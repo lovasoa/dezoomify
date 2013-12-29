@@ -1,0 +1,68 @@
+html, body {
+	margin:0;
+	padding:0;
+	width:100%;
+	background-color:black;
+}
+
+#status {
+	position:fixed;
+	top:20%;
+	left:30%;
+
+	width:40%;
+	min-height:20%;
+
+	background:linear-gradient(rgba(10,10,10,0.8),rgba(50,50,50,0.5));
+	box-shadow:0 0 8px rgba(200,200,255,0.5);
+	border-radius:16px;
+	color:white;
+}
+
+form {
+	margin-top:10%;
+	padding-left:7%;
+	width:86%;
+}
+
+input#url {
+	width:100%;
+	max-width:100%;
+	margin-bottom:10px;
+	border:0;
+	box-shadow:0 0 3px #aaa;
+	height:1.5em;
+}
+input#url:focus {
+	box-shadow:0 0 10px #aaf;
+}
+
+.dezoomifiers label {
+	margin-right:20px;
+}
+input[type=submit] {
+	width:30%;
+	margin:25px 35% 0;
+}
+input[type=submit]:focus {
+	box-shadow:0 0 10px #aaf;
+}
+
+#percent {
+	color:white;
+	font-size:1em;
+	text-align:center;
+}
+#progressbar {
+	width:0;
+	background-color:red;
+	height:7px;
+}
+#error {
+	margin:30px;
+	text-align:justify;
+	background-color:white;
+	color:black;
+	display:none;
+	padding:7px;
+}	

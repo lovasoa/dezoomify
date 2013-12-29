@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<!--Le dézoumistificateur
+
+The dezoomify script is capable of grabbing images from a  webpage containing a Zoomify viewer and automatically stitching the images with javascript and the HTML5 <canvas> element.
+
+This script is inspired by the source code of http://toolserver.org/~kolossos/image/zoomify.php
+but instead of using a table to display the image, it uses javascript, and the html5 <canvas> element
+-->
+<head>
+	<title>Dezoomify</title>
+	<link rel="icon" type="image/gif" href="loupe.gif" />
+	<link rel="stylesheet" media="screen" href="style.css" />
+</head>
+
+<body>
+	<div id="dezoomifiedImage">
+	<canvas id="rendering-canvas" width="0" height="0"></canvas>
+	</div>
+	<div id="status">
+			<form id="urlform" action="#">
+				<p>
+				<input type='text' tabindex="10" id='url' placeholder="URL of a webpage containing a zoomify viewer" />
+				<span class="dezoomifiers">
+					<input type="radio" tabindex="20" checked="checked" name="dezoomer" value="zoomify" id="dezoomer-zoomify"><label for="dezoomer-zoomify">Zoomify</label>
+					<input type="radio" name="dezoomer" value="nationalgallery" id="dezoomer-ng"><label for="dezoomer-ng">National Gallery</label>
+				</span>
+				<input type='submit' tabindex="30" />
+				</p>
+			</form>
+
+		<p id="percent"></p>
+		<p id="progressbar"></p>
+
+		<div id="error"><p style='color:red;'>Error : Unable to extract informations from the given file !</p>
+		<p>Try to extract the zoomifyImagePath in the webpage containing the zoomify viewer on your own, and paste this path to the form on this page. Search 'zoomifyImagePath' in the real source code of the page (the one you can get with firebug in firefox, or the web inspector in Safari/Chrome.</p>
+		<p>Exemple of path : <code>http://images.famsf.org/Zoom/7822312331480020/</code></p>
+		</div>
+	</div>
+
+<script type="text/javascript" src="zoommanager.js" ></script>
+<script type="text/javascript" src="natgal.js" ></script>
+<script type="text/javascript" src="zoomify.js" ></script>
+
+<script type="text/javascript">
+document.getElementById("urlform").onsubmit = function(evt) {
+	evt.preventDefault();
+	var url = document.getElementById("url").value;
+
+	var dezoomersRadios = document.getElementsByName("dezoomer");
+	for(var i=0;i<dezoomersRadios.length; i++) {
+		var radio = dezoomersRadios[i];
+		if (radio.checked) ZoomManager.dezoomer = ZoomManager.dezoomersList[radio.value];
+	}
+
+	ZoomManager.open(url);
+	return false;
+}
+
+function chooseProvider () {
+	if (this.value.match("nationalgallery.org.uk")) {
+		document.getElementById("dezoomer-ng").checked = true;
+	} else {
+		document.getElementById("dezoomer-zoomify").checked = true;
+	}
+}
+
+document.getElementById("url").onkeyup = chooseProvider;
+document.getElementById("url").onchange = chooseProvider;
+</script>
+
+</body>
+</html>
