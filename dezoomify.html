@@ -8,6 +8,8 @@ This script is inspired by the source code of http://toolserver.org/~kolossos/im
 but instead of using a table to display the image, it uses javascript, and the html5 <canvas> element
 -->
 <head>
+    <meta charset="utf8" />
+    <meta name="description" content="Grab images from a  webpage containing a Zoomify or ZoomTool (from the National Gallery of London) viewer and automatically stitches the images with javascript and the HTML5 <canvas>." />
 	<title>Dezoomify</title>
 	<link rel="icon" type="image/gif" href="loupe.gif" />
 	<link rel="stylesheet" media="screen" href="style.css" />
@@ -19,8 +21,16 @@ but instead of using a table to display the image, it uses javascript, and the h
 	</div>
 	<div id="status">
 			<form id="urlform" action="#">
+				<h1>Dezoomify</h1>
+				<p id="description">
+					Enter the URL of a webpage containing a zoomify viewer.
+					The image will be downloaded at maximal resolution. 
+					On Firefox, you will then be able to right-click on the image,
+					and choose "Save As" in order to save it as a PNG file on your computer.
+				</p>
+
 				<p>
-				<input type='text' tabindex="10" id='url' placeholder="URL of a webpage containing a zoomify viewer" />
+				<input type='text' tabindex="10" id='url' placeholder="URL" />
 				<span class="dezoomifiers">
 					<input type="radio" tabindex="20" checked="checked" name="dezoomer" value="zoomify" id="dezoomer-zoomify"><label for="dezoomer-zoomify">Zoomify</label>
 					<input type="radio" name="dezoomer" value="nationalgallery" id="dezoomer-ng"><label for="dezoomer-ng">National Gallery</label>

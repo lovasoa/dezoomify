@@ -52,7 +52,7 @@ function zoomifyPath ($url){
 	The searched url is within a javascript script. It's the second argument of the showImage function.*/
 	if (count($addr)===0)
   	preg_match("#showImage\([^),]*,[^\"']*[\"']([^'\"]*)[^)]*\)#", $html, $addr);
-	
+
 	//var_dump($addr);
 	return url_to_absolute ($url, $addr[1]);
 }
