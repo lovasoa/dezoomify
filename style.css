@@ -19,6 +19,24 @@ html, body {
 	color:white;
 }
 
+h1 {
+	text-align:center;
+	text-shadow:0 0 2px rgba(200,200,255);
+}
+
+#description {
+	text-align:justify;
+}
+
+#licenseinfo {
+	font-size:0.7em;
+	color:#888;
+}
+
+#licenseinfo a {
+	color:#444;
+}
+
 form {
 	margin-top:10%;
 	padding-left:7%;
