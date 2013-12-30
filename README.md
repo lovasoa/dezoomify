@@ -1,7 +1,8 @@
 #Dezoomify
 #Reassemble tiles of a zoomify-powered image
 
-This script makes one downloadable image from an image viewable via a flash zoomify interface.
+This script makes a downloadable image from an image viewable via a flash or html5 zoomify interface.
+It also works with ZoomTool, the zoomable images tool from the National Gallery of London.
 
 Input : the URL of a site containing a zoomify viewer.
 Output : An image that you can download (in Firefox).
