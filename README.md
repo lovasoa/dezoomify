@@ -11,7 +11,7 @@ Output : An image that you can download (in Firefox).
 If you are not interested in the source code and just want to *assemble tiles of (dezoomify) a zoomify-powered image*, go there : [unzoomify an image](http://ophir.lojkine.free.fr/dezoomify/dezoomify.html)
 
 #Programming Languages
-The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 _<canvas>_ tag), and only the network-related stuffs on the server side (in this case, _PHP_).
+The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 `<canvas>` tag), and only the network-related stuffs on the server side (in this case, _PHP_).
 
 #Wikimedia
 This script on wikimedia : [Zoomify in the help about zoomable Images on wikimedia](https://secure.wikimedia.org/wikipedia/commons/wiki/Help:Zoomable_images)
