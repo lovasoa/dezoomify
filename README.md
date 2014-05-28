@@ -17,7 +17,7 @@ The aim of the script is to do as much as possible in _Javascript_ (with the HTM
 This script on wikimedia : [Zoomify in the help about zoomable Images on wikimedia](https://secure.wikimedia.org/wikipedia/commons/wiki/Help:Zoomable_images)
 
 #GPL
-> Copyright © 2011 Lovasoa
+> Copyright © 2011-2014 Lovasoa
 > 
 >  This file is part of Dezoomify.
 >
