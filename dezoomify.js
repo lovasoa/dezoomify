@@ -1,4 +1,5 @@
-//var PHPSCRIPT = "http://ophir.alwaysdata.net/dezoomify/dezoomify.php" //Use a remote php script if you can't host PHP
+//var PHPSCRIPT = "http://ophir.alwaysdata.net/dezoomify/dezoomify.php"
+//Use a remote php script if you can't host PHP
 var PHPSCRIPT = "dezoomify.php"
 
 function dezoomify() {
@@ -42,7 +43,7 @@ function remove(el) {
 }
 
 function addTile(url, x, y) {
-  //Demande une partie de l'image au serveur, et l'affiche lorsqu'elle est reçue
+  //Fetch a tile from the server, and display it when it's received
   var i = document.createElement("img");
   i.onload = function () {
     ctx.drawImage(i, x, y);
@@ -64,7 +65,7 @@ function loadEnd() {
 }
 
 function changeSize() {
-  //Ajuste la taille de l'image, pour qu'elle soit en taille de base, ou ajustée à la largeur ou la hauteur de la page
+  // Adjust the display size of the image 
   if (typeof(fit) == "undefined") {
     //Fit page width
     fit = "width";
@@ -84,17 +85,17 @@ function changeSize() {
 }
 
 function findZoom(size) {
-  /*Retourne le zoomlevel maximum
-  Chaque zoomlevel multiplie la taille de l'image par deux. Le zoomlevel 0 correspond à l'image entière contenue dans une seule tile
-  On a donc la formule suivante, où size=max(originalWidth, originalHeight) et numTilesAtThisZoomLevel = max(width in tiles, height in tiles) at this zoomlevel :
+  /*Returns the maximum zoomlevel
+  Every zoomlevel is twice as large as the previous one
+  Zoomlevel 0 is the full image, on one tile.
+  So, we have  size=max(originalWidth, originalHeight) and numTilesAtThisZoomLevel = max(width in tiles, height in tiles) at this zoomlevel :
   size / 2^(maxZoomLevel - zoomlevel) = numTilesAtThisZoomLevel * tileSize
-  On sait que pour zoomlevel=0, numTilesAtThisZoomLevel=1
-  On peut donc résoudre l'équation, et trouver maxZoomLevel :*/
+  We know that, for zoomlevel=0, numTilesAtThisZoomLevel=1
+  Thus, we can solve the equation: :*/
   return Math.ceil(Math.log(size/tileSize) / Math.log(2));
 }
 
 function drawImage() {
-  //Tout le code. On devrait peut-être le couper en plusieurs fonctions
   updateProgress(0, "Preparing tiles load...");
 
   canvas = document.createElement("canvas");
