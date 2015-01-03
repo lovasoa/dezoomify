@@ -10,6 +10,12 @@ Output : An image that you can download (in Firefox).
 #Try it
 If you are not interested in the source code and just want to *assemble tiles of (dezoomify) a zoomify-powered image*, go there : [unzoomify an image](http://ophir.lojkine.free.fr/dezoomify/dezoomify.html)
 
+# Supported zoomable image formats
+The following formats are supported by dezzomify:
+ * [Zoomify](http://www.zoomify.com/)
+ * [National Gallery](http://www.nationalgallery.org.uk/) The national gallery uses its own zoomable image format.
+ * [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom)
+
 #Programming Languages
 The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 `<canvas>` tag), and only the network-related stuffs on the server side (in this case, _PHP_).
 
