@@ -44,3 +44,4 @@ var zoomify = (function () { //Code isolation
 	};
 })();
 ZoomManager.addDezoomer(zoomify);
+ZoomManager.setDezoomer(zoomify);

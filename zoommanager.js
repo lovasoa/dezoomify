@@ -60,12 +60,17 @@ UI.addDezoomer = function(dezoomer) {
 	var input = document.createElement("input");
 	input.type = "radio"
 	input.name = "dezoomer";
+	input.id   = "dezoomer-" + dezoomer.name;
 	input.onclick = function() {
 		ZoomManager.setDezoomer(dezoomer);
 	}
 	label.appendChild(input);
 	label.appendChild(document.createTextNode(dezoomer.name));
 	UI.dezoomers.appendChild(label);
+};
+
+UI.setDezoomer = function(dezoomerName) {
+	document.getElementById("dezoomer-"+dezoomerName).checked = true;
 }
 
 var ZoomManager = {};
@@ -162,4 +167,5 @@ ZoomManager.addDezoomer = function(dezoomer) {
 
 ZoomManager.setDezoomer = function(dezoomer) {
 	ZoomManager.dezoomer = dezoomer;
+	UI.setDezoomer(dezoomer.name);
 }
