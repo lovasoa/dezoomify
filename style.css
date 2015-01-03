@@ -55,8 +55,10 @@ input#url:focus {
 	box-shadow:0 0 10px #aaf;
 }
 
-.dezoomifiers label {
+#dezoomers label {
 	margin-right:20px;
+	white-space: nowrap;
+	font-size:.9em;
 }
 input[type=submit] {
 	width:30%;

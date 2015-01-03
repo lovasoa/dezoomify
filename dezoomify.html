@@ -37,10 +37,7 @@ but instead of using a table to display the image, it uses javascript, and the h
 
 				<p>
 				<input type='text' tabindex="10" id='url' placeholder="URL" />
-				<span class="dezoomifiers">
-					<input type="radio" tabindex="20" checked="checked" name="dezoomer" value="zoomify" id="dezoomer-zoomify"><label for="dezoomer-zoomify">Zoomify</label>
-					<input type="radio" name="dezoomer" value="nationalgallery" id="dezoomer-ng"><label for="dezoomer-ng">National Gallery</label>
-				</span>
+				<p id="dezoomers"></p>
 				<input type='submit' tabindex="30" />
 				</p>
 			</form>
@@ -62,27 +59,9 @@ but instead of using a table to display the image, it uses javascript, and the h
 document.getElementById("urlform").onsubmit = function(evt) {
 	evt.preventDefault();
 	var url = document.getElementById("url").value;
-
-	var dezoomersRadios = document.getElementsByName("dezoomer");
-	for(var i=0;i<dezoomersRadios.length; i++) {
-		var radio = dezoomersRadios[i];
-		if (radio.checked) ZoomManager.dezoomer = ZoomManager.dezoomersList[radio.value];
-	}
-
 	ZoomManager.open(url);
 	return false;
 }
-
-function chooseProvider () {
-	if (this.value.match("nationalgallery.org.uk")) {
-		document.getElementById("dezoomer-ng").checked = true;
-	} else {
-		document.getElementById("dezoomer-zoomify").checked = true;
-	}
-}
-
-document.getElementById("url").onkeyup = chooseProvider;
-document.getElementById("url").onchange = chooseProvider;
 </script>
 
 </body>

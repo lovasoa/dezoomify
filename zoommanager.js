@@ -1,5 +1,6 @@
 var UI = {};
 UI.canvas = document.getElementById("rendering-canvas");
+UI.dezoomers = document.getElementById("dezoomers");
 
 /** Adjusts the size of the image, so that is fits page width or page height
 **/
@@ -53,6 +54,19 @@ UI.updateProgress = function (percent, text) {
 UI.loadEnd = function() {
 	document.getElementById("status").style.display = "none";
 };
+
+UI.addDezoomer = function(dezoomer) {
+	var label = document.createElement("label")
+	var input = document.createElement("input");
+	input.type = "radio"
+	input.name = "dezoomer";
+	input.onclick = function() {
+		ZoomManager.setDezoomer(dezoomer);
+	}
+	label.appendChild(input);
+	label.appendChild(document.createTextNode(dezoomer.name));
+	UI.dezoomers.appendChild(label);
+}
 
 var ZoomManager = {};
 
@@ -141,3 +155,11 @@ ZoomManager.findMaxZoom = function (data) {
 };
 
 ZoomManager.dezoomersList = {};
+ZoomManager.addDezoomer = function(dezoomer) {
+	ZoomManager.dezoomersList[dezoomer.name] = dezoomer;
+	UI.addDezoomer(dezoomer);
+}
+
+ZoomManager.setDezoomer = function(dezoomer) {
+	ZoomManager.dezoomer = dezoomer;
+}

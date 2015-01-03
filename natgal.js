@@ -9,6 +9,7 @@ var nationalgallery = (function(){
 	}
 
 	return {
+		"name" : "National Gallery",
 		"open" : function (url) {
 			var codedurl = encodeURIComponent(url);
 
@@ -52,5 +53,4 @@ var nationalgallery = (function(){
 		}
 	};
 })();
-ZoomManager.dezoomersList["nationalgallery"] = nationalgallery;
-ZoomManager.dezoomer = nationalgallery;
+ZoomManager.addDezoomer(nationalgallery);

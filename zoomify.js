@@ -3,6 +3,7 @@ var zoomify = (function () { //Code isolation
 	var PHPSCRIPT = "dezoomify.php";
 
 	return {
+		"name": "Zoomify",
 		"open" : function (url) {
 			var codedurl = encodeURIComponent(url);
 
@@ -42,5 +43,4 @@ var zoomify = (function () { //Code isolation
 		}
 	};
 })();
-ZoomManager.dezoomersList["zoomify"] = zoomify;
-ZoomManager.dezoomer = nationalgallery;
+ZoomManager.addDezoomer(zoomify);
