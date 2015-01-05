@@ -1,7 +1,4 @@
 var zoomify = (function () { //Code isolation
-	//var PHPSCRIPT = "http://ophir.alwaysdata.net/dezoomify/dezoomify.php" //Use a remote php script if you can't host PHP
-	var PHPSCRIPT = "dezoomify.php";
-
 	return {
 		"name": "Zoomify",
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
