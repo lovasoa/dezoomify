@@ -11,45 +11,30 @@ var nationalgallery = (function(){
 	return {
 		"name" : "National Gallery",
 		"open" : function (url) {
-			var codedurl = encodeURIComponent(url);
-
-			var base = url.split("/").slice(0,3).join("/");
-			var path = base + "/custom/ng/tile.php?id=";
-
-			var xhr = new XMLHttpRequest();
-			xhr.open("GET", PHPSCRIPT + "?url=" + codedurl, true);
-			xhr.responseType = "document";
-
-			xhr.onloadstart = function () {
-				ZoomManager.updateProgress(0, "Sent a request in order to get informations about the image...");
-			};
-			xhr.onerror = function (e) {
-				console.log("XHR error", e);
-				ZoomManager.error();
-			};
-			xhr.onloadend = function () {
-				var doc = xhr.response;
+			ZoomManager.getFile(url, "xml", function (doc, xhr) {
 				var dataElems = doc.querySelectorAll(".data dt");
-				if (dataElems.length===0) ZoomManager.error("No valid zoomify information found.");
+				if (dataElems.length===0)
+					ZoomManager.error("No valid zoomify information found.");
 				var rawdata = {};
 				for (var i=0; i<dataElems.length; i++) {
-					rawdata[dataElems[i].textContent] = dataElems[i].nextElementSibling.textContent;
+					var name = dataElems[i].textContent;
+					rawdata[name] = dataElems[i].nextElementSibling.textContent;
 				}
 				var data = {
+					"origin": url,
 					"width" : Math.round(rawdata.width),
 					"height" : Math.round(rawdata.height),
 					"tileSize" : parseInt(rawdata.tileSize),
 					"maxZoomLevel" : parseInt(rawdata.max),
 					"contentId" : parseInt(rawdata.contentId),
-					"path" : path
 				};
 
 				ZoomManager.readyToRender(data);
-			};
-			xhr.send(null);
+			});
 		},
 		"getTileURL" : function (col, row, zoom, data) {
-			return data.path + getObfuscatedTileId(data.contentId, zoom, row, col);
+			var tileId = getObfuscatedTileId(data.contentId, zoom, row, col);
+			return "/custom/ng/tile.php?id=" + tileId;
 		}
 	};
 })();
