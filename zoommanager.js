@@ -126,6 +126,7 @@ ZoomManager.defaultRender = function (data) {
 	for (var x=0; x<data.nbrTilesX; x++) {
 		for (var y=0; y<data.nbrTilesY; y++) {
 			var url = ZoomManager.dezoomer.getTileURL(x,y,zoom,data);
+			if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
 			ZoomManager.addTile(url, x*data.tileSize, y*data.tileSize);
 		}
 	}
@@ -143,10 +144,67 @@ ZoomManager.addTile = function (url, x, y) {
 
 ZoomManager.open = function(url) {
 	if (url.indexOf("http") !== 0) {
-		ZoomManager.error("You must provide a valid URL.");
-		return;
+		return ZoomManager.error("You must provide a valid URL.");
 	}
-	ZoomManager.dezoomer.open(url);
+	if (typeof ZoomManager.dezoomer.findFile === "function") {
+		ZoomManager.dezoomer.findFile(url, function foundFile(filePath) {
+			ZoomManager.dezoomer.open(ZoomManager.resolveRelative(filePath, url));
+		});
+	} else {
+		ZoomManager.dezoomer.open(url);
+	}
+};
+
+/**
+ * Call callback with the contents of the page at url
+ */
+ZoomManager.getFile = function (url, type, callback) {
+	var PHPSCRIPT = "proxy.php";
+	var xhr = new XMLHttpRequest();
+
+	var codedurl = encodeURIComponent(url);
+	xhr.open("GET", PHPSCRIPT + "?url=" + codedurl, true);
+
+	xhr.onloadstart = function () {
+		ZoomManager.updateProgress(0, "Sent a request in order to get informations about the image...");
+	};
+	xhr.onerror = function (e) {
+		ZoomManager.error("Unable to connect to the proxy server to get the required informations.");
+		console.log("XHR error", e);
+	};
+	xhr.onloadend = function () {
+		callback(xhr.response, xhr);
+	};
+
+	if (type === "xml") {
+		xhr.responseType = "document";
+		xhr.overrideMimeType("text/xml");
+	} else {
+		xhr.responseType = "text";
+		xhr.overrideMimeType("text/plain");
+	}
+	xhr.send(null);
+};
+
+/**
+ * Return the absolute path, given a relative path and a base
+ */
+ZoomManager.resolveRelative = function resolveRelative(path, base) {
+	// absolute URL
+	if (path.match(/\w*:\/\//)) {
+		return path;
+	}
+	// Upper directory
+	if (path.startsWith("../")) {
+		return resolveRelative(path.slice(3), base.replace(/\/[^\/]*$/, ''));
+	}
+	// Relative to the root
+	if (path.startsWith('/')) {
+		var match = base.match(/(\w*:\/\/)?[^\/]*\//) || [base];
+		return match[0] + path.slice(1);
+	}
+	//relative to the current directory
+	return base.replace(/\/[^\/]*$/, "") + '/' + path;
 };
 
 /** Returns the maximum zoom level, knowing the image size, the tile size, and the multiplying factor between two consecutive zoom levels 

@@ -5,26 +5,11 @@ var seadragon = (function () { //Code isolation
 	return {
 		"name" : "Seadragon (Deep Zoom Image)",
 		"open" : function (url) {
-			var codedurl = encodeURIComponent(url);
-
-			var xhr = new XMLHttpRequest();
-			xhr.overrideMimeType('text/xml');
-
-			xhr.open("GET", PHPSCRIPT + "?url=" + codedurl, true);
-
-			xhr.onloadstart = function () {
-				ZoomManager.updateProgress(0, "Sent a request in order to get informations about the image...");
-			};
-			xhr.onerror = function (e) {
-				console.log("XHR error", e);
-				ZoomManager.error("Unable to connect to the proxy server to get the required informations.");
-			};
-			xhr.onloadend = function () {
-				var xml = xhr.responseXML;
+			ZoomManager.getFile(url, "xml", function (xml, xhr) {
 				var infos = xml.getElementsByTagName("Image")[0];
 				if (!infos) {
 					ZoomManager.error();
-					console.log(xhr.responseText);
+					console.log(xml);
 				}
 				var size = xml.getElementsByTagName("Size")[0];
 				var data = {};
@@ -41,8 +26,7 @@ var seadragon = (function () { //Code isolation
 				data.maxZoomLevel = Math.ceil(Math.log2(Math.max(data.width, data.height)));
 
 				ZoomManager.readyToRender(data);
-			};
-			xhr.send(null);
+			});
 		},
 		"getTileURL" : function (col, row, zoom, data) {
 			return data.path + "/" + zoom + "/" + col + "_" + row + "." + data.format;
