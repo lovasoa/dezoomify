@@ -46,6 +46,12 @@ UI.error = function(errmsg) {
 	elem.style.display = "block";
 };
 
+UI.reset = function() {
+	document.getElementById("error").style.display = "none";
+	document.getElementById("urlform").style.display = "block";
+	UI.canvas.width = UI.canvas.height = 0;
+};
+
 UI.updateProgress = function (percent, text) {
 	document.getElementById("percent").innerHTML = text + ' (' + parseInt(percent) + ") %";
 	document.getElementById("progressbar").style.width = percent + "%";
@@ -149,6 +155,7 @@ ZoomManager.addTile = function (url, x, y) {
 };
 
 ZoomManager.open = function(url) {
+	UI.reset();
 	if (url.indexOf("http") !== 0) {
 		return ZoomManager.error("You must provide a valid URL.");
 	}
