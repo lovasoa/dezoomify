@@ -123,13 +123,22 @@ ZoomManager.readyToRender = function(data) {
 
 ZoomManager.defaultRender = function (data) {
 	var zoom = data.maxZoomLevel || ZoomManager.findMaxZoom(data);
-	for (var x=0; x<data.nbrTilesX; x++) {
-		for (var y=0; y<data.nbrTilesY; y++) {
-			var url = ZoomManager.dezoomer.getTileURL(x,y,zoom,data);
-			if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
-			ZoomManager.addTile(url, x*data.tileSize, y*data.tileSize);
+	var x=0, y=0;
+
+	function nextTile() {
+		x++;
+		if (x >= data.nbrTilesX) {
+			x = 0;
+			y++;
 		}
+		var url = ZoomManager.dezoomer.getTileURL(x,y,zoom,data);
+		if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
+		ZoomManager.addTile(url, x*data.tileSize, y*data.tileSize);
+
+		if (y < data.nbrTilesY) requestAnimationFrame(nextTile);
 	}
+
+	nextTile();
 };
 
 ZoomManager.addTile = function (url, x, y) {
