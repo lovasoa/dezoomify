@@ -2,6 +2,21 @@ var seadragon = (function () { //Code isolation
 
 	return {
 		"name" : "Seadragon (Deep Zoom Image)",
+		"findFile" : function getDZIFile (baseUrl, callback) {
+			if (baseUrl.match(/\.xml|\.dzi/i)) {
+				return callback(baseUrl);
+			}
+			ZoomManager.getFile(baseUrl, "text", function (text, xhr) {
+				// Any url ending with .xml or .dzi
+				var matchPath = text.match(
+					/[\w\/]+\.(?:(?:xml)|(?:dzi))/i
+				);
+				if (matchPath) {
+					return callback(matchPath[0]);
+				}
+				return callback(baseUrl);
+			});
+		},
 		"open" : function (url) {
 			ZoomManager.getFile(url, "xml", function (xml, xhr) {
 				var infos = xml.getElementsByTagName("Image")[0];
