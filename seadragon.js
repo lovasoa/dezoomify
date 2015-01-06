@@ -27,7 +27,8 @@ var seadragon = (function () { //Code isolation
 				var size = xml.getElementsByTagName("Size")[0];
 				var data = {};
 
-				data.path = url.replace(/\.[^.\/]*$/,'') + "_files"; //replace extension by _files
+				//replace extension by _files
+				data.path = url.replace(/\.[^.\/]*$/,'') + "_files";
 				data.tileSize = parseInt(infos.getAttribute("TileSize"));
 				data.overlap = parseInt(infos.getAttribute("Overlap"));
 				data.format = infos.getAttribute("Format");
@@ -35,9 +36,12 @@ var seadragon = (function () { //Code isolation
 				data.width = parseInt(size.getAttribute("Width"));
 				data.height = parseInt(size.getAttribute("Height"));
 
-				data.zoomFactor = 2; //Zooming factor between two consecutive zoom levels
-				data.maxZoomLevel = Math.ceil(Math.log2(Math.max(data.width, data.height)));
-
+				//Zooming factor between two consecutive zoom levels
+				data.zoomFactor = 2;
+				// 2^maxzoom = max(w,h) (the first tile is 1x1)
+				data.maxZoomLevel = Math.ceil(
+						Math.log2(Math.max(data.width, data.height))
+				);
 				ZoomManager.readyToRender(data);
 			});
 		},
