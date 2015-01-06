@@ -126,15 +126,12 @@ ZoomManager.defaultRender = function (data) {
 	var x=0, y=0;
 
 	function nextTile() {
-		x++;
-		if (x >= data.nbrTilesX) {
-			x = 0;
-			y++;
-		}
 		var url = ZoomManager.dezoomer.getTileURL(x,y,zoom,data);
 		if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
 		ZoomManager.addTile(url, x*data.tileSize, y*data.tileSize);
 
+		x++;
+		if (x >= data.nbrTilesX) {x = 0; y++;}
 		if (y < data.nbrTilesY) requestAnimationFrame(nextTile);
 	}
 
