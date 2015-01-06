@@ -28,7 +28,7 @@ var seadragon = (function () { //Code isolation
 				var data = {};
 
 				//replace extension by _files
-				data.path = url.replace(/\.[^.\/]*$/,'') + "_files";
+				data.origin = url.replace(/\.[^.\/]*$/,'') + "_files/";
 				data.tileSize = parseInt(infos.getAttribute("TileSize"));
 				data.overlap = parseInt(infos.getAttribute("Overlap"));
 				data.format = infos.getAttribute("Format");
@@ -46,7 +46,7 @@ var seadragon = (function () { //Code isolation
 			});
 		},
 		"getTileURL" : function (col, row, zoom, data) {
-			return data.path + "/" + zoom + "/" + col + "_" + row + "." + data.format;
+			return zoom + "/" + col + "_" + row + "." + data.format;
 		}
 	};
 })();
