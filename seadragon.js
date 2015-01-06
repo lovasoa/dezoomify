@@ -1,6 +1,4 @@
 var seadragon = (function () { //Code isolation
-	//var PHPSCRIPT = "http://ophir.alwaysdata.net/dezoomify/dezoomify.php" //Use a remote php script if you can't host PHP
-	var PHPSCRIPT = "proxy.php";
 
 	return {
 		"name" : "Seadragon (Deep Zoom Image)",
