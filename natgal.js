@@ -1,6 +1,4 @@
 var nationalgallery = (function(){
-	var PHPSCRIPT = "proxy.php";
-
 	function getObfuscatedTileId (id, zoom, row, col) {
 		var repl = "vRfOdXapKz";
 		var num = "0000000" + (row*1e9 + id*1e4 + col*1e2 + zoom), res='';
