@@ -6,6 +6,11 @@ var seadragon = (function () { //Code isolation
 			if (baseUrl.match(/\.xml|\.dzi/i)) {
 				return callback(baseUrl);
 			}
+			if (baseUrl.indexOf("bl.uk/manuscripts/Viewer.aspx") > -1) {
+				return callback(baseUrl
+													.replace("Viewer.aspx","Proxy.ashx")
+													.replace(/ref=([^&]*)/, "view=$1.xml"));
+			}
 			ZoomManager.getFile(baseUrl, "text", function (text, xhr) {
 				// Any url ending with .xml or .dzi
 				var matchPath = text.match(
