@@ -12,9 +12,10 @@ If you are not interested in the source code and just want to *assemble tiles of
 
 # Supported zoomable image formats
 The following formats are supported by dezzomify:
- * [Zoomify](http://www.zoomify.com/)
- * [National Gallery](http://www.nationalgallery.org.uk/) The national gallery uses its own zoomable image format.
- * [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom)
+ * [Zoomify](http://www.zoomify.com/) : Most common zoomable image format. *dezoomify* used to support only this, hence the name.
+ * [National Gallery](http://www.nationalgallery.org.uk/) : The national gallery uses its own zoomable image format.
+ * [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom) : Zoomable image format created by Microsoft.
+ * [Zoomify single-file format](https://github.com/lovasoa/dezoomify/wiki/PFF-format-description) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
 
 #Programming Languages
 The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 `<canvas>` tag), and only the network-related stuffs on the server side (in this case, _PHP_).
