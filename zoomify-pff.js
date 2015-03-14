@@ -22,10 +22,11 @@ var zoomifyPFF = (function () { //Code isolation
 				data.version = parseInt(text.match(/version=.(\d+)/i)[1]);
 				data.headerSize = parseInt(text.match(/headerSize=.(\d+)/i)[1]);
 				data.zoomFactor = 2; //Zooming factor between two consecutive zoom levels
-
-				var begin = 0x424 + data.headerSize,
-						end   = begin + 8*data.numTiles;
-				ZoomManager.getFile(url+"&requestType=2&begin="+begin+"&end="+end, "text", function(text) {
+				data.indexBegin = 0x424 + data.headerSize,
+				data.indexEnd   = data.indexBegin + 8*data.numTiles;
+				var indexesURL = url + "&requestType=2" +
+												"&begin=" + data.indexBegin + "&end="  + data.indexEnd;
+				ZoomManager.getFile(indexesURL, "text", function(text) {
 					var s = parseInt(text.match(/reply_data=(\d+)/)[1]);
 					data.offsets = text.split(',')[1]
 														 .match(/[ \d]{9}/g)
@@ -36,8 +37,8 @@ var zoomifyPFF = (function () { //Code isolation
 		},
 		"getTileURL" : function (col, row, zoom, data) {
 			var idx = col + row*data.nbrTilesX,
-					begin = data.offsets[idx],
-					end = data.offsets[idx+1];
+					begin = (idx!==0) ? data.offsets[idx-1] : data.indexEnd,
+					end = data.offsets[idx];
 			return data.origin+"&requestType=0&head="+data.headerSize+"&begin="+begin+"&end="+end;
 		}
 	};
