@@ -6,12 +6,24 @@ var seadragon = (function () { //Code isolation
 			if (baseUrl.match(/\.xml|\.dzi/i)) {
 				return callback(baseUrl);
 			}
+
+			// British Library
 			if (baseUrl.indexOf("bl.uk/manuscripts/Viewer.aspx") > -1) {
 				return callback(baseUrl
 													.replace("Viewer.aspx","Proxy.ashx")
 													.replace(/ref=([^&]*)/, "view=$1.xml"));
 			}
+
 			ZoomManager.getFile(baseUrl, "text", function (text, xhr) {
+				// World digital library
+				var wdlMatch = baseUrl.match(/view\/(\d+)\/(\d+)/);
+				if (wdlMatch && text.match("dziUrlTemplate")) {
+					var group = parseInt(wdlMatch[1]);
+					var index = parseInt(wdlMatch[2]);
+					var m = text.match(/"([^"]+\.dzi)"/i);
+					var url = m[1].replace("{group}", group).replace("{index}", index);
+					return callback(url);
+				}
 				// Any url ending with .xml or .dzi
 				var matchPath = text.match(
 					/[\w\/]+\.(?:(?:xml)|(?:dzi))/i
