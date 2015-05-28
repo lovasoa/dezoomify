@@ -8,10 +8,10 @@ Input : the URL of a site containing a zoomable image viewer.
 
 Output : An image that you can **download** (by right-clicking on it, and choosing *Save Image as...*).
 
-#Try it
+## Try it
 If you are not interested in the source code and just want to *assemble tiles of (dezoomify) a zoomify-powered image*, go there : [unzoomify an image](http://ophir.lojkine.free.fr/dezoomify/dezoomify.html)
 
-# Supported zoomable image formats
+## Supported zoomable image formats
 The following formats are supported by dezzomify:
  * [Zoomify](http://www.zoomify.com/) : Most common zoomable image format. *dezoomify* used to support only this, hence the name.
  * [National Gallery](http://www.nationalgallery.org.uk/) : The national gallery uses its own zoomable image format.
@@ -19,6 +19,10 @@ The following formats are supported by dezzomify:
   * The [British Library](http://www.bl.uk/)
   * The [World Digital Library (WDL)](http://www.wdl.org/fr/)
  * [Zoomify single-file format](https://github.com/lovasoa/dezoomify/wiki/PFF-format-description) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
+
+## Screenshots
+![dezoomify main page, a zoomable image downloader](http://pix.toile-libre.org/upload/original/1432804561.png)
+![dezoomify downloading an image](http://pix.toile-libre.org/upload/original/1432805025.png)
 
 #Programming Languages
 The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 `<canvas>` tag), and only the network-related stuffs on the server side (in this case, _PHP_). The only little piece of _PHP_ that remains in the code is just a proxy, used to circumvent the [same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy).
