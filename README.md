@@ -6,10 +6,10 @@ It works with several different zommable image tools, from several different web
 
 Input : the URL of a site containing a zoomable image viewer.
 
-Output : An image that you can **download** (by right-clicking on it, and choosing *Save Image as...*).
+Output : An image that you can download (by right-clicking on it, and choosing *Save Image as...*).
 
 ## Try it
-If you are not interested in the source code and just want to *assemble tiles of (dezoomify) a zoomify-powered image*, go there : [unzoomify an image](http://ophir.lojkine.free.fr/dezoomify/dezoomify.html)
+If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [unzoomify an image](http://ophir.lojkine.free.fr/dezoomify/dezoomify.html)
 
 ## Supported zoomable image formats
 The following formats are supported by dezzomify:
