@@ -18,7 +18,7 @@ The following formats are supported by dezzomify:
  * [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom) : Zoomable image format created by Microsoft. Dezoomify has a special support for the following websites that use *Deep Zoom*:
   * The [British Library](http://www.bl.uk/)
   * The [World Digital Library (WDL)](http://www.wdl.org/fr/)
- * [Zoomify single-file format](https://github.com/lovasoa/dezoomify/wiki/PFF-format-description) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
+ * [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/PFF-file-format) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
 
 ## Screenshots
 ![dezoomify main page, a zoomable image downloader](http://pix.toile-libre.org/upload/original/1432804561.png)
