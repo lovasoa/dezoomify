@@ -175,6 +175,11 @@ ZoomManager.getFile = function (url, type, callback) {
 	var PHPSCRIPT = "proxy.php";
 	var xhr = new XMLHttpRequest();
 
+	// The url we got MIGHT already have been encoded
+	// The url we give to the server MUST be encoded
+	// So, we first decode it, which is a no-op if it was not encoded, then encode it
+	url = encodeURI(decodeURI(url));
+	// We pass the URL itself as a query parameter, so we have to re-encode it
 	var codedurl = encodeURIComponent(url);
 	xhr.open("GET", PHPSCRIPT + "?url=" + codedurl, true);
 
