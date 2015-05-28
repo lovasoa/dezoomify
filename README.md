@@ -1,5 +1,5 @@
 #Dezoomify
-#Reassemble tiles of a zoomify-powered image
+#Download zoomable images
 
 _Dezoomify_ makes a downloadable image from an image viewable via a flash or html5 zoomable image interface.
 It works with several different zommable image tools, from several different websites (see the list below). 
