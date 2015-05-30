@@ -14,6 +14,17 @@ var seadragon = (function () { //Code isolation
 													.replace(/ref=([^&]*)/, "view=$1.xml"));
 			}
 
+			// Polona.pl
+			var polonaMatch = baseUrl.match(/polona.pl\/item\/(\d+)\/(\d+)/);
+			if (polonaMatch) {
+				var itemId = polonaMatch[1], pageId = parseInt(polonaMatch[2]);
+				var resUrl = "http://polona.pl/resources/item/"+itemId+"/";
+				ZoomManager.getFile(resUrl, "json", function(res, xhr) {
+					callback(res.pages[pageId].dzi_url);
+				});
+				return;
+			}
+
 			ZoomManager.getFile(baseUrl, "text", function (text, xhr) {
 				// World digital library
 				var wdlMatch = baseUrl.match(/view\/(\d+)\/(\d+)/);

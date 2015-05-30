@@ -194,12 +194,18 @@ ZoomManager.getFile = function (url, type, callback) {
 		callback(xhr.response, xhr);
 	};
 
-	if (type === "xml") {
-		xhr.responseType = "document";
-		xhr.overrideMimeType("text/xml");
-	} else {
-		xhr.responseType = "text";
-		xhr.overrideMimeType("text/plain");
+	switch(type) {
+		case "xml":
+			xhr.responseType = "document";
+			xhr.overrideMimeType("text/xml");
+			break;
+		case "json":
+			xhr.responseType = "json";
+			xhr.overrideMimeType("application/json");
+			break;
+		default:
+			xhr.responseType = "text";
+			xhr.overrideMimeType("text/plain");
 	}
 	xhr.send(null);
 };
