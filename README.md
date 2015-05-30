@@ -20,6 +20,8 @@ The following formats are supported by dezzomify:
   * The [World Digital Library (WDL)](http://www.wdl.org/fr/)
   * [Polona](http://polona.pl/), the Polish Digital National Library
  * [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/PFF-file-format) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
+ * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developped by an italian company. It is used on the following websites:
+  * The [Royal Library of Belgium](http://kbr.be/)
 
 ## Screenshots
 ![dezoomify main page, a zoomable image downloader](http://pix.toile-libre.org/upload/original/1432804561.png)
