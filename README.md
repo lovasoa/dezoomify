@@ -6,10 +6,10 @@ It works with several different zommable image tools, from several different web
 
 Input : the URL of a site containing a zoomable image viewer.
 
-Output : An image that you can **download** (by right-clicking on it, and choosing *Save Image as...*).
+Output : An image that you can download (by right-clicking on it, and choosing *Save Image as...*).
 
 ## Try it
-If you are not interested in the source code and just want to *assemble tiles of (dezoomify) a zoomify-powered image*, go there : [unzoomify an image](http://ophir.lojkine.free.fr/dezoomify/dezoomify.html)
+If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [unzoomify an image](http://ophir.lojkine.free.fr/dezoomify/dezoomify.html)
 
 ## Supported zoomable image formats
 The following formats are supported by dezzomify:
@@ -19,7 +19,7 @@ The following formats are supported by dezzomify:
   * The [British Library](http://www.bl.uk/)
   * The [World Digital Library (WDL)](http://www.wdl.org/fr/)
   * [Polona](http://polona.pl/), the Polish Digital National Library
- * [Zoomify single-file format](https://github.com/lovasoa/dezoomify/wiki/PFF-format-description) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
+ * [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/PFF-file-format) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
 
 ## Screenshots
 ![dezoomify main page, a zoomable image downloader](http://pix.toile-libre.org/upload/original/1432804561.png)
