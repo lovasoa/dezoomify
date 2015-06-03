@@ -20,7 +20,9 @@ var zoomify = (function () { //Code isolation
 					for(var i=1;i<matchPath.length;i++)
 						if (matchPath[i]) return foundZoomifyPath(matchPath[i]);
 				}
-				return callback(baseUrl);
+				// If no zoomify path was found in the page, then assume that
+				// the url that was given is the path itself
+				return foundZoomifyPath(baseUrl);
 			});
 		},
 		"open" : function (url) {
