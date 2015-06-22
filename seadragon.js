@@ -25,6 +25,12 @@ var seadragon = (function () { //Code isolation
 				return;
 			}
 
+			// e-corpus
+			var ecorpusMatch = baseUrl.match(/e-corpus.org\/notices\/.+\/gallery\/.+/);
+			if (ecorpusMatch) {
+				return callback(baseUrl + ".dzi");
+			}
+
 			ZoomManager.getFile(baseUrl, "text", function (text, xhr) {
 				// World digital library
 				var wdlMatch = baseUrl.match(/view\/(\d+)\/(\d+)/);
@@ -54,6 +60,10 @@ var seadragon = (function () { //Code isolation
 				}
 				var size = xml.getElementsByTagName("Size")[0];
 				var data = {};
+
+				// e-corpus doesn't store the tiles in the same place as the dzi file
+				url = url.replace(/e-corpus.org\/notices\/\d+\/gallery\/(\d+)/,
+													"static.e-corpus.org/tiles/$1/index");
 
 				//replace extension by _files
 				data.origin = url.replace(/\.[^.\/]*$/,'') + "_files/";
