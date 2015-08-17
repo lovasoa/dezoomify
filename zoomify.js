@@ -20,6 +20,18 @@ var zoomify = (function () { //Code isolation
 					for(var i=1;i<matchPath.length;i++)
 						if (matchPath[i]) return foundZoomifyPath(matchPath[i]);
 				}
+				// Fluid engage zoomify
+				var fluidMatch = text.match(/accessnumber=([\w.]+)/i);
+				if (fluidMatch) {
+					var xmlBrokerPath = "/scripts/XMLBroker.new.php" +
+										"?Lang=2&contentType=IMAGES&contentID=" +
+										fluidMatch[1];
+					var url = ZoomManager.resolveRelative(xmlBrokerPath, baseUrl);
+					return ZoomManager.getFile(url, "xml", function(xml, xhr){
+						var pathElem = xml.querySelector("imagefile[format=zoomify]");
+						return foundZoomifyPath(pathElem.firstChild.nodeValue);
+					});
+				}
 				// If no zoomify path was found in the page, then assume that
 				// the url that was given is the path itself
 				return foundZoomifyPath(baseUrl);
