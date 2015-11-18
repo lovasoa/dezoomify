@@ -177,8 +177,7 @@ ZoomManager.getFile = function (url, type, callback) {
 
 	// The url we got MIGHT already have been encoded
 	// The url we give to the server MUST be encoded
-	// So, we first decode it, which is a no-op if it was not encoded, then encode it
-	url = encodeURI(decodeURI(url));
+	if (url.match(/%[a-zA-Z0-9]{2}/) === null) url = encodeURI(url);
 	// We pass the URL itself as a query parameter, so we have to re-encode it
 	var codedurl = encodeURIComponent(url);
 	xhr.open("GET", PHPSCRIPT + "?url=" + codedurl, true);
@@ -231,7 +230,7 @@ ZoomManager.resolveRelative = function resolveRelative(path, base) {
 	return base.replace(/\/[^\/]*$/, "") + '/' + path;
 };
 
-/** Returns the maximum zoom level, knowing the image size, the tile size, and the multiplying factor between two consecutive zoom levels 
+/** Returns the maximum zoom level, knowing the image size, the tile size, and the multiplying factor between two consecutive zoom levels
 **/
 ZoomManager.findMaxZoom = function (data) {
 	//For all zoom levels:
