@@ -43,7 +43,7 @@ var seadragon = (function () { //Code isolation
 				}
 				// Any url ending with .xml or .dzi
 				var matchPath = text.match(
-					/[\w\/]+\.(?:(?:xml)|(?:dzi))/i
+					/[^"'()<>]+\.(?:xml|dzi)/i
 				);
 				if (matchPath) {
 					return callback(matchPath[0]);
