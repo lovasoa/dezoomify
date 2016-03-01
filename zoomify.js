@@ -32,6 +32,12 @@ var zoomify = (function () { //Code isolation
 						return foundZoomifyPath(pathElem.firstChild.nodeValue);
 					});
 				}
+				// If nothing was found, but the page contains an iframe, follow the iframe
+				var iframeMatch = text.match(/<iframe[^>]*src=["']([^"']*)/);
+				if (iframeMatch) {
+					var url = ZoomManager.resolveRelative(iframeMatch[1], baseUrl);
+					return getZoomifyPath(url, callback);
+				}
 				// If no zoomify path was found in the page, then assume that
 				// the url that was given is the path itself
 				return foundZoomifyPath(baseUrl);
