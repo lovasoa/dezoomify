@@ -1,6 +1,22 @@
-var nationalgallery = (function(){
+var topviewer = (function(){
 	return {
 		"name" : "TopViewer",
+		"findFile" : function findTopViewer(baseUrl, callback) {
+			// Daguerreobase
+			if (baseUrl.indexOf("memorix.nl/dag/topviewjson/memorix/") > -1) {
+				return callback(baseUrl);
+			}
+			ZoomManager.getFile(baseUrl, "htmltext", function(text, xhr) {
+				var serverMatch = text.match(/["']?server["']?\s*:\s*(["'][^"']+["'])/);
+				if (serverMatch) {
+					var url = JSON.parse(serverMatch[1]);
+					url = ZoomManager.resolveRelative(url, baseUrl);
+					return callback(url);
+				}
+				// Nothing was found
+				callback(baseUrl);
+			});
+		},
 		"open" : function (url) {
 			ZoomManager.getFile(url, "json", function (info, xhr) {
 				if (!info.topviews || !info.config) throw new Error("Invalid Topviewer file");
@@ -33,4 +49,4 @@ var nationalgallery = (function(){
 		}
 	};
 })();
-ZoomManager.addDezoomer(nationalgallery);
+ZoomManager.addDezoomer(topviewer);
