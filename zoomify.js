@@ -40,10 +40,7 @@ var zoomify = (function () { //Code isolation
 		"open" : function (url) {
 			ZoomManager.getFile(url, "xml", function (xml, xhr) {
 				var infos = xml.getElementsByTagName("IMAGE_PROPERTIES")[0];
-				if (!infos) {
-					ZoomManager.error();
-					console.log(xhr);
-				}
+				if (!infos) return ZoomManager.error("Invalid zoomify XML info file: " + url);
 				var data = {};
 				data.origin = url;
 				data.width = parseInt(infos.getAttribute("WIDTH"));

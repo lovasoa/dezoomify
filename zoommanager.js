@@ -41,13 +41,18 @@ UI.drawTile = function(tileImg, x, y) {
 };
 
 UI.error = function(errmsg) {
-	var elem = document.getElementById("error");
-	if (errmsg) elem.innerHTML = errmsg;
-	elem.style.display = "block";
+	if (errmsg) {
+		document.getElementById("errormsg").textContent = errmsg;
+	}
+	document.getElementById("percent").textContent = "";
+	document.getElementById("error").removeAttribute("hidden");
 };
+window.onerror = function(errmsg, source, lineno) {
+	UI.error(errmsg + ' (' + source + ':' + lineno + ')');
+}
 
 UI.reset = function() {
-	document.getElementById("error").style.display = "none";
+	document.getElementById("error").setAttribute("hidden", "hidden");
 	document.getElementById("urlform").style.display = "block";
 	UI.canvas.width = UI.canvas.height = 0;
 };
@@ -157,7 +162,7 @@ ZoomManager.addTile = function (url, x, y) {
 ZoomManager.open = function(url) {
 	UI.reset();
 	if (url.indexOf("http") !== 0) {
-		return ZoomManager.error("You must provide a valid URL.");
+		throw new Error("You must provide a valid HTTP URL.");
 	}
 	if (typeof ZoomManager.dezoomer.findFile === "function") {
 		ZoomManager.dezoomer.findFile(url, function foundFile(filePath) {
@@ -183,13 +188,22 @@ ZoomManager.getFile = function (url, type, callback) {
 	xhr.open("GET", PHPSCRIPT + "?url=" + codedurl, true);
 
 	xhr.onloadstart = function () {
-		ZoomManager.updateProgress(0, "Sent a request in order to get informations about the image...");
+		ZoomManager.updateProgress(1, "Sent a request in order to get informations about the image...");
 	};
 	xhr.onerror = function (e) {
-		ZoomManager.error("Unable to connect to the proxy server to get the required informations.");
 		console.log("XHR error", e);
+		throw new Error("Unable to connect to the proxy server to get the required informations.");
 	};
 	xhr.onloadend = function () {
+		// Custom error message on invalid XML
+		if (xhr.response.documentElement &&
+				xhr.response.documentElement.tagName === "parsererror") {
+			return ZoomManager.error("Invalid XML: " + url);
+		}
+		// Custom error message on invalid JSON
+		if (xhr.responseType === "json" && xhr.response === null) {
+			return ZoomManager.error("Invalid JSON: " + url);
+		}
 		callback(xhr.response, xhr);
 	};
 

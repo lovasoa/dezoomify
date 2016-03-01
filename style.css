@@ -7,7 +7,7 @@ html, body {
 
 #status {
 	position:fixed;
-	top:20%;
+	top:10%;
 	left:30%;
 
 	width:40%;
@@ -80,10 +80,19 @@ input[type=submit]:focus {
 	height:7px;
 }
 #error {
-	margin:30px;
+	margin-top:15px;
+	margin-left:30px;
+	margin-right:30px;
 	text-align:justify;
-	background-color:white;
+	background-color:#ffc4c4;
 	color:black;
-	display:none;
-	padding:7px;
+	padding-left:7px;
+	padding-right:7px;
+	border-radius: 5px;
+	border: 2px solid red;
 }	
+
+#error > h3 {
+	color: red;
+	text-align: center;
+}

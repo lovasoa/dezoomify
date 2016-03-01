@@ -54,11 +54,8 @@ var seadragon = (function () { //Code isolation
 		"open" : function (url) {
 			ZoomManager.getFile(url, "xml", function (xml, xhr) {
 				var infos = xml.getElementsByTagName("Image")[0];
-				if (!infos) {
-					ZoomManager.error();
-					console.log(xml);
-				}
 				var size = xml.getElementsByTagName("Size")[0];
+				if (!infos || !size) return ZoomManager.error("Invalid seadragon XML info file: " + url);
 				var data = {};
 
 				// e-corpus doesn't store the tiles in the same place as the dzi file
