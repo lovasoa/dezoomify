@@ -231,12 +231,17 @@ ZoomManager.resolveRelative = function resolveRelative(path, base) {
 	if (path.match(/\w*:\/\//)) {
 		return path;
 	}
+  // Protocol-relative URL
+	if (path.indexOf("//") === 0) {
+		var protocol = base.match(/\w+:/) || ["http:"];
+		return protocol[0] + path;
+	}
 	// Upper directory
-	if (path.startsWith("../")) {
+	if (path.indexOf("../") === 0) {
 		return resolveRelative(path.slice(3), base.replace(/\/[^\/]*$/, ''));
 	}
 	// Relative to the root
-	if (path.startsWith('/')) {
+	if (path[0] === '/') {
 		var match = base.match(/(\w*:\/\/)?[^\/]*\//) || [base];
 		return match[0] + path.slice(1);
 	}
