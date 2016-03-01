@@ -204,7 +204,12 @@ ZoomManager.getFile = function (url, type, callback) {
 		if (xhr.responseType === "json" && xhr.response === null) {
 			return ZoomManager.error("Invalid JSON: " + url);
 		}
-		callback(xhr.response, xhr);
+		var response = xhr.response;
+		// Decode html encoded entities
+		if (type === "htmltext") {
+			response = ZoomManager.decodeHTMLentities(response);
+		}
+		callback(response, xhr);
 	};
 
 	switch(type) {
@@ -222,6 +227,23 @@ ZoomManager.getFile = function (url, type, callback) {
 	}
 	xhr.send(null);
 };
+
+ZoomManager.decodeHTMLentities = (function (){
+	var dict = {
+		"&amp;": "&",
+		"&lt;": "<",
+		"&gt;": ">",
+		"&quot;": "\"",
+		"&#x27;": "'",
+		"&#x60;": "`"
+	};
+	var regEx = /(?:&amp;|&lt;|&gt;|&quot;|&#x27;|&#x60;)/g;
+	function replacer(entity) {return dict[entity];}
+
+	return function decodeHTMLentities (text) {
+		return text.replace(regEx, replacer);
+	};
+})();
 
 /**
  * Return the absolute path, given a relative path and a base

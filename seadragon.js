@@ -31,7 +31,7 @@ var seadragon = (function () { //Code isolation
 				return callback(baseUrl + ".dzi");
 			}
 
-			ZoomManager.getFile(baseUrl, "text", function (text, xhr) {
+			ZoomManager.getFile(baseUrl, "htmltext", function (text, xhr) {
 				// World digital library
 				var wdlMatch = baseUrl.match(/view\/(\d+)\/(\d+)/);
 				if (wdlMatch && text.match("dziUrlTemplate")) {

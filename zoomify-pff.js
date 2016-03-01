@@ -2,7 +2,7 @@ var zoomifyPFF = (function () { //Code isolation
 	return {
 		"name": "Zoomify PFF",
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
-			ZoomManager.getFile(baseUrl, "text", function (text, xhr) {
+			ZoomManager.getFile(baseUrl, "htmltext", function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath
 				// attribute of a tag
 				var f = text.match(/zoomifyImagePath=([^\'"&]*)[\'"&]/)[1];

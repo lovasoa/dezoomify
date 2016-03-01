@@ -8,7 +8,7 @@ var zoomify = (function () { //Code isolation
 			function foundZoomifyPath(zoomifyPath) {
 				return callback(zoomifyPath + "/ImageProperties.xml");
 			}
-			ZoomManager.getFile(baseUrl, "text", function (text, xhr) {
+			ZoomManager.getFile(baseUrl, "htmltext", function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath
 				// attribute of a tag
 				// In the HTML5 zoomify player, the path is the second argument
