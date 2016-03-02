@@ -3,10 +3,16 @@ var topviewer = (function(){
 		"name" : "TopViewer",
 		"findFile" : function findTopViewer(baseUrl, callback) {
 			// Daguerreobase
-			if (baseUrl.indexOf("memorix.nl/dag/topviewjson/memorix/") > -1) {
+			if (baseUrl.match(/memorix\.nl\/.+\/topviewjson\/memorix/)) {
 				return callback(baseUrl);
 			}
 			ZoomManager.getFile(baseUrl, "htmltext", function(text, xhr) {
+				// Memorix image thumbnail
+				var thumbMatch = text.match(/(?:images\.memorix|afbeeldingen\.gahetna)\.nl\/([a-z\-_]{3,6})\/thumb\/(?:image(?:bank)?-)?(?:[0-9]{2,3}x[0-9]{2,3}(?:crop)?|detailresult|gallery_thumb|mediabank-(?:detail|horizontal))\/(.*?)\.jpg/);
+				if (thumbMatch) {
+					return callback('http://images.memorix.nl/'+thumbMatch[1]+'/topviewjson/memorix/'+thumbMatch[2]);
+				}
+				// Direct server indication
 				var serverMatch = text.match(/["']?server["']?\s*:\s*(["'][^"']+["'])/);
 				if (serverMatch) {
 					var url = JSON.parse(serverMatch[1]);
