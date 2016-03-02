@@ -22,6 +22,9 @@ The following formats are supported by dezzomify:
  * [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/Zoomify-PFF-file-format-documentation) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
  * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developped by an italian company. It is used on the following websites:
   * The [Royal Library of Belgium](http://kbr.be/)
+ * **TopViewer**, also named **Memorix Maior picture viewer** used on the following websites:
+  * [daguerreobase](http://daguerreobase.org/en/), a collection of daguerreotypes.
+  * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developped by the company picturae.
 
 ## Screenshots
 ![dezoomify main page, a zoomable image downloader](http://pix.toile-libre.org/upload/original/1432804561.png)
