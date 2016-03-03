@@ -195,16 +195,16 @@ ZoomManager.getFile = function (url, type, callback) {
 		throw new Error("Unable to connect to the proxy server to get the required informations.");
 	};
 	xhr.onloadend = function () {
+		var response = xhr.response;
 		// Custom error message on invalid XML
-		if (xhr.response.documentElement &&
-				xhr.response.documentElement.tagName === "parsererror") {
+		if (type === "xml" &&
+				response.documentElement.tagName === "parsererror") {
 			return ZoomManager.error("Invalid XML: " + url);
 		}
 		// Custom error message on invalid JSON
-		if (xhr.responseType === "json" && xhr.response === null) {
+		if (type === "json" && xhr.response === null) {
 			return ZoomManager.error("Invalid JSON: " + url);
 		}
-		var response = xhr.response;
 		// Decode html encoded entities
 		if (type === "htmltext") {
 			response = ZoomManager.decodeHTMLentities(response);
