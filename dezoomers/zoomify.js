@@ -1,6 +1,15 @@
 var zoomify = (function () { //Code isolation
 	return {
 		"name": "Zoomify",
+		"description": "Most commmon zoomable image format",
+		"urls": [
+			/ImageProperties\.xml$/
+		],
+		"contents": [
+			/zoomifyImagePath=/,
+			/showImage\(/,
+			/accessnumber=/
+		],
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
 			if (baseUrl.endsWith("ImageProperties.xml")) {
 				return callback(baseUrl);
@@ -66,4 +75,3 @@ var zoomify = (function () { //Code isolation
 	};
 })();
 ZoomManager.addDezoomer(zoomify);
-ZoomManager.setDezoomer(zoomify);

@@ -8,6 +8,8 @@ var nationalgallery = (function(){
 
 	return {
 		"name" : "National Gallery",
+		"description": "The national gallery of London",
+		"urls" : [/nationalgallery\.co\.uk/],
 		"open" : function (url) {
 			ZoomManager.getFile(url, "xml", function (doc, xhr) {
 				var dataElems = doc.querySelectorAll(".data dt");

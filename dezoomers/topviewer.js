@@ -1,6 +1,11 @@
 var topviewer = (function(){
 	return {
 		"name" : "TopViewer",
+		"description": "Memorix viewer, or topviewer, by picturae. Used on dutch websites.",
+		"urls": [/memorix\.nl\/.+\/topviewjson\/memorix/],
+		"contents": [
+			/(?:images\.memorix|afbeeldingen\.gahetna)\.nl\/([a-z\-_]{3,6})\/thumb\/(?:image(?:bank)?-)?(?:[0-9]{2,3}x[0-9]{2,3}(?:crop)?|detailresult|gallery_thumb|mediabank-(?:detail|horizontal))\/(.*?)\.jpg/
+		],
 		"findFile" : function findTopViewer(baseUrl, callback) {
 			// Daguerreobase
 			if (baseUrl.match(/memorix\.nl\/.+\/topviewjson\/memorix/)) {

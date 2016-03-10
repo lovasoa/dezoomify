@@ -2,6 +2,17 @@ var seadragon = (function () { //Code isolation
 
 	return {
 		"name" : "Seadragon (Deep Zoom Image)",
+		"description" : "Microsoft zoomable image format, sometimes called DZI, seadragon, or deep zoom",
+		"urls" : [
+			/bl\.uk\/manuscripts\/Viewer\.aspx/,
+			/polona\.pl\/item\//,
+			/e-corpus.org\/notices\/.+\/gallery\/.+/,
+			/dzi$/
+		],
+		"contents" : [
+			/dziUrlTemplate/,
+			/[^"'()<>]+\.(?:xml|dzi)/i
+		],
 		"findFile" : function getDZIFile (baseUrl, callback) {
 			if (baseUrl.match(/\.xml|\.dzi/i)) {
 				return callback(baseUrl);

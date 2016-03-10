@@ -1,6 +1,8 @@
 var xlimage = (function () { //Code isolation
 	return {
 		"name": "XLimage",
+		"description": "Format developed by an italian company, used on kbr.be",
+		"urls" : [/kbr.be\/multi\/([\w\d-]+)Viewer/],
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
 			// kbr.be
 			var kbrMatch = baseUrl.match(/kbr.be\/multi\/([\w\d-]+)Viewer/);

@@ -72,6 +72,7 @@ UI.addDezoomer = function(dezoomer) {
 	input.type = "radio"
 	input.name = "dezoomer";
 	input.id   = "dezoomer-" + dezoomer.name;
+	label.title= dezoomer.description;
 	input.onclick = function() {
 		ZoomManager.setDezoomer(dezoomer);
 	}
@@ -291,3 +292,4 @@ ZoomManager.setDezoomer = function(dezoomer) {
 	ZoomManager.dezoomer = dezoomer;
 	UI.setDezoomer(dezoomer.name);
 }
+
