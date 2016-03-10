@@ -2,7 +2,7 @@ html, body {
 	margin:0;
 	padding:0;
 	width:100%;
-	background-color:black;
+	background-color:#fff9f9;
 }
 
 #status {
@@ -13,15 +13,19 @@ html, body {
 	width:40%;
 	min-height:20%;
 
-	background:linear-gradient(rgba(10,10,10,0.8),rgba(50,50,50,0.5));
+	background:linear-gradient(rgba(198, 192, 192, 0.8),rgb(227, 219, 219));
 	box-shadow:0 0 8px rgba(200,200,255,0.5);
-	border-radius:16px;
-	color:white;
+	border-radius:3px;
+	color:black;
+	border: 1px solid #a19797;
 }
 
 h1 {
 	text-align:center;
 	text-shadow:0 0 2px rgba(200,200,255);
+	font-family: sans-serif;
+	/*! background-color: grey; */
+	width: 100%;
 }
 
 #description {
@@ -49,7 +53,9 @@ input#url {
 	margin-bottom:10px;
 	border:0;
 	box-shadow:0 0 3px #aaa;
-	height:1.5em;
+	height:2.5em;
+	border-radius: 5px;
+	font-size: 1.2em;
 }
 input#url:focus {
 	box-shadow:0 0 10px #aaf;
@@ -64,6 +70,10 @@ input#url:focus {
 input[type=submit] {
 	width:30%;
 	margin:25px 35% 0;
+	background: white;
+	border: 1px solid;
+	height: 30px;
+	border-radius: 100px;
 }
 input[type=submit]:focus {
 	box-shadow:0 0 10px #aaf;
