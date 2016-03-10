@@ -21,21 +21,39 @@ var automatic = (function () { //Code isolation
 				}
 				
 				// Then, if url didn't match, try to match the contents
-				ZoomManager.getFile(url, "htmltext", function(contents) {
-					for (dezoomerName in ZoomManager.dezoomersList) {
-						var dezoomer = ZoomManager.dezoomersList[dezoomerName];
-						if (dezoomer.contents) {
-							for (var i=0; i<dezoomer.contents.length; i++) {
-								var regex = dezoomer.contents[i];
-								if (contents.match(regex)) {
-									ZoomManager.setDezoomer(dezoomer);
-									return ZoomManager.open(url);
+				// Match recursively the page contents and all its iframe children
+				var urlstack = [url];
+				function processNextUrl() {
+					var nextUrl = urlstack.shift();
+					if (!nextUrl) {
+						var msg = "Unable to find a proper dezoomer for the given URL.";
+						return ZoomManager.error(new Error(msg));
+					}
+					nextUrl = ZoomManager.resolveRelative(nextUrl, url);
+
+					ZoomManager.getFile(nextUrl, "htmltext", function(contents) {
+						var iframeRegex = /<i?frame[^>]*src=["']([^"']+)/g;
+						var match;
+						while (match = iframeRegex.exec(contents)) {
+							urlstack.push(match[1]);
+						}
+
+						for (dezoomerName in ZoomManager.dezoomersList) {
+							var dezoomer = ZoomManager.dezoomersList[dezoomerName];
+							if (dezoomer.contents) {
+								for (var i=0; i<dezoomer.contents.length; i++) {
+									var regex = dezoomer.contents[i];
+									if (contents.match(regex)) {
+										ZoomManager.setDezoomer(dezoomer);
+										return ZoomManager.open(nextUrl);
+									}
 								}
 							}
 						}
-					}
-					ZoomManager.error(new Error("Unable to find a proper dezoomer for the given URL."));
-				});
+						processNextUrl();
+					});
+				}
+				processNextUrl();
 		},
 	};
 })();
