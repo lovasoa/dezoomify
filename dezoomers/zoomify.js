@@ -3,7 +3,8 @@ var zoomify = (function () { //Code isolation
 		"name": "Zoomify",
 		"description": "Most commmon zoomable image format",
 		"urls": [
-			/ImageProperties\.xml$/
+			/ImageProperties\.xml$/,
+			/biblio\.unibe\.ch\/web-apps\/maps\/zoomify.php/
 		],
 		"contents": [
 			/zoomifyImagePath=/,
@@ -40,6 +41,13 @@ var zoomify = (function () { //Code isolation
 						var pathElem = xml.querySelector("imagefile[format=zoomify]");
 						return foundZoomifyPath(pathElem.firstChild.nodeValue);
 					});
+				}
+				// Universitätsbibliothek
+				var unibeMatch = text.match(/url = '([^']*)'/);
+				if (~baseUrl.indexOf("biblio.unibe.ch/web-apps/maps/zoomify.php") &&
+						unibeMatch) {
+					var url = ZoomManager.resolveRelative(unibeMatch[1], baseUrl);
+					return foundZoomifyPath(url);
 				}
 				// If nothing was found, but the page contains an iframe, follow the iframe
 				var iframeMatch = text.match(/<iframe[^>]*src=["']([^"']*)/);
