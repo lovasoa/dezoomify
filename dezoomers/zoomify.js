@@ -12,7 +12,7 @@ var zoomify = (function () { //Code isolation
 			/accessnumber=/
 		],
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
-			if (baseUrl.endsWith("ImageProperties.xml")) {
+			if (baseUrl.match(/ImageProperties\.xml$/)) {
 				return callback(baseUrl);
 			}
 			function foundZoomifyPath(zoomifyPath) {
