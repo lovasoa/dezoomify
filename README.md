@@ -27,8 +27,7 @@ The following formats are supported by dezzomify:
   * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developped by the company picturae.
 
 ## Screenshots
-![dezoomify main page, a zoomable image downloader](http://pix.toile-libre.org/upload/original/1432804561.png)
-![dezoomify downloading an image](http://pix.toile-libre.org/upload/original/1432805025.png)
+![dezoomify downloading an image](http://pix.toile-libre.org/upload/original/1460095520.gif)
 
 #Programming Languages
 The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 `<canvas>` tag), and only the network-related stuffs on the server side (in this case, _PHP_). The only little piece of _PHP_ that remains in the code is just a proxy, used to circumvent the [same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy).
