@@ -6,18 +6,25 @@ html, body {
 }
 
 #status {
-	position:fixed;
-	top:10%;
-	left:30%;
+	margin-top:5%;
+	margin-left:15%;
 
-	width:40%;
-	min-height:20%;
+	width:70%;
+	min-height:30%;
 
-	background:linear-gradient(rgba(198, 192, 192, 0.8),rgb(227, 219, 219));
+	background:linear-gradient(rgb(227, 222, 222),rgb(236, 231, 231));
 	box-shadow:0 0 8px rgba(200,200,255,0.5);
 	border-radius:3px;
 	color:black;
 	border: 1px solid #a19797;
+}
+
+@media (max-width: 900px) {
+	#status {
+	 width: 95%;
+	 margin-left: 2.5%;
+	 margin-top: 7px;
+	}
 }
 
 h1 {
@@ -42,7 +49,8 @@ h1 {
 }
 
 form {
-	margin-top:10%;
+	margin-top:50px;
+	margin-bottom:25px;
 	padding-left:7%;
 	width:86%;
 }
@@ -72,7 +80,7 @@ input[type=submit] {
 	margin:25px 35% 0;
 	background: white;
 	border: 1px solid;
-	height: 30px;
+	height: 40px;
 	border-radius: 100px;
 }
 input[type=submit]:focus {
