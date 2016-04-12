@@ -23,5 +23,17 @@ $opts = array(
   )
 );
 $context = stream_context_create($opts);
-readfile($url, false, $context);
+if (false !== ($f = fopen($url, 'r', false, $context))) {
+  $meta = stream_get_meta_data($f);
+  foreach($meta['wrapper_data'] as $header) {
+    if (strpos($header, "Set-Cookie: ") === 0) {
+      header("X-".$header);
+    }
+  }
+
+  stream_copy_to_stream($f, fopen("php://output", 'w'));
+  fclose($f);
+} else {
+  http_response_code(500);
+}
 ?>
