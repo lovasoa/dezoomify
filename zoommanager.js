@@ -121,6 +121,8 @@ ZoomManager.readyToRender = function(data) {
 	data.nbrTilesX = data.nbrTilesX || Math.ceil(data.width / data.tileSize);
 	data.nbrTilesY = data.nbrTilesY|| Math.ceil(data.height / data.tileSize);
 	data.totalTiles = data.totalTiles || data.nbrTilesX*data.nbrTilesY;
+	data.zoomFactor = data.zoomFactor || 2;
+	data.baseZoomLevel = data.baseZoomLevel || 0;
 
 	ZoomManager.status.totalTiles = data.totalTiles;
 	ZoomManager.data = data;
