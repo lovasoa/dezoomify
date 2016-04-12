@@ -25,6 +25,7 @@ The following formats are supported by dezzomify:
  * **TopViewer**, also named **Memorix Maior picture viewer** used on the following websites:
   * [daguerreobase](http://daguerreobase.org/en/), a collection of daguerreotypes.
   * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developped by the company picturae.
+ * [Artsy](https://www.artsy.net/), an art website.
 
 ## Screenshots
 ![dezoomify downloading an image](http://pix.toile-libre.org/upload/original/1460096698.gif)
