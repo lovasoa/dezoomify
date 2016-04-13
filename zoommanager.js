@@ -179,8 +179,9 @@ ZoomManager.open = function(url) {
 /**
  * Call callback with the contents of the page at url
  */
-ZoomManager.getFile = function (url, type, callback) {
+ZoomManager.getFile = function (url, params, callback) {
 	var PHPSCRIPT = "proxy.php";
+	var type = params.type;
 	var xhr = new XMLHttpRequest();
 
 	// The url we got MIGHT already have been encoded
@@ -294,4 +295,3 @@ ZoomManager.setDezoomer = function(dezoomer) {
 	ZoomManager.dezoomer = dezoomer;
 	UI.setDezoomer(dezoomer.name);
 }
-

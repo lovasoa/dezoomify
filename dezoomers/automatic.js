@@ -19,7 +19,7 @@ var automatic = (function () { //Code isolation
 						}
 					}
 				}
-				
+
 				// Then, if url didn't match, try to match the contents
 				// Match recursively the page contents and all its iframe children
 				var urlstack = [url];
@@ -31,7 +31,7 @@ var automatic = (function () { //Code isolation
 					}
 					nextUrl = ZoomManager.resolveRelative(nextUrl, url);
 
-					ZoomManager.getFile(nextUrl, "htmltext", function(contents) {
+					ZoomManager.getFile(nextUrl, {type:"htmltext"}, function(contents) {
 						var iframeRegex = /<i?frame[^>]*src=["']([^"']+)/g;
 						var match;
 						while (match = iframeRegex.exec(contents)) {

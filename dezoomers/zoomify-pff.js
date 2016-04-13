@@ -6,7 +6,7 @@ var zoomifyPFF = (function () { //Code isolation
 			/zoomifyTileHandlerPath=/
 		],
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
-			ZoomManager.getFile(baseUrl, "htmltext", function (text, xhr) {
+			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath
 				// attribute of a tag
 				var f = text.match(/zoomifyImagePath=([^\'"&]*)[\'"&]/)[1];
@@ -30,7 +30,7 @@ var zoomifyPFF = (function () { //Code isolation
 				data.indexEnd   = data.indexBegin + 8*data.numTiles;
 				var indexesURL = url + "&requestType=2" +
 												"&begin=" + data.indexBegin + "&end="  + data.indexEnd;
-				ZoomManager.getFile(indexesURL, "text", function(text) {
+				ZoomManager.getFile(indexesURL, {type:"text"}, function(text) {
 					var s = parseInt(text.match(/reply_data=(\d+)/)[1]);
 					data.offsets = text.split(',')[1]
 														 .match(/[ \d]{9}/g)

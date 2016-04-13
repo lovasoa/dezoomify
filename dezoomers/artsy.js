@@ -21,7 +21,7 @@ var artsy = (function () { //Code isolation
 			return ZoomManager.error("Invalid artsy URL: " + baseUrl);
 		},
 		"open" : function (url) {
-			ZoomManager.getFile(url, "json", function (info, xhr) {
+			ZoomManager.getFile(url, {type:"json"}, function (info, xhr) {
 				var data = {};
 				var image = info["images"][0];
 

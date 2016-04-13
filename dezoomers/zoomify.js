@@ -18,7 +18,7 @@ var zoomify = (function () { //Code isolation
 			function foundZoomifyPath(zoomifyPath) {
 				return callback(zoomifyPath + "/ImageProperties.xml");
 			}
-			ZoomManager.getFile(baseUrl, "htmltext", function (text, xhr) {
+			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath
 				// attribute of a tag
 				// In the HTML5 zoomify player, the path is the second argument
@@ -37,7 +37,7 @@ var zoomify = (function () { //Code isolation
 										"?Lang=2&contentType=IMAGES&contentID=" +
 										fluidMatch[1];
 					var url = ZoomManager.resolveRelative(xmlBrokerPath, baseUrl);
-					return ZoomManager.getFile(url, "xml", function(xml, xhr){
+					return ZoomManager.getFile(url, {type:"xml"}, function(xml, xhr){
 						var pathElem = xml.querySelector("imagefile[format=zoomify]");
 						return foundZoomifyPath(pathElem.firstChild.nodeValue);
 					});
@@ -61,7 +61,7 @@ var zoomify = (function () { //Code isolation
 			});
 		},
 		"open" : function (url) {
-			ZoomManager.getFile(url, "xml", function (xml, xhr) {
+			ZoomManager.getFile(url, {type:"xml"}, function (xml, xhr) {
 				var infos = xml.getElementsByTagName("IMAGE_PROPERTIES")[0];
 				if (!infos) return ZoomManager.error("Invalid zoomify XML info file: " + url);
 				var data = {};

@@ -30,7 +30,7 @@ var seadragon = (function () { //Code isolation
 			if (polonaMatch) {
 				var itemId = polonaMatch[1], pageId = parseInt(polonaMatch[2]);
 				var resUrl = "http://polona.pl/resources/item/"+itemId+"/?format=json";
-				ZoomManager.getFile(resUrl, "json", function(res, xhr) {
+				ZoomManager.getFile(resUrl, {type:"json"}, function(res, xhr) {
 					callback(res.pages[pageId].dzi_url);
 				});
 				return;
@@ -42,7 +42,7 @@ var seadragon = (function () { //Code isolation
 				return callback(baseUrl + ".dzi");
 			}
 
-			ZoomManager.getFile(baseUrl, "htmltext", function (text, xhr) {
+			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
 				// World digital library
 				var wdlMatch = baseUrl.match(/view\/(\d+)\/(\d+)/);
 				if (wdlMatch && text.match("dziUrlTemplate")) {
@@ -63,7 +63,7 @@ var seadragon = (function () { //Code isolation
 			});
 		},
 		"open" : function (url) {
-			ZoomManager.getFile(url, "xml", function (xml, xhr) {
+			ZoomManager.getFile(url, {type:"xml"}, function (xml, xhr) {
 				var infos = xml.getElementsByTagName("Image")[0];
 				var size = xml.getElementsByTagName("Size")[0];
 				if (!infos || !size) return ZoomManager.error("Invalid seadragon XML info file: " + url);

@@ -16,7 +16,7 @@ var xlimage = (function () { //Code isolation
 			return callback(baseUrl);
 		},
 		"open" : function (url) {
-			ZoomManager.getFile(url, "xml", function (doc, xhr) {
+			ZoomManager.getFile(url, {type:"xml"}, function (doc, xhr) {
 				var data = {};
 				data.origin = url.replace(/\/xml\.php.*/,"");
 				data.width = parseInt(doc.getElementsByTagName("width")[0].innerHTML);

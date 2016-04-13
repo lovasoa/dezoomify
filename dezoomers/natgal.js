@@ -11,7 +11,7 @@ var nationalgallery = (function(){
 		"description": "The national gallery of London",
 		"urls" : [/nationalgallery\.co\.uk/],
 		"open" : function (url) {
-			ZoomManager.getFile(url, "xml", function (doc, xhr) {
+			ZoomManager.getFile(url, {type:"xml"}, function (doc, xhr) {
 				var dataElems = doc.querySelectorAll(".data dt");
 				if (dataElems.length===0)
 					ZoomManager.error("No valid zoomify information found.");
