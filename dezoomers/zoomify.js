@@ -45,7 +45,7 @@ var zoomify = (function () { //Code isolation
 						if (matchPath[i]) return foundZoomifyPath(matchPath[i]);
 				}
 				// Fluid engage zoomify
-				var fluidMatch = text.match(/accessnumber=([\w.]+)/i);
+				var fluidMatch = text.match(/accessnumber=([^"&\s']+)/i);
 				if (fluidMatch) {
 					var xmlBrokerPath = "/scripts/XMLBroker.new.php" +
 										"?Lang=2&contentType=IMAGES&contentID=" +
