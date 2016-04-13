@@ -9,7 +9,7 @@ $headers =
   "\r\nAccept-Language: en-US,en;q=0.5";
 
 if (isset($_GET["cookies"])) {
-  $headers .= "\r\nCookies: " . str_replace("\n", "", $_GET["cookies"]);
+  $headers .= "\r\nCookie: " . str_replace("\n", "", $_GET["cookies"]);
 }
 
 $opts = array(
