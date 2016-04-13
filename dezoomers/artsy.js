@@ -9,7 +9,7 @@ var artsy = (function () { //Code isolation
 		],
 		"contents" : [
 		],
-		"findFile" : function getDZIFile (baseUrl, callback) {
+		"findFile" : function getAPIFile (baseUrl, callback) {
 			var info_url_base = "https://fusion.artsy.net/api/v1/artwork/";
 			if (baseUrl.indexOf(info_url_base) === 0) {
 				return callback(baseUrl);
