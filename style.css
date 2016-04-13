@@ -27,6 +27,12 @@ html, body {
 	}
 }
 
+#status.loading {
+	position:  fixed;
+	top: 10%;
+	min-height: 35px!important;
+}
+
 h1 {
 	text-align:center;
 	text-shadow:0 0 2px rgba(200,200,255);
@@ -88,8 +94,9 @@ input[type=submit]:focus {
 }
 
 #percent {
-	color:white;
-	font-size:1em;
+	color:black;
+	font-family: sans;
+	font-size:1.2em;
 	text-align:center;
 }
 #progressbar {
