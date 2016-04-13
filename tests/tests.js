@@ -21,15 +21,16 @@ testwin.onload = function() {
       }
       ZoomManager.addTile = function (url, x, y) {
       	//In order to save time & bandwidth, load only the last tile
-        if (x === ZoomManager.data.nbrTilesX-1 &&
-            y === ZoomManager.data.nbrTilesY-1) {
+        if (x*y === (ZoomManager.data.nbrTilesX-1) *
+                    (ZoomManager.data.nbrTilesY-1) *
+                    (ZoomManager.data.tileSize * ZoomManager.data.tileSize)) {
             var img = document.createElement("img");
-          	img.onload = function () {ZoomManager.status.loaded ++;};
+            img.onload = function () {ZoomManager.status.loaded ++;};
             img.onerror = function() {
               assert.ok(false, "Invalid tile image: " + url);
               done();
             }
-          	img.src = url;
+            img.src = url;
         } else {
           ZoomManager.status.loaded ++;
           UI.canvas.width = UI.canvas.height = UI.canvas.style.width = UI.canvas.style.height = 0;
