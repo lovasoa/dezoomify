@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf8" />
+  <meta name="description" content="Set of tests for dezoomify" />
+	<title>Dezoomify Tests</title>
+  <meta name="viewport" content="width=device-width">
+  <link rel="stylesheet" href="qunit.css">
+  <style>
+#dezoomify {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  border: 3px solid black;
+  border-radius: 10px;
+  opacity: 0.5;
+  transition: .2s;
+}
+#dezoomify:hover {
+  opacity: 1;
+  transition: .2s;
+}
+  </style>
+</head>
+
+<body>
+  <iframe id="dezoomify" src="../dezoomify.html" width="600" height="600"></iframe>
+
+  <div id="qunit"></div>
+  <div id="qunit-fixture"></div>
+  <script src="qunit.js"></script>
+  <script src="test_urls.js"></script>
+  <script src="tests.js"></script>
+</body>
+</html>

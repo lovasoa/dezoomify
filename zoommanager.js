@@ -88,15 +88,10 @@ UI.setDezoomer = function(dezoomerName) {
 var ZoomManager = {};
 
 ZoomManager.error = function (errmsg) {
-	console.error(errmsg);
 	UI.error(errmsg);
+	throw new Error(errmsg);
 };
 ZoomManager.updateProgress = UI.updateProgress;
-
-ZoomManager.status = {
-	"loaded" : 0,
-	"totalTiles" : 1
-};
 
 ZoomManager.startTimer = function () {
 	var timer = setInterval(function () {
@@ -146,11 +141,15 @@ ZoomManager.defaultRender = function (data) {
 
 		x++;
 		if (x >= data.nbrTilesX) {x = 0; y++;}
-		if (y < data.nbrTilesY) requestAnimationFrame(nextTile);
+		if (y < data.nbrTilesY) ZoomManager.nextTick(nextTile);
 	}
 
 	nextTile();
 };
+ZoomManager.nextTick = (function(doAnim) {
+	if (doAnim) return function(f){return requestAnimationFrame(f)}
+	else return function(f) {return setTimeout(f, 5)}
+})(!!window.requestAnimationFrame);
 
 ZoomManager.addTile = function (url, x, y) {
 	//Demande une partie de l'image au serveur, et l'affiche lorsqu'elle est reçue
@@ -163,7 +162,7 @@ ZoomManager.addTile = function (url, x, y) {
 };
 
 ZoomManager.open = function(url) {
-	UI.reset();
+	ZoomManager.init();
 	if (url.indexOf("http") !== 0) {
 		throw new Error("You must provide a valid HTTP URL.");
 	}
@@ -237,8 +236,6 @@ ZoomManager.getFile = function (url, params, callback) {
 	}
 	xhr.send(null);
 };
-// This variable will store cookies set by previous requests
-ZoomManager.cookies = "";
 
 ZoomManager.decodeHTMLentities = (function (){
 	var dict = {
@@ -303,3 +300,17 @@ ZoomManager.setDezoomer = function(dezoomer) {
 	ZoomManager.dezoomer = dezoomer;
 	UI.setDezoomer(dezoomer.name);
 }
+ZoomManager.reset = function() {
+	// This variable will store cookies set by previous requests
+	ZoomManager.setDezoomer(ZoomManager.dezoomersList["Select automatically"]);
+};
+
+ZoomManager.init = function() {
+	// Called before open()
+	if (!ZoomManager.cookies) ZoomManager.cookies = "";
+	ZoomManager.status = {
+		"loaded" : 0,
+		"totalTiles" : 1
+	};
+	UI.reset();
+};
