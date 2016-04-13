@@ -33,6 +33,10 @@ html, body {
 	min-height: 35px!important;
 }
 
+#status.finished {
+	display: none;
+}
+
 h1 {
 	text-align:center;
 	text-shadow:0 0 2px rgba(200,200,255);
@@ -54,11 +58,16 @@ h1 {
 	color:#444;
 }
 
-form {
+#urlform {
 	margin-top:50px;
 	margin-bottom:25px;
 	padding-left:7%;
 	width:86%;
+}
+
+#status.loading #urlform {
+	/*Hide the form while loading tiles*/
+	display: none;
 }
 
 input#url {
@@ -115,7 +124,7 @@ input[type=submit]:focus {
 	padding-right:7px;
 	border-radius: 5px;
 	border: 2px solid red;
-}	
+}
 
 #error > h3 {
 	color: red;

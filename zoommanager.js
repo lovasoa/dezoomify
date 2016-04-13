@@ -27,7 +27,7 @@ UI.changeSize = function () {
 /** Sets the width and height of the canvas
 **/
 UI.setupRendering = function (data) {
-	document.getElementById("urlform").style.display = "none";
+	document.getElementById("status").className = "loading";
 	UI.canvas.width = data.width;
 	UI.canvas.height = data.height;
 	UI.canvas.onclick = UI.changeSize;
@@ -53,17 +53,17 @@ window.onerror = function(errmsg, source, lineno) {
 
 UI.reset = function() {
 	document.getElementById("error").setAttribute("hidden", "hidden");
-	document.getElementById("urlform").style.display = "block";
+	document.getElementById("status").className = "";
 	UI.canvas.width = UI.canvas.height = 0;
 };
 
 UI.updateProgress = function (percent, text) {
-	document.getElementById("percent").innerHTML = text + ' (' + parseInt(percent) + ") %";
+	document.getElementById("percent").innerHTML = text + ' (' + parseInt(percent) + "%)";
 	document.getElementById("progressbar").style.width = percent + "%";
 };
 
 UI.loadEnd = function() {
-	document.getElementById("status").style.display = "none";
+	document.getElementById("status").className = "finished";
 };
 
 UI.addDezoomer = function(dezoomer) {
