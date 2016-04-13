@@ -11,6 +11,7 @@ testwin.onload = function() {
 
   test_urls.forEach(function(test) {
     QUnit.test(test.name, function( assert ) {
+      assert.expect(1);
       var done = assert.async();
       ZoomManager.reset();
       ZoomManager.open(test.url);

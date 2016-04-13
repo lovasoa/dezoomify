@@ -1,5 +1,13 @@
 var test_urls = [
   {
+    "name": "polona.pl",
+    "url": "https://polona.pl/item/9388882/0/"
+  },
+  {
+    "name": "British Library",
+    "url": "http://www.bl.uk/manuscripts/Viewer.aspx?ref=burney_ms_276_f031ar"
+  },
+  {
     "name": "artsy",
     "url": "https://www.artsy.net/artwork/damien-hirst-beautiful-unorthodox-a-legacy-of-unconventional-art-education-with-surgical-rubber-drapes-and-sinister-overtones-minimizing-its-significance-painting/zoom"
   },
