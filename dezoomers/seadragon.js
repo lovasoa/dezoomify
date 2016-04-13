@@ -11,7 +11,8 @@ var seadragon = (function () { //Code isolation
 		],
 		"contents" : [
 			/dziUrlTemplate/,
-			/[^"'()<>]+\.(?:xml|dzi)/i
+			/[^"'()<>]+\.(?:xml|dzi)/i,
+			/schemas\.microsoft\.com\/deepzoom/
 		],
 		"findFile" : function getDZIFile (baseUrl, callback) {
 			if (baseUrl.match(/\.xml|\.dzi/i)) {
