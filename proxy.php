@@ -24,13 +24,21 @@ $opts = array(
 );
 $context = stream_context_create($opts);
 if (false !== ($f = fopen($url, 'r', false, $context))) {
+
+  // Header management
   $meta = stream_get_meta_data($f);
+  $cookies = "";
   foreach($meta['wrapper_data'] as $header) {
-    if (strpos($header, "Set-Cookie: ") === 0) {
-      header("X-".$header);
+    if (preg_match("/Set-Cookie:\s*([^;]+)/i", $header, $m)) {
+      $cookies .= $m[1] . ';';
+    } else if (strpos($header, "Content-Type:") === 0) {
+      header($header);
     }
   }
+  // Javascript cannot access cookies directly, so we change the header name
+  if ($cookies !== "") header("X-Set-Cookie: " . $cookies);
 
+  // Pipe the stream from the webpage to our output
   stream_copy_to_stream($f, fopen("php://output", 'w'));
   fclose($f);
 } else {
