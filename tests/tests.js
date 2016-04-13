@@ -16,6 +16,7 @@ testwin.onload = function() {
       ZoomManager.reset();
       ZoomManager.open(test.url);
       ZoomManager.loadEnd = function () {
+        ZoomManager.reset();
         assert.ok(true, "Image loaded")
         done();
       }

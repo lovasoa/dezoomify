@@ -17,6 +17,30 @@ var test_urls = [
   },
   {
     "name" : "Bibliothèques spécialisées de Paris",
-    "url" : "http://bspe-p-pub.paris.fr/MDBGED/zoomify-BFS.aspx?edid=8727&edfindex=0&count=1&referer=http%3a%2f%2fbspe-p-pub.paris.fr%2fMDBGED%2fEDFileDetail-BFS.aspx%3fedid%3d8727&hash=2ead02da52ccdbb882ec136edba4b72b"
+    "url" : "http://bspe-p-pub.paris.fr/MDBGED/zoomify-BFS.aspx?edid=23143&edfindex=0&count=1&referer=http://bspe-p-pub.paris.fr/MDBGED/EDFileDetail-BFS.aspx?edid=23143&hash=b226c1d52694495c72f25ee9dfa83c56"
+  },
+  {
+    "name": "DZI path with numbers",
+    "url" : "http://zoom.iwm.org.uk/view/445552&cat=photographs&oid=object-205390201"
+  },
+  {
+    "name": "archieven.nl",
+    "url": "http://www.archieven.nl/maisi_ajax_proxy0.php?mivast=0&mizig=962&miadt=5&miaet=185&micode=1785&minr=8193963&milang=nl&misort=last_mod|asc&miview=viewer2"
+  },
+  {
+    "name": "fluid engage zoomify",
+    "url": "http://collection.mccord.mcgill.ca/fr/collection/artefacts/MP-0000.236.1"
+  },
+  {
+    "name" : "national archives (research.archives.gov)",
+    "url" : "https://catalog.archives.gov/OpaAPI/media/7029407/opa-renditions/image-tiles/95-GP-3287-Box0552_003_001_AC.jpg.dzi"
+  },
+  {
+    "name": "daguerreobase",
+    "url" : "http://www.daguerreobase.org/en/browse/indeling/detail/start/1"
+  },
+  {
+    "name": "e-corpus",
+    "url": "http://www.e-corpus.org/notices/102464/gallery/773640.dzi"
   }
 ];
