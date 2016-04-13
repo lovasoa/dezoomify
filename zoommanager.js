@@ -181,7 +181,7 @@ ZoomManager.open = function(url) {
  */
 ZoomManager.getFile = function (url, params, callback) {
 	var PHPSCRIPT = "proxy.php";
-	var type = params.type;
+	var type = params.type || "text";
 	var xhr = new XMLHttpRequest();
 
 	// The url we got MIGHT already have been encoded
@@ -189,7 +189,11 @@ ZoomManager.getFile = function (url, params, callback) {
 	if (url.match(/%[a-zA-Z0-9]{2}/) === null) url = encodeURI(url);
 	// We pass the URL itself as a query parameter, so we have to re-encode it
 	var codedurl = encodeURIComponent(url);
-	xhr.open("GET", PHPSCRIPT + "?url=" + codedurl, true);
+	var requesturl = PHPSCRIPT + "?url=" + codedurl;
+	if (ZoomManager.cookies.length > 0) {
+		requesturl += "&cookies=" + encodeURIComponent(ZoomManager.cookies);
+	}
+	xhr.open("GET", requesturl, true);
 
 	xhr.onloadstart = function () {
 		ZoomManager.updateProgress(1, "Sent a request in order to get informations about the image...");
@@ -200,6 +204,8 @@ ZoomManager.getFile = function (url, params, callback) {
 	};
 	xhr.onloadend = function () {
 		var response = xhr.response;
+		var cookie = xhr.getResponseHeader("X-Set-Cookie");
+		if (cookie) ZoomManager.cookies += cookie;
 		// Custom error message on invalid XML
 		if (type === "xml" &&
 				response.documentElement.tagName === "parsererror") {
@@ -231,6 +237,8 @@ ZoomManager.getFile = function (url, params, callback) {
 	}
 	xhr.send(null);
 };
+// This variable will store cookies set by previous requests
+ZoomManager.cookies = "";
 
 ZoomManager.decodeHTMLentities = (function (){
 	var dict = {
