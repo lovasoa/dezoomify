@@ -1,6 +1,6 @@
 language: php
-node_js:
-  - "0.10"
+php:
+  - "5.6"
 script: cd tests && npm install && npm test
 before_script:
   - export DISPLAY=:99.0
