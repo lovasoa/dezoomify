@@ -1,0 +1,19 @@
+{
+  "name": "dezoomify-tests",
+  "version": "1.0.0",
+  "description": "tests for dezoomify",
+  "main": "tests.js",
+  "dependencies": {
+    "karma": "^0.13.22",
+    "karma-firefox-launcher": "^0.1.7",
+    "karma-qunit": "^0.1.9",
+    "qunit": "^0.9.1",
+    "qunitjs": "^1.23.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "./node_modules/karma/bin/karma start"
+  },
+  "author": "",
+  "license": "GPL"
+}
