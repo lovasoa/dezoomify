@@ -1,8 +1,9 @@
-language: node_js
+language: php
 node_js:
   - "0.10"
 script: cd tests && npm install && npm test
 before_script:
   - export DISPLAY=:99.0
   - sh -e /etc/init.d/xvfb start
+  - "php -S 127.0.0.1:8181 &"
 sudo: false
