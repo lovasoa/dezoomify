@@ -6,7 +6,6 @@ UI.dezoomers = document.getElementById("dezoomers");
 **/
 UI.changeSize = function () {
 	var width = UI.canvas.width, height = UI.canvas.height;
-	console.log("changeSize");
 	switch (this.fit) {
 		case "width":
 			this.fit = "height";
@@ -33,7 +32,6 @@ UI.setupRendering = function (data) {
 	UI.canvas.onclick = UI.changeSize;
 	UI.ctx = UI.canvas.getContext("2d");
 	UI.changeSize();
-	console.log("Image size: " + data.width + "x" + data.height);
 };
 
 UI.drawTile = function(tileImg, x, y) {
@@ -179,7 +177,7 @@ ZoomManager.open = function(url) {
  * Call callback with the contents of the page at url
  */
 ZoomManager.getFile = function (url, params, callback) {
-	var PHPSCRIPT = "proxy.php";
+	var PHPSCRIPT = ZoomManager.proxy_url;
 	var type = params.type || "text";
 	var xhr = new XMLHttpRequest();
 
@@ -308,6 +306,7 @@ ZoomManager.reset = function() {
 ZoomManager.init = function() {
 	// Called before open()
 	if (!ZoomManager.cookies) ZoomManager.cookies = "";
+	if (!ZoomManager.proxy_url) ZoomManager.proxy_url = "proxy.php";
 	ZoomManager.status = {
 		"loaded" : 0,
 		"totalTiles" : 1
