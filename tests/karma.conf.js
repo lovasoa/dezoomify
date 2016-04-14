@@ -17,10 +17,11 @@ module.exports = function(config) {
     files: [
       {pattern:'dezoomify.html', included:false},
       {pattern:'style.css', included:false},
+      {pattern:'icon.svg', included:false},
       {pattern:'zoommanager.js', included:false},
       {pattern:'dezoomers/*js', included:false},
       'tests/test_urls.js',
-      'tests/karma-tests.js',
+      'tests/tests.js',
     ],
 
     // proxies
