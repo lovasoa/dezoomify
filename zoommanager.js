@@ -196,8 +196,7 @@ ZoomManager.getFile = function (url, params, callback) {
 		ZoomManager.updateProgress(1, "Sent a request in order to get informations about the image...");
 	};
 	xhr.onerror = function (e) {
-		console.log("XHR error", e);
-		throw new Error("Unable to connect to the proxy server to get the required informations.");
+		throw new Error("Unable to connect to the proxy server to get the required informations. XHR error: " + e);
 	};
 	xhr.onloadend = function () {
 		var response = xhr.response;
