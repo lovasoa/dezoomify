@@ -26,6 +26,7 @@ The following formats are supported by dezzomify:
   * [daguerreobase](http://daguerreobase.org/en/), a collection of daguerreotypes.
   * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developped by the company picturae.
  * [Artsy](https://www.artsy.net/), an art website.
+ * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
 
 ## Screenshots
 ![dezoomify downloading an image](http://pix.toile-libre.org/upload/original/1460096698.gif)
