@@ -1,5 +1,9 @@
 var test_urls = [
   {
+    "name": "krpano",
+    "url": "http://krpano.com/panos/andreabiffi/galleria_04.xml"
+  },
+  {
     "name": "polona.pl",
     "url": "https://polona.pl/item/9388882/0/"
   },
