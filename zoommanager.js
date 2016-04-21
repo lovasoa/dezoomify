@@ -98,12 +98,16 @@ ZoomManager.loadEnd = function () {
 }
 
 ZoomManager.startTimer = function () {
+	var wasLoaded = 0; // Number of tiles that were loaded last time we watched
 	var timer = setInterval(function () {
 		/*Update the User Interface each 500ms, and not in addTile, because it would
 		slow down the all process to update the UI too often.*/
 		var loaded = ZoomManager.status.loaded, total = ZoomManager.status.totalTiles;
-		ZoomManager.updateProgress(100 * loaded / total, "Loading the tiles...");
-
+		if (loaded !== wasLoaded) {
+			// Update progress if new tiles were loaded
+			ZoomManager.updateProgress(100 * loaded / total, "Loading the tiles...");
+			wasLoaded = loaded;
+		}
 		if (loaded == total) {
 			clearInterval(timer);
 			ZoomManager.loadEnd();
