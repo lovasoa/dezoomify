@@ -1,0 +1,58 @@
+"use strict";
+var jsdom = require("jsdom");
+var Canvas = require("canvas");
+var request = require("request");
+var fs = require("fs");
+
+var PROXY_PORT = 8181;
+var proxy_server = require("./proxy.js").listen(PROXY_PORT);
+
+var dezoomdir = "../dezoomers/";
+var scripts = fs.readdirSync(dezoomdir).map(s => "dezoomers/"+s);
+scripts.unshift("zoommanager.js");
+
+var virtualConsole = jsdom.createVirtualConsole().sendTo(console);
+
+function onload(window) {
+  var ZoomManager = window.ZoomManager, UI = window.UI;
+  UI.error = function error(err) {
+    console.error(err);
+    proxy_server.close();
+  }
+  UI.loadEnd = function loadEnd() {
+    var out = fs.createWriteStream(process.argv[3]);
+    UI.canvas.jpegStream().pipe(out);
+    proxy_server.close();
+  }
+  UI.updateProgress = function(progress, text) {
+    console.log(parseInt(progress) + "% : " + text);
+  }
+  UI.setupRendering = function (data) {
+  	UI.canvas = new Canvas(data.width, data.height);
+  	UI.ctx = UI.canvas.getContext("2d");
+  };
+  ZoomManager.addTile = function (url, x, y) {
+    //Demande une partie de l'image au serveur, et l'affiche lorsqu'elle est reçue
+    request({url, encoding:null}, function tileLoaded(err, stream, buffer){
+      if (err) return ZoomManager.error("Error while loading tile: " + url + "\n" + err);
+      var img = new Canvas.Image;
+      img.src = buffer;
+      UI.drawTile(img, x, y);
+      ZoomManager.status.loaded ++;
+    });
+  };
+  ZoomManager.proxy_url = "http://127.0.0.1:"+PROXY_PORT;
+  ZoomManager.open(process.argv[2]);
+}
+
+if (process.argv.length < 3) {
+  console.error("Usage: %s [URL] filename.jpg", process.argv[1]);
+  process.exit(1);
+} else {
+  jsdom.env({
+    file: "../dezoomify.html",
+    scripts,
+    virtualConsole,
+    onload
+  });
+}

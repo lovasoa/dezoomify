@@ -89,7 +89,13 @@ ZoomManager.error = function (errmsg) {
 	UI.error(errmsg);
 	throw new Error(errmsg);
 };
-ZoomManager.updateProgress = UI.updateProgress;
+
+ZoomManager.updateProgress = function (progress, msg) {
+	UI.updateProgress(progress, msg);
+};
+ZoomManager.loadEnd = function () {
+	UI.loadEnd();
+}
 
 ZoomManager.startTimer = function () {
 	var timer = setInterval(function () {
@@ -105,8 +111,6 @@ ZoomManager.startTimer = function () {
 	}, 500);
 	return timer;
 };
-
-ZoomManager.loadEnd = UI.loadEnd;
 
 
 ZoomManager.readyToRender = function(data) {
@@ -151,11 +155,14 @@ ZoomManager.nextTick = (function(doAnim) {
 
 ZoomManager.addTile = function (url, x, y) {
 	//Demande une partie de l'image au serveur, et l'affiche lorsqu'elle est reçue
-	var img = document.createElement("img");
-	img.onload = function () {
+	var img = new Image;
+	img.addEventListener("load", function () {
 		UI.drawTile(img, x, y);
 		ZoomManager.status.loaded ++;
-	};
+	});
+	img.addEventListener("error", function() {
+		ZoomManager.error("Unable to load tile: " + url);
+	});
 	img.src = url;
 };
 
