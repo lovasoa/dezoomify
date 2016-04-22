@@ -31,10 +31,18 @@ function onload(window) {
   	UI.canvas = new Canvas(data.width, data.height);
   	UI.ctx = UI.canvas.getContext("2d");
   };
-  ZoomManager.addTile = function (url, x, y) {
+  ZoomManager.addTile = function addTile (url, x, y, nTries) {
+    if (nTries === (void 0)) nTries = 10;
     //Demande une partie de l'image au serveur, et l'affiche lorsqu'elle est reçue
     request({url, encoding:null}, function tileLoaded(err, stream, buffer){
-      if (err) return ZoomManager.error("Error while loading tile: " + url + "\n" + err);
+      if (err) {
+        if (nTries === 0) {
+          return ZoomManager.error("Error while loading tile: " + url + "\n" + err);
+        } else {
+          console.log("Request failed, retrying :" + nTries);
+          return setTimeout(addTile, Math.pow(2, 10-nTries), url, x, y, nTries-1);
+        }
+      }
       var img = new Canvas.Image;
       img.src = buffer;
       UI.drawTile(img, x, y);
