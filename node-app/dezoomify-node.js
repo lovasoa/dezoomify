@@ -3,11 +3,14 @@ var jsdom = require("jsdom");
 var Canvas = require("canvas");
 var request = require("request");
 var fs = require("fs");
+var path = require("path");
 
 var PROXY_PORT = 8181;
 var proxy_server = require("./proxy.js").listen(PROXY_PORT);
 
-var dezoomdir = "../dezoomers/";
+var DEZOOMIFY_PATH = path.dirname(__dirname);
+
+var dezoomdir = path.join(DEZOOMIFY_PATH, "dezoomers");
 var scripts = fs.readdirSync(dezoomdir).map(s => "dezoomers/"+s);
 scripts.unshift("zoommanager.js");
 
@@ -58,7 +61,7 @@ if (process.argv.length < 3) {
   process.exit(1);
 } else {
   jsdom.env({
-    file: "../dezoomify.html",
+    file: path.join(DEZOOMIFY_PATH, "dezoomify.html"),
     scripts,
     virtualConsole,
     onload
