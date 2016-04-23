@@ -2,7 +2,7 @@
 #Download zoomable images
 
 _Dezoomify_ makes a downloadable image from an image viewable via a flash or html5 zoomable image interface.
-It works with several different zommable image tools, from several different websites (see the list below). 
+It works with several different zomable image tools, from several different websites (see the list below). 
 
 Input : the URL of a site containing a zoomable image viewer.
 
