@@ -2,7 +2,7 @@
 #Download zoomable images
 
 _Dezoomify_ makes a downloadable image from an image viewable via a flash or html5 zoomable image interface.
-It works with several different zomable image tools, from several different websites (see the list below). 
+It works with several different zoomable image tools, from several different websites (see the list below). 
 
 Input : the URL of a site containing a zoomable image viewer.
 
@@ -52,7 +52,7 @@ This script on wikimedia : [Zoomify in the help about zoomable Images on wikimed
 
 #GPL
 > Copyright © 2011-2014 Lovasoa
-> 
+>
 >  This file is part of Dezoomify.
 >
 >  Dezoomify is free software; you can redistribute it and/or modify
@@ -64,7 +64,7 @@ This script on wikimedia : [Zoomify in the help about zoomable Images on wikimed
 >  but WITHOUT ANY WARRANTY; without even the implied warranty of
 >  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 >  GNU General Public License for more details.
-> 
+>
 >  You should have received a copy of the GNU General Public License
 >  along with Dezoomify; if not, write to the Free Software
 >  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301
