@@ -27,7 +27,7 @@ html, body {
 	}
 }
 
-#status.loading {
+#status.loading, #status.download {
 	position:  fixed;
 	top: 10%;
 	min-height: 35px!important;
@@ -65,8 +65,8 @@ h1 {
 	width:86%;
 }
 
-#status.loading #urlform {
-	/*Hide the form while loading tiles*/
+#status.loading #urlform, #status.download #urlform {
+	/*Hide the form while loading tiles and when displaying download link*/
 	display: none;
 }
 
@@ -90,7 +90,7 @@ input#url:focus {
 	white-space: nowrap;
 	font-size:.9em;
 }
-input[type=submit] {
+.button {
 	width:30%;
 	margin:25px 35% 0;
 	background: white;
@@ -98,7 +98,7 @@ input[type=submit] {
 	height: 40px;
 	border-radius: 100px;
 }
-input[type=submit]:focus {
+.button:focus {
 	box-shadow:0 0 10px #aaf;
 }
 
@@ -113,6 +113,19 @@ input[type=submit]:focus {
 	background-color:red;
 	height:7px;
 }
+
+
+#status a[download] {
+	display: block;
+	margin: auto;
+	padding: 10px;
+	text-align: center;
+	height: 1em;
+	margin-bottom: 10px;
+	border: 1px solid black;
+	text-decoration: none;
+}
+
 .error {
 	margin-top:15px;
 	margin-left:30px;

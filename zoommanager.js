@@ -61,7 +61,24 @@ UI.updateProgress = function (percent, text) {
 };
 
 UI.loadEnd = function() {
-	document.getElementById("status").className = "finished";
+	var status = document.getElementById("status");
+	var a = document.createElement("a");
+	a.download = "dezoomify-result.jpg";
+	a.href = "#";
+	a.textContent = "Converting image...";
+	a.className = "button";
+	try {
+		// Try to export the image
+		UI.canvas.toBlob(function(blob){
+			var url = URL.createObjectURL(blob);
+			a.href = url;
+			a.textContent = "Save image";
+		}, "image/jpeg", 0.95);
+		status.className = "download";
+		status.appendChild(a);
+	} catch(e) {
+		status.className = "finished";
+	}
 };
 
 UI.addDezoomer = function(dezoomer) {
@@ -167,6 +184,10 @@ ZoomManager.addTile = function (url, x, y) {
 	img.addEventListener("error", function() {
 		ZoomManager.error("Unable to load tile: " + url);
 	});
+	if (ZoomManager.proxy_tiles) {
+		url = ZoomManager.proxy_tiles + "?url=" + encodeURIComponent(url);
+		img.crossOrigin = "anonymous";
+	}
 	img.src = url;
 };
 
