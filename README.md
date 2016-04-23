@@ -2,7 +2,7 @@
 #Download zoomable images
 
 _Dezoomify_ makes a downloadable image from an image viewable via a flash or html5 zoomable image interface.
-It works with several different zommable image tools, from several different websites (see the list below). 
+It works with several different zomable image tools, from several different websites (see the list below). 
 
 Input : the URL of a site containing a zoomable image viewer.
 
@@ -10,6 +10,16 @@ Output : An image that you can download (by right-clicking on it, and choosing *
 
 ## Try it
 If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [unzoomify an image](http://ophir.lojkine.free.fr/dezoomify/dezoomify.html)
+
+## Troublshooting
+#### FAQ
+If you have problems while downloading an image, then read the **[FAQ](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ)**.
+#### Reporting issues
+Your bug reports and feature requests are welcome!
+Please go the the [Github issue page of the project](https://github.com/lovasoa/dezoomify/issues),
+and explain your problem.
+Please be clear, and give the URL of the page containing the image dezoomify
+failed to process.
 
 ## Supported zoomable image formats
 The following formats are supported by dezzomify:
@@ -33,13 +43,6 @@ The following formats are supported by dezzomify:
 
 ## Video tutorial
 [![Video tutorial for dezzomify](http://pix.toile-libre.org/upload/original/1460095793.png)](https://www.youtube.com/watch?v=RtyckiAE5Eo)
-
-## Reporting issues
-Your bug reports and feature requests are welcome!
-Please go the the [Github issue page of the project](https://github.com/lovasoa/dezoomify/issues),
-and explain your problem.
-Please be clear, and give the URL of the page containing the image dezoomify
-failed to process.
 
 #Programming Languages
 The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 `<canvas>` tag), and only the network-related stuffs on the server side (in this case, _PHP_). The only little piece of _PHP_ that remains in the code is just a proxy, used to circumvent the [same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy).
