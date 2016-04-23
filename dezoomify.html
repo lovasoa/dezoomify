@@ -1,60 +1,76 @@
 <!DOCTYPE html>
 <html>
-<!--Le dézoumistificateur
-
-The dezoomify script is capable of grabbing images from a  webpage containing a Zoomify viewer and automatically stitching the images with javascript and the HTML5 <canvas> element.
-
-This script is inspired by the source code of http://toolserver.org/~kolossos/image/zoomify.php
-but instead of using a table to display the image, it uses javascript, and the html5 <canvas> element
--->
 <head>
-    <meta charset="utf8" />
-    <meta name="description" content="Grab images from a  webpage containing a Zoomify or ZoomTool (from the National Gallery of London) viewer and automatically stitches the images with javascript and the HTML5 <canvas>." />
-	<title>Dezoomify</title>
-	<link rel="icon" href="favicon.png" />
-	<link rel="stylesheet" media="screen" href="style.css" />
-	<meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf8" />
+  <title>Dezoomify</title>
+  <link rel="icon" href="favicon.png" />
+  <link rel="stylesheet" media="screen" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Download zoomable images from websites using Zoomify, Deep Zoom, and other." />
 </head>
 
 <body>
-	<div id="dezoomifiedImage">
-	<canvas id="rendering-canvas" width="0" height="0"></canvas>
-	</div>
-	<div id="status">
-			<form id="urlform" action="#">
-				<div id="description">
-				<h1>Dezoomify <img src="icon.svg" width="20" height="20"/></h1>
-				<p id="description">
-					Enter the URL of a webpage containing a zoomify viewer.
-					The image will be downloaded at maximal resolution.
-					On Firefox, you will then be able to right-click on the image,
-					and choose "Save As" in order to save it as a PNG file on your computer.
-				</p>
-				<p id="licenseinfo">
-					This script is released under the <a href="http://www.gnu.org/licenses/gpl.html">GPL</a>.
-					<a href="http://github.com/lovasoa/dezoomify">See the source code</a>.
-				</p>
-				</div>
+  <!-- Contribute to dezoomify on https://github.com/lovasoa/dezoomify !-->
+  <div id="dezoomifiedImage">
+    <!-- The tiles will be drawn on this canvas.
+      Dezoomify will dynamically change it's size once the target image meta-information is loaded. -->
+     <canvas id="rendering-canvas" width="0" height="0"></canvas>
+  </div>
+  <div id="status">
+      <form id="urlform" action="#">
+        <div id="description">
+        <h1>Dezoomify <img src="icon.svg" width="20" height="20"/></h1>
+        <p id="description">
+          Enter the URL of a webpage containing a <abbr title="A large image in which you can navigate inside a webpage.">zoomable image</abbr>.
+          The image will be downloaded at maximal resolution.
+          You can then right-click on the image,
+          and choose "Save As" in order to save it as a PNG file on your computer.
+          If it doesn't work, read our <a href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ">FAQ</a>.
+        </p>
 
-				<p>
-				<input type='text' tabindex="10" id='url' placeholder="URL" />
-				<p id="dezoomers"></p>
-				<input type='submit' tabindex="30" />
-				</p>
-			</form>
+        <p id="licenseinfo">
+          This script is released under the <a href="http://www.gnu.org/licenses/gpl.html">GPL</a>.
+          <a href="http://github.com/lovasoa/dezoomify">See the source code</a>.
+        </p>
+        </div>
 
-		<p id="percent"></p>
-		<p id="progressbar"></p>
+        <!--[if lte IE 9]>
+        <div id="browserwarning" class="error" hidden>
+          <h2>Warning</h2>
+          <p>Unfortunately, Internet Explorer doesn't support
+          the features used in zoomify. Please use a recent version of
+            <a href="https://www.mozilla.org/en-US/firefox/new/">Firefox</a> or
+            <a href="https://www.google.com/chrome/">Chrome</a>.</p>
+        </div>
+        <![endif]-->
 
-		<div id="error" hidden>
-			<h3>Error !</h3>
-			<div id="errormsg">
-			<p>Try to extract the zoomifyImagePath in the webpage containing the zoomify viewer on your own, and paste this path to the form on this page. Search 'zoomifyImagePath' in the real source code of the page (the one you can get with firebug in firefox, or the web inspector in Safari/Chrome.</p>
-			<p>Exemple of path : <code>http://images.famsf.org/Zoom/7822312331480020/</code></p>
-			</div>
-		<p>If you think this is an issue with dezoomify itself, you can <a href="https://github.com/lovasoa/dezoomify/issues/">report a bug on the bugtracker</a>.</p>
-		</div>
-	</div>
+        <noscript>
+          <div class="error">
+            Dezoomify uses javascript to do it's magic.
+            But javascript seems to be disabled on your browser.
+            Here are the <a href="http://www.enable-javascript.com/">instructions how to enable JavaScript in your web browser</a>.
+          </div>
+        </noscript>
+
+        <p>
+        <input type='text' tabindex="10" id='url' placeholder="URL" />
+        <p id="dezoomers"></p>
+        <input type='submit' tabindex="30" />
+        </p>
+      </form>
+
+    <p id="percent"></p>
+    <p id="progressbar"></p>
+
+    <div id="error" class="error" hidden>
+      <h3>Error !</h3>
+      <div id="errormsg">
+      <p>Try to extract the zoomifyImagePath in the webpage containing the zoomify viewer on your own, and paste this path to the form on this page. Search 'zoomifyImagePath' in the real source code of the page (the one you can get with firebug in firefox, or the web inspector in Safari/Chrome.</p>
+      <p>Exemple of path : <code>http://images.famsf.org/Zoom/7822312331480020/</code></p>
+      </div>
+    <p>If you think this is an issue with dezoomify itself, you can <a href="https://github.com/lovasoa/dezoomify/issues/">report a bug on the bugtracker</a>.</p>
+    </div>
+  </div>
 
 <script type="text/javascript" src="zoommanager.js" ></script>
 <script type="text/javascript" src="dezoomers/automatic.js" ></script>
@@ -69,10 +85,10 @@ but instead of using a table to display the image, it uses javascript, and the h
 
 <script type="text/javascript">
 document.getElementById("urlform").onsubmit = function(evt) {
-	evt.preventDefault();
-	var url = document.getElementById("url").value;
-	ZoomManager.open(url);
-	return false;
+  evt.preventDefault();
+  var url = document.getElementById("url").value;
+  ZoomManager.open(url);
+  return false;
 }
 </script>
 

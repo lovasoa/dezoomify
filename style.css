@@ -113,7 +113,7 @@ input[type=submit]:focus {
 	background-color:red;
 	height:7px;
 }
-#error {
+.error {
 	margin-top:15px;
 	margin-left:30px;
 	margin-right:30px;
@@ -126,7 +126,11 @@ input[type=submit]:focus {
 	border: 2px solid red;
 }
 
-#error > h3 {
+.error > h3 {
 	color: red;
 	text-align: center;
+}
+
+div[hidden] {
+	display: none;
 }
