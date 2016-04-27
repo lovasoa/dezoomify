@@ -1,5 +1,9 @@
 var test_urls = [
   {
+    "name": "TopViewer",
+    "url" : "https://www.erfgoedleiden.nl/collecties/beeldmateriaal/zoeken-in-beeldmateriaal/weergave/record/layout/default?id=037fc916-5f97-be9a-ee66-5df5d29caa2e"
+  },
+  {
     "name": "krpano",
     "url": "http://krpano.com/panos/andreabiffi/galleria_04.xml"
   },
