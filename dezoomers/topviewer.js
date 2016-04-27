@@ -3,20 +3,30 @@ var topviewer = (function(){
 	return {
 		"name" : "TopViewer",
 		"description": "Memorix viewer, or topviewer, by picturae. Used on dutch websites.",
-		"urls": [/memorix\.nl\/.+\/topviewjson\/memorix/],
+		"urls": [
+			/memorix\.nl\/.+\/topviewjson\/memorix/,
+			/rhcrijnstreek\.nl/
+		],
 		"contents": [
 			memorixThumbnailRegexp
 		],
 		"findFile" : function findTopViewer(baseUrl, callback) {
-			// Daguerreobase
+			function foundData(server_name, image) {
+				return callback('http://images.memorix.nl/'+server_name+'/topviewjson/memorix/'+image);
+			}
 			if (baseUrl.match(/memorix\.nl\/.+\/topviewjson\/memorix/)) {
 				return callback(baseUrl);
+			}
+			// rhcrijnstreek.nl
+			var rhcMatch = baseUrl.match(/rhcrijnstreek\.nl.*(?:asset=|media\/)([a-f0-9\-]+)/);
+			if (rhcMatch) {
+				return foundData("srs", rhcMatch[1]);
 			}
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function(text, xhr) {
 				// Memorix image thumbnail
 				var thumbMatch = text.match(memorixThumbnailRegexp);
 				if (thumbMatch) {
-					return callback('http://images.memorix.nl/'+thumbMatch[1]+'/topviewjson/memorix/'+thumbMatch[2]);
+					return foundData(thumbMatch[1], thumbMatch[2]);
 				}
 				// Direct server indication
 				var serverMatch = text.match(/["']?server["']?\s*:\s*(["'][^"']+["'])/);

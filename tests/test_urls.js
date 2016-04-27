@@ -4,6 +4,10 @@ var test_urls = [
     "url" : "https://www.erfgoedleiden.nl/collecties/beeldmateriaal/zoeken-in-beeldmateriaal/weergave/record/layout/default?id=037fc916-5f97-be9a-ee66-5df5d29caa2e"
   },
   {
+    "name": "rhcrijnstreek.nl (TopViewer)",
+    "url": "http://rhcrijnstreek.nl/bronnen/foto-s-en-kaarten/zoeken/detail/b89cc580-b402-11e3-9e78-d3d4ab4f0074/media/8045c7aa-8a2d-f541-f953-a74fdbad0c9e"
+  },
+  {
     "name": "krpano",
     "url": "http://krpano.com/panos/andreabiffi/galleria_04.xml"
   },
