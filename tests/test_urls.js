@@ -1,5 +1,9 @@
 var test_urls = [
   {
+    "name": "zoom.it",
+    "url" : "http://zoom.it/3fvN"
+  },
+  {
     "name": "TopViewer",
     "url" : "https://www.erfgoedleiden.nl/collecties/beeldmateriaal/zoeken-in-beeldmateriaal/weergave/record/layout/default?id=037fc916-5f97-be9a-ee66-5df5d29caa2e"
   },

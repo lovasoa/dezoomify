@@ -12,7 +12,8 @@ var seadragon = (function () { //Code isolation
 		"contents" : [
 			/dziUrlTemplate/,
 			/[^"'()<>]+\.(?:xml|dzi)/i,
-			/schemas\.microsoft\.com\/deepzoom/
+			/schemas\.microsoft\.com\/deepzoom/,
+			/zoom(?:\.it|hub.net)\/.*\.js/
 		],
 		"findFile" : function getDZIFile (baseUrl, callback) {
 			if (baseUrl.match(/\.xml|\.dzi/i)) {
@@ -53,6 +54,13 @@ var seadragon = (function () { //Code isolation
 					var url = m[1].replace("{group}", group).replace("{index}", index);
 					return callback(url);
 				}
+
+				// Zoom.it
+				var zoomitMatch = text.match(/zoom(?:\.it|hub.net)\/(.*?)\.js/);
+				if (zoomitMatch) {
+					return callback("http://content.zoomhub.net/dzis/" + zoomitMatch[1] + ".dzi");
+				}
+
 				// Any url ending with .xml or .dzi
 				var matchPath = text.match(
 					/[^"'()<>]+\.(?:xml|dzi)/i
