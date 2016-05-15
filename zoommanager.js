@@ -174,15 +174,23 @@ ZoomManager.nextTick = (function(doAnim) {
 	else return function(f) {return setTimeout(f, 5)}
 })(!!window.requestAnimationFrame);
 
-ZoomManager.addTile = function (url, x, y) {
-	//Demande une partie de l'image au serveur, et l'affiche lorsqu'elle est reçue
+ZoomManager.addTile = function addTile(url, x, y, ntries) {
+	//Request a tile from the server and display it once it loaded
+	ntries = ntries | 0; // Number of time the tile has already been requested
 	var img = new Image;
 	img.addEventListener("load", function () {
 		UI.drawTile(img, x, y);
 		ZoomManager.status.loaded ++;
 	});
-	img.addEventListener("error", function() {
-		ZoomManager.error("Unable to load tile: " + url);
+	img.addEventListener("error", function(evt) {
+		if (ntries < 5) {
+			// Maybe the server is just busy right now, or we are running on a bad connection
+			nextTime = Math.pow(10*Math.random(), ntries);
+			setTimeout(addTile, nextTime, url, x, y, ntries+1);
+		} else {
+			ZoomManager.error("Unable to load tile.\n" +
+												"Check that your internet connection is working and that you can access this url: " + url);
+		}
 	});
 	if (ZoomManager.proxy_tiles) {
 		url = ZoomManager.proxy_tiles + "?url=" + encodeURIComponent(url);
