@@ -36,7 +36,7 @@ function onload(window) {
   };
   ZoomManager.addTile = function addTile (url, x, y, nTries) {
     if (nTries === (void 0)) nTries = 10;
-    //Demande une partie de l'image au serveur, et l'affiche lorsqu'elle est reçue
+    //Request a tile from the server, and prints add it to the canvas when it's received
     request({url, encoding:null}, function tileLoaded(err, stream, buffer){
       if (err) {
         if (nTries === 0) {
