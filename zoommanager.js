@@ -1,8 +1,21 @@
+/**
+@mainpage Helper classes from zoomifiers
+
+Classes defined here:
+ - @ref UI : User interface management, interaction with HTML. SHouldn't be used directly by dezoomers.
+ - @ref ZoomManager : Helper to be used by dezoomers
+*/
+
+/**
+@class UI
+@brief User interface management, interaction with HTML
+*/
 var UI = {};
 UI.canvas = document.getElementById("rendering-canvas");
 UI.dezoomers = document.getElementById("dezoomers");
 
-/** Adjusts the size of the image, so that is fits page width or page height
+/**
+Adjusts the size of the image, so that is fits page width or page height
 **/
 UI.changeSize = function () {
 	var width = UI.canvas.width, height = UI.canvas.height;
@@ -23,7 +36,11 @@ UI.changeSize = function () {
 			UI.canvas.style.height = window.innerWidth / width * height + "px";
 	}
 };
-/** Sets the width and height of the canvas
+
+/**
+Sets the width and height of the canvas
+
+@param {Object} data : Image source informations, containing width and height of the image.
 **/
 UI.setupRendering = function (data) {
 	document.getElementById("status").className = "loading";
@@ -34,10 +51,22 @@ UI.setupRendering = function (data) {
 	UI.changeSize();
 };
 
+/**
+Draw a tile on the canvas, at the given position.
+
+@param {Image} tile : The tile image
+@param {Number} x position
+@param {Number} y position
+*/
 UI.drawTile = function(tileImg, x, y) {
 	UI.ctx.drawImage(tileImg, x, y);
 };
 
+/**
+Display an error in the UI.
+
+@param {String} errmsg The error message
+*/
 UI.error = function(errmsg) {
 	if (errmsg) {
 		document.getElementById("errormsg").textContent = errmsg;
@@ -45,21 +74,34 @@ UI.error = function(errmsg) {
 	document.getElementById("percent").textContent = "";
 	document.getElementById("error").removeAttribute("hidden");
 };
+
 window.onerror = function(errmsg, source, lineno) {
 	UI.error(errmsg + ' (' + source + ':' + lineno + ')');
 }
 
+/**
+Reset the UI to the initial state.
+*/
 UI.reset = function() {
 	document.getElementById("error").setAttribute("hidden", "hidden");
 	document.getElementById("status").className = "";
 	UI.canvas.width = UI.canvas.height = 0;
 };
 
+/**
+Update the state of the progress bar.
+
+@param {Number} percentage (between 0 and 100)
+@param {String} description current state description
+*/
 UI.updateProgress = function (percent, text) {
 	document.getElementById("percent").innerHTML = text + ' (' + parseInt(percent) + "%)";
 	document.getElementById("progressbar").style.width = percent + "%";
 };
 
+/**
+Update UI after the image has loaded.
+*/
 UI.loadEnd = function() {
 	var status = document.getElementById("status");
 	var a = document.createElement("a");
@@ -81,6 +123,11 @@ UI.loadEnd = function() {
 	}
 };
 
+/**
+Add a new button for a new dezoomer.
+
+@param {Object} dezoomer the dezoomer object
+*/
 UI.addDezoomer = function(dezoomer) {
 	var label = document.createElement("label")
 	var input = document.createElement("input");
@@ -96,12 +143,29 @@ UI.addDezoomer = function(dezoomer) {
 	UI.dezoomers.appendChild(label);
 };
 
+/**
+@brief Set the dezoomer that is currently used.
+
+@param {String} dezoomerName name of the dezoomer
+*/
 UI.setDezoomer = function(dezoomerName) {
 	document.getElementById("dezoomer-"+dezoomerName).checked = true;
 }
 
+
+/**
+@class ZoomManager
+
+@brief Helper class for dezoomers
+*/
 var ZoomManager = {};
 
+/**
+@brief Signal an error
+
+@param {String} errmsg The error text
+@throws {Error} err The given error
+*/
 ZoomManager.error = function (errmsg) {
 	UI.error(errmsg);
 	throw new Error(errmsg);
@@ -114,6 +178,11 @@ ZoomManager.loadEnd = function () {
 	UI.loadEnd();
 }
 
+/**
+Start listening for tile loads
+
+@return {Number} The timer ID
+*/
 ZoomManager.startTimer = function () {
 	var wasLoaded = 0; // Number of tiles that were loaded last time we watched
 	var timer = setInterval(function () {
@@ -134,6 +203,9 @@ ZoomManager.startTimer = function () {
 };
 
 
+/**
+Tells that we are ready
+*/
 ZoomManager.readyToRender = function(data) {
 
 	data.nbrTilesX = data.nbrTilesX || Math.ceil(data.width / data.tileSize);
