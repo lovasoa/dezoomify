@@ -7,8 +7,8 @@ Classes defined here:
 */
 
 /**
+User interface management, interaction with HTML
 @class UI
-@brief User interface management, interaction with HTML
 */
 var UI = {};
 UI.canvas = document.getElementById("rendering-canvas");
@@ -154,9 +154,8 @@ UI.setDezoomer = function(dezoomerName) {
 
 
 /**
-@class ZoomManager
-
-@brief Helper class for dezoomers
+Contains helper functions for dezoomers
+@class
 */
 var ZoomManager = {};
 
@@ -241,11 +240,24 @@ ZoomManager.defaultRender = function (data) {
 
 	nextTile();
 };
+
+/**
+@function nextTick
+Call a function, but not immediatly
+*/
 ZoomManager.nextTick = (function(doAnim) {
 	if (doAnim) return function(f){return requestAnimationFrame(f)}
 	else return function(f) {return setTimeout(f, 5)}
 })(!!window.requestAnimationFrame);
 
+/**
+Request a tile from the server
+
+@param {String} url - tile URL
+@param {Number} x - position in px
+@param {Number} y - position in px
+@param {Number} [n=0] - Number of time the tile has already been requested
+*/
 ZoomManager.addTile = function addTile(url, x, y, ntries) {
 	//Request a tile from the server and display it once it loaded
 	ntries = ntries | 0; // Number of time the tile has already been requested
@@ -271,6 +283,9 @@ ZoomManager.addTile = function addTile(url, x, y, ntries) {
 	img.src = url;
 };
 
+/**
+Start the dezoomifying process
+*/
 ZoomManager.open = function(url) {
 	ZoomManager.init();
 	if (url.indexOf("http") !== 0) {
@@ -286,8 +301,17 @@ ZoomManager.open = function(url) {
 };
 
 /**
- * Call callback with the contents of the page at url
- */
+@callback fileCallback
+@param {string|Document|Object} response
+@param {XMLHttpRequest} request
+*/
+
+/**
+Call callback with the contents of the page at url
+@param {string} url
+@param {type:String} options
+@param {fileCallback} callback - callback to call when the file is loaded
+*/
 ZoomManager.getFile = function (url, params, callback) {
 	var PHPSCRIPT = ZoomManager.proxy_url;
 	var type = params.type || "text";
@@ -346,6 +370,13 @@ ZoomManager.getFile = function (url, params, callback) {
 	xhr.send(null);
 };
 
+/**
+Decode HTML special characaters such as "&amp;", "&gt;", ...
+
+@function ZoomManager.decodeHTMLentities
+@param {string} str
+@return {string} decoded
+*/
 ZoomManager.decodeHTMLentities = (function (){
 	var dict = {
 		"&amp;": "&",
@@ -364,8 +395,12 @@ ZoomManager.decodeHTMLentities = (function (){
 })();
 
 /**
- * Return the absolute path, given a relative path and a base
- */
+Return the absolute path, given a relative path and a base
+
+@param {string} path - the path, such as "path/to/other/file.jpg"
+@param {string} base - the base URL, such as "http://test.com/path/to/first/file.html"
+@return {string} resolved - the resolved path, such as "http://test.com/path/to/first/path/to/other/file.jpg"
+*/
 ZoomManager.resolveRelative = function resolveRelative(path, base) {
 	// absolute URL
 	if (path.match(/\w*:\/\//)) {
@@ -389,7 +424,10 @@ ZoomManager.resolveRelative = function resolveRelative(path, base) {
 	return base.replace(/\/[^\/]*$/, "") + '/' + path;
 };
 
-/** Returns the maximum zoom level, knowing the image size, the tile size, and the multiplying factor between two consecutive zoom levels
+/**
+Returns the maximum zoom level, knowing the image size, the tile size, and the multiplying factor between two consecutive zoom levels
+@param {{width:number, height:number}} metadata
+@return {number} maxzoom - the maximal zoom level
 **/
 ZoomManager.findMaxZoom = function (data) {
 	//For all zoom levels:
@@ -405,15 +443,22 @@ ZoomManager.addDezoomer = function(dezoomer) {
 	UI.addDezoomer(dezoomer);
 }
 
+/**
+Set the active dezoomer
+*/
 ZoomManager.setDezoomer = function(dezoomer) {
 	ZoomManager.dezoomer = dezoomer;
 	UI.setDezoomer(dezoomer.name);
 }
+
 ZoomManager.reset = function() {
 	// This variable will store cookies set by previous requests
 	ZoomManager.setDezoomer(ZoomManager.dezoomersList["Select automatically"]);
 };
 
+/**
+Initialize the ZoomManager
+*/
 ZoomManager.init = function() {
 	// Called before open()
 	if (!ZoomManager.cookies) ZoomManager.cookies = "";
