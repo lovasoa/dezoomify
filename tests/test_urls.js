@@ -1,5 +1,9 @@
 var test_urls = [
   {
+    "name": "IIPImage (national gallery of london)",
+    "url": "http://www.nationalgallery.org.uk/paintings/alexandre-calame-at-handeck"
+  },
+  {
     "name": "zoom.it",
     "url" : "http://zoom.it/3fvN"
   },
