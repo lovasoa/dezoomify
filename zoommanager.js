@@ -278,6 +278,9 @@ ZoomManager.addTile = function addTile(url, x, y, ntries) {
 	});
 	if (ZoomManager.proxy_tiles) {
 		url = ZoomManager.proxy_tiles + "?url=" + encodeURIComponent(url);
+		if (ZoomManager.cookies.length > 0) {
+			url += "&cookies=" + encodeURIComponent(ZoomManager.cookies);
+		}
 		img.crossOrigin = "anonymous";
 	}
 	img.src = url;
