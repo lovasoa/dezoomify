@@ -2,10 +2,18 @@ var zoomifyPFF = (function () { //Code isolation
 	return {
 		"name": "Zoomify PFF",
 		"description": "Zoomable image format developed by zoomify, but distinct from the most common format in that it consists of one file only",
+		"urls" : [
+			/file=.*&requestType=/
+		],
 		"contents": [
 			/zoomifyTileHandlerPath=/
 		],
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
+			// Test if the zopmifyserver image was given directly
+			if (baseUrl.match(/file=.*&requestType=/)) {
+				var url = baseUrl.match(/^(.*)&requestType/)[1];
+				return callback(url);
+			}
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath
 				// attribute of a tag
