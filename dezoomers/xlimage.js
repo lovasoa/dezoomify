@@ -2,7 +2,10 @@ var xlimage = (function () { //Code isolation
 	return {
 		"name": "XLimage",
 		"description": "Format developed by an italian company, used on kbr.be",
-		"urls" : [/kbr.be\/multi\/([\w\d-]+)Viewer/],
+		"urls" : [
+			/kbr.be\/multi\/([\w\d-]+)Viewer/,
+			/\.img.\?cmd=info/
+		],
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
 			// kbr.be
 			var kbrMatch = baseUrl.match(/kbr.be\/multi\/([\w\d-]+)Viewer/);
@@ -18,17 +21,16 @@ var xlimage = (function () { //Code isolation
 		"open" : function (url) {
 			ZoomManager.getFile(url, {type:"xml"}, function (doc, xhr) {
 				var data = {};
-				data.origin = url.replace(/\/xml\.php.*/,"");
+				data.origin = url.replace(/\?cmd=info.*$/,"");
 				data.width = parseInt(doc.getElementsByTagName("width")[0].innerHTML);
 				data.height = parseInt(doc.getElementsByTagName("height")[0].innerHTML);
 				data.tileSize = parseInt(doc.getElementsByTagName("tileside")[0].innerHTML);
-				data.remote = doc.getElementsByTagName("remote")[0].innerHTML;
 				data.maxZoomLevel = 1;
 				ZoomManager.readyToRender(data);
 			});
 		},
 		"getTileURL" : function (x,y,z, data) {
-			return data.origin+"/xml.php?"+data.remote+"?cmd=tile&x="+x+"&y="+y+"&z="+z;
+			return data.origin+"?cmd=tile&x="+x+"&y="+y+"&z="+z;
 		}
 	};
 })();
