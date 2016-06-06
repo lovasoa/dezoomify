@@ -33,7 +33,7 @@ var test_urls = [
   },
   {
     "name": "artsy",
-    "url": "https://www.artsy.net/artwork/damien-hirst-beautiful-unorthodox-a-legacy-of-unconventional-art-education-with-surgical-rubber-drapes-and-sinister-overtones-minimizing-its-significance-painting/zoom"
+    "url": "https://www.artsy.net/artwork/holly-hendry-the-hoarders-and-wasters-i-need-you-to-knead-me"
   },
   {
     "name": "Universitätsbibliothek (unibe.ch)",
