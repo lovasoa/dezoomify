@@ -29,7 +29,8 @@ var iipimage = (function(){
         var sizeMatch = text.match(/Max-size:(\d+) (\d+)/);
         var tileSizeMatch = text.match(/Tile-size:(\d+) (\d+)/);
         var zoomMatch = text.match(/Resolution-number:(\d+)/);
-        if (sizeMatch.length !== 3 || tileSizeMatch.length !== 3) {
+        if (!sizeMatch || !tileSizeMatch ||
+            sizeMatch.length !== 3 || tileSizeMatch.length !== 3) {
           throw new Error("Invalid IIPImage information file.");
         }
         var data = {
