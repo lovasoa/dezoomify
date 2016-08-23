@@ -41,7 +41,7 @@ var test_urls = [
   },
   {
     "name": "artsy",
-    "url": "https://www.artsy.net/artwork/holly-hendry-the-hoarders-and-wasters-i-need-you-to-knead-me"
+    "url": "https://www.artsy.net/artwork/damien-hirst-black-sheep-with-golden-horns"
   },
   {
     "name": "Universitätsbibliothek (unibe.ch)",
