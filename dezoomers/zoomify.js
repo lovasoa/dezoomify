@@ -63,6 +63,12 @@ var zoomify = (function () { //Code isolation
 					var url = ZoomManager.resolveRelative(unibeMatch[1], baseUrl);
 					return foundZoomifyPath(url);
 				}
+				
+				// Openlayers
+				var olMatch = text.match(/<[^>]*class="ete-openlayers-src"[^>]*>(.*?)<\/.*>/);
+				if (olMatch) {
+					return foundZoomifyPath(olMatch[1]);
+				}
 				// If nothing was found, but the page contains an iframe, follow the iframe
 				var iframeMatch = text.match(/<iframe[^>]*src=["']([^"']*)/);
 				if (iframeMatch) {
