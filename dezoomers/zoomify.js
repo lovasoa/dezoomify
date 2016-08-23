@@ -10,7 +10,8 @@ var zoomify = (function () { //Code isolation
 		"contents": [
 			/zoomifyImagePath=/,
 			/showImage\(/,
-			/accessnumber=/
+			/accessnumber=/,
+			/ete-openlayers-src/
 		],
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
 			if (baseUrl.match(/ImageProperties\.xml$/)) {
