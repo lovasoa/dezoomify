@@ -4,6 +4,10 @@ var test_urls = [
     "url": "http://uffizicloud.centrica.it/7711/closer/hi-res/A1456.imgf?cmd=tile&x={{X}}&y={{Y}}&z=32"
   },
   {
+    "name": "Zoomify (openlayers)",
+    "url": "http://www.deutschefotothek.de/documents/obj/71243350/bs_haum_0000000_j-e-haid-ab3-0037"
+  },
+  {
     "name": "Zoomify-PFF",
     "url": "http://zoomify.masterfile.com:8080/servlet/zoomifyservlet.ZoomifyServlet?file=/flash/zimages/08/11/68/856-08116834.pff&requestType=0&begin=677564&end=695109&vers=106&head=12895"
   },
