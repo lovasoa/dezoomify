@@ -5,7 +5,8 @@ var zoomify = (function () { //Code isolation
 		"urls": [
 			/ImageProperties\.xml$/,
 			/biblio\.unibe\.ch\/web-apps\/maps\/zoomify\.php/,
-			/bspe-p-pub\.paris\.fr\/MDBGED\/zoomify-BFS\.aspx/
+			/bspe-p-pub\.paris\.fr\/MDBGED\/zoomify-BFS\.aspx/,
+			/ngv\.vic\.gov\.au\/explore\/collection\/work/
 		],
 		"contents": [
 			/zoomifyImagePath=/,
@@ -64,12 +65,19 @@ var zoomify = (function () { //Code isolation
 					var url = ZoomManager.resolveRelative(unibeMatch[1], baseUrl);
 					return foundZoomifyPath(url);
 				}
-				
+
 				// Openlayers
 				var olMatch = text.match(/<[^>]*class="ete-openlayers-src"[^>]*>(.*?)<\/.*>/);
 				if (olMatch) {
 					return foundZoomifyPath(olMatch[1]);
 				}
+
+				// National Gallery of Victoria (NGV)
+				var ngvMatch = text.match(/var url = '(.*?)'/);
+				if (~baseUrl.indexOf("ngv.vic.gov.au") && ngvMatch) {
+					return foundZoomifyPath(ngvMatch[1]);
+				}
+
 				// If nothing was found, but the page contains an iframe, follow the iframe
 				var iframeMatch = text.match(/<iframe[^>]*src=["']([^"']*)/);
 				if (iframeMatch) {

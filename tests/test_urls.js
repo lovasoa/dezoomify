@@ -16,6 +16,10 @@ var test_urls = [
     "url": "http://www.nationalgallery.org.uk/paintings/alexandre-calame-at-handeck"
   },
   {
+    "name": "National Gallery of Victoria (zoomify)",
+    "url": "http://www.ngv.vic.gov.au/explore/collection/work/4202/"
+  },
+  {
     "name": "zoom.it",
     "url" : "http://zoom.it/3fvN"
   },
