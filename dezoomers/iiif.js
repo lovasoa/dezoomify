@@ -52,7 +52,7 @@ var iiif = (function(){
                           s    + "," + // returned image width
                           s    + "/" + // returned image height
                           "0"  + "/" + //rotation
-                          "native" + "." + //quality
+                          "default" + "." + //quality
                           "jpg"; //format
     }
   };
