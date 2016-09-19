@@ -57,7 +57,7 @@ var test_urls = [
   },
   {
     "name" : "Bibliothèques spécialisées de Paris",
-    "url" : "http://bspe-p-pub.paris.fr/MDBGED/zoomify-BFS.aspx?edid=23143&edfindex=0&count=1&referer=http://bspe-p-pub.paris.fr/MDBGED/EDFileDetail-BFS.aspx?edid=23143&hash=b226c1d52694495c72f25ee9dfa83c56"
+    "url" : "http://bibliotheques-specialisees.paris.fr/ark:/73873/pf0001115743/0017/v0001.simple.selectedTab=otherdocs"
   },
   {
     "name": "DZI path with numbers",

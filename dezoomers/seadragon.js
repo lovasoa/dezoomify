@@ -7,6 +7,7 @@ var seadragon = (function () { //Code isolation
 			/bl\.uk\/manuscripts\/Viewer\.aspx/,
 			/polona\.pl\/item\//,
 			/e-corpus.org\/notices\/.+\/gallery\/.+/,
+			/bibliotheques-specialisees\.paris\.fr\/ark/,
 			/dzi$/
 		],
 		"contents" : [
@@ -59,6 +60,12 @@ var seadragon = (function () { //Code isolation
 				var zoomitMatch = text.match(/zoom(?:\.it|hub.net)\/(.*?)\.js/);
 				if (zoomitMatch) {
 					return callback("http://content.zoomhub.net/dzis/" + zoomitMatch[1] + ".dzi");
+				}
+
+				// bibliothèques specialisées de la ville de Paris
+				var parisMatch = text.match(/deepZoomManifest['"]\s*:\s*["']([^"']*)/);
+				if (parisMatch) {
+					return callback(parisMatch[1]);
 				}
 
 				// Any url ending with .xml or .dzi

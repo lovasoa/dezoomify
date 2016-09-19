@@ -23,18 +23,6 @@ var zoomify = (function () { //Code isolation
 				return callback(zoomifyPath + "/ImageProperties.xml");
 			}
 
-			// Portail des bibliothèques spécialisées de la ville de Paris
-			if (baseUrl.indexOf("bspe-p-pub.paris.fr/MDBGED/zoomify") > -1 &&
-					ZoomManager.cookies.indexOf("ASP.NET_SessionId") === -1) {
-				// See https://github.com/lovasoa/dezoomify/issues/37
-				// We need to do a first request in order to get a cookie
-				var cookieurl = "http://bspe-p-pub.paris.fr/MDBGED/Main.aspx?profile=internet&Lang=FRE&accesspoint=complet&zone=25";
-				return ZoomManager.getFile(cookieurl, {}, function() {
-					// We now have the right cookie, and can start the process again
-					getZoomifyPath(baseUrl, callback);
-				});
-			}
-
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath
 				// attribute of a tag
