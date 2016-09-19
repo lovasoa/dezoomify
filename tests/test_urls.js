@@ -79,6 +79,10 @@ var test_urls = [
     "name": "daguerreobase",
     "url" : "http://www.daguerreobase.org/en/browse/indeling/detail/start/1"
   },
+  {
+    "name": "IIIF",
+    "url": "http://www.kb.dk/maps/kortsa/2012/jul/kortatlas/object60564/en/"
+  },
 /*
   {
     "name": "e-corpus",
