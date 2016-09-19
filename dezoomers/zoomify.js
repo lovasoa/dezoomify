@@ -101,7 +101,8 @@ var zoomify = (function () { //Code isolation
 					// The computed zoom level was incorrect.
 					// When zoomify generates the zoom levels, it MAY stop creating new zoom
 					// levels when a zoomlevel has one of its dimensions that rounds down to TILESIZE.
-					data.maxZoomLevel = maxZoom - 1;
+					var size = Math.max(data.width, data.height);
+					data.maxZoomLevel = Math.ceil(Math.log(size/(data.tileSize+1)) / Math.LN2);
 				}
 				ZoomManager.readyToRender(data);
 			});
