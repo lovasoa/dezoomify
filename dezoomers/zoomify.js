@@ -6,7 +6,8 @@ var zoomify = (function () { //Code isolation
 			/ImageProperties\.xml$/,
 			/biblio\.unibe\.ch\/web-apps\/maps\/zoomify\.php/,
 			/bspe-p-pub\.paris\.fr\/MDBGED\/zoomify-BFS\.aspx/,
-			/ngv\.vic\.gov\.au\/explore\/collection\/work/
+			/ngv\.vic\.gov\.au\/explore\/collection\/work/,
+			/artandarchitecture\.org\.uk\/images\/zoom/
 		],
 		"contents": [
 			/zoomifyImagePath=/,
@@ -101,6 +102,19 @@ var zoomify = (function () { //Code isolation
 				data.numTiles = parseInt(infos.getAttribute("NUMTILES")); //Total number of tiles (for all zoom levels)
 				data.zoomFactor = 2; //Zooming factor between two consecutive zoom levels
 
+				var w=data.width, h=data.height,
+						ntiles=0,
+						maxZoom = ZoomManager.findMaxZoom(data);
+				for(var z=0; z<=maxZoom; z++) {
+					ntiles += Math.ceil(w / data.tileSize) * Math.ceil(h / data.tileSize);
+					w /= 2; h /= 2;
+				}
+				if (ntiles !== data.numTiles) {
+					// The computed zoom level was incorrect.
+					// When zoomify generates the zoom levels, it MAY stop creating new zoom
+					// levels when a zoomlevel has one of its dimensions that rounds down to TILESIZE.
+					data.maxZoomLevel = maxZoom - 1;
+				}
 				ZoomManager.readyToRender(data);
 			});
 		},
