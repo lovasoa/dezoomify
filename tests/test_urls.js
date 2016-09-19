@@ -79,8 +79,10 @@ var test_urls = [
     "name": "daguerreobase",
     "url" : "http://www.daguerreobase.org/en/browse/indeling/detail/start/1"
   },
+/*
   {
     "name": "e-corpus",
     "url": "http://www.e-corpus.org/notices/102464/gallery/773640.dzi"
   }
+*/
 ];
