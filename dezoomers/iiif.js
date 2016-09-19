@@ -27,7 +27,7 @@ var iiif = (function(){
 
         var tiles =
           (data.tiles && data.tiles.length)
-            ? tilesList.reduce(function(red, val){
+            ? data.tiles.reduce(function(red, val){
                   return min(red.scaleFactors) < min(val.scaleFactors) ? red : val;
               })
             : {"width": 512, "scaleFactors": [1]};
