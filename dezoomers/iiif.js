@@ -25,12 +25,12 @@ var iiif = (function(){
       ZoomManager.getFile(url, {type:"json"}, function (data, xhr) {
         function min(array){return Math.min.apply(null, array)}
 
-        var tilesList = data.tiles && data.tiles.length
-                            ? data.tiles
-                            : {"width":256, "scaleFactors": [1]};
-        var tiles = tilesList.reduce(function(red, val){
-          return min(red.scaleFactors) < min(val.scaleFactors) ? red : val;
-        });
+        var tiles =
+          (data.tiles && data.tiles.length)
+            ? tilesList.reduce(function(red, val){
+                  return min(red.scaleFactors) < min(val.scaleFactors) ? red : val;
+              })
+            : {"width": 512, "scaleFactors": [1]};
         var data = {
           "origin": data["@id"],
           "width" : parseInt(data.width),
