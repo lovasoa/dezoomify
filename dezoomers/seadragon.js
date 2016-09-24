@@ -8,6 +8,7 @@ var seadragon = (function () { //Code isolation
 			/polona\.pl\/item\//,
 			/e-corpus.org\/notices\/.+\/gallery\/.+/,
 			/bibliotheques-specialisees\.paris\.fr\/ark/,
+			/nla\.gov\.au\/nla\.obj.*\/view$/,
 			/dzi$/
 		],
 		"contents" : [
@@ -43,6 +44,11 @@ var seadragon = (function () { //Code isolation
 			var ecorpusMatch = baseUrl.match(/e-corpus.org\/notices\/.+\/gallery\/.+/);
 			if (ecorpusMatch) {
 				return callback(baseUrl + ".dzi");
+			}
+
+			// national library of australia
+			if (baseUrl.match(/nla\.gov\.au\/nla\.obj.*\/view$/)) {
+				return callback(baseUrl.replace(/view\/?$/, "dzi"));
 			}
 
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
@@ -88,9 +94,13 @@ var seadragon = (function () { //Code isolation
 				// e-corpus doesn't store the tiles in the same place as the dzi file
 				url = url.replace(/e-corpus.org\/notices\/\d+\/gallery\/(\d+)/,
 													"static.e-corpus.org/tiles/$1/index");
-
-				//replace extension by _files
-				data.origin = url.replace(/\.[^.\/]*$/,'') + "_files/";
+				if (url.match(/nla\.gov\.au\/.*\/dzi/)) {
+					// national library of australia
+					data.origin = url + "?tile=";
+				} else {
+					//replace extension by _files
+					data.origin = url.replace(/\.[^.\/]*$/,'') + "_files/";
+				}
 				data.tileSize = parseInt(infos.getAttribute("TileSize"));
 				data.overlap = parseInt(infos.getAttribute("Overlap"));
 				data.format = infos.getAttribute("Format");
@@ -108,7 +118,7 @@ var seadragon = (function () { //Code isolation
 			});
 		},
 		"getTileURL" : function (col, row, zoom, data) {
-			return zoom + "/" + col + "_" + row + "." + data.format;
+			return data.origin + zoom + "/" + col + "_" + row + "." + data.format;
 		}
 	};
 })();
