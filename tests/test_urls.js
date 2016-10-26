@@ -9,7 +9,7 @@ var test_urls = [
   },
   {
     "name": "Zoomify (issue #81)",
-    "url": "http://www.artandarchitecture.org.uk/images/zoom/c462969579cd09dd4ccb690d0e43018757fa2df2.html"
+    "url": "http://ophir.alwaysdata.net/dezoomify/tests/images/issue_81/image/ImageProperties.xml"
   },
   {
     "name": "Zoomify-PFF",
@@ -60,10 +60,6 @@ var test_urls = [
     "url" : "http://bibliotheques-specialisees.paris.fr/ark:/73873/pf0001115743/0017/v0001.simple.selectedTab=otherdocs"
   },
   {
-    "name": "DZI path with numbers",
-    "url" : "http://zoom.iwm.org.uk/view/445552&cat=photographs&oid=object-205390201"
-  },
-  {
     "name": "archieven.nl",
     "url": "http://www.archieven.nl/maisi_ajax_proxy0.php?mivast=0&mizig=962&miadt=5&miaet=185&micode=1785&minr=8193963&milang=nl&misort=last_mod|asc&miview=viewer2"
   },
@@ -86,11 +82,9 @@ var test_urls = [
   {
     "name" : "National Library of Australia",
     "url" : "http://nla.gov.au/nla.obj-152644715/view"
-  }
-/*
+  }/*,
   {
     "name": "e-corpus",
     "url": "http://www.e-corpus.org/notices/102464/gallery/773640.dzi"
-  }
-*/
+  }*/
 ];
