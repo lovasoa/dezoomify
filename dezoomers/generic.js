@@ -34,8 +34,11 @@ var generic_viewer = (function(){
                 "tileSize" : tileSize
               });
             }
-            if (img.width === img.height && img.width > 0) {
-              tileSize = img.width;
+            if (img.height > 0 && img.width > 0) {
+              // Try to guess tilesize.
+              // There can be overlap between tiles, but there cannot be blanks.
+              // (In most cases, width and height will be the same)
+              tileSize = Math.min(img.width, img.height);
             }
             return dichotomy_step();
           }
