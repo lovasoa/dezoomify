@@ -296,10 +296,13 @@ ZoomManager.open = function(url) {
 	}
 	if (typeof ZoomManager.dezoomer.findFile === "function") {
 		ZoomManager.dezoomer.findFile(url, function foundFile(filePath) {
+			ZoomManager.updateProgress(0, "Found image. Trying to open it...");
 			ZoomManager.dezoomer.open(ZoomManager.resolveRelative(filePath, url));
 		});
+		ZoomManager.updateProgress(0, "The dezoomer is trying to locate the zoomable image...");
 	} else {
 		ZoomManager.dezoomer.open(url);
+		ZoomManager.updateProgress(0, "Launched dezoomer...");
 	}
 };
 
