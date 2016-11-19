@@ -37,8 +37,9 @@ var generic_viewer = (function(){
             if (img.height > 0 && img.width > 0) {
               // Try to guess tilesize.
               // There can be overlap between tiles, but there cannot be blanks.
+              // The tiles at near the right and bottom margins of the image may be smaller
               // (In most cases, width and height will be the same)
-              tileSize = Math.min(img.width, img.height);
+              tileSize = Math.max(tileSize, Math.min(img.width, img.height));
             }
             return dichotomy_step();
           }
