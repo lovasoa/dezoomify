@@ -2,7 +2,7 @@
 #Download zoomable images
 
 _Dezoomify_ makes a downloadable image from an image viewable via a flash or html5 zoomable image interface.
-It works with several different zoomable image tools, from several different websites (see the list below). 
+It works with several different zoomable image tools, from several different websites (see the list below).
 
 Input : the URL of a site containing a zoomable image viewer.
 
@@ -37,6 +37,12 @@ The following formats are supported by dezzomify:
   * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developped by the company picturae.
  * [Artsy](https://www.artsy.net/), an art website.
  * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
+ * [The Tretiakov gallery](http://www.tretyakovgallery.ru/en/), official website of the Третяковская галерея (in Moscow)
+
+Dezoomify also has a
+[generic dezoomer](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ#the-page-uses-an-image-viewer-that-is-not-supported-by-dezoomify-is-there-still-a-chance-).
+If the zoomable image format is simple enough, you just have to enter a pattern of tile
+URL, and dezoomify will be able to work with it.
 
 ## Screenshots
 ![dezoomify downloading an image](http://pix.toile-libre.org/upload/original/1460096698.gif)
