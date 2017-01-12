@@ -22,11 +22,13 @@ var fsi = (function(){
       if (try_url(baseUrl)) return;
 
       // romandelarose.org
-      var roseMatch = baseUrl.match(/romandelarose\.org\/#read;(([^.]+)\..+)/);
+      var roseMatch = baseUrl.match(/romandelarose\.org\/#read;(.+?)(\..+?)?(\..+)?$/);
       if (roseMatch) {
-        // http://romandelarose.org/#read;Douce332.140r.tif
+        var id = roseMatch[1],
+            page = roseMatch[2] || ".001r",
+            format = roseMatch[3] || ".tif";
         var rose_url = "http://fsiserver.library.jhu.edu/server?type=info&source=rose/" +
-                        roseMatch[2] + "/cropped/" + roseMatch[1];
+                        id + "/" + id + page + format;
         if (try_url(rose_url)) return;
       }
 
@@ -56,13 +58,19 @@ var fsi = (function(){
       });
     },
     "getTileURL" : function (x, y, zoom, data) {
+      var coords = [x, y].map(function (position, i) {
+        var pos = position*data.tileSize;
+        var size = Math.min(data.tileSize, data[i===0? "width":"height"] - pos);
+        return {pos:pos, size:size};
+      });
       return data.origin +
                   "?type=image&source=" + data.source +
-                  "&width=" + data.tileSize + "&height=" + data.tileSize +
-                  "&left=" + (x*data.tileSize/data.width) +
-                  "&right=" + ((x+1)*data.tileSize/data.width) +
-                  "&top=" + (y*data.tileSize/data.height) +
-                  "&bottom=" + ((y+1)*data.tileSize/data.height);
+                  "&width=" + coords[0].size +
+                  "&height=" + coords[1].size +
+                  "&rect=" + coords[0].pos / data.width + "," +
+                           + coords[1].pos / data.height + "," +
+                           + coords[0].size / data.width + "," +
+                           + coords[1].size / data.height;
     }
   };
 })();
