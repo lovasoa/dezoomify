@@ -38,7 +38,7 @@ var fsi = (function(){
               if (try_url(url_matches[i])) return;
             }
           }
-          throw new Error("No IIIF URL found.");
+          throw new Error("No FSI URL found.");
       });
     },
     "open" : function (url) {
