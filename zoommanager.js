@@ -388,12 +388,14 @@ ZoomManager.decodeHTMLentities = (function (){
 		"&amp;": "&",
 		"&lt;": "<",
 		"&gt;": ">",
-		"&quot;": "\"",
-		"&#x27;": "'",
-		"&#x60;": "`"
+		"&quot;": "\""
 	};
-	var regEx = /(?:&amp;|&lt;|&gt;|&quot;|&#x27;|&#x60;)/g;
-	function replacer(entity) {return dict[entity];}
+	var regEx = /&(?:amp|lt|gt|quot|#(?:x[\da-f]+|\d+));/gi;
+	function replacer(entity) {
+		entity = entity.toLowerCase();
+		return dict[entity] ||
+					 String.fromCharCode(parseInt('0' + entity.slice(2,-1)));
+	}
 
 	return function decodeHTMLentities (text) {
 		return text.replace(regEx, replacer);
