@@ -86,6 +86,10 @@ var test_urls = [
   {
     "name": "Tretiakov",
     "url": "http://www.tretyakovgallery.ru/ru/collection/_show/image/_id/394"
+  },
+  {
+    "name": "FSI",
+    "url": "http://romandelarose.org/#read;Douce332.140r.tif"
   }/*,
   {
     "name": "e-corpus",
