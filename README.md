@@ -4,9 +4,10 @@
 _Dezoomify_ downloads images from online zoomable image interfaces.
 It works with several zoomable image tools, from several different websites (see the list below).
 
-Input : the URL of a site containing a zoomable image viewer.
-
-Output : An image that you can download (by right-clicking on it, and choosing *Save Image as...*).
+#### Input
+The URL of a webpage containing a zoomable image viewer.
+#### Output
+An image that you can download (by right-clicking on it, and choosing *Save Image as...*).
 
 ## Try it
 If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [**unzoomify an image**](http://ophir.alwaysdata.net/dezoomify/dezoomify.html)
