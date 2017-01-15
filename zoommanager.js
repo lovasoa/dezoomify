@@ -193,7 +193,7 @@ ZoomManager.startTimer = function () {
 			ZoomManager.updateProgress(100 * loaded / total, "Loading the tiles...");
 			wasLoaded = loaded;
 		}
-		if (loaded == total) {
+		if (loaded >= total) {
 			clearInterval(timer);
 			ZoomManager.loadEnd();
 		}
