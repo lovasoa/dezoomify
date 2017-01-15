@@ -90,9 +90,5 @@ var test_urls = [
   {
     "name": "FSI",
     "url": "http://romandelarose.org/#read;Douce332.140r.tif"
-  }/*,
-  {
-    "name": "e-corpus",
-    "url": "http://www.e-corpus.org/notices/102464/gallery/773640.dzi"
-  }*/
+  }
 ];

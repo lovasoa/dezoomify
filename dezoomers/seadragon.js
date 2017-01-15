@@ -6,7 +6,6 @@ var seadragon = (function () { //Code isolation
 		"urls" : [
 			/bl\.uk\/manuscripts\/Viewer\.aspx/,
 			/polona\.pl\/item\//,
-			/e-corpus.org\/notices\/.+\/gallery\/.+/,
 			/bibliotheques-specialisees\.paris\.fr\/ark/,
 			/nla\.gov\.au\/nla\.obj.*\/view$/,
 			/dzi$/
@@ -38,12 +37,6 @@ var seadragon = (function () { //Code isolation
 					callback(res.pages[pageId].dzi_url);
 				});
 				return;
-			}
-
-			// e-corpus
-			var ecorpusMatch = baseUrl.match(/e-corpus.org\/notices\/.+\/gallery\/.+/);
-			if (ecorpusMatch) {
-				return callback(baseUrl + ".dzi");
 			}
 
 			// national library of australia
@@ -91,9 +84,6 @@ var seadragon = (function () { //Code isolation
 				if (!infos || !size) return ZoomManager.error("Invalid seadragon XML info file: " + url);
 				var data = {};
 
-				// e-corpus doesn't store the tiles in the same place as the dzi file
-				url = url.replace(/e-corpus.org\/notices\/\d+\/gallery\/(\d+)/,
-													"static.e-corpus.org/tiles/$1/index");
 				if (url.match(/nla\.gov\.au\/.*\/dzi/)) {
 					// national library of australia
 					data.origin = url + "?tile=";
