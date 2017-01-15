@@ -73,10 +73,12 @@ UI.error = function(errmsg) {
 	}
 	document.getElementById("percent").textContent = "";
 	document.getElementById("error").removeAttribute("hidden");
+	var error_img = "error.svg?error=" + encodeURIComponent(errmsg);
+	document.getElementById("error-img").src = error_img;
 };
 
 window.onerror = function(errmsg, source, lineno) {
-	UI.error(errmsg + ' (' + source + ':' + lineno + ')');
+	UI.error(errmsg + '\n\n(' + source + ':' + lineno + ')');
 }
 
 /**
@@ -275,7 +277,8 @@ ZoomManager.addTile = function addTile(url, x, y, ntries) {
 			setTimeout(addTile, nextTime, url, x, y, ntries+1);
 		} else {
 			ZoomManager.error("Unable to load tile.\n" +
-												"Check that your internet connection is working and that you can access this url: " + url);
+												"Check that your internet connection is working " +
+												"and that you can access this url:\n" + url);
 		}
 	});
 	if (ZoomManager.proxy_tiles) {
@@ -340,7 +343,8 @@ ZoomManager.getFile = function (url, params, callback) {
 		ZoomManager.updateProgress(1, "Sent a request in order to get informations about the image...");
 	};
 	xhr.onerror = function (e) {
-		throw new Error("Unable to connect to the proxy server to get the required informations. XHR error: " + e);
+		throw new Error("Unable to connect to the proxy server " +
+										"to get the required informations.\n\nXHR error:\n" + e);
 	};
 	xhr.onloadend = function () {
 		var response = xhr.response;
@@ -349,11 +353,11 @@ ZoomManager.getFile = function (url, params, callback) {
 		// Custom error message on invalid XML
 		if (type === "xml" &&
 				response.documentElement.tagName === "parsererror") {
-			return ZoomManager.error("Invalid XML: " + url);
+			return ZoomManager.error("Invalid XML:\n" + url);
 		}
 		// Custom error message on invalid JSON
 		if (type === "json" && xhr.response === null) {
-			return ZoomManager.error("Invalid JSON: " + url);
+			return ZoomManager.error("Invalid JSON:\n" + url);
 		}
 		// Decode html encoded entities
 		if (type === "htmltext") {

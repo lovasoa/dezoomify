@@ -27,7 +27,7 @@ var automatic = (function () { //Code isolation
 					var nextUrl = urlstack.shift();
 					if (!nextUrl) {
 						var msg = "Unable to find a proper dezoomer for the given URL.";
-						return ZoomManager.error(new Error(msg));
+						throw new Error(msg);
 					}
 					nextUrl = ZoomManager.resolveRelative(nextUrl, url);
 

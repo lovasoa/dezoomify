@@ -143,9 +143,14 @@ input#url:focus {
   font-size: 1.3em;
 }
 
-.error > h3 {
-	color: red;
+.error h3 {
+	color: #ff5555;
 	text-align: center;
+	font-size: 1.5em;
+}
+
+.error img {
+	vertical-align: middle;
 }
 
 div[hidden] {
