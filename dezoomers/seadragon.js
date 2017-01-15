@@ -14,7 +14,8 @@ var seadragon = (function () { //Code isolation
 			/dziUrlTemplate/,
 			/[^"'()<>]+\.(?:xml|dzi)/i,
 			/schemas\.microsoft\.com\/deepzoom/,
-			/zoom(?:\.it|hub.net)\/.*\.js/
+			/zoom(?:\.it|hub.net)\/.*\.js/,
+			/\b(dzi|DZI)\b/
 		],
 		"findFile" : function getDZIFile (baseUrl, callback) {
 			if (baseUrl.match(/\.xml|\.dzi/i)) {
@@ -63,17 +64,16 @@ var seadragon = (function () { //Code isolation
 
 				// bibliothèques specialisées de la ville de Paris
 				var parisMatch = text.match(/deepZoomManifest['"]\s*:\s*["']([^"']*)/);
-				if (parisMatch) {
-					return callback(parisMatch[1]);
-				}
+				if (parisMatch) return callback(parisMatch[1]);
 
 				// Any url ending with .xml or .dzi
-				var matchPath = text.match(
-					/[^"'()<>]+\.(?:xml|dzi)/i
-				);
-				if (matchPath) {
-					return callback(matchPath[0]);
-				}
+				var matchPath = text.match(/[^"'()<>]+\.(?:xml|dzi)/i);
+				if (matchPath) return callback(matchPath[0]);
+
+				// Try to find a link to a dzi file, (<dzi>link</dzi>, "dzi": "link", dzi="link")
+				var dziLinkMatch = text.match(/[^a-z]dzi["'<>\s:=]+([^<"']*)/i);
+				if (dziLinkMatch) return callback(dziLinkMatch[1]);
+
 				return callback(baseUrl);
 			});
 		},
