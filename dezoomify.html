@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta http-equiv="x-ua-compatible" content="ie=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self'">
   <title>Dezoomify</title>
   <link rel="icon" href="favicon.png" />
   <link rel="stylesheet" media="screen" href="style.css" />
@@ -88,22 +89,7 @@
 <script type="text/javascript" src="dezoomers/fsi.js" ></script>
 <script type="text/javascript" src="dezoomers/tretiakov.js" ></script>
 <script type="text/javascript" src="dezoomers/generic.js" ></script>
-
-<script type="text/javascript">
-document.getElementById("urlform").onsubmit = function(evt) {
-  evt.preventDefault();
-  var url = document.getElementById("url").value;
-  window.location.hash = url;
-  ZoomManager.open(url);
-  return false;
-}
-
-// allow to set the URL to be dezoomed by setting the URL hash
-var startURL = decodeURI(window.location.hash.slice(1));
-if (startURL) {
-  document.getElementById("url").value = startURL;
-}
-</script>
+<script type="text/javascript" src="browser-init.js"></script>
 
 </body>
 </html>
