@@ -95,8 +95,10 @@ Update the state of the progress bar.
 @param {String} description current state description
 */
 UI.updateProgress = function (percent, text) {
-	document.getElementById("percent").innerHTML = text + ' (' + parseInt(percent) + "%)";
+	percent = parseInt(percent);
+	document.getElementById("percent").innerHTML = text + ' (' + percent + "%)";
 	document.getElementById("progressbar").style.width = percent + "%";
+	document.getElementById("progressbar").setAttribute("aria-valuenow", percent);
 };
 
 /**
