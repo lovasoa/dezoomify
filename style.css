@@ -41,9 +41,7 @@ html, body {
 
 h1 {
 	text-align:center;
-	text-shadow:0 0 2px rgba(200,200,255);
 	font-family: sans-serif;
-	/*! background-color: grey; */
 	width: 100%;
 }
 
