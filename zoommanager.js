@@ -171,8 +171,12 @@ var ZoomManager = {};
 @throws {Error} err The given error
 */
 ZoomManager.error = function (errmsg) {
-	UI.error(errmsg);
-	throw new Error(errmsg);
+	// Display only the first error, until the ZoomManager in reinitialized
+	if (!ZoomManager.status.error) {
+		ZoomManager.status.error = true;
+		UI.error(errmsg);
+		throw new Error(errmsg);
+	}
 };
 
 ZoomManager.updateProgress = function (progress, msg) {
@@ -479,6 +483,7 @@ ZoomManager.init = function() {
 	if (!ZoomManager.cookies) ZoomManager.cookies = "";
 	if (!ZoomManager.proxy_url) ZoomManager.proxy_url = "proxy.php";
 	ZoomManager.status = {
+		"error": false,
 		"loaded" : 0,
 		"totalTiles" : 1
 	};
