@@ -19,6 +19,7 @@ module.exports = function(config) {
       {pattern:'style.css', included:false},
       {pattern:'icon.svg', included:false},
       {pattern:'zoommanager.js', included:false},
+      {pattern:'browser-init.js', included:false},
       {pattern:'dezoomers/*js', included:false},
       'tests/test_urls.js',
       'tests/tests.js',
