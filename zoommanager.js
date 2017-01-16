@@ -101,6 +101,7 @@ UI.updateProgress = function (percent, text) {
 	document.getElementById("percent").innerHTML = text + ' (' + percent + "%)";
 	document.getElementById("progressbar").style.width = percent + "%";
 	document.getElementById("progressbar").setAttribute("aria-valuenow", percent);
+	document.title = "(" + percent + "%) Dezoomify";
 };
 
 /**
@@ -248,11 +249,11 @@ ZoomManager.defaultRender = function (data) {
 /**
 @function nextTick
 Call a function, but not immediatly
+@param {Function} f - the function to call
 */
-ZoomManager.nextTick = (function(doAnim) {
-	if (doAnim) return function(f){return requestAnimationFrame(f)}
-	else return function(f) {return setTimeout(f, 5)}
-})(!!window.requestAnimationFrame);
+ZoomManager.nextTick = function(f) {
+	return setTimeout(f, 3);
+};
 
 /**
 Request a tile from the server
