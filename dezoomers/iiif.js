@@ -58,7 +58,8 @@ var iiif = (function(){
                           pxY    + "," + // source image Y
                           s      + "," + // source image width
                           s      + "/" + // source image height
-                          "full" + "/" + // returned image size
+                          s      + "," + // returned image width
+                          s      + "/" + // returned image height
                           "0"    + "/" + //rotation
                           data.quality + "." + //quality
                           data.format; //format
