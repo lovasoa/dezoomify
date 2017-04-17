@@ -1,5 +1,6 @@
-#Dezoomify
-#Download zoomable images
+# Dezoomify
+
+## Download zoomable images
 
 _Dezoomify_ downloads images from online zoomable image interfaces.
 It works with several zoomable image tools, from several different websites (see the list below).
@@ -53,16 +54,16 @@ URL, and dezoomify will be able to work with it.
 ## Video tutorial
 [![Video tutorial for dezzomify](http://pix.toile-libre.org/upload/original/1460095793.png)](https://www.youtube.com/watch?v=RtyckiAE5Eo)
 
-#Programming Languages
+# Programming Languages
 The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 `<canvas>` tag), and only the network-related stuffs on the server side. The only little piece of server-side code that remains in the code is just a proxy, used to circumvent the [same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy).
 We implemented this code both in Javascript ([node-app/proxy.js](node-app/proxy.js)) and PHP ([proxy.php](proxy.php)), so you just need to have either one
 on your server to run dezoomify.
 
-#Wikimedia
+## Wikimedia
 This script on wikimedia : [Zoomify in the help about zoomable Images on wikimedia](https://secure.wikimedia.org/wikipedia/commons/wiki/Help:Zoomable_images)
 
-#GPL
-> Copyright © 2011-2014 Lovasoa
+## GPL
+> Copyright © 2011-2017 Lovasoa
 >
 >  This file is part of Dezoomify.
 >
