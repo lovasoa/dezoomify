@@ -268,6 +268,11 @@ Request a tile from the server
 @param {Number} [n=0] - Number of time the tile has already been requested
 */
 ZoomManager.addTile = function addTile(url, x, y, ntries) {
+	//add proxy URL
+	var PHPSCRIPT = ZoomManager.proxy_url;
+	var codedurl=encodeURIComponent(url);
+	url = PHPSCRIPT + "?url=" + codedurl;
+	
 	//Request a tile from the server and display it once it loaded
 	ntries = ntries | 0; // Number of time the tile has already been requested
 	var img = new Image;
