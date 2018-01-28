@@ -45,4 +45,4 @@ if (false !== ($f = fopen($url, 'r', false, $context))) {
 } else {
   http_response_code(500);
 }
-?>
+
