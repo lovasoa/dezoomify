@@ -1,5 +1,5 @@
 var topviewer = (function(){
-	var memorixThumbnailRegexp = /(?:images\.memorix|afbeeldingen\.gahetna)\.nl\/(.*?)\/thumb\/(?:image(?:bank)?-)?(?:[0-9x]*?(?:crop)?|detailresult|gallery_thumb|mediabank-(?:detail|horizontal))\/(.*?)\.jpg/;
+	var memorixThumbnailRegexp = /(?:images\.memorix|afbeeldingen\.gahetna|images\.rkd)\.nl\/(.*?)\/thumb\/(?:image(?:bank)?-)?(?:[0-9x]*?(?:crop)?|detailresult|gallery_thumb|mediabank-(?:detail|horizontal))\/(.*?)\.jpg/;
 	return {
 		"name" : "TopViewer",
 		"description": "Memorix viewer, or topviewer, by picturae. Used on dutch websites.",
@@ -12,6 +12,9 @@ var topviewer = (function(){
 		],
 		"findFile" : function findTopViewer(baseUrl, callback) {
 			function foundData(server_name, image) {
+				if (server_name == 'rkd'){
+					return callback('https://images.rkd.nl/rkd/topviewjson/memorix/'+image);
+				}
 				return callback('http://images.memorix.nl/'+server_name+'/topviewjson/memorix/'+image);
 			}
 			if (baseUrl.match(/memorix\.nl\/.+\/topviewjson\/memorix/)) {
