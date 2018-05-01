@@ -39,7 +39,7 @@ var iiif = (function(){
             : {"width": data.tile_width || 512, "scaleFactors": [1]};
 
         var returned_data = {
-          "origin": data["@id"],
+          "origin": data["@id"] || url.replace(/\/info\.json$/, ''),
           "width" : parseInt(data.width),
           "height" : parseInt(data.height),
           "tileSize" : tiles.width,
