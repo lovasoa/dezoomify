@@ -47,23 +47,34 @@ var iiif = (function(){
           "quality" : searchWithDefault(data.qualities, "native", "default"),
           "format" : searchWithDefault(data.formats, "png", "jpg")
         };
-        ZoomManager.readyToRender(returned_data);
+        var img = new Image; // Load a tile to find out the real tile size
+        img.src = getTileURL(0, 0, returned_data.maxZoomLevel, returned_data);
+        img.addEventListener("load", function(){
+          returned_data.tileSize = Math.max(img.width, img.height);
+          ZoomManager.readyToRender(returned_data);
+        });
+        img.addEventListener("error", function(){
+          ZoomManager.readyToRender(returned_data); // Try rendering anyway
+          ZoomManager.error("Unable to load first tile: " + img.src);
+        });
       });
     },
-    "getTileURL" : function (x, y, zoom, data) {
-      var s = data.tileSize,
-          pxX = x*s, pxY = y*s;
-      return data.origin + "/" +
-                          pxX    + "," + // source image X
-                          pxY    + "," + // source image Y
-                          s      + "," + // source image width
-                          s      + "/" + // source image height
-                          s      + "," + // returned image width
-                          s      + "/" + // returned image height
-                          "0"    + "/" + //rotation
-                          data.quality + "." + //quality
-                          data.format; //format
-    }
+    "getTileURL" : getTileURL
   };
+
+  function getTileURL (x, y, zoom, data) {
+    var s = data.tileSize,
+        pxX = x*s, pxY = y*s;
+    return data.origin + "/" +
+                        pxX    + "," + // source image X
+                        pxY    + "," + // source image Y
+                        s      + "," + // source image width
+                        s      + "/" + // source image height
+                        s      + "," + // returned image width
+                        s      + "/" + // returned image height
+                        "0"    + "/" + //rotation
+                        data.quality + "." + //quality
+                        data.format; //format
+  }
 })();
 ZoomManager.addDezoomer(iiif);
