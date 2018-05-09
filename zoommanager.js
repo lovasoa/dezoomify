@@ -40,7 +40,7 @@ UI.changeSize = function () {
 /**
 Sets the width and height of the canvas
 
-@param {Object} data : Image source informations, containing width and height of the image.
+@param {Object} data : Image source information, containing width and height of the image.
 **/
 UI.setupRendering = function (data) {
 	document.getElementById("status").className = "loading";
@@ -345,11 +345,11 @@ ZoomManager.getFile = function (url, params, callback) {
 	xhr.open("GET", requesturl, true);
 
 	xhr.onloadstart = function () {
-		ZoomManager.updateProgress(1, "Sent a request in order to get informations about the image...");
+		ZoomManager.updateProgress(1, "Sent a request in order to get information about the image...");
 	};
 	xhr.onerror = function (e) {
 		throw new Error("Unable to connect to the proxy server " +
-										"to get the required informations.\n\nXHR error:\n" + e);
+										"to get the required information.\n\nXHR error:\n" + e);
 	};
 	xhr.onloadend = function () {
 		var response = xhr.response;
