@@ -1,5 +1,5 @@
 "use strict";
-var jsdom = require("jsdom");
+var jsdom = require("jsdom/lib/old-api.js");
 var Canvas = require("canvas");
 var request = require("request");
 var fs = require("fs");
