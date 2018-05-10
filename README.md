@@ -13,7 +13,7 @@ An image that you can download (by right-clicking on it, and choosing *Save Imag
 ## Try it
 If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [**unzoomify an image**](http://ophir.alwaysdata.net/dezoomify/dezoomify.html)
 
-## Troublshooting
+## Troubleshooting
 #### FAQ
 If you have problems while downloading an image, then read the **[FAQ](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ)**.
 #### Reporting issues
@@ -33,11 +33,11 @@ The following formats are supported by dezoomify:
   * [Polona](http://polona.pl/), the Polish Digital National Library
   * [BALaT](http://balat.kikirpa.be/), Belgian Art Links and Tools
  * [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/Zoomify-PFF-file-format-documentation) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
- * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developped by an italian company. It is used on the following websites:
+ * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developed by an Italian company. It is used on the following websites:
   * The [Royal Library of Belgium](http://kbr.be/)
  * **TopViewer**, also named **Memorix Maior picture viewer** used on the following websites:
   * [daguerreobase](http://daguerreobase.org/en/), a collection of daguerreotypes.
-  * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developped by the company picturae.
+  * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developed by the company picturae.
  * [Artsy](https://www.artsy.net/), an art website.
  * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
  * [The Tretiakov gallery](http://www.tretyakovgallery.ru/en/), official website of the Третьяковская галерея (in Moscow).
