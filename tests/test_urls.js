@@ -90,5 +90,9 @@ var test_urls = [
   {
     "name": "FSI",
     "url": "http://romandelarose.org/#read;Douce332.140r.tif"
+  },
+  {
+    "name": "VLS",
+    "url": "https://www.e-rara.ch/bau_1/ch17/content/pageview/4243948"
   }
 ];

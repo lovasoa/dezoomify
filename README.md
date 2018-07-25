@@ -42,6 +42,7 @@ The following formats are supported by dezoomify:
  * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
  * [The Tretiakov gallery](http://www.tretyakovgallery.ru/en/), official website of the Третьяковская галерея (in Moscow).
  * [FSI Viewer](https://www.neptunelabs.com/products/fsi-viewer/), zoomable image server by NeptuneLabs GmbH.
+ * [Visual Library Server](https://www.semantics.de/visual_library/), by semantics
 
 Dezoomify also has a
 [generic dezoomer](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ#the-page-uses-an-image-viewer-that-is-not-supported-by-dezoomify-is-there-still-a-chance-).
