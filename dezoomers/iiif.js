@@ -65,13 +65,26 @@ var iiif = (function(){
   function getTileURL (x, y, zoom, data) {
     var s = data.tileSize,
         pxX = x*s, pxY = y*s;
+        //The image size is adjusted for edges
+        //width
+        if (pxX + s > data.width) {
+          sx = data.width - pxX;
+        } else {
+          sx = s;
+        }
+        //height
+        if (pxY + s > data.height) {
+          sy = data.height - pxY;
+        } else {
+          sy = s;
+        }
     return data.origin + "/" +
                         pxX    + "," + // source image X
                         pxY    + "," + // source image Y
-                        s      + "," + // source image width
-                        s      + "/" + // source image height
-                        s      + "," + // returned image width
-                        s      + "/" + // returned image height
+                        sx      + "," + // source image width
+                        sy      + "/" + // source image height
+                        sx      + "," + // returned image width
+                        sy      + "/" + // returned image height
                         "0"    + "/" + //rotation
                         data.quality + "." + //quality
                         data.format; //format
