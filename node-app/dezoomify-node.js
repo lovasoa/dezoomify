@@ -31,7 +31,7 @@ function onload(window) {
     console.log(parseInt(progress) + "% : " + text);
   }
   UI.setupRendering = function (data) {
-  	UI.canvas = new Canvas(data.width, data.height);
+  	UI.canvas = new Canvas.Canvas(data.width, data.height);
   	UI.ctx = UI.canvas.getContext("2d");
   };
   ZoomManager.addTile = function addTile (url, x, y, nTries) {
