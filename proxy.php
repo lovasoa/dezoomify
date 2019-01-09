@@ -20,7 +20,6 @@ $opts = array(
   "ssl" => array(
     "verify_peer"=>false,
     "verify_peer_name"=>false,
-    "crypto_method" => STREAM_CRYPTO_METHOD_TLSv1_0_CLIENT
   )
 );
 $context = stream_context_create($opts);
