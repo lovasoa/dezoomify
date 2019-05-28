@@ -237,10 +237,20 @@ ZoomManager.defaultRender = function (data) {
 	var zoom = data.maxZoomLevel || ZoomManager.findMaxZoom(data);
 	var x=0, y=0;
 
+	function addTile(url, x, y, data) {
+		if (typeof url ==="string") {
+			if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
+			ZoomManager.addTile(url, x*data.tileSize, y*data.tileSize);
+		} else { // Promise
+			url.then(function(url){
+				addTile(url, x, y, data)
+			}).catch(ZoomManager.error.bind(ZoomManager));
+		}
+	}
+
 	function nextTile() {
 		var url = ZoomManager.dezoomer.getTileURL(x,y,zoom,data);
-		if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
-		ZoomManager.addTile(url, x*data.tileSize, y*data.tileSize);
+		addTile(url, x, y, data);
 
 		x++;
 		if (x >= data.nbrTilesX) {x = 0; y++;}
@@ -305,9 +315,9 @@ ZoomManager.open = function(url) {
 		throw new Error("You must provide a valid HTTP URL.");
 	}
 	if (typeof ZoomManager.dezoomer.findFile === "function") {
-		ZoomManager.dezoomer.findFile(url, function foundFile(filePath) {
+		ZoomManager.dezoomer.findFile(url, function foundFile(filePath, infos) {
 			ZoomManager.updateProgress(0, "Found image. Trying to open it...");
-			ZoomManager.dezoomer.open(ZoomManager.resolveRelative(filePath, url));
+			ZoomManager.dezoomer.open(ZoomManager.resolveRelative(filePath, url), infos);
 		});
 		ZoomManager.updateProgress(0, "The dezoomer is trying to locate the zoomable image...");
 	} else {
@@ -379,6 +389,9 @@ ZoomManager.getFile = function (url, params, callback) {
 		case "json":
 			xhr.responseType = "json";
 			xhr.overrideMimeType("application/json");
+			break;
+		case "binary":
+			xhr.responseType = "arraybuffer";
 			break;
 		default:
 			xhr.responseType = "text";
