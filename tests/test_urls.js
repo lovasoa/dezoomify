@@ -29,7 +29,7 @@ var test_urls = [
   },
   {
     "name": "TopViewer",
-    "url" : "https://www.erfgoedleiden.nl/collecties/beeldmateriaal/zoeken-in-beeldmateriaal/weergave/record/layout/default?id=037fc916-5f97-be9a-ee66-5df5d29caa2e"
+    "url" : "https://rkd.nl/en/explore/images/record?filters%5Bproject%5D%5B0%5D=The+Rembrandt+Database&query=&sort%5Bsort_title%5D=asc&start=152"
   },
   {
     "name": "krpano",
