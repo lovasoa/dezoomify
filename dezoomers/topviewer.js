@@ -20,11 +20,6 @@ var topviewer = (function(){
 			if (baseUrl.match(/memorix\.nl\/.+\/topviewjson\/memorix/)) {
 				return callback(baseUrl);
 			}
-			// rhcrijnstreek.nl
-			var rhcMatch = baseUrl.match(/rhcrijnstreek\.nl.*(?:asset=|media\/)([a-f0-9\-]+)/);
-			if (rhcMatch) {
-				return foundData("srs", rhcMatch[1]);
-			}
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function(text, xhr) {
 				// Memorix image thumbnail
 				var thumbMatch = text.match(memorixThumbnailRegexp);
