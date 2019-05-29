@@ -12,7 +12,7 @@ var seadragon = (function () { //Code isolation
 		],
 		"contents" : [
 			/dziUrlTemplate/,
-			/[^"'()<>]+\.(?:xml|dzi)/i,
+			/[^"'()<>]+\.(?:dzi)/i,
 			/schemas\.microsoft\.com\/deepzoom/,
 			/zoom(?:\.it|hub.net)\/.*\.js/,
 			/\b(dzi|DZI)\b/
