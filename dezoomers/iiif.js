@@ -7,14 +7,14 @@ var iiif = (function(){
       /\/info.json$/
     ],
     "contents" : [
-      /http:\/\/[^\s"']*\/info\.json/
+      /https?:\/\/[^\s"']*\/info\.json/
     ],
     "findFile" : function getInfoFile (baseUrl, callback) {
       if (baseUrl.match(/info\.json$/)) {
         return callback(baseUrl);
       }
       ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text) {
-          var infoMatch = text.match(/http:\/\/[^\s"']*\/info\.json/);
+          var infoMatch = text.match(/https?:\/\/[^\s"']*\/info\.json/);
           if (infoMatch) {
             return callback(infoMatch[0]);
           }
