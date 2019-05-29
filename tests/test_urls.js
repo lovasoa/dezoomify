@@ -12,10 +12,6 @@ var test_urls = [
     "url": "http://ophir.alwaysdata.net/dezoomify/tests/images/issue_81/image/ImageProperties.xml"
   },
   {
-    "name": "Zoomify-PFF",
-    "url": "http://zoomify.masterfile.com:8080/servlet/zoomifyservlet.ZoomifyServlet?file=/flash/zimages/08/11/68/856-08116834.pff&requestType=0&begin=677564&end=695109&vers=106&head=12895"
-  },
-  {
     "name": "IIPImage (national gallery of london)",
     "url": "http://www.nationalgallery.org.uk/paintings/alexandre-calame-at-handeck"
   },
