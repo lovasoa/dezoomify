@@ -48,10 +48,6 @@ var test_urls = [
     "url": "http://www.bl.uk/manuscripts/Viewer.aspx?ref=burney_ms_276_f031ar"
   },
   {
-    "name": "artsy",
-    "url": "https://www.artsy.net/artwork/damien-hirst-black-sheep-with-golden-horns"
-  },
-  {
     "name": "Universitätsbibliothek (unibe.ch)",
     "url": "http://biblio.unibe.ch/web-apps/maps/zoomify.php?col=ryh&pic=Ryh_7906_6"
   },

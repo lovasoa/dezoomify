@@ -38,7 +38,6 @@ The following formats are supported by dezoomify:
  * **TopViewer**, also named **Memorix Maior picture viewer** used on the following websites:
   * [daguerreobase](http://daguerreobase.org/en/), a collection of daguerreotypes.
   * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developed by the company picturae.
- * [Artsy](https://www.artsy.net/), an art website.
  * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
  * [The Tretiakov gallery](http://www.tretyakovgallery.ru/en/), official website of the Третьяковская галерея (in Moscow).
  * [FSI Viewer](https://www.neptunelabs.com/products/fsi-viewer/), zoomable image server by NeptuneLabs GmbH.
