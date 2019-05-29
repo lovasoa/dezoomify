@@ -37,8 +37,7 @@ function open(url, gapdata) {
 				gapdata: gapdata
 			}
 		}).filter(function (level) {
-			const max = 1 << 13;
-			return level.width < max && level.height < max;
+			return level.width * level.height < UI.MAX_CANVAS_AREA;
 		});
 		ZoomManager.readyToRender(levels[levels.length - 1]);
 	});
