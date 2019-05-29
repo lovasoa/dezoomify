@@ -1,4 +1,4 @@
-var vls = (function() {
+var vls = (function () {
   return {
     name: 'VLS',
     description: 'Visual Library Server, by semantics',
@@ -6,12 +6,12 @@ var vls = (function() {
       /\/(thumbview|pageview|zoom)\/\d+$/
     ],
     contents: [],
-    findFile: function getInfoFile (baseUrl, callback) {
+    findFile: function getInfoFile(baseUrl, callback) {
       var url = baseUrl.replace(/\/(thumbview|pageview|zoom)\//, '/zoom/');
       callback(url);
     },
     open: function (url) {
-      ZoomManager.getFile(url, {type: 'xml'}, function (doc, xhr) {
+      ZoomManager.getFile(url, { type: 'xml' }, function (doc, xhr) {
         var vars = {};
         var varNodes = doc.getElementsByTagName('var');
         for (var i = 0; i < varNodes.length; i++) {
@@ -23,11 +23,9 @@ var vls = (function() {
         if (!id) {
           throw new Error('Unable to extract image ID');
         }
-        var rotate = mapNode.getAttribute('vls:flip_rotate');
         var width = parseInt(mapNode.getAttribute('vls:width'));
         var height = parseInt(mapNode.getAttribute('vls:height'));
-        var zoomLevels = mapNode.getAttribute('vls:zoomsizes').split(',');
-        var path = ['/image/tile/wc', rotate, width, '1.0.0', id, zoomLevels.length - 1].join('/');
+        var path = ['/image/tiler/square', id, 0].join('/');
         var tileSize = parseInt(vars['zoomTileSize']);
 
         // Workaround: avoid cropping at the bottom
@@ -38,12 +36,12 @@ var vls = (function() {
           path: path,
           width: width,
           height: height,
-          tileSize: tileSize,
+          tileSize: 1024,
         });
       });
     },
     getTileURL: function (x, y, zoom, data) {
-      return [data.path, x, (data.nbrTilesY - y - 1) + '.jpg'].join('/');
+      return [data.path, x, y].join('/');
     },
   };
 })();

@@ -5,10 +5,10 @@ var fsi = (function(){
     "description": "FSI Server, by Neptune Labs",
     "urls" : [
       /server\?.*(?:(?:type=|image=).*?){2}/,
-      /romandelarose\.org\/#read;.+/
     ],
     "contents" : [
-      /server\?.*(?:(?:type=|image=).*?){2}/
+      /server\?.*(?:(?:type=|image=).*?){2}/,
+      /<fsi-viewer/
     ],
     "findFile" : function getInfoFile (baseUrl, callback) {
       function try_url (url) {
@@ -20,17 +20,6 @@ var fsi = (function(){
         return true;
       }
       if (try_url(baseUrl)) return;
-
-      // romandelarose.org
-      var roseMatch = baseUrl.match(/romandelarose\.org\/#read;(.+?)(\..+?)?(\..+)?$/);
-      if (roseMatch) {
-        var id = roseMatch[1],
-            page = roseMatch[2] || ".001r",
-            format = roseMatch[3] || ".tif";
-        var rose_url = "http://fsiserver.library.jhu.edu/server?type=info&source=rose/" +
-                        id + "/" + id + page + format;
-        if (try_url(rose_url)) return;
-      }
 
       // Inline references
       ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text) {

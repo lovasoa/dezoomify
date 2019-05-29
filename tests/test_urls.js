@@ -77,7 +77,7 @@ var test_urls = [
   },
   {
     "name": "FSI",
-    "url": "http://romandelarose.org/#read;Douce332.140r.tif"
+    "url": "https://www.neptunelabs.com/fsi-viewer/"
   },
   {
     "name": "VLS",
