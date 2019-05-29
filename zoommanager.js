@@ -13,6 +13,8 @@ User interface management, interaction with HTML
 var UI = {};
 UI.canvas = document.getElementById("rendering-canvas");
 UI.dezoomers = document.getElementById("dezoomers");
+UI.ratio = 1;
+UI.MAX_CANVAS_AREA = 268435456; // 2^14 x 2^14
 
 /**
 Adjusts the size of the image, so that is fits page width or page height
@@ -44,8 +46,12 @@ Sets the width and height of the canvas
 **/
 UI.setupRendering = function (data) {
 	document.getElementById("status").className = "loading";
-	UI.canvas.width = data.width;
-	UI.canvas.height = data.height;
+	var area = data.width * data.height;
+	UI.ratio = (area > UI.MAX_CANVAS_AREA)
+		? Math.sqrt(UI.MAX_CANVAS_AREA / area)
+		: 1;
+	UI.canvas.width = data.width * UI.ratio;
+	UI.canvas.height = data.height * UI.ratio;
 	UI.canvas.onclick = UI.changeSize;
 	UI.ctx = UI.canvas.getContext("2d");
 	UI.changeSize();
@@ -59,7 +65,13 @@ Draw a tile on the canvas, at the given position.
 @param {Number} y position
 */
 UI.drawTile = function(tileImg, x, y) {
-	UI.ctx.drawImage(tileImg, x, y);
+	var r = UI.ratio, w = tileImg.width, h = tileImg.height;
+	UI.ctx.drawImage(tileImg, 
+		Math.floor(x * r),
+		Math.floor(y * r),
+		Math.ceil(w * r),
+		Math.ceil(h * r)
+	);
 };
 
 /**
