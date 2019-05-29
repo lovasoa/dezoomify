@@ -20,6 +20,10 @@ var test_urls = [
     "url": "http://www.ngv.vic.gov.au/explore/collection/work/4202/"
   },
   {
+    "name": "Zoomify PFF",
+    "url": "https://wakpp-db.vumop.cz/WAKPP/viewer.php?source=/zpravy/VY/JIH/_017_JZD_Dobronin_002.pff"
+  },
+  {
     "name": "zoom.it",
     "url" : "http://zoom.it/3fvN"
   },

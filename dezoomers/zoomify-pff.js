@@ -3,13 +3,14 @@ var zoomifyPFF = (function () { //Code isolation
 		"name": "Zoomify PFF",
 		"description": "Zoomable image format developed by zoomify, but distinct from the most common format in that it consists of one file only",
 		"urls" : [
-			/file=.*&requestType=/
+			/file=.*&requestType=/,
+			/\.pff$/
 		],
 		"contents": [
 			/zoomifyTileHandlerPath=/
 		],
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
-			// Test if the zopmifyserver image was given directly
+			// Test if the zoomifyserver image was given directly
 			if (baseUrl.match(/file=.*&requestType=/)) {
 				var url = baseUrl.match(/^(.*)&requestType/)[1];
 				return callback(url);
