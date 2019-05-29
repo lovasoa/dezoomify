@@ -11,7 +11,7 @@ The URL of a webpage containing a zoomable image viewer.
 An image that you can download (by right-clicking on it, and choosing *Save Image as...*).
 
 ## Try it
-If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [**unzoomify an image**](http://ophir.alwaysdata.net/dezoomify/dezoomify.html)
+If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [**unzoomify an image**](https://ophir.alwaysdata.net/dezoomify/dezoomify.html)
 
 ## Troubleshooting
 #### FAQ
