@@ -379,7 +379,7 @@ ZoomManager.getFile = function (url, params, callback) {
 		if (cookie) ZoomManager.cookies += cookie;
 		// Custom error message on invalid XML
 		if (type === "xml" &&
-				response.documentElement.tagName === "parsererror") {
+			(response === null || response.documentElement.tagName === "parsererror")) {
 			return ZoomManager.error("Invalid XML:\n" + url);
 		}
 		// Custom error message on invalid JSON
