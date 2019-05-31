@@ -14,7 +14,7 @@ var seadragon = (function () { //Code isolation
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
 				// Any xml url within a call to embedpano
 				var matchPath = text.match(
-					/embedpano\(\s*\{.*xml.?\s*:\s*["']([^"']*)/
+					/embedpano\(\s*\{[\s\S]*xml.?\s*:\s*\\?["']([^"'\\]*)/
 				);
 				if (matchPath) {
 					return callback(matchPath[1]);
