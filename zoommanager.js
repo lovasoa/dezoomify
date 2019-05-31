@@ -373,7 +373,7 @@ ZoomManager.getFile = function (url, params, callback) {
 		throw new Error("Unable to connect to the proxy server " +
 										"to get the required information.\n\nXHR error:\n" + e);
 	};
-	xhr.onloadend = function () {
+	xhr.onload = function () {
 		var response = xhr.response;
 		var cookie = xhr.getResponseHeader("X-Set-Cookie");
 		if (cookie) ZoomManager.cookies += cookie;
