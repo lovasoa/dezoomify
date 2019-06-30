@@ -7,7 +7,8 @@ if (strpos($url, "http") !== 0) die("Only http requests are allowed.");
 $headers =
   "User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/40.0.2214.85 Safari/537.36" .
   "\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" .
-  "\r\nAccept-Language: en-US,en;q=0.5";
+  "\r\nAccept-Language: en-US,en;q=0.5" . 
+  "\r\nReferer: $url";
 
 if (isset($_GET["cookies"])) {
   $headers .= "\r\nCookie: " . str_replace("\n", "", $_GET["cookies"]);
