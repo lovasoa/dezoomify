@@ -84,7 +84,7 @@ var iiif = (function(){
                         sx      + "," + // source image width
                         sy      + "/" + // source image height
                         sx      + "," + // returned image width
-                        sy      + "/" + // returned image height
+                        ""      + "/" + // returned image height
                         "0"    + "/" + //rotation
                         data.quality + "." + //quality
                         data.format; //format
