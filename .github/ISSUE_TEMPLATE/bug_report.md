@@ -1,21 +1,19 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-title: ''
-labels: ''
-assignees: ''
+about: Report a problem that is not specific to a specific site
+title: "[bug]"
+labels: bug
+assignees: lovasoa
 
 ---
+
+Please open a bug report ONLY if the issue you are facing is not specific to a particular site. If you have an issue with a site in particular and would like dezoomify to add support for it, then please open a __new site support__ issue instead.
 
 **Describe the bug**
 A clear and concise description of what the bug is.
 
 **To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+Steps to reproduce the behavior. Include an URL to a zoomable image viewer page AND the URL you are giving to dezoomify.
 
 **Expected behavior**
 A clear and concise description of what you expected to happen.
@@ -23,15 +21,8 @@ A clear and concise description of what you expected to happen.
 **Screenshots**
 If applicable, add screenshots to help explain your problem.
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
+**Browser:**
  - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
-
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
  - Version [e.g. 22]
 
 **Additional context**
