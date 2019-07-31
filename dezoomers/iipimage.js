@@ -3,7 +3,8 @@ var iipimage = (function(){
     "name" : "IIPImage",
     "description": "IIPImage image server",
     "urls" : [
-      /\?FIF=/
+      /\?FIF=/,
+      /nationalgallery\.org\.uk\/paintings/
     ],
     "contents" : [
       /\?FIF=/
@@ -18,6 +19,12 @@ var iipimage = (function(){
             var path = fifMatch[1];
             var url = ZoomManager.resolveRelative(path, baseUrl);
             return callback(url);
+          }
+          // Special support for nationalgallery.org.uk
+          if (baseUrl.match(/nationalgallery\.org\.uk\/paintings/)){
+            var server = JSON.parse(text.match(/server\s*:\s*("[^"]*")/)[1]);
+            var image = JSON.parse(text.match(/image\s*:\s*("[^"]*")/)[1]);
+            return callback(server + '?FIF=' + image);
           }
           throw new Error("No IIPImage-related URL found.");
       });
