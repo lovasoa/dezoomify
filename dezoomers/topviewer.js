@@ -4,11 +4,13 @@ var topviewer = (function(){
 		"name" : "TopViewer",
 		"description": "Memorix viewer, or topviewer, by picturae. Used on dutch websites.",
 		"urls": [
-			/memorix\.nl\/.+\/topviewjson\/memorix/,
-			/rhcrijnstreek\.nl/
+			/memorix/,
+			/rhcrijnstreek\.nl/,
+			/topviewjson/
 		],
 		"contents": [
-			memorixThumbnailRegexp
+			memorixThumbnailRegexp,
+			/"topviews"\s*:/
 		],
 		"findFile" : function findTopViewer(baseUrl, callback) {
 			function foundData(server_name, image) {

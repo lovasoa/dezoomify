@@ -8,7 +8,7 @@
   }
 
   // allow to set the URL to be dezoomed by setting the URL hash
-  var startURL = decodeURI(window.location.hash.slice(1));
+  var startURL = window.location.hash.slice(1);
   if (startURL) {
     document.getElementById("url").value = startURL;
   }
