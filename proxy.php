@@ -2,7 +2,9 @@
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Expose-Headers: X-Set-Cookie");
 $url = get_magic_quotes_gpc() ? stripslashes($_GET['url']) : $_GET["url"];
-if (strpos($url, "http") !== 0) die("Only http requests are allowed.");
+if (preg_match("#^https?://#", $url) !== 1) {
+  die("Only http requests are allowed.");
+}
 
 $headers =
   "User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/40.0.2214.85 Safari/537.36" .
