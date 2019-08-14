@@ -6,8 +6,9 @@ function findFile(baseUrl, callback) {
 			/<meta property="og:image" content="([^"]+)">/
 		);
 		let url = matchPath[1];
-		let path = url.replace(/^\w+:/, '');
-		let reg = new RegExp(']\n,"' + path + '","([^"]+)"', "m");
+		let path = url.split('/')[3];
+		let path_noscheme = url.replace(/^\w+:/, '');
+		let reg = new RegExp(']\n,"' + path_noscheme + '","([^"]+)"', "m");
 		let matchToken = text.match(reg);
 		let token = matchToken[1];
 		callback(url + "=g", { path, token });
