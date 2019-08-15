@@ -4,7 +4,7 @@
   "description": "tests for dezoomify",
   "main": "tests.js",
   "dependencies": {
-    "karma": "^4.1.0",
+    "karma": "^4.2.0",
     "karma-firefox-launcher": "^0.1.7",
     "karma-qunit": "^0.1.9",
     "qunit": "^2.9.2",
