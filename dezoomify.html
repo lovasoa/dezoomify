@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -25,11 +26,11 @@
   <main id="status">
     <form id="urlform" action="#">
       <div id="description">
-        <h1>Dezoomify <img src="icon.svg" alt="" width="20" height="20"/></h1>
+        <h1>Dezoomify <img src="icon.svg" alt="" width="20" height="20" /></h1>
         <p>
           <strong>Dezoomify</strong> allows you to download
           <abbr title="Large images in which you can navigate inside a webpage.">
-          zoomable images</abbr>.
+            zoomable images</abbr>.
           Enter the
           <abbr title="Uniform Resource Locator, the address of a webpage">URL</abbr>
           of such an image in the text field below.
@@ -70,21 +71,20 @@
       </noscript>
 
       <p>
-        <input type='url' tabindex="10" id='url'
-             title="Enter the URL of the webpage containing your zoomable image"
-             placeholder="URL of the webpage containing your image" autofocus>
+        <input type='url' tabindex="10" id='url' title="Enter the URL of the webpage containing your zoomable image"
+          placeholder="URL of the webpage containing your image" autofocus>
       </p>
       <p id="dezoomers"></p>
       <input type='submit' tabindex="30" class="button">
     </form>
 
     <p id="percent" role="status"></p>
-    <p id="progressbar" role="progressbar"
-       aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></p>
+    <p id="progressbar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></p>
 
     <div id="error" class="error" role="alert" hidden>
       <h3>
-        <img id="error-img" src="data:image/bmp;base64,Qk0eAAAAAAAAABoAAAAMAAAAAQABAAEAGAAAAP8A" alt="" width="30" height="30">
+        <img id="error-img" src="data:image/bmp;base64,Qk0eAAAAAAAAABoAAAAMAAAAAQABAAEAGAAAAP8A" alt="" width="30"
+          height="30">
         Error
       </h3>
       <div id="errormsg">
@@ -110,22 +110,23 @@
     </div>
   </main>
 
-<script type="text/javascript" src="zoommanager.js" ></script>
-<script type="text/javascript" src="dezoomers/automatic.js" ></script>
-<script type="text/javascript" src="dezoomers/zoomify.js" ></script>
-<script type="text/javascript" src="dezoomers/seadragon.js" ></script>
-<script type="text/javascript" src="dezoomers/iipimage.js" ></script>
-<script type="text/javascript" src="dezoomers/zoomify-pff.js" ></script>
-<script type="text/javascript" src="dezoomers/xlimage.js" ></script>
-<script type="text/javascript" src="dezoomers/topviewer.js" ></script>
-<script type="text/javascript" src="dezoomers/krpano.js" ></script>
-<script type="text/javascript" src="dezoomers/iiif.js" ></script>
-<script type="text/javascript" src="dezoomers/fsi.js" ></script>
-<script type="text/javascript" src="dezoomers/vls.js" ></script>
-<script type="text/javascript" src="dezoomers/micrio.js" ></script>
-<script type="module" src="dezoomers/google-arts-culture.js" ></script>
-<script type="text/javascript" src="dezoomers/generic.js" ></script>
-<script type="text/javascript" src="browser-init.js"></script>
+  <script type="text/javascript" src="zoommanager.js"></script>
+  <script type="text/javascript" src="dezoomers/automatic.js"></script>
+  <script type="text/javascript" src="dezoomers/zoomify.js"></script>
+  <script type="text/javascript" src="dezoomers/seadragon.js"></script>
+  <script type="text/javascript" src="dezoomers/iipimage.js"></script>
+  <script type="text/javascript" src="dezoomers/zoomify-pff.js"></script>
+  <script type="text/javascript" src="dezoomers/xlimage.js"></script>
+  <script type="text/javascript" src="dezoomers/topviewer.js"></script>
+  <script type="text/javascript" src="dezoomers/krpano.js"></script>
+  <script type="text/javascript" src="dezoomers/iiif.js"></script>
+  <script type="text/javascript" src="dezoomers/fsi.js"></script>
+  <script type="text/javascript" src="dezoomers/vls.js"></script>
+  <script type="text/javascript" src="dezoomers/micrio.js"></script>
+  <script type="module" src="dezoomers/google-arts-culture.js"></script>
+  <script type="text/javascript" src="dezoomers/generic.js"></script>
+  <script type="text/javascript" src="browser-init.js"></script>
 
 </body>
+
 </html>
