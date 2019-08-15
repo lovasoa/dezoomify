@@ -85,6 +85,6 @@ var test_urls = [
   },
   {
     "name": "Micrio",
-    "url": "https://www.vangoghmuseum.nl/en/collection/s0106V1962"
+    "url": "https://www.vangoghmuseum.nl/en/collection/s0424M1991"
   }
 ];
