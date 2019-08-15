@@ -25,11 +25,11 @@ var test_urls = [
   },
   {
     "name": "zoom.it",
-    "url" : "http://zoom.it/3fvN"
+    "url": "http://zoom.it/3fvN"
   },
   {
     "name": "TopViewer",
-    "url" : "https://rkd.nl/en/explore/images/record?filters%5Bproject%5D%5B0%5D=The+Rembrandt+Database&query=&sort%5Bsort_title%5D=asc&start=152"
+    "url": "https://rkd.nl/en/explore/images/record?filters%5Bproject%5D%5B0%5D=The+Rembrandt+Database&query=&sort%5Bsort_title%5D=asc&start=152"
   },
   {
     "name": "krpano",
@@ -48,8 +48,8 @@ var test_urls = [
     "url": "http://biblio.unibe.ch/web-apps/maps/zoomify.php?col=ryh&pic=Ryh_7906_6"
   },
   {
-    "name" : "Bibliothèques spécialisées de Paris",
-    "url" : "http://bibliotheques-specialisees.paris.fr/ark:/73873/pf0001115743/0017/v0001.simple.selectedTab=otherdocs"
+    "name": "Bibliothèques spécialisées de Paris",
+    "url": "http://bibliotheques-specialisees.paris.fr/ark:/73873/pf0001115743/0017/v0001.simple.selectedTab=otherdocs"
   },
   {
     "name": "archieven.nl",
@@ -60,20 +60,20 @@ var test_urls = [
     "url": "http://collection.mccord.mcgill.ca/fr/collection/artefacts/MP-0000.236.1"
   },
   {
-    "name" : "national archives (research.archives.gov)",
-    "url" : "https://catalog.archives.gov/OpaAPI/media/7029407/opa-renditions/image-tiles/95-GP-3287-Box0552_003_001_AC.jpg.dzi"
+    "name": "national archives (research.archives.gov)",
+    "url": "https://catalog.archives.gov/OpaAPI/media/7029407/opa-renditions/image-tiles/95-GP-3287-Box0552_003_001_AC.jpg.dzi"
   },
   {
     "name": "daguerreobase",
-    "url" : "http://www.daguerreobase.org/en/browse/indeling/detail/start/1"
+    "url": "http://www.daguerreobase.org/en/browse/indeling/detail/start/1"
   },
   {
     "name": "IIIF",
     "url": "http://www.kb.dk/maps/kortsa/2012/jul/kortatlas/object60564/en/"
   },
   {
-    "name" : "National Library of Australia",
-    "url" : "http://nla.gov.au/nla.obj-152644715/view"
+    "name": "National Library of Australia",
+    "url": "http://nla.gov.au/nla.obj-152644715/view"
   },
   {
     "name": "FSI",
@@ -82,5 +82,9 @@ var test_urls = [
   {
     "name": "VLS",
     "url": "https://www.e-rara.ch/bau_1/ch17/content/pageview/4243948"
+  },
+  {
+    "name": "Micrio",
+    "url": "https://www.vangoghmuseum.nl/en/collection/s0106V1962"
   }
 ];
