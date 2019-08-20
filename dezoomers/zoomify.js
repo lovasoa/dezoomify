@@ -28,12 +28,11 @@ var zoomify = (function () { //Code isolation
 				// attribute of a tag
 				// In the HTML5 zoomify player, the path is the second argument
 				// to a JS function called showImage
-				var matchPath = text.match(
-					/zoomifyImagePath=([^\'"&]*)[\'"&]|showImage\([^),]*,\s*["']([^'"]*)/
-				);
-				if (matchPath) {
+				var zReg = /zoomifyImagePath=([^\'"&]*)[\'"&]|showImage\([^),]*,\s*["']([^'"]*)/g;
+				var matchPath;
+				while ((matchPath= zReg.exec(text)) != null){
 					for(var i=1;i<matchPath.length;i++)
-						if (matchPath[i]) return foundZoomifyPath(matchPath[i]);
+						if (matchPath[i]) foundZoomifyPath(matchPath[i]);
 				}
 				// Fluid engage zoomify
 				var fluidMatch = text.match(/accessnumber=([^"&\s']+)/i);

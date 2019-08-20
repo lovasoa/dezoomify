@@ -46,6 +46,7 @@ Sets the width and height of the canvas
 **/
 UI.setupRendering = function (data) {
 	document.getElementById("status").className = "loading";
+	document.getElementById("error").setAttribute("hidden", true);
 	var area = data.width * data.height;
 	UI.ratio = (area > UI.MAX_CANVAS_AREA)
 		? Math.sqrt(UI.MAX_CANVAS_AREA / area)
@@ -227,6 +228,10 @@ ZoomManager.startTimer = function () {
 Tells that we are ready
 */
 ZoomManager.readyToRender = function(data) {
+	if (ZoomManager.data){
+		console.log("Only one dezoom can be active at a time", data);
+		return;
+	}
 
 	data.nbrTilesX = data.nbrTilesX || Math.ceil(data.width / data.tileSize);
 	data.nbrTilesY = data.nbrTilesY|| Math.ceil(data.height / data.tileSize);
