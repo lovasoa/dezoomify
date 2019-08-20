@@ -15,7 +15,7 @@ var zoomify = (function () { //Code isolation
 			/accessnumber=/,
 			/ete-openlayers-src/
 		],
-		"findFile" : function getZoomifyPath (baseUrl, callback) {
+		"findFile": function getZoomifyPath(baseUrl, callback) {
 			if (baseUrl.match(/ImageProperties\.xml$/)) {
 				return callback(baseUrl);
 			}
@@ -23,25 +23,25 @@ var zoomify = (function () { //Code isolation
 				return callback(zoomifyPath + "/ImageProperties.xml");
 			}
 
-			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
+			ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath
 				// attribute of a tag
 				// In the HTML5 zoomify player, the path is the second argument
 				// to a JS function called showImage
 				var zReg = /zoomifyImagePath=([^\'"&]*)[\'"&]|showImage\([^),]*,\s*["']([^'"]*)/g;
 				var matchPath;
-				while ((matchPath= zReg.exec(text)) != null){
-					for(var i=1;i<matchPath.length;i++)
+				while ((matchPath = zReg.exec(text)) != null) {
+					for (var i = 1; i < matchPath.length; i++)
 						if (matchPath[i]) foundZoomifyPath(matchPath[i]);
 				}
 				// Fluid engage zoomify
 				var fluidMatch = text.match(/accessnumber=([^"&\s']+)/i);
 				if (fluidMatch) {
 					var xmlBrokerPath = "/scripts/XMLBroker.new.php" +
-										"?Lang=2&contentType=IMAGES&contentID=" +
-										fluidMatch[1];
+						"?Lang=2&contentType=IMAGES&contentID=" +
+						fluidMatch[1];
 					var url = ZoomManager.resolveRelative(xmlBrokerPath, baseUrl);
-					return ZoomManager.getFile(url, {type:"xml"}, function(xml, xhr){
+					return ZoomManager.getFile(url, { type: "xml" }, function (xml, xhr) {
 						var pathElem = xml.querySelector("imagefile[format=zoomify]");
 						return foundZoomifyPath(pathElem.firstChild.nodeValue);
 					});
@@ -49,7 +49,7 @@ var zoomify = (function () { //Code isolation
 				// Universitätsbibliothek
 				var unibeMatch = text.match(/url = '([^']*)'/);
 				if (~baseUrl.indexOf("biblio.unibe.ch/web-apps/maps/zoomify.php") &&
-						unibeMatch) {
+					unibeMatch) {
 					var url = ZoomManager.resolveRelative(unibeMatch[1], baseUrl);
 					return foundZoomifyPath(url);
 				}
@@ -77,8 +77,8 @@ var zoomify = (function () { //Code isolation
 				return foundZoomifyPath(baseUrl);
 			});
 		},
-		"open" : function (url) {
-			ZoomManager.getFile(url, {type:"xml"}, function (xml, xhr) {
+		"open": function (url) {
+			ZoomManager.getFile(url, { type: "xml" }, function (xml, xhr) {
 				var infos = xml.getElementsByTagName("IMAGE_PROPERTIES")[0];
 				if (!infos) return ZoomManager.error("Invalid zoomify XML info file: " + url);
 				var data = {};
@@ -89,10 +89,10 @@ var zoomify = (function () { //Code isolation
 				data.numTiles = parseInt(infos.getAttribute("NUMTILES")); //Total number of tiles (for all zoom levels)
 				data.zoomFactor = 2; //Zooming factor between two consecutive zoom levels
 
-				var w=data.width, h=data.height,
-						ntiles=0,
-						maxZoom = ZoomManager.findMaxZoom(data);
-				for(var z=0; z<=maxZoom; z++) {
+				var w = data.width, h = data.height,
+					ntiles = 0,
+					maxZoom = ZoomManager.findMaxZoom(data);
+				for (var z = 0; z <= maxZoom; z++) {
 					ntiles += Math.ceil(w / data.tileSize) * Math.ceil(h / data.tileSize);
 					w /= 2; h /= 2;
 				}
@@ -101,14 +101,14 @@ var zoomify = (function () { //Code isolation
 					// When zoomify generates the zoom levels, it MAY stop creating new zoom
 					// levels when a zoomlevel has one of its dimensions that rounds down to TILESIZE.
 					var size = Math.max(data.width, data.height);
-					data.maxZoomLevel = Math.ceil(Math.log(size/(data.tileSize+1)) / Math.LN2);
+					data.maxZoomLevel = Math.ceil(Math.log(size / (data.tileSize + 1)) / Math.LN2);
 				}
 				ZoomManager.readyToRender(data);
 			});
 		},
-		"getTileURL" : function (col, row, zoom, data) {
+		"getTileURL": function (col, row, zoom, data) {
 			var totalTiles = data.nbrTilesX * data.nbrTilesY;
-			var tileGroup = Math.floor((data.numTiles - totalTiles + col + row*data.nbrTilesX) / 256);
+			var tileGroup = Math.floor((data.numTiles - totalTiles + col + row * data.nbrTilesX) / 256);
 			return "TileGroup" + tileGroup + "/" + zoom + "-" + col + "-" + row + ".jpg";
 		}
 	};
