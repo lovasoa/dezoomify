@@ -30,10 +30,17 @@ var zoomify = (function () { //Code isolation
 				// to a JS function called showImage
 				var zReg = /zoomifyImagePath=([^\'"&]*)[\'"&]|showImage\([^),]*,\s*["']([^'"]*)/g;
 				var matchPath;
+				var foundPaths = [];
 				while ((matchPath = zReg.exec(text)) != null) {
-					for (var i = 1; i < matchPath.length; i++)
-						if (matchPath[i]) foundZoomifyPath(matchPath[i]);
+					for (var i = 1; i < matchPath.length; i++) {
+						var path = matchPath[i];
+						if (path && foundPaths.indexOf(path) === -1) {
+							foundPaths.push(path);
+						}
+					}
 				}
+				if (foundPaths.length > 0) return foundPaths.forEach(foundZoomifyPath);
+
 				// Fluid engage zoomify
 				var fluidMatch = text.match(/accessnumber=([^"&\s']+)/i);
 				if (fluidMatch) {
