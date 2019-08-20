@@ -13,7 +13,8 @@ var zoomify = (function () { //Code isolation
 			/zoomifyImagePath=/,
 			/showImage\(/,
 			/accessnumber=/,
-			/ete-openlayers-src/
+			/ete-openlayers-src/,
+			/type['"]?\s*:\s*['"]zoomifytileservice/
 		],
 		"findFile": function getZoomifyPath(baseUrl, callback) {
 			if (baseUrl.match(/ImageProperties\.xml$/)) {
@@ -28,14 +29,19 @@ var zoomify = (function () { //Code isolation
 				// attribute of a tag
 				// In the HTML5 zoomify player, the path is the second argument
 				// to a JS function called showImage
-				var zReg = /zoomifyImagePath=([^\'"&]*)[\'"&]|showImage\([^),]*,\s*["']([^'"]*)/g;
+				var zRegs = [
+					/zoomifyImagePath=([^\'"&]*)[\'"&]|showImage\([^),]*,\s*["']([^'"]*)/g,
+					/type['"]?\s*:\s*['"]zoomifytileservice[\s\S]*tilesUrl["']?\s*:\s*["']([^'"]+)/g
+				]
 				var matchPath;
 				var foundPaths = [];
-				while ((matchPath = zReg.exec(text)) != null) {
-					for (var i = 1; i < matchPath.length; i++) {
-						var path = matchPath[i];
-						if (path && foundPaths.indexOf(path) === -1) {
-							foundPaths.push(path);
+				for (var z = 0; z < zRegs.length; z++) {
+					while ((matchPath = zRegs[z].exec(text)) != null) {
+						for (var i = 1; i < matchPath.length; i++) {
+							var path = matchPath[i];
+							if (path && foundPaths.indexOf(path) === -1) {
+								foundPaths.push(path);
+							}
 						}
 					}
 				}

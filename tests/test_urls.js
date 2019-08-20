@@ -86,5 +86,9 @@ var test_urls = [
   {
     "name": "Micrio",
     "url": "https://www.vangoghmuseum.nl/en/collection/s0424M1991"
-  }
+  },
+  {
+    "name": "Zoomify (openseadragon tile source)",
+    "url": "https://openseadragon.github.io/examples/tilesource-zoomify/"
+  },
 ];
