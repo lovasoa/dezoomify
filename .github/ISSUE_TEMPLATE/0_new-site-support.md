@@ -9,6 +9,7 @@ assignees: lovasoa
 
 ### Site name and desciption
 What is the name and the URL of the site you would like dezoomify to support ?
+
 Why is this site of particular interest ? The more popular the site, the more chance you have to see dezoomify supporting it someday.
 
 ### Example URLs

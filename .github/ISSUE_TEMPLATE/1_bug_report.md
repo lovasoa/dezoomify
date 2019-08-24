@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a problem that is not specific to a specific site
+about: Report a problem that is not specific to a particular site
 title: "[bug]"
 labels: bug
 assignees: lovasoa
