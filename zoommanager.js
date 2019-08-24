@@ -384,10 +384,10 @@ ZoomManager.getFile = function (url, params, callback) {
 
 		/// If the proxy failed to make the request
 		if (xhr.status === 500) {
-			var msg = "Unable to get the requested file. ";
-			if (response.error) {
-				msg += "The server responded:\n" + response.error;
-				if (response.error.match(/403 forbidden/i)) {
+			var msg = "Unable to fetch " + url;
+			if (response) {
+				msg += "\nThe server responded:\n" + response;
+				if (response.match(/403 forbidden/i)) {
 					msg += "\nSee dezoomify's wiki page about protected pages.";
 				}
 			}

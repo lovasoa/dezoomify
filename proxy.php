@@ -58,12 +58,7 @@ if (false !== $f) {
 } else {
   /// Unable to open the connection
   http_response_code(500);
-  header("Content-Type: application/json");
-  $trace = $last_error->getTrace();
-  echo json_encode(array(
-    "error" => $last_error->getMessage(),
-    "code" => $last_error->getCode(),
-    "trace" => $last_error->getTraceAsString(),
-  ));
+  header("Content-Type: text/plain");
+  echo $last_error->getMessage();
 }
 
