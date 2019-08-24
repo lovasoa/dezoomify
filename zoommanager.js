@@ -238,6 +238,7 @@ ZoomManager.readyToRender = function(data) {
 	data.totalTiles = data.totalTiles || data.nbrTilesX*data.nbrTilesY;
 	data.zoomFactor = data.zoomFactor || 2;
 	data.baseZoomLevel = data.baseZoomLevel || 0;
+	data.overlap = data.overlap || 0;
 
 	ZoomManager.status.totalTiles = data.totalTiles;
 	ZoomManager.data = data;
@@ -257,7 +258,7 @@ ZoomManager.defaultRender = function (data) {
 	function addTile(url, x, y, data) {
 		if (typeof url ==="string") {
 			if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
-			ZoomManager.addTile(url, x*data.tileSize, y*data.tileSize);
+			ZoomManager.addTile(url, x*data.tileSize-data.overlap, y*data.tileSize-data.overlap);
 		} else { // Promise
 			url.then(function(url){
 				addTile(url, x, y, data)
