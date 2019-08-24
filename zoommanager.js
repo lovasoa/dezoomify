@@ -381,6 +381,19 @@ ZoomManager.getFile = function (url, params, callback) {
 	};
 	xhr.onload = function () {
 		var response = xhr.response;
+
+		/// If the proxy failed to make the request
+		if (xhr.status === 500) {
+			var msg = "Unable to get the requested file. ";
+			if (response.error) {
+				msg += "The server responded:\n" + response.error;
+				if (response.error.match(/403 forbidden/i)) {
+					msg += "\nSee dezoomify's wiki page about protected pages.";
+				}
+			}
+			throw new Error(msg);
+		}
+
 		var cookie = xhr.getResponseHeader("X-Set-Cookie");
 		if (cookie) ZoomManager.cookies += cookie;
 		// Custom error message on invalid XML

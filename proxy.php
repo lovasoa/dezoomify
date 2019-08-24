@@ -26,7 +26,18 @@ $opts = array(
   )
 );
 $context = stream_context_create($opts);
-if (false !== ($f = fopen($url, 'r', false, $context))) {
+
+$last_error = NULL;
+
+// Save errors
+set_error_handler(function($errno, $errstr, $errfile, $errline, $errcontext) {
+  global $last_error;
+  $last_error = new ErrorException($errstr, 0, $errno, $errfile, $errline);
+});
+$f = fopen($url, 'r', false, $context);
+restore_error_handler();
+
+if (false !== $f) {
 
   // Header management
   $meta = stream_get_meta_data($f);
@@ -45,6 +56,14 @@ if (false !== ($f = fopen($url, 'r', false, $context))) {
   stream_copy_to_stream($f, fopen("php://output", 'w'));
   fclose($f);
 } else {
+  /// Unable to open the connection
   http_response_code(500);
+  header("Content-Type: application/json");
+  $trace = $last_error->getTrace();
+  echo json_encode(array(
+    "error" => $last_error->getMessage(),
+    "code" => $last_error->getCode(),
+    "trace" => $last_error->getTraceAsString(),
+  ));
 }
 
