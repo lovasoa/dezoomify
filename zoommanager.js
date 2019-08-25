@@ -65,9 +65,9 @@ Draw a tile on the canvas, at the given position.
 @param {Number} x position
 @param {Number} y position
 */
-UI.drawTile = function(tileImg, x, y) {
+UI.drawTile = function (tileImg, x, y) {
 	var r = UI.ratio, w = tileImg.width, h = tileImg.height;
-	UI.ctx.drawImage(tileImg, 
+	UI.ctx.drawImage(tileImg,
 		Math.floor(x * r),
 		Math.floor(y * r),
 		Math.ceil(w * r),
@@ -80,7 +80,7 @@ Display an error in the UI.
 
 @param {String} errmsg The error message
 */
-UI.error = function(errmsg) {
+UI.error = function (errmsg) {
 	if (errmsg) {
 		document.getElementById("errormsg").textContent = errmsg;
 	}
@@ -90,14 +90,14 @@ UI.error = function(errmsg) {
 	document.getElementById("error-img").src = error_img;
 };
 
-window.onerror = function(errmsg, source, lineno) {
+window.onerror = function (errmsg, source, lineno) {
 	UI.error(errmsg + '\n\n(' + source + ':' + lineno + ')');
 }
 
 /**
 Reset the UI to the initial state.
 */
-UI.reset = function() {
+UI.reset = function () {
 	document.getElementById("error").setAttribute("hidden", "hidden");
 	document.getElementById("status").className = "";
 	UI.canvas.width = UI.canvas.height = 0;
@@ -120,7 +120,7 @@ UI.updateProgress = function (percent, text) {
 /**
 Update UI after the image has loaded.
 */
-UI.loadEnd = function() {
+UI.loadEnd = function () {
 	var status = document.getElementById("status");
 	var a = document.createElement("a");
 	a.download = "dezoomify-result.jpg";
@@ -129,14 +129,14 @@ UI.loadEnd = function() {
 	a.className = "button";
 	try {
 		// Try to export the image
-		UI.canvas.toBlob(function(blob){
+		UI.canvas.toBlob(function (blob) {
 			var url = URL.createObjectURL(blob);
 			a.href = url;
 			a.textContent = "Save image";
 		}, "image/jpeg", 0.95);
 		status.className = "download";
 		status.appendChild(a);
-	} catch(e) {
+	} catch (e) {
 		status.className = "finished";
 	}
 };
@@ -146,14 +146,14 @@ Add a new button for a new dezoomer.
 
 @param {Object} dezoomer the dezoomer object
 */
-UI.addDezoomer = function(dezoomer) {
+UI.addDezoomer = function (dezoomer) {
 	var label = document.createElement("label")
 	var input = document.createElement("input");
 	input.type = "radio"
 	input.name = "dezoomer";
-	input.id   = "dezoomer-" + dezoomer.name;
-	label.title= dezoomer.description;
-	input.onclick = function() {
+	input.id = "dezoomer-" + dezoomer.name;
+	label.title = dezoomer.description;
+	input.onclick = function () {
 		ZoomManager.setDezoomer(dezoomer);
 	}
 	label.appendChild(input);
@@ -166,8 +166,8 @@ UI.addDezoomer = function(dezoomer) {
 
 @param {String} dezoomerName name of the dezoomer
 */
-UI.setDezoomer = function(dezoomerName) {
-	document.getElementById("dezoomer-"+dezoomerName).checked = true;
+UI.setDezoomer = function (dezoomerName) {
+	document.getElementById("dezoomer-" + dezoomerName).checked = true;
 }
 
 
@@ -227,15 +227,15 @@ ZoomManager.startTimer = function () {
 /**
 Tells that we are ready
 */
-ZoomManager.readyToRender = function(data) {
-	if (ZoomManager.data){
+ZoomManager.readyToRender = function (data) {
+	if (ZoomManager.data) {
 		console.log("Only one dezoom can be active at a time", data);
 		return;
 	}
 
 	data.nbrTilesX = data.nbrTilesX || Math.ceil(data.width / data.tileSize);
-	data.nbrTilesY = data.nbrTilesY|| Math.ceil(data.height / data.tileSize);
-	data.totalTiles = data.totalTiles || data.nbrTilesX*data.nbrTilesY;
+	data.nbrTilesY = data.nbrTilesY || Math.ceil(data.height / data.tileSize);
+	data.totalTiles = data.totalTiles || data.nbrTilesX * data.nbrTilesY;
 	data.zoomFactor = data.zoomFactor || 2;
 	data.baseZoomLevel = data.baseZoomLevel || 0;
 	data.overlap = data.overlap || 0;
@@ -253,25 +253,25 @@ ZoomManager.readyToRender = function(data) {
 
 ZoomManager.defaultRender = function (data) {
 	var zoom = data.maxZoomLevel || ZoomManager.findMaxZoom(data);
-	var x=0, y=0;
+	var x = 0, y = 0;
 
 	function addTile(url, x, y, data) {
-		if (typeof url ==="string") {
+		if (typeof url === "string") {
 			if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
-			ZoomManager.addTile(url, x*data.tileSize-data.overlap, y*data.tileSize-data.overlap);
+			ZoomManager.addTile(url, x * data.tileSize - data.overlap, y * data.tileSize - data.overlap);
 		} else { // Promise
-			url.then(function(url){
+			url.then(function (url) {
 				addTile(url, x, y, data)
 			}).catch(ZoomManager.error.bind(ZoomManager));
 		}
 	}
 
 	function nextTile() {
-		var url = ZoomManager.dezoomer.getTileURL(x,y,zoom,data);
+		var url = ZoomManager.dezoomer.getTileURL(x, y, zoom, data);
 		addTile(url, x, y, data);
 
 		x++;
-		if (x >= data.nbrTilesX) {x = 0; y++;}
+		if (x >= data.nbrTilesX) { x = 0; y++; }
 		if (y < data.nbrTilesY) ZoomManager.nextTick(nextTile);
 	}
 
@@ -283,7 +283,7 @@ ZoomManager.defaultRender = function (data) {
 Call a function, but not immediatly
 @param {Function} f - the function to call
 */
-ZoomManager.nextTick = function(f) {
+ZoomManager.nextTick = function (f) {
 	return setTimeout(f, 3);
 };
 
@@ -301,17 +301,17 @@ ZoomManager.addTile = function addTile(url, x, y, ntries) {
 	var img = new Image;
 	img.addEventListener("load", function () {
 		UI.drawTile(img, x, y);
-		ZoomManager.status.loaded ++;
+		ZoomManager.status.loaded++;
 	});
-	img.addEventListener("error", function(evt) {
+	img.addEventListener("error", function (evt) {
 		if (ntries < 5) {
 			// Maybe the server is just busy right now, or we are running on a bad connection
-			nextTime = Math.pow(10*Math.random(), ntries);
-			setTimeout(addTile, nextTime, url, x, y, ntries+1);
+			nextTime = Math.pow(10 * Math.random(), ntries);
+			setTimeout(addTile, nextTime, url, x, y, ntries + 1);
 		} else {
 			ZoomManager.error("Unable to load tile.\n" +
-												"Check that your internet connection is working " +
-												"and that you can access this url:\n" + url);
+				"Check that your internet connection is working " +
+				"and that you can access this url:\n" + url);
 		}
 	});
 	if (ZoomManager.proxy_tiles) {
@@ -327,7 +327,7 @@ ZoomManager.addTile = function addTile(url, x, y, ntries) {
 /**
 Start the dezoomifying process
 */
-ZoomManager.open = function(url) {
+ZoomManager.open = function (url) {
 	ZoomManager.init();
 	if (url.indexOf("http") !== 0) {
 		throw new Error("You must provide a valid HTTP URL.");
@@ -377,7 +377,7 @@ ZoomManager.getFile = function (url, params, callback) {
 	};
 	xhr.onerror = function (e) {
 		throw new Error("Unable to connect to the proxy server " +
-										"to get the required information.\n\nXHR error:\n" + e);
+			"to get the required information.\n\nXHR error:\n" + e);
 	};
 	xhr.onload = function () {
 		var response = xhr.response;
@@ -412,7 +412,7 @@ ZoomManager.getFile = function (url, params, callback) {
 		callback(response, xhr);
 	};
 
-	switch(type) {
+	switch (type) {
 		case "xml":
 			xhr.responseType = "document";
 			xhr.overrideMimeType("text/xml");
@@ -438,7 +438,7 @@ Decode HTML special characaters such as "&amp;", "&gt;", ...
 @param {string} str
 @return {string} decoded
 */
-ZoomManager.decodeHTMLentities = (function (){
+ZoomManager.decodeHTMLentities = (function () {
 	var dict = {
 		"&amp;": "&",
 		"&lt;": "<",
@@ -449,10 +449,10 @@ ZoomManager.decodeHTMLentities = (function (){
 	function replacer(entity) {
 		entity = entity.toLowerCase();
 		return dict[entity] ||
-					 String.fromCharCode(parseInt('0' + entity.slice(2,-1)));
+			String.fromCharCode(parseInt('0' + entity.slice(2, -1)));
 	}
 
-	return function decodeHTMLentities (text) {
+	return function decodeHTMLentities(text) {
 		return text.replace(regEx, replacer);
 	};
 })();
@@ -469,7 +469,7 @@ ZoomManager.resolveRelative = function resolveRelative(path, base) {
 	if (path.match(/\w*:\/\//)) {
 		return path;
 	}
-  // Protocol-relative URL
+	// Protocol-relative URL
 	if (path.indexOf("//") === 0) {
 		var protocol = base.match(/\w+:/) || ["http:"];
 		return protocol[0] + path;
@@ -497,11 +497,11 @@ ZoomManager.findMaxZoom = function (data) {
 	//size / zoomFactor^(maxZoomLevel - zoomlevel) = numTilesAtThisZoomLevel * tileSize
 	//For the baseZoomLevel (0 for zoomify), numTilesAtThisZoomLevel=1
 	var size = Math.max(data.width, data.height);
-	return Math.ceil(Math.log(size/data.tileSize) / Math.log(data.zoomFactor)) + (data.baseZoomLevel||0);
+	return Math.ceil(Math.log(size / data.tileSize) / Math.log(data.zoomFactor)) + (data.baseZoomLevel || 0);
 };
 
 ZoomManager.dezoomersList = {};
-ZoomManager.addDezoomer = function(dezoomer) {
+ZoomManager.addDezoomer = function (dezoomer) {
 	ZoomManager.dezoomersList[dezoomer.name] = dezoomer;
 	UI.addDezoomer(dezoomer);
 }
@@ -509,12 +509,12 @@ ZoomManager.addDezoomer = function(dezoomer) {
 /**
 Set the active dezoomer
 */
-ZoomManager.setDezoomer = function(dezoomer) {
+ZoomManager.setDezoomer = function (dezoomer) {
 	ZoomManager.dezoomer = dezoomer;
 	UI.setDezoomer(dezoomer.name);
 }
 
-ZoomManager.reset = function() {
+ZoomManager.reset = function () {
 	// This variable will store cookies set by previous requests
 	ZoomManager.setDezoomer(ZoomManager.dezoomersList["Select automatically"]);
 };
@@ -522,14 +522,14 @@ ZoomManager.reset = function() {
 /**
 Initialize the ZoomManager
 */
-ZoomManager.init = function() {
+ZoomManager.init = function () {
 	// Called before open()
 	if (!ZoomManager.cookies) ZoomManager.cookies = "";
 	if (!ZoomManager.proxy_url) ZoomManager.proxy_url = "proxy.php";
 	ZoomManager.status = {
 		"error": false,
-		"loaded" : 0,
-		"totalTiles" : 1
+		"loaded": 0,
+		"totalTiles": 1
 	};
 	UI.reset();
 };
