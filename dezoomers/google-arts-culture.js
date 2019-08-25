@@ -8,9 +8,12 @@ function findFile(baseUrl, callback) {
 		let url = matchPath[1];
 		let path = url.split('/')[3];
 		let path_noscheme = url.replace(/^\w+:/, '');
-		let reg = new RegExp(']\n,"' + path_noscheme + '","([^"]+)"', "m");
+		let reg = new RegExp(']\n,"' + path_noscheme + '",(?:"([^"]+)"|null)', "m");
 		let matchToken = text.match(reg);
-		let token = matchToken[1];
+		if (!matchToken) {
+			throw new Error("Unable to find google arts image token");
+		}
+		let token = matchToken[1] || "";
 		callback(url + "=g", { path, token });
 	});
 }
