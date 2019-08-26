@@ -1,23 +1,22 @@
 // IIIF Image API 2.1
 var iiif = (function(){
+  var urlReg = /(http[^"'\s]+\/)(?:info.json|(?:\d+,\d+,\d+,\d+|full)\/(?:\d+,(?:\d+)?|max|full)\/\d+\/(?:default|native).(?:jpg|png|tiff?))/;
+  function extractUrl(text){
+    var match = text.match(urlReg);
+    if (match) return match[1] + "info.json";
+  }
   return {
     "name" : "IIIF",
     "description": "International Image Interoperability Framework",
-    "urls" : [
-      /\/info.json$/
-    ],
-    "contents" : [
-      /https?:\/\/[^\s"']*\/info\.json/
-    ],
+    "urls" : [urlReg],
+    "contents" : [urlReg],
     "findFile" : function getInfoFile (baseUrl, callback) {
-      if (baseUrl.match(/info\.json$/)) {
-        return callback(baseUrl);
-      }
+      var url = extractUrl(baseUrl);
+      if (url) return callback(url);
+
       ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text) {
-          var infoMatch = text.match(/https?:\/\/[^\s"']*\/info\.json/);
-          if (infoMatch) {
-            return callback(infoMatch[0]);
-          }
+          var url = extractUrl(text);
+          if (url) return callback(url);
           throw new Error("No IIIF URL found.");
       });
     },
