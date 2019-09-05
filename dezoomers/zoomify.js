@@ -4,6 +4,7 @@ var zoomify = (function () { //Code isolation
 		"description": "Most commmon zoomable image format",
 		"urls": [
 			/ImageProperties\.xml$/,
+			/\/TileGroup\d+\/\d+-\d+-\d+.jpg$/,
 			/biblio\.unibe\.ch\/web-apps\/maps\/zoomify\.php/,
 			/bspe-p-pub\.paris\.fr\/MDBGED\/zoomify-BFS\.aspx/,
 			/ngv\.vic\.gov\.au\/explore\/collection\/work/,
@@ -20,9 +21,13 @@ var zoomify = (function () { //Code isolation
 			if (baseUrl.match(/ImageProperties\.xml$/)) {
 				return callback(baseUrl);
 			}
+
 			function foundZoomifyPath(zoomifyPath) {
 				return callback(zoomifyPath + "/ImageProperties.xml");
 			}
+
+			var tileUrlMatch = baseUrl.match(/.*(?=\/TileGroup\d+\/\d+-\d+-\d+.jpg$)/);
+			if (tileUrlMatch) return foundZoomifyPath(tileUrlMatch[0]);
 
 			ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath
