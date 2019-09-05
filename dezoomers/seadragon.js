@@ -8,6 +8,7 @@ var seadragon = (function () { //Code isolation
 			/polona\.pl\/item\//,
 			/bibliotheques-specialisees\.paris\.fr\/ark/,
 			/nla\.gov\.au\/nla\.obj.*\/view$/,
+			/_files\/\d+\/\d+_\d+.jpg$/,
 			/dzi$/
 		],
 		"contents" : [
@@ -44,6 +45,10 @@ var seadragon = (function () { //Code isolation
 			if (baseUrl.match(/nla\.gov\.au\/nla\.obj.*\/view$/)) {
 				return callback(baseUrl.replace(/view\/?$/, "dzi"));
 			}
+
+			// A single tile URL
+			var tileMatch = baseUrl.match(/(.*)_files\/\d+\/\d+_\d+.jpg$/);
+			if (tileMatch) return callback(tileMatch[1] + ".dzi");
 
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
 				// World digital library

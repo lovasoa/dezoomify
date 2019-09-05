@@ -91,4 +91,8 @@ var test_urls = [
     "name": "Zoomify (openseadragon tile source)",
     "url": "https://openseadragon.github.io/examples/tilesource-zoomify/"
   },
+  {
+    "name": "DeepZoom (from tile URL)",
+    "url": "https://digitalcollections.tcd.ie/content/14/pages/MS58_001r/image_files/10/1_0.jpg"
+  }
 ];
