@@ -6,14 +6,13 @@ function findFile(baseUrl, callback) {
 			/<meta property="og:image" content="([^"]+)">/
 		);
 		let url = matchPath[1];
-		let path = url.split('/')[3];
-		let path_noscheme = url.replace(/^\w+:/, '');
-		let reg = new RegExp(']\n,"' + path_noscheme + '",(?:"([^"]+)"|null)', "m");
+		let reg = /]\n,"\/\/[^"\/]+\/([^"\/]+)",(?:"([^"]+)"|null)/m;
 		let matchToken = text.match(reg);
 		if (!matchToken) {
 			throw new Error("Unable to find google arts image token");
 		}
-		let token = matchToken[1] || "";
+		let path = matchToken[1];
+		let token = matchToken[2] || "";
 		callback(url + "=g", { path, token });
 	});
 }
