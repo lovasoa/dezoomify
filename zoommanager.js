@@ -268,7 +268,14 @@ ZoomManager.defaultRender = function (data) {
 
 	function nextTile() {
 		var url = ZoomManager.dezoomer.getTileURL(x, y, zoom, data);
-		addTile(url, x, y, data);
+		if (typeof Promise !== "undefined") {
+			var x0 = x, y0 = y;
+			Promise.resolve(url)
+				.then(function (url) { addTile(url, x0, y0, data) })
+				.catch(ZoomManager.error);
+		} else {
+			addTile(url, x, y, data);
+		}
 
 		x++;
 		if (x >= data.nbrTilesX) { x = 0; y++; }
