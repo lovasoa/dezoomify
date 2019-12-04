@@ -98,5 +98,9 @@ var test_urls = [
   {
     "name": "DeepZoom (from tile URL)",
     "url": "https://digitalcollections.tcd.ie/content/14/pages/MS58_001r/image_files/10/1_0.jpg"
+  },
+  {
+    "name": "Hungaricana",
+    "url": "https://gallery.hungaricana.hu/en/SzerencsKepeslap/10338/?list=eyJxdWVyeSI6ICJib3JkZXIifQ&img=0"
   }
 ];
