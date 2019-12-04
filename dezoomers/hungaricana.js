@@ -28,11 +28,20 @@ var hungaricana = (function () {
       ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text) {
         var layerUrlMatch = text.match(/layer_?[uU]rl["']?\s*:\s*['"]([^'"]*)/);
         if (!layerUrlMatch) throw new Error("Unable to find the layer base url");
-        var layerFileMatch = text.match(/(?:files["']?|images["']?|imagepath)\s*[\:=][\s\[]*["']([^'"]*)/);
-        if (!layerFileMatch) throw new Error("Unable to find the layer file name");
+        var layerFileArrayMatch = text.match(/(?:files|images)["']?\s*\:\s*(\[.*?\])/);
+        try {
+          var layerFileArray = JSON.parse(layerFileArrayMatch[1]);
+          var idxMatch = baseUrl.match(/(?:img|pg)=(\d+)/);
+          var idx = idxMatch ? parseInt(idxMatch[1]) : 0;
+          var layerFile = layerFileArray[idx];
+        } catch (e) {
+          var layerFileMatch = text.match(/imagepath\s*=\s*["']([^"']*)/);
+          if (!layerFileMatch) throw new Error("Unable to find the layer file name");
+          var layerFile = layerFileMatch[1];
+        }
         var layerPathMatch = text.match(/\Wpath["']?\s*:\s*["']([^"']*)/);
-        var layerPath = layerPathMatch && layerPathMatch[1] || '';
-        return callback(layerUrlMatch[1] + layerPath + layerFileMatch[1]);
+        var layerPath = layerPathMatch ? layerPathMatch[1] : '';
+        return callback(layerUrlMatch[1] + layerPath + layerFile);
       });
     },
     open: function (url) {
