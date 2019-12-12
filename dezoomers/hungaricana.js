@@ -28,20 +28,31 @@ var hungaricana = (function () {
       ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text) {
         var layerUrlMatch = text.match(/layer_?[uU]rl["']?\s*:\s*['"]([^'"]*)/);
         if (!layerUrlMatch) throw new Error("Unable to find the layer base url");
-        var layerFileArrayMatch = text.match(/(?:files|images)["']?\s*\:\s*(\[.*?\])/);
-        try {
-          var layerFileArray = JSON.parse(layerFileArrayMatch[1]);
-          var idxMatch = baseUrl.match(/(?:img|pg)=(\d+)/);
-          var idx = idxMatch ? parseInt(idxMatch[1]) : 0;
-          var layerFile = layerFileArray[idx];
-        } catch (e) {
-          var layerFileMatch = text.match(/imagepath\s*=\s*["']([^"']*)/);
-          if (!layerFileMatch) throw new Error("Unable to find the layer file name");
-          var layerFile = layerFileMatch[1];
-        }
+
         var layerPathMatch = text.match(/\Wpath["']?\s*:\s*["']([^"']*)/);
         var layerPath = layerPathMatch ? layerPathMatch[1] : '';
-        return callback(layerUrlMatch[1] + layerPath + layerFile);
+
+        function foundLayerFile(layerFile) {
+          return callback(layerUrlMatch[1] + layerPath + layerFile);
+        }
+
+        function foundLayerFileJson(layerFileJson) {
+          var layerFileArray = JSON.parse(layerFileJson);
+          var idxMatch = baseUrl.match(/(?:img|pg)=(\d+)/);
+          var idx = idxMatch ? parseInt(idxMatch[1]) : 0;
+          return foundLayerFile(layerFileArray[idx]);
+        }
+
+        var layerFileMatch = text.match(/imagepath["']?\s*=\s*["']([^"']*)/);
+        if (layerFileMatch) return foundLayerFile(layerFileMatch[1]);
+
+        var layerFileArrayMatch = text.match(/(?:files|images)["']?\s*\:\s*(\[.*?\])/);
+        if (layerFileArrayMatch) return foundLayerFileJson(layerFileArrayMatch[1]);
+
+        var fileUrlMatch = text.match(/files_url["']?\s*\:\s*['"]([^'"]*)/);
+        if (fileUrlMatch) return ZoomManager.getFile(fileUrlMatch[1], { type: 'text' }, foundLayerFileJson);
+
+        throw new Error("Unable to find the layer file name");
       });
     },
     open: function (url) {
