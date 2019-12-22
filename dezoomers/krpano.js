@@ -8,7 +8,8 @@ var seadragon = (function () { //Code isolation
 			/krpano\.com/
 		],
 		"contents" : [
-			/embedpano\(\s*\{/
+			/embedpano\(\s*\{/,
+			/krpano/
 		],
 		"findFile" : function getDZIFile (baseUrl, callback) {
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
