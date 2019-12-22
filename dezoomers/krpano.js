@@ -63,6 +63,8 @@ var seadragon = (function () { //Code isolation
 					data.height = maxsize[1];
 					data.origin = firstUrl;
 					data.url = maxlevel.firstElementChild.getAttribute("url");
+					data.nbrTilesX = Math.round(data.width / data.tileSize);
+					data.nbrTilesY = Math.round(data.height / data.tileSize);
 					ZoomManager.readyToRender(data);
 				});
 			}
