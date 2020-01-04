@@ -1,5 +1,5 @@
 "use strict";
-var jsdom = require("jsdom/lib/old-api.js");
+var jsdom = require("jsdom");
 var Canvas = require("canvas");
 var request = require("request");
 var fs = require("fs");
@@ -10,11 +10,16 @@ var proxy_server = require("./proxy.js").listen(PROXY_PORT);
 
 var DEZOOMIFY_PATH = path.dirname(__dirname);
 
-var dezoomdir = path.join(DEZOOMIFY_PATH, "dezoomers");
-var scripts = fs.readdirSync(dezoomdir).map(s => "dezoomers/"+s);
-scripts.unshift("zoommanager.js");
+if (process.argv.length < 3) {
+  console.error("Usage: %s URL [filename.jpg]", process.argv[1]);
+  process.exit(1);
+} else {
+  var target_url = process.argv[2];
+  var target_filename = process.argv[3] || 'dezoomed.jpg';
+  console.log("Dezooming '%s' and saving it to '%s'...", target_url, target_filename);
+}
 
-var virtualConsole = jsdom.createVirtualConsole().sendTo(console);
+var virtualConsole = new jsdom.VirtualConsole().sendTo(console);
 
 function onload(window) {
   var ZoomManager = window.ZoomManager, UI = window.UI;
@@ -23,8 +28,9 @@ function onload(window) {
     proxy_server.close();
   }
   UI.loadEnd = function loadEnd() {
-    var out = fs.createWriteStream(process.argv[3]);
+    var out = fs.createWriteStream(target_filename);
     UI.canvas.jpegStream().pipe(out);
+    console.log("Saved the image to " + target_filename);
     proxy_server.close();
   }
   UI.updateProgress = function(progress, text) {
@@ -53,17 +59,13 @@ function onload(window) {
     });
   };
   ZoomManager.proxy_url = "http://127.0.0.1:"+PROXY_PORT;
-  ZoomManager.open(process.argv[2]);
+  ZoomManager.open(target_url);
 }
 
-if (process.argv.length < 3) {
-  console.error("Usage: %s [URL] filename.jpg", process.argv[1]);
-  process.exit(1);
-} else {
-  jsdom.env({
-    file: path.join(DEZOOMIFY_PATH, "dezoomify.html"),
-    scripts,
-    virtualConsole,
-    onload
-  });
-}
+jsdom.JSDOM.fromFile(path.join(DEZOOMIFY_PATH, "dezoomify.html"), {
+  virtualConsole,
+  runScripts: "dangerously",
+  resources: "usable",
+}).then(function(dom){
+  dom.window.onload = onload.bind(null, dom.window)
+});
