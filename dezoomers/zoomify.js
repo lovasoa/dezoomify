@@ -3,7 +3,7 @@ var zoomify = (function () { //Code isolation
 		"name": "Zoomify",
 		"description": "Most commmon zoomable image format",
 		"urls": [
-			/ImageProperties\.xml$/,
+			/ImageProperties\.xml(\?.*)?$/,
 			/\/TileGroup\d+\/\d+-\d+-\d+.jpg$/,
 			/biblio\.unibe\.ch\/web-apps\/maps\/zoomify\.php/,
 			/bspe-p-pub\.paris\.fr\/MDBGED\/zoomify-BFS\.aspx/,
@@ -18,7 +18,7 @@ var zoomify = (function () { //Code isolation
 			/type['"]?\s*:\s*['"]zoomifytileservice/
 		],
 		"findFile": function getZoomifyPath(baseUrl, callback) {
-			if (baseUrl.match(/ImageProperties\.xml$/)) {
+			if (baseUrl.match(/ImageProperties\.xml(\?.*)?$/)) {
 				return callback(baseUrl);
 			}
 
