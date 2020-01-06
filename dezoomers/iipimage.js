@@ -3,7 +3,7 @@ var iipimage = (function(){
     "name" : "IIPImage",
     "description": "IIPImage image server",
     "urls" : [
-      /\?FIF=/,
+      /^((?!topview).)*\?FIF=.*$/, // Topview uses FIF= but is not compatible with iipimage
       /nationalgallery\.org\.uk\/paintings/
     ],
     "contents" : [

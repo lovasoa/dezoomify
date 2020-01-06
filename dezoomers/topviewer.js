@@ -6,7 +6,7 @@ var topviewer = (function(){
 		"urls": [
 			/memorix/,
 			/rhcrijnstreek\.nl/,
-			/topviewjson/
+			/topview\.?json/,
 		],
 		"contents": [
 			memorixThumbnailRegexp,
