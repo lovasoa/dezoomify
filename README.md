@@ -1,5 +1,7 @@
 # Dezoomify
 
+![Dezoomify cover image](./cover.png)
+
 ## Download zoomable images
 
 _Dezoomify_ downloads images from online zoomable image interfaces.
