@@ -1,6 +1,6 @@
 # Dezoomify
 
-![Dezoomify cover image](./cover.png)
+[![Dezoomify cover image](./cover.png)](https://ophir.alwaysdata.net/dezoomify/dezoomify.html)
 
 ## Download zoomable images
 
