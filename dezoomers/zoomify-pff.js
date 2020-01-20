@@ -12,8 +12,7 @@ var zoomifyPFF = (function () { //Code isolation
 		"findFile" : function getZoomifyPath (baseUrl, callback) {
 			// Test if the zoomifyserver image was given directly
 			if (baseUrl.match(/file=.*&requestType=/)) {
-				var url = baseUrl.match(/^(.*)&requestType/)[1];
-				return callback(url);
+				return callback(baseUrl.replace(/&(begin|end|head|requestType)=\d+/g, ''));
 			}
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function (text, xhr) {
 				// for the zoomify flash player, the path is in the zoomifyImagePath

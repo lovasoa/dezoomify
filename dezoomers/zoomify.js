@@ -23,7 +23,8 @@ var zoomify = (function () { //Code isolation
 			}
 
 			function foundZoomifyPath(zoomifyPath) {
-				return callback(zoomifyPath + "/ImageProperties.xml");
+				var sep = zoomifyPath[zoomifyPath.length - 1] == '/' ? '' : '/';
+				return callback(zoomifyPath + sep + "ImageProperties.xml");
 			}
 
 			var tileUrlMatch = baseUrl.match(/.*(?=\/TileGroup\d+\/\d+-\d+-\d+.jpg$)/);
@@ -90,6 +91,12 @@ var zoomify = (function () { //Code isolation
 					var url = ZoomManager.resolveRelative(iframeMatch[1], baseUrl);
 					return getZoomifyPath(url, callback);
 				}
+
+				var eteMatch = text.match(/<url>(.*)<\/url>/);
+				if (eteMatch) {
+					return foundZoomifyPath(eteMatch[1]);
+				}
+
 				// If no zoomify path was found in the page, then assume that
 				// the url that was given is the path itself
 				return foundZoomifyPath(baseUrl);
