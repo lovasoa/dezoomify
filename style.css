@@ -154,3 +154,23 @@ input#url:focus {
 div[hidden] {
 	display: none;
 }
+
+#extension-ad {
+	position: absolute;
+	bottom: 20px;
+	right: 20px;
+	font-size: .8em;
+	width: 300px;
+	background:linear-gradient(rgb(227, 222, 222),rgb(236, 231, 231));
+	box-shadow:0 0 8px rgba(200,200,255,0.5);
+	border-radius:3px;
+	color:black;
+	border: 1px solid #a19797;
+	padding: 5px;
+	animation: slidein 1s;
+}
+
+@keyframes slidein {
+  from { right: 2500px; }
+  to { right: 20px; }
+}
