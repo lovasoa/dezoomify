@@ -156,7 +156,7 @@ div[hidden] {
 }
 
 #extension-ad {
-	position: absolute;
+	position: fixed;
 	bottom: 20px;
 	right: 20px;
 	font-size: .8em;
