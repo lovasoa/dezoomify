@@ -2,17 +2,12 @@ import { compute_signed_path, decrypt_image } from './google-arts-culture-crypto
 
 function findFile(baseUrl, callback) {
 	ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text, xhr) {
-		let matchPath = text.match(
-			/<meta property="og:image" content="([^"]+)">/
-		);
-		let url = matchPath[1];
-		let reg = /]\n,"\/\/[^"\/]+\/([^"\/]+)",(?:"([^"]+)"|null)/m;
-		let matchToken = text.match(reg);
-		if (!matchToken) {
-			throw new Error("Unable to find google arts image token");
-		}
-		let path = matchToken[1];
-		let token = matchToken[2] || "";
+		let reg = /]\n,"(\/\/[^"/]+\/[^"/]+)",(?:"([^"]+)"|null)/m;
+		let matches = text.match(reg);
+		if (!matches) throw new Error("Unable to find google arts image metadata URL");
+		let url = 'https:' + matches[1]
+		let path = new URL(url).pathname.slice(1);
+		let token = matches[2] || "";
 		callback(url + "=g", { path, token });
 	});
 }
@@ -66,6 +61,7 @@ ZoomManager.addDezoomer({
 	"description": "Zommable images from artsandculture.google.com",
 	"urls": [
 		/artsandculture\.google\.com/,
+		/\/g.co\/arts\//
 	],
 	"contents": [],
 	findFile, open, getTileURL
