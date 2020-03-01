@@ -1,16 +1,35 @@
 // IIIF Image API 2.1
 var iiif = (function () {
-  var urlReg = /(http[^"'\s]+\/)(?:info.json|(?:\d+,\d+,\d+,\d+|full)\/(?:\d+,(?:\d+)?|max|full)\/\d+\/(?:default|native).(?:jpg|png|tiff?))/;
+  var urlReg = new RegExp( // IIIF API image URL
+    "(https?://[^\"'\\s]+)" + // base
+    "(?:/info\\.json|" +
+    "/\\^?(?:full|square|(?:pct:)?\\d+,\\d+,\\d+,\\d+)" + // region
+    "/(?:full|max|\\d+,|,\\d+|pct:\\d+|!?\\d+,\\d+)" + // size
+    "/!?[1-3]?[0-9]?[0-9]" + // rotation
+    "/(?:color|gray|bitonal|default|native)" + // quality
+    "\\.(?:jpe?g|tiff?|png|gif|jp2|pdf|webp)" + // format
+    ")"
+  );
+  var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
   function extractUrl(text) {
     var match = text.match(urlReg);
-    if (match) return match[1] + "info.json";
+    if (match) return match[1] + "/info.json";
   }
   return {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
-    "urls": [urlReg],
+    "urls": [urlReg, gallicaReg],
     "contents": [urlReg],
     "findFile": function getInfoFile(baseUrl, callback) {
+
+      var gallicaMatch = baseUrl.match(gallicaReg);
+      if (gallicaMatch) {
+        baseUrl = 'https://gallica.bnf.fr/iiif/ark:/' +
+          gallicaMatch[1] + '/' +
+          (gallicaMatch[2] || 'f1') +
+          '/info.json';
+      }
+
       var url = extractUrl(baseUrl);
       if (url) return callback(url);
 
