@@ -4,13 +4,11 @@
 
 ## Download zoomable images
 
-_Dezoomify_ downloads images from online zoomable image interfaces.
+_Dezoomify_ extracts full high-resolution images from online zoomable image interfaces.
 It works with several zoomable image tools, from several different websites (see the list below).
+It takes as input the URL of a a zoomable image and gives as output an image that you can download (by right-clicking on it, and choosing *Save Image as...*).
 
-#### Input
-The URL of a webpage containing a zoomable image viewer.
-#### Output
-An image that you can download (by right-clicking on it, and choosing *Save Image as...*).
+In order to find the URL of the zoomable that dezoomify requires, you can install the [**dezoomify browser extension**](https://github.com/lovasoa/dezoomify-extension/#dezoomify-extension). Alternatively, you can also try to [find the zoomable image URL yourself](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ).
 
 ## Try it
 If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [**unzoomify an image**](https://ophir.alwaysdata.net/dezoomify/dezoomify.html)
@@ -51,6 +49,22 @@ The following formats are supported by dezoomify:
  * [Visual Library Server](https://www.semantics.de/visual_library/), by semantics
  * [Micr.io](https://micr.io/)'s non-IIIF format, used on [vangoghmuseum.nl](https://www.vangoghmuseum.nl/en/explore-the-collection)
  * [Hungaricana](https://hungaricana.hu/en/) a format found only on the **Hungarian Cultural Heritage Portal**, that hosts half a million images.
+
+The most prominant supported websites include :
+- Google Arts & Culture (artsandculture.google.com)
+- Gallica (gallica.bnf.fr)
+- The British Library (bl.uk)
+- National Gallery of Art (nga.gov)
+- Hungaricana (hungaricana.hu)
+- National Library of Australia (nla.gov.au)
+- National Library of Israel (nli.org.il)
+- National Galleries Of Scotland (nationalgalleries.org)
+- National Library of Scotland (nls.uk)
+- Harvard Library (library.harvard.edu)
+- heidICON, Heidelberg University (heidicon.ub.uni-heidelberg.de)
+- Geographicus (geographicus.com)
+- Archivio di Stato di Trieste (archiviodistatotrieste.it)
+
 
 Dezoomify also has a
 [generic dezoomer](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ#the-page-uses-an-image-viewer-that-is-not-supported-by-dezoomify-is-there-still-a-chance-).
