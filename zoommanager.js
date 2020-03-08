@@ -130,6 +130,10 @@ UI.loadEnd = function () {
 	try {
 		// Try to export the image
 		UI.canvas.toBlob(function (blob) {
+			if (!(blob instanceof Blob)) {
+				console.error("Unable to access the canvas image data, got an unexpected value", blob);
+				status.className = "finished";
+			}
 			var url = URL.createObjectURL(blob);
 			a.href = url;
 			a.textContent = "Save image";
