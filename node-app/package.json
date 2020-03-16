@@ -5,7 +5,7 @@
   "main": "dezoomify-node.js",
   "dependencies": {
     "canvas": "^2.6.1",
-    "jsdom": "^15.2.1"
+    "jsdom": "^16.2.1"
   },
   "devDependencies": {},
   "scripts": {
