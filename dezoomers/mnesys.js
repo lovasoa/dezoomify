@@ -39,26 +39,29 @@ var mnesys = (function () { //Code isolation
             ZoomManager.getFile(url, { type: "xml" }, function (doc, xhr) {
                 var layers = doc.getElementsByTagName("layer");
                 if (layers.length === 0) throw new Error("No layer in image");
-                var bestLayer = layers[0], bestZ = parseInt(bestLayer.getAttribute("z"));
+                var bestLayerIdx = 0, bestZ = parseInt(layers[0].getAttribute("z"));
                 for (var i = 0; i < layers.length; i++) {
                     var layer = layers[i];
                     var z = parseInt(layer.getAttribute("z"));
                     if (z > bestZ) {
+                        bestLayerIdx = i;
                         bestZ = z;
-                        bestLayer = layer;
                     }
                 }
-                var data = {};
-                data.width = parseInt(bestLayer.getAttribute("w"));
-                data.height = parseInt(bestLayer.getAttribute("h"));
-                data.tileSize = parseInt(bestLayer.getAttribute("t"));
-                data.origin = url;
+                var bestLayer = layers[bestLayerIdx];
+                var data = {
+                    width: parseInt(bestLayer.getAttribute("w")),
+                    height: parseInt(bestLayer.getAttribute("h")),
+                    tileSize: parseInt(bestLayer.getAttribute("t")),
+                    origin: url,
+                    maxZoomLevel: bestLayerIdx,
+                };
                 ZoomManager.readyToRender(data);
             });
         },
         "getTileURL": function (x, y, z, data) {
             var index = x + y * data.nbrTilesX;
-            return (z - 1) + "_" + index + ".jpg";
+            return z + "_" + index + ".jpg";
         }
     };
 })();
