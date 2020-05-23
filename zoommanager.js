@@ -81,13 +81,26 @@ Display an error in the UI.
 @param {String} errmsg The error message
 */
 UI.error = function (errmsg) {
-	if (errmsg) {
-		document.getElementById("errormsg").textContent = errmsg;
-	}
 	document.getElementById("percent").textContent = "";
 	document.getElementById("error").removeAttribute("hidden");
 	var error_img = "error.svg?error=" + encodeURIComponent(errmsg);
 	document.getElementById("error-img").src = error_img;
+	if (errmsg) {
+		document.getElementById("errormsg").textContent = errmsg;
+		var url = new URL(document.getElementById("url").value);
+		document.getElementById("gh-search").href =
+			"https://github.com/lovasoa/dezoomify/issues?q=" +
+			encodeURIComponent(url.host);
+		document.getElementById("gh-open-issue").href =
+			"https://github.com/lovasoa/dezoomify/issues/new" +
+			"?labels=" + "new%20site%20support" +
+			"&title=" + encodeURIComponent(url.host) +
+			"&body=" + encodeURIComponent(
+				"Hello everyone,\n\n I am having issues when trying to download " + url +
+				"\n\nDezoomify reports:\n\n```\n" + errmsg + "\n```\n" +
+				"I don't understand this message. Can someone please help me ?"
+			);
+	}
 };
 
 window.onerror = function (errmsg, source, lineno) {
