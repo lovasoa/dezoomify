@@ -97,7 +97,7 @@ var test_urls = [
   },
   {
     "name": "DeepZoom (from tile URL)",
-    "url": "https://digitalcollections.tcd.ie/content/14/pages/MS58_001r/image_files/10/1_0.jpg"
+    "url": "https://storage.googleapis.com/raremaps/img/dzi/img_46087_files/0/0_0.jpg"
   },
   {
     "name": "Hungaricana",
