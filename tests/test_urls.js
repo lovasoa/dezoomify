@@ -36,6 +36,10 @@ var test_urls = [
     "url": "http://krpano.com/panos/andreabiffi/galleria_04.xml"
   },
   {
+    "name": "krpano multires",
+    "url": "https://files.andreiduman.com/Zebra1/pano.xml"
+  },
+  {
     "name": "polona.pl",
     "url": "https://polona.pl/item/9388882/0/"
   },
