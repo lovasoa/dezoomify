@@ -2,8 +2,9 @@ var generic_viewer = (function () {
   var coordinateRegex = /\{\{([XY])(?::(.)(\d+))?\}\}/gi;
   function fillTemplate(tpl, coords) {
     return tpl.replace(coordinateRegex, function (base, coord, padding, widthStr) {
+      var width = widthStr | 0;
+      var padding = padding || "";
       var n = coords[coord.toLowerCase()];
-      var width = parseInt(widthStr);
       var result = n.toString();
       while (result.length < width) {
         result = padding + result;
