@@ -30,6 +30,7 @@ var seadragon = (function () { //Code isolation
 					.replace(/ref=([^&]*)/, "view=$1.xml"));
 			}
 
+			// bibliothèques specialisées de la ville de Paris
 			var parisMatch = baseUrl.match(/bibliotheques-specialisees.paris.fr\/ark:((?:\/\w+){3})(.*)/);
 			if (parisMatch) {
 				baseUrl = "https://bibliotheques-specialisees.paris.fr/in/imageReader.xhtml" +
@@ -68,12 +69,6 @@ var seadragon = (function () { //Code isolation
 					var m = text.match(/"([^"]+\.dzi)"/i);
 					var url = m[1].replace("{group}", group).replace("{index}", index);
 					return callback(url);
-				}
-
-				// Zoom.it
-				var zoomitMatch = text.match(/zoom(?:\.it|hub.net)\/(.*?)\.js/);
-				if (zoomitMatch) {
-					return callback("http://content.zoomhub.net/dzis/" + zoomitMatch[1] + ".dzi");
 				}
 
 				// Any url ending with .xml or .dzi

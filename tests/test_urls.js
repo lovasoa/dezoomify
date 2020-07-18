@@ -24,16 +24,16 @@ var test_urls = [
     "url": "https://wakpp-db.vumop.cz/WAKPP/viewer.php?source=/zpravy/VY/JIH/_017_JZD_Dobronin_002.pff"
   },
   {
-    "name": "zoom.it",
-    "url": "http://zoom.it/3fvN"
-  },
-  {
     "name": "TopViewer",
     "url": "https://rkd.nl/en/explore/images/record?filters%5Bproject%5D%5B0%5D=The+Rembrandt+Database&query=&sort%5Bsort_title%5D=asc&start=152"
   },
   {
     "name": "krpano",
     "url": "http://krpano.com/panos/andreabiffi/galleria_04.xml"
+  },
+  {
+    "name": "krpano multires",
+    "url": "https://files.andreiduman.com/Zebra1/pano.xml"
   },
   {
     "name": "polona.pl",
