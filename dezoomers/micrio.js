@@ -3,28 +3,44 @@ var micrio = (function () {
     name: 'Micrio',
     description: 'Micrio (used by vangoghmuseum.nl)',
     urls: [
-      /vangoghmuseum-assetserver/,
-      /vangoghmuseum\.nl/
+      /rijksmuseum.nl\/en\/rijksstudio/,
+      /\/api\/getTilesInfo\?object_id=/
     ],
     contents: [
-      /data-role="micrio"/
+      /data-role="micrio"/,
+      /dataSourcePath\s*:\s*".*"/
     ],
     findFile: function getInfoFile(baseUrl, callback) {
-      if (baseUrl.match(/vangoghmuseum-assetserver/)) {
-        return callback(baseUrl);
-      }
+      if (baseUrl.match(/\/api\/getTilesInfo\?object_id=/)) return callback(baseUrl);
+
       ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text, xhr) {
         var idMatch = text.match(/data-id="([^"]+)"/);
         var bpMatch = text.match(/data-base-path="([^"]+)"/);
         if (idMatch && bpMatch) {
           return callback(bpMatch[1] + idMatch[1]);
         }
+        var dataSourceMatch = text.match(/dataSourcePath["']?\s*:\s*["']([^'"]*)['"]/);
+        if (dataSourceMatch) {
+          var metaInfUrl = ZoomManager.resolveRelative(dataSourceMatch[1], baseUrl);
+          return ZoomManager.getFile(metaInfUrl, { type: "json" }, function (metaInf, xhr) {
+            var objectNumber = baseUrl.match("#/([^,]*)")[1];
+            var items = metaInf.setItems;
+            for (var i = 0; i < items.length; i++) {
+              if (items[i].ObjectNumber === objectNumber) {
+                return callback(items[i].TilingUrl);
+              }
+            }
+            return callback(items[0].TilingUrl);
+          });
+        }
         return callback(baseUrl);
       });
     },
     open: function (url) {
       ZoomManager.getFile(url, { type: 'json' }, function (doc, xhr) {
-        var level = doc.levels[0];
+        var level = doc.levels.reduce(function (prev, cur) {
+          return prev.width > cur.width || prev.height > cur.height ? prev : cur;
+        }, { width: 0, height: 0 });
         ZoomManager.readyToRender({
           width: level.width,
           height: level.height,
