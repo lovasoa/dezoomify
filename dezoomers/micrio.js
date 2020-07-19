@@ -21,9 +21,16 @@ var micrio = (function () {
         }
         var dataSourceMatch = text.match(/dataSourcePath["']?\s*:\s*["']([^'"]*)['"]/);
         if (dataSourceMatch) {
-          var metaInfUrl = ZoomManager.resolveRelative(dataSourceMatch[1], baseUrl);
+          var imageMatch = baseUrl.match(/#\/([^,]*)(?:,(\d+))?/);
+          var objectNumber = imageMatch ? imageMatch[1] : "";
+          var offset = imageMatch ? imageMatch[2] : "";
+          var dataQueryMatch = text.match(/dataSourceQuery["']?\s*:\s*("[^"]*")/);
+          var metaInfPath = dataSourceMatch[1] + ((dataQueryMatch) ? JSON.parse(dataQueryMatch[1]) : "");
+          if (offset) {
+            metaInfPath = metaInfPath.replace(/offset=\d+/, "offset=" + offset);
+          }
+          var metaInfUrl = ZoomManager.resolveRelative(metaInfPath, baseUrl);
           return ZoomManager.getFile(metaInfUrl, { type: "json" }, function (metaInf, xhr) {
-            var objectNumber = baseUrl.match("#/([^,]*)")[1];
             var items = metaInf.setItems;
             for (var i = 0; i < items.length; i++) {
               if (items[i].ObjectNumber === objectNumber) {
