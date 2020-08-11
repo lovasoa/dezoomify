@@ -85,7 +85,7 @@ var test_urls = [
   },
   {
     "name": "Micrio",
-    "url": "https://www.vangoghmuseum.nl/en/collection/s0424M1991"
+    "url": "https://www.rijksmuseum.nl/en/my/collections/2345391--rob-verhaar/rembrandt-s-schilderijen/objecten#/SK-A-5033,1"
   },
   {
     "name": "Zoomify (openseadragon tile source)",

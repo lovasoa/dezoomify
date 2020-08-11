@@ -30,6 +30,16 @@ var seadragon = (function () { //Code isolation
 					.replace(/ref=([^&]*)/, "view=$1.xml"));
 			}
 
+			// bibliothèques specialisées de la ville de Paris
+			var parisMatch = baseUrl.match(/bibliotheques-specialisees.paris.fr\/ark:((?:\/\w+){3})(.*)/);
+			if (parisMatch) {
+				baseUrl = "https://bibliotheques-specialisees.paris.fr/in/imageReader.xhtml" +
+					"?id=ark:" + parisMatch[1] +
+					"&updateUrl=updateUrl1653" +
+					"&ark=" + parisMatch[1] + parisMatch[2] +
+					"&selectedTab=otherdocs";
+			}
+
 			// Polona.pl
 			var polonaMatch = baseUrl.match(/polona.pl\/item\/(\d+)\/(\d+)/);
 			if (polonaMatch) {
@@ -60,10 +70,6 @@ var seadragon = (function () { //Code isolation
 					var url = m[1].replace("{group}", group).replace("{index}", index);
 					return callback(url);
 				}
-
-				// bibliothèques specialisées de la ville de Paris
-				var parisMatch = text.match(/deepZoomManifest['"]\s*:\s*["']([^"']*)/);
-				if (parisMatch) return callback(parisMatch[1]);
 
 				// Any url ending with .xml or .dzi
 				var matchPath = text.match(/[^"'()<>]+\.(?:xml|dzi)/i);
