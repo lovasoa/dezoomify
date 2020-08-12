@@ -32,7 +32,7 @@ The following formats are supported by dezoomify:
    * The [World Digital Library (WDL)](http://www.wdl.org/fr/)
    * [Polona](http://polona.pl/), the Polish Digital National Library
    * [BALaT](http://balat.kikirpa.be/), Belgian Art Links and Tools
- * [Google Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums
+ * [Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums. [More info about the controversy around this dezoomer.](https://github.com/lovasoa/dezoomify/issues/435).
  * [IIIF](https://iiif.io): The International Image Interoperability Framework, used on many websites, including:
    * [Gallica](https://gallica.bnf.fr/), the numeric library of the French national library
    * [Bavarikon](https://www.bavarikon.de/)
@@ -51,7 +51,7 @@ The following formats are supported by dezoomify:
  * [Hungaricana](https://hungaricana.hu/en/) a format found only on the **Hungarian Cultural Heritage Portal**, that hosts half a million images.
 
 The most prominant supported websites include :
-- Google Arts & Culture (artsandculture.google.com)
+- Arts & Culture (artsandculture.google.com)
 - Gallica (gallica.bnf.fr)
 - The British Library (bl.uk)
 - National Gallery of Art (nga.gov)
