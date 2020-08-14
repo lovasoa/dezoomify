@@ -1,5 +1,5 @@
-(function() {
-  document.getElementById("urlform").onsubmit = function(evt) {
+(function () {
+  document.getElementById("urlform").onsubmit = function (evt) {
     evt.preventDefault();
     var url = document.getElementById("url").value;
     window.location.hash = url;
@@ -12,4 +12,8 @@
   if (startURL) {
     document.getElementById("url").value = startURL;
   }
+
+  document.querySelector("#popup > button[title=Close]").addEventListener("click", function () {
+    document.getElementById("popup").style.bottom = "-500px";
+  })
 })();

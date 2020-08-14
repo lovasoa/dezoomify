@@ -155,7 +155,7 @@ div[hidden] {
 	display: none;
 }
 
-#extension-ad {
+#popup {
 	position: fixed;
 	bottom: 20px;
 	right: 20px;
@@ -168,9 +168,16 @@ div[hidden] {
 	border: 1px solid #a19797;
 	padding: 5px;
 	animation: slidein 1s;
+	transition: 1s;
+}
+
+#popup > button[title=Close] {
+	position: absolute;
+	right: 3px;
+	padding: 0;
 }
 
 @keyframes slidein {
-  from { right: 2500px; }
-  to { right: 20px; }
+  from { bottom: -500px; }
+  to { bottom: 20px; }
 }
