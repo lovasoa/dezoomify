@@ -175,6 +175,9 @@ div[hidden] {
 	position: absolute;
 	right: 3px;
 	padding: 0;
+	border: 0;
+	width: 17px;
+	height: 17px;
 }
 
 @keyframes slidein {
