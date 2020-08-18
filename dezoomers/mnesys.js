@@ -11,6 +11,7 @@ var mnesys = (function () { //Code isolation
             /flashVars.*playlist=.*\.xml/
         ],
         "findFile": function getZoomifyPath(baseUrl, callback) {
+            var pagenum = parseInt((baseUrl.match(/img_num=(\d+)/) || [0, 0])[1]);
             if (baseUrl.match(/\/p\.xml(\?.*)?$/)) {
                 return callback(baseUrl);
             }
@@ -20,7 +21,6 @@ var mnesys = (function () { //Code isolation
                     if (!playlist) throw new Error("Invalid mnesys playlist");
                     var base = playlist.getAttribute("host") + playlist.getAttribute("basepath");
                     var pages = playlist.getElementsByTagName("a");
-                    var pagenum = parseInt((baseUrl.match(/img_num=(\d+)/) || [0, 0])[1]);
                     var page = pages[pagenum];
                     var pxml = page.textContent.replace('.', '_') + '_/p.xml';
                     return callback(base + pxml);
@@ -30,9 +30,15 @@ var mnesys = (function () { //Code isolation
                 return playlist(baseUrl);
             }
             return ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text, xhr) {
-                var match = text.match(/flashVars.*playlist=([^&'"]*)/);
+                var match = text.match(/flashVars["= ,]+"([^"]+)"/);
                 if (!match) throw new Error("Unable to find a mnesys viewer information file");
-                return playlist(ZoomManager.resolveRelative(match[1], baseUrl));
+                var flash_vars = {};
+                match[1].split("&").forEach(function (var_text) {
+                    var parts = var_text.split(/=(.*)/, 2);
+                    flash_vars[parts[0]] = parts[1];
+                });
+                if (flash_vars["cur_item"]) pagenum = parseInt(flash_vars["cur_item"]);
+                return playlist(ZoomManager.resolveRelative(flash_vars["playlist"], baseUrl));
             });
         },
         "open": function (url) {
