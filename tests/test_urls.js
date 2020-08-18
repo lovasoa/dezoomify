@@ -4,10 +4,6 @@ var test_urls = [
     "url": "http://uffizicloud.centrica.it/7711/closer/hi-res/A1456.imgf?cmd=tile&x={{X}}&y={{Y}}&z=32"
   },
   {
-    "name": "Zoomify (openlayers)",
-    "url": "http://www.deutschefotothek.de/documents/obj/71243350/bs_haum_0000000_j-e-haid-ab3-0037"
-  },
-  {
     "name": "Zoomify (issue #81)",
     "url": "http://ophir.alwaysdata.net/dezoomify/tests/images/issue_81/image/ImageProperties.xml"
   },
