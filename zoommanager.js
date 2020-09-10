@@ -45,7 +45,7 @@ Sets the width and height of the canvas
 @param {Object} data : Image source information, containing width and height of the image.
 **/
 UI.setupRendering = function (data) {
-	document.getElementById("status").className = "loading";
+	document.body.className = "loading";
 	document.getElementById("error").setAttribute("hidden", true);
 	var area = data.width * data.height;
 	UI.ratio = (area > UI.MAX_CANVAS_AREA)
@@ -151,7 +151,7 @@ UI.loadEnd = function () {
 			a.href = url;
 			a.textContent = "Save image";
 		}, "image/jpeg", 0.95);
-		status.className = "download";
+		document.body.className = "download";
 		status.appendChild(a);
 	} catch (e) {
 		status.className = "finished";
