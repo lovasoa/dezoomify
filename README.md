@@ -67,7 +67,7 @@ The most prominant supported websites include :
 
 
 Dezoomify also has a
-[generic dezoomer](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ#the-page-uses-an-image-viewer-that-is-not-supported-by-dezoomify-is-there-still-a-chance-).
+[generic dezoomer](https://github.com/lovasoa/dezoomify/wiki/Generic-dezoomer-tutorial).
 If the zoomable image format is simple enough, you just have to enter a pattern of tile
 URL, and dezoomify will be able to work with it.
 
