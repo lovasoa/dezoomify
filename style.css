@@ -5,7 +5,7 @@ html, body {
 	background-color:#fcfeff;
 	font-family: Verdana, sans-serif;
 	font-size: 15px;
-	overflow: hidden;
+	overflow-x: hidden;
 }
 
 nav {
@@ -189,6 +189,11 @@ a:visited {
 	margin-bottom: 10px;
 	border: 1px solid black;
 	text-decoration: none;
+}
+
+
+#dezoomifiedImage {
+	overflow: auto;
 }
 
 .error {
