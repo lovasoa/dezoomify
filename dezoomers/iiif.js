@@ -56,8 +56,17 @@ var iiif = (function () {
             })
             : { "width": data.tile_width || 512, "scaleFactors": [1] };
 
+        try {
+          var origin = new URL(data["@id"], url);
+          if (origin.hostname === "localhost" || origin.hostname === "example.com") {
+            throw new Error("probably a test host");
+          }
+        } catch (e) {
+          console.log("Rewriting the @id from the manifest: " + e);
+          var origin = url.replace(/\/info\.json(\?.*)?$/, '');
+        }
         var returned_data = {
-          "origin": data["@id"] || url.replace(/\/info\.json$/, ''),
+          "origin": origin.toString(),
           "width": parseInt(data.width),
           "height": parseInt(data.height),
           "tileSize": tiles.width,
