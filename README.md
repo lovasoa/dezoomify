@@ -4,6 +4,7 @@
 
 ## Download zoomable images
 
+images make our works looks facinating ..one of the best is zoomify images.
 _Dezoomify_ extracts full high-resolution images from online zoomable image interfaces.
 It works with several zoomable image tools, from several different websites (see the list below).
 It takes as input the URL of a a zoomable image and gives as output an image that you can download (by right-clicking on it, and choosing *Save Image as...*).
