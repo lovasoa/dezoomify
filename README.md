@@ -10,7 +10,7 @@ It takes as input the URL of a a zoomable image and gives as output an image tha
 
 In order to find the URL of the zoomable that dezoomify requires, you can install the [**dezoomify browser extension**](https://github.com/lovasoa/dezoomify-extension/#dezoomify-extension). Alternatively, you can also try to [find the zoomable image URL yourself](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ).
 
-## Try it
+## Try it NOW-
 If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [**unzoomify an image**](https://ophir.alwaysdata.net/dezoomify/dezoomify.html)
 
 ## Troubleshooting
