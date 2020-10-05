@@ -72,7 +72,7 @@ If the zoomable image format is simple enough, you just have to enter a pattern 
 URL, and dezoomify will be able to work with it.
 
 ## Screenshots
-![dezoomify downloading an image](http://pix.toile-libre.org/upload/original/1460096698.gif)
+![dezoomify downloading an image](https://user-images.githubusercontent.com/552629/95110615-9723ba80-073e-11eb-8845-2ccf6e557480.gif)
 
 ## Video tutorial
 [![Video tutorial for dezzomify](http://pix.toile-libre.org/upload/original/1460095793.png)](https://www.youtube.com/watch?v=RtyckiAE5Eo)
