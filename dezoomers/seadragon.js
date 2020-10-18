@@ -58,7 +58,18 @@ var seadragon = (function () { //Code isolation
 
 			// A single tile URL
 			var tileMatch = baseUrl.match(/(.*)_files\/\d+\/\d+_\d+.jpg$/);
-			if (tileMatch) return callback(tileMatch[1] + ".dzi");
+			if (tileMatch) {
+				// We need to detect whether the image is a dzi or an xml
+				var decided_xml_dzi = false;
+				return [tileMatch[1] + ".dzi", tileMatch[1] + ".xml"].forEach(function (url) {
+					ZoomManager.getFile(url, { type: "xml" }, function (xml) {
+						if (!decided_xml_dzi && xml.getElementsByTagName("Image")) {
+							decided_xml_dzi = true;
+							callback(url);
+						}
+					});
+				});
+			}
 
 			ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text, xhr) {
 				// World digital library
