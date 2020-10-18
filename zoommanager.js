@@ -377,7 +377,7 @@ ZoomManager.open = function (url) {
 /**
 Call callback with the contents of the page at url
 @param {string} url
-@param {type:String} options
+@param {{type:String, allow_failure?: boolean, error_callback: (err:string)=>any}} params
 @param {fileCallback} callback - callback to call when the file is loaded
 */
 ZoomManager.getFile = function (url, params, callback) {
@@ -394,13 +394,20 @@ ZoomManager.getFile = function (url, params, callback) {
 	if (ZoomManager.cookies.length > 0) {
 		requesturl += "&cookies=" + encodeURIComponent(ZoomManager.cookies);
 	}
+
+	function onerror(error_msg) {
+		if (params.error_callback) params.error_callback(error_msg);
+		if (params.allow_failure) console.log("non-fatal error: ", error_msg);
+		else ZoomManager.error(error_msg);
+	}
+
 	xhr.open("GET", requesturl, true);
 
 	xhr.onloadstart = function () {
 		ZoomManager.updateProgress(1, "Sent a request in order to get information about the image...");
 	};
 	xhr.onerror = function (e) {
-		throw new Error("Unable to connect to the proxy server " +
+		onerror("Unable to connect to the proxy server " +
 			"to get the required information.\n\nXHR error:\n" + e);
 	};
 	xhr.onload = function () {
@@ -415,7 +422,7 @@ ZoomManager.getFile = function (url, params, callback) {
 					msg += "\nSee dezoomify's wiki page about protected pages.";
 				}
 			}
-			throw new Error(msg);
+			return onerror(msg);
 		}
 
 		var cookie = xhr.getResponseHeader("X-Set-Cookie");
@@ -423,11 +430,11 @@ ZoomManager.getFile = function (url, params, callback) {
 		// Custom error message on invalid XML
 		if (type === "xml" &&
 			(response === null || response.documentElement.tagName === "parsererror")) {
-			return ZoomManager.error("Invalid XML:\n" + url);
+			return onerror("Invalid XML:\n" + url);
 		}
 		// Custom error message on invalid JSON
 		if (type === "json" && xhr.response === null) {
-			return ZoomManager.error("Invalid JSON:\n" + url);
+			return onerror("Invalid JSON:\n" + url);
 		}
 		// Decode html encoded entities
 		if (type === "htmltext") {

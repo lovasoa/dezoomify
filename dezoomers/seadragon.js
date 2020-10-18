@@ -60,9 +60,18 @@ var seadragon = (function () { //Code isolation
 			var tileMatch = baseUrl.match(/(.*)_files\/\d+\/\d+_\d+.jpg$/);
 			if (tileMatch) {
 				// We need to detect whether the image is a dzi or an xml
-				var decided_xml_dzi = false;
-				return [tileMatch[1] + ".dzi", tileMatch[1] + ".xml"].forEach(function (url) {
-					ZoomManager.getFile(url, { type: "xml" }, function (xml) {
+				var decided_xml_dzi = false, possibilities = [tileMatch[1] + ".dzi", tileMatch[1] + ".xml"], errors = [];
+				function error_callback(msg) {
+					errors.push(msg);
+					if (errors.length === possibilities.length)
+						ZoomManager.error(
+							"Unable to load the meta-information file: \n" +
+							possibilities.map(function (p, i) { return "- " + p + ": " + errors[i] })
+								.join("\n")
+						);
+				}
+				return possibilities.forEach(function (url) {
+					ZoomManager.getFile(url, { type: "xml", allow_failure: true, error_callback: error_callback }, function (xml) {
 						if (!decided_xml_dzi && xml.getElementsByTagName("Image")) {
 							decided_xml_dzi = true;
 							callback(url);
