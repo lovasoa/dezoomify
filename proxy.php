@@ -1,7 +1,7 @@
 <?php
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Expose-Headers: X-Set-Cookie");
-$url = get_magic_quotes_gpc() ? stripslashes($_GET['url']) : $_GET["url"];
+$url = $_GET["url"];
 if (preg_match("#^https?://#", $url) !== 1) {
   die("Only http requests are allowed.");
 }
