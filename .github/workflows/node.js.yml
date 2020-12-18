@@ -23,6 +23,6 @@ jobs:
         node-version: ${{ matrix.node-version }}
     - run: >
        php -S 127.0.0.1:8181 &
-       cd tests
-       npm ci
+       cd tests &&
+       npm ci &&
        npm test
