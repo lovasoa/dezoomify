@@ -87,7 +87,12 @@ UI.error = function (errmsg) {
 	document.getElementById("error-img").src = error_img;
 	if (errmsg) {
 		document.getElementById("errormsg").textContent = errmsg;
-		var url = new URL(document.getElementById("url").value);
+		var urltxt = document.getElementById("url").value;
+		try {
+			var url = new URL(urltxt);
+		} catch (e) { // not a valid URL
+			var url = new URL("invalid://invalid?source=" + urltxt);
+		}
 		document.getElementById("gh-search").href =
 			"https://github.com/lovasoa/dezoomify/issues?q=" +
 			encodeURIComponent(url.host);
