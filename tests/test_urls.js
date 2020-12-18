@@ -106,5 +106,9 @@ var test_urls = [
   {
     "name": "Mnesys",
     "url": "http://memoirevive.besancon.fr/ark:/48565/a011514878120Och07o/1/1"
+  },
+  {
+    "name": "auchinleck.nls.uk (IIIF without @id)",
+    "url": "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/info.json"
   }
 ];

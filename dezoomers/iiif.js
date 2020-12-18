@@ -57,6 +57,7 @@ var iiif = (function () {
             : { "width": data.tile_width || 512, "scaleFactors": [1] };
 
         try {
+          if (!data["@id"]) throw new Error("missing iiif @id");
           var origin = new URL(data["@id"], url);
           if (origin.hostname === "localhost" || origin.hostname === "example.com") {
             throw new Error("probably a test host");
