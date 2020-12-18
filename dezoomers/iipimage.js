@@ -22,9 +22,8 @@ var iipimage = (function(){
           }
           // Special support for nationalgallery.org.uk
           if (baseUrl.match(/nationalgallery\.org\.uk\/paintings/)){
-            var server = JSON.parse(text.match(/server\s*:\s*("[^"]*")/)[1]);
             var image = JSON.parse(text.match(/image\s*:\s*("[^"]*")/)[1]);
-            return callback(server + '?FIF=' + image);
+            return callback('/server.iip/fcgi-bin/iipsrv.fcgi?FIF=' + image);
           }
           throw new Error("No IIPImage-related URL found.");
       });
