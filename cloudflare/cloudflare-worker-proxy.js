@@ -10,7 +10,7 @@ const MAX_REDIRECT = 3;
  */
 async function handleRequest(request) {
     const url = new URL(request.url);
-    let target_url = new URL(url.searchParams.get("url"));
+    let target_url = url.searchParams.get("url");
     let target_request = new Request(target_url, request);
     target_request.headers.set("Origin", target_url.origin);
     target_request.headers.set("Referer", target_url.toString());

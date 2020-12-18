@@ -1,0 +1,6 @@
+name = "proxy"
+type = "webpack"
+account_id = "23fd3a721965e4778379dc464d3e4224"
+workers_dev = true
+route = "http://dezoomify.ophir.dev/dezoomify/proxy.php*"
+zone_id = "1f019deb74665b98200e4b5c20bea879"
