@@ -13,7 +13,7 @@ var test_urls = [
   },
   {
     "name": "National Gallery of Victoria (zoomify)",
-    "url": "http://www.ngv.vic.gov.au/explore/collection/work/4202/"
+    "url": "https://www.ngv.vic.gov.au/explore/collection/work/3867/"
   },
   {
     "name": "Zoomify PFF",
