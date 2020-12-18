@@ -49,12 +49,21 @@ var iiif = (function () {
           return ~array.indexOf(search) ? search : array[0];
         }
 
-        var tiles =
-          (data.tiles && data.tiles.length)
-            ? data.tiles.reduce(function (red, val) {
-              return min(red.scaleFactors) < min(val.scaleFactors) ? red : val;
-            })
-            : { "width": data.tile_width || 512, "scaleFactors": [1] };
+        var tiles;
+        if (data.tiles && data.tiles.length) {
+          tiles = data.tiles.reduce(function (red, val) {
+            return min(red.scaleFactors) < min(val.scaleFactors) ? red : val;
+          });
+        } else {
+          // map-view.nls.uk contains invalid tile widths (see dezoomify-rs#92)
+          tiles = {
+            "width":
+              (data.tile_width < data.width)
+                ? data.tile_width
+                : 512,
+            "scaleFactors": [1]
+          }
+        }
 
         try {
           if (!data["@id"]) throw new Error("missing iiif @id");

@@ -110,5 +110,9 @@ var test_urls = [
   {
     "name": "auchinleck.nls.uk (IIIF without @id)",
     "url": "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/info.json"
+  },
+  {
+    "name": "map-view.nls.uk (IIIF with invalid tile_width)",
+    "url": "https://map-view.nls.uk/iiif/19619%2F196194600/info.json"
   }
 ];
