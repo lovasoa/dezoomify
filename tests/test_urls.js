@@ -104,10 +104,6 @@ var test_urls = [
     "url": "https://gallery.hungaricana.hu/en/SzerencsKepeslap/10338/?list=eyJxdWVyeSI6ICJib3JkZXIifQ&img=0"
   },
   {
-    "name": "Mnesys",
-    "url": "http://memoirevive.besancon.fr/ark:/48565/a011514878120Och07o/1/1"
-  },
-  {
     "name": "auchinleck.nls.uk (IIIF without @id)",
     "url": "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/info.json"
   },
