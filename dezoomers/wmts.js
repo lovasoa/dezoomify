@@ -77,7 +77,7 @@ const floor = (x) => Math.floor(x);
 ZoomManager.addDezoomer({
   name: "WMTS",
   description: "OpenGIS Web Map Tile Service Implementation Standard",
-  urls: [/\bwmts\b/],
+  urls: [/\bwmts\b/i],
   findFile(baseUrl, callback) {
     // metadata file URL extraction is not implemented yet
     return callback(baseUrl);
