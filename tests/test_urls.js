@@ -114,5 +114,10 @@ var test_urls = [
   {
     "name": "map-view.nls.uk (IIIF with invalid tile_width)",
     "url": "https://map-view.nls.uk/iiif/19619%2F196194600/info.json"
-  }
+  },
+  {
+    name: "arcgisonline (WMTS map)",
+    url:
+      "https://services.arcgisonline.com/arcgis/rest/services/Demographics/USA_Population_Density/MapServer/WMTS/",
+  },
 ];
