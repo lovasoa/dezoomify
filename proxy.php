@@ -30,7 +30,7 @@ $context = stream_context_create($opts);
 $last_error = NULL;
 
 // Save errors
-set_error_handler(function($errno, $errstr, $errfile, $errline, $errcontext) {
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
   global $last_error;
   $last_error = new ErrorException($errstr, 0, $errno, $errfile, $errline);
 });
