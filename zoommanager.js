@@ -14,7 +14,7 @@ var UI = {};
 UI.canvas = document.getElementById("rendering-canvas");
 UI.dezoomers = document.getElementById("dezoomers");
 UI.ratio = 1;
-UI.MAX_CANVAS_AREA = 268435456; // 2^14 x 2^14
+UI.MAX_CANVAS_AREA = 16384 * 16384; // See https://github.com/jhildenbiddle/canvas-size
 
 /**
 Adjusts the size of the image, so that is fits page width or page height
@@ -48,13 +48,17 @@ UI.setupRendering = function (data) {
 	document.body.className = "loading";
 	document.getElementById("error").setAttribute("hidden", true);
 	var area = data.width * data.height;
-	UI.ratio = (area > UI.MAX_CANVAS_AREA)
-		? Math.sqrt(UI.MAX_CANVAS_AREA / area)
-		: 1;
-	UI.canvas.width = data.width * UI.ratio;
-	UI.canvas.height = data.height * UI.ratio;
+	for (var maxArea = UI.MAX_CANVAS_AREA; maxArea > 8; maxArea /= 2) {
+		UI.ratio = Math.min(Math.sqrt(maxArea / area), 1);
+		UI.canvas.width = data.width * UI.ratio;
+		UI.canvas.height = data.height * UI.ratio;
+		UI.ctx = UI.canvas.getContext("2d");
+		try {
+			UI.ctx.getImageData(0, 0, 1, 1); // Tests whether the canvas was successfully allocated
+			break;
+		} catch (_) { }
+	}
 	UI.canvas.onclick = UI.changeSize;
-	UI.ctx = UI.canvas.getContext("2d");
 	UI.changeSize();
 };
 
