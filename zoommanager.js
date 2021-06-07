@@ -354,6 +354,8 @@ ZoomManager.addTile = function addTile(url, x, y, ntries) {
 		}
 		img.crossOrigin = "anonymous";
 	}
+	// Don't tell the tile host the request comes from dezoomify
+	img.referrerPolicy = "no-referrer";
 	img.src = url;
 };
 
