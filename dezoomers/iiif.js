@@ -13,7 +13,11 @@ var iiif = (function () {
   var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
   function extractUrl(text) {
     var match = text.match(urlReg);
-    if (match) return match[1] + "/info.json";
+    if (!match) return null;
+    var result = match[1] + "/info.json";
+    // Van Gogh Museum has hash-protected URLs on micrio.* but not micrio-cdn.* 
+    result = result.replace('micrio.vangoghmuseum.nl/iiif', 'micrio-cdn.vangoghmuseum.nl');
+    return result;
   }
   return {
     "name": "IIIF",
