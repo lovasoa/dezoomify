@@ -434,6 +434,12 @@ ZoomManager.getFile = function (url, params, callback) {
 				}
 			}
 			return onerror(msg);
+		} else if (xhr.status === 429) {
+			var msg = "Our server has received too many requests, and our provider is blocking new requests. " +
+				"You can donate on https://github.com/sponsors/lovasoa to participate to the hosting fees. " +
+				"Once we collect over 5$/month overall, we will switch to a paid plan of the provider, allowing more requests to go through every day. " + 
+				"For more details, see https://github.com/lovasoa/dezoomify/issues/337#issuecomment-773498488.";
+			return onerror(msg);
 		}
 
 		var cookie = xhr.getResponseHeader("X-Set-Cookie");
