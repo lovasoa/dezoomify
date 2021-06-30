@@ -114,6 +114,6 @@ var test_urls = [
   {
     name: "arcgisonline (WMTS map)",
     url:
-      "https://services.arcgisonline.com/arcgis/rest/services/Demographics/USA_Population_Density/MapServer/WMTS/",
+      "https://basemap.nationalmap.gov/arcgis/rest/services/USGSHydroCached/MapServer/WMTS/1.0.0/WMTSCapabilities.xml",
   },
 ];
