@@ -25,30 +25,31 @@ failed to process.
 
 ## Supported zoomable image formats
 The following formats are supported by dezoomify:
- * [Zoomify](http://www.zoomify.com/) : Most common zoomable image format. *dezoomify* used to support only this, hence the name.
- * [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom) : Zoomable image format created by Microsoft. Dezoomify has a special support for the following websites that use *Deep Zoom*:
-   * The [British Library](http://www.bl.uk/)
-   * [National Gallery](http://www.nationalgallery.org.uk/) : The national gallery uses its own zoomable image format.
-   * The [World Digital Library (WDL)](http://www.wdl.org/fr/)
-   * [Polona](http://polona.pl/), the Polish Digital National Library
-   * [BALaT](http://balat.kikirpa.be/), Belgian Art Links and Tools
- * [Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums. [More info about the controversy around this dezoomer.](https://github.com/lovasoa/dezoomify/issues/435).
- * [IIIF](https://iiif.io): The International Image Interoperability Framework, used on many websites, including:
-   * [Gallica](https://gallica.bnf.fr/), the numeric library of the French national library
-   * [Bavarikon](https://www.bavarikon.de/)
-   * [Harvard's library](https://library.harvard.edu/)
- * [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/Zoomify-PFF-file-format-documentation) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
- * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developed by an Italian company. It is used on the following websites:
+
+* [Zoomify](http://www.zoomify.com/) : Most common zoomable image format. *dezoomify* used to support only this, hence the name.
+* [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom) : Zoomable image format created by Microsoft. Dezoomify has a special support for the following websites that use *Deep Zoom*:
+  * The [British Library](http://www.bl.uk/)
+  * [National Gallery](http://www.nationalgallery.org.uk/) : The national gallery uses its own zoomable image format.
+  * The [World Digital Library (WDL)](http://www.wdl.org/fr/)
+  * [Polona](http://polona.pl/), the Polish Digital National Library
+  * [BALaT](http://balat.kikirpa.be/), Belgian Art Links and Tools
+* [Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums. [More info about the controversy around this dezoomer.](https://github.com/lovasoa/dezoomify/issues/435).
+* [IIIF](https://iiif.io): The International Image Interoperability Framework, used on many websites, including:
+  * [Gallica](https://gallica.bnf.fr/), the numeric library of the French national library
+  * [Bavarikon](https://www.bavarikon.de/)
+  * [Harvard's library](https://library.harvard.edu/)
+* [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/Zoomify-PFF-file-format-documentation) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
+* [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developed by an Italian company. It is used on the following websites:
   * The [Royal Library of Belgium](http://kbr.be/)
- * **TopViewer**, also named **Memorix Maior picture viewer** used on the following websites:
-   * [daguerreobase](http://daguerreobase.org/en/), a collection of daguerreotypes.
-   * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developed by the company picturae.
- * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
- * [The Tretiakov gallery](http://www.tretyakovgallery.ru/en/), official website of the Третьяковская галерея (in Moscow).
- * [FSI Viewer](https://www.neptunelabs.com/products/fsi-viewer/), zoomable image server by NeptuneLabs GmbH.
- * [Visual Library Server](https://www.semantics.de/visual_library/), by semantics
- * [Micr.io](https://micr.io/)'s non-IIIF format, used on [vangoghmuseum.nl](https://www.vangoghmuseum.nl/en/explore-the-collection)
- * [Hungaricana](https://hungaricana.hu/en/) a format found only on the **Hungarian Cultural Heritage Portal**, that hosts half a million images.
+* **TopViewer**, also named **Memorix Maior picture viewer** used on the following websites:
+  * [daguerreobase](http://daguerreobase.org/en/), a collection of daguerreotypes.
+  * [Several dutch websites](https://picturae.com/nl/website/websites-portfolio) developed by the company picturae.
+* [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
+* [The Tretiakov gallery](http://www.tretyakovgallery.ru/en/), official website of the Третьяковская галерея (in Moscow).
+* [FSI Viewer](https://www.neptunelabs.com/products/fsi-viewer/), zoomable image server by NeptuneLabs GmbH.
+* [Visual Library Server](https://www.semantics.de/visual_library/), by semantics
+* [Micr.io](https://micr.io/)'s non-IIIF format, used on [vangoghmuseum.nl](https://www.vangoghmuseum.nl/en/explore-the-collection)
+* [Hungaricana](https://hungaricana.hu/en/) a format found only on the **Hungarian Cultural Heritage Portal**, that hosts half a million images.
 
 The most prominant supported websites include :
 - Arts & Culture (artsandculture.google.com)
