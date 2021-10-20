@@ -62,7 +62,7 @@ function onload(window) {
   ZoomManager.open(target_url);
 }
 
-jsdom.JSDOM.fromFile(path.join(DEZOOMIFY_PATH, "dezoomify.html"), {
+jsdom.JSDOM.fromFile(path.join(DEZOOMIFY_PATH, "index.html"), {
   virtualConsole,
   runScripts: "dangerously",
   resources: "usable",

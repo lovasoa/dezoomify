@@ -6,13 +6,12 @@ QUnit.module("Image loads", {
     var that = this;
 
     var iframe = document.createElement("iframe");
-    iframe.src = BASE + "/dezoomify.html";
+    iframe.src = BASE + "/index.html";
     document.body.appendChild(iframe);
 
     var testwin = iframe.contentWindow;
 
     testwin.onload = function() {
-      var testdoc = testwin.document;
       var ZoomManager = testwin.ZoomManager;
       // Execute the tests faster: don't wait between fake tile loads
       ZoomManager.nextTick = function(f) {return setTimeout(f,0);};

@@ -15,7 +15,7 @@ module.exports = function(config) {
 
     // list of files / patterns to load in the browser
     files: [
-      {pattern:'dezoomify.html', included:false},
+      {pattern:'index.html', included:false},
       {pattern:'style.css', included:false},
       {pattern:'icon.svg', included:false},
       {pattern:'zoommanager.js', included:false},

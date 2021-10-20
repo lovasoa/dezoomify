@@ -29,7 +29,7 @@ var test_urls = [
   },
   {
     "name": "krpano multires",
-    "url": "https://files.andreiduman.com/Zebra1/pano.xml"
+    "url": "http://files.andreiduman.com/Zebra1/pano.xml"
   },
   {
     "name": "polona.pl",
@@ -49,7 +49,7 @@ var test_urls = [
   },
   {
     "name": "archieven.nl",
-    "url": "http://www.archieven.nl/maisi_ajax_proxy0.php?mivast=0&mizig=962&miadt=5&miaet=185&micode=1785&minr=8193963&milang=nl&misort=last_mod|asc&miview=viewer2"
+    "url": "https://preserve3.archieven.nl/cgi-bin/iipsrv.fcgi?Zoomify=cache%2Ffonc-gra%2F4db1d94c77bf8aecded58b8545f5e455.jp2/TileGroup0/4-1-5.jpg"
   },
   {
     "name": "fluid engage zoomify",
