@@ -12,10 +12,17 @@ async function handleRequest(request) {
     const url = new URL(request.url);
     let target_url = url.searchParams.get("url");
     let target_request = new Request(target_url, request);
-    target_request.headers.set("Origin", target_url.origin);
+    try {
+      target_request.headers.set("Origin", new URL(target_url).origin);
+    } catch(e) {
+        console.log("Invalid URL: " + target_url, e);
+    }
     target_request.headers.set("Referer", target_url.toString());
     const cookies = url.searchParams.get("cookies");
     if (cookies) target_request.headers.set("Cookie", cookies);
+    console.log(`Making request to ${target_request.url} with headers ${
+        JSON.stringify(Object.fromEntries(target_request.headers.entries()))
+    }`);
     let response = await fetch(target_request);
     let location = response.headers.get("Location");
     for (let i = 0; i < MAX_REDIRECT && location; i++) {
