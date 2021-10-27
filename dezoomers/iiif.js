@@ -71,6 +71,8 @@ var iiif = (function () {
 
         try {
           if (!data["@id"]) throw new Error("missing iiif @id");
+          // See https://github.com/lovasoa/dezoomify/issues/582
+          data["@id"] = data["@id"].replace(/^https?, (https?:\/\/)/, '$1');
           var origin = new URL(data["@id"], url);
           if (origin.hostname === "localhost" || origin.hostname === "example.com") {
             throw new Error("probably a test host");
