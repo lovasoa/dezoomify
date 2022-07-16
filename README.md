@@ -86,6 +86,20 @@ on your server to run dezoomify.
 ## Wikimedia
 This script on wikimedia : [Zoomify in the help about zoomable Images on wikimedia](https://secure.wikimedia.org/wikipedia/commons/wiki/Help:Zoomable_images)
 
+## Local development
+
+You can run the script locally, using php:
+
+```bash
+# Install the dependencies
+sudo apt install php-cli
+
+# Run the script
+php -S localhost:3000
+```
+
+Then open http://localhost:3000/ in your browser.
+
 ## GPL
 > Copyright © 2011-2017 Lovasoa
 >
