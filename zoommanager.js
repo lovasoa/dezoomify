@@ -427,9 +427,13 @@ ZoomManager.getFile = function (url, params, callback) {
 		/// If the proxy failed to make the request
 		if (xhr.status === 500) {
 			var msg = "Unable to fetch " + url;
-			if (response) {
-				msg += "\nThe server responded:\n" + response;
-				if (response.match(/403 forbidden/i)) {
+			var responseText =
+				typeof response === "string" ? response :
+					(response instanceof ArrayBuffer) ? new TextDecoder("utf-8").decode(response) :
+						"";
+			if (responseText) {
+				msg += "\nThe server responded:\n" + responseText;
+				if (responseText.match(/403 forbidden/i)) {
 					msg += "\nSee dezoomify's wiki page about protected pages.";
 				}
 			}
@@ -437,7 +441,7 @@ ZoomManager.getFile = function (url, params, callback) {
 		} else if (xhr.status === 429) {
 			var msg = "Our server has received too many requests, and our provider is blocking new requests. " +
 				"You can donate on https://github.com/sponsors/lovasoa to participate to the hosting fees. " +
-				"Once we collect over 5$/month overall, we will switch to a paid plan of the provider, allowing more requests to go through every day. " + 
+				"Once we collect over 5$/month overall, we will switch to a paid plan of the provider, allowing more requests to go through every day. " +
 				"For more details, see https://github.com/lovasoa/dezoomify/issues/337#issuecomment-773498488.";
 			return onerror(msg);
 		}
