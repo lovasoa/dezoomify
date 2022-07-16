@@ -2,7 +2,7 @@ import { compute_signed_path, decrypt_image } from './arts-culture-crypto.js';
 
 function findFile(baseUrl, callback) {
 	ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text, xhr) {
-		let reg = /]\n?,"(\/\/[a-zA-Z0-9./]+)",(?:"([^"]+)"|null)/m;
+		let reg = /]\n?,"(\/\/[a-zA-Z0-9./_\-]+)",(?:"([^"]+)"|null)/m;
 		let matches = text.match(reg);
 		if (!matches) throw new Error("Unable to find arts and culture image metadata URL");
 		let url = 'https:' + matches[1]
