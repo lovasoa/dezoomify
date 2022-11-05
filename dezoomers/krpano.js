@@ -60,7 +60,7 @@ var seadragon = (function () { //Code isolation
 										levelIndex: k + baseIndex,
 									})
 								}
-							} else {
+							} else if (el.tagName.toLowerCase() === "level") {
 								levels.push({
 									width: el.getAttribute("tiledimagewidth") | 0,
 									height: el.getAttribute("tiledimageheight") | 0,
