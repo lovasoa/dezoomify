@@ -124,4 +124,8 @@ var test_urls = [
     name: "pnav (collection.pushkinmuseum.art)",
     url: "https://collection.pushkinmuseum.art/entity/OBJECT/77606",
   },
+  {
+    name: "pnav (collection.ethnomuseum.ru)",
+    url: "https://collection.ethnomuseum.ru/entity/OBJECT/32945",
+  }
 ];
