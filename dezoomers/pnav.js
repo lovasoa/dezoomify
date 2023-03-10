@@ -1,9 +1,5 @@
 const tileSize = 512;
 
-function findFile(baseUrl, callback) {
-  return callback(baseUrl);
-}
-
 function open(url) {
   ZoomManager.getFile(url, { type: "htmltext" }, function (text) {
     const regex = /<meta property="og:image" content="(.*?)\?w=1000&h=1000/;
@@ -96,16 +92,17 @@ function open(url) {
   });
 }
 
-async function getTileURL(x, y, zoom, data) {
-  return data.tileUrls[x + "," + y];
-}
-
 ZoomManager.addDezoomer({
   name: "pnav",
-  description: "An image viewer used on shm.ru and pushkinmuseum.art",
-  urls: [/catalog\.shm\.ru/, /collection\.pushkinmuseum\.art/],
+  description:
+    "An image viewer used on shm.ru, pushkinmuseum.art, ethnomuseum.ru...",
+  urls: [/\/entity\/OBJECT\/\d+/],
   contents: [],
-  findFile,
+  findFile(baseUrl, callback) {
+    return callback(baseUrl);
+  },
   open,
-  getTileURL,
+  getTileURL(x, y, zoom, data) {
+    return data.tileUrls[x + "," + y];
+  },
 });
