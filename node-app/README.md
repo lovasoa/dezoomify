@@ -1,6 +1,6 @@
 # dezoomify node app
 
-## Installation totorial and information
+## Installation tutorial and information
 See our wiki page: https://github.com/lovasoa/dezoomify/wiki/Very-large-images
 
 ## Technical details
