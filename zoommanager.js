@@ -132,6 +132,10 @@ Update the state of the progress bar.
 @param {String} description current state description
 */
 UI.updateProgress = function (percent, text) {
+	if (!percent) {
+		document.getElementById("percent").innerHTML = text;
+		return;
+	}
 	percent = parseInt(percent);
 	document.getElementById("percent").innerHTML = text + ' (' + percent + "%)";
 	document.getElementById("progressbar").style.width = percent + "%";
@@ -311,13 +315,15 @@ ZoomManager.defaultRender = function (data) {
 	nextTile();
 };
 
+ZoomManager.MAX_REQUESTS_PER_SECOND = 5;
+
 /**
 @function nextTick
 Call a function, but not immediatly
 @param {Function} f - the function to call
 */
 ZoomManager.nextTick = function (f) {
-	return setTimeout(f, 3);
+	return setTimeout(f, 1000 / ZoomManager.MAX_REQUESTS_PER_SECOND);
 };
 
 /**
@@ -388,7 +394,7 @@ ZoomManager.open = function (url) {
 /**
 Call callback with the contents of the page at url
 @param {string} url
-@param {{type:String, allow_failure?: boolean, error_callback: (err:string)=>any}} params
+@param {{type:String, allow_failure?: boolean, error_callback: (err:string)=>any, is_tile?: boolean}} params
 @param {fileCallback} callback - callback to call when the file is loaded
 */
 ZoomManager.getFile = function (url, params, callback) {
@@ -415,7 +421,8 @@ ZoomManager.getFile = function (url, params, callback) {
 	xhr.open("GET", requesturl, true);
 
 	xhr.onloadstart = function () {
-		ZoomManager.updateProgress(1, "Sent a request in order to get information about the image...");
+		if (!params.is_tile)
+			ZoomManager.updateProgress(0, "Sent a request in order to get information about the image...");
 	};
 	xhr.onerror = function (e) {
 		onerror("Unable to connect to the proxy server " +

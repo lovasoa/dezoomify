@@ -48,7 +48,7 @@ async function getTileURL(
 	const tile_path = await compute_signed_path(path, token, x, y, z);
 	const tile_url = ZoomManager.resolveRelative("/"+tile_path, origin);
 	const buffer = await new Promise(accept =>
-		ZoomManager.getFile(tile_url, { type: 'binary' }, accept)
+		ZoomManager.getFile(tile_url, { type: 'binary', is_tile: true }, accept)
 	);
 	const tile = await decrypt_image({ buffer });
 	const blob = new Blob([tile], { type: "image/jpeg" });
