@@ -72,9 +72,9 @@ const targets = [
     url: "https://bibliotheques-specialisees.paris.fr/ark:/73873/pf0001115743/0017/v0001.simple.selectedTab=otherdocs",
   },
   {
-    name: "National Library of Australia",
+    name: "Art Institute of Chicago Sargent archive",
     expectedDezoomer: "Seadragon (Deep Zoom Image)",
-    url: "https://nla.gov.au/nla.obj-152644715/view",
+    url: "https://archive.artic.edu/sargent/images/dzis/IM022017-int_print.dzi",
   },
   {
     name: "Academia Sinica Bronze Rubbings",
