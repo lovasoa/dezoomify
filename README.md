@@ -60,6 +60,7 @@ The most prominent supported websites with live compatibility tests include :
 - Geographicus (geographicus.com)
 - krpano examples (krpano.com)
 - Memorix TopViewer sites (images.memorix.nl)
+- Oklahoma State University Digital Collections (dc.library.okstate.edu)
 - OpenSeadragon Zoomify examples (openseadragon.github.io)
 - PNAV collection sites, including catalog.shm.ru, collection.pushkinmuseum.art, and collection.ethnomuseum.ru
 

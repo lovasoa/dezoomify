@@ -17,6 +17,7 @@ var iiif = (function () {
   );
   var londonMuseumServiceRootReg =
     /(https?:\/\/collections\.londonmuseum\.net\/iiif\/3\/[^"'\s<>]+?\.ptif)(?=["'\s<>])/;
+  var contentdmRecordReg = /^(https?:\/\/[^/]+)(\/digital)\/collection\/([^/?#]+)\/id\/(\d+)(?:[/?#]|$)/;
   var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
   function extractUrl(text, baseUrl) {
     var match = text.match(urlReg) ||
@@ -29,7 +30,6 @@ var iiif = (function () {
     result = result.replace('micrio.vangoghmuseum.nl/iiif', 'micrio-cdn.vangoghmuseum.nl');
     return result;
   }
-
   function isPrivateIPv4(hostname) {
     var match = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
     if (!match) return false;
@@ -42,10 +42,17 @@ var iiif = (function () {
     );
   }
 
+  function contentdmInfoUrl(info, origin, appPath) {
+    if (!info || !info.iiifInfoUri) return null;
+    if (info.iiifInfoUri.match(/\w*:\/\//)) return info.iiifInfoUri;
+    if (info.iiifInfoUri.indexOf(appPath + "/") === 0) return origin + info.iiifInfoUri;
+    if (info.iiifInfoUri.indexOf("/") === 0) return origin + appPath + info.iiifInfoUri;
+    return origin + appPath + "/" + info.iiifInfoUri;
+  }
   return {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
-    "urls": [urlReg, gallicaReg],
+    "urls": [urlReg, gallicaReg, contentdmRecordReg],
     "contents": [urlReg, relativeUrlReg, londonMuseumServiceRootReg],
     "findFile": function getInfoFile(baseUrl, callback) {
 
@@ -59,6 +66,18 @@ var iiif = (function () {
 
       var url = extractUrl(baseUrl);
       if (url) return callback(url);
+
+      var contentdmMatch = baseUrl.match(contentdmRecordReg);
+      if (contentdmMatch) {
+        var apiUrl = contentdmMatch[1] + contentdmMatch[2] +
+          "/api/singleitem/collection/" + contentdmMatch[3] +
+          "/id/" + contentdmMatch[4];
+        return ZoomManager.getFile(apiUrl, { type: "json" }, function (info) {
+          var url = contentdmInfoUrl(info, contentdmMatch[1], contentdmMatch[2]);
+          if (url) return callback(url);
+          throw new Error("No CONTENTdm IIIF URL found.");
+        });
+      }
 
       ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text) {
         var url = extractUrl(text, baseUrl);
