@@ -356,6 +356,25 @@ function fixtureFor(target, origin) {
     return text('<property width value="512" /><property height value="512" />');
   }
 
+  if (
+    href ===
+    "https://fixtures.test/lizardtech/iserv/calcrgn?cat=North%20America%20and%20United%20States&item=NorthAmerica/US1566a.sid&wid=500&hei=400&props=item(Name,Description),cat(Name,Description)&style=default/view.xsl&plugin=true"
+  ) {
+    return xml(`
+      <ImageServer host="fixtures.test" path="lizardtech/iserv" version="9.5.0.4547">
+        <Request command="calcrgn">
+          <Parameter name="cat">North America and United States</Parameter>
+          <Parameter name="item">NorthAmerica/US1566a.sid</Parameter>
+        </Request>
+        <Response>
+          <Catalog name="North America and United States">
+            <Image width="1024" height="1024" name="US1566a.sid" parent="NorthAmerica" numlevels="10" />
+          </Catalog>
+        </Response>
+      </ImageServer>
+    `);
+  }
+
   if (href === "https://fixtures.test/vls/zoom/1") {
     return xml(`
       <root>

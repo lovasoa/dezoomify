@@ -170,6 +170,11 @@ test.describe("dezoomer fixture coverage", () => {
         expectedTile: "https://fixtures.test/fsi/server?type=image&source=image",
       },
       {
+        dezoomer: "LizardTech ImageServer",
+        url: "https://fixtures.test/lizardtech/iserv/calcrgn?cat=North%20America%20and%20United%20States&item=NorthAmerica/US1566a.sid&wid=500&hei=400&props=item(Name,Description),cat(Name,Description)&style=default/view.xsl&plugin=true",
+        expectedTile: "https://fixtures.test/lizardtech/iserv/getimage?cat=North%20America%20and%20United%20States&item=NorthAmerica%2FUS1566a.sid&wid=512&hei=512&oif=jpeg&lev=0&cp=0.75,0.75",
+      },
+      {
         dezoomer: "VLS",
         url: "https://fixtures.test/vls/zoom/1",
         expectedTile: "https://fixtures.test/image/tiler/square/fixture/0/0/0",
