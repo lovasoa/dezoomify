@@ -117,6 +117,8 @@ var zoomify = (function () { //Code isolation
 				var w = data.width, h = data.height,
 					ntiles = 0,
 					maxZoom = ZoomManager.findMaxZoom(data);
+				var fullResolutionTiles = Math.ceil(w / data.tileSize) * Math.ceil(h / data.tileSize);
+				data.numTilesIsFullResolutionOnly = data.numTiles === fullResolutionTiles;
 				for (var z = 0; z <= maxZoom; z++) {
 					ntiles += Math.ceil(w / data.tileSize) * Math.ceil(h / data.tileSize);
 					w /= 2; h /= 2;
@@ -133,7 +135,9 @@ var zoomify = (function () { //Code isolation
 		},
 		"getTileURL": function (col, row, zoom, data) {
 			var totalTiles = data.nbrTilesX * data.nbrTilesY;
-			var tileGroup = Math.floor((data.numTiles - totalTiles + col + row * data.nbrTilesX) / 256);
+			var tileGroup = data.numTilesIsFullResolutionOnly
+				? 0
+				: Math.floor((data.numTiles - totalTiles + col + row * data.nbrTilesX) / 256);
 			return "TileGroup" + tileGroup + "/" + zoom + "-" + col + "-" + row + ".jpg";
 		}
 	};
