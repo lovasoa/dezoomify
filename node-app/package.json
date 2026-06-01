@@ -4,8 +4,8 @@
   "description": "Download images in various zoomable image formats.",
   "main": "dezoomify-node.js",
   "dependencies": {
-    "canvas": "^2.6.1",
-    "jsdom": "^16.5.0"
+    "@napi-rs/canvas": "^1.0.0",
+    "jsdom": "^29.1.1"
   },
   "devDependencies": {},
   "scripts": {

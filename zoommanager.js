@@ -425,8 +425,11 @@ ZoomManager.getFile = function (url, params, callback) {
 			ZoomManager.updateProgress(0, "Sent a request in order to get information about the image...");
 	};
 	xhr.onerror = function (e) {
-		onerror("Unable to connect to the proxy server " +
-			"to get the required information.\n\nXHR error:\n" + e);
+		onerror("Unable to reach the proxy endpoint.\n\n" +
+			"Proxy request: " + requesturl + "\n" +
+			"Target URL: " + url + "\n\n" +
+			"This usually means the proxy endpoint is missing, blocked, or not allowed by the browser.\n" +
+			"XHR event: " + (e && e.type ? e.type : "network error"));
 	};
 	xhr.onload = function () {
 		var response = xhr.response;

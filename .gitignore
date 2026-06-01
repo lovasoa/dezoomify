@@ -14,6 +14,10 @@ lib-cov
 # Coverage directory used by tools like istanbul
 coverage
 
+# Playwright output
+playwright-report
+test-results
+
 # Grunt intermediate storage (http://gruntjs.com/creating-plugins#storing-task-files)
 .grunt
 

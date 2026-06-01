@@ -3,8 +3,7 @@ var iipimage = (function(){
     "name" : "IIPImage",
     "description": "IIPImage image server",
     "urls" : [
-      /^((?!topview).)*\?FIF=.*$/, // Topview uses FIF= but is not compatible with iipimage
-      /nationalgallery\.org\.uk\/paintings/
+      /^((?!topview).)*\?FIF=.*$/ // Topview uses FIF= but is not compatible with iipimage
     ],
     "contents" : [
       /\?FIF=/
@@ -19,11 +18,6 @@ var iipimage = (function(){
             var path = fifMatch[1];
             var url = ZoomManager.resolveRelative(path, baseUrl);
             return callback(url);
-          }
-          // Special support for nationalgallery.org.uk
-          if (baseUrl.match(/nationalgallery\.org\.uk\/paintings/)){
-            var image = JSON.parse(text.match(/image\s*:\s*("[^"]*")/)[1]);
-            return callback('/server.iip/fcgi-bin/iipsrv.fcgi?FIF=' + image);
           }
           throw new Error("No IIPImage-related URL found.");
       });

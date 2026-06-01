@@ -1,20 +1,26 @@
 // IIIF Image API 2.1
 var iiif = (function () {
-  var urlReg = new RegExp( // IIIF API image URL
-    "(https?://[^\"'\\s]+)" + // base
+  var iiifPathRegExp =
     "(?:/info\\.json|" +
     "/\\^?(?:full|square|(?:pct:)?\\d+,\\d+,\\d+,\\d+)" + // region
     "/(?:full|max|\\d+,|,\\d+|pct:\\d+|!?\\d+,\\d+)" + // size
     "/!?[1-3]?[0-9]?[0-9]" + // rotation
     "/(?:color|gray|bitonal|default|native)" + // quality
     "\\.(?:jpe?g|tiff?|png|gif|jp2|pdf|webp)" + // format
-    ")"
+    ")";
+  var urlReg = new RegExp( // IIIF API image URL
+    "(https?://[^\"'\\s]+)" + // base
+    iiifPathRegExp
+  );
+  var relativeUrlReg = new RegExp(
+    "((?:/|\\.\\.?/)[^\"'\\s<>]+)" + iiifPathRegExp
   );
   var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
-  function extractUrl(text) {
-    var match = text.match(urlReg);
+  function extractUrl(text, baseUrl) {
+    var match = text.match(urlReg) || text.match(relativeUrlReg);
     if (!match) return null;
     var result = match[1] + "/info.json";
+    if (baseUrl) result = ZoomManager.resolveRelative(result, baseUrl);
     // Van Gogh Museum has hash-protected URLs on micrio.* but not micrio-cdn.* 
     result = result.replace('micrio.vangoghmuseum.nl/iiif', 'micrio-cdn.vangoghmuseum.nl');
     return result;
@@ -23,7 +29,7 @@ var iiif = (function () {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
     "urls": [urlReg, gallicaReg],
-    "contents": [urlReg],
+    "contents": [urlReg, relativeUrlReg],
     "findFile": function getInfoFile(baseUrl, callback) {
 
       var gallicaMatch = baseUrl.match(gallicaReg);
@@ -38,7 +44,7 @@ var iiif = (function () {
       if (url) return callback(url);
 
       ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text) {
-        var url = extractUrl(text);
+        var url = extractUrl(text, baseUrl);
         if (url) return callback(url);
         throw new Error("No IIIF URL found.");
       });
@@ -70,6 +76,7 @@ var iiif = (function () {
         }
 
         try {
+          data["@id"] = data["@id"] || data.id;
           if (!data["@id"]) throw new Error("missing iiif @id");
           // See https://github.com/lovasoa/dezoomify/issues/582
           data["@id"] = data["@id"].replace(/^https?, (https?:\/\/)/, '$1');
@@ -87,8 +94,8 @@ var iiif = (function () {
           "height": parseInt(data.height),
           "tileSize": tiles.width,
           "maxZoomLevel": Math.min.apply(null, tiles.scaleFactors),
-          "quality": searchWithDefault(data.qualities, "native", "default"),
-          "format": searchWithDefault(data.formats, "png", "jpg")
+          "quality": searchWithDefault(data.qualities || data.extraQualities, "native", "default"),
+          "format": searchWithDefault(data.formats || data.extraFormats, "png", "jpg")
         };
         var img = new Image; // Load a tile to find out the real tile size
         img.src = getTileURL(0, 0, returned_data.maxZoomLevel, returned_data);
