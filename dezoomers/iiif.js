@@ -25,6 +25,19 @@ var iiif = (function () {
     result = result.replace('micrio.vangoghmuseum.nl/iiif', 'micrio-cdn.vangoghmuseum.nl');
     return result;
   }
+
+  function isPrivateIPv4(hostname) {
+    var match = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (!match) return false;
+    var first = Number(match[1]);
+    var second = Number(match[2]);
+    return (
+      first === 10 ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168)
+    );
+  }
+
   return {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
@@ -81,7 +94,7 @@ var iiif = (function () {
           // See https://github.com/lovasoa/dezoomify/issues/582
           data["@id"] = data["@id"].replace(/^https?, (https?:\/\/)/, '$1');
           var origin = new URL(data["@id"], url);
-          if (origin.hostname === "localhost" || origin.hostname === "example.com") {
+          if (origin.hostname === "localhost" || origin.hostname === "example.com" || isPrivateIPv4(origin.hostname)) {
             throw new Error("probably a test host");
           }
         } catch (e) {

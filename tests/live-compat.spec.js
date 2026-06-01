@@ -12,6 +12,11 @@ const targets = [
     url: "https://www.nationalgallery.org.uk/paintings/alexandre-calame-at-handeck",
   },
   {
+    name: "Memoire des hommes",
+    expectedDezoomer: "IIIF",
+    url: "https://www.memoiredeshommes.defense.gouv.fr/_recherche-images/show/112145/image/56545/0/info.json",
+  },
+  {
     name: "National Gallery of Victoria",
     expectedDezoomer: "Zoomify",
     url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",
