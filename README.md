@@ -29,38 +29,32 @@ The following formats are supported by dezoomify:
 * [Zoomify](http://www.zoomify.com/) : Most common zoomable image format. *dezoomify* used to support only this, hence the name.
 * [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom) : Zoomable image format created by Microsoft.
 * [Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums. [More info about the controversy around this dezoomer.](https://github.com/lovasoa/dezoomify/issues/435).
-* [IIIF](https://iiif.io): The International Image Interoperability Framework, used on many websites, including:
-  * [Gallica](https://gallica.bnf.fr/), the numeric library of the French national library
-  * [Bavarikon](https://www.bavarikon.de/)
-  * [Harvard's library](https://library.harvard.edu/)
-  * [National Gallery](https://www.nationalgallery.org.uk/)
+* [IIIF](https://iiif.io): The International Image Interoperability Framework, used on many websites, including [National Gallery](https://www.nationalgallery.org.uk/), [National Library of Israel](https://www.nli.org.il/), and [National Library of Scotland](https://www.nls.uk/).
 * [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/Zoomify-PFF-file-format-documentation) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
 * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developed by an Italian company.
 * **TopViewer**, also named **Memorix Maior picture viewer**, used by Picturae Memorix sites.
 * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
-* [The Tretiakov gallery](http://www.tretyakovgallery.ru/en/), official website of the Третьяковская галерея (in Moscow).
 * [FSI Viewer](https://www.neptunelabs.com/products/fsi-viewer/), zoomable image server by NeptuneLabs GmbH.
 * [Visual Library Server](https://www.semantics.de/visual_library/), by semantics
-* [Micr.io](https://micr.io/)'s non-IIIF format, used on [vangoghmuseum.nl](https://www.vangoghmuseum.nl/en/explore-the-collection)
+* [Micr.io](https://micr.io/)'s non-IIIF format.
 * [Hungaricana](https://hungaricana.hu/en/) a format found only on the **Hungarian Cultural Heritage Portal**, that hosts half a million images.
 * [WMTS](https://www.ogc.org/standards/wmts/), the OpenGIS Web Map Tile Service standard.
 * Mnesys image viewer.
 * PNAV image viewer, used by several museum collection sites.
 
-The most prominant supported websites include :
+The most prominent supported websites with live compatibility tests include :
 - Arts & Culture (artsandculture.google.com)
-- Gallica (gallica.bnf.fr)
-- The British Library (bl.uk)
-- National Gallery of Art (nga.gov)
-- Hungaricana (hungaricana.hu)
+- National Gallery (nationalgallery.org.uk)
+- National Gallery of Victoria (ngv.vic.gov.au)
 - National Library of Australia (nla.gov.au)
 - National Library of Israel (nli.org.il)
-- National Galleries Of Scotland (nationalgalleries.org)
 - National Library of Scotland (nls.uk)
-- Harvard Library (library.harvard.edu)
-- heidICON, Heidelberg University (heidicon.ub.uni-heidelberg.de)
-- Geographicus (geographicus.com)
-- Archivio di Stato di Trieste (archiviodistatotrieste.it)
+- Bibliotheques specialisees de Paris (bibliotheques-specialisees.paris.fr)
+- FSI Viewer examples (neptunelabs.com)
+- krpano examples (krpano.com)
+- Memorix TopViewer sites (images.memorix.nl)
+- OpenSeadragon Zoomify examples (openseadragon.github.io)
+- PNAV collection sites, including catalog.shm.ru, collection.pushkinmuseum.art, and collection.ethnomuseum.ru
 
 
 Dezoomify also has a
@@ -84,6 +78,20 @@ This script on wikimedia : [Zoomify in the help about zoomable Images on wikimed
 ## Local development
 
 The browser app is static, but it expects a `/proxy` endpoint. Cloudflare Pages serves [functions/proxy.js](functions/proxy.js) at that route. The deterministic test server in [tests/fixture-server.js](tests/fixture-server.js) also provides a fixture-backed `/proxy` route for local tests.
+
+Run deterministic tests from [tests](tests):
+
+```sh
+npm test
+```
+
+Run live compatibility checks manually:
+
+```sh
+npm run test:live
+```
+
+Live compatibility tests intentionally touch real websites and run the browser app against each URL. They fail when automatic detection, metadata loading, or the first tile load breaks. Do not use live-only behavior as the sole regression coverage for a dezoomer; keep deterministic fixtures in [tests/dezoomers.spec.js](tests/dezoomers.spec.js) for protocol behavior, and use [tests/live-compat.spec.js](tests/live-compat.spec.js) to notice when real-world examples have changed.
 
 ## GPL
 > Copyright © 2011-2017 Lovasoa
