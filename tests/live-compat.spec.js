@@ -47,6 +47,11 @@ const targets = [
     url: "https://collections.csntm.org/image-service/iiif/MNTGRCGA01/default/M_NT_GRC_GA01_20250609_203r/M_NT_GRC_GA01_20250609_203r/info.json",
   },
   {
+    name: "Austrian National Library",
+    expectedDezoomer: "IIIF",
+    url: "https://api.onb.ac.at/iiif/presentation/v3/manifest/10048A37",
+  },
+  {
     name: "Memorix TopViewer",
     expectedDezoomer: "TopViewer",
     url: "https://images.memorix.nl/wba/topviewjson/memorix/6eb5a89b-b76c-5039-3999-aabfd7a0c7c9",

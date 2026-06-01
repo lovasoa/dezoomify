@@ -21,6 +21,9 @@ var iiif = (function () {
     /(?:philamuseum|Philadelphia Museum)[\s\S]*\\?"shortId\\?"\s*:\s*\\?"([A-Za-z0-9_-]{3,32})\\?"|\\?"shortId\\?"\s*:\s*\\?"([A-Za-z0-9_-]{3,32})\\?"[\s\S]*(?:philamuseum|Philadelphia Museum)/;
   var contentdmRecordReg = /^(https?:\/\/[^/]+)(\/digital)\/collection\/([^/?#]+)\/id\/(\d+)(?:[/?#]|$)/;
   var manifestParamReg = /^https?:\/\/[^?#]+[?&][^#]*\bmanifest=/;
+  var onbPresentationManifestReg = /^https?:\/\/api\.onb\.ac\.at\/iiif\/presentation\/v3\/manifest\/[^?#]+(?:[?#].*)?$/;
+  var onbViewerReg = /^https?:\/\/viewer\.onb\.ac\.at\/[^?#]+(?:[?#].*)?$/;
+  var onbRepViewerReg = /^https?:\/\/digital\.onb\.ac\.at\/RepViewer\/viewer\.faces\?(?=[^#]*\bdoc=)/;
   var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
   var micrioCustomElementReg = /<micr-io\b[^>]*\bid=["']([A-Za-z0-9]{5})["'][^>]*>/i;
   function extractUrl(text, baseUrl) {
@@ -72,16 +75,54 @@ var iiif = (function () {
       return match && decodeURIComponent(match[1]);
     }
   }
+  function onbManifestUrl(baseUrl) {
+    try {
+      var url = new URL(baseUrl);
+      var manifestPrefix = "/iiif/presentation/v3/manifest/";
+      if (url.hostname === "api.onb.ac.at" && url.pathname.indexOf(manifestPrefix) === 0) {
+        return url.href;
+      }
+      if (url.hostname === "viewer.onb.ac.at") {
+        var viewerId = url.pathname.replace(/^\/+|\/+$/g, "").split("/")[0];
+        if (viewerId) return "https://api.onb.ac.at/iiif/presentation/v3/manifest/" + viewerId;
+      }
+      if (url.hostname === "digital.onb.ac.at" && url.pathname === "/RepViewer/viewer.faces") {
+        var doc = url.searchParams.get("doc");
+        if (doc) return "https://api.onb.ac.at/iiif/presentation/v3/manifest/" + encodeURIComponent(doc);
+      }
+    } catch (e) {
+      return null;
+    }
+    return null;
+  }
   function imageServiceInfoUrl(service) {
     if (!service || typeof service !== "object") return null;
     var url = service["@id"] || service.id;
     if (!url) return null;
+    var serviceType = String(service.type || service["@type"] || "");
     var isImageService =
+      /^ImageService[0-9]?$/.test(serviceType) ||
       String(service.profile || "").indexOf("iiif.io/api/image/") >= 0 ||
       String(service["@context"] || "").indexOf("iiif.io/api/image/") >= 0;
     if (!isImageService) return null;
     if (/\/info\.json(?:[?#].*)?$/.test(url)) return url;
     return url.replace(/\/?([?#].*)?$/, "/info.json$1");
+  }
+  function firstServiceInfoUrl(service) {
+    var services = service && service.length ? service : [service];
+    for (var i = 0; i < services.length; i++) {
+      var infoUrl = imageServiceInfoUrl(services[i]);
+      if (infoUrl) return infoUrl;
+    }
+    return null;
+  }
+  function firstBodyImageServiceInfoUrl(body) {
+    var bodies = body && body.length ? body : [body];
+    for (var i = 0; i < bodies.length; i++) {
+      var infoUrl = bodies[i] && firstServiceInfoUrl(bodies[i].service);
+      if (infoUrl) return infoUrl;
+    }
+    return null;
   }
   function firstPresentationImageServiceInfoUrl(manifest) {
     var sequences = manifest && manifest.sequences;
@@ -91,11 +132,20 @@ var iiif = (function () {
         var images = canvases[j].images;
         for (var k = 0; images && k < images.length; k++) {
           var service = images[k].resource && images[k].resource.service;
-          var services = service && service.length ? service : [service];
-          for (var l = 0; l < services.length; l++) {
-            var infoUrl = imageServiceInfoUrl(services[l]);
-            if (infoUrl) return infoUrl;
-          }
+          var infoUrl = firstServiceInfoUrl(service);
+          if (infoUrl) return infoUrl;
+        }
+      }
+    }
+
+    var items = manifest && manifest.items;
+    for (var m = 0; items && m < items.length; m++) {
+      var annotationPages = items[m].items;
+      for (var n = 0; annotationPages && n < annotationPages.length; n++) {
+        var annotations = annotationPages[n].items;
+        for (var o = 0; annotations && o < annotations.length; o++) {
+          var bodyInfoUrl = firstBodyImageServiceInfoUrl(annotations[o].body);
+          if (bodyInfoUrl) return bodyInfoUrl;
         }
       }
     }
@@ -104,7 +154,7 @@ var iiif = (function () {
   return {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
-    "urls": [urlReg, gallicaReg, contentdmRecordReg, manifestParamReg],
+    "urls": [urlReg, gallicaReg, contentdmRecordReg, manifestParamReg, onbPresentationManifestReg, onbViewerReg, onbRepViewerReg],
     "contents": [
       urlReg,
       relativeUrlReg,
@@ -137,7 +187,7 @@ var iiif = (function () {
         });
       }
 
-      var manifestUrl = manifestParamUrl(baseUrl);
+      var manifestUrl = onbManifestUrl(baseUrl) || manifestParamUrl(baseUrl);
       if (manifestUrl) {
         return ZoomManager.getFile(manifestUrl, { type: "json" }, function (manifest) {
           var infoUrl = firstPresentationImageServiceInfoUrl(manifest);

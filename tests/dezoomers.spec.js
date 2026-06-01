@@ -231,6 +231,25 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.tiles.at(-1).url).toContain("/iiif/v3/256,256,256,256/256,256/0/default.jpg");
   });
 
+  test("discovers ONB IIIF Presentation 3 manifests", async ({ page }) => {
+    const cases = [
+      "https://viewer.onb.ac.at/10048A37/",
+      "https://viewer.onb.ac.at/10048A37/137",
+      "https://api.onb.ac.at/iiif/presentation/v3/manifest/10048A37",
+      "https://digital.onb.ac.at/RepViewer/viewer.faces?doc=DTL_7039594&order=1&view=SINGLE",
+    ];
+
+    for (const url of cases) {
+      const result = await runDezoomer(page, "Select automatically", url);
+
+      expect(result.dezoomerName, url).toBe("IIIF");
+      expect(result.data.origin, url).toBe("http://127.0.0.1:9877/iiif/onb/10048A37/uk4nGb4kQHe3msbC");
+      expect(result.tiles.at(-1).url, url).toContain(
+        "/iiif/onb/10048A37/uk4nGb4kQHe3msbC/256,256,256,256/256,256/0/default.jpg"
+      );
+    }
+  });
+
   test("generates IIIF tile URLs with explicit returned dimensions", async ({ page }) => {
     const urls = await page.evaluate(() => {
       const iiif = window.ZoomManager.dezoomersList.IIIF;
