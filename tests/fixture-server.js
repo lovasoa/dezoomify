@@ -167,6 +167,26 @@ function fixtureFor(target, origin) {
     `);
   }
 
+  if (href === "https://fixtures.test/londonmuseum-object") {
+    return html(`
+      <img data-src="https://collections.londonmuseum.net/iiif/3/object-95380.ptif">
+    `);
+  }
+
+  if (href === "https://collections.londonmuseum.net/iiif/3/object-95380.ptif/info.json") {
+    return json({
+      "@context": "http://iiif.io/api/image/3/context.json",
+      id: `${origin}/iiif/londonmuseum/object-95380.ptif`,
+      type: "ImageService3",
+      width: 512,
+      height: 512,
+      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
+      profile: "level2",
+      extraQualities: ["bitonal", "color", "gray"],
+      extraFormats: ["tif", "gif"],
+    });
+  }
+
   if (
     href ===
     "https://fixtures.test/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/info.json"

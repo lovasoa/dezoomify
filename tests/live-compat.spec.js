@@ -17,6 +17,11 @@ const targets = [
     url: "https://www.memoiredeshommes.defense.gouv.fr/_recherche-images/show/112145/image/56545/0/info.json",
   },
   {
+    name: "London Museum collections",
+    expectedDezoomer: "IIIF",
+    url: "https://www.londonmuseum.org.uk/collections/v/object-95380/a-country-fair/",
+  },
+  {
     name: "National Gallery of Victoria",
     expectedDezoomer: "Zoomify",
     url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",

@@ -291,4 +291,14 @@ test.describe("dezoomer fixture coverage", () => {
     );
   });
 
+  test("extracts London Museum bare IIIF service roots from pages", async ({ page }) => {
+    const result = await runDezoomer(page, "Select automatically", "https://fixtures.test/londonmuseum-object");
+
+    expect(result.dezoomerName).toBe("IIIF");
+    expect(result.data.origin).toBe("http://127.0.0.1:9877/iiif/londonmuseum/object-95380.ptif");
+    expect(result.tiles.at(-1).url).toContain(
+      "/iiif/londonmuseum/object-95380.ptif/256,256,256,256/256,256/0/default.jpg"
+    );
+  });
+
 });
