@@ -49,6 +49,7 @@ The most prominent supported websites with live compatibility tests include :
 - London Museum collections (londonmuseum.org.uk)
 - National Gallery (nationalgallery.org.uk)
 - National Gallery of Victoria (ngv.vic.gov.au)
+- Philadelphia Museum of Art (philamuseum.org)
 - CSNTM manuscripts (collections.csntm.org)
 - National Library of Australia (nla.gov.au)
 - National Library of Israel (nli.org.il)
