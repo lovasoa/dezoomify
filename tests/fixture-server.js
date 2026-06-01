@@ -295,6 +295,29 @@ function fixtureFor(target, origin) {
     });
   }
 
+  if (href === "https://fixtures.test/micrio-custom-element") {
+    return html(`
+      <!doctype html>
+      <html>
+        <body>
+          <micr-io data-view="default" id="KEimL"></micr-io>
+        </body>
+      </html>
+    `);
+  }
+
+  if (href === "https://i.micr.io/KEimL/info.json") {
+    return json({
+      "@context": "http://iiif.io/api/image/2/context.json",
+      "@id": "https://iiif.micr.io/KEimL",
+      width: 512,
+      height: 512,
+      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
+      qualities: ["default"],
+      formats: ["jpg"],
+    });
+  }
+
   if (href === "https://collections.londonmuseum.net/iiif/3/object-95380.ptif/info.json") {
     return json({
       "@context": "http://iiif.io/api/image/3/context.json",

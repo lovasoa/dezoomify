@@ -27,6 +27,11 @@ const targets = [
     url: "https://philamuseum.org/collection/object/101731",
   },
   {
+    name: "Liechtenstein Collections",
+    expectedDezoomer: "IIIF",
+    url: "https://www.liechtensteincollections.at/en/collections-online/forest-landscape",
+  },
+  {
     name: "National Gallery of Victoria",
     expectedDezoomer: "Zoomify",
     url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",

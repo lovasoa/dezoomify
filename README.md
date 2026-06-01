@@ -48,6 +48,7 @@ The most prominent supported websites with live compatibility tests include :
 - Czech Digital Library (api.ceskadigitalniknihovna.cz)
 - Memoire des hommes (memoiredeshommes.defense.gouv.fr)
 - London Museum collections (londonmuseum.org.uk)
+- Liechtenstein Collections (liechtensteincollections.at)
 - National Gallery (nationalgallery.org.uk)
 - National Gallery of Victoria (ngv.vic.gov.au)
 - Philadelphia Museum of Art (philamuseum.org)
