@@ -338,6 +338,27 @@ test.describe("dezoomer fixture coverage", () => {
     );
   });
 
+  test("extracts Prado OpenSeadragon metadata from artwork pages", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Select automatically",
+      "https://www.museodelprado.es/en/the-collection/art-work/las-meninas/9fdc7800-9ade-48b0-ab8b-edee94ea877f?searchid=0a27f161-5629-8f4a-2756-ff085078076e"
+    );
+
+    expect(result.dezoomerName).toBe("Seadragon (Deep Zoom Image)");
+    expect(result.data.origin).toBe(
+      "https://content3.cdnprado.net/imagenes/Documentos/imgsem/9f/9fdc/9fdc7800-9ade-48b0-ab8b-edee94ea877f/41866afd-6396-45e7-bd26-944263cf92f7/"
+    );
+    expect(result.data.width).toBe(2362);
+    expect(result.data.height).toBe(2697);
+    expect(result.data.tileSize).toBe(256);
+    expect(result.data.overlap).toBe(1);
+    expect(result.data.maxZoomLevel).toBe(12);
+    expect(result.tiles[0].url).toBe(
+      "https://content3.cdnprado.net/imagenes/Documentos/imgsem/9f/9fdc/9fdc7800-9ade-48b0-ab8b-edee94ea877f/41866afd-6396-45e7-bd26-944263cf92f7/12/0_0.jpg"
+    );
+  });
+
   test("extracts Philadelphia Museum Micrio short IDs as IIIF info URLs", async ({ page }) => {
     const cases = [
       { url: "https://fixtures.test/philamuseum-escaped-shortid", shortId: "QYRjM" },

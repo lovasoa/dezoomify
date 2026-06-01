@@ -30,6 +30,7 @@ The following formats are supported by dezoomify:
 * [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom) : Zoomable image format created by Microsoft.
 * [Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums. [More info about the controversy around this dezoomer.](https://github.com/lovasoa/dezoomify/issues/435).
 * [IIIF](https://iiif.io): The International Image Interoperability Framework, used on many websites, including [National Gallery](https://www.nationalgallery.org.uk/), [National Library of Israel](https://www.nli.org.il/), and [National Library of Scotland](https://www.nls.uk/).
+* [Museo Nacional del Prado](https://www.museodelprado.es/): artwork pages using Prado's OpenSeadragon image viewer.
 * [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/Zoomify-PFF-file-format-documentation) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
 * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developed by an Italian company.
 * **TopViewer**, also named **Memorix Maior picture viewer**, used by Picturae Memorix sites.

@@ -1,9 +1,34 @@
 var seadragon = (function () { //Code isolation
+	function pradoDeepZoomDataFromPage(text, baseUrl) {
+		var doc = new DOMParser().parseFromString(text, "text/html");
+		var image = doc.querySelector("img.img_cache[data-pyr][data-width][data-height]");
+		if (!image) return null;
+
+		var origin = image.getAttribute("data-pyr");
+		var width = parseInt(image.getAttribute("data-width"), 10);
+		var height = parseInt(image.getAttribute("data-height"), 10);
+		if (!origin || !width || !height) return null;
+
+		origin = ZoomManager.resolveRelative(origin, baseUrl);
+		if (origin.slice(-1) !== "/") origin += "/";
+
+		return {
+			origin: origin,
+			tileSize: 256,
+			overlap: 1,
+			format: "jpg",
+			width: width,
+			height: height,
+			zoomFactor: 2,
+			maxZoomLevel: Math.ceil(Math.log2(Math.max(width, height)))
+		};
+	}
 
 	return {
 		"name": "Seadragon (Deep Zoom Image)",
 		"description": "Microsoft zoomable image format, sometimes called DZI, seadragon, or deep zoom",
 		"urls": [
+			/museodelprado\.es\/(?:en\/the-collection|coleccion)\/(?:art-work|obra-de-arte)\//,
 			/bl\.uk\/manuscripts\/Viewer\.aspx/,
 			/polona\.pl\/item\//,
 			/bibliotheques-specialisees\.paris\.fr\/ark/,
@@ -12,6 +37,7 @@ var seadragon = (function () { //Code isolation
 			/dzi$/
 		],
 		"contents": [
+			/data-pyr=["'][^"']+["'][^>]*\bimg_cache\b|\bimg_cache\b[^>]*data-pyr=/i,
 			/dziUrlTemplate/,
 			/Seadragon\.embed\([^)]*["'][^"']+\.(?:xml|dzi)(?:\?[^"']*)?["']/i,
 			/[^"'()<>]+\.(?:dzi)/i,
@@ -92,6 +118,9 @@ var seadragon = (function () { //Code isolation
 					return callback(url);
 				}
 
+				var pradoData = pradoDeepZoomDataFromPage(text, baseUrl);
+				if (pradoData) return callback(baseUrl, { deepZoomData: pradoData });
+
 				var seadragonEmbedMatch = text.match(/Seadragon\.embed\([^)]*["']([^"']+\.(?:xml|dzi)(?:\?[^"']*)?)["'][^)]*\)/i);
 				if (seadragonEmbedMatch) return callback(seadragonEmbedMatch[1]);
 
@@ -106,7 +135,9 @@ var seadragon = (function () { //Code isolation
 				return callback(baseUrl);
 			});
 		},
-		"open": function (url) {
+		"open": function (url, infos) {
+			if (infos && infos.deepZoomData) return ZoomManager.readyToRender(infos.deepZoomData);
+
 			ZoomManager.getFile(url, { type: "xml" }, function (xml, xhr) {
 				var infos = xml.getElementsByTagName("Image")[0];
 				var size = xml.getElementsByTagName("Size")[0];
