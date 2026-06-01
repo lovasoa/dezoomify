@@ -122,7 +122,7 @@ test.describe("dezoomer fixture coverage", () => {
       {
         dezoomer: "IIIF",
         url: "https://fixtures.test/iiif-v2/info.json",
-        expectedTile: "/iiif/v2/256,256,256,256/256,/0/native.png",
+        expectedTile: "/iiif/v2/256,256,256,256/256,256/0/native.png",
       },
       {
         dezoomer: "IIPImage",
@@ -208,7 +208,31 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.data.origin).toBe("http://127.0.0.1:9877/iiif/v3");
     expect(result.data.quality).toBe("default");
     expect(result.data.format).toBe("jpg");
-    expect(result.tiles.at(-1).url).toContain("/iiif/v3/256,256,256,256/256,/0/default.jpg");
+    expect(result.tiles.at(-1).url).toContain("/iiif/v3/256,256,256,256/256,256/0/default.jpg");
+  });
+
+  test("generates IIIF tile URLs with explicit returned dimensions", async ({ page }) => {
+    const urls = await page.evaluate(() => {
+      const iiif = window.ZoomManager.dezoomersList.IIIF;
+      const data = {
+        origin: "https://iiif.example/image",
+        width: 600,
+        height: 384,
+        tileSize: 256,
+        quality: "default",
+        format: "jpg",
+      };
+
+      return [
+        iiif.getTileURL(0, 0, 1, data),
+        iiif.getTileURL(1, 1, 1, data),
+      ];
+    });
+
+    expect(urls).toEqual([
+      "https://iiif.example/image/0,0,256,256/256,256/0/default.jpg",
+      "https://iiif.example/image/256,256,256,128/256,128/0/default.jpg",
+    ]);
   });
 
   test("keeps Zoomify full-resolution-only NUMTILES in TileGroup0", async ({ page }) => {
@@ -236,7 +260,7 @@ test.describe("dezoomer fixture coverage", () => {
       "http://127.0.0.1:9877/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif"
     );
     expect(result.tiles.at(-1).url).toContain(
-      "/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/256,256,256,256/256,/0/default.jpg"
+      "/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/256,256,256,256/256,256/0/default.jpg"
     );
   });
 
