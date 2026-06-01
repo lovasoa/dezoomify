@@ -136,6 +136,11 @@ test.describe("dezoomer fixture coverage", () => {
       },
       {
         dezoomer: "IIIF",
+        url: "https://fixtures.test/uv/#?manifest=https%3A%2F%2Ffixtures.test%2Fiiif-presentation%2Fmanifest.json",
+        expectedTile: "/iiif/mirador/256,256,256,256/256,256/0/native.jpg",
+      },
+      {
+        dezoomer: "IIIF",
         url: "https://fixtures.test/micrio-custom-element",
         expectedTile: "https://iiif.micr.io/KEimL/256,256,256,256/256,256/0/default.jpg",
       },
