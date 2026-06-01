@@ -46,6 +46,7 @@ The most prominent supported websites with live compatibility tests include :
 - Arts & Culture (artsandculture.google.com)
 - Czech Digital Library (api.ceskadigitalniknihovna.cz)
 - Memoire des hommes (memoiredeshommes.defense.gouv.fr)
+- London Museum collections (londonmuseum.org.uk)
 - National Gallery (nationalgallery.org.uk)
 - National Gallery of Victoria (ngv.vic.gov.au)
 - CSNTM manuscripts (collections.csntm.org)

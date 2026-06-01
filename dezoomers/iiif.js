@@ -15,9 +15,13 @@ var iiif = (function () {
   var relativeUrlReg = new RegExp(
     "((?:/|\\.\\.?/)[^\"'\\s<>]+)" + iiifPathRegExp
   );
+  var londonMuseumServiceRootReg =
+    /(https?:\/\/collections\.londonmuseum\.net\/iiif\/3\/[^"'\s<>]+?\.ptif)(?=["'\s<>])/;
   var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
   function extractUrl(text, baseUrl) {
-    var match = text.match(urlReg) || text.match(relativeUrlReg);
+    var match = text.match(urlReg) ||
+      text.match(relativeUrlReg) ||
+      text.match(londonMuseumServiceRootReg);
     if (!match) return null;
     var result = match[1] + "/info.json";
     if (baseUrl) result = ZoomManager.resolveRelative(result, baseUrl);
@@ -42,7 +46,7 @@ var iiif = (function () {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
     "urls": [urlReg, gallicaReg],
-    "contents": [urlReg, relativeUrlReg],
+    "contents": [urlReg, relativeUrlReg, londonMuseumServiceRootReg],
     "findFile": function getInfoFile(baseUrl, callback) {
 
       var gallicaMatch = baseUrl.match(gallicaReg);
@@ -124,8 +128,12 @@ var iiif = (function () {
           "height": parseInt(data.height),
           "tileSize": tiles.width,
           "maxZoomLevel": Math.min.apply(null, tiles.scaleFactors),
-          "quality": searchWithDefault(data.qualities || data.extraQualities, "native", "default"),
-          "format": searchWithDefault(data.formats || data.extraFormats, "png", "jpg")
+          "quality": data.qualities
+            ? searchWithDefault(data.qualities, "native", "default")
+            : "default",
+          "format": data.formats
+            ? searchWithDefault(data.formats, "png", "jpg")
+            : "jpg"
         };
         var img = new Image; // Load a tile to find out the real tile size
         img.src = getTileURL(0, 0, returned_data.maxZoomLevel, returned_data);
