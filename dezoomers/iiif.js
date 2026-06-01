@@ -18,6 +18,7 @@ var iiif = (function () {
   var londonMuseumServiceRootReg =
     /(https?:\/\/collections\.londonmuseum\.net\/iiif\/3\/[^"'\s<>]+?\.ptif)(?=["'\s<>])/;
   var contentdmRecordReg = /^(https?:\/\/[^/]+)(\/digital)\/collection\/([^/?#]+)\/id\/(\d+)(?:[/?#]|$)/;
+  var manifestParamReg = /^https?:\/\/[^?#]+[?&][^#]*\bmanifest=/;
   var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
   function extractUrl(text, baseUrl) {
     var match = text.match(urlReg) ||
@@ -49,10 +50,47 @@ var iiif = (function () {
     if (info.iiifInfoUri.indexOf("/") === 0) return origin + appPath + info.iiifInfoUri;
     return origin + appPath + "/" + info.iiifInfoUri;
   }
+  function manifestParamUrl(baseUrl) {
+    try {
+      return new URL(baseUrl).searchParams.get("manifest");
+    } catch (e) {
+      var match = String(baseUrl).match(/[?&]manifest=([^&#]+)/);
+      return match && decodeURIComponent(match[1]);
+    }
+  }
+  function imageServiceInfoUrl(service) {
+    if (!service || typeof service !== "object") return null;
+    var url = service["@id"] || service.id;
+    if (!url) return null;
+    var isImageService =
+      String(service.profile || "").indexOf("iiif.io/api/image/") >= 0 ||
+      String(service["@context"] || "").indexOf("iiif.io/api/image/") >= 0;
+    if (!isImageService) return null;
+    if (/\/info\.json(?:[?#].*)?$/.test(url)) return url;
+    return url.replace(/\/?([?#].*)?$/, "/info.json$1");
+  }
+  function firstPresentationImageServiceInfoUrl(manifest) {
+    var sequences = manifest && manifest.sequences;
+    for (var i = 0; sequences && i < sequences.length; i++) {
+      var canvases = sequences[i].canvases;
+      for (var j = 0; canvases && j < canvases.length; j++) {
+        var images = canvases[j].images;
+        for (var k = 0; images && k < images.length; k++) {
+          var service = images[k].resource && images[k].resource.service;
+          var services = service && service.length ? service : [service];
+          for (var l = 0; l < services.length; l++) {
+            var infoUrl = imageServiceInfoUrl(services[l]);
+            if (infoUrl) return infoUrl;
+          }
+        }
+      }
+    }
+    return null;
+  }
   return {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
-    "urls": [urlReg, gallicaReg, contentdmRecordReg],
+    "urls": [urlReg, gallicaReg, contentdmRecordReg, manifestParamReg],
     "contents": [urlReg, relativeUrlReg, londonMuseumServiceRootReg],
     "findFile": function getInfoFile(baseUrl, callback) {
 
@@ -76,6 +114,15 @@ var iiif = (function () {
           var url = contentdmInfoUrl(info, contentdmMatch[1], contentdmMatch[2]);
           if (url) return callback(url);
           throw new Error("No CONTENTdm IIIF URL found.");
+        });
+      }
+
+      var manifestUrl = manifestParamUrl(baseUrl);
+      if (manifestUrl) {
+        return ZoomManager.getFile(manifestUrl, { type: "json" }, function (manifest) {
+          var infoUrl = firstPresentationImageServiceInfoUrl(manifest);
+          if (infoUrl) return callback(infoUrl);
+          throw new Error("No IIIF Image API service found in manifest.");
         });
       }
 

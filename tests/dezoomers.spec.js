@@ -130,6 +130,11 @@ test.describe("dezoomer fixture coverage", () => {
         expectedTile: "/iiif/v2/256,256,256,256/256,256/0/native.png",
       },
       {
+        dezoomer: "IIIF",
+        url: "https://fixtures.test/mirador?manifest=https://fixtures.test/iiif-presentation/manifest.json",
+        expectedTile: "/iiif/mirador/256,256,256,256/256,256/0/native.jpg",
+      },
+      {
         dezoomer: "IIPImage",
         url: "https://fixtures.test/iip?FIF=/image.tif",
         expectedTile: "https://fixtures.test/iip?FIF=/image.tif&JTL=1,3",
@@ -291,6 +296,14 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.tiles.at(-1).url).toContain(
       "/digital/iiif/OKMaps/6483/256,256,256,256/256,256/0/native.jpg"
     );
+  });
+
+  test("rejects IIIF Presentation manifests with only plain images", async ({ page }) => {
+    await expect(runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/mirador?manifest=https://fixtures.test/iiif-presentation/plain-image-manifest.json"
+    )).rejects.toThrow("No IIIF Image API service found in manifest.");
   });
 
   test("extracts current National Gallery IIIF URLs from pages", async ({ page }) => {

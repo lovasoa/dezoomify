@@ -134,6 +134,67 @@ function fixtureFor(target, origin) {
     });
   }
 
+  if (href === "https://fixtures.test/mirador?manifest=https://fixtures.test/iiif-presentation/manifest.json") {
+    return html("<title>Mirador fixture</title>");
+  }
+
+  if (href === "https://fixtures.test/iiif-presentation/manifest.json") {
+    return json({
+      "@context": "http://iiif.io/api/presentation/2/context.json",
+      "@id": "https://fixtures.test/iiif-presentation/manifest.json",
+      "@type": "sc:Manifest",
+      sequences: [{
+        canvases: [{
+          images: [{
+            resource: {
+              "@id": "https://fixtures.test/iiif-presentation/full.jpg",
+              service: [{
+                "@context": "http://iiif.io/api/image/2/context.json",
+                "@id": "https://fixtures.test/iiif-presentation/image",
+                profile: "http://iiif.io/api/image/2/level2.json",
+              }],
+            },
+          }],
+        }],
+      }],
+    });
+  }
+
+  if (href === "https://fixtures.test/iiif-presentation/image/info.json") {
+    return json({
+      "@context": "http://iiif.io/api/image/2/context.json",
+      "@id": `${origin}/iiif/mirador`,
+      width: 512,
+      height: 512,
+      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
+      qualities: ["native"],
+      formats: ["jpg"],
+    });
+  }
+
+  if (href === "https://fixtures.test/mirador?manifest=https://fixtures.test/iiif-presentation/plain-image-manifest.json") {
+    return html("<title>Plain image Mirador fixture</title>");
+  }
+
+  if (href === "https://fixtures.test/iiif-presentation/plain-image-manifest.json") {
+    return json({
+      "@context": "http://iiif.io/api/presentation/2/context.json",
+      "@id": "https://fixtures.test/iiif-presentation/plain-image-manifest.json",
+      "@type": "sc:Manifest",
+      sequences: [{
+        canvases: [{
+          images: [{
+            resource: {
+              "@id": "https://fixtures.test/iiif-presentation/plain.jpg",
+              "@type": "dctypes:Image",
+              format: "image/jpeg",
+            },
+          }],
+        }],
+      }],
+    });
+  }
+
   if (
     href === "https://fixtures.test/iiif-private-id/info.json" ||
     href === `${origin}/fixtures/iiif-private-id/info.json`
