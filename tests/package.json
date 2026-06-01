@@ -8,7 +8,7 @@
   "scripts": {
     "test": "playwright test",
     "test:node-cli": "node node-cli-smoke.js",
-    "test:live": "node live-smoke.js"
+    "test:live": "playwright test --config live-playwright.config.js"
   },
   "author": "",
   "license": "GPL"
