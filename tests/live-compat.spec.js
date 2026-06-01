@@ -47,6 +47,11 @@ const targets = [
     url: "https://dc.library.okstate.edu/digital/collection/OKMaps/id/6483/rec/6",
   },
   {
+    name: "University of Washington Mirador",
+    expectedDezoomer: "IIIF",
+    url: "https://digitalcollections.lib.washington.edu/digital/custom/mirador3?manifest=https://digitalcollections.lib.washington.edu//iiif/info/social/1303/manifest.json",
+  },
+  {
     name: "krpano",
     expectedDezoomer: "krpano",
     url: "https://krpano.com/panos/andreabiffi/galleria_04.xml",

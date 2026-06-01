@@ -63,6 +63,7 @@ The most prominent supported websites with live compatibility tests include :
 - Oklahoma State University Digital Collections (dc.library.okstate.edu)
 - OpenSeadragon Zoomify examples (openseadragon.github.io)
 - PNAV collection sites, including catalog.shm.ru, collection.pushkinmuseum.art, and collection.ethnomuseum.ru
+- University of Washington Digital Collections Mirador (digitalcollections.lib.washington.edu)
 
 
 Dezoomify also has a
