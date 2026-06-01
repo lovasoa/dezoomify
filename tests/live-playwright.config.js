@@ -9,6 +9,8 @@ module.exports = defineConfig({
   testDir: ".",
   testMatch: "live-compat.spec.js",
   fullyParallel: true,
+  globalTimeout: process.env.CI ? 60 * 60 * 1000 : undefined,
+  retries: process.env.CI ? 20 : 0,
   timeout: 30000,
   workers: 4,
   expect: {

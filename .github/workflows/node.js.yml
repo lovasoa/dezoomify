@@ -30,6 +30,7 @@ jobs:
       working-directory: tests
   live-compat:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
     - uses: actions/checkout@v6.0.2
     - uses: actions/setup-node@v6.4.0
@@ -42,4 +43,8 @@ jobs:
     - run: npx playwright install --with-deps chromium
       working-directory: tests
     - run: npm run test:live
+      id: live-tests
+      continue-on-error: true
       working-directory: tests
+    - if: steps.live-tests.outcome == 'failure'
+      run: echo "::warning title=Live compatibility tests failed::One or more live websites changed, blocked the runner, or returned an unexpected response. See the live-compat job logs for details."
