@@ -64,6 +64,22 @@ function fixtureFor(target, origin) {
     );
   }
 
+  if (href === "https://fixtures.test/deepzoom/legacy-embed.html") {
+    return html(`
+      <div id="auto"></div>
+      <script src="/seadragon-min.js"></script>
+      <script>
+        Seadragon.embed("auto", "600px", "legacy.xml");
+      </script>
+    `);
+  }
+
+  if (href === "https://fixtures.test/deepzoom/legacy.xml") {
+    return xml(
+      '<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008"><Size Width="512" Height="512" /></Image>'
+    );
+  }
+
   if (href === "https://fixtures.test/iiif-v2/info.json") {
     return json({
       "@context": "http://iiif.io/api/image/2/context.json",

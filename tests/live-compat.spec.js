@@ -37,6 +37,11 @@ const targets = [
     url: "https://nla.gov.au/nla.obj-152644715/view",
   },
   {
+    name: "Academia Sinica Bronze Rubbings",
+    expectedDezoomer: "Seadragon (Deep Zoom Image)",
+    url: "https://bronze.asdc.sinica.edu.tw/filePool/R/05395-1.html",
+  },
+  {
     name: "FSI Viewer",
     expectedDezoomer: "FSI",
     url: "https://www.neptunelabs.com/fsi-viewer/",

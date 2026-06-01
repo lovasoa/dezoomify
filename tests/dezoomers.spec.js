@@ -115,6 +115,11 @@ test.describe("dezoomer fixture coverage", () => {
         expectedTile: "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg",
       },
       {
+        dezoomer: "Seadragon (Deep Zoom Image)",
+        url: "https://fixtures.test/deepzoom/legacy-embed.html",
+        expectedTile: "https://fixtures.test/deepzoom/legacy_files/9/1_1.jpg",
+      },
+      {
         dezoomer: "IIIF",
         url: "https://fixtures.test/iiif-v2/info.json",
         expectedTile: "/iiif/v2/256,256,256,256/256,/0/native.png",
