@@ -211,6 +211,23 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.tiles.at(-1).url).toContain("/iiif/v3/256,256,256,256/256,/0/default.jpg");
   });
 
+  test("keeps Zoomify full-resolution-only NUMTILES in TileGroup0", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/zoomify-full-numtiles/ImageProperties.xml"
+    );
+
+    expect(result.dezoomerName).toBe("Zoomify");
+    expect(result.data.numTiles).toBe(280);
+    expect(result.data.numTilesIsFullResolutionOnly).toBe(true);
+    expect(result.tiles).toHaveLength(280);
+    expect(result.tiles.every((tile) => tile.url.includes("/TileGroup0/"))).toBe(true);
+    expect(result.tiles.map((tile) => tile.url)).toContain(
+      "https://fixtures.test/zoomify-full-numtiles/TileGroup0/6-16-6.jpg"
+    );
+  });
+
   test("extracts current National Gallery IIIF URLs from pages", async ({ page }) => {
     const result = await runDezoomer(page, "Select automatically", "https://fixtures.test/national-gallery");
 

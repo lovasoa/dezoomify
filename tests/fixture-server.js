@@ -58,6 +58,12 @@ function fixtureFor(target, origin) {
     );
   }
 
+  if (href === "https://fixtures.test/zoomify-full-numtiles/ImageProperties.xml") {
+    return xml(
+      '<IMAGE_PROPERTIES WIDTH="10240" HEIGHT="1792" NUMTILES="280" VERSION="1.8" TILESIZE="256" />'
+    );
+  }
+
   if (href === "https://fixtures.test/deepzoom/sample.dzi") {
     return xml(
       '<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008"><Size Width="512" Height="512" /></Image>'

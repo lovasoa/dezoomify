@@ -17,6 +17,11 @@ const targets = [
     url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",
   },
   {
+    name: "Czech Digital Library",
+    expectedDezoomer: "Zoomify",
+    url: "https://api.ceskadigitalniknihovna.cz/search/api/client/v7.0/items/cuni/uuid:425e338e-9420-11ec-ac48-fa163e4ea95f/image/zoomify/ImageProperties.xml",
+  },
+  {
     name: "Memorix TopViewer",
     expectedDezoomer: "TopViewer",
     url: "https://images.memorix.nl/wba/topviewjson/memorix/6eb5a89b-b76c-5039-3999-aabfd7a0c7c9",

@@ -44,6 +44,7 @@ The following formats are supported by dezoomify:
 
 The most prominent supported websites with live compatibility tests include :
 - Arts & Culture (artsandculture.google.com)
+- Czech Digital Library (api.ceskadigitalniknihovna.cz)
 - National Gallery (nationalgallery.org.uk)
 - National Gallery of Victoria (ngv.vic.gov.au)
 - National Library of Australia (nla.gov.au)
