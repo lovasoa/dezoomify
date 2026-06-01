@@ -77,6 +77,11 @@ const targets = [
     url: "https://www.neptunelabs.com/fsi-viewer/",
   },
   {
+    name: "Alabama Maps LizardTech",
+    expectedDezoomer: "LizardTech ImageServer",
+    url: "http://cartweb.geography.ua.edu/lizardtech/iserv/calcrgn?cat=North%20America%20and%20United%20States&item=NorthAmerica/US1566a.sid&wid=500&hei=400&props=item(Name,Description),cat(Name,Description)&style=default/view.xsl&plugin=true",
+  },
+  {
     name: "Geographicus",
     expectedDezoomer: "Zoomify",
     url: "https://www.geographicus.com/P/AntiqueMap/nantucket-sheminroyster-1973",

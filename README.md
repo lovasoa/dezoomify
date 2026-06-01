@@ -35,6 +35,7 @@ The following formats are supported by dezoomify:
 * **TopViewer**, also named **Memorix Maior picture viewer**, used by Picturae Memorix sites.
 * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
 * [FSI Viewer](https://www.neptunelabs.com/products/fsi-viewer/), zoomable image server by NeptuneLabs GmbH.
+* [LizardTech ImageServer](https://www.extensis.com/support/geospatial), for direct ImageServer `calcrgn` URLs.
 * [Visual Library Server](https://www.semantics.de/visual_library/), by semantics
 * [Micr.io](https://micr.io/)'s non-IIIF format.
 * [Hungaricana](https://hungaricana.hu/en/) a format found only on the **Hungarian Cultural Heritage Portal**, that hosts half a million images.
@@ -57,6 +58,7 @@ The most prominent supported websites with live compatibility tests include :
 - Westchester County Archives (collections.westchestergov.com)
 - Bibliotheques specialisees de Paris (bibliotheques-specialisees.paris.fr)
 - FSI Viewer examples (neptunelabs.com)
+- LizardTech ImageServer on Alabama Maps (cartweb.geography.ua.edu)
 - Geographicus (geographicus.com)
 - krpano examples (krpano.com)
 - Memorix TopViewer sites (images.memorix.nl)
