@@ -161,6 +161,33 @@ function fixtureFor(target, origin) {
     });
   }
 
+  if (href === "https://fixtures.test/digital/collection/OKMaps/id/6483/rec/6") {
+    return html(`
+      <h1>Alfalfa County, Oklahoma</h1>
+      <img src="/digital/api/singleitem/collection/OKMaps/id/6483/thumbnail">
+    `);
+  }
+
+  if (href === "https://fixtures.test/digital/api/singleitem/collection/OKMaps/id/6483") {
+    return json({
+      title: "Alfalfa County, Oklahoma",
+      thumbnailUri: "/api/singleitem/collection/OKMaps/id/6483/thumbnail",
+      iiifInfoUri: "/iiif/OKMaps/6483/info.json",
+    });
+  }
+
+  if (href === "https://fixtures.test/digital/iiif/OKMaps/6483/info.json") {
+    return json({
+      "@context": "http://iiif.io/api/image/2/context.json",
+      "@id": `${origin}/digital/iiif/OKMaps/6483`,
+      width: 512,
+      height: 512,
+      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
+      qualities: ["native"],
+      formats: ["jpg"],
+    });
+  }
+
   if (href === "https://fixtures.test/national-gallery") {
     return html(`
       <img src="/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/full/!80,50/0/default.jpg">
@@ -383,6 +410,7 @@ function serveStatic(req, res, pathname) {
     pathname === "/fixtures/pnav/image.jpg" ||
     pathname.startsWith("/fixtures/iiif-private-id/") ||
     pathname.startsWith("/iiif/") ||
+    pathname.startsWith("/digital/iiif/") ||
     pathname === "/server.iip"
   ) {
     res.writeHead(200, { "Content-Type": "image/jpeg" });

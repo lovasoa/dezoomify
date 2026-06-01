@@ -279,6 +279,20 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.tiles.at(-1).url).not.toContain(":80/");
   });
 
+  test("discovers CONTENTdm IIIF info URLs through the API", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/digital/collection/OKMaps/id/6483/rec/6"
+    );
+
+    expect(result.dezoomerName).toBe("IIIF");
+    expect(result.data.origin).toBe("http://127.0.0.1:9877/digital/iiif/OKMaps/6483");
+    expect(result.tiles.at(-1).url).toContain(
+      "/digital/iiif/OKMaps/6483/256,256,256,256/256,256/0/native.jpg"
+    );
+  });
+
   test("extracts current National Gallery IIIF URLs from pages", async ({ page }) => {
     const result = await runDezoomer(page, "Select automatically", "https://fixtures.test/national-gallery");
 

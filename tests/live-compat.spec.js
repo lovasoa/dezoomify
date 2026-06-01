@@ -42,6 +42,11 @@ const targets = [
     url: "https://images.memorix.nl/wba/topviewjson/memorix/6eb5a89b-b76c-5039-3999-aabfd7a0c7c9",
   },
   {
+    name: "Oklahoma State Digital Collections",
+    expectedDezoomer: "IIIF",
+    url: "https://dc.library.okstate.edu/digital/collection/OKMaps/id/6483/rec/6",
+  },
+  {
     name: "krpano",
     expectedDezoomer: "krpano",
     url: "https://krpano.com/panos/andreabiffi/galleria_04.xml",

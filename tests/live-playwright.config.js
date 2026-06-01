@@ -1,4 +1,9 @@
+const path = require("path");
 const { defineConfig, devices } = require("@playwright/test");
+
+// Oklahoma State omits this intermediate; browsers recover it, Node does not.
+process.env.NODE_EXTRA_CA_CERTS = process.env.NODE_EXTRA_CA_CERTS ||
+  path.join(__dirname, "certs", "incommon-rsa-server-ca-2.pem");
 
 module.exports = defineConfig({
   testDir: ".",
