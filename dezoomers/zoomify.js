@@ -31,6 +31,9 @@ var zoomify = (function () { //Code isolation
 			if (tileUrlMatch) return foundZoomifyPath(tileUrlMatch[0]);
 
 			ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text, xhr) {
+				var pageBaseUrl = baseUrl;
+				var baseMatch = text.match(/<base\s+[^>]*href\s*=\s*["']([^"']*)/i);
+				if (baseMatch) pageBaseUrl = ZoomManager.resolveRelative(baseMatch[1], baseUrl);
 				// for the zoomify flash player, the path is in the zoomifyImagePath
 				// attribute of a tag
 				// In the HTML5 zoomify player, the path is the second argument
@@ -45,13 +48,14 @@ var zoomify = (function () { //Code isolation
 					while ((matchPath = zRegs[z].exec(text)) != null) {
 						for (var i = 1; i < matchPath.length; i++) {
 							var path = matchPath[i];
-							if (path && foundPaths.indexOf(path) === -1) {
-								foundPaths.push(path);
+							var resolvedPath = path && ZoomManager.resolveRelative(path, pageBaseUrl);
+							if (resolvedPath && foundPaths.indexOf(resolvedPath) === -1) {
+								foundPaths.push(resolvedPath);
 							}
 						}
 					}
 				}
-				if (foundPaths.length > 0) return foundPaths.forEach(foundZoomifyPath);
+				if (foundPaths.length > 0) return foundZoomifyPath(foundPaths[0]);
 
 				// Fluid engage zoomify
 				var fluidMatch = text.match(/accessnumber=([^"&\s']+)/i);
