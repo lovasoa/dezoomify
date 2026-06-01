@@ -82,6 +82,11 @@ const targets = [
     url: "https://map-view.nls.uk/iiif/19619%2F196194600/info.json",
   },
   {
+    name: "Westchester County Archives",
+    expectedDezoomer: "IIIF",
+    url: "https://collections.westchestergov.com/digital/collection/ccmaps/id/69/",
+  },
+  {
     name: "pnav catalog.shm.ru",
     expectedDezoomer: "pnav",
     url: "https://catalog.shm.ru/entity/OBJECT/2117418",

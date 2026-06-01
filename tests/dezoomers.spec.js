@@ -263,6 +263,17 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.tiles.at(-1).url).not.toContain("10.0.0.42");
   });
 
+  test("uses the info.json origin when IIIF metadata has a same-host default port", async ({ page }) => {
+    const result = await runDezoomer(page, "IIIF", "/fixtures/iiif-default-port/info.json");
+
+    expect(result.dezoomerName).toBe("IIIF");
+    expect(result.data.origin).toBe("http://127.0.0.1:9877/iiif/default-port");
+    expect(result.tiles.at(-1).url).toContain(
+      "http://127.0.0.1:9877/iiif/default-port/256,256,256,256/256,256/0/native.jpg"
+    );
+    expect(result.tiles.at(-1).url).not.toContain(":80/");
+  });
+
   test("extracts current National Gallery IIIF URLs from pages", async ({ page }) => {
     const result = await runDezoomer(page, "Select automatically", "https://fixtures.test/national-gallery");
 
