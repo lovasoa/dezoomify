@@ -288,7 +288,11 @@ ZoomManager.defaultRender = function (data) {
 	function addTile(url, x, y, data) {
 		if (typeof url === "string") {
 			if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
-			ZoomManager.addTile(url, x * data.tileSize - data.overlap, y * data.tileSize - data.overlap);
+			ZoomManager.addTile(
+				url,
+				x * data.tileSize - (x > 0 ? data.overlap : 0),
+				y * data.tileSize - (y > 0 ? data.overlap : 0)
+			);
 		} else { // Promise
 			url.then(function (url) {
 				addTile(url, x, y, data)

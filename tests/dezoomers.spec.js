@@ -255,6 +255,22 @@ test.describe("dezoomer fixture coverage", () => {
     }
   });
 
+  test("places Deep Zoom overlap only on non-edge tile axes", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Seadragon (Deep Zoom Image)",
+      "https://fixtures.test/deepzoom/overlap.dzi"
+    );
+
+    expect(result.data.overlap).toBe(1);
+    expect(result.tiles.map(({ x, y }) => ({ x, y }))).toEqual([
+      { x: 0, y: 0 },
+      { x: 255, y: 0 },
+      { x: 0, y: 255 },
+      { x: 255, y: 255 },
+    ]);
+  });
+
   test("generates IIIF tile URLs with explicit returned dimensions", async ({ page }) => {
     const urls = await page.evaluate(() => {
       const iiif = window.ZoomManager.dezoomersList.IIIF;
