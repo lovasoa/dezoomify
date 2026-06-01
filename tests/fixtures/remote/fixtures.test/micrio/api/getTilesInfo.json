@@ -1,0 +1,9 @@
+{
+  "levels": [
+    {
+      "width": 512,
+      "height": 512,
+      "tiles": [{ "x": 0, "y": 0, "url": "{{origin}}/fixtures/tile.jpg" }]
+    }
+  ]
+}

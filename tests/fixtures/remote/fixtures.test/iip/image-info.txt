@@ -1,0 +1,3 @@
+Max-size:512 512
+Tile-size:256 256
+Resolution-number:2

@@ -1,0 +1,4 @@
+<root>
+  <var id="zoomTileSize" value="512" />
+  <map id="map" vls:ot_id="fixture" vls:width="512" vls:height="512" xmlns:vls="urn:vls" />
+</root>

@@ -1,10 +1,18 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const stream = require("stream");
+const urlModule = require("url");
 
 const root = path.resolve(__dirname, "..");
-const port = Number(process.env.PORT || 9877);
+const fixtureRoot = path.join(__dirname, "fixtures");
+const remoteFixtureRoot = path.join(fixtureRoot, "remote");
+const localFixtureRoot = path.join(fixtureRoot, "local");
+const portArg = process.argv.find((arg) => arg.startsWith("--port="));
+const port = Number(portArg ? portArg.slice("--port=".length) : process.env.PORT || 9877);
 const host = "127.0.0.1";
+const useFixtures = !process.argv.includes("--live");
+const proxyModule = import(urlModule.pathToFileURL(path.join(root, "functions", "proxy.js")));
 
 const jpg = fs.readFileSync(
   path.join(root, "tests/images/issue_81/image/TileGroup0/3-1-6.jpg")
@@ -12,13 +20,18 @@ const jpg = fs.readFileSync(
 
 const contentTypes = {
   ".css": "text/css",
+  ".dzi": "application/xml",
   ".html": "text/html",
   ".js": "application/javascript",
   ".jpg": "image/jpeg",
   ".json": "application/json",
+  ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".txt": "text/plain",
   ".xml": "application/xml",
 };
+
+const textExtensions = new Set([".css", ".dzi", ".html", ".js", ".json", ".svg", ".txt", ".xml"]);
 
 function response(status, contentType, body) {
   return {
@@ -32,513 +45,166 @@ function response(status, contentType, body) {
   };
 }
 
-function xml(body) {
-  return response(200, "application/xml", body);
+function renderTemplate(body, origin) {
+  return body
+    .replaceAll("{{origin}}", origin)
+    .replaceAll("{{host}}", host);
 }
 
-function json(body) {
-  return response(200, "application/json", JSON.stringify(body));
+function responseFromFile(filePath, origin) {
+  const ext = path.extname(filePath);
+  const contentType = contentTypes[ext] || "application/octet-stream";
+  const body = textExtensions.has(ext)
+    ? renderTemplate(fs.readFileSync(filePath, "utf8"), origin)
+    : fs.readFileSync(filePath);
+  return response(200, contentType, body);
 }
 
-function text(body) {
-  return response(200, "text/plain", body);
+function safeJoin(base, pathname) {
+  const safePath = path.normalize(path.join(base, pathname));
+  if (safePath !== base && !safePath.startsWith(`${base}${path.sep}`)) return null;
+  return safePath;
 }
 
-function html(body) {
-  return response(200, "text/html", body);
+function fixtureFile(hostname, pathname) {
+  const basePath = safeJoin(path.join(remoteFixtureRoot, hostname), `.${pathname}`);
+  if (!basePath) return null;
+  if (fs.existsSync(basePath) && fs.statSync(basePath).isFile()) return basePath;
+
+  for (const ext of [".html", ".json", ".xml", ".txt"]) {
+    const candidate = `${basePath}${ext}`;
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+function fixturePathFor(url) {
+  if (
+    url.hostname === "images.memorix.nl" &&
+    url.pathname === "/demo/topviewjson/memorix/sample-file"
+  ) {
+    return fixtureFile("fixtures.test", "/topviewer/data.json");
+  }
+
+  if (url.hostname === "fixtures.test") {
+    if (url.pathname === "/iip" && url.searchParams.has("OBJ")) {
+      return fixtureFile(url.hostname, "/iip/image-info.txt");
+    }
+
+    if (url.pathname === "/pff") {
+      const requestType = url.searchParams.get("requestType");
+      if (requestType === "1" || requestType === "2") {
+        return fixtureFile(url.hostname, `/pff/requestType-${requestType}.txt`);
+      }
+    }
+
+    if (url.pathname === "/xl/sample.imgi" && url.searchParams.get("cmd") === "info") {
+      return fixtureFile(url.hostname, "/xl/sample-info.xml");
+    }
+
+    if (url.pathname === "/fsi/server" && url.searchParams.get("type") === "info") {
+      return fixtureFile(url.hostname, "/fsi/server-info.txt");
+    }
+
+    if (url.pathname === "/server.iip" && url.searchParams.get("IIIF")) {
+      return fixtureFile(url.hostname, "/server.iip/iiif-fronts-info.json");
+    }
+
+    if (url.pathname === "/hungaricana/imagesize/sample.ecw") {
+      return fixtureFile(url.hostname, "/hungaricana/imagesize/sample.ecw.json");
+    }
+  }
+
+  return fixtureFile(url.hostname, url.pathname);
 }
 
 function fixtureFor(target, origin) {
-  const url = new URL(target);
-  const href = url.href;
+  const filePath = fixturePathFor(new URL(target));
+  if (!filePath) return null;
+  return responseFromFile(filePath, origin);
+}
 
-  if (href === "https://fixtures.test/zoomify/ImageProperties.xml") {
-    return xml(
-      '<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />'
-    );
+async function serveProxy(req, res, requestUrl) {
+  const target = requestUrl.searchParams.get("url");
+  if (!target) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    res.end("missing url");
+    return;
   }
 
-  if (href === "https://fixtures.test/zoomify-full-numtiles/ImageProperties.xml") {
-    return xml(
-      '<IMAGE_PROPERTIES WIDTH="10240" HEIGHT="1792" NUMTILES="280" VERSION="1.8" TILESIZE="256" />'
-    );
-  }
-
-  if (href === "https://fixtures.test/zoomify-base-href/product.html") {
-    return html(`
-      <!doctype html>
-      <html>
-        <head>
-          <base href="https://fixtures.test/zoomify-base-href/assets/">
-        </head>
-        <body>
-          <script>
-            Z.showImage("viewer", "maps/sample");
-            Z.showImage("viewer", "maps/missing");
-          </script>
-        </body>
-      </html>
-    `);
-  }
-
-  if (href === "https://fixtures.test/zoomify-base-href/assets/maps/sample/ImageProperties.xml") {
-    return xml(
-      '<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />'
-    );
-  }
-
-  if (href === "https://fixtures.test/deepzoom/sample.dzi") {
-    return xml(
-      '<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008"><Size Width="512" Height="512" /></Image>'
-    );
-  }
-
-  if (href === "https://fixtures.test/deepzoom/legacy-embed.html") {
-    return html(`
-      <div id="auto"></div>
-      <script src="/seadragon-min.js"></script>
-      <script>
-        Seadragon.embed("auto", "600px", "legacy.xml");
-      </script>
-    `);
-  }
-
-  if (href === "https://fixtures.test/deepzoom/legacy.xml") {
-    return xml(
-      '<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008"><Size Width="512" Height="512" /></Image>'
-    );
-  }
-
-  if (href === "https://fixtures.test/iiif-v2/info.json") {
-    return json({
-      "@context": "http://iiif.io/api/image/2/context.json",
-      "@id": `${origin}/iiif/v2`,
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      qualities: ["native"],
-      formats: ["png"],
-    });
-  }
-
-  if (href === "https://fixtures.test/iiif-v3/info.json") {
-    return json({
-      "@context": "http://iiif.io/api/image/3/context.json",
-      id: `${origin}/iiif/v3`,
-      type: "ImageService3",
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      extraQualities: ["default", "gray"],
-      extraFormats: ["jpg", "webp"],
-    });
-  }
-
-  if (href === "https://fixtures.test/mirador?manifest=https://fixtures.test/iiif-presentation/manifest.json") {
-    return html("<title>Mirador fixture</title>");
-  }
-
-  if (href === "https://fixtures.test/iiif-presentation/manifest.json") {
-    return json({
-      "@context": "http://iiif.io/api/presentation/2/context.json",
-      "@id": "https://fixtures.test/iiif-presentation/manifest.json",
-      "@type": "sc:Manifest",
-      sequences: [{
-        canvases: [{
-          images: [{
-            resource: {
-              "@id": "https://fixtures.test/iiif-presentation/full.jpg",
-              service: [{
-                "@context": "http://iiif.io/api/image/2/context.json",
-                "@id": "https://fixtures.test/iiif-presentation/image",
-                profile: "http://iiif.io/api/image/2/level2.json",
-              }],
-            },
-          }],
-        }],
-      }],
-    });
-  }
-
-  if (href === "https://fixtures.test/iiif-presentation/image/info.json") {
-    return json({
-      "@context": "http://iiif.io/api/image/2/context.json",
-      "@id": `${origin}/iiif/mirador`,
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      qualities: ["native"],
-      formats: ["jpg"],
-    });
-  }
-
-  if (href === "https://fixtures.test/mirador?manifest=https://fixtures.test/iiif-presentation/plain-image-manifest.json") {
-    return html("<title>Plain image Mirador fixture</title>");
-  }
-
-  if (href === "https://fixtures.test/iiif-presentation/plain-image-manifest.json") {
-    return json({
-      "@context": "http://iiif.io/api/presentation/2/context.json",
-      "@id": "https://fixtures.test/iiif-presentation/plain-image-manifest.json",
-      "@type": "sc:Manifest",
-      sequences: [{
-        canvases: [{
-          images: [{
-            resource: {
-              "@id": "https://fixtures.test/iiif-presentation/plain.jpg",
-              "@type": "dctypes:Image",
-              format: "image/jpeg",
-            },
-          }],
-        }],
-      }],
-    });
-  }
-
-  if (
-    href === "https://fixtures.test/iiif-private-id/info.json" ||
-    href === `${origin}/fixtures/iiif-private-id/info.json`
-  ) {
-    return json({
-      "@context": "http://iiif.io/api/image/2/context.json",
-      "@id": "http://10.0.0.42/iiif/private-id",
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      qualities: ["native"],
-      formats: ["png"],
-    });
-  }
-
-  if (href === `${origin}/fixtures/iiif-default-port/info.json`) {
-    return json({
-      "@context": "http://iiif.io/api/image/2/context.json",
-      "@id": `http://${host}:80/iiif/default-port`,
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      qualities: ["native"],
-      formats: ["jpg"],
-    });
-  }
-
-  if (href === "https://fixtures.test/digital/collection/OKMaps/id/6483/rec/6") {
-    return html(`
-      <h1>Alfalfa County, Oklahoma</h1>
-      <img src="/digital/api/singleitem/collection/OKMaps/id/6483/thumbnail">
-    `);
-  }
-
-  if (href === "https://fixtures.test/digital/api/singleitem/collection/OKMaps/id/6483") {
-    return json({
-      title: "Alfalfa County, Oklahoma",
-      thumbnailUri: "/api/singleitem/collection/OKMaps/id/6483/thumbnail",
-      iiifInfoUri: "/iiif/OKMaps/6483/info.json",
-    });
-  }
-
-  if (href === "https://fixtures.test/digital/iiif/OKMaps/6483/info.json") {
-    return json({
-      "@context": "http://iiif.io/api/image/2/context.json",
-      "@id": `${origin}/digital/iiif/OKMaps/6483`,
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      qualities: ["native"],
-      formats: ["jpg"],
-    });
-  }
-
-  if (href === "https://fixtures.test/national-gallery") {
-    return html(`
-      <img src="/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/full/!80,50/0/default.jpg">
-    `);
-  }
-
-  if (href === "https://fixtures.test/londonmuseum-object") {
-    return html(`
-      <img data-src="https://collections.londonmuseum.net/iiif/3/object-95380.ptif">
-    `);
-  }
-
-  if (href === "https://fixtures.test/philamuseum-escaped-shortid") {
-    return html(`
-      <script id="__NEXT_DATA__" type="application/json">
-        {"props":{"pageProps":{"site":"philamuseum.org","image":"{\\"shortId\\":\\"QYRjM\\"}"}}}
-      </script>
-    `);
-  }
-
-  if (href === "https://fixtures.test/philamuseum-raw-shortid") {
-    return html(`
-      <script id="__NEXT_DATA__" type="application/json">
-        {"props":{"pageProps":{"site":"philamuseum.org","image":{"shortId":"Raw01"}}}}
-      </script>
-    `);
-  }
-
-  if (
-    href === "https://i.micr.io/QYRjM/info.json" ||
-    href === "https://i.micr.io/Raw01/info.json"
-  ) {
-    const shortId = url.pathname.replace(/^\/|\/info\.json$/g, "");
-    return json({
-      "@context": "http://iiif.io/api/image/3/context.json",
-      id: `${origin}/iiif/micrio/${shortId}`,
-      type: "ImageService3",
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      profile: "level2",
-      qualities: ["default", "gray", "color"],
-      formats: ["jpg", "png", "webp"],
-    });
-  }
-
-  if (href === "https://fixtures.test/micrio-custom-element") {
-    return html(`
-      <!doctype html>
-      <html>
-        <body>
-          <micr-io data-view="default" id="KEimL"></micr-io>
-        </body>
-      </html>
-    `);
-  }
-
-  if (href === "https://i.micr.io/KEimL/info.json") {
-    return json({
-      "@context": "http://iiif.io/api/image/2/context.json",
-      "@id": "https://iiif.micr.io/KEimL",
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      qualities: ["default"],
-      formats: ["jpg"],
-    });
-  }
-
-  if (href === "https://collections.londonmuseum.net/iiif/3/object-95380.ptif/info.json") {
-    return json({
-      "@context": "http://iiif.io/api/image/3/context.json",
-      id: `${origin}/iiif/londonmuseum/object-95380.ptif`,
-      type: "ImageService3",
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      profile: "level2",
-      extraQualities: ["bitonal", "color", "gray"],
-      extraFormats: ["tif", "gif"],
-    });
-  }
-
-  if (
-    href ===
-    "https://fixtures.test/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/info.json"
-  ) {
-    return json({
-      "@context": "http://iiif.io/api/image/3/context.json",
-      id: `${origin}/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif`,
-      type: "ImageService3",
-      width: 512,
-      height: 512,
-      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
-      profile: "level2",
-    });
-  }
-
-  if (href.startsWith("https://fixtures.test/iip?FIF=/image.tif&OBJ=")) {
-    return text("Max-size:512 512\nTile-size:256 256\nResolution-number:2\n");
-  }
-
-  if (href === "https://fixtures.test/krpano/pano.xml") {
-    return xml(`
-      <krpano>
-        <image tilesize="256">
-          <level tiledimagewidth="512" tiledimageheight="512">
-            <front url="tiles/l%l/%v_%h.jpg" />
-          </level>
-        </image>
-      </krpano>
-    `);
-  }
-
-  if (url.hostname === "fixtures.test" && url.pathname === "/pff") {
-    var requestType = url.searchParams.get("requestType");
-    if (requestType === "1") {
-      return text(
-        'width="512"\nheight="512"\ntileSize="256"\nnumTiles="4"\nversion="1"\nheaderSize="0"\n'
-      );
+  if (useFixtures) {
+    const fixture = fixtureFor(target, `http://${host}:${port}`);
+    if (fixture) {
+      res.writeHead(fixture.status, fixture.headers);
+      res.end(req.method === "HEAD" ? undefined : fixture.body);
+      return;
     }
-    if (requestType === "2") {
-      return text("reply_data=0,     1200     1300     1400     1500");
+
+    if (new URL(target).hostname === "fixtures.test") {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end(`No fixture for ${target}`);
+      return;
     }
   }
 
-  if (href === "https://fixtures.test/xl/sample.imgi?cmd=info") {
-    return xml("<image><width>512</width><height>512</height><tileside>256</tileside></image>");
-  }
+  const request = new Request(requestUrl, {
+    method: req.method,
+    headers: req.headers,
+  });
+  const proxy = await proxyModule;
+  const response = req.method === "HEAD"
+    ? await proxy.onRequestHead({ request })
+    : await proxy.onRequestGet({ request });
 
-  if (href === "https://fixtures.test/topviewer/data.json") {
-    return json({
-      topviews: [
-        {
-          filepath: "sample-file",
-          width: 512,
-          height: 512,
-          tileWidth: 256,
-          layers: [{ no: 1, width: 512, starttile: 10, cols: 2 }],
-        },
-      ],
-      config: {
-        tileurl_v2: `${origin}/topviewer/{file}/{tile}.{extension}`,
-      },
-    });
-  }
+  res.statusCode = response.status;
+  res.statusMessage = response.statusText;
+  response.headers.forEach((value, name) => {
+    res.setHeader(name, value);
+  });
 
-  if (href === "https://fixtures.test/topviewer/page?FIF=not-iip") {
-    return html(`
-      <img src="https://images.memorix.nl/demo/thumb/100x100/sample-file.jpg">
-    `);
+  if (!response.body) {
+    res.end();
+    return;
   }
+  stream.Readable.fromWeb(response.body).pipe(res);
+}
 
-  if (href === "http://images.memorix.nl/demo/topviewjson/memorix/sample-file") {
-    return fixtureFor("https://fixtures.test/topviewer/data.json", origin);
-  }
-
-  if (
-    href === "https://fixtures.test/fsi/server?type=info&source=image" ||
-    href === "https://fixtures.test/fsi/server?type=info&source=image&image=image"
-  ) {
-    return text('<property width value="512" /><property height value="512" />');
-  }
-
-  if (
-    href ===
-    "https://fixtures.test/lizardtech/iserv/calcrgn?cat=North%20America%20and%20United%20States&item=NorthAmerica/US1566a.sid&wid=500&hei=400&props=item(Name,Description),cat(Name,Description)&style=default/view.xsl&plugin=true"
-  ) {
-    return xml(`
-      <ImageServer host="fixtures.test" path="lizardtech/iserv" version="9.5.0.4547">
-        <Request command="calcrgn">
-          <Parameter name="cat">North America and United States</Parameter>
-          <Parameter name="item">NorthAmerica/US1566a.sid</Parameter>
-        </Request>
-        <Response>
-          <Catalog name="North America and United States">
-            <Image width="1024" height="1024" name="US1566a.sid" parent="NorthAmerica" numlevels="10" />
-          </Catalog>
-        </Response>
-      </ImageServer>
-    `);
-  }
-
-  if (href === "https://fixtures.test/vls/zoom/1") {
-    return xml(`
-      <root>
-        <var id="zoomTileSize" value="512" />
-        <map id="map" vls:ot_id="fixture" vls:width="512" vls:height="512" xmlns:vls="urn:vls" />
-      </root>
-    `);
-  }
-
-  if (href === "https://fixtures.test/micrio/api/getTilesInfo?object_id=1") {
-    return json({
-      levels: [
-        {
-          width: 512,
-          height: 512,
-          tiles: [{ x: 0, y: 0, url: `${origin}/fixtures/tile.jpg` }],
-        },
-      ],
-    });
-  }
-
-  if (href === "https://fixtures.test/hungaricana/imagesize/sample.ecw") {
-    return json({ width: 512, height: 512 });
-  }
-
-  if (href === "https://fixtures.test/mnesys/p.xml") {
-    return xml('<root><layer z="0" w="512" h="512" t="256" /></root>');
-  }
-
-  if (href === "https://fixtures.test/wmts/WMTSCapabilities.xml") {
-    return xml(`
-      <Capabilities xmlns="http://www.opengis.net/wmts/1.0" xmlns:ows="http://www.opengis.net/ows/1.1">
-        <Contents>
-          <Layer>
-            <ows:Identifier>fixture</ows:Identifier>
-            <ows:BoundingBox crs="urn:ogc:def:crs:EPSG::3857">
-              <ows:LowerCorner>0 0</ows:LowerCorner>
-              <ows:UpperCorner>512 512</ows:UpperCorner>
-            </ows:BoundingBox>
-            <Style><ows:Identifier>default</ows:Identifier></Style>
-            <ResourceURL format="image/jpeg" resourceType="tile" template="${origin}/wmts/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.jpg" />
-          </Layer>
-          <TileMatrixSet>
-            <ows:Identifier>EPSG3857</ows:Identifier>
-            <ows:SupportedCRS>urn:ogc:def:crs:EPSG::3857</ows:SupportedCRS>
-            <TileMatrix>
-              <ows:Identifier>0</ows:Identifier>
-              <ScaleDenominator>714.2857142857143</ScaleDenominator>
-              <TopLeftCorner>0 512</TopLeftCorner>
-              <TileWidth>256</TileWidth>
-              <TileHeight>256</TileHeight>
-              <MatrixWidth>2</MatrixWidth>
-              <MatrixHeight>2</MatrixHeight>
-            </TileMatrix>
-          </TileMatrixSet>
-        </Contents>
-      </Capabilities>
-    `);
-  }
-
-  if (href === "https://fixtures.test/entity/OBJECT/1") {
-    return html(
-      `<meta property="og:image" content="${origin}/fixtures/pnav/image.jpg?w=1000&h=1000">`
-    );
-  }
-
-  if (href === `${origin}/fixtures/pnav/image.json`) {
-    return json({ width: 512, height: 512 });
-  }
-
-  return response(404, "text/plain", `No fixture for ${target}`);
+function serveFixtureFile(res, filePath, origin) {
+  const fixture = responseFromFile(filePath, origin);
+  res.writeHead(fixture.status, fixture.headers);
+  res.end(fixture.body);
 }
 
 function serveStatic(req, res, pathname) {
   const origin = `http://${host}:${port}`;
+
   if (pathname === "/fixtures/iiif-v2/info.json") {
-    const fixture = fixtureFor("https://fixtures.test/iiif-v2/info.json", origin);
-    res.writeHead(fixture.status, fixture.headers);
-    res.end(fixture.body);
+    serveFixtureFile(res, fixtureFile("fixtures.test", "/iiif-v2/info.json"), origin);
     return;
   }
 
   if (pathname === "/fixtures/iiif-private-id/info.json") {
-    const fixture = fixtureFor("https://fixtures.test/iiif-private-id/info.json", origin);
-    res.writeHead(fixture.status, fixture.headers);
-    res.end(fixture.body);
+    serveFixtureFile(res, fixtureFile("fixtures.test", "/iiif-private-id/info.json"), origin);
     return;
   }
 
   if (pathname === "/fixtures/iiif-default-port/info.json") {
-    const fixture = fixtureFor(`${origin}/fixtures/iiif-default-port/info.json`, origin);
-    res.writeHead(fixture.status, fixture.headers);
-    res.end(fixture.body);
+    serveFixtureFile(
+      res,
+      path.join(localFixtureRoot, "fixtures/iiif-default-port/info.json"),
+      origin
+    );
     return;
   }
 
   if (pathname === "/entity/OBJECT/1") {
-    const fixture = fixtureFor("https://fixtures.test/entity/OBJECT/1", origin);
-    res.writeHead(fixture.status, fixture.headers);
-    res.end(fixture.body);
+    serveFixtureFile(res, fixtureFile("fixtures.test", "/entity/OBJECT/1"), origin);
     return;
   }
 
   if (pathname === "/fixtures/pnav/image.json") {
-    const fixture = fixtureFor(`${origin}/fixtures/pnav/image.json`, origin);
-    res.writeHead(fixture.status, fixture.headers);
-    res.end(fixture.body);
+    serveFixtureFile(res, path.join(localFixtureRoot, "fixtures/pnav/image.json"), origin);
     return;
   }
 
@@ -556,7 +222,7 @@ function serveStatic(req, res, pathname) {
   }
 
   if (pathname === "/fixtures/generic/tile.jpg") {
-    const url = new URL(req.url, `http://${host}:${port}`);
+    const url = new URL(req.url, origin);
     const x = Number(url.searchParams.get("x"));
     const y = Number(url.searchParams.get("y"));
     if (x >= 0 && x < 2 && y >= 0 && y < 2) {
@@ -569,8 +235,8 @@ function serveStatic(req, res, pathname) {
     return;
   }
 
-  const safePath = path.normalize(path.join(root, pathname));
-  if (!safePath.startsWith(root)) {
+  const safePath = safeJoin(root, pathname);
+  if (!safePath) {
     res.writeHead(403, { "Content-Type": "text/plain" });
     res.end("forbidden");
     return;
@@ -595,15 +261,10 @@ http
     const url = new URL(req.url, origin);
 
     if (url.pathname === "/proxy") {
-      const target = url.searchParams.get("url");
-      if (!target) {
-        res.writeHead(400, { "Content-Type": "text/plain" });
-        res.end("missing url");
-        return;
-      }
-      const fixture = fixtureFor(target, origin);
-      res.writeHead(fixture.status, fixture.headers);
-      res.end(fixture.body);
+      serveProxy(req, res, url).catch((err) => {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end(err.toString() + "\n");
+      });
       return;
     }
 

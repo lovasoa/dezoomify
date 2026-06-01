@@ -22,7 +22,7 @@ module.exports = defineConfig({
     channel: process.env.PLAYWRIGHT_CHANNEL || (process.platform === "darwin" ? "chrome" : undefined),
   },
   webServer: {
-    command: "node live-server.js",
+    command: "node fixture-server.js --live --port=9878",
     url: "http://127.0.0.1:9878",
     reuseExistingServer: !process.env.CI,
     timeout: 5000,

@@ -1,0 +1,7 @@
+<krpano>
+  <image tilesize="256">
+    <level tiledimagewidth="512" tiledimageheight="512">
+      <front url="tiles/l%l/%v_%h.jpg" />
+    </level>
+  </image>
+</krpano>
