@@ -17,6 +17,8 @@ var iiif = (function () {
   );
   var londonMuseumServiceRootReg =
     /(https?:\/\/collections\.londonmuseum\.net\/iiif\/3\/[^"'\s<>]+?\.ptif)(?=["'\s<>])/;
+  var philadelphiaMuseumMicrioShortIdReg =
+    /(?:philamuseum|Philadelphia Museum)[\s\S]*\\?"shortId\\?"\s*:\s*\\?"([A-Za-z0-9_-]{3,32})\\?"|\\?"shortId\\?"\s*:\s*\\?"([A-Za-z0-9_-]{3,32})\\?"[\s\S]*(?:philamuseum|Philadelphia Museum)/;
   var contentdmRecordReg = /^(https?:\/\/[^/]+)(\/digital)\/collection\/([^/?#]+)\/id\/(\d+)(?:[/?#]|$)/;
   var manifestParamReg = /^https?:\/\/[^?#]+[?&][^#]*\bmanifest=/;
   var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
@@ -30,6 +32,11 @@ var iiif = (function () {
     // Van Gogh Museum has hash-protected URLs on micrio.* but not micrio-cdn.* 
     result = result.replace('micrio.vangoghmuseum.nl/iiif', 'micrio-cdn.vangoghmuseum.nl');
     return result;
+  }
+  function extractPhiladelphiaMuseumMicrioUrl(text) {
+    var match = text.match(philadelphiaMuseumMicrioShortIdReg);
+    if (!match) return null;
+    return "https://i.micr.io/" + (match[1] || match[2]) + "/info.json";
   }
   function isPrivateIPv4(hostname) {
     var match = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
@@ -91,7 +98,7 @@ var iiif = (function () {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
     "urls": [urlReg, gallicaReg, contentdmRecordReg, manifestParamReg],
-    "contents": [urlReg, relativeUrlReg, londonMuseumServiceRootReg],
+    "contents": [urlReg, relativeUrlReg, londonMuseumServiceRootReg, philadelphiaMuseumMicrioShortIdReg],
     "findFile": function getInfoFile(baseUrl, callback) {
 
       var gallicaMatch = baseUrl.match(gallicaReg);
@@ -127,7 +134,8 @@ var iiif = (function () {
       }
 
       ZoomManager.getFile(baseUrl, { type: "htmltext" }, function (text) {
-        var url = extractUrl(text, baseUrl);
+        var url = extractUrl(text, baseUrl) ||
+          extractPhiladelphiaMuseumMicrioUrl(text);
         if (url) return callback(url);
         throw new Error("No IIIF URL found.");
       });

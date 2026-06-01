@@ -333,4 +333,21 @@ test.describe("dezoomer fixture coverage", () => {
     );
   });
 
+  test("extracts Philadelphia Museum Micrio short IDs as IIIF info URLs", async ({ page }) => {
+    const cases = [
+      { url: "https://fixtures.test/philamuseum-escaped-shortid", shortId: "QYRjM" },
+      { url: "https://fixtures.test/philamuseum-raw-shortid", shortId: "Raw01" },
+    ];
+
+    for (const item of cases) {
+      const result = await runDezoomer(page, "Select automatically", item.url);
+
+      expect(result.dezoomerName, item.url).toBe("IIIF");
+      expect(result.data.origin, item.url).toBe(`http://127.0.0.1:9877/iiif/micrio/${item.shortId}`);
+      expect(result.tiles.at(-1).url, item.url).toContain(
+        `/iiif/micrio/${item.shortId}/256,256,256,256/256,256/0/default.png`
+      );
+    }
+  });
+
 });

@@ -261,6 +261,40 @@ function fixtureFor(target, origin) {
     `);
   }
 
+  if (href === "https://fixtures.test/philamuseum-escaped-shortid") {
+    return html(`
+      <script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"site":"philamuseum.org","image":"{\\"shortId\\":\\"QYRjM\\"}"}}}
+      </script>
+    `);
+  }
+
+  if (href === "https://fixtures.test/philamuseum-raw-shortid") {
+    return html(`
+      <script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"site":"philamuseum.org","image":{"shortId":"Raw01"}}}}
+      </script>
+    `);
+  }
+
+  if (
+    href === "https://i.micr.io/QYRjM/info.json" ||
+    href === "https://i.micr.io/Raw01/info.json"
+  ) {
+    const shortId = url.pathname.replace(/^\/|\/info\.json$/g, "");
+    return json({
+      "@context": "http://iiif.io/api/image/3/context.json",
+      id: `${origin}/iiif/micrio/${shortId}`,
+      type: "ImageService3",
+      width: 512,
+      height: 512,
+      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
+      profile: "level2",
+      qualities: ["default", "gray", "color"],
+      formats: ["jpg", "png", "webp"],
+    });
+  }
+
   if (href === "https://collections.londonmuseum.net/iiif/3/object-95380.ptif/info.json") {
     return json({
       "@context": "http://iiif.io/api/image/3/context.json",

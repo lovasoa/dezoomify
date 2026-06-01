@@ -22,6 +22,11 @@ const targets = [
     url: "https://www.londonmuseum.org.uk/collections/v/object-95380/a-country-fair/",
   },
   {
+    name: "Philadelphia Museum of Art",
+    expectedDezoomer: "IIIF",
+    url: "https://philamuseum.org/collection/object/101731",
+  },
+  {
     name: "National Gallery of Victoria",
     expectedDezoomer: "Zoomify",
     url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",
