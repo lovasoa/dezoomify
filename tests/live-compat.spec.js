@@ -22,6 +22,11 @@ const targets = [
     url: "https://api.ceskadigitalniknihovna.cz/search/api/client/v7.0/items/cuni/uuid:425e338e-9420-11ec-ac48-fa163e4ea95f/image/zoomify/ImageProperties.xml",
   },
   {
+    name: "CSNTM manuscripts",
+    expectedDezoomer: "IIIF",
+    url: "https://collections.csntm.org/image-service/iiif/MNTGRCGA01/default/M_NT_GRC_GA01_20250609_203r/M_NT_GRC_GA01_20250609_203r/info.json",
+  },
+  {
     name: "Memorix TopViewer",
     expectedDezoomer: "TopViewer",
     url: "https://images.memorix.nl/wba/topviewjson/memorix/6eb5a89b-b76c-5039-3999-aabfd7a0c7c9",

@@ -47,6 +47,7 @@ The most prominent supported websites with live compatibility tests include :
 - Czech Digital Library (api.ceskadigitalniknihovna.cz)
 - National Gallery (nationalgallery.org.uk)
 - National Gallery of Victoria (ngv.vic.gov.au)
+- CSNTM manuscripts (collections.csntm.org)
 - National Library of Australia (nla.gov.au)
 - National Library of Israel (nli.org.il)
 - National Library of Scotland (nls.uk)

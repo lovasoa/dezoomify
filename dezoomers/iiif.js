@@ -114,7 +114,8 @@ var iiif = (function () {
 
   function getTileURL(x, y, zoom, data) {
     var s = data.tileSize,
-      pxX = x * s, pxY = y * s;
+      pxX = x * s, pxY = y * s,
+      sx, sy;
     //The image size is adjusted for edges
     //width
     if (pxX + s > data.width) {
@@ -134,7 +135,7 @@ var iiif = (function () {
       sx + "," + // source image width
       sy + "/" + // source image height
       sx + "," + // returned image width
-      "" + "/" + // returned image height
+      sy + "/" + // returned image height
       "0" + "/" + //rotation
       data.quality + "." + //quality
       data.format; //format
