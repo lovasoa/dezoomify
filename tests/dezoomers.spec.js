@@ -86,7 +86,7 @@ async function runDezoomer(page, dezoomerName, url) {
     },
     {
       dezoomerName,
-      proxyUrl: `${new URL(page.url()).origin}/proxy.php`,
+      proxyUrl: `${new URL(page.url()).origin}/proxy`,
       url,
     }
   );

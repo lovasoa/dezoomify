@@ -398,7 +398,7 @@ Call callback with the contents of the page at url
 @param {fileCallback} callback - callback to call when the file is loaded
 */
 ZoomManager.getFile = function (url, params, callback) {
-	var PHPSCRIPT = ZoomManager.proxy_url;
+	var proxyEndpoint = ZoomManager.proxy_url;
 	var type = params.type || "text";
 	var xhr = new XMLHttpRequest();
 
@@ -407,7 +407,7 @@ ZoomManager.getFile = function (url, params, callback) {
 	if (url.match(/%[a-zA-Z0-9]{2}/) === null) url = encodeURI(url);
 	// We pass the URL itself as a query parameter, so we have to re-encode it
 	var codedurl = encodeURIComponent(url);
-	var requesturl = PHPSCRIPT + "?url=" + codedurl;
+	var requesturl = proxyEndpoint + "?url=" + codedurl;
 	if (ZoomManager.cookies.length > 0) {
 		requesturl += "&cookies=" + encodeURIComponent(ZoomManager.cookies);
 	}
@@ -587,7 +587,7 @@ Initialize the ZoomManager
 ZoomManager.init = function () {
 	// Called before open()
 	if (!ZoomManager.cookies) ZoomManager.cookies = "";
-	if (!ZoomManager.proxy_url) ZoomManager.proxy_url = "proxy.php";
+	if (!ZoomManager.proxy_url) ZoomManager.proxy_url = "/proxy";
 	ZoomManager.status = {
 		"error": false,
 		"loaded": 0,

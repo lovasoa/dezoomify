@@ -76,25 +76,14 @@ URL, and dezoomify will be able to work with it.
 
 # Programming Languages
 The aim of the script is to do as much as possible in _Javascript_ (with the HTML5 `<canvas>` tag), and only the network-related stuffs on the server side. The only little piece of server-side code that remains in the code is just a proxy, used to circumvent the [same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy).
-We implemented this code both in Javascript ([node-app/proxy.js](node-app/proxy.js)) and PHP ([proxy.php](proxy.php)), so you just need to have either one
-on your server to run dezoomify.
+The proxy is implemented in Javascript as a Cloudflare Pages Function ([functions/proxy.js](functions/proxy.js)) and reused by the Node app through [node-app/proxy.js](node-app/proxy.js).
 
 ## Wikimedia
 This script on wikimedia : [Zoomify in the help about zoomable Images on wikimedia](https://secure.wikimedia.org/wikipedia/commons/wiki/Help:Zoomable_images)
 
 ## Local development
 
-You can run the script locally, using php:
-
-```bash
-# Install the dependencies
-sudo apt install php-cli
-
-# Run the script
-php -S localhost:3000
-```
-
-Then open http://localhost:3000/ in your browser.
+The browser app is static, but it expects a `/proxy` endpoint. Cloudflare Pages serves [functions/proxy.js](functions/proxy.js) at that route. The deterministic test server in [tests/fixture-server.js](tests/fixture-server.js) also provides a fixture-backed `/proxy` route for local tests.
 
 ## GPL
 > Copyright © 2011-2017 Lovasoa

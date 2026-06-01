@@ -322,7 +322,7 @@ http
     const origin = `http://${host}:${port}`;
     const url = new URL(req.url, origin);
 
-    if (url.pathname === "/proxy.php") {
+    if (url.pathname === "/proxy") {
       const target = url.searchParams.get("url");
       if (!target) {
         res.writeHead(400, { "Content-Type": "text/plain" });
