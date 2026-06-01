@@ -71,6 +71,18 @@ var iiif = (function () {
           var array = (array && array.length) ? array : [defaultValue];
           return ~array.indexOf(search) ? search : array[0];
         }
+        function explicitPort(rawUrl) {
+          var match = String(rawUrl).match(/^https?:\/\/(?:\[[^\]]+\]|[^\/?#:]+):(\d+)(?:[\/?#]|$)/i);
+          return match && match[1];
+        }
+        function hasDefaultPortOriginMismatch(serviceUrl, infoUrl, rawServiceUrl) {
+          if (serviceUrl.hostname !== infoUrl.hostname) return false;
+          if (serviceUrl.protocol === infoUrl.protocol && serviceUrl.port === infoUrl.port) return false;
+
+          var port = explicitPort(rawServiceUrl);
+          return port === "80" || port === "443" ||
+            (serviceUrl.protocol === "http:" && infoUrl.protocol === "https:" && !serviceUrl.port);
+        }
 
         var tiles;
         if (data.tiles && data.tiles.length) {
@@ -94,6 +106,11 @@ var iiif = (function () {
           // See https://github.com/lovasoa/dezoomify/issues/582
           data["@id"] = data["@id"].replace(/^https?, (https?:\/\/)/, '$1');
           var origin = new URL(data["@id"], url);
+          var infoUrl = new URL(url);
+          if (hasDefaultPortOriginMismatch(origin, infoUrl, data["@id"])) {
+            origin.protocol = infoUrl.protocol;
+            origin.host = infoUrl.host;
+          }
           if (origin.hostname === "localhost" || origin.hostname === "example.com" || isPrivateIPv4(origin.hostname)) {
             throw new Error("probably a test host");
           }
