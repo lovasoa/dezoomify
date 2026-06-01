@@ -64,6 +64,29 @@ function fixtureFor(target, origin) {
     );
   }
 
+  if (href === "https://fixtures.test/zoomify-base-href/product.html") {
+    return html(`
+      <!doctype html>
+      <html>
+        <head>
+          <base href="https://fixtures.test/zoomify-base-href/assets/">
+        </head>
+        <body>
+          <script>
+            Z.showImage("viewer", "maps/sample");
+            Z.showImage("viewer", "maps/missing");
+          </script>
+        </body>
+      </html>
+    `);
+  }
+
+  if (href === "https://fixtures.test/zoomify-base-href/assets/maps/sample/ImageProperties.xml") {
+    return xml(
+      '<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />'
+    );
+  }
+
   if (href === "https://fixtures.test/deepzoom/sample.dzi") {
     return xml(
       '<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008"><Size Width="512" Height="512" /></Image>'

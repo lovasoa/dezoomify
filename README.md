@@ -56,6 +56,7 @@ The most prominent supported websites with live compatibility tests include :
 - Westchester County Archives (collections.westchestergov.com)
 - Bibliotheques specialisees de Paris (bibliotheques-specialisees.paris.fr)
 - FSI Viewer examples (neptunelabs.com)
+- Geographicus (geographicus.com)
 - krpano examples (krpano.com)
 - Memorix TopViewer sites (images.memorix.nl)
 - OpenSeadragon Zoomify examples (openseadragon.github.io)

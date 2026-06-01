@@ -110,6 +110,11 @@ test.describe("dezoomer fixture coverage", () => {
         expectedTile: "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
       },
       {
+        dezoomer: "Zoomify",
+        url: "https://fixtures.test/zoomify-base-href/product.html",
+        expectedTile: "https://fixtures.test/zoomify-base-href/assets/maps/sample/TileGroup0/1-1-1.jpg",
+      },
+      {
         dezoomer: "Seadragon (Deep Zoom Image)",
         url: "https://fixtures.test/deepzoom/sample.dzi",
         expectedTile: "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg",

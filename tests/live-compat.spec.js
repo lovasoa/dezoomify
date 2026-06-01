@@ -62,6 +62,11 @@ const targets = [
     url: "https://www.neptunelabs.com/fsi-viewer/",
   },
   {
+    name: "Geographicus",
+    expectedDezoomer: "Zoomify",
+    url: "https://www.geographicus.com/P/AntiqueMap/nantucket-sheminroyster-1973",
+  },
+  {
     name: "OpenSeadragon Zoomify",
     expectedDezoomer: "Zoomify",
     url: "https://openseadragon.github.io/examples/tilesource-zoomify/",
