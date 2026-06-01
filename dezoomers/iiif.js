@@ -22,12 +22,19 @@ var iiif = (function () {
   var contentdmRecordReg = /^(https?:\/\/[^/]+)(\/digital)\/collection\/([^/?#]+)\/id\/(\d+)(?:[/?#]|$)/;
   var manifestParamReg = /^https?:\/\/[^?#]+[?&][^#]*\bmanifest=/;
   var gallicaReg = /https?:\/\/gallica\.bnf\.fr\/ark:\/(\w+\/\w+)(?:\/(f\w+))?/
+  var micrioCustomElementReg = /<micr-io\b[^>]*\bid=["']([A-Za-z0-9]{5})["'][^>]*>/i;
   function extractUrl(text, baseUrl) {
     var match = text.match(urlReg) ||
       text.match(relativeUrlReg) ||
       text.match(londonMuseumServiceRootReg);
-    if (!match) return null;
-    var result = match[1] + "/info.json";
+    var result;
+    if (match) {
+      result = match[1] + "/info.json";
+    } else {
+      match = text.match(micrioCustomElementReg);
+      if (!match) return null;
+      result = "https://i.micr.io/" + match[1] + "/info.json";
+    }
     if (baseUrl) result = ZoomManager.resolveRelative(result, baseUrl);
     // Van Gogh Museum has hash-protected URLs on micrio.* but not micrio-cdn.* 
     result = result.replace('micrio.vangoghmuseum.nl/iiif', 'micrio-cdn.vangoghmuseum.nl');
@@ -98,7 +105,13 @@ var iiif = (function () {
     "name": "IIIF",
     "description": "International Image Interoperability Framework",
     "urls": [urlReg, gallicaReg, contentdmRecordReg, manifestParamReg],
-    "contents": [urlReg, relativeUrlReg, londonMuseumServiceRootReg, philadelphiaMuseumMicrioShortIdReg],
+    "contents": [
+      urlReg,
+      relativeUrlReg,
+      londonMuseumServiceRootReg,
+      philadelphiaMuseumMicrioShortIdReg,
+      micrioCustomElementReg,
+    ],
     "findFile": function getInfoFile(baseUrl, callback) {
 
       var gallicaMatch = baseUrl.match(gallicaReg);
