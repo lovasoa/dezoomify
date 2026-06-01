@@ -231,6 +231,27 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.tiles.at(-1).url).toContain("/iiif/v3/256,256,256,256/256,256/0/default.jpg");
   });
 
+  test("loads Art Institute of Chicago artwork pages through the public API", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Select automatically",
+      "https://www.artic.edu/artworks/20684/paris-street-rainy-day"
+    );
+
+    expect(result.dezoomerName).toBe("Art Institute of Chicago");
+    expect(result.data.origin).toBe("https://www.artic.edu/iiif/2/f8fd76e9-c396-5678-36ed-6a348c904d27");
+    expect(result.data.width).toBe(9987);
+    expect(result.data.height).toBe(7755);
+    expect(result.data.tileSize).toBe(1024);
+    expect(result.tiles).toHaveLength(80);
+    expect(result.tiles.map((tile) => tile.url)).toContain(
+      "https://www.artic.edu/iiif/2/f8fd76e9-c396-5678-36ed-6a348c904d27/0,0,1024,1024/1024,1024/0/default.jpg"
+    );
+    expect(result.tiles.at(-1).url).toBe(
+      "https://www.artic.edu/iiif/2/f8fd76e9-c396-5678-36ed-6a348c904d27/9216,7168,771,587/771,587/0/default.jpg"
+    );
+  });
+
   test("generates IIIF tile URLs with explicit returned dimensions", async ({ page }) => {
     const urls = await page.evaluate(() => {
       const iiif = window.ZoomManager.dezoomersList.IIIF;

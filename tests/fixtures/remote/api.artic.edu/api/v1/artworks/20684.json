@@ -1,0 +1,15 @@
+{
+  "data": {
+    "id": 20684,
+    "title": "Paris Street; Rainy Day",
+    "image_id": "f8fd76e9-c396-5678-36ed-6a348c904d27",
+    "thumbnail": {
+      "width": 9987,
+      "height": 7755
+    },
+    "alt_image_ids": []
+  },
+  "config": {
+    "iiif_url": "https://www.artic.edu/iiif/2"
+  }
+}
