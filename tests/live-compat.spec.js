@@ -74,7 +74,7 @@ const targets = [
   {
     name: "Art Institute of Chicago Sargent archive",
     expectedDezoomer: "Seadragon (Deep Zoom Image)",
-    url: "https://archive.artic.edu/sargent/images/dzis/IM022017-int_print.dzi",
+    url: "https://archive.artic.edu/sargent/",
   },
   {
     name: "Academia Sinica Bronze Rubbings",
