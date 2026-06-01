@@ -24,7 +24,7 @@ var zoomifyPFF = (function () { //Code isolation
 			});
 		},
 		"open" : function (url) {
-			ZoomManager.getFile(url+"&requestType=1", "text", function (text, xhr) {
+			ZoomManager.getFile(url+"&requestType=1", {type:"text"}, function (text, xhr) {
 				var data = {};
 				data.origin = url;
 				data.width = parseInt(text.match(/width=.(\d+)/i)[1]);

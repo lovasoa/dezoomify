@@ -2,17 +2,13 @@
   "name": "dezoomify-tests",
   "version": "1.0.0",
   "description": "tests for dezoomify",
-  "main": "tests.js",
-  "dependencies": {
-    "karma": "^6.3.16",
-    "karma-firefox-launcher": "^2.1.0",
-    "karma-qunit": "^0.1.9",
-    "qunit": "^2.13.0",
-    "qunitjs": "^1.23.1"
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
   },
-  "devDependencies": {},
   "scripts": {
-    "test": "./node_modules/karma/bin/karma start"
+    "test": "playwright test",
+    "test:node-cli": "node node-cli-smoke.js",
+    "test:live": "node live-smoke.js"
   },
   "author": "",
   "license": "GPL"

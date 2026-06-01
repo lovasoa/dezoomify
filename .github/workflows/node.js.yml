@@ -1,11 +1,7 @@
-# This workflow will do a clean install of node dependencies, build the source code and run tests across different versions of node
-# For more information see: https://help.github.com/actions/language-and-framework-guides/using-nodejs-with-github-actions
-
 name: CI
 
 on:
   push:
-    branches: [ master ]
   pull_request:
     branches: [ master ]
   schedule:
@@ -13,16 +9,32 @@ on:
     - cron:  '0 0 1 * *'
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v1
+    - uses: actions/checkout@v6.0.2
+    - uses: actions/setup-node@v6.4.0
       with:
-        node-version: ${{ matrix.node-version }}
-    - run: >
-       php -S 127.0.0.1:8181 &
-       cd tests &&
-       npm ci &&
-       npm test
+        node-version: 22
+        cache: npm
+        cache-dependency-path: tests/package-lock.json
+    - run: npm ci
+      working-directory: tests
+    - run: npx playwright install --with-deps chromium
+      working-directory: tests
+    - run: npm test
+      working-directory: tests
+    - run: npm ci
+      working-directory: node-app
+    - run: npm run test:node-cli
+      working-directory: tests
+  live-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v6.0.2
+    - uses: actions/setup-node@v6.4.0
+      with:
+        node-version: 22
+    - run: npm run test:live
+      working-directory: tests
