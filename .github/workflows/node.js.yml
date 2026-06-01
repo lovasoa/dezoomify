@@ -28,21 +28,8 @@ jobs:
       working-directory: node-app
     - run: npm run test:node-cli
       working-directory: tests
-  live-compat:
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-    - uses: actions/checkout@v6.0.2
-    - uses: actions/setup-node@v6.4.0
-      with:
-        node-version: 22
-        cache: npm
-        cache-dependency-path: tests/package-lock.json
-    - run: npm ci
-      working-directory: tests
-    - run: npx playwright install --with-deps chromium
-      working-directory: tests
     - run: npm run test:live
       id: live-tests
       continue-on-error: true
+      timeout-minutes: 75
       working-directory: tests
