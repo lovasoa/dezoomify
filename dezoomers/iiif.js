@@ -20,7 +20,7 @@ var iiif = (function () {
   var philadelphiaMuseumMicrioShortIdReg =
     /(?:philamuseum|Philadelphia Museum)[\s\S]*\\?"shortId\\?"\s*:\s*\\?"([A-Za-z0-9_-]{3,32})\\?"|\\?"shortId\\?"\s*:\s*\\?"([A-Za-z0-9_-]{3,32})\\?"[\s\S]*(?:philamuseum|Philadelphia Museum)/;
   var contentdmRecordReg = /^(https?:\/\/[^/]+)(\/digital)\/collection\/([^/?#]+)\/id\/(\d+)(?:[/?#]|$)/;
-  var manifestParamReg = /^https?:\/\/[^?#]+[?&][^#]*\bmanifest=/;
+  var manifestParamReg = /^https?:\/\/[^#]*(?:[?&][^#]*\bmanifest=|#[^#]*\bmanifest=)/;
   var onbPresentationManifestReg = /^https?:\/\/api\.onb\.ac\.at\/iiif\/presentation\/v3\/manifest\/[^?#]+(?:[?#].*)?$/;
   var onbViewerReg = /^https?:\/\/viewer\.onb\.ac\.at\/[^?#]+(?:[?#].*)?$/;
   var onbRepViewerReg = /^https?:\/\/digital\.onb\.ac\.at\/RepViewer\/viewer\.faces\?(?=[^#]*\bdoc=)/;
@@ -69,11 +69,17 @@ var iiif = (function () {
   }
   function manifestParamUrl(baseUrl) {
     try {
-      return new URL(baseUrl).searchParams.get("manifest");
+      var url = new URL(baseUrl);
+      return url.searchParams.get("manifest") || fragmentManifestParamUrl(url.hash);
     } catch (e) {
-      var match = String(baseUrl).match(/[?&]manifest=([^&#]+)/);
+      var match = String(baseUrl).match(/[?&#]manifest=([^&#]+)/);
       return match && decodeURIComponent(match[1]);
     }
+  }
+  function fragmentManifestParamUrl(hash) {
+    if (!hash) return null;
+    var params = String(hash).replace(/^#\??/, "");
+    return new URLSearchParams(params).get("manifest");
   }
   function onbManifestUrl(baseUrl) {
     try {
