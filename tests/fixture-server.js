@@ -111,6 +111,21 @@ function fixtureFor(target, origin) {
     });
   }
 
+  if (
+    href === "https://fixtures.test/iiif-private-id/info.json" ||
+    href === `${origin}/fixtures/iiif-private-id/info.json`
+  ) {
+    return json({
+      "@context": "http://iiif.io/api/image/2/context.json",
+      "@id": "http://10.0.0.42/iiif/private-id",
+      width: 512,
+      height: 512,
+      tiles: [{ width: 256, height: 256, scaleFactors: [1, 2] }],
+      qualities: ["native"],
+      formats: ["png"],
+    });
+  }
+
   if (href === "https://fixtures.test/national-gallery") {
     return html(`
       <img src="/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/full/!80,50/0/default.jpg">
@@ -280,6 +295,13 @@ function serveStatic(req, res, pathname) {
     return;
   }
 
+  if (pathname === "/fixtures/iiif-private-id/info.json") {
+    const fixture = fixtureFor("https://fixtures.test/iiif-private-id/info.json", origin);
+    res.writeHead(fixture.status, fixture.headers);
+    res.end(fixture.body);
+    return;
+  }
+
   if (pathname === "/entity/OBJECT/1") {
     const fixture = fixtureFor("https://fixtures.test/entity/OBJECT/1", origin);
     res.writeHead(fixture.status, fixture.headers);
@@ -297,6 +319,7 @@ function serveStatic(req, res, pathname) {
   if (
     pathname === "/fixtures/tile.jpg" ||
     pathname === "/fixtures/pnav/image.jpg" ||
+    pathname.startsWith("/fixtures/iiif-private-id/") ||
     pathname.startsWith("/iiif/") ||
     pathname === "/server.iip"
   ) {

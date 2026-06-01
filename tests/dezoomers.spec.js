@@ -252,6 +252,17 @@ test.describe("dezoomer fixture coverage", () => {
     );
   });
 
+  test("ignores internal IIIF ids and uses the public info.json base", async ({ page }) => {
+    const result = await runDezoomer(page, "Select automatically", "/fixtures/iiif-private-id/info.json");
+
+    expect(result.dezoomerName).toBe("IIIF");
+    expect(result.data.origin).toBe("http://127.0.0.1:9877/fixtures/iiif-private-id");
+    expect(result.tiles.at(-1).url).toContain(
+      "/fixtures/iiif-private-id/256,256,256,256/256,256/0/native.png"
+    );
+    expect(result.tiles.at(-1).url).not.toContain("10.0.0.42");
+  });
+
   test("extracts current National Gallery IIIF URLs from pages", async ({ page }) => {
     const result = await runDezoomer(page, "Select automatically", "https://fixtures.test/national-gallery");
 
