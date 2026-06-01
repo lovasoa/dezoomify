@@ -13,7 +13,7 @@ function errorResponse(error, status = 500) {
   });
 }
 
-async function proxy(request) {
+export async function proxy(request) {
   const proxyUrl = new URL(request.url);
   const targetUrl = proxyUrl.searchParams.get("url");
   if (!targetUrl) return errorResponse("Missing url query parameter", 400);
