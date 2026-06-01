@@ -13,6 +13,7 @@ var seadragon = (function () { //Code isolation
 		],
 		"contents": [
 			/dziUrlTemplate/,
+			/Seadragon\.embed\([^)]*["'][^"']+\.(?:xml|dzi)(?:\?[^"']*)?["']/i,
 			/[^"'()<>]+\.(?:dzi)/i,
 			/schemas\.microsoft\.com\/deepzoom/,
 			/zoom(?:\.it|hub.net)\/.*\.js/,
@@ -90,6 +91,9 @@ var seadragon = (function () { //Code isolation
 					var url = m[1].replace("{group}", group).replace("{index}", index);
 					return callback(url);
 				}
+
+				var seadragonEmbedMatch = text.match(/Seadragon\.embed\([^)]*["']([^"']+\.(?:xml|dzi)(?:\?[^"']*)?)["'][^)]*\)/i);
+				if (seadragonEmbedMatch) return callback(seadragonEmbedMatch[1]);
 
 				// Any url ending with .xml or .dzi
 				var matchPath = text.match(/[^"'()<>]+\.(?:xml|dzi)/i);

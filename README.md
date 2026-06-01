@@ -49,6 +49,7 @@ The most prominent supported websites with live compatibility tests include :
 - National Library of Australia (nla.gov.au)
 - National Library of Israel (nli.org.il)
 - National Library of Scotland (nls.uk)
+- Academia Sinica Bronze Rubbings (bronze.asdc.sinica.edu.tw)
 - Bibliotheques specialisees de Paris (bibliotheques-specialisees.paris.fr)
 - FSI Viewer examples (neptunelabs.com)
 - krpano examples (krpano.com)
