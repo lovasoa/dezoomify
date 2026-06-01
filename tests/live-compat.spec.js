@@ -230,19 +230,48 @@ async function runLiveTarget(page, target) {
   );
 }
 
+function escapeGitHubActionsAnnotation(value) {
+  return String(value)
+    .replaceAll("%", "%25")
+    .replaceAll("\r", "%0D")
+    .replaceAll("\n", "%0A");
+}
+
+function emitLiveFailureWarning(target, error) {
+  if (process.env.GITHUB_ACTIONS !== "true") return;
+
+  const title = escapeGitHubActionsAnnotation(`Live compatibility failed: ${target.name}`);
+  const message = escapeGitHubActionsAnnotation(
+    "A live website changed, blocked the runner, or returned an unexpected response. " +
+    `URL: ${target.url}. Error: ${error.message}`
+  );
+
+  console.log(`::warning title=${title}::${message}`);
+}
+
 for (const target of targets) {
-  test(target.name, async ({ page }) => {
+  test(target.name, async ({ page }, testInfo) => {
     test.setTimeout(target.timeout || 30000);
-    await openApp(page);
 
-    const result = await runLiveTarget(page, target);
+    try {
+      await openApp(page);
 
-    expect(result.dezoomerName).toBe(target.expectedDezoomer);
-    expect(result.width).toBeGreaterThan(0);
-    expect(result.height).toBeGreaterThan(0);
-    expect(result.totalTiles).toBeGreaterThan(0);
-    expect(result.tileUrl).toContain("http");
-    expect(result.tileWidth).toBeGreaterThan(0);
-    expect(result.tileHeight).toBeGreaterThan(0);
+      const result = await runLiveTarget(page, target);
+
+      expect(result.dezoomerName).toBe(target.expectedDezoomer);
+      expect(result.width).toBeGreaterThan(0);
+      expect(result.height).toBeGreaterThan(0);
+      expect(result.totalTiles).toBeGreaterThan(0);
+      expect(result.tileUrl).toContain("http");
+      expect(result.tileWidth).toBeGreaterThan(0);
+      expect(result.tileHeight).toBeGreaterThan(0);
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      failure.message = `${failure.message}\nLive target URL: ${target.url}`;
+      if (testInfo.retry >= (testInfo.project.retries || 0)) {
+        emitLiveFailureWarning(target, failure);
+      }
+      throw failure;
+    }
   });
 }

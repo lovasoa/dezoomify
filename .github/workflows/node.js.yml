@@ -46,5 +46,3 @@ jobs:
       id: live-tests
       continue-on-error: true
       working-directory: tests
-    - if: steps.live-tests.outcome == 'failure'
-      run: echo "::warning title=Live compatibility tests failed::One or more live websites changed, blocked the runner, or returned an unexpected response. See the live-compat job logs for details."
