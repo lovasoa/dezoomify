@@ -92,6 +92,26 @@ const targets = [
     url: "https://www.neptunelabs.com/fsi-viewer/",
   },
   {
+    name: "HNG IIPImage",
+    expectedDezoomer: "IIPImage",
+    url: "https://image.hng-data.org/iipsrv/iipsrv.fcgi?FIF=/HNG/016/card/0178.tif",
+  },
+  {
+    name: "Uffizi XLimage",
+    expectedDezoomer: "XLimage",
+    url: "http://uffizicloud.centrica.it/7711/closer/hi-res/A1456.imgf?cmd=info",
+  },
+  {
+    name: "ArcGIS World Imagery WMTS",
+    expectedDezoomer: "WMTS",
+    url: "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/WMTS/1.0.0/WMTSCapabilities.xml",
+  },
+  {
+    name: "BLB generic tile template",
+    expectedDezoomer: "Generic dezoomer",
+    url: "https://digital.blb-karlsruhe.de/image/tiler/square/2410801/0/{{X}}/{{Y}}",
+  },
+  {
     name: "Alabama Maps LizardTech",
     expectedDezoomer: "LizardTech ImageServer",
     url: "http://cartweb.geography.ua.edu/lizardtech/iserv/calcrgn?cat=North%20America%20and%20United%20States&item=NorthAmerica/US1566a.sid&wid=500&hei=400&props=item(Name,Description),cat(Name,Description)&style=default/view.xsl&plugin=true",
