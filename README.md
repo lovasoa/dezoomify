@@ -31,17 +31,14 @@ The following formats are supported by dezoomify:
 * [Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums. [More info about the controversy around this dezoomer.](https://github.com/lovasoa/dezoomify/issues/435).
 * [IIIF](https://iiif.io): The International Image Interoperability Framework, used on many websites, including [Austrian National Library](https://www.onb.ac.at/), [National Gallery](https://www.nationalgallery.org.uk/), [National Library of Israel](https://www.nli.org.il/), and [National Library of Scotland](https://www.nls.uk/).
 * [Museo Nacional del Prado](https://www.museodelprado.es/): artwork pages using Prado's OpenSeadragon image viewer.
-* [Zoomify single-file format](https://github.com/lovasoa/pff-extract/wiki/Zoomify-PFF-file-format-documentation) : Less common format used by zoomify, where all tiles are in a single *.pff* file, and are queried through a java servlet.
 * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developed by an Italian company.
 * **TopViewer**, also named **Memorix Maior picture viewer**, used by Picturae Memorix sites.
 * [krpano Panorama Viewer](http://krpano.com), mainly used in panoramic images and interactive virtual tours.
 * [FSI Viewer](https://www.neptunelabs.com/products/fsi-viewer/), zoomable image server by NeptuneLabs GmbH.
 * [LizardTech ImageServer](https://www.lizardtech.com/_files/ugd/04ad27_586a81cf99d349df926fba35b0f55b3d.pdf), for direct ImageServer `calcrgn` URLs.
 * [Visual Library Server](https://www.semantics.de/visual_library/), by semantics
-* [Micr.io](https://micr.io/)'s non-IIIF format.
 * [Hungaricana](https://hungaricana.hu/en/) a format found only on the **Hungarian Cultural Heritage Portal**, that hosts half a million images.
 * [WMTS](https://www.ogc.org/standards/wmts/), the OpenGIS Web Map Tile Service standard.
-* Mnesys image viewer.
 * PNAV image viewer, used by several museum collection sites.
 
 The most prominent supported websites with live compatibility tests include :
