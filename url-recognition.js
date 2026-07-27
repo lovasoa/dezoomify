@@ -14,10 +14,7 @@ const META_REGEX = new RegExp([
     /\?FIF=/,
     /_files\/0\/0_0\.jpe?g(?:\?.*)?$/,
     /\.img.\?cmd=info/,
-    /getTilesInfo\?object_id/,
-    /\.pff(&requestType=1)?$/,
     /\.ecw(?:\?.*)?$/,
-    /\/p.xml(?:\?.*)?$/,
     iiifpath,
     /artsandculture\.google\.com\/asset\//
 ].map(e => e.source).join('|'));
@@ -30,7 +27,6 @@ const META_REPLACE = [
     { pattern: /(\?FIF=[^&]*)&.*/, replacement: '$1' },
     { pattern: /(http.*artsandculture\.google\.com\/asset\/.+\/.+)\?.*/, replacement: '$1' },
     { pattern: iiifpath, replacement: '/info.json' },
-    { pattern: /getTilesInfo\?object_id=(.*)&callback.*/, replacement: 'getTilesInfo?object_id=$1' },
 ];
 
 /**
