@@ -11,7 +11,8 @@ var vls = (function () {
       callback(url);
     },
     open: function (url) {
-      ZoomManager.getFile(url, { type: 'xml' }, function (doc, xhr) {
+      ZoomManager.getFile(url, {}, function (text, xhr) {
+        var doc = new DOMParser().parseFromString(text, 'text/html');
         var vars = {};
         var varNodes = doc.getElementsByTagName('var');
         for (var i = 0; i < varNodes.length; i++) {

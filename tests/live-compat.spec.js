@@ -57,6 +57,17 @@ const targets = [
     url: "https://images.memorix.nl/wba/topviewjson/memorix/6eb5a89b-b76c-5039-3999-aabfd7a0c7c9",
   },
   {
+    name: "BLB Visual Library Server",
+    expectedDezoomer: "VLS",
+    url: "https://digital.blb-karlsruhe.de/blbhs/content/zoom/2410801",
+    cookies: "js_enabled=2",
+  },
+  {
+    name: "Hungaricana postcard gallery",
+    expectedDezoomer: "Hungaricana",
+    url: "https://gallery.hungaricana.hu/en/SzerencsKepeslap/1168634/?img=0",
+  },
+  {
     name: "Oklahoma State Digital Collections",
     expectedDezoomer: "IIIF",
     url: "https://dc.library.okstate.edu/digital/collection/OKMaps/id/6483/rec/6",
@@ -211,7 +222,7 @@ async function runLiveTarget(page, target) {
         ZoomManager.data = null;
         ZoomManager.proxy_url = proxyUrl;
         ZoomManager.proxy_tiles = "";
-        ZoomManager.cookies = "";
+        ZoomManager.cookies = target.cookies || "";
         ZoomManager.nextTick = (fn) => setTimeout(fn, 0);
         ZoomManager.error = (message) => fail(new Error(message));
         ZoomManager.updateProgress = () => {};
