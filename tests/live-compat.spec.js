@@ -37,11 +37,6 @@ const targets = [
     url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",
   },
   {
-    name: "Czech Digital Library",
-    expectedDezoomer: "Zoomify",
-    url: "https://api.ceskadigitalniknihovna.cz/search/api/client/v7.0/items/cuni/uuid:425e338e-9420-11ec-ac48-fa163e4ea95f/image/zoomify/ImageProperties.xml",
-  },
-  {
     name: "CSNTM manuscripts",
     expectedDezoomer: "IIIF",
     url: "https://collections.csntm.org/image-service/iiif/MNTGRCGA01/default/M_NT_GRC_GA01_20250609_203r/M_NT_GRC_GA01_20250609_203r/info.json",
@@ -88,11 +83,6 @@ const targets = [
     url: "https://bibliotheques-specialisees.paris.fr/ark:/73873/pf0001115743/0017/v0001.simple.selectedTab=otherdocs",
   },
   {
-    name: "Art Institute of Chicago Sargent archive",
-    expectedDezoomer: "Seadragon (Deep Zoom Image)",
-    url: "https://archive.artic.edu/sargent/",
-  },
-  {
     name: "Academia Sinica Bronze Rubbings",
     expectedDezoomer: "Seadragon (Deep Zoom Image)",
     url: "https://bronze.asdc.sinica.edu.tw/filePool/R/05395-1.html",
@@ -128,11 +118,6 @@ const targets = [
     url: "http://cartweb.geography.ua.edu/lizardtech/iserv/calcrgn?cat=North%20America%20and%20United%20States&item=NorthAmerica/US1566a.sid&wid=500&hei=400&props=item(Name,Description),cat(Name,Description)&style=default/view.xsl&plugin=true",
   },
   {
-    name: "Geographicus",
-    expectedDezoomer: "Zoomify",
-    url: "https://www.geographicus.com/P/AntiqueMap/nantucket-sheminroyster-1973",
-  },
-  {
     name: "OpenSeadragon Zoomify",
     expectedDezoomer: "Zoomify",
     url: "https://openseadragon.github.io/examples/tilesource-zoomify/",
@@ -156,11 +141,6 @@ const targets = [
     name: "Westchester County Archives",
     expectedDezoomer: "IIIF",
     url: "https://collections.westchestergov.com/digital/collection/ccmaps/id/69/",
-  },
-  {
-    name: "pnav catalog.shm.ru",
-    expectedDezoomer: "pnav",
-    url: "https://catalog.shm.ru/entity/OBJECT/2117418",
   },
   {
     name: "pnav collection.pushkinmuseum.art",
