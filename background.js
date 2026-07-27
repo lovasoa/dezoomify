@@ -1,36 +1,3 @@
-const DEZOOMIFY_URL = "https://dezoomify.ophir.dev/#";
-
-const iiifpath = new RegExp( // IIIF API image URL
-    "/\\^?(full|square|(pct:)?\\d+,\\d+,\\d+,\\d+)" + // region
-    "/(full|max|\\d+,|,\\d+|pct:\\d+|!?\\d+,\\d+)" + // size
-    "/!?[1-3]?[0-9]?[0-9]" + // rotation
-    "/(color|gray|bitonal|default|native)" + // quality
-    "\\.(jpe?g|tiff?|png|gif|jp2|pdf|webp)" // format
-);
-
-const META_REGEX = new RegExp([
-    /\/ImageProperties.xml/, // Zoomify
-    /\/info.json/, // IIIF
-    /\?FIF=/, // IIPImage
-    /_files\/0\/0_0.jpg(?:\?.*)?$/, // OpenSeadragon
-    /\.img.\\?cmd=info/,
-    /getTilesInfo\?object_id/,
-    /\.pff(&requestType=1)?$/, // Zoomify PFF
-    /\.ecw(?:\?.*)?$/, // Hungaricana
-    /\/p.xml(?:\?.*)?$/, // Mnesys
-    iiifpath,
-    /artsandculture\.google\.com\/asset\// // Google Arts
-].map(e => e.source).join('|'));
-const META_REPLACE = [
-    { pattern: /\.dzi(?:\?.*)?$/, replacement: '_files/0/0_0.jpg' },
-    { pattern: /_files\/\d+\/\d+_\d+\.jpg(?:\?.*)?$/, replacement: '_files/0/0_0.jpg' },
-    { pattern: /\/TileGroup\d+\/\d+-\d+-\d+.jpg(?:\?.*)?$/, replacement: '/ImageProperties.xml' },
-    { pattern: /\/ImageProperties\.xml\?t\w+$/, replacement: '/ImageProperties.xml' },
-    { pattern: /(\?FIF=[^&]*)&.*/, replacement: '$1' }, // IIPImage
-    { pattern: /(http.*artsandculture\.google\.com\/asset\/.+\/.+)\?.*/, replacement: '$1' },
-    { pattern: iiifpath, replacement: '/info.json' },
-    { pattern: /getTilesInfo\?object_id=(.*)&callback.*/, replacement: 'getTilesInfo?object_id=$1' },
-];
 // @ts-ignore
 const VALID_RESOURCE_TYPES = new Set(Object.values(chrome.webRequest['ResourceType']));
 
@@ -148,12 +115,8 @@ class PageListener {
      * @param {{url:string }} request 
      */
     handleRequest({ url }) {
-        for (const { pattern, replacement } of META_REPLACE) {
-            url = url.replace(pattern, replacement);
-        }
-        if (META_REGEX.test(url) && !url.startsWith(DEZOOMIFY_URL)) {
-            this.foundZoomableImage(url);
-        }
+        const recognizedUrl = recognizeZoomableUrl(url);
+        if (recognizedUrl) this.foundZoomableImage(recognizedUrl);
     }
 
     /**

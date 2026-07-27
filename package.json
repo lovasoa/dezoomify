@@ -4,7 +4,7 @@
   "description": "Detect zoomable images in web pages and download them with dezoomify",
   "main": "background.js",
   "scripts": {
-    "test": "tsc",
+    "test": "node test/url-recognition.test.js && tsc",
     "build": "bash -x build.sh"
   },
   "repository": {

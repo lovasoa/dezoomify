@@ -27,6 +27,7 @@
     ],
     "background": {
         "scripts": [
+            "url-recognition.js",
             "background.js"
         ]
     }
