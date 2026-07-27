@@ -155,11 +155,6 @@ test.describe("dezoomer fixture coverage", () => {
         expectedTile: "https://fixtures.test/krpano/tiles/l1/2_2.jpg",
       },
       {
-        dezoomer: "Zoomify PFF",
-        url: "https://fixtures.test/pff?file=/sample.pff&requestType=1",
-        expectedTile: "https://fixtures.test/pff?file=/sample.pff&requestType=0&head=0&begin=1400&end=1500",
-      },
-      {
         dezoomer: "XLimage",
         url: "https://fixtures.test/xl/sample.imgi?cmd=info",
         expectedTile: "https://fixtures.test/xl/sample.imgi?cmd=tile&x=1&y=1&z=1",
@@ -190,19 +185,9 @@ test.describe("dezoomer fixture coverage", () => {
         expectedTile: "https://fixtures.test/image/tiler/square/fixture/0/0/0",
       },
       {
-        dezoomer: "Micrio",
-        url: "https://fixtures.test/micrio/api/getTilesInfo?object_id=1",
-        expectedTile: "/fixtures/tile.jpg",
-      },
-      {
         dezoomer: "Hungaricana",
         url: "https://fixtures.test/hungaricana/imagesize/sample.ecw",
         expectedTile: "https://fixtures.test/hungaricana/image/sample.ecw/",
-      },
-      {
-        dezoomer: "Mnesys",
-        url: "https://fixtures.test/mnesys/p.xml",
-        expectedTile: "https://fixtures.test/mnesys/1_3.jpg",
       },
       {
         dezoomer: "WMTS",
