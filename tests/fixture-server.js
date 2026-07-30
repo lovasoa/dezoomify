@@ -81,10 +81,40 @@ function fixtureFile(hostname, pathname) {
 
 function fixturePathFor(url) {
   if (
+    url.hostname === "www.beeldbankgroningen.nl" &&
+    url.pathname.includes("/beelden/detail/")
+  ) {
+    return fixtureFile("fixtures.test", "/topviewer/mediabank-detail.html");
+  }
+  if (url.hostname === "historischarchief.midden-groningen.nl") {
+    return fixtureFile("fixtures.test", "/topviewer/mediabank-gallery.html");
+  }
+  if (
     url.hostname === "images.memorix.nl" &&
-    url.pathname === "/demo/topviewjson/memorix/sample-file"
+    (
+      url.pathname === "/demo/topviewjson/memorix/sample-file" ||
+      url.pathname === "/gra/topviewjson/memorix/1c7914ee-3f37-0d37-3218-48eba1c3a97f" ||
+      url.pathname === "/ghs/topviewjson/memorix/686dce31-a340-7d19-ae6d-419cee43b952"
+    )
   ) {
     return fixtureFile("fixtures.test", "/topviewer/data.json");
+  }
+  if (
+    url.hostname === "webservices.memorix.nl" &&
+    url.pathname === "/mediabank/media/53479cae-899f-0ac1-8913-40276a93a4f7" &&
+    url.searchParams.get("apiKey") === "fd45b590-346a-11e5-a2cb-0800200c9a66"
+  ) {
+    return fixtureFile("fixtures.test", "/topviewer/detail-media.json");
+  }
+  if (
+    url.hostname === "webservices.memorix.nl" &&
+    url.pathname === "/mediabank/media" &&
+    url.searchParams.get("apiKey") === "c51f00b2-2034-45a2-85ce-0aca7143dbbc" &&
+    url.searchParams.get("entities[0]") === "77036348-6551-9e9d-5b2e-b505237e84cf" &&
+    url.searchParams.get("rows") === "1" &&
+    url.searchParams.get("sort") === "random{1785398881908} asc"
+  ) {
+    return fixtureFile("fixtures.test", "/topviewer/media.json");
   }
 
   if (url.hostname === "fixtures.test") {

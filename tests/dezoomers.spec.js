@@ -256,6 +256,21 @@ test.describe("dezoomer fixture coverage", () => {
     ]);
   });
 
+  test("discovers images from current Memorix mediabank pages", async ({ page }) => {
+    const cases = [
+      "https://www.beeldbankgroningen.nl/beelden/detail/53479cae-899f-0ac1-8913-40276a93a4f7/media/1c7914ee-3f37-0d37-3218-48eba1c3a97f?mode=detail&view=horizontal&rows=1&page=4&fq%5B%5D=search_s_download:%22Nee%22&sort=random%7B1785398988616%7D%20asc",
+      "https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc",
+    ];
+
+    for (const url of cases) {
+      const result = await runDezoomer(page, "Select automatically", url);
+
+      expect(result.dezoomerName, url).toBe("TopViewer");
+      expect(result.data.width, url).toBe(512);
+      expect(result.tiles.at(-1).url, url).toContain("/topviewer/sample-file/13.jpg");
+    }
+  });
+
   test("generates IIIF tile URLs with explicit returned dimensions", async ({ page }) => {
     const urls = await page.evaluate(() => {
       const iiif = window.ZoomManager.dezoomersList.IIIF;

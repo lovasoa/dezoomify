@@ -52,6 +52,16 @@ const targets = [
     url: "https://images.memorix.nl/wba/topviewjson/memorix/6eb5a89b-b76c-5039-3999-aabfd7a0c7c9",
   },
   {
+    name: "Beeldbank Groningen",
+    expectedDezoomer: "TopViewer",
+    url: "https://www.beeldbankgroningen.nl/beelden/detail/53479cae-899f-0ac1-8913-40276a93a4f7/media/1c7914ee-3f37-0d37-3218-48eba1c3a97f?mode=detail&view=horizontal&rows=1&page=4&fq%5B%5D=search_s_download:%22Nee%22&sort=random%7B1785398988616%7D%20asc",
+  },
+  {
+    name: "Historisch Archief Midden-Groningen",
+    expectedDezoomer: "TopViewer",
+    url: "https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc",
+  },
+  {
     name: "BLB Visual Library Server",
     expectedDezoomer: "VLS",
     url: "https://digital.blb-karlsruhe.de/blbhs/content/zoom/2410801",

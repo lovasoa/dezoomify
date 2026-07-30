@@ -1,5 +1,41 @@
 var topviewer = (function(){
 	var memorixThumbnailRegexp = /(?:images\.memorix|afbeeldingen\.gahetna|images\.rkd)\.nl\/(.*?)\/thumb\/(?:image(?:bank)?-)?(?:[0-9x]*?(?:crop)?|detailresult|gallery_thumb|mediabank-(?:detail|horizontal))\/(.*?)\.jpg/;
+
+	function findMediaBank(baseUrl, text, callback) {
+		var doc = new DOMParser().parseFromString(text, "text/html");
+		var element = doc.querySelector("pic-mediabank[data-api-key][data-api-url]");
+		if (!element) return false;
+
+		var pageUrl = new URL(baseUrl);
+		var detailMatch = pageUrl.pathname.match(/\/detail\/([^/]+)(?:\/media\/([^/]+))?/);
+		var apiUrl = new URL(element.getAttribute("data-api-url"), baseUrl);
+		apiUrl.pathname = apiUrl.pathname.replace(/\/?$/, "/media" +
+			(detailMatch ? "/" + encodeURIComponent(detailMatch[1]) : ""));
+		if (!detailMatch) {
+			["q", "page", "fq[]", "sort"].forEach(function (name) {
+				pageUrl.searchParams.getAll(name).forEach(function (value) {
+					apiUrl.searchParams.append(name, value);
+				});
+			});
+			apiUrl.searchParams.set("rows", "1");
+		}
+		apiUrl.searchParams.set("apiKey", element.getAttribute("data-api-key"));
+		var entities = element.getAttribute("data-entities");
+		if (entities) apiUrl.searchParams.set("entities[0]", entities);
+
+		ZoomManager.getFile(apiUrl.href, {type:"json"}, function (info) {
+			var media = info.media && info.media[0];
+			var assets = media && media.asset;
+			for (var i = 0; assets && i < assets.length; i++) {
+				if ((!detailMatch || !detailMatch[2] || assets[i].uuid === detailMatch[2]) && assets[i].topview) {
+					return callback(assets[i].topview);
+				}
+			}
+			throw new Error("No zoomable image found in Memorix response.");
+		});
+		return true;
+	}
+
 	return {
 		"name" : "TopViewer",
 		"description": "Memorix viewer, or topviewer, by picturae. Used on dutch websites.",
@@ -10,6 +46,7 @@ var topviewer = (function(){
 		],
 		"contents": [
 			memorixThumbnailRegexp,
+			/<pic-mediabank\b/i,
 			/"topviews"\s*:/
 		],
 		"findFile" : function findTopViewer(baseUrl, callback) {
@@ -17,12 +54,13 @@ var topviewer = (function(){
 				if (server_name == 'rkd'){
 					return callback('https://images.rkd.nl/rkd/topviewjson/memorix/'+image);
 				}
-				return callback('http://images.memorix.nl/'+server_name+'/topviewjson/memorix/'+image);
+				return callback('https://images.memorix.nl/'+server_name+'/topviewjson/memorix/'+image);
 			}
 			if (baseUrl.match(/memorix\.nl\/.+\/topviewjson\/memorix/)) {
 				return callback(baseUrl);
 			}
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function(text, xhr) {
+				if (findMediaBank(baseUrl, text, callback)) return;
 				// Memorix image thumbnail
 				var thumbMatch = text.match(memorixThumbnailRegexp);
 				if (thumbMatch) {
