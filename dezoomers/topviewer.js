@@ -1,5 +1,32 @@
 var topviewer = (function(){
 	var memorixThumbnailRegexp = /(?:images\.memorix|afbeeldingen\.gahetna|images\.rkd)\.nl\/(.*?)\/thumb\/(?:image(?:bank)?-)?(?:[0-9x]*?(?:crop)?|detailresult|gallery_thumb|mediabank-(?:detail|horizontal))\/(.*?)\.jpg/;
+	// Institution mappings adapted from VDK/Dememorixer's beeldbanken.json (GPL-2.0):
+	// https://github.com/VDK/Dememorixer/blob/master/beeldbanken.json
+	var memorixSites = [
+		{ url: /koninklijkeverzamelingen\.nl\/(?:collectie-online|mediabank)/, imageServer: "kha" },
+		{ url: /beeldbankgroningen\.nl\/beelden/, imageServer: "gra" },
+		{ url: /rhcrijnstreek\.nl\/bronnen\/foto-s-en-kaarten\/zoeken/, imageServer: "srs" },
+		{ url: /salha\.nl\/archieven-en-collecties\/beeld\/beeldbank/, imageServer: "sha" },
+		{ url: /archief\.zaanstad\.nl\/beeldbank/, imageServer: "zaa" },
+		{ url: /regionaalarchiefzutphen\.nl\/beeld/, imageServer: "szu" },
+		{ url: /noord-hollandsarchief\.nl\/beelden\/beeldbank/, imageServer: "ranh" },
+		{ url: /nationaalarchief\.nl/, imageServer: "naa" }
+	];
+	var memorixDetailPath = "\\/detail\\/[a-z0-9-]{36}\\/media\\/([a-z0-9-]{36})";
+	var memorixDetailUrls = memorixSites.map(function (site) {
+		return new RegExp(site.url.source + memorixDetailPath, "i");
+	});
+
+	function knownMemorixFile(baseUrl) {
+		for (var i = 0; i < memorixDetailUrls.length; i++) {
+			var match = baseUrl.match(memorixDetailUrls[i]);
+			if (match) {
+				return "https://images.memorix.nl/" + memorixSites[i].imageServer +
+					"/topviewjson/memorix/" + match[1];
+			}
+		}
+		return null;
+	}
 
 	function findMediaBank(baseUrl, text, callback) {
 		var doc = new DOMParser().parseFromString(text, "text/html");
@@ -43,7 +70,7 @@ var topviewer = (function(){
 			/memorix/,
 			/rhcrijnstreek\.nl/,
 			/topview\.?json/,
-		],
+		].concat(memorixDetailUrls),
 		"contents": [
 			memorixThumbnailRegexp,
 			/<pic-mediabank\b/i,
@@ -59,6 +86,8 @@ var topviewer = (function(){
 			if (baseUrl.match(/memorix\.nl\/.+\/topviewjson\/memorix/)) {
 				return callback(baseUrl);
 			}
+			var knownFile = knownMemorixFile(baseUrl);
+			if (knownFile) return callback(knownFile);
 			ZoomManager.getFile(baseUrl, {type:"htmltext"}, function(text, xhr) {
 				if (findMediaBank(baseUrl, text, callback)) return;
 				// Memorix image thumbnail
