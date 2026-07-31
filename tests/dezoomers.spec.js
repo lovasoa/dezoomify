@@ -271,6 +271,45 @@ test.describe("dezoomer fixture coverage", () => {
     }
   });
 
+  test("resolves Dememorixer institution detail URLs without fetching their pages", async ({ page }) => {
+    const record = "11111111-1111-1111-1111-111111111111";
+    const media = "22222222-2222-2222-2222-222222222222";
+    const cases = [
+      ["https://www.koninklijkeverzamelingen.nl/collectie-online", "kha"],
+      ["https://www.beeldbankgroningen.nl/beelden", "gra"],
+      ["https://rhcrijnstreek.nl/bronnen/foto-s-en-kaarten/zoeken", "srs"],
+      ["https://salha.nl/archieven-en-collecties/beeld/beeldbank", "sha"],
+      ["https://archief.zaanstad.nl/beeldbank", "zaa"],
+      ["https://regionaalarchiefzutphen.nl/beeld", "szu"],
+      ["https://noord-hollandsarchief.nl/beelden/beeldbank", "ranh"],
+      ["https://www.nationaalarchief.nl/onderzoeken/fotocollectie", "naa"],
+    ];
+
+    for (const [baseUrl, imageServer] of cases) {
+      const url = `${baseUrl.replace(/\/$/, "")}/detail/${record}/media/${media}`;
+      const result = await page.evaluate((input) => {
+        const ZoomManager = window.ZoomManager;
+        const automatic = ZoomManager.dezoomersList["Select automatically"];
+        const originalOpen = ZoomManager.open;
+        let selectedDezoomer;
+        ZoomManager.open = () => { selectedDezoomer = ZoomManager.dezoomer.name; };
+        automatic.open(input);
+        ZoomManager.open = originalOpen;
+
+        return new Promise((resolve) => {
+          ZoomManager.dezoomersList.TopViewer.findFile(input, (file) => {
+            resolve({ file, selectedDezoomer });
+          });
+        });
+      }, url);
+
+      expect(result.selectedDezoomer, url).toBe("TopViewer");
+      expect(result.file, url).toBe(
+        `https://images.memorix.nl/${imageServer}/topviewjson/memorix/${media}`
+      );
+    }
+  });
+
   test("generates IIIF tile URLs with explicit returned dimensions", async ({ page }) => {
     const urls = await page.evaluate(() => {
       const iiif = window.ZoomManager.dezoomersList.IIIF;
