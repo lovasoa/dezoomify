@@ -10,7 +10,7 @@ var topviewer = (function(){
 		{ url: /archief\.zaanstad\.nl\/beeldbank/, imageServer: "zaa" },
 		{ url: /regionaalarchiefzutphen\.nl\/beeld/, imageServer: "szu" },
 		{ url: /noord-hollandsarchief\.nl\/beelden\/beeldbank/, imageServer: "ranh" },
-		{ url: /nationaalarchief\.nl/, imageServer: "naa" }
+		{ url: /nationaalarchief\.nl\/onderzoeken\/fotocollectie/, imageServer: "naa" }
 	];
 	var memorixDetailPath = "\\/detail\\/[a-z0-9-]{36}\\/media\\/([a-z0-9-]{36})";
 	var memorixDetailUrls = memorixSites.map(function (site) {

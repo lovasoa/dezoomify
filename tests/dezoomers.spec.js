@@ -282,16 +282,29 @@ test.describe("dezoomer fixture coverage", () => {
       ["https://archief.zaanstad.nl/beeldbank", "zaa"],
       ["https://regionaalarchiefzutphen.nl/beeld", "szu"],
       ["https://noord-hollandsarchief.nl/beelden/beeldbank", "ranh"],
-      ["https://www.nationaalarchief.nl/", "naa"],
+      ["https://www.nationaalarchief.nl/onderzoeken/fotocollectie", "naa"],
     ];
 
     for (const [baseUrl, imageServer] of cases) {
       const url = `${baseUrl.replace(/\/$/, "")}/detail/${record}/media/${media}`;
-      const result = await page.evaluate((input) => new Promise((resolve) => {
-        window.ZoomManager.dezoomersList.TopViewer.findFile(input, resolve);
-      }), url);
+      const result = await page.evaluate((input) => {
+        const ZoomManager = window.ZoomManager;
+        const automatic = ZoomManager.dezoomersList["Select automatically"];
+        const originalOpen = ZoomManager.open;
+        let selectedDezoomer;
+        ZoomManager.open = () => { selectedDezoomer = ZoomManager.dezoomer.name; };
+        automatic.open(input);
+        ZoomManager.open = originalOpen;
 
-      expect(result, url).toBe(
+        return new Promise((resolve) => {
+          ZoomManager.dezoomersList.TopViewer.findFile(input, (file) => {
+            resolve({ file, selectedDezoomer });
+          });
+        });
+      }, url);
+
+      expect(result.selectedDezoomer, url).toBe("TopViewer");
+      expect(result.file, url).toBe(
         `https://images.memorix.nl/${imageServer}/topviewjson/memorix/${media}`
       );
     }
