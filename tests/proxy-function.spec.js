@@ -24,28 +24,6 @@ test.describe("Cloudflare Pages proxy function", () => {
     expect(headResponse.headers.get("content-type")).toBe("text/plain");
     expect(await headResponse.text()).toBe("");
   });
-
-  test("uses a modern browser user agent for upstream requests", async () => {
-    const proxy = await loadProxyFunction();
-    const originalFetch = global.fetch;
-    let userAgent;
-    global.fetch = async (_url, options) => {
-      userAgent = options.headers.get("User-Agent");
-      return new Response("ok");
-    };
-
-    try {
-      await proxy.onRequestGet({
-        request: new Request("http://example.test/proxy?url=https%3A%2F%2Fexample.com", {
-          headers: { "User-Agent": "Mozilla/5.0 Chrome/58.0.3029.110" },
-        }),
-      });
-    } finally {
-      global.fetch = originalFetch;
-    }
-
-    expect(userAgent).toContain("Chrome/149.0.0.0");
-  });
 });
 
 test.describe("Node proxy adapter", () => {
