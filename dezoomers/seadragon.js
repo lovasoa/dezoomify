@@ -33,7 +33,7 @@ var seadragon = (function () { //Code isolation
 			/polona\.pl\/item\//,
 			/bibliotheques-specialisees\.paris\.fr\/ark/,
 			/nla\.gov\.au\/nla\.obj.*\/view$/,
-			/_files\/\d+\/\d+_\d+\.(?:jpg|png)$/,
+			/_files\/\d+\/\d+_\d+\.(?:jpe?g|png)$/,
 			/dzi$/
 		],
 		"contents": [
@@ -84,7 +84,7 @@ var seadragon = (function () { //Code isolation
 			}
 
 			// A single tile URL
-			var tileMatch = baseUrl.match(/(.*)_files\/\d+\/\d+_\d+\.(?:jpg|png)$/);
+			var tileMatch = baseUrl.match(/(.*)_files\/\d+\/\d+_\d+\.(?:jpe?g|png)$/);
 			if (tileMatch) {
 				// We need to detect whether the image is a dzi or an xml
 				var decided_xml_dzi = false, possibilities = [tileMatch[1] + ".dzi", tileMatch[1] + ".xml"], errors = [];
