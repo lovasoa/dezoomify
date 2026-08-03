@@ -1,4 +1,6 @@
 const MAX_REDIRECTS = 3;
+const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 
 function corsHeaders(headers) {
   headers.set("Access-Control-Allow-Origin", "*");
@@ -20,7 +22,7 @@ export async function proxy(request) {
 
   const target = new URL(targetUrl);
   const headers = new Headers({
-    "User-Agent": request.headers.get("User-Agent") || "Mozilla/5.0",
+    "User-Agent": USER_AGENT,
     "Accept": request.headers.get("Accept") || "*/*",
     "Accept-Language": request.headers.get("Accept-Language") || "en-US,en;q=0.5",
     "Accept-Encoding": "identity",
