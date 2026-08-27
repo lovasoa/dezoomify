@@ -205,6 +205,11 @@ test.describe("dezoomer fixture coverage", () => {
         expectedTile: "/wmts/EPSG3857/0/10/10.jpg",
       },
       {
+        dezoomer: "ArcGIS MapServer",
+        url: "https://fixtures.test/arcgis/MapServer",
+        expectedTile: "/arcgis/MapServer/tile/7/3/4",
+      },
+      {
         dezoomer: "pnav",
         url: "https://fixtures.test/entity/OBJECT/1",
         expectedTile: "/fixtures/pnav/image.jpg?w=2000&h=2000&cl=0&ct=0&cw=512&ch=512",
@@ -229,6 +234,36 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.data.quality).toBe("default");
     expect(result.data.format).toBe("jpg");
     expect(result.tiles.at(-1).url).toContain("/iiif/v3/256,256,256,256/256,256/0/default.jpg");
+  });
+
+  test("discovers cached ArcGIS MapServer viewer URLs and uses global row/column coordinates", async ({ page }) => {
+    const serviceUrl = "https://fixtures.test/arcgis/MapServer?token=fixture&f=html";
+    const viewerUrl = `https://wmts.ngi.be/arcgis/home/webmap/viewer.html?basemapUrl=${encodeURIComponent(serviceUrl)}`;
+    const result = await runDezoomer(page, "Select automatically", viewerUrl);
+
+    expect(result.dezoomerName).toBe("ArcGIS MapServer");
+    expect(result.data.width).toBe(768);
+    expect(result.data.height).toBe(768);
+    expect(result.data.minColumn).toBe(2);
+    expect(result.data.minRow).toBe(1);
+    expect(result.tiles[0].url).toBe(
+      "https://fixtures.test/arcgis/MapServer/tile/7/1/2?token=fixture"
+    );
+    expect(result.tiles[1].url).toBe(
+      "https://fixtures.test/arcgis/MapServer/tile/7/1/3?token=fixture"
+    );
+    expect(result.tiles[3].url).toBe(
+      "https://fixtures.test/arcgis/MapServer/tile/7/2/2?token=fixture"
+    );
+    expect(result.tiles.every(({ url }) => !url.includes("f="))).toBe(true);
+  });
+
+  test("rejects uncached ArcGIS MapServer responses", async ({ page }) => {
+    await expect(runDezoomer(
+      page,
+      "ArcGIS MapServer",
+      "https://fixtures.test/arcgis/uncached/MapServer"
+    )).rejects.toThrow("does not provide a fused tile cache");
   });
 
   test("discovers ONB IIIF Presentation 3 manifests", async ({ page }) => {
