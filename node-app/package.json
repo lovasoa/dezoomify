@@ -27,5 +27,8 @@
   "bugs": {
     "url": "https://github.com/lovasoa/dezoomify/issues"
   },
-  "homepage": "https://github.com/lovasoa/dezoomify"
+  "homepage": "https://github.com/lovasoa/dezoomify",
+  "overrides": {
+    "undici": "7.29.0"
+  }
 }
