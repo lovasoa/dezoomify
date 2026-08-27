@@ -118,6 +118,13 @@ function fixturePathFor(url) {
   }
 
   if (url.hostname === "fixtures.test") {
+    if (url.pathname === "/arcgis/MapServer") {
+      if (url.searchParams.get("f") === "json") {
+        return fixtureFile(url.hostname, "/arcgis/MapServer.json");
+      }
+      return null;
+    }
+
     if (url.pathname === "/iip" && url.searchParams.has("OBJ")) {
       return fixtureFile(url.hostname, "/iip/image-info.txt");
     }
