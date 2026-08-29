@@ -44,6 +44,7 @@ The following formats are supported by dezoomify:
 The most prominent supported websites with live compatibility tests include :
 - Arts & Culture (artsandculture.google.com)
 - National Gallery (nationalgallery.org.uk)
+- Museo del Prado (museodelprado.es)
 - Memoire des hommes (memoiredeshommes.defense.gouv.fr)
 - London Museum collections (londonmuseum.org.uk)
 - Philadelphia Museum of Art (philamuseum.org)

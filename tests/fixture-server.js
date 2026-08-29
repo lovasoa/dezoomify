@@ -80,6 +80,18 @@ function fixtureFile(hostname, pathname) {
 }
 
 function fixturePathFor(url) {
+  if (url.hostname === "www.bl.uk" && url.pathname === "/manuscripts/Proxy.ashx") {
+    return fixtureFile("fixtures.test", "/deepzoom/sample.dzi");
+  }
+  if (url.hostname === "polona.pl" && url.pathname === "/resources/item/9388882/") {
+    return fixtureFile("fixtures.test", "/deepzoom/polona.json");
+  }
+  if (
+    url.hostname === "bibliotheques-specialisees.paris.fr" &&
+    url.pathname === "/in/imageReader.xhtml"
+  ) {
+    return fixtureFile("fixtures.test", "/deepzoom/paris-reader.html");
+  }
   if (
     [
       "artandarchitecture.org.uk",
@@ -169,6 +181,13 @@ function fixturePathFor(url) {
 
     if (url.pathname === "/server.iip" && url.searchParams.get("IIIF")) {
       return fixtureFile(url.hostname, "/server.iip/iiif-fronts-info.json");
+    }
+
+    if (
+      url.pathname === "/deepzoom/legacy" &&
+      url.searchParams.get("format") === "xml"
+    ) {
+      return fixtureFile(url.hostname, "/deepzoom/legacy.xml");
     }
 
     if (url.pathname === "/hungaricana/imagesize/sample.ecw") {

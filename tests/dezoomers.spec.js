@@ -339,6 +339,80 @@ test.describe("dezoomer fixture coverage", () => {
     expect(result.tiles.at(-1).url).toContain("/iiif/v3/256,256,256,256/256,256/0/default.jpg");
   });
 
+  test("covers Seadragon page and service discovery branches", async ({ page }) => {
+    const cases = [
+      {
+        name: "British Library Viewer rewrite",
+        url: "https://www.bl.uk/manuscripts/Viewer.aspx?ref=burney_ms_276_f031ar",
+        expectedTile: "https://www.bl.uk/manuscripts/Proxy.ashx?view=burney_ms_276_f031ar_files/9/1_1.jpg",
+      },
+      {
+        name: "Polona JSON conversion",
+        url: "https://polona.pl/item/9388882/0/",
+        expectedTile: "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg",
+      },
+      {
+        name: "Paris specialized libraries rewrite",
+        url: "https://bibliotheques-specialisees.paris.fr/ark:/73873/pf0001115743/0017/v0001.simple.selectedTab=otherdocs",
+        expectedTile: "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg",
+      },
+      {
+        name: "World Digital Library view path",
+        url: "https://fixtures.test/view/12/34",
+        expectedTile: "https://fixtures.test/deepzoom/wdl-12-34_files/9/1_1.jpg",
+      },
+      {
+        name: "Generic XML link",
+        url: "https://fixtures.test/deepzoom/xml-link.html",
+        expectedTile: "https://fixtures.test/deepzoom/legacy_files/9/1_1.jpg",
+      },
+      {
+        name: "Generic DZI link",
+        url: "https://fixtures.test/deepzoom/dzi-link.html",
+        expectedTile: "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg",
+      },
+      {
+        name: "Generic dzi attribute",
+        url: "https://fixtures.test/deepzoom/dzi-query.html",
+        expectedTile: "https://fixtures.test/deepzoom/legacy?format=xml_files/9/1_1.jpg",
+      },
+    ];
+
+    for (const item of cases) {
+      const result = await runDezoomer(page, "Seadragon (Deep Zoom Image)", item.url);
+
+      expect(result.dezoomerName, item.name).toBe("Seadragon (Deep Zoom Image)");
+      expect(result.tiles.at(-1).url, item.name).toBe(item.expectedTile);
+    }
+  });
+
+  test("detects zoom.it and zoomhub.net page content", async ({ page }) => {
+    for (const url of [
+      "https://fixtures.test/deepzoom/zoomit.html",
+      "https://fixtures.test/deepzoom/zoomhub.html",
+    ]) {
+      const result = await runDezoomer(page, "Select automatically", url);
+
+      expect(result.dezoomerName, url).toBe("Seadragon (Deep Zoom Image)");
+      expect(result.tiles.at(-1).url, url).toContain(
+        "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg"
+      );
+    }
+  });
+
+  test("discovers a DZI through an iframe child page", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/deepzoom/iframe-parent.html"
+    );
+
+    expect(result.dezoomerName).toBe("Seadragon (Deep Zoom Image)");
+    expect(result.tiles.at(-1).url).toContain(
+      "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg"
+    );
+  });
+
   test("discovers cached ArcGIS MapServer viewer URLs and uses global row/column coordinates", async ({ page }) => {
     const serviceUrl = "https://fixtures.test/arcgis/MapServer?token=fixture&f=html";
     const viewerUrl = `https://wmts.ngi.be/arcgis/home/webmap/viewer.html?basemapUrl=${encodeURIComponent(serviceUrl)}`;
