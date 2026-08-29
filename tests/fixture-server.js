@@ -80,6 +80,42 @@ function fixtureFile(hostname, pathname) {
 }
 
 function fixturePathFor(url) {
+  if (
+    [
+      "artandarchitecture.org.uk",
+      "www.artandarchitecture.org.uk",
+      "biblio.unibe.ch",
+      "bspe-p-pub.paris.fr",
+      "www.ngv.vic.gov.au",
+    ].includes(url.hostname) &&
+    url.pathname === "/zoomify/ImageProperties.xml"
+  ) {
+    return fixtureFile("fixtures.test", "/zoomify/ImageProperties.xml");
+  }
+  if (
+    url.hostname === "biblio.unibe.ch" &&
+    url.pathname === "/web-apps/maps/zoomify.php"
+  ) {
+    return fixtureFile("fixtures.test", "/zoomify/unibe.html");
+  }
+  if (
+    url.hostname === "bspe-p-pub.paris.fr" &&
+    url.pathname === "/MDBGED/zoomify-BFS.aspx"
+  ) {
+    return fixtureFile("fixtures.test", "/zoomify/paris.html");
+  }
+  if (
+    url.hostname === "www.ngv.vic.gov.au" &&
+    url.pathname.startsWith("/explore/collection/work/")
+  ) {
+    return fixtureFile("fixtures.test", "/zoomify/ngv.html");
+  }
+  if (
+    url.hostname === "www.artandarchitecture.org.uk" &&
+    url.pathname.startsWith("/images/zoom/")
+  ) {
+    return fixtureFile("fixtures.test", "/zoomify/artandarchitecture.html");
+  }
   if (url.hostname === "historischarchief.midden-groningen.nl") {
     return fixtureFile("fixtures.test", "/topviewer/mediabank-gallery.html");
   }
@@ -114,6 +150,13 @@ function fixturePathFor(url) {
 
     if (url.pathname === "/iip" && url.searchParams.has("OBJ")) {
       return fixtureFile(url.hostname, "/iip/image-info.txt");
+    }
+
+    if (
+      url.pathname === "/scripts/XMLBroker.new.php" &&
+      url.searchParams.get("contentID") === "fixture-access-number"
+    ) {
+      return fixtureFile(url.hostname, "/zoomify/fluid-broker.xml");
     }
 
     if (url.pathname === "/xl/sample.imgi" && url.searchParams.get("cmd") === "info") {

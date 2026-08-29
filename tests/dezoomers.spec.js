@@ -226,6 +226,109 @@ test.describe("dezoomer fixture coverage", () => {
     }
   });
 
+  test("covers Zoomify discovery branches", async ({ page }) => {
+    const cases = [
+      {
+        name: "Flash zoomifyImagePath",
+        url: "https://fixtures.test/zoomify/flash.html",
+        expectedTile: "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
+      },
+      {
+        name: "Fluid Engage accessnumber",
+        url: "https://fixtures.test/zoomify/fluid.html",
+        expectedTile: "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
+      },
+      {
+        name: "OpenLayers source element",
+        url: "https://fixtures.test/zoomify/openlayers.html",
+        expectedTile: "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
+      },
+      {
+        name: "OpenLayers tile source",
+        url: "https://fixtures.test/zoomify/tile-source.html",
+        expectedTile: "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
+      },
+      {
+        name: "URL element",
+        url: "https://fixtures.test/zoomify/url-element.html",
+        expectedTile: "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
+      },
+      {
+        name: "University of Bern",
+        url: "https://biblio.unibe.ch/web-apps/maps/zoomify.php?col=ryh&pic=Ryh_7906_6",
+        expectedTile: "https://biblio.unibe.ch/zoomify/TileGroup0/1-1-1.jpg",
+      },
+      {
+        name: "Paris specialized libraries",
+        url: "https://bspe-p-pub.paris.fr/MDBGED/zoomify-BFS.aspx?edid=23143&edfindex=0",
+        expectedTile: "https://bspe-p-pub.paris.fr/zoomify/TileGroup0/1-1-1.jpg",
+      },
+      {
+        name: "National Gallery of Victoria",
+        url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",
+        expectedTile: "https://www.ngv.vic.gov.au/zoomify/TileGroup0/1-1-1.jpg",
+      },
+      {
+        name: "Art and Architecture",
+        url: "https://www.artandarchitecture.org.uk/images/zoom/c462969579cd09dd4ccb690d0e43018757fa2df2.html",
+        expectedTile: "https://www.artandarchitecture.org.uk/zoomify/TileGroup0/1-1-1.jpg",
+      },
+    ];
+
+    for (const item of cases) {
+      const result = await runDezoomer(page, "Zoomify", item.url);
+
+      expect(result.dezoomerName, item.name).toBe("Zoomify");
+      expect(result.tiles.at(-1).url, item.name).toBe(item.expectedTile);
+    }
+  });
+
+  test("discovers Zoomify through an iframe child page", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/zoomify/iframe-parent.html"
+    );
+
+    expect(result.dezoomerName).toBe("Zoomify");
+    expect(result.tiles.at(-1).url).toContain(
+      "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg"
+    );
+  });
+
+  test("resolves a direct Zoomify TileGroup URL to sibling metadata", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg"
+    );
+
+    expect(result.dezoomerName).toBe("Zoomify");
+    expect(result.tiles.at(-1).url).toContain(
+      "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg"
+    );
+  });
+
+  test("uses Zoomify tile-group arithmetic across a group boundary", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "Zoomify",
+      "https://fixtures.test/zoomify/multiple-groups/ImageProperties.xml"
+    );
+
+    expect(result.data.numTiles).toBe(341);
+    expect(result.tiles).toHaveLength(256);
+    expect(result.tiles[170].url).toBe(
+      "https://fixtures.test/zoomify/multiple-groups/TileGroup0/4-10-10.jpg"
+    );
+    expect(result.tiles[171].url).toBe(
+      "https://fixtures.test/zoomify/multiple-groups/TileGroup1/4-11-10.jpg"
+    );
+    expect(result.tiles.at(-1).url).toBe(
+      "https://fixtures.test/zoomify/multiple-groups/TileGroup1/4-15-15.jpg"
+    );
+  });
+
   test("supports IIIF Image API 3 info.json responses", async ({ page }) => {
     const result = await runDezoomer(page, "Select automatically", "https://fixtures.test/iiif-v3/info.json");
 
