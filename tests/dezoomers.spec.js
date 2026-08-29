@@ -623,6 +623,24 @@ test.describe("dezoomer fixture coverage", () => {
     )).rejects.toThrow("does not provide a fused tile cache");
   });
 
+  test("does not claim ArcGIS WMTS capabilities as MapServer", async ({ page }) => {
+    const selected = await page.evaluate(() => new Promise((resolve) => {
+      const ZoomManager = window.ZoomManager;
+      const automatic = ZoomManager.dezoomersList["Select automatically"];
+      const originalOpen = ZoomManager.open;
+      ZoomManager.open = () => {
+        const name = ZoomManager.dezoomer.name;
+        ZoomManager.open = originalOpen;
+        resolve(name);
+      };
+      automatic.open(
+        "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/WMTS/1.0.0/WMTSCapabilities.xml"
+      );
+    }));
+
+    expect(selected).toBe("WMTS");
+  });
+
   test("discovers ONB IIIF Presentation 3 manifests", async ({ page }) => {
     const cases = [
       "https://viewer.onb.ac.at/10048A37/",
