@@ -286,7 +286,10 @@ ZoomManager.defaultRender = function (data) {
 	var x = 0, y = 0;
 
 	function addTile(url, x, y, data) {
-		if (typeof url === "string") {
+		if (url == null) {
+			// Some sparse layouts intentionally have no tile at this position.
+			ZoomManager.status.loaded++;
+		} else if (typeof url === "string") {
 			if (data.origin) url = ZoomManager.resolveRelative(url, data.origin);
 			ZoomManager.addTile(
 				url,

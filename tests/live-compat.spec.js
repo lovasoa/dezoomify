@@ -148,6 +148,11 @@ const targets = [
     url: "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/WMTS/1.0.0/WMTSCapabilities.xml",
   },
   {
+    name: "Cartesius/NGI ArcGIS MapServer",
+    expectedDezoomer: "ArcGIS MapServer",
+    url: "https://wmts.ngi.be/arcgis/rest/services/20k__%7BD67270FA-BDEC-4A9F-95D1-BEC0C75BA45E%7D__default__404000/MapServer",
+  },
+  {
     name: "BLB generic tile template",
     expectedDezoomer: "Generic dezoomer",
     url: "https://digital.blb-karlsruhe.de/image/tiler/square/2410801/0/{{X}}/{{Y}}",

@@ -92,6 +92,66 @@ async function runDezoomer(page, dezoomerName, url) {
   );
 }
 
+async function renderAssembly(page, spec) {
+  await page.evaluate((input) => {
+    const ZoomManager = window.ZoomManager;
+    const tiles = new Map(input.tiles.map((tile) => [`${tile.x},${tile.y}`, tile]));
+    const data = {
+      width: input.width,
+      height: input.height,
+      tileSize: input.tileSize,
+      nbrTilesX: input.nbrTilesX,
+      nbrTilesY: input.nbrTilesY,
+      totalTiles: input.nbrTilesX * input.nbrTilesY,
+      maxZoomLevel: 1,
+      overlap: input.overlap || 0,
+    };
+
+    ZoomManager.dezoomer = {
+      getTileURL(x, y) {
+        const tile = tiles.get(`${x},${y}`);
+        if (!tile) return;
+        const params = new URLSearchParams({
+          x: String(x),
+          y: String(y),
+          w: String(tile.width || input.tileSize),
+          h: String(tile.height || input.tileSize),
+          color: tile.color,
+        });
+        return `${window.location.origin}/fixtures/assembly/tile.svg?${params}`;
+      },
+    };
+    ZoomManager.data = data;
+    ZoomManager.status = { error: false, loaded: 0, totalTiles: data.totalTiles };
+    ZoomManager.proxy_tiles = "";
+    ZoomManager.cookies = "";
+    ZoomManager.nextTick = (fn) => setTimeout(fn, 0);
+    UI.setupRendering(data);
+    ZoomManager.defaultRender(data);
+  }, spec);
+
+  await page.waitForFunction((totalTiles) => {
+    return window.ZoomManager.status.loaded >= totalTiles;
+  }, spec.nbrTilesX * spec.nbrTilesY);
+
+  return page.evaluate((points) => points.map(({ x, y }) => {
+    return Array.from(UI.ctx.getImageData(x, y, 1, 1).data);
+  }), spec.points);
+}
+
+async function probeGeneric(page, url) {
+  return page.evaluate((input) => new Promise((resolve) => {
+    const ZoomManager = window.ZoomManager;
+    const generic = ZoomManager.dezoomersList["Generic dezoomer"];
+    const originalReadyToRender = ZoomManager.readyToRender;
+    ZoomManager.readyToRender = (data) => {
+      ZoomManager.readyToRender = originalReadyToRender;
+      resolve(data);
+    };
+    generic.open(input);
+  }), url);
+}
+
 test.describe("dezoomer fixture coverage", () => {
   test.beforeEach(async ({ page }) => {
     await openApp(page);
@@ -224,6 +284,59 @@ test.describe("dezoomer fixture coverage", () => {
       expect(result.tiles.at(-1).url, item.dezoomer).toContain(item.expectedTile);
       expect(result.dezoomerName, item.dezoomer).toBe(item.dezoomer);
     }
+  });
+
+  test("covers generic templates, probing boundaries, placeholders, and missing origins", async ({ page }) => {
+    const origin = new URL(page.url()).origin;
+    const cases = [
+      ["padded.svg?x={{X:05}}&y={{Y:05}}", { width: 512, height: 512, tileSize: 256 }],
+      ["large.svg?x={{X}}&y={{Y}}", { width: 1024, height: 512, tileSize: 512 }],
+      ["edge.svg?x={{X}}&y={{Y}}", { width: 512, height: 512, tileSize: 256 }],
+      ["boundary.svg?x={{X}}&y={{Y}}", { width: 256000, height: 256, tileSize: 256 }],
+      ["one.svg?x={{X}}&y={{Y}}", { width: 768, height: 256, tileSize: 256 }],
+      ["missing-origin.svg?x={{X}}&y={{Y}}", { width: 512, height: 512, tileSize: 256 }],
+      ["placeholder.svg?x={{X}}&y={{Y}}", { width: 512, height: 512, tileSize: 256 }],
+    ];
+
+    for (const [path, expected] of cases) {
+      const data = await probeGeneric(page, `${origin}/fixtures/generic/${path}`);
+      expect({ width: data.width, height: data.height, tileSize: data.tileSize }, path)
+        .toEqual(expected);
+    }
+
+    const missingOrigin = await runDezoomer(
+      page,
+      "Generic dezoomer",
+      `${origin}/fixtures/generic/missing-origin.svg?x={{X}}&y={{Y}}`
+    );
+    expect(missingOrigin.data.width).toBe(512);
+    expect(missingOrigin.tiles[0].url).toContain("x=0&y=0");
+
+    const encodedUrl = `${origin}/fixtures/generic/padded.svg?x=%7B%7BX%7D%7D&y=%7B%7BY%7D%7D`;
+    const encodedTile = await page.evaluate((input) => {
+      return window.ZoomManager.dezoomersList["Generic dezoomer"].getTileURL(
+        7,
+        9,
+        0,
+        { origin: input }
+      );
+    }, encodedUrl);
+    expect(encodedTile).toBe(`${origin}/fixtures/generic/padded.svg?x=7&y=9`);
+
+    const selected = await page.evaluate((input) => new Promise((resolve) => {
+      const ZoomManager = window.ZoomManager;
+      const automatic = ZoomManager.dezoomersList["Select automatically"];
+      const originalOpen = ZoomManager.open;
+      ZoomManager.proxy_url = `${window.location.origin}/proxy`;
+      ZoomManager.cookies = "";
+      ZoomManager.open = () => {
+        const name = ZoomManager.dezoomer.name;
+        ZoomManager.open = originalOpen;
+        resolve(name);
+      };
+      automatic.open(input);
+    }), encodedUrl);
+    expect(selected).toBe("Generic dezoomer");
   });
 
   test("covers Zoomify discovery branches", async ({ page }) => {
@@ -635,6 +748,222 @@ test.describe("dezoomer fixture coverage", () => {
     );
 
     expect(result.tiles.at(-1).url).toContain("/topviewer/sample-file/13.jpg");
+  });
+
+  test("covers Arts & Culture metadata, signing, encryption, and short links", async ({ page }) => {
+    const requests = [];
+    const onRequest = (request) => {
+      if (request.url().includes("/proxy?url=")) requests.push(request.url());
+    };
+    page.on("request", onRequest);
+
+    const cases = [
+      {
+        url: "https://artsandculture.google.com/asset/fixture",
+        bytes: Array.from(Buffer.from("HEADABCDEFGHIJKLMNOPTAIL")),
+        path: "/arts/path=x0-y0-z0-t",
+      },
+      {
+        url: "https://g.co/arts/fixture",
+        bytes: Array.from(Buffer.from("HEADABCDEFGHIJKLMNOPTAIL")),
+        path: "/arts/path=x0-y0-z0-t",
+      },
+      {
+        url: "https://artsandculture.google.com/asset/plain",
+        bytes: Array.from(Buffer.from("plain-tile")),
+        path: "/arts/plain=x0-y0-z0-t",
+      },
+    ];
+
+    for (const item of cases) {
+      const requestStart = requests.length;
+      const result = await runDezoomer(page, "Select automatically", item.url);
+      const bytes = await page.evaluate(async (blobUrl) => {
+        return Array.from(new Uint8Array(await fetch(blobUrl).then((response) => response.arrayBuffer())));
+      }, result.tiles[0].url);
+
+      expect(result.dezoomerName, item.url).toBe("Arts & Culture");
+      expect(bytes, item.url).toEqual(item.bytes);
+      const requestedTargets = requests.slice(requestStart).map((requestUrl) => {
+        return decodeURIComponent(new URL(requestUrl).searchParams.get("url"));
+      });
+      expect(requestedTargets.some((target) => {
+        return new URL(target).pathname.startsWith(item.path);
+      }), item.url).toBe(true);
+    }
+
+    page.off("request", onRequest);
+  });
+
+  test("rewrites the KBR XLimage viewer page after asking for a page", async ({ page }) => {
+    const result = await page.evaluate(() => new Promise((resolve) => {
+      const originalPrompt = window.prompt;
+      window.prompt = () => "3";
+      window.ZoomManager.dezoomersList.XLimage.findFile(
+        "https://kbr.be/multi/abcViewer/index.html",
+        (file) => {
+          window.prompt = originalPrompt;
+          resolve(file);
+        }
+      );
+    }));
+
+    expect(result).toBe("/multi/abcViewer/xml.php?/multi/abc/004.imgi?cmd=info");
+  });
+
+  test("discovers Hungaricana image-file page variants", async ({ page }) => {
+    await page.evaluate(() => {
+      window.ZoomManager.proxy_url = `${window.location.origin}/proxy`;
+      window.ZoomManager.cookies = "";
+      window.ZoomManager.updateProgress = () => {};
+    });
+
+    const cases = [
+      ["https://fixtures.test/hungaricana/imagepath.html", "imagepath.ecw"],
+      ["https://fixtures.test/hungaricana/inline-files.html?img=1", "second.ecw"],
+      ["https://fixtures.test/hungaricana/inline-images.html?pg=1", "second.ecw"],
+      ["https://fixtures.test/hungaricana/files-url.html?img=1", "second.ecw"],
+    ];
+
+    for (const [url, fileName] of cases) {
+      const file = await page.evaluate((input) => new Promise((resolve) => {
+        window.ZoomManager.dezoomersList.Hungaricana.findFile(input, resolve);
+      }), url);
+
+      expect(file, url).toBe(`https://fixtures.test/hungaricana/image/page/${fileName}`);
+    }
+  });
+
+  test("uses registered dezoomer precedence for ambiguous pages", async ({ page }) => {
+    const selected = await page.evaluate(() => new Promise((resolve) => {
+      const ZoomManager = window.ZoomManager;
+      ZoomManager.proxy_url = `${window.location.origin}/proxy`;
+      ZoomManager.cookies = "";
+      const automatic = ZoomManager.dezoomersList["Select automatically"];
+      const originalOpen = ZoomManager.open;
+      ZoomManager.open = () => {
+        const name = ZoomManager.dezoomer.name;
+        ZoomManager.open = originalOpen;
+        resolve(name);
+      };
+      automatic.open("https://fixtures.test/automatic/precedence.html");
+    }));
+
+    expect(selected).toBe("Zoomify");
+  });
+
+  test("does not fetch repeated or cyclic iframe URLs forever", async ({ page }) => {
+    const requests = [];
+    const onRequest = (request) => {
+      if (request.url().includes("/proxy?url=")) requests.push(request.url());
+    };
+    page.on("request", onRequest);
+
+    await expect(runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/automatic/repeated-parent.html"
+    )).rejects.toThrow("Unable to find a proper dezoomer");
+
+    const repeatedTargets = requests.map((requestUrl) => {
+      return decodeURIComponent(new URL(requestUrl).searchParams.get("url"));
+    });
+    expect(repeatedTargets.filter((url) => url.endsWith("/automatic/child.html"))).toHaveLength(1);
+
+    requests.length = 0;
+    await expect(runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/automatic/cycle-a.html"
+    )).rejects.toThrow("Unable to find a proper dezoomer");
+
+    const cycleTargets = requests.map((requestUrl) => {
+      return decodeURIComponent(new URL(requestUrl).searchParams.get("url"));
+    });
+    expect(cycleTargets.filter((url) => url.endsWith("/automatic/cycle-a.html"))).toHaveLength(1);
+    expect(cycleTargets.filter((url) => url.endsWith("/automatic/cycle-b.html"))).toHaveLength(1);
+    page.off("request", onRequest);
+  });
+
+  test("assembles regular, overlapping, sparse, and edge tiles at exact pixels", async ({ page }) => {
+    const cases = [
+      {
+        width: 512,
+        height: 512,
+        tileSize: 256,
+        nbrTilesX: 2,
+        nbrTilesY: 2,
+        tiles: [
+          { x: 0, y: 0, color: "ff0000" },
+          { x: 1, y: 0, color: "00ff00" },
+          { x: 0, y: 1, color: "0000ff" },
+          { x: 1, y: 1, color: "ffff00" },
+        ],
+        points: [
+          { x: 10, y: 10, expected: [255, 0, 0, 255] },
+          { x: 300, y: 10, expected: [0, 255, 0, 255] },
+          { x: 10, y: 300, expected: [0, 0, 255, 255] },
+          { x: 300, y: 300, expected: [255, 255, 0, 255] },
+        ],
+      },
+      {
+        width: 511,
+        height: 511,
+        tileSize: 256,
+        nbrTilesX: 2,
+        nbrTilesY: 2,
+        overlap: 1,
+        tiles: [
+          { x: 0, y: 0, color: "ff0000" },
+          { x: 1, y: 0, color: "00ff00" },
+          { x: 0, y: 1, color: "0000ff" },
+          { x: 1, y: 1, color: "ffff00" },
+        ],
+        points: [
+          { x: 254, y: 10, expected: [255, 0, 0, 255] },
+          { x: 255, y: 10, expected: [0, 255, 0, 255] },
+          { x: 254, y: 254, expected: [255, 0, 0, 255] },
+          { x: 255, y: 255, expected: [255, 255, 0, 255] },
+        ],
+      },
+      {
+        width: 512,
+        height: 256,
+        tileSize: 256,
+        nbrTilesX: 2,
+        nbrTilesY: 1,
+        tiles: [
+          { x: 0, y: 0, color: "ff0000" },
+        ],
+        points: [
+          { x: 10, y: 10, expected: [255, 0, 0, 255] },
+          { x: 300, y: 10, expected: [0, 0, 0, 0] },
+        ],
+      },
+      {
+        width: 300,
+        height: 270,
+        tileSize: 256,
+        nbrTilesX: 2,
+        nbrTilesY: 2,
+        tiles: [
+          { x: 0, y: 0, color: "ff0000" },
+          { x: 1, y: 0, width: 44, color: "00ff00" },
+          { x: 0, y: 1, height: 14, color: "0000ff" },
+          { x: 1, y: 1, width: 44, height: 14, color: "ffff00" },
+        ],
+        points: [
+          { x: 299, y: 255, expected: [0, 255, 0, 255] },
+          { x: 255, y: 269, expected: [0, 0, 255, 255] },
+          { x: 299, y: 269, expected: [255, 255, 0, 255] },
+        ],
+      },
+    ];
+
+    for (const item of cases) {
+      const pixels = await renderAssembly(page, item);
+      expect(pixels, item).toEqual(item.points.map((point) => point.expected));
+    }
   });
 
   test("generates IIIF tile URLs with explicit returned dimensions", async ({ page }) => {
