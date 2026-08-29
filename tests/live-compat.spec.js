@@ -67,6 +67,26 @@ const targets = [
     url: "https://www.beeldbankgroningen.nl/beelden/detail/53479cae-899f-0ac1-8913-40276a93a4f7/media/1c7914ee-3f37-0d37-3218-48eba1c3a97f?mode=detail&view=horizontal&rows=1&page=4&fq%5B%5D=search_s_download:%22Nee%22&sort=random%7B1785398988616%7D%20asc",
   },
   {
+    name: "SALHA",
+    expectedDezoomer: "TopViewer",
+    url: "https://salha.nl/bronnen/fotos-en-films/foto-s/detail/2b1d137e-2308-11e0-acba-74f6d356987f/media/80e3858f-5c15-e084-d368-5aa6b9fa0062",
+  },
+  {
+    name: "Archief Zaanstad",
+    expectedDezoomer: "TopViewer",
+    url: "https://archief.zaanstad.nl/mediabank/zoek-in-de-beeldbank/detail/5e5e4b6f-1ed0-ae92-e18a-5e1cc449fd7d/media/33f3329d-6882-81a5-43ab-1a7ffe286575",
+  },
+  {
+    name: "Regionaal Archief Zutphen",
+    expectedDezoomer: "TopViewer",
+    url: "https://erfgoedcentrumzutphen.nl/onderzoeken/beeldbank/detail/268857ad-0480-2e3e-953d-4cf9731c35ff/media/70b46159-6022-5903-a718-c083adb32fe0",
+  },
+  {
+    name: "Noord-Hollands Archief",
+    expectedDezoomer: "TopViewer",
+    url: "https://noord-hollandsarchief.nl/beelden/beeldbank/detail/49AB27FEFB8F11DF9E4D523BC2E286E2/media/9c2a1001-932a-3beb-503f-8d9421db389e",
+  },
+  {
     name: "Historisch Archief Midden-Groningen",
     expectedDezoomer: "TopViewer",
     url: "https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc",

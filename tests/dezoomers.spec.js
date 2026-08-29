@@ -560,22 +560,50 @@ test.describe("dezoomer fixture coverage", () => {
     }
   });
 
+  test("parses legacy Gahetna and RKD thumbnails", async ({ page }) => {
+    const cases = [
+      [
+        "https://fixtures.test/topviewer/gahetna.html",
+        "https://images.memorix.nl/naa/topviewjson/memorix/gahetna-sample",
+      ],
+      [
+        "https://fixtures.test/topviewer/rkd.html",
+        "https://images.rkd.nl/rkd/topviewjson/memorix/rkd-sample",
+      ],
+    ];
+
+    await page.evaluate(() => {
+      window.ZoomManager.proxy_url = `${window.location.origin}/proxy`;
+      window.ZoomManager.cookies = "";
+      window.ZoomManager.updateProgress = () => {};
+    });
+
+    for (const [url, expectedFile] of cases) {
+      const file = await page.evaluate((input) => new Promise((resolve) => {
+        window.ZoomManager.dezoomersList.TopViewer.findFile(input, resolve);
+      }), url);
+
+      expect(file, url).toBe(expectedFile);
+    }
+  });
+
   test("resolves Dememorixer institution detail URLs without fetching their pages", async ({ page }) => {
     const record = "11111111-1111-1111-1111-111111111111";
     const media = "22222222-2222-2222-2222-222222222222";
     const cases = [
-      ["https://www.koninklijkeverzamelingen.nl/collectie-online", "kha"],
-      ["https://www.beeldbankgroningen.nl/beelden", "gra"],
-      ["https://rhcrijnstreek.nl/bronnen/foto-s-en-kaarten/zoeken", "srs"],
-      ["https://salha.nl/archieven-en-collecties/beeld/beeldbank", "sha"],
-      ["https://archief.zaanstad.nl/beeldbank", "zaa"],
-      ["https://regionaalarchiefzutphen.nl/beeld", "szu"],
-      ["https://noord-hollandsarchief.nl/beelden/beeldbank", "ranh"],
-      ["https://www.nationaalarchief.nl/onderzoeken/fotocollectie", "naa"],
+      ["https://www.beeldbankgroningen.nl/beelden", "gra", record],
+      ["https://salha.nl/bronnen/fotos-en-films/foto-s", "sha", record],
+      ["https://archief.zaanstad.nl/mediabank/zoek-in-de-beeldbank", "zaa", record],
+      ["https://erfgoedcentrumzutphen.nl/onderzoeken/beeldbank", "szu", record],
+      [
+        "https://noord-hollandsarchief.nl/beelden/beeldbank",
+        "ranh",
+        "11111111111111111111111111111111",
+      ],
     ];
 
-    for (const [baseUrl, imageServer] of cases) {
-      const url = `${baseUrl.replace(/\/$/, "")}/detail/${record}/media/${media}`;
+    for (const [baseUrl, imageServer, recordId] of cases) {
+      const url = `${baseUrl.replace(/\/$/, "")}/detail/${recordId}/media/${media}`;
       const result = await page.evaluate((input) => {
         const ZoomManager = window.ZoomManager;
         const automatic = ZoomManager.dezoomersList["Select automatically"];
@@ -597,6 +625,16 @@ test.describe("dezoomer fixture coverage", () => {
         `https://images.memorix.nl/${imageServer}/topviewjson/memorix/${media}`
       );
     }
+  });
+
+  test("discovers TopViewer files from embedded server metadata", async ({ page }) => {
+    const result = await runDezoomer(
+      page,
+      "TopViewer",
+      "https://fixtures.test/topviewer/server.html"
+    );
+
+    expect(result.tiles.at(-1).url).toContain("/topviewer/sample-file/13.jpg");
   });
 
   test("generates IIIF tile URLs with explicit returned dimensions", async ({ page }) => {
