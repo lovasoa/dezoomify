@@ -107,7 +107,7 @@ function tileMatrices(metadata, service) {
 ZoomManager.addDezoomer({
   name: "ArcGIS MapServer",
   description: "Cached ArcGIS REST MapServer",
-  urls: [/(?:\/|%2f)MapServer(?:\/?(?:%3f|%26|[?&#]|$))/i],
+  urls: [/(?:\/|%2f)MapServer(?:(?:\/|%2f)?(?:%3f|%26|[?&#]|$))/i],
   findFile(baseUrl, callback) {
     const viewerUrl = new URL(baseUrl);
     const basemapUrl = viewerUrl.searchParams.get("basemapUrl");
