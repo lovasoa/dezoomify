@@ -15,7 +15,7 @@ const useFixtures = !process.argv.includes("--live");
 const proxyModule = import(urlModule.pathToFileURL(path.join(root, "functions", "proxy.js")));
 
 const jpg = fs.readFileSync(
-  path.join(root, "tests/images/issue_81/image/TileGroup0/3-1-6.jpg")
+  path.join(root, "tests/images/fixture.jpg")
 );
 
 const contentTypes = {
@@ -80,12 +80,6 @@ function fixtureFile(hostname, pathname) {
 }
 
 function fixturePathFor(url) {
-  if (
-    url.hostname === "www.beeldbankgroningen.nl" &&
-    url.pathname.includes("/beelden/detail/")
-  ) {
-    return fixtureFile("fixtures.test", "/topviewer/mediabank-detail.html");
-  }
   if (url.hostname === "historischarchief.midden-groningen.nl") {
     return fixtureFile("fixtures.test", "/topviewer/mediabank-gallery.html");
   }
@@ -98,13 +92,6 @@ function fixturePathFor(url) {
     )
   ) {
     return fixtureFile("fixtures.test", "/topviewer/data.json");
-  }
-  if (
-    url.hostname === "webservices.memorix.nl" &&
-    url.pathname === "/mediabank/media/53479cae-899f-0ac1-8913-40276a93a4f7" &&
-    url.searchParams.get("apiKey") === "fd45b590-346a-11e5-a2cb-0800200c9a66"
-  ) {
-    return fixtureFile("fixtures.test", "/topviewer/detail-media.json");
   }
   if (
     url.hostname === "webservices.memorix.nl" &&
@@ -127,13 +114,6 @@ function fixturePathFor(url) {
 
     if (url.pathname === "/iip" && url.searchParams.has("OBJ")) {
       return fixtureFile(url.hostname, "/iip/image-info.txt");
-    }
-
-    if (url.pathname === "/pff") {
-      const requestType = url.searchParams.get("requestType");
-      if (requestType === "1" || requestType === "2") {
-        return fixtureFile(url.hostname, `/pff/requestType-${requestType}.txt`);
-      }
     }
 
     if (url.pathname === "/xl/sample.imgi" && url.searchParams.get("cmd") === "info") {
