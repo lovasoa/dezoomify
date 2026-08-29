@@ -4,10 +4,6 @@ function fromhex(h) {
     return Uint8Array.from(h.match(/[0-9a-fA-F]{2}/g).map(x => parseInt(x, 16)))
 }
 
-function tohex(b) {
-    return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('')
-}
-
 const aes_key_promise = subtle.importKey("raw", fromhex('5b63db113b7af3e0b1435556c8f9530c'), "AES-CBC", true, ["encrypt", "decrypt"]);
 const aes_iv = fromhex('71e70405353a778bfa6fbc30321b9592');
 
@@ -81,8 +77,6 @@ async function compute_signed_path(path, token, x, y, z) {
     return make_path(path, signature, x, y, z);
 }
 export {
-    aes_decrypt_buffer,
     decrypt_image,
-    compute_signed_path,
-    fromhex, tohex
+    compute_signed_path
 }

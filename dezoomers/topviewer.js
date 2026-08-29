@@ -119,7 +119,6 @@ var topviewer = (function(){
 					"height" : view.height,
 					"tileSize" : view.tileWidth,
 					"maxZoomLevel" : maxLevel.no,
-					"maxLevel" : maxLevel.no,
 					"tileurl_tpl" : tileurl_tpl,
 					"firsttile" : maxLevel.starttile,
 					"cols" : maxLevel.cols

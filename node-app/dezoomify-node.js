@@ -4,7 +4,7 @@ var Canvas = require("@napi-rs/canvas");
 var fs = require("fs");
 var path = require("path");
 
-var PROXY_PORT = 8181;
+var PROXY_PORT = Number(process.env.DEZOOMIFY_PROXY_PORT || 8181);
 var proxy_server = require("./proxy.js").listen(PROXY_PORT);
 
 var DEZOOMIFY_PATH = path.dirname(__dirname);

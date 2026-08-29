@@ -44,9 +44,7 @@ The following formats are supported by dezoomify:
 The most prominent supported websites with live compatibility tests include :
 - Arts & Culture (artsandculture.google.com)
 - National Gallery (nationalgallery.org.uk)
-- Museo del Prado (museodelprado.es)
 - Van Gogh Museum Micrio (vangoghmuseum.nl)
-- Memoire des hommes (memoiredeshommes.defense.gouv.fr)
 - London Museum collections (londonmuseum.org.uk)
 - Philadelphia Museum of Art (philamuseum.org)
 - Liechtenstein Collections (liechtensteincollections.at)
@@ -75,11 +73,8 @@ The most prominent supported websites with live compatibility tests include :
 - BLB generic tile template (digital.blb-karlsruhe.de)
 - Alabama Maps LizardTech (cartweb.geography.ua.edu)
 - OpenSeadragon Zoomify (openseadragon.github.io)
-- National Library of Israel (iiif.nli.org.il)
 - National Library of Scotland Auchinleck (auchinleck.nls.uk)
 - National Library of Scotland map-view (map-view.nls.uk)
-- Westchester County Archives (collections.westchestergov.com)
-- pnav collection.pushkinmuseum.art (collection.pushkinmuseum.art)
 - pnav collection.ethnomuseum.ru (collection.ethnomuseum.ru)
 
 

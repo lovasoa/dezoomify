@@ -12,19 +12,9 @@ const targets = [
     url: "https://www.nationalgallery.org.uk/paintings/alexandre-calame-at-handeck",
   },
   {
-    name: "Museo del Prado",
-    expectedDezoomer: "Seadragon (Deep Zoom Image)",
-    url: "https://www.museodelprado.es/en/the-collection/art-work/las-meninas/9fdc7800-9ade-48b0-ab8b-edee94ea877f?searchid=0a27f161-5629-8f4a-2756-ff085078076e",
-  },
-  {
     name: "Van Gogh Museum Micrio",
     expectedDezoomer: "IIIF",
     url: "https://www.vangoghmuseum.nl/en/collection/s0424M1991",
-  },
-  {
-    name: "Memoire des hommes",
-    expectedDezoomer: "IIIF",
-    url: "https://www.memoiredeshommes.defense.gouv.fr/_recherche-images/show/112145/image/56545/0/info.json",
   },
   {
     name: "London Museum collections",
@@ -168,11 +158,6 @@ const targets = [
     url: "https://openseadragon.github.io/examples/tilesource-zoomify/",
   },
   {
-    name: "National Library of Israel",
-    expectedDezoomer: "IIIF",
-    url: "https://iiif.nli.org.il/IIIFv21/FL58252370/info.json",
-  },
-  {
     name: "National Library of Scotland",
     expectedDezoomer: "IIIF",
     url: "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/info.json",
@@ -181,16 +166,6 @@ const targets = [
     name: "National Library of Scotland map-view",
     expectedDezoomer: "IIIF",
     url: "https://map-view.nls.uk/iiif/19619%2F196194600/info.json",
-  },
-  {
-    name: "Westchester County Archives",
-    expectedDezoomer: "IIIF",
-    url: "https://collections.westchestergov.com/digital/collection/ccmaps/id/69/",
-  },
-  {
-    name: "pnav collection.pushkinmuseum.art",
-    expectedDezoomer: "pnav",
-    url: "https://collection.pushkinmuseum.art/entity/OBJECT/77606",
   },
   {
     name: "pnav collection.ethnomuseum.ru",

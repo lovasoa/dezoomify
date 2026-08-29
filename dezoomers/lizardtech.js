@@ -69,13 +69,10 @@ var lizardtech = (function () {
 
 				var data = {
 					origin: source.protocol + "//" + host + "/" + path + "/calcrgn",
-					host: host,
-					path: path,
 					catalog: catalog.getAttribute("name") || requestParameter(doc, "cat"),
 					item: item,
 					width: width,
 					height: height,
-					numlevels: parseInt(image.getAttribute("numlevels")),
 					tileSize: 512,
 					maxZoomLevel: 0,
 					levels: buildLevels(width, height),

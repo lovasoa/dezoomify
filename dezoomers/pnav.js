@@ -75,7 +75,6 @@ function open(url) {
             }
           }
           const data = {
-            origin: tileUrls[0],
             width: Math.round(tileWidth * wStep + wMod * tileScaleRatio),
             height: Math.round(tileHeight * hStep + hMod * tileScaleRatio),
             tileSize: tileHeight,

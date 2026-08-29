@@ -8,7 +8,6 @@ const urlModule = require("url");
 const root = path.resolve(__dirname, "..");
 const fixtureRoot = path.join(__dirname, "fixtures");
 const remoteFixtureRoot = path.join(fixtureRoot, "remote");
-const localFixtureRoot = path.join(fixtureRoot, "local");
 const portArg = process.argv.find((arg) => arg.startsWith("--port="));
 const port = Number(portArg ? portArg.slice("--port=".length) : process.env.PORT || 9877);
 const host = "127.0.0.1";
@@ -98,178 +97,31 @@ function safeJoin(base, pathname) {
 function fixtureFile(hostname, pathname) {
   const basePath = safeJoin(path.join(remoteFixtureRoot, hostname), `.${pathname}`);
   if (!basePath) return null;
-  if (fs.existsSync(basePath) && fs.statSync(basePath).isFile()) return basePath;
 
-  for (const ext of [".html", ".json", ".xml", ".txt"]) {
-    const candidate = `${basePath}${ext}`;
-    if (fs.existsSync(candidate)) return candidate;
+  const extensions = [".html", ".json", ".xml", ".txt"];
+  const candidates = [basePath, ...extensions.map((ext) => `${basePath}${ext}`)];
+  if (fs.existsSync(basePath) && fs.statSync(basePath).isDirectory()) {
+    candidates.push(...extensions.map((ext) => path.join(basePath, `index${ext}`)));
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
   }
 
   return null;
 }
 
-function fixturePathFor(url) {
-  if (
-    url.hostname === "gallica.bnf.fr" &&
-    url.pathname === "/iiif/ark:/12148/btv1b10500000/f1/info.json"
-  ) {
-    return fixtureFile("fixtures.test", "/iiif-v2/info.json");
-  }
-  if (
-    url.hostname === "micrio-cdn.vangoghmuseum.nl" &&
-    url.pathname === "/s0424M1991/info.json"
-  ) {
-    return fixtureFile("fixtures.test", "/iiif-v3/info.json");
-  }
-  if (url.hostname === "www.bl.uk" && url.pathname === "/manuscripts/Proxy.ashx") {
-    return fixtureFile("fixtures.test", "/deepzoom/sample.dzi");
-  }
-  if (url.hostname === "polona.pl" && url.pathname === "/resources/item/9388882/") {
-    return fixtureFile("fixtures.test", "/deepzoom/polona.json");
-  }
-  if (
-    url.hostname === "bibliotheques-specialisees.paris.fr" &&
-    url.pathname === "/in/imageReader.xhtml"
-  ) {
-    return fixtureFile("fixtures.test", "/deepzoom/paris-reader.html");
-  }
-  if (
-    [
-      "artandarchitecture.org.uk",
-      "www.artandarchitecture.org.uk",
-      "biblio.unibe.ch",
-      "bspe-p-pub.paris.fr",
-      "www.ngv.vic.gov.au",
-    ].includes(url.hostname) &&
-    url.pathname === "/zoomify/ImageProperties.xml"
-  ) {
-    return fixtureFile("fixtures.test", "/zoomify/ImageProperties.xml");
-  }
-  if (
-    url.hostname === "biblio.unibe.ch" &&
-    url.pathname === "/web-apps/maps/zoomify.php"
-  ) {
-    return fixtureFile("fixtures.test", "/zoomify/unibe.html");
-  }
-  if (
-    url.hostname === "bspe-p-pub.paris.fr" &&
-    url.pathname === "/MDBGED/zoomify-BFS.aspx"
-  ) {
-    return fixtureFile("fixtures.test", "/zoomify/paris.html");
-  }
-  if (
-    url.hostname === "www.ngv.vic.gov.au" &&
-    url.pathname.startsWith("/explore/collection/work/")
-  ) {
-    return fixtureFile("fixtures.test", "/zoomify/ngv.html");
-  }
-  if (
-    url.hostname === "www.artandarchitecture.org.uk" &&
-    url.pathname.startsWith("/images/zoom/")
-  ) {
-    return fixtureFile("fixtures.test", "/zoomify/artandarchitecture.html");
-  }
-  if (url.hostname === "historischarchief.midden-groningen.nl") {
-    return fixtureFile("fixtures.test", "/topviewer/mediabank-gallery.html");
-  }
-  if (
-    url.hostname === "www.beeldbankgroningen.nl" &&
-    url.pathname.includes("/beelden/detail/")
-  ) {
-    return fixtureFile("fixtures.test", "/topviewer/mediabank-detail.html");
-  }
-  if (url.hostname === "artsandculture.google.com") {
-    if (url.pathname === "/asset/fixture") {
-      return fixtureFile("fixtures.test", "/arts/page.html");
-    }
-    if (url.pathname === "/asset/plain") {
-      return fixtureFile("fixtures.test", "/arts/plain.html");
-    }
-    if (url.pathname === "/arts/path=g" || url.pathname === "/arts/plain=g") {
-      return fixtureFile("fixtures.test", "/arts/TileInfo.xml");
-    }
-  }
-  if (url.hostname === "g.co" && url.pathname === "/arts/fixture") {
-    return fixtureFile("fixtures.test", "/arts/page.html");
-  }
-  if (
-    url.hostname === "images.memorix.nl" &&
-    (
-      url.pathname === "/demo/topviewjson/memorix/sample-file" ||
-      url.pathname === "/gra/topviewjson/memorix/1c7914ee-3f37-0d37-3218-48eba1c3a97f" ||
-      url.pathname === "/ghs/topviewjson/memorix/686dce31-a340-7d19-ae6d-419cee43b952"
-    )
-  ) {
-    return fixtureFile("fixtures.test", "/topviewer/data.json");
-  }
-  if (
-    url.hostname === "webservices.memorix.nl" &&
-    url.pathname === "/mediabank/media/53479cae-899f-0ac1-8913-40276a93a4f7" &&
-    url.searchParams.get("apiKey") === "fd45b590-346a-11e5-a2cb-0800200c9a66"
-  ) {
-    return fixtureFile("fixtures.test", "/topviewer/detail-media.json");
-  }
-  if (
-    url.hostname === "webservices.memorix.nl" &&
-    url.pathname === "/mediabank/media" &&
-    url.searchParams.get("apiKey") === "c51f00b2-2034-45a2-85ce-0aca7143dbbc" &&
-    url.searchParams.get("entities[0]") === "77036348-6551-9e9d-5b2e-b505237e84cf" &&
-    url.searchParams.get("rows") === "1" &&
-    url.searchParams.get("sort") === "random{1785398881908} asc"
-  ) {
-    return fixtureFile("fixtures.test", "/topviewer/media.json");
-  }
-
-  if (url.hostname === "fixtures.test") {
-    if (url.pathname === "/arcgis/MapServer") {
-      if (url.searchParams.get("f") === "json") {
-        return fixtureFile(url.hostname, "/arcgis/MapServer.json");
-      }
-      return null;
-    }
-
-    if (url.pathname === "/iip" && url.searchParams.has("OBJ")) {
-      return fixtureFile(url.hostname, "/iip/image-info.txt");
-    }
-
-    if (
-      url.pathname === "/scripts/XMLBroker.new.php" &&
-      url.searchParams.get("contentID") === "fixture-access-number"
-    ) {
-      return fixtureFile(url.hostname, "/zoomify/fluid-broker.xml");
-    }
-
-    if (url.pathname === "/xl/sample.imgi" && url.searchParams.get("cmd") === "info") {
-      return fixtureFile(url.hostname, "/xl/sample-info.xml");
-    }
-
-    if (url.pathname === "/fsi/server" && url.searchParams.get("type") === "info") {
-      return fixtureFile(url.hostname, "/fsi/server-info.txt");
-    }
-
-    if (url.pathname === "/server.iip" && url.searchParams.get("IIIF")) {
-      return fixtureFile(url.hostname, "/server.iip/iiif-fronts-info.json");
-    }
-
-    if (
-      url.pathname === "/deepzoom/legacy" &&
-      url.searchParams.get("format") === "xml"
-    ) {
-      return fixtureFile(url.hostname, "/deepzoom/legacy.xml");
-    }
-
-    if (url.pathname === "/hungaricana/imagesize/sample.ecw") {
-      return fixtureFile(url.hostname, "/hungaricana/imagesize/sample.ecw.json");
-    }
-  }
-
-  return fixtureFile(url.hostname, url.pathname);
-}
-
 function fixtureFor(target, origin) {
-  const filePath = fixturePathFor(new URL(target));
+  const url = new URL(target);
+  const filePath = fixtureFile(url.hostname, url.pathname);
   if (!filePath) return null;
   return responseFromFile(filePath, origin);
+}
+
+function serveFile(res, filePath, origin) {
+  const fixture = responseFromFile(filePath, origin);
+  res.writeHead(fixture.status, fixture.headers);
+  res.end(fixture.body);
 }
 
 async function serveProxy(req, res, requestUrl) {
@@ -324,46 +176,15 @@ async function serveProxy(req, res, requestUrl) {
   stream.Readable.fromWeb(response.body).pipe(res);
 }
 
-function serveFixtureFile(res, filePath, origin) {
-  const fixture = responseFromFile(filePath, origin);
-  res.writeHead(fixture.status, fixture.headers);
-  res.end(fixture.body);
-}
-
 function serveStatic(req, res, pathname) {
   const origin = `http://${host}:${port}`;
-
-  if (pathname === "/fixtures/iiif-v2/info.json") {
-    serveFixtureFile(res, fixtureFile("fixtures.test", "/iiif-v2/info.json"), origin);
-    return;
-  }
-
-  if (pathname === "/fixtures/iiif-private-id/info.json") {
-    serveFixtureFile(res, fixtureFile("fixtures.test", "/iiif-private-id/info.json"), origin);
-    return;
-  }
-
-  if (pathname === "/fixtures/iiif-default-port/info.json") {
-    serveFixtureFile(
-      res,
-      path.join(localFixtureRoot, "fixtures/iiif-default-port/info.json"),
-      origin
-    );
-    return;
-  }
-
-  if (pathname === "/entity/OBJECT/1") {
-    serveFixtureFile(res, fixtureFile("fixtures.test", "/entity/OBJECT/1"), origin);
-    return;
-  }
-
-  if (pathname === "/fixtures/pnav/image.json") {
-    serveFixtureFile(res, path.join(localFixtureRoot, "fixtures/pnav/image.json"), origin);
+  const localFixture = fixtureFile(host, pathname);
+  if (localFixture) {
+    serveFile(res, localFixture, origin);
     return;
   }
 
   if (
-    pathname === "/fixtures/tile.jpg" ||
     pathname === "/fixtures/pnav/image.jpg" ||
     pathname.startsWith("/fixtures/iiif-private-id/") ||
     pathname.startsWith("/iiif/") ||

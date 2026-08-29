@@ -120,8 +120,6 @@ ZoomManager.addDezoomer({
         const tileHeight = xmlNumber(m, "TileHeight");
         if (tileHeight !== tileSize)
           throw new Error("Non-square tiles are not supported");
-        const matrixWidth = xmlNumber(m, "MatrixWidth");
-        const matrixHeight = xmlNumber(m, "MatrixHeight");
         const scaleDenominator = xmlNumber(m, "ScaleDenominator");
         const [tileMatrixMinX, tileMatrixMaxY] = parseCoordinates(
           xmlText(m, "TopLeftCorner")
@@ -147,8 +145,6 @@ ZoomManager.addDezoomer({
           tileMinRow,
           tileMaxCol,
           tileMaxRow,
-          matrixHeight,
-          matrixWidth,
           maxZoomLevel: 1,
         };
       });
