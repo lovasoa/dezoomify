@@ -80,6 +80,18 @@ function fixtureFile(hostname, pathname) {
 }
 
 function fixturePathFor(url) {
+  if (
+    url.hostname === "gallica.bnf.fr" &&
+    url.pathname === "/iiif/ark:/12148/btv1b10500000/f1/info.json"
+  ) {
+    return fixtureFile("fixtures.test", "/iiif-v2/info.json");
+  }
+  if (
+    url.hostname === "micrio-cdn.vangoghmuseum.nl" &&
+    url.pathname === "/s0424M1991/info.json"
+  ) {
+    return fixtureFile("fixtures.test", "/iiif-v3/info.json");
+  }
   if (url.hostname === "www.bl.uk" && url.pathname === "/manuscripts/Proxy.ashx") {
     return fixtureFile("fixtures.test", "/deepzoom/sample.dzi");
   }

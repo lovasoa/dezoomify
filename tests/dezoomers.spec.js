@@ -413,6 +413,73 @@ test.describe("dezoomer fixture coverage", () => {
     );
   });
 
+  test("converts Gallica ark URLs to IIIF info URLs", async ({ page }) => {
+    const requests = [];
+    const onRequest = (request) => {
+      if (request.url().includes("/proxy?url=")) requests.push(request.url());
+    };
+    page.on("request", onRequest);
+
+    const result = await runDezoomer(
+      page,
+      "IIIF",
+      "https://gallica.bnf.fr/ark:/12148/btv1b10500000/f1"
+    );
+
+    page.off("request", onRequest);
+    const requestedUrls = requests.map((requestUrl) =>
+      decodeURIComponent(new URL(requestUrl).searchParams.get("url"))
+    );
+    expect(requestedUrls).toContain(
+      "https://gallica.bnf.fr/iiif/ark:/12148/btv1b10500000/f1/info.json"
+    );
+    expect(result.tiles.at(-1).url).toContain("/iiif/v2/256,256,256,256/256,256/0/native.png");
+  });
+
+  test("rewrites Van Gogh Museum Micrio URLs to the CDN", async ({ page }) => {
+    const requests = [];
+    const onRequest = (request) => {
+      if (request.url().includes("/proxy?url=")) requests.push(request.url());
+    };
+    page.on("request", onRequest);
+
+    const result = await runDezoomer(
+      page,
+      "Select automatically",
+      "https://fixtures.test/iiif/van-gogh.html"
+    );
+
+    page.off("request", onRequest);
+    const requestedUrls = requests.map((requestUrl) =>
+      decodeURIComponent(new URL(requestUrl).searchParams.get("url"))
+    );
+    expect(requestedUrls).toContain(
+      "https://micrio-cdn.vangoghmuseum.nl/s0424M1991/info.json"
+    );
+    expect(result.dezoomerName).toBe("IIIF");
+    expect(result.tiles.at(-1).url).toContain("/iiif/v3/256,256,256,256/256,256/0/default.jpg");
+  });
+
+  test("uses the fallback tile width for malformed IIIF metadata", async ({ page }) => {
+    const tileRequests = [];
+    const onRequest = (request) => {
+      if (request.url().includes("/iiif/malformed-tile/")) tileRequests.push(request.url());
+    };
+    page.on("request", onRequest);
+
+    const result = await runDezoomer(
+      page,
+      "IIIF",
+      "https://fixtures.test/iiif-malformed-tile/info.json"
+    );
+
+    page.off("request", onRequest);
+    expect(result.dezoomerName).toBe("IIIF");
+    expect(tileRequests).toContain(
+      "http://127.0.0.1:9877/iiif/malformed-tile/0,0,512,512/512,512/0/default.jpg"
+    );
+  });
+
   test("discovers cached ArcGIS MapServer viewer URLs and uses global row/column coordinates", async ({ page }) => {
     const serviceUrl = "https://fixtures.test/arcgis/MapServer?token=fixture&f=html";
     const viewerUrl = `https://wmts.ngi.be/arcgis/home/webmap/viewer.html?basemapUrl=${encodeURIComponent(serviceUrl)}`;

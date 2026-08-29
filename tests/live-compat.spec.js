@@ -17,6 +17,11 @@ const targets = [
     url: "https://www.museodelprado.es/en/the-collection/art-work/las-meninas/9fdc7800-9ade-48b0-ab8b-edee94ea877f?searchid=0a27f161-5629-8f4a-2756-ff085078076e",
   },
   {
+    name: "Van Gogh Museum Micrio",
+    expectedDezoomer: "IIIF",
+    url: "https://www.vangoghmuseum.nl/en/collection/s0424M1991",
+  },
+  {
     name: "Memoire des hommes",
     expectedDezoomer: "IIIF",
     url: "https://www.memoiredeshommes.defense.gouv.fr/_recherche-images/show/112145/image/56545/0/info.json",
