@@ -32,6 +32,7 @@ var seadragon = (function () { //Code isolation
 			/bl\.uk\/manuscripts\/Viewer\.aspx/,
 			/polona\.pl\/item\//,
 			/bibliotheques-specialisees\.paris\.fr\/ark/,
+			/nla\.gov\.au\/nla\.obj.*\/view$/,
 			/_files\/\d+\/\d+_\d+\.(?:jpe?g|png)$/,
 			/dzi$/
 		],
@@ -75,6 +76,11 @@ var seadragon = (function () { //Code isolation
 					callback(res.pages[pageId].dzi_url);
 				});
 				return;
+			}
+
+			// National Library of Australia
+			if (baseUrl.match(/nla\.gov\.au\/nla\.obj.*\/view$/)) {
+				return callback(baseUrl.replace(/view\/?$/, "dzi"));
 			}
 
 			// A single tile URL
@@ -138,8 +144,13 @@ var seadragon = (function () { //Code isolation
 				if (!infos || !size) return ZoomManager.error("Invalid seadragon XML info file: " + url);
 				var data = {};
 
-				//replace extension by _files
-				data.origin = url.replace(/\.[^.\/]*$/, '') + "_files/";
+				if (url.match(/nla\.gov\.au\/.*\/dzi/)) {
+					// National Library of Australia
+					data.origin = url + "?tile=";
+				} else {
+					//replace extension by _files
+					data.origin = url.replace(/\.[^.\/]*$/, '') + "_files/";
+				}
 				data.tileSize = parseInt(infos.getAttribute("TileSize"));
 				data.overlap = parseInt(infos.getAttribute("Overlap"));
 				data.format = infos.getAttribute("Format");

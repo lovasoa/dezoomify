@@ -49,6 +49,7 @@ The most prominent supported websites with live compatibility tests include :
 - Philadelphia Museum of Art (philamuseum.org)
 - Liechtenstein Collections (liechtensteincollections.at)
 - National Gallery of Victoria (ngv.vic.gov.au)
+- National Library of Australia (nla.gov.au)
 - CSNTM manuscripts (collections.csntm.org)
 - Austrian National Library (api.onb.ac.at)
 - Memorix TopViewer (images.memorix.nl)

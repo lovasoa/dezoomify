@@ -37,6 +37,11 @@ const targets = [
     url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",
   },
   {
+    name: "National Library of Australia",
+    expectedDezoomer: "Seadragon (Deep Zoom Image)",
+    url: "https://nla.gov.au/nla.obj-152642460/view",
+  },
+  {
     name: "CSNTM manuscripts",
     expectedDezoomer: "IIIF",
     url: "https://collections.csntm.org/image-service/iiif/MNTGRCGA01/default/M_NT_GRC_GA01_20250609_203r/M_NT_GRC_GA01_20250609_203r/info.json",

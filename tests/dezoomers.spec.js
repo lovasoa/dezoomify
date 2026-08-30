@@ -255,6 +255,7 @@ const seadragonCases = [
     maxZoomLevel: 12,
   }, 0),
   c("Polona JSON", "https://polona.pl/item/9388882/0/", "Seadragon (Deep Zoom Image)", fixture("deepzoom/sample_files/9/1_1.jpg")),
+  c("National Library of Australia", "https://nla.gov.au/nla.obj-152642460/view", "Seadragon (Deep Zoom Image)", "https://nla.gov.au/nla.obj-152642460/dzi?tile=13/20_25.jpg"),
   c("Paris DZI rewrite", "https://bibliotheques-specialisees.paris.fr/ark:/73873/pf0001115743/0017/v0001.simple.selectedTab=otherdocs", "Seadragon (Deep Zoom Image)", fixture("deepzoom/sample_files/9/1_1.jpg")),
   c("World Digital Library", fixture("view/12/34"), "Seadragon (Deep Zoom Image)", fixture("deepzoom/wdl-12-34_files/9/1_1.jpg")),
   c("XML link", fixture("deepzoom/xml-link.html"), "Seadragon (Deep Zoom Image)", fixture("deepzoom/legacy_files/9/1_1.jpg"), "Seadragon (Deep Zoom Image)"),
