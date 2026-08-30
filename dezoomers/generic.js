@@ -1,7 +1,8 @@
 var generic_viewer = (function () {
   var coordinateRegex = /\{\{([XY])(?::(.)(\d+))?\}\}/gi;
+  var encodedCoordinateRegex = /%7B%7B([XY])(?:(?:%3A|:)(.)(\d+))?%7D%7D/gi;
   function fillTemplate(tpl, coords) {
-    return tpl.replace(coordinateRegex, function (base, coord, padding, widthStr) {
+    function replaceCoordinate(base, coord, padding, widthStr) {
       var width = widthStr | 0;
       var padding = padding || "";
       var n = coords[coord.toLowerCase()];
@@ -10,13 +11,17 @@ var generic_viewer = (function () {
         result = padding + result;
       }
       return result;
-    });
+    }
+    return tpl
+      .replace(coordinateRegex, replaceCoordinate)
+      .replace(encodedCoordinateRegex, replaceCoordinate);
   }
   return {
     "name": "Generic dezoomer",
     "description": "Just put the url of a tile, replacing it's horizontal coordinate by {{X}} and vertical coordinate by {{Y}}.",
     "urls": [
-      coordinateRegex
+      coordinateRegex,
+      encodedCoordinateRegex
     ],
     "open": function (url) {
       var current_dimension = 0;
@@ -30,7 +35,6 @@ var generic_viewer = (function () {
         var coords = dimensions_interval.map(function (interval, i) {
           return i === current_dimension ? middle(interval) : 0;
         });
-        img.src = fillTemplate(url, { x: coords[0], y: coords[1] });
         function next_image(border) {
           var interval = dimensions_interval[current_dimension];
           var new_coord = middle(interval);
@@ -57,8 +61,12 @@ var generic_viewer = (function () {
             return dichotomy_step();
           }
         }
-        img.onload = next_image(0);
+        img.onload = function () {
+          // A few tile servers return a 1x1 placeholder with HTTP 200 for a missing tile.
+          next_image(img.width === 1 && img.height === 1 ? 1 : 0)();
+        };
         img.onerror = next_image(1);
+        img.src = fillTemplate(url, { x: coords[0], y: coords[1] });
       }
       return dichotomy_step();
     },

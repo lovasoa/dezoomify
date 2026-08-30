@@ -5,6 +5,7 @@ const { spawn } = require("child_process");
 
 const root = path.resolve(__dirname, "..");
 const fixtureOrigin = "http://127.0.0.1:9877";
+const proxyPort = process.env.DEZOOMIFY_PROXY_PORT || "8181";
 
 const cases = [
   {
@@ -45,7 +46,11 @@ function runCli(item) {
     const child = spawn(
       process.execPath,
       [path.join(root, "node-app", "dezoomify-node.js"), item.url, output],
-      { cwd: root, stdio: ["ignore", "pipe", "pipe"] }
+      {
+        cwd: root,
+        env: { ...process.env, DEZOOMIFY_PROXY_PORT: proxyPort },
+        stdio: ["ignore", "pipe", "pipe"],
+      }
     );
     let stdout = "";
     let stderr = "";

@@ -78,7 +78,7 @@ var seadragon = (function () { //Code isolation
 				return;
 			}
 
-			// national library of australia
+			// National Library of Australia
 			if (baseUrl.match(/nla\.gov\.au\/nla\.obj.*\/view$/)) {
 				return callback(baseUrl.replace(/view\/?$/, "dzi"));
 			}
@@ -145,7 +145,7 @@ var seadragon = (function () { //Code isolation
 				var data = {};
 
 				if (url.match(/nla\.gov\.au\/.*\/dzi/)) {
-					// national library of australia
+					// National Library of Australia
 					data.origin = url + "?tile=";
 				} else {
 					//replace extension by _files

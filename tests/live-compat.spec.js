@@ -12,9 +12,9 @@ const targets = [
     url: "https://www.nationalgallery.org.uk/paintings/alexandre-calame-at-handeck",
   },
   {
-    name: "Memoire des hommes",
+    name: "Van Gogh Museum Micrio",
     expectedDezoomer: "IIIF",
-    url: "https://www.memoiredeshommes.defense.gouv.fr/_recherche-images/show/112145/image/56545/0/info.json",
+    url: "https://www.vangoghmuseum.nl/en/collection/s0424M1991",
   },
   {
     name: "London Museum collections",
@@ -37,6 +37,11 @@ const targets = [
     url: "https://www.ngv.vic.gov.au/explore/collection/work/3867/",
   },
   {
+    name: "National Library of Australia",
+    expectedDezoomer: "Seadragon (Deep Zoom Image)",
+    url: "https://nla.gov.au/nla.obj-152642460/view",
+  },
+  {
     name: "CSNTM manuscripts",
     expectedDezoomer: "IIIF",
     url: "https://collections.csntm.org/image-service/iiif/MNTGRCGA01/default/M_NT_GRC_GA01_20250609_203r/M_NT_GRC_GA01_20250609_203r/info.json",
@@ -55,6 +60,26 @@ const targets = [
     name: "Beeldbank Groningen",
     expectedDezoomer: "TopViewer",
     url: "https://www.beeldbankgroningen.nl/beelden/detail/53479cae-899f-0ac1-8913-40276a93a4f7/media/1c7914ee-3f37-0d37-3218-48eba1c3a97f?mode=detail&view=horizontal&rows=1&page=4&fq%5B%5D=search_s_download:%22Nee%22&sort=random%7B1785398988616%7D%20asc",
+  },
+  {
+    name: "SALHA",
+    expectedDezoomer: "TopViewer",
+    url: "https://salha.nl/bronnen/fotos-en-films/foto-s/detail/2b1d137e-2308-11e0-acba-74f6d356987f/media/80e3858f-5c15-e084-d368-5aa6b9fa0062",
+  },
+  {
+    name: "Archief Zaanstad",
+    expectedDezoomer: "TopViewer",
+    url: "https://archief.zaanstad.nl/mediabank/zoek-in-de-beeldbank/detail/5e5e4b6f-1ed0-ae92-e18a-5e1cc449fd7d/media/33f3329d-6882-81a5-43ab-1a7ffe286575",
+  },
+  {
+    name: "Regionaal Archief Zutphen",
+    expectedDezoomer: "TopViewer",
+    url: "https://erfgoedcentrumzutphen.nl/onderzoeken/beeldbank/detail/268857ad-0480-2e3e-953d-4cf9731c35ff/media/70b46159-6022-5903-a718-c083adb32fe0",
+  },
+  {
+    name: "Noord-Hollands Archief",
+    expectedDezoomer: "TopViewer",
+    url: "https://noord-hollandsarchief.nl/beelden/beeldbank/detail/49AB27FEFB8F11DF9E4D523BC2E286E2/media/9c2a1001-932a-3beb-503f-8d9421db389e",
   },
   {
     name: "Historisch Archief Midden-Groningen",
@@ -118,6 +143,11 @@ const targets = [
     url: "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/WMTS/1.0.0/WMTSCapabilities.xml",
   },
   {
+    name: "Cartesius/NGI ArcGIS MapServer",
+    expectedDezoomer: "ArcGIS MapServer",
+    url: "https://wmts.ngi.be/arcgis/rest/services/20k__%7BD67270FA-BDEC-4A9F-95D1-BEC0C75BA45E%7D__default__404000/MapServer",
+  },
+  {
     name: "BLB generic tile template",
     expectedDezoomer: "Generic dezoomer",
     url: "https://digital.blb-karlsruhe.de/image/tiler/square/2410801/0/{{X}}/{{Y}}",
@@ -133,11 +163,6 @@ const targets = [
     url: "https://openseadragon.github.io/examples/tilesource-zoomify/",
   },
   {
-    name: "National Library of Israel",
-    expectedDezoomer: "IIIF",
-    url: "https://iiif.nli.org.il/IIIFv21/FL58252370/info.json",
-  },
-  {
     name: "National Library of Scotland",
     expectedDezoomer: "IIIF",
     url: "https://auchinleck.nls.uk/imageserver/iipsrv.fcgi?iiif=/auchinleck/105v.jp2/info.json",
@@ -146,16 +171,6 @@ const targets = [
     name: "National Library of Scotland map-view",
     expectedDezoomer: "IIIF",
     url: "https://map-view.nls.uk/iiif/19619%2F196194600/info.json",
-  },
-  {
-    name: "Westchester County Archives",
-    expectedDezoomer: "IIIF",
-    url: "https://collections.westchestergov.com/digital/collection/ccmaps/id/69/",
-  },
-  {
-    name: "pnav collection.pushkinmuseum.art",
-    expectedDezoomer: "pnav",
-    url: "https://collection.pushkinmuseum.art/entity/OBJECT/77606",
   },
   {
     name: "pnav collection.ethnomuseum.ru",

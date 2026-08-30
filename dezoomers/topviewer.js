@@ -3,16 +3,13 @@ var topviewer = (function(){
 	// Institution mappings adapted from VDK/Dememorixer's beeldbanken.json (GPL-2.0):
 	// https://github.com/VDK/Dememorixer/blob/master/beeldbanken.json
 	var memorixSites = [
-		{ url: /koninklijkeverzamelingen\.nl\/(?:collectie-online|mediabank)/, imageServer: "kha" },
 		{ url: /beeldbankgroningen\.nl\/beelden/, imageServer: "gra" },
-		{ url: /rhcrijnstreek\.nl\/bronnen\/foto-s-en-kaarten\/zoeken/, imageServer: "srs" },
-		{ url: /salha\.nl\/archieven-en-collecties\/beeld\/beeldbank/, imageServer: "sha" },
-		{ url: /archief\.zaanstad\.nl\/beeldbank/, imageServer: "zaa" },
-		{ url: /regionaalarchiefzutphen\.nl\/beeld/, imageServer: "szu" },
+		{ url: /salha\.nl\/bronnen\/fotos-en-films\/foto-s/, imageServer: "sha" },
+		{ url: /archief\.zaanstad\.nl\/mediabank\/zoek-in-de-beeldbank/, imageServer: "zaa" },
+		{ url: /erfgoedcentrumzutphen\.nl\/onderzoeken\/beeldbank/, imageServer: "szu" },
 		{ url: /noord-hollandsarchief\.nl\/beelden\/beeldbank/, imageServer: "ranh" },
-		{ url: /nationaalarchief\.nl\/onderzoeken\/fotocollectie/, imageServer: "naa" }
 	];
-	var memorixDetailPath = "\\/detail\\/[a-z0-9-]{36}\\/media\\/([a-z0-9-]{36})";
+	var memorixDetailPath = "\\/detail\\/[a-z0-9-]{32,36}\\/media\\/([a-z0-9-]{36})";
 	var memorixDetailUrls = memorixSites.map(function (site) {
 		return new RegExp(site.url.source + memorixDetailPath, "i");
 	});
@@ -68,7 +65,6 @@ var topviewer = (function(){
 		"description": "Memorix viewer, or topviewer, by picturae. Used on dutch websites.",
 		"urls": [
 			/memorix/,
-			/rhcrijnstreek\.nl/,
 			/topview\.?json/,
 		].concat(memorixDetailUrls),
 		"contents": [
@@ -123,7 +119,6 @@ var topviewer = (function(){
 					"height" : view.height,
 					"tileSize" : view.tileWidth,
 					"maxZoomLevel" : maxLevel.no,
-					"maxLevel" : maxLevel.no,
 					"tileurl_tpl" : tileurl_tpl,
 					"firsttile" : maxLevel.starttile,
 					"cols" : maxLevel.cols

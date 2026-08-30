@@ -23,6 +23,7 @@ var automatic = (function () { //Code isolation
 				// Then, if url didn't match, try to match the contents
 				// Match recursively the page contents and all its iframe children
 				var urlstack = [url];
+				var visitedUrls = Object.create(null);
 				function processNextUrl() {
 					var nextUrl = urlstack.shift();
 					if (!nextUrl) {
@@ -30,12 +31,14 @@ var automatic = (function () { //Code isolation
 						throw new Error(msg);
 					}
 					nextUrl = ZoomManager.resolveRelative(nextUrl, url);
+					if (visitedUrls[nextUrl]) return processNextUrl();
+					visitedUrls[nextUrl] = true;
 
 					ZoomManager.getFile(nextUrl, {type:"htmltext"}, function(contents) {
 						var iframeRegex = /<i?frame[^>]*src=["']([^"']+)/g;
 						var match;
 						while (match = iframeRegex.exec(contents)) {
-							urlstack.push(match[1]);
+							urlstack.push(ZoomManager.resolveRelative(match[1], nextUrl));
 						}
 
 						for (dezoomerName in ZoomManager.dezoomersList) {

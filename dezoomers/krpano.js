@@ -4,7 +4,6 @@ var seadragon = (function () { //Code isolation
 		"name": "krpano",
 		"description": "krpano Panorama Viewer: Mainly used in panoramic images and interactive virtual tours.",
 		"urls": [
-			/hyper-photo\.com\/hyperpano/,
 			/krpano\.com/
 		],
 		"contents": [
