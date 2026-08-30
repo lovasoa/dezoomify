@@ -292,6 +292,31 @@ test.describe("dezoomer fixture coverage", () => {
     await expectCases(page, coreCases);
   });
 
+  test("keeps required metadata query parameters covered", async ({ page }) => {
+    const iip = await captureProxyTargets(page, () => runDezoomer(
+      page,
+      "IIPImage",
+      fixture("iip?FIF=/image.tif")
+    ));
+    const iipInfo = new URL(iip.targets.find((target) => new URL(target).pathname === "/iip"));
+    expect(iipInfo.searchParams.getAll("OBJ")).toEqual([
+      "Max-size",
+      "Tile-size",
+      "Resolution-number",
+    ]);
+
+    const memorix = await captureProxyTargets(page, () => runDezoomer(
+      page,
+      AUTO,
+      "https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc"
+    ));
+    const media = new URL(memorix.targets.find((target) => new URL(target).pathname === "/mediabank/media"));
+    expect(media.searchParams.get("apiKey")).toBe("c51f00b2-2034-45a2-85ce-0aca7143dbbc");
+    expect(media.searchParams.get("entities[0]")).toBe("77036348-6551-9e9d-5b2e-b505237e84cf");
+    expect(media.searchParams.get("rows")).toBe("1");
+    expect(media.searchParams.get("sort")).toBe("random{1785398881908} asc");
+  });
+
   test("covers generic probing and encoded templates", async ({ page }) => {
     const local = (file) => new URL(`/fixtures/generic/${file}`, page.url()).href;
     const cases = [
