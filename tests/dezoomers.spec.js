@@ -318,6 +318,13 @@ test.describe("dezoomer fixture coverage", () => {
     }, encoded);
     expect(tile).toBe(local("padded.svg?x=7&y=9"));
     expect(await selectDezoomer(page, encoded)).toBe("Generic dezoomer");
+
+    const encodedPadded = local("padded.svg?x=%7B%7BX:05%7D%7D&y=%7B%7BY:05%7D%7D");
+    const paddedTile = await page.evaluate((url) => {
+      return window.ZoomManager.dezoomersList["Generic dezoomer"].getTileURL(7, 9, 0, { origin: url });
+    }, encodedPadded);
+    expect(paddedTile).toBe(local("padded.svg?x=00007&y=00009"));
+    expect(await selectDezoomer(page, encodedPadded)).toBe("Generic dezoomer");
   });
 
   test("covers Zoomify discovery branches", async ({ page }) => {

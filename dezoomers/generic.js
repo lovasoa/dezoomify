@@ -1,6 +1,6 @@
 var generic_viewer = (function () {
   var coordinateRegex = /\{\{([XY])(?::(.)(\d+))?\}\}/gi;
-  var encodedCoordinateRegex = /%7B%7B([XY])(?:%3A(.)(\d+))?%7D%7D/gi;
+  var encodedCoordinateRegex = /%7B%7B([XY])(?:(?:%3A|:)(.)(\d+))?%7D%7D/gi;
   function fillTemplate(tpl, coords) {
     function replaceCoordinate(base, coord, padding, widthStr) {
       var width = widthStr | 0;
