@@ -277,7 +277,9 @@ const iiifCases = [
   c("ONB manifest", "https://api.onb.ac.at/iiif/presentation/v3/manifest/10048A37", "IIIF", "/iiif/onb/10048A37/uk4nGb4kQHe3msbC/256,256,256,256/256,256/0/default.jpg", AUTO, { origin: "http://127.0.0.1:9877/iiif/onb/10048A37/uk4nGb4kQHe3msbC" }),
   c("ONB RepViewer", "https://digital.onb.ac.at/RepViewer/viewer.faces?doc=DTL_7039594&order=1&view=SINGLE", "IIIF", "/iiif/onb/10048A37/uk4nGb4kQHe3msbC/256,256,256,256/256,256/0/default.jpg", AUTO, { origin: "http://127.0.0.1:9877/iiif/onb/10048A37/uk4nGb4kQHe3msbC" }),
   c("private IIIF id", "/fixtures/iiif-private-id/info.json", "IIIF", "/fixtures/iiif-private-id/256,256,256,256/256,256/0/native.png"),
-  c("IIIF default port", "/fixtures/iiif-default-port/info.json", "IIIF", "/iiif/default-port/256,256,256,256/256,256/0/native.jpg"),
+  c("IIIF default port", "/fixtures/iiif-default-port/info.json", "IIIF", "http://127.0.0.1:9877/iiif/default-port/256,256,256,256/256,256/0/native.jpg", AUTO, {
+    origin: "http://127.0.0.1:9877/iiif/default-port",
+  }),
   c("CONTENTdm", fixture("digital/collection/OKMaps/id/6483/rec/6"), "IIIF", "/digital/iiif/OKMaps/6483/256,256,256,256/256,256/0/native.jpg", AUTO, { origin: "http://127.0.0.1:9877/digital/iiif/OKMaps/6483" }),
   c("National Gallery page", fixture("national-gallery"), "IIIF", "/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/256,256,256,256/256,256/0/default.jpg", AUTO, { origin: "http://127.0.0.1:9877/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif" }),
   c("London Museum page", fixture("londonmuseum-object"), "IIIF", "/iiif/londonmuseum/object-95380.ptif/256,256,256,256/256,256/0/default.jpg", AUTO, { origin: "http://127.0.0.1:9877/iiif/londonmuseum/object-95380.ptif" }),
