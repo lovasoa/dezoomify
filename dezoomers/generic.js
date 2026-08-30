@@ -63,7 +63,7 @@ var generic_viewer = (function () {
         }
         img.onload = function () {
           // A few tile servers return a 1x1 placeholder with HTTP 200 for a missing tile.
-          next_image(img.width > 1 && img.height > 1 ? 0 : 1)();
+          next_image(img.width === 1 && img.height === 1 ? 1 : 0)();
         };
         img.onerror = next_image(1);
         img.src = fillTemplate(url, { x: coords[0], y: coords[1] });

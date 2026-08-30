@@ -227,7 +227,7 @@ function serveStatic(req, res, pathname) {
       height = 512;
     } else if (pathname.endsWith("/edge.svg")) {
       available = x >= 0 && x < 2 && y >= 0 && y < 2;
-      width = x === 1 ? 44 : 256;
+      width = x === 1 ? 1 : 256;
       height = y === 1 ? 14 : 256;
     } else if (pathname.endsWith("/boundary.svg")) {
       available = x >= 0 && x < 1000 && y === 0;
