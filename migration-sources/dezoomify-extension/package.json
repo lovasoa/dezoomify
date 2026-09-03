@@ -1,0 +1,29 @@
+{
+  "name": "dezoomify-extension",
+  "version": "1.0.1",
+  "description": "Detect zoomable images in web pages and download them with dezoomify",
+  "main": "background.js",
+  "scripts": {
+    "test": "node test/url-recognition.test.js && tsc",
+    "build": "bash -x build.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lovasoa/dezoomify-extension.git"
+  },
+  "keywords": [
+    "dezoomify",
+    "zoom",
+    "image"
+  ],
+  "author": "Ophir LOJKINE",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/lovasoa/dezoomify-extension/issues"
+  },
+  "homepage": "https://github.com/lovasoa/dezoomify-extension#readme",
+  "devDependencies": {
+    "@types/chrome": "^0.0.154",
+    "typescript": "^4.3.5"
+  }
+}
