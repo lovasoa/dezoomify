@@ -206,7 +206,7 @@ impl<'a> TileDownloadCoordinator<'a> {
                         .map_err(|error| WorkError::Download(*error))
                 }
             })
-            .buffer_unordered(self.args.parallelism);
+            .buffer_unordered(self.args.parallelism.max(1));
 
         let mut observations = Vec::new();
         while let Some(tile_result) = stream.next().await {
@@ -223,7 +223,13 @@ impl<'a> TileDownloadCoordinator<'a> {
                 Err(WorkError::Download(error)) => {
                     let spec = error.tile_spec;
                     let tile = (spec.role == TileRole::Output)
-                        .then(|| empty_tile_for(spec.destination, state.tile_size, canvas_size))
+                        .then(|| {
+                            empty_tile_for(
+                                spec.destination,
+                                spec.expected_size.or(state.tile_size),
+                                canvas_size,
+                            )
+                        })
                         .flatten();
                     (spec, tile, false)
                 }
@@ -283,7 +289,7 @@ impl<'a> TileDownloadCoordinator<'a> {
                         .map_err(|error| WorkError::Download(*error))
                 }
             })
-            .buffer_unordered(self.args.parallelism);
+            .buffer_unordered(self.args.parallelism.max(1));
 
         let mut observations = Vec::new();
         while let Some(tile_result) = stream.next().await {

@@ -88,8 +88,14 @@ impl TileBuffer {
     /// Start writing a source pyramid level.
     pub async fn begin_level(&mut self, level: SourceLevel) -> Result<(), ZoomError> {
         let prefer_encoded_tiles = {
-            let extension = self.destination().extension().unwrap_or_default();
-            extension == "tiff" || extension == "tif" || extension == "zif"
+            self.destination()
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| {
+                    extension.eq_ignore_ascii_case("tiff")
+                        || extension.eq_ignore_ascii_case("tif")
+                        || extension.eq_ignore_ascii_case("zif")
+                })
         };
         match self {
             TileBuffer::Buffering {

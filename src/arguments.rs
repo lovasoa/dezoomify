@@ -62,7 +62,12 @@ pub struct Arguments {
 
     /// Degree of parallelism to use. At most this number of
     /// tiles will be downloaded at the same time.
-    #[arg(short = 'n', long = "parallelism", default_value = "16")]
+    #[arg(
+        short = 'n',
+        long = "parallelism",
+        default_value = "16",
+        value_parser = parse_positive_usize
+    )]
     pub parallelism: usize,
 
     /// Number of new attempts to make when a tile load fails
@@ -256,6 +261,15 @@ fn parse_header(s: &str) -> Result<(String, String), &'static str> {
     }
 }
 
+fn parse_positive_usize(s: &str) -> Result<usize, &'static str> {
+    let value = s
+        .parse()
+        .map_err(|_| "parallelism must be a positive integer")?;
+    (value > 0)
+        .then_some(value)
+        .ok_or("parallelism must be a positive integer")
+}
+
 fn parse_duration(s: &str) -> Result<Duration, &'static str> {
     let err_msg = "Invalid duration. \
                         A duration is a number followed by a unit, such as '10ms' or '5s'";
@@ -310,6 +324,14 @@ fn test_parse_duration() {
     assert!(parse_duration("ms").is_err());
     assert!(parse_duration("1j").is_err());
     assert!(parse_duration("").is_err());
+}
+
+#[test]
+fn test_parallelism_must_be_positive() {
+    assert_eq!(parse_positive_usize("1"), Ok(1));
+    assert!(parse_positive_usize("0").is_err());
+    assert!(parse_positive_usize("not-a-number").is_err());
+    assert!(Arguments::try_parse_from(["dezoomify-rs", "--parallelism", "0"]).is_err());
 }
 
 #[test]

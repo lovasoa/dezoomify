@@ -18,7 +18,7 @@ pub use arguments::Arguments;
 pub use binary_display::{BinaryDisplay, display_bytes};
 pub use dezoomify_core::Vec2d;
 pub use errors::ZoomError;
-use network::client;
+use network::{client, user_header_names};
 use output_file::get_outname;
 use tile::Tile;
 
@@ -292,20 +292,69 @@ fn output_prefers_source_pyramid(path: &Path, args: &Arguments) -> bool {
     if args.has_level_specifying_args() || args.largest {
         return false;
     }
-    matches!(
-        path.extension().and_then(|ext| ext.to_str()),
-        Some("iiif" | "tif" | "tiff" | "zif")
-    )
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("iiif")
+                || ext.eq_ignore_ascii_case("tif")
+                || ext.eq_ignore_ascii_case("tiff")
+                || ext.eq_ignore_ascii_case("zif")
+        })
 }
 
 fn can_dezoomify_source_pyramid(path: &Path, args: &Arguments, levels: &[LevelDescriptor]) -> bool {
-    output_prefers_source_pyramid(path, args)
-        && largest_level_size(levels).is_some()
-        && levels.iter().all(|level| {
-            level.source.image_size().is_some()
-                && level.source.tile_size().is_some()
-                && level.source.overlap() == Some(Vec2d::default())
-        })
+    output_prefers_source_pyramid(path, args) && source_pyramid_scale_factors(levels).is_some()
+}
+
+fn source_pyramid_scale_factors(levels: &[LevelDescriptor]) -> Option<Vec<u32>> {
+    let full_size = largest_level_size(levels)?;
+    let mut full_levels = levels
+        .iter()
+        .filter(|level| level.source.image_size() == Some(full_size));
+    let full_level = full_levels.next()?;
+    if full_levels.next().is_some() {
+        return None;
+    }
+    let base_scale_factor = full_level.scale_factor.unwrap_or(1);
+    let tile_size = full_level.source.tile_size()?;
+    if base_scale_factor == 0 {
+        return None;
+    }
+
+    let mut scale_factors = Vec::with_capacity(levels.len());
+    for level in levels {
+        if level.source.overlap() != Some(Vec2d::default())
+            || level.source.tile_size() != Some(tile_size)
+        {
+            return None;
+        }
+        let level_size = level.source.image_size()?;
+        let scale_factor = match level.scale_factor {
+            Some(scale_factor) if scale_factor > 0 && scale_factor % base_scale_factor == 0 => {
+                scale_factor / base_scale_factor
+            }
+            Some(_) => return None,
+            None => exact_scale_factor(full_size, level_size)?,
+        };
+        if scale_factor == 0
+            || full_size.x.div_ceil(scale_factor) != level_size.x
+            || full_size.y.div_ceil(scale_factor) != level_size.y
+            || scale_factors.contains(&scale_factor)
+        {
+            return None;
+        }
+        scale_factors.push(scale_factor);
+    }
+    Some(scale_factors)
+}
+
+fn exact_scale_factor(full_size: Vec2d, level_size: Vec2d) -> Option<u32> {
+    if level_size.x == 0 || level_size.y == 0 {
+        return None;
+    }
+    let x = full_size.x.div_ceil(level_size.x);
+    (x > 0 && full_size.x.div_ceil(x) == level_size.x && full_size.y.div_ceil(x) == level_size.y)
+        .then_some(x)
 }
 
 async fn dezoomify_source_pyramid(
@@ -498,8 +547,9 @@ pub async fn process_bulk(args: &Arguments) -> Result<BulkStats, ZoomError> {
     debug!("Bulk source: {bulk_uri}");
 
     // Discover images from the bulk source.
-    let http = client(std::iter::empty(), args, None)?;
-    let resolver = NativeDiscoveryDriver::new(http);
+    let http = client(args.headers(), args, None)?;
+    let resolver =
+        NativeDiscoveryDriver::with_user_headers(http, user_header_names(args.headers()));
     let registry =
         registry_for_cli(&args.dezoomer, bulk_uri).ok_or_else(|| ZoomError::NoSuchDezoomer {
             name: args.dezoomer.clone(),
@@ -826,61 +876,76 @@ async fn dezoomify_level_into_buffer(
                 .await?;
         }
         TileSource::DiscoverableGrid(discoverable) => {
-            let mut step = discoverable.start();
-            loop {
-                step = match step {
-                    DiscoverableStep::Probe { tile, continuation } => {
-                        let result = coordinator
-                            .download_tiles(
-                                std::iter::once(Ok(tile)),
-                                canvas,
-                                &mut state,
-                                &progress,
-                                None,
-                            )
-                            .await?
-                            .pop()
-                            .ok_or_else(|| ZoomError::Dezoomer {
-                                message: "generic probe produced no observation".into(),
-                            })?;
-                        continuation
-                            .submit(result)
-                            .map_err(|error| ZoomError::Dezoomer {
-                                message: error.to_string(),
-                            })?
-                    }
-                    DiscoverableStep::Resolved {
-                        grid,
-                        previously_output,
-                    } => {
-                        state.set_total_tiles(grid.count());
-                        progress.set_resolved_tiles(grid.count(), state.successful_tiles);
-                        let remaining = grid.tiles_row_major().filter(move |tile| {
-                            tile.as_ref()
-                                .map_or(true, |tile| !previously_output.contains(&tile.destination))
-                        });
-                        coordinator
-                            .download_tiles(
-                                remaining,
-                                canvas,
-                                &mut state,
-                                &progress,
-                                Some(grid.image_size()),
-                            )
-                            .await?;
-                        break;
-                    }
-                    DiscoverableStep::Empty => {
-                        progress.set_resolved_tiles(0, 0);
-                        break;
-                    }
-                };
-            }
+            download_discoverable(
+                discoverable.start(),
+                &mut coordinator,
+                canvas,
+                &mut state,
+                &progress,
+            )
+            .await?;
+        }
+        TileSource::Adaptive(adaptive) => {
+            download_discoverable(
+                adaptive.start(),
+                &mut coordinator,
+                canvas,
+                &mut state,
+                &progress,
+            )
+            .await?;
         }
     }
 
     progress.finish();
     Ok(state)
+}
+
+async fn download_discoverable(
+    mut step: DiscoverableStep,
+    coordinator: &mut download_state::TileDownloadCoordinator<'_>,
+    canvas: &mut TileBuffer,
+    state: &mut download_state::DownloadState,
+    progress: &download_state::ProgressManager,
+) -> Result<(), ZoomError> {
+    loop {
+        step = match step {
+            DiscoverableStep::Probe { tile, continuation } => {
+                let result = coordinator
+                    .download_tiles(std::iter::once(Ok(tile)), canvas, state, progress, None)
+                    .await?
+                    .pop()
+                    .ok_or_else(|| ZoomError::Dezoomer {
+                        message: "probe produced no observation".into(),
+                    })?;
+                continuation
+                    .submit(result)
+                    .map_err(|error| ZoomError::Dezoomer {
+                        message: error.to_string(),
+                    })?
+            }
+            DiscoverableStep::Resolved {
+                grid,
+                previously_output,
+            } => {
+                state.set_total_tiles(grid.count());
+                progress.set_resolved_tiles(grid.count(), state.successful_tiles);
+                let remaining = grid.tiles_row_major().filter(move |tile| {
+                    tile.as_ref()
+                        .map_or(true, |tile| !previously_output.contains(&tile.destination))
+                });
+                coordinator
+                    .download_tiles(remaining, canvas, state, progress, Some(grid.image_size()))
+                    .await?;
+                break;
+            }
+            DiscoverableStep::Empty => {
+                progress.set_resolved_tiles(0, 0);
+                break;
+            }
+        };
+    }
+    Ok(())
 }
 
 async fn finalize_canvas(canvas: &mut TileBuffer) -> Result<(), ZoomError> {
@@ -1105,7 +1170,7 @@ mod tests {
     #[test]
     fn source_pyramid_requires_compatible_output_and_levels() {
         let mut args = Arguments::default();
-        for extension in ["iiif", "tif", "tiff", "zif"] {
+        for extension in ["iiif", "tif", "tiff", "zif", "TIFF", "ZIF"] {
             let path = PathBuf::from(format!("output.{extension}"));
             assert!(can_dezoomify_source_pyramid(
                 &path,
@@ -1149,6 +1214,24 @@ mod tests {
             Path::new("output.tiff"),
             &Arguments::default(),
             &overlapping
+        ));
+
+        let odd_levels = vec![
+            test_level(
+                Some(Vec2d { x: 501, y: 351 }),
+                Some(Vec2d::square(256)),
+                false,
+            ),
+            test_level(
+                Some(Vec2d { x: 1001, y: 701 }),
+                Some(Vec2d::square(256)),
+                false,
+            ),
+        ];
+        assert!(can_dezoomify_source_pyramid(
+            Path::new("output.TIFF"),
+            &Arguments::default(),
+            &odd_levels
         ));
     }
 
