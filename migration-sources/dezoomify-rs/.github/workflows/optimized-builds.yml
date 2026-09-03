@@ -1,0 +1,58 @@
+name: Optimized builds
+
+on:
+  push:
+    branches: [ master ]
+    paths: [ 'src/**.rs', '.github/workflows/optimized-builds.yml' ]
+    # Sequence of patterns matched against refs/tags
+    tags: [ 'v*' ] # Push events to matching v*, i.e. v1.0, v20.15.10
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-22.04]
+        include:
+          - os: windows-latest
+            binary_path: target/release/dezoomify-rs.exe
+          - os: macos-latest
+            binary_path: target/release/dezoomify-rs
+          - os: ubuntu-22.04
+            binary_path: target/release/dezoomify-rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo build --release --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dezoomify-rs ${{ matrix.os }}
+          path: ${{ matrix.binary_path }}
+  create_release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+      - run: cd 'dezoomify-rs macos-latest' && chmod +x dezoomify-rs && tar --create --file dezoomify-rs-macos.tgz --gzip dezoomify-rs ../README-MACOS.txt
+      - run: cd 'dezoomify-rs ubuntu-22.04' && chmod +x dezoomify-rs && tar --create --file dezoomify-rs-linux.tgz --gzip dezoomify-rs
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          files: |
+            dezoomify-rs windows-latest/dezoomify-rs.exe
+            dezoomify-rs ubuntu-22.04/dezoomify-rs-linux.tgz
+            dezoomify-rs macos-latest/dezoomify-rs-macos.tgz

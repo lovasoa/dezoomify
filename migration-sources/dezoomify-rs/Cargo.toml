@@ -1,0 +1,54 @@
+[package]
+name = "dezoomify-rs"
+version = "2.19.0"
+authors = ["lovasoa"]
+edition = "2024"
+license-file = "LICENSE"
+description = "Allows downloading zoomable images. Supports several different formats such as zoomify, iiif, and deep zoom images."
+documentation = "https://docs.rs/dezoomify-rs"
+repository = "https://github.com/lovasoa/dezoomify-rs"
+homepage = "https://lovasoa.github.io/dezoomify-rs/"
+readme = "README.md"
+keywords = ["image", "download"]
+
+[workspace]
+members = ["dezoomify-core"]
+# Root-level `cargo build`/`test`/`clippy`/`bench` cover both crates.
+default-members = [".", "dezoomify-core"]
+
+[dependencies]
+dezoomify-core = { path = "dezoomify-core" }
+image = "0.25"
+png = "0.18"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+custom_error = "1.7"
+clap = { version = "4.4.6", features = ["derive"] }
+regex = "1"
+itertools = "0.15"
+serde_json = "1.0"
+sha1 = "0.11"
+indicatif = "0.18"
+sanitize-filename-reader-friendly = "2"
+human-panic = "2"
+log = "0.4"
+env_logger = "0.11"
+fixedbitset = "0.5"
+reqwest = { version = "0.13", default-features = false, features = [
+    "charset",
+    "gzip",
+    "http2",
+    "native-tls",
+    "system-proxy",
+    "zstd",
+] }
+zif-tiff = "0.3.0"
+
+[dev-dependencies]
+criterion = "0.8"
+image_hasher = "3"
+tempfile = "3"
+
+[[bench]]
+name = "local_dezoomifying"
+harness = false
