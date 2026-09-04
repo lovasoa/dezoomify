@@ -1,0 +1,36 @@
+live_id,source_path,site_owner,input_host,expected_format,minimum_assertion,deterministic_replacement_id,diagnostic_frequency,owner
+L01,migration-sources/dezoomify-web/tests/live-compat.spec.js,Google,artsandculture.google.com,Arts & Culture,auto-select + first tile loads,web-arts-culture,manual,unassigned
+L02,migration-sources/dezoomify-web/tests/live-compat.spec.js,National Gallery,nationalgallery.org.uk,IIIF,auto-select + first tile loads,web-iiif-info,manual,unassigned
+L03,migration-sources/dezoomify-web/tests/live-compat.spec.js,Van Gogh Museum,vangoghmuseum.nl,IIIF,auto-select + first tile loads,web-iiif-discovery,manual,unassigned
+L04,migration-sources/dezoomify-web/tests/live-compat.spec.js,London Museum,londonmuseum.org.uk,IIIF,auto-select + first tile loads,web-iiif-discovery,manual,unassigned
+L05,migration-sources/dezoomify-web/tests/live-compat.spec.js,Philadelphia Museum,philamuseum.org,IIIF,auto-select + first tile loads,web-iiif-discovery,manual,unassigned
+L06,migration-sources/dezoomify-web/tests/live-compat.spec.js,Liechtenstein Collections,liechtensteincollections.at,IIIF,auto-select + first tile loads,web-iiif-info,manual,unassigned
+L07,migration-sources/dezoomify-web/tests/live-compat.spec.js,National Gallery of Victoria,ngv.vic.gov.au,Zoomify,auto-select + first tile loads,web-zoomify-pages,manual,unassigned
+L08,migration-sources/dezoomify-web/tests/live-compat.spec.js,National Library of Australia,nla.gov.au,Seadragon,auto-select + first tile loads,web-seadragon-pages,manual,unassigned
+L09,migration-sources/dezoomify-web/tests/live-compat.spec.js,CSNTM,collections.csntm.org,IIIF,auto-select + first tile loads,web-iiif-info,manual,unassigned
+L10,migration-sources/dezoomify-web/tests/live-compat.spec.js,Austrian National Library,api.onb.ac.at,IIIF,auto-select + first tile loads,web-iiif-discovery,manual,unassigned
+L11,migration-sources/dezoomify-web/tests/live-compat.spec.js,Memorix,images.memorix.nl,TopViewer,auto-select + first tile loads,web-topviewer,manual,unassigned
+L12,migration-sources/dezoomify-web/tests/live-compat.spec.js,Beeldbank Groningen,beeldbankgroningen.nl,TopViewer,auto-select + first tile loads,web-topviewer,manual,unassigned
+L13,migration-sources/dezoomify-web/tests/live-compat.spec.js,SALHA,salha.nl,TopViewer,auto-select + first tile loads,web-topviewer,manual,unassigned
+L14,migration-sources/dezoomify-web/tests/live-compat.spec.js,Archief Zaanstad,archief.zaanstad.nl,TopViewer,auto-select + first tile loads,web-topviewer,manual,unassigned
+L15,migration-sources/dezoomify-web/tests/live-compat.spec.js,Regionaal Archief Zutphen,erfgoedcentrumzutphen.nl,TopViewer,auto-select + first tile loads,web-topviewer,manual,unassigned
+L16,migration-sources/dezoomify-web/tests/live-compat.spec.js,Noord-Hollands Archief,noord-hollandsarchief.nl,TopViewer,auto-select + first tile loads,web-topviewer,manual,unassigned
+L17,migration-sources/dezoomify-web/tests/live-compat.spec.js,HAMG,historischarchief.midden-groningen.nl,TopViewer,auto-select + first tile loads,web-topviewer,manual,unassigned
+L18,migration-sources/dezoomify-web/tests/live-compat.spec.js,BLB Karlsruhe,digital.blb-karlsruhe.de,VLS,auto-select + first tile loads (session cookie),web-vls,manual,unassigned
+L19,migration-sources/dezoomify-web/tests/live-compat.spec.js,Hungaricana,gallery.hungaricana.hu,Hungaricana,auto-select + first tile loads,web-hungaricana,manual,unassigned
+L20,migration-sources/dezoomify-web/tests/live-compat.spec.js,Oklahoma State,dc.library.okstate.edu,IIIF,auto-select + first tile loads,web-iiif-info,manual,unassigned
+L21,migration-sources/dezoomify-web/tests/live-compat.spec.js,Univ of Washington,digitalcollections.lib.washington.edu,IIIF,auto-select + first tile loads (mirador manifest),web-iiif-discovery,manual,unassigned
+L22,migration-sources/dezoomify-web/tests/live-compat.spec.js,krpano,krpano.com,krpano,auto-select + first tile loads,web-krpano,manual,unassigned
+L23,migration-sources/dezoomify-web/tests/live-compat.spec.js,Bibliotheques Paris,bibliotheques-specialisees.paris.fr,Seadragon,auto-select + first tile loads,web-seadragon-pages,manual,unassigned
+L24,migration-sources/dezoomify-web/tests/live-compat.spec.js,Academia Sinica,bronze.asdc.sinica.edu.tw,Seadragon,auto-select + first tile loads,web-seadragon-pages,manual,unassigned
+L25,migration-sources/dezoomify-web/tests/live-compat.spec.js,Neptune Labs,neptunelabs.com,FSI,auto-select + first tile loads,web-fsi,manual,unassigned
+L26,migration-sources/dezoomify-web/tests/live-compat.spec.js,HNG,image.hng-data.org,IIPImage,auto-select + first tile loads,web-iipimage,manual,unassigned
+L27,migration-sources/dezoomify-web/tests/live-compat.spec.js,Uffizi,uffizicloud.centrica.it,XLimage,auto-select + first tile loads,web-xlimage,manual,unassigned
+L28,migration-sources/dezoomify-web/tests/live-compat.spec.js,Esri,server.arcgisonline.com,WMTS,auto-select + first tile loads,web-wmts,manual,unassigned
+L29,migration-sources/dezoomify-web/tests/live-compat.spec.js,NGI Belgium,wmts.ngi.be,ArcGIS MapServer,auto-select + first tile loads,web-arcgis,manual,unassigned
+L30,migration-sources/dezoomify-web/tests/live-compat.spec.js,BLB Karlsruhe,digital.blb-karlsruhe.de,Generic dezoomer,template probing resolves,web-generic-probing,manual,unassigned
+L31,migration-sources/dezoomify-web/tests/live-compat.spec.js,Univ of Alabama,cartweb.geography.ua.edu,LizardTech,auto-select + first tile loads,web-lizardtech,manual,unassigned
+L32,migration-sources/dezoomify-web/tests/live-compat.spec.js,OpenSeadragon,openseadragon.github.io,Zoomify,auto-select + first tile loads,web-zoomify-metadata,manual,unassigned
+L33,migration-sources/dezoomify-web/tests/live-compat.spec.js,NLS,auchinleck.nls.uk,IIIF,auto-select + first tile loads,web-iiif-info,manual,unassigned
+L34,migration-sources/dezoomify-web/tests/live-compat.spec.js,NLS map-view,map-view.nls.uk,IIIF,auto-select + first tile loads,web-iiif-info,manual,unassigned
+L35,migration-sources/dezoomify-web/tests/live-compat.spec.js,Ethnomuseum,collection.ethnomuseum.ru,pnav,auto-select + first tile loads,web-pnav,manual,unassigned
