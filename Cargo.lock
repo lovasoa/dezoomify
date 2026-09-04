@@ -299,6 +299,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f8a51dd197fa6ba5b4dc98a990a43cc13693c23eb0089ebb0fcc1f04152bca6"
 
 [[package]]
+name = "dezoomify-cli"
+version = "1.0.0"
+dependencies = [
+ "dezoomify-native",
+ "serde_json",
+]
+
+[[package]]
 name = "dezoomify-core"
 version = "2.20.0"
 dependencies = [
@@ -344,6 +352,17 @@ name = "dezoomify-job"
 version = "1.0.0"
 dependencies = [
  "dezoomify-core",
+ "dezoomify-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "dezoomify-native"
+version = "1.0.0"
+dependencies = [
+ "dezoomify-core",
+ "dezoomify-job",
  "dezoomify-protocol",
  "serde",
  "serde_json",

@@ -1,0 +1,1 @@
+usage: dezoomify-cli [--overwrite] [--json] <input-url> <output>
