@@ -340,12 +340,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "dezoomify-job"
+version = "1.0.0"
+dependencies = [
+ "dezoomify-core",
+ "dezoomify-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "dezoomify-protocol"
 version = "1.0.0"
 dependencies = [
  "dezoomify-core",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "dezoomify-wasm"
+version = "0.1.0"
+dependencies = [
+ "dezoomify-core",
+ "dezoomify-protocol",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
