@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Scenario manifest v1",
+  "type": "object",
+  "required": ["version", "scenarios"],
+  "properties": {
+    "version": { "const": 1 },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "sha256", "size", "source_snapshot", "source_path", "license_provenance", "sensitive"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_./-]*$" },
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "size": { "type": "integer", "minimum": 0 },
+          "content_type": { "type": "string" },
+          "source_snapshot": { "type": "string" },
+          "source_path": { "type": "string" },
+          "served_urls": { "type": "array", "items": { "type": "string" } },
+          "license_provenance": { "type": "string" },
+          "sensitive": { "type": ["boolean", "string"] }
+        }
+      }
+    }
+  }
+}

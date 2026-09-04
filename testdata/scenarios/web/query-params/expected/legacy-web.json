@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "data": {
+        "baseZoomLevel": 0,
+        "height": 512,
+        "maxZoomLevel": 1,
+        "nbrTilesX": 2,
+        "nbrTilesY": 2,
+        "origin": "https://fixtures.test/iip?FIF=/image.tif",
+        "overlap": 0,
+        "tileSize": 256,
+        "totalTiles": 4,
+        "width": 512,
+        "zoomFactor": 2
+      },
+      "error": null,
+      "format": "IIPImage",
+      "height": 512,
+      "input": "iip",
+      "label": "iip OBJ params",
+      "lastTile": "https://fixtures.test/iip?FIF=/image.tif&JTL=1,3",
+      "mode": "explicit",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "data": {
+        "baseZoomLevel": 0,
+        "cols": 2,
+        "firsttile": 10,
+        "height": 512,
+        "maxZoomLevel": 1,
+        "nbrTilesX": 2,
+        "nbrTilesY": 2,
+        "origin": "https://images.memorix.nl/ghs/topviewjson/memorix/686dce31-a340-7d19-ae6d-419cee43b952",
+        "overlap": 0,
+        "tileSize": 256,
+        "tileurl_tpl": "http://127.0.0.1:PORT/topviewer/sample-file/{tile}.jpg",
+        "totalTiles": 4,
+        "width": 512,
+        "zoomFactor": 2
+      },
+      "error": null,
+      "format": "TopViewer",
+      "height": 512,
+      "input": "hamg",
+      "label": "memorix query",
+      "lastTile": "http://127.0.0.1:PORT/topviewer/sample-file/13.jpg",
+      "mode": "automatic",
+      "tileCount": 4,
+      "width": 512
+    }
+  ],
+  "metadata_requests": [
+    "GET https://fixtures.test/iip?FIF=/image.tif&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number",
+    "GET https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc",
+    "GET https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc",
+    "GET https://webservices.memorix.nl/mediabank/media?sort=random%7B1785398881908%7D+asc&rows=1&apiKey=c51f00b2-2034-45a2-85ce-0aca7143dbbc&entities%5B0%5D=77036348-6551-9e9d-5b2e-b505237e84cf",
+    "GET https://images.memorix.nl/ghs/topviewjson/memorix/686dce31-a340-7d19-ae6d-419cee43b952"
+  ],
+  "scenario": "web/query-params",
+  "tile_requests": []
+}

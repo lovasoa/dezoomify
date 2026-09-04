@@ -1,0 +1,13 @@
+{
+  "description": "Core protocol fixtures for all 16 formats (AUTO)",
+  "id": "web/core-discovery",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/zoomify/ImageProperties.xml"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js coreCases",
+    "snapshot": "f7caa07"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "description": "Proxy GET and HEAD on data targets",
+  "id": "web/proxy",
+  "input": {
+    "mode": "explicit",
+    "url": "http://127.0.0.1/proxy?url=data:text/plain,hello"
+  },
+  "operation": "proxy",
+  "source_evidence": {
+    "path": "tests/proxy-function.spec.js",
+    "snapshot": "f7caa07"
+  }
+}

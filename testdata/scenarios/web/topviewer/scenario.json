@@ -1,0 +1,13 @@
+{
+  "description": "TopViewer and Memorix discovery",
+  "id": "web/topviewer",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/topviewer/data.json"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js topviewer",
+    "snapshot": "f7caa07"
+  }
+}

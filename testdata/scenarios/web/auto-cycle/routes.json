@@ -1,0 +1,48 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/automatic/cycle-a.html",
+      "payload": "payloads/fixtures.test/automatic/cycle-a.html",
+      "route_id": "fixtures-test-automatic-cycle-a-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/automatic/cycle-b.html",
+      "payload": "payloads/fixtures.test/automatic/cycle-b.html",
+      "route_id": "fixtures-test-automatic-cycle-b-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/automatic/repeated-parent.html",
+      "payload": "payloads/fixtures.test/automatic/repeated-parent.html",
+      "route_id": "fixtures-test-automatic-repeated-parent-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/automatic/child.html",
+      "payload": "payloads/fixtures.test/automatic/child.html",
+      "route_id": "fixtures-test-automatic-child-html",
+      "status": 200
+    }
+  ]
+}

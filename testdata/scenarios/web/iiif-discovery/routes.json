@@ -1,0 +1,302 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/iiif-v3/info.json",
+      "payload": "payloads/fixtures.test/iiif-v3/info.json",
+      "route_id": "fixtures-test-iiif-v3-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "api.onb.ac.at",
+      "method": "GET",
+      "path": "/iiif/image/v3/10048A37/uk4nGb4kQHe3msbC/info.json",
+      "payload": "payloads/api.onb.ac.at/iiif/image/v3/10048A37/uk4nGb4kQHe3msbC/info.json",
+      "route_id": "api-onb-ac-at-iiif-image-v3-10048A37-uk4nGb4kQHe3msbC-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "api.onb.ac.at",
+      "method": "GET",
+      "path": "/iiif/presentation/v3/manifest/10048A37.json",
+      "payload": "payloads/api.onb.ac.at/iiif/presentation/v3/manifest/10048A37.json",
+      "route_id": "api-onb-ac-at-iiif-presentation-v3-manifest-10048A37-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "api.onb.ac.at",
+      "method": "GET",
+      "path": "/iiif/presentation/v3/manifest/DTL_7039594.json",
+      "payload": "payloads/api.onb.ac.at/iiif/presentation/v3/manifest/DTL_7039594.json",
+      "route_id": "api-onb-ac-at-iiif-presentation-v3-manifest-DTL_7039594-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/iiif-private-id/info.json",
+      "payload": "payloads/127.0.0.1/fixtures/iiif-private-id/info.json",
+      "route_id": "127-0-0-1-fixtures-iiif-private-id-info-json",
+      "status": 200
+    },
+    {
+      "generator": {
+        "image": "payloads/127.0.0.1/stub.jpg",
+        "type": "jpeg-stub"
+      },
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path_prefix": "/fixtures/iiif-private-id/",
+      "route_id": "127-0-0-1-fixtures-iiif-private-id",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/iiif-default-port/info.json",
+      "payload": "payloads/127.0.0.1/fixtures/iiif-default-port/info.json",
+      "route_id": "127-0-0-1-fixtures-iiif-default-port-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/digital/api/singleitem/collection/OKMaps/id/6483.json",
+      "payload": "payloads/fixtures.test/digital/api/singleitem/collection/OKMaps/id/6483.json",
+      "route_id": "fixtures-test-digital-api-singleitem-collection-OKMaps-id-6483-j",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/digital/iiif/OKMaps/6483/info.json",
+      "payload": "payloads/fixtures.test/digital/iiif/OKMaps/6483/info.json",
+      "route_id": "fixtures-test-digital-iiif-OKMaps-6483-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/national-gallery.html",
+      "payload": "payloads/fixtures.test/national-gallery.html",
+      "route_id": "fixtures-test-national-gallery-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/server.iip.json",
+      "payload": "payloads/fixtures.test/server.iip.json",
+      "route_id": "fixtures-test-server-iip-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/londonmuseum-object.html",
+      "payload": "payloads/fixtures.test/londonmuseum-object.html",
+      "route_id": "fixtures-test-londonmuseum-object-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "collections.londonmuseum.net",
+      "method": "GET",
+      "path": "/iiif/3/object-95380.ptif/info.json",
+      "payload": "payloads/collections.londonmuseum.net/iiif/3/object-95380.ptif/info.json",
+      "route_id": "collections-londonmuseum-net-iiif-3-object-95380-ptif-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/philamuseum-escaped-shortid.html",
+      "payload": "payloads/fixtures.test/philamuseum-escaped-shortid.html",
+      "route_id": "fixtures-test-philamuseum-escaped-shortid-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/philamuseum-raw-shortid.html",
+      "payload": "payloads/fixtures.test/philamuseum-raw-shortid.html",
+      "route_id": "fixtures-test-philamuseum-raw-shortid-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "i.micr.io",
+      "method": "GET",
+      "path": "/QYRjM/info.json",
+      "payload": "payloads/i.micr.io/QYRjM/info.json",
+      "route_id": "i-micr-io-QYRjM-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "i.micr.io",
+      "method": "GET",
+      "path": "/Raw01/info.json",
+      "payload": "payloads/i.micr.io/Raw01/info.json",
+      "route_id": "i-micr-io-Raw01-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "gallica.bnf.fr",
+      "method": "GET",
+      "path": "/iiif/ark:/12148/btv1b10500000/f1/info.json",
+      "payload": "payloads/gallica.bnf.fr/iiif/ark:/12148/btv1b10500000/f1/info.json",
+      "route_id": "gallica-bnf-fr-iiif-ark:-12148-btv1b10500000-f1-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/iiif/van-gogh.html",
+      "payload": "payloads/fixtures.test/iiif/van-gogh.html",
+      "route_id": "fixtures-test-iiif-van-gogh-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "micrio-cdn.vangoghmuseum.nl",
+      "method": "GET",
+      "path": "/s0424M1991/info.json",
+      "payload": "payloads/micrio-cdn.vangoghmuseum.nl/s0424M1991/info.json",
+      "route_id": "micrio-cdn-vangoghmuseum-nl-s0424M1991-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/iiif-malformed-tile/info.json",
+      "payload": "payloads/fixtures.test/iiif-malformed-tile/info.json",
+      "route_id": "fixtures-test-iiif-malformed-tile-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/iiif-presentation/plain-image-manifest.json",
+      "payload": "payloads/fixtures.test/iiif-presentation/plain-image-manifest.json",
+      "route_id": "fixtures-test-iiif-presentation-plain-image-manifest-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/stub.jpg",
+      "payload": "payloads/127.0.0.1/stub.jpg",
+      "route_id": "127-0-0-1-stub-jpg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "image": "payloads/127.0.0.1/stub.jpg",
+        "type": "jpeg-stub"
+      },
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path_prefix": "/iiif/",
+      "route_id": "127-0-0-1-iiif",
+      "status": 200
+    },
+    {
+      "generator": {
+        "image": "payloads/127.0.0.1/stub.jpg",
+        "type": "jpeg-stub"
+      },
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path_prefix": "/digital/iiif/",
+      "route_id": "127-0-0-1-digital-iiif",
+      "status": 200
+    },
+    {
+      "generator": {
+        "image": "payloads/127.0.0.1/stub.jpg",
+        "type": "jpeg-stub"
+      },
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/server.iip",
+      "route_id": "127-0-0-1-server-iip",
+      "status": 200
+    }
+  ]
+}

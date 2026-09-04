@@ -1,0 +1,87 @@
+{
+  "scenario": "extension/recognition",
+  "cases": [
+    {
+      "input": "https://example.com/ImageProperties.xml?t123",
+      "expected": "https://example.com/ImageProperties.xml",
+      "got": "https://example.com/ImageProperties.xml"
+    },
+    {
+      "input": "https://example.com/image/info.json",
+      "expected": "https://example.com/image/info.json",
+      "got": "https://example.com/image/info.json"
+    },
+    {
+      "input": "https://example.com/image.dzi?cache=1",
+      "expected": "https://example.com/image_files/0/0_0.jpg",
+      "got": "https://example.com/image_files/0/0_0.jpg"
+    },
+    {
+      "input": "https://example.com/image_files/12/3_4.jpg?cache=1",
+      "expected": "https://example.com/image_files/0/0_0.jpg",
+      "got": "https://example.com/image_files/0/0_0.jpg"
+    },
+    {
+      "input": "https://example.com/image_files/12/3_4.jpeg",
+      "expected": "https://example.com/image_files/0/0_0.jpg",
+      "got": "https://example.com/image_files/0/0_0.jpg"
+    },
+    {
+      "input": "https://example.com/TileGroup2/5-3-4.jpg",
+      "expected": "https://example.com/ImageProperties.xml",
+      "got": "https://example.com/ImageProperties.xml"
+    },
+    {
+      "input": "https://example.com/iip?FIF=image.tif&WID=500",
+      "expected": "https://example.com/iip?FIF=image.tif",
+      "got": "https://example.com/iip?FIF=image.tif"
+    },
+    {
+      "input": "https://example.com/image.imgi?cmd=info",
+      "expected": "https://example.com/image.imgi?cmd=info",
+      "got": "https://example.com/image.imgi?cmd=info"
+    },
+    {
+      "input": "https://example.com/image.ecw",
+      "expected": "https://example.com/image.ecw",
+      "got": "https://example.com/image.ecw"
+    },
+    {
+      "input": "https://example.com/id/full/512,/0/default.jpg",
+      "expected": "https://example.com/id/info.json",
+      "got": "https://example.com/id/info.json"
+    },
+    {
+      "input": "https://artsandculture.google.com/asset/title/id?hl=en",
+      "expected": "https://artsandculture.google.com/asset/title/id",
+      "got": "https://artsandculture.google.com/asset/title/id"
+    },
+    {
+      "input": "https://example.com/photo.jpg",
+      "expected": null,
+      "got": null
+    },
+    {
+      "input": "https://example.com/image.pff",
+      "expected": null,
+      "got": null
+    },
+    {
+      "input": "https://example.com/viewer/p.xml",
+      "expected": null,
+      "got": null
+    },
+    {
+      "input": "https://www.rijksmuseum.nl/api/getTilesInfo?object_id=1&callback=x",
+      "expected": null,
+      "got": null
+    },
+    {
+      "input": "https://dezoomify.ophir.dev/#https://example.com/info.json",
+      "expected": null,
+      "got": null
+    }
+  ],
+  "metadata_requests": [],
+  "tile_requests": []
+}

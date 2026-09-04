@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "data": null,
+      "error": null,
+      "format": null,
+      "height": null,
+      "input": "data:text/plain,hello",
+      "label": "GET data target",
+      "lastTile": null,
+      "mode": "proxy",
+      "tileCount": 0,
+      "width": null
+    }
+  ],
+  "metadata_requests": [
+    "GET data:<redacted>",
+    "GET data:<redacted>"
+  ],
+  "scenario": "web/proxy",
+  "tile_requests": []
+}

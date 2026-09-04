@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "data": null,
+      "error": "Unable to find a proper dezoomer for:",
+      "format": null,
+      "height": null,
+      "input": "https://fixtures.test/automatic/repeated-parent.html",
+      "label": "reject https://fixtures.test/automatic/repeated-parent.html",
+      "lastTile": null,
+      "mode": "Select automatically",
+      "tileCount": 0,
+      "width": null
+    },
+    {
+      "data": null,
+      "error": "Unable to find a proper dezoomer for:",
+      "format": null,
+      "height": null,
+      "input": "https://fixtures.test/automatic/cycle-a.html",
+      "label": "reject https://fixtures.test/automatic/cycle-a.html",
+      "lastTile": null,
+      "mode": "Select automatically",
+      "tileCount": 0,
+      "width": null
+    }
+  ],
+  "metadata_requests": [
+    "GET https://fixtures.test/automatic/repeated-parent.html",
+    "GET https://fixtures.test/automatic/child.html",
+    "GET https://fixtures.test/automatic/cycle-a.html",
+    "GET https://fixtures.test/automatic/cycle-b.html"
+  ],
+  "scenario": "web/auto-cycle",
+  "tile_requests": []
+}

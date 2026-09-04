@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Scenario transcript v1 (envelope and order only; protocol message slots bind in phase 05)",
+  "type": "object",
+  "required": ["scenario", "commands", "events", "result"],
+  "properties": {
+    "scenario": { "type": "string" },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["seq", "kind"],
+        "properties": {
+          "seq": { "type": "integer", "minimum": 0 },
+          "kind": { "type": "string" },
+          "params": { "type": "object" }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["seq", "kind"],
+        "properties": {
+          "seq": { "type": "integer", "minimum": 0 },
+          "kind": { "type": "string" },
+          "params": { "type": "object" }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["success", "failure", "cancelled", "partial"] },
+        "format": { "type": "string" },
+        "error": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,213 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/ImageProperties.xml",
+      "payload": "payloads/fixtures.test/zoomify/ImageProperties.xml",
+      "route_id": "fixtures-test-zoomify-ImageProperties-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/flash.html",
+      "payload": "payloads/fixtures.test/zoomify/flash.html",
+      "route_id": "fixtures-test-zoomify-flash-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/fluid.html",
+      "payload": "payloads/fixtures.test/zoomify/fluid.html",
+      "route_id": "fixtures-test-zoomify-fluid-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/scripts/XMLBroker.new.php.xml",
+      "payload": "payloads/fixtures.test/scripts/XMLBroker.new.php.xml",
+      "route_id": "fixtures-test-scripts-XMLBroker-new-php-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/openlayers.html",
+      "payload": "payloads/fixtures.test/zoomify/openlayers.html",
+      "route_id": "fixtures-test-zoomify-openlayers-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/tile-source.html",
+      "payload": "payloads/fixtures.test/zoomify/tile-source.html",
+      "route_id": "fixtures-test-zoomify-tile-source-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/url-element.html",
+      "payload": "payloads/fixtures.test/zoomify/url-element.html",
+      "route_id": "fixtures-test-zoomify-url-element-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/iframe-parent.html",
+      "payload": "payloads/fixtures.test/zoomify/iframe-parent.html",
+      "route_id": "fixtures-test-zoomify-iframe-parent-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/iframe-child.html",
+      "payload": "payloads/fixtures.test/zoomify/iframe-child.html",
+      "route_id": "fixtures-test-zoomify-iframe-child-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/multiple-groups/ImageProperties.xml",
+      "payload": "payloads/fixtures.test/zoomify/multiple-groups/ImageProperties.xml",
+      "route_id": "fixtures-test-zoomify-multiple-groups-ImageProperties-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify-full-numtiles/ImageProperties.xml",
+      "payload": "payloads/fixtures.test/zoomify-full-numtiles/ImageProperties.xml",
+      "route_id": "fixtures-test-zoomify-full-numtiles-ImageProperties-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "biblio.unibe.ch",
+      "method": "GET",
+      "path": "/web-apps/maps/zoomify.php.html",
+      "payload": "payloads/biblio.unibe.ch/web-apps/maps/zoomify.php.html",
+      "route_id": "biblio-unibe-ch-web-apps-maps-zoomify-php-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "biblio.unibe.ch",
+      "method": "GET",
+      "path": "/zoomify/ImageProperties.xml",
+      "payload": "payloads/biblio.unibe.ch/zoomify/ImageProperties.xml",
+      "route_id": "biblio-unibe-ch-zoomify-ImageProperties-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "bspe-p-pub.paris.fr",
+      "method": "GET",
+      "path": "/MDBGED/zoomify-BFS.aspx.html",
+      "payload": "payloads/bspe-p-pub.paris.fr/MDBGED/zoomify-BFS.aspx.html",
+      "route_id": "bspe-p-pub-paris-fr-MDBGED-zoomify-BFS-aspx-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "bspe-p-pub.paris.fr",
+      "method": "GET",
+      "path": "/zoomify/ImageProperties.xml",
+      "payload": "payloads/bspe-p-pub.paris.fr/zoomify/ImageProperties.xml",
+      "route_id": "bspe-p-pub-paris-fr-zoomify-ImageProperties-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "www.ngv.vic.gov.au",
+      "method": "GET",
+      "path": "/explore/collection/work/3867/index.html",
+      "payload": "payloads/www.ngv.vic.gov.au/explore/collection/work/3867/index.html",
+      "route_id": "www-ngv-vic-gov-au-explore-collection-work-3867-index-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "www.ngv.vic.gov.au",
+      "method": "GET",
+      "path": "/zoomify/ImageProperties.xml",
+      "payload": "payloads/www.ngv.vic.gov.au/zoomify/ImageProperties.xml",
+      "route_id": "www-ngv-vic-gov-au-zoomify-ImageProperties-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "www.artandarchitecture.org.uk",
+      "method": "GET",
+      "path": "/images/zoom/c462969579cd09dd4ccb690d0e43018757fa2df2.html",
+      "payload": "payloads/www.artandarchitecture.org.uk/images/zoom/c462969579cd09dd4ccb690d0e43018757fa2df2.html",
+      "route_id": "www-artandarchitecture-org-uk-images-zoom-c462969579cd09dd4ccb69",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "www.artandarchitecture.org.uk",
+      "method": "GET",
+      "path": "/zoomify/ImageProperties.xml",
+      "payload": "payloads/www.artandarchitecture.org.uk/zoomify/ImageProperties.xml",
+      "route_id": "www-artandarchitecture-org-uk-zoomify-ImageProperties-xml",
+      "status": 200
+    }
+  ]
+}

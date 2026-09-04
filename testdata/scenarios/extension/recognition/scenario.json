@@ -1,0 +1,13 @@
+{
+  "description": "URL recognition positives negatives canonicalization",
+  "id": "extension/recognition",
+  "input": {
+    "mode": "explicit",
+    "url": "https://example.com/ImageProperties.xml?t123"
+  },
+  "operation": "recognize",
+  "source_evidence": {
+    "path": "test/url-recognition.test.js",
+    "snapshot": "d231dd0"
+  }
+}

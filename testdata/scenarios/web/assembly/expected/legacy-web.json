@@ -1,0 +1,171 @@
+{
+  "cases": [
+    {
+      "layout": 0,
+      "points": [
+        {
+          "rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "x": 10,
+          "y": 10
+        },
+        {
+          "rgba": [
+            0,
+            255,
+            0,
+            255
+          ],
+          "x": 300,
+          "y": 10
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "x": 10,
+          "y": 300
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            0,
+            255
+          ],
+          "x": 300,
+          "y": 300
+        }
+      ]
+    },
+    {
+      "layout": 1,
+      "points": [
+        {
+          "rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "x": 254,
+          "y": 10
+        },
+        {
+          "rgba": [
+            0,
+            255,
+            0,
+            255
+          ],
+          "x": 255,
+          "y": 10
+        },
+        {
+          "rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "x": 254,
+          "y": 254
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            0,
+            255
+          ],
+          "x": 255,
+          "y": 255
+        }
+      ]
+    },
+    {
+      "layout": 2,
+      "points": [
+        {
+          "rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "x": 10,
+          "y": 10
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "x": 300,
+          "y": 10
+        }
+      ]
+    },
+    {
+      "layout": 3,
+      "points": [
+        {
+          "rgba": [
+            0,
+            255,
+            0,
+            255
+          ],
+          "x": 299,
+          "y": 255
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "x": 255,
+          "y": 269
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            0,
+            255
+          ],
+          "x": 299,
+          "y": 269
+        }
+      ]
+    }
+  ],
+  "metadata_requests": [],
+  "scenario": "web/assembly",
+  "tile_requests": [
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=0&y=0&w=256&h=256&color=ff0000",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=0&y=0&w=256&h=256&color=ff0000",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=0&y=0&w=256&h=256&color=ff0000",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=0&y=0&w=256&h=256&color=ff0000",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=0&y=1&w=256&h=14&color=0000ff",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=0&y=1&w=256&h=256&color=0000ff",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=0&y=1&w=256&h=256&color=0000ff",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=1&y=0&w=256&h=256&color=00ff00",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=1&y=0&w=256&h=256&color=00ff00",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=1&y=0&w=44&h=256&color=00ff00",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=1&y=1&w=256&h=256&color=ffff00",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=1&y=1&w=256&h=256&color=ffff00",
+    "GET http://127.0.0.1/fixtures/assembly/tile.svg?x=1&y=1&w=44&h=14&color=ffff00"
+  ]
+}

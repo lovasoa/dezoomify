@@ -1,0 +1,13 @@
+{
+  "description": "Zoomify viewer-page branches",
+  "id": "web/zoomify-pages",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/zoomify/flash.html"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js zoomifyCases",
+    "snapshot": "f7caa07"
+  }
+}

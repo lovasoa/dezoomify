@@ -1,0 +1,16 @@
+{
+  "description": "Automatic precedence selects Zoomify",
+  "expected": {
+    "format": "Zoomify"
+  },
+  "id": "web/auto-precedence",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/automatic/precedence.html"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js precedence",
+    "snapshot": "f7caa07"
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "routes": [
+    {
+      "generator": {
+        "shape": "padded",
+        "type": "generic-svg"
+      },
+      "headers": {
+        "Content-Type": "image/svg+xml"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/generic/padded.svg",
+      "route_id": "127-0-0-1-fixtures-generic-padded-svg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "shape": "large",
+        "type": "generic-svg"
+      },
+      "headers": {
+        "Content-Type": "image/svg+xml"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/generic/large.svg",
+      "route_id": "127-0-0-1-fixtures-generic-large-svg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "shape": "edge",
+        "type": "generic-svg"
+      },
+      "headers": {
+        "Content-Type": "image/svg+xml"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/generic/edge.svg",
+      "route_id": "127-0-0-1-fixtures-generic-edge-svg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "shape": "boundary",
+        "type": "generic-svg"
+      },
+      "headers": {
+        "Content-Type": "image/svg+xml"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/generic/boundary.svg",
+      "route_id": "127-0-0-1-fixtures-generic-boundary-svg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "shape": "one",
+        "type": "generic-svg"
+      },
+      "headers": {
+        "Content-Type": "image/svg+xml"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/generic/one.svg",
+      "route_id": "127-0-0-1-fixtures-generic-one-svg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "shape": "missing-origin",
+        "type": "generic-svg"
+      },
+      "headers": {
+        "Content-Type": "image/svg+xml"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/generic/missing-origin.svg",
+      "route_id": "127-0-0-1-fixtures-generic-missing-origin-svg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "shape": "placeholder",
+        "type": "generic-svg"
+      },
+      "headers": {
+        "Content-Type": "image/svg+xml"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/generic/placeholder.svg",
+      "route_id": "127-0-0-1-fixtures-generic-placeholder-svg",
+      "status": 200
+    }
+  ]
+}

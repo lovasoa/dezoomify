@@ -1,0 +1,13 @@
+{
+  "description": "Seadragon viewer-page branches",
+  "id": "web/seadragon-pages",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/deepzoom/sample.dzi"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js seadragonCases",
+    "snapshot": "f7caa07"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "description": "Rust core unit and coverage payload library (a304e43)",
+  "id": "rs-core/formats",
+  "input": {
+    "mode": "explicit",
+    "url": "memory://rs-core/formats"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "dezoomify-core/testdata + tiles.yaml",
+    "snapshot": "a304e43"
+  }
+}

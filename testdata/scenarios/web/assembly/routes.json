@@ -1,0 +1,17 @@
+{
+  "routes": [
+    {
+      "generator": {
+        "type": "assembly-tile"
+      },
+      "headers": {
+        "Content-Type": "image/svg+xml"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/assembly/tile.svg",
+      "route_id": "127-0-0-1-fixtures-assembly-tile-svg",
+      "status": 200
+    }
+  ]
+}

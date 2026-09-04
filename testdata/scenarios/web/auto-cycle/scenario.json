@@ -1,0 +1,16 @@
+{
+  "description": "Cycle and repeated-parent rejection with exact-once fetches",
+  "expected": {
+    "error_contains": "Unable to find a proper dezoomer"
+  },
+  "id": "web/auto-cycle",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/automatic/cycle-a.html"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js cycle",
+    "snapshot": "f7caa07"
+  }
+}

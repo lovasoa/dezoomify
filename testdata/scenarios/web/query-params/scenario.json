@@ -1,0 +1,13 @@
+{
+  "description": "Required metadata query preservation",
+  "id": "web/query-params",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/iip?FIF=/image.tif"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js query params",
+    "snapshot": "f7caa07"
+  }
+}

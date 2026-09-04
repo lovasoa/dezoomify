@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Scenario routes v1",
+  "type": "object",
+  "required": ["routes"],
+  "properties": {
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["route_id", "method", "status"],
+        "properties": {
+          "route_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "method": { "type": "string", "enum": ["GET", "HEAD"] },
+          "host": { "type": "string" },
+          "path": { "type": "string" },
+          "path_prefix": { "type": "string" },
+          "path_regex": { "type": "string" },
+          "query": { "type": "string" },
+          "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+          "payload": { "type": "string" },
+          "generator": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "enum": ["arts-tile", "generic-svg", "assembly-tile", "jpeg-stub", "generic-jpg"] },
+              "image": { "type": "string" },
+              "shape": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

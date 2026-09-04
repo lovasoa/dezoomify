@@ -1,0 +1,13 @@
+{
+  "description": "ArcGIS WMTS pnav XLimage FSI LizardTech VLS Hungaricana Arts",
+  "id": "web/site-adapters",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/arcgis/MapServer"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js remaining adapters",
+    "snapshot": "f7caa07"
+  }
+}

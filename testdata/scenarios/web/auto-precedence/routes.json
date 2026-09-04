@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/automatic/precedence.html",
+      "payload": "payloads/fixtures.test/automatic/precedence.html",
+      "route_id": "fixtures-test-automatic-precedence-html",
+      "status": 200
+    }
+  ]
+}

@@ -1,0 +1,191 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "text/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/sample.dzi",
+      "payload": "payloads/fixtures.test/deepzoom/sample.dzi",
+      "route_id": "fixtures-test-deepzoom-sample-dzi",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/legacy.xml",
+      "payload": "payloads/fixtures.test/deepzoom/legacy.xml",
+      "route_id": "fixtures-test-deepzoom-legacy-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "www.bl.uk",
+      "method": "GET",
+      "path": "/manuscripts/Proxy.ashx.xml",
+      "payload": "payloads/www.bl.uk/manuscripts/Proxy.ashx.xml",
+      "route_id": "www-bl-uk-manuscripts-Proxy-ashx-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "www.museodelprado.es",
+      "method": "GET",
+      "path": "/en/the-collection/art-work/las-meninas/9fdc7800-9ade-48b0-ab8b-edee94ea877f.html",
+      "payload": "payloads/www.museodelprado.es/en/the-collection/art-work/las-meninas/9fdc7800-9ade-48b0-ab8b-edee94ea877f.html",
+      "route_id": "www-museodelprado-es-en-the-collection-art-work-las-meninas-9fdc",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "polona.pl",
+      "method": "GET",
+      "path": "/resources/item/9388882/index.json",
+      "payload": "payloads/polona.pl/resources/item/9388882/index.json",
+      "route_id": "polona-pl-resources-item-9388882-index-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/octet-stream"
+      },
+      "host": "nla.gov.au",
+      "method": "GET",
+      "path": "/nla.obj-152642460/dzi",
+      "payload": "payloads/nla.gov.au/nla.obj-152642460/dzi",
+      "route_id": "nla-gov-au-nla-obj-152642460-dzi",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "bibliotheques-specialisees.paris.fr",
+      "method": "GET",
+      "path": "/in/imageReader.xhtml.html",
+      "payload": "payloads/bibliotheques-specialisees.paris.fr/in/imageReader.xhtml.html",
+      "route_id": "bibliotheques-specialisees-paris-fr-in-imageReader-xhtml-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/view/12/34.html",
+      "payload": "payloads/fixtures.test/view/12/34.html",
+      "route_id": "fixtures-test-view-12-34-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/wdl-12-34.dzi",
+      "payload": "payloads/fixtures.test/deepzoom/wdl-12-34.dzi",
+      "route_id": "fixtures-test-deepzoom-wdl-12-34-dzi",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/xml-link.html",
+      "payload": "payloads/fixtures.test/deepzoom/xml-link.html",
+      "route_id": "fixtures-test-deepzoom-xml-link-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/dzi-link.html",
+      "payload": "payloads/fixtures.test/deepzoom/dzi-link.html",
+      "route_id": "fixtures-test-deepzoom-dzi-link-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/dzi-query.html",
+      "payload": "payloads/fixtures.test/deepzoom/dzi-query.html",
+      "route_id": "fixtures-test-deepzoom-dzi-query-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/zoomit.html",
+      "payload": "payloads/fixtures.test/deepzoom/zoomit.html",
+      "route_id": "fixtures-test-deepzoom-zoomit-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/zoomhub.html",
+      "payload": "payloads/fixtures.test/deepzoom/zoomhub.html",
+      "route_id": "fixtures-test-deepzoom-zoomhub-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/iframe-parent.html",
+      "payload": "payloads/fixtures.test/deepzoom/iframe-parent.html",
+      "route_id": "fixtures-test-deepzoom-iframe-parent-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/iframe-child.html",
+      "payload": "payloads/fixtures.test/deepzoom/iframe-child.html",
+      "route_id": "fixtures-test-deepzoom-iframe-child-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/overlap.dzi",
+      "payload": "payloads/fixtures.test/deepzoom/overlap.dzi",
+      "route_id": "fixtures-test-deepzoom-overlap-dzi",
+      "status": 200
+    }
+  ]
+}

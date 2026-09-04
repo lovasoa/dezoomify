@@ -1,0 +1,59 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/topviewer/data.json",
+      "payload": "payloads/fixtures.test/topviewer/data.json",
+      "route_id": "fixtures-test-topviewer-data-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/topviewer/server.html",
+      "payload": "payloads/fixtures.test/topviewer/server.html",
+      "route_id": "fixtures-test-topviewer-server-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/topviewer/gahetna.html",
+      "payload": "payloads/fixtures.test/topviewer/gahetna.html",
+      "route_id": "fixtures-test-topviewer-gahetna-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/topviewer/rkd.html",
+      "payload": "payloads/fixtures.test/topviewer/rkd.html",
+      "route_id": "fixtures-test-topviewer-rkd-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "images.memorix.nl",
+      "method": "GET",
+      "path": "/gra/topviewjson/memorix/1c7914ee-3f37-0d37-3218-48eba1c3a97f.json",
+      "payload": "payloads/images.memorix.nl/gra/topviewjson/memorix/1c7914ee-3f37-0d37-3218-48eba1c3a97f.json",
+      "route_id": "images-memorix-nl-gra-topviewjson-memorix-1c7914ee-3f37-0d37-321",
+      "status": 200
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "text/plain"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/iip.txt",
+      "payload": "payloads/fixtures.test/iip.txt",
+      "route_id": "fixtures-test-iip-txt",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "historischarchief.midden-groningen.nl",
+      "method": "GET",
+      "path": "/collectie/beelden/beelden-view/index.html",
+      "payload": "payloads/historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/index.html",
+      "route_id": "historischarchief-midden-groningen-nl-collectie-beelden-beelden",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "webservices.memorix.nl",
+      "method": "GET",
+      "path": "/mediabank/media.json",
+      "payload": "payloads/webservices.memorix.nl/mediabank/media.json",
+      "route_id": "webservices-memorix-nl-mediabank-media-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "images.memorix.nl",
+      "method": "GET",
+      "path": "/ghs/topviewjson/memorix/686dce31-a340-7d19-ae6d-419cee43b952.json",
+      "payload": "payloads/images.memorix.nl/ghs/topviewjson/memorix/686dce31-a340-7d19-ae6d-419cee43b952.json",
+      "route_id": "images-memorix-nl-ghs-topviewjson-memorix-686dce31-a340-7d19-ae6",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "images.memorix.nl",
+      "method": "GET",
+      "path": "/demo/topviewjson/memorix/sample-file.json",
+      "payload": "payloads/images.memorix.nl/demo/topviewjson/memorix/sample-file.json",
+      "route_id": "images-memorix-nl-demo-topviewjson-memorix-sample-file-json",
+      "status": 200
+    }
+  ]
+}

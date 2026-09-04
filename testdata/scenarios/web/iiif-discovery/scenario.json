@@ -1,0 +1,13 @@
+{
+  "description": "IIIF branches incl malformed/overlap/edge-crop",
+  "id": "web/iiif-discovery",
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/iiif-v3/info.json"
+  },
+  "operation": "discover",
+  "source_evidence": {
+    "path": "tests/dezoomers.spec.js iiifCases",
+    "snapshot": "f7caa07"
+  }
+}

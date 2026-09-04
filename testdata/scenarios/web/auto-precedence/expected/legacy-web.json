@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "data": null,
+      "error": null,
+      "format": "Zoomify",
+      "height": null,
+      "input": "https://fixtures.test/automatic/precedence.html",
+      "label": "precedence",
+      "lastTile": null,
+      "mode": "automatic",
+      "tileCount": 0,
+      "width": null
+    }
+  ],
+  "metadata_requests": [
+    "GET https://fixtures.test/automatic/precedence.html"
+  ],
+  "scenario": "web/auto-precedence",
+  "tile_requests": []
+}

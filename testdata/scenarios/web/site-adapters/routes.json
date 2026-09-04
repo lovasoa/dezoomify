@@ -1,0 +1,160 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/arcgis/MapServer.json",
+      "payload": "payloads/fixtures.test/arcgis/MapServer.json",
+      "route_id": "fixtures-test-arcgis-MapServer-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/arcgis/uncached/MapServer.json",
+      "payload": "payloads/fixtures.test/arcgis/uncached/MapServer.json",
+      "route_id": "fixtures-test-arcgis-uncached-MapServer-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/hungaricana/imagepath.html",
+      "payload": "payloads/fixtures.test/hungaricana/imagepath.html",
+      "route_id": "fixtures-test-hungaricana-imagepath-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/hungaricana/inline-files.html",
+      "payload": "payloads/fixtures.test/hungaricana/inline-files.html",
+      "route_id": "fixtures-test-hungaricana-inline-files-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/hungaricana/inline-images.html",
+      "payload": "payloads/fixtures.test/hungaricana/inline-images.html",
+      "route_id": "fixtures-test-hungaricana-inline-images-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/hungaricana/files-url.html",
+      "payload": "payloads/fixtures.test/hungaricana/files-url.html",
+      "route_id": "fixtures-test-hungaricana-files-url-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/hungaricana/files.json",
+      "payload": "payloads/fixtures.test/hungaricana/files.json",
+      "route_id": "fixtures-test-hungaricana-files-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "artsandculture.google.com",
+      "method": "GET",
+      "path": "/asset/fixture.html",
+      "payload": "payloads/artsandculture.google.com/asset/fixture.html",
+      "route_id": "artsandculture-google-com-asset-fixture-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "artsandculture.google.com",
+      "method": "GET",
+      "path": "/asset/plain.html",
+      "payload": "payloads/artsandculture.google.com/asset/plain.html",
+      "route_id": "artsandculture-google-com-asset-plain-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "g.co",
+      "method": "GET",
+      "path": "/arts/fixture.html",
+      "payload": "payloads/g.co/arts/fixture.html",
+      "route_id": "g-co-arts-fixture-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "artsandculture.google.com",
+      "method": "GET",
+      "path": "/arts/path=g.xml",
+      "payload": "payloads/artsandculture.google.com/arts/path=g.xml",
+      "route_id": "artsandculture-google-com-arts-path=g-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "artsandculture.google.com",
+      "method": "GET",
+      "path": "/arts/plain=g.xml",
+      "payload": "payloads/artsandculture.google.com/arts/plain=g.xml",
+      "route_id": "artsandculture-google-com-arts-plain=g-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/octet-stream"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/arts/encrypted-tile.b64",
+      "payload": "payloads/fixtures.test/arts/encrypted-tile.b64",
+      "route_id": "fixtures-test-arts-encrypted-tile-b64",
+      "status": 200
+    },
+    {
+      "generator": {
+        "image": "payloads/fixtures.test/arts/encrypted-tile.b64",
+        "type": "arts-tile"
+      },
+      "headers": {
+        "Content-Type": "application/octet-stream"
+      },
+      "method": "GET",
+      "path_regex": "^/arts/(path|plain)=x[0-9]+-y[0-9]+-z[0-9]+-t[^/]+$",
+      "route_id": "any-arts",
+      "status": 200
+    }
+  ]
+}

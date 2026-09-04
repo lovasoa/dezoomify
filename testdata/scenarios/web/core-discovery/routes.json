@@ -1,0 +1,354 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify/ImageProperties.xml",
+      "payload": "payloads/fixtures.test/zoomify/ImageProperties.xml",
+      "route_id": "fixtures-test-zoomify-ImageProperties-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify-base-href/product.html",
+      "payload": "payloads/fixtures.test/zoomify-base-href/product.html",
+      "route_id": "fixtures-test-zoomify-base-href-product-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/zoomify-base-href/assets/maps/sample/ImageProperties.xml",
+      "payload": "payloads/fixtures.test/zoomify-base-href/assets/maps/sample/ImageProperties.xml",
+      "route_id": "fixtures-test-zoomify-base-href-assets-maps-sample-ImageProperti",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/sample.dzi",
+      "payload": "payloads/fixtures.test/deepzoom/sample.dzi",
+      "route_id": "fixtures-test-deepzoom-sample-dzi",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/png.dzi",
+      "payload": "payloads/fixtures.test/deepzoom/png.dzi",
+      "route_id": "fixtures-test-deepzoom-png-dzi",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/jpeg.dzi",
+      "payload": "payloads/fixtures.test/deepzoom/jpeg.dzi",
+      "route_id": "fixtures-test-deepzoom-jpeg-dzi",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/legacy-embed.html",
+      "payload": "payloads/fixtures.test/deepzoom/legacy-embed.html",
+      "route_id": "fixtures-test-deepzoom-legacy-embed-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/deepzoom/legacy.xml",
+      "payload": "payloads/fixtures.test/deepzoom/legacy.xml",
+      "route_id": "fixtures-test-deepzoom-legacy-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/iiif-v2/info.json",
+      "payload": "payloads/127.0.0.1/fixtures/iiif-v2/info.json",
+      "route_id": "127-0-0-1-fixtures-iiif-v2-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/iiif-presentation/manifest.json",
+      "payload": "payloads/fixtures.test/iiif-presentation/manifest.json",
+      "route_id": "fixtures-test-iiif-presentation-manifest-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/iiif-presentation/image/info.json",
+      "payload": "payloads/fixtures.test/iiif-presentation/image/info.json",
+      "route_id": "fixtures-test-iiif-presentation-image-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/micrio-custom-element.html",
+      "payload": "payloads/fixtures.test/micrio-custom-element.html",
+      "route_id": "fixtures-test-micrio-custom-element-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "i.micr.io",
+      "method": "GET",
+      "path": "/KEimL/info.json",
+      "payload": "payloads/i.micr.io/KEimL/info.json",
+      "route_id": "i-micr-io-KEimL-info-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/plain"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/iip.txt",
+      "payload": "payloads/fixtures.test/iip.txt",
+      "route_id": "fixtures-test-iip-txt",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/krpano/pano.xml",
+      "payload": "payloads/fixtures.test/krpano/pano.xml",
+      "route_id": "fixtures-test-krpano-pano-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/xl/sample.imgi.xml",
+      "payload": "payloads/fixtures.test/xl/sample.imgi.xml",
+      "route_id": "fixtures-test-xl-sample-imgi-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/topviewer/data.json",
+      "payload": "payloads/fixtures.test/topviewer/data.json",
+      "route_id": "fixtures-test-topviewer-data-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/topviewer/page.html",
+      "payload": "payloads/fixtures.test/topviewer/page.html",
+      "route_id": "fixtures-test-topviewer-page-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/plain"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/fsi/server.txt",
+      "payload": "payloads/fixtures.test/fsi/server.txt",
+      "route_id": "fixtures-test-fsi-server-txt",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/lizardtech/iserv/calcrgn.xml",
+      "payload": "payloads/fixtures.test/lizardtech/iserv/calcrgn.xml",
+      "route_id": "fixtures-test-lizardtech-iserv-calcrgn-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/vls/zoom/1.html",
+      "payload": "payloads/fixtures.test/vls/zoom/1.html",
+      "route_id": "fixtures-test-vls-zoom-1-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/hungaricana/imagesize/sample.ecw.json",
+      "payload": "payloads/fixtures.test/hungaricana/imagesize/sample.ecw.json",
+      "route_id": "fixtures-test-hungaricana-imagesize-sample-ecw-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/wmts/WMTSCapabilities.xml",
+      "payload": "payloads/fixtures.test/wmts/WMTSCapabilities.xml",
+      "route_id": "fixtures-test-wmts-WMTSCapabilities-xml",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/arcgis/MapServer.json",
+      "payload": "payloads/fixtures.test/arcgis/MapServer.json",
+      "route_id": "fixtures-test-arcgis-MapServer-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/entity/OBJECT/1.html",
+      "payload": "payloads/fixtures.test/entity/OBJECT/1.html",
+      "route_id": "fixtures-test-entity-OBJECT-1-html",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/pnav/image.json",
+      "payload": "payloads/127.0.0.1/fixtures/pnav/image.json",
+      "route_id": "127-0-0-1-fixtures-pnav-image-json",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/pnav/image.jpg",
+      "payload": "payloads/127.0.0.1/fixtures/pnav/image.jpg",
+      "route_id": "127-0-0-1-fixtures-pnav-image-jpg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "image": "payloads/127.0.0.1/fixtures/pnav/image.jpg",
+        "type": "generic-jpg"
+      },
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/fixtures/generic/tile.jpg",
+      "route_id": "127-0-0-1-fixtures-generic-tile-jpg",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path": "/stub.jpg",
+      "payload": "payloads/127.0.0.1/stub.jpg",
+      "route_id": "127-0-0-1-stub-jpg",
+      "status": 200
+    },
+    {
+      "generator": {
+        "image": "payloads/127.0.0.1/stub.jpg",
+        "type": "jpeg-stub"
+      },
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "127.0.0.1",
+      "method": "GET",
+      "path_prefix": "/iiif/",
+      "route_id": "127-0-0-1-iiif",
+      "status": 200
+    },
+    {
+      "generator": {
+        "image": "payloads/127.0.0.1/stub.jpg",
+        "type": "jpeg-stub"
+      },
+      "headers": {
+        "Content-Type": "image/jpeg"
+      },
+      "host": "iiif.micr.io",
+      "method": "GET",
+      "path_prefix": "/KEimL/",
+      "route_id": "iiif-micr-io-KEimL",
+      "status": 200
+    }
+  ]
+}
