@@ -1,7 +1,7 @@
 # Development
 
 The repository is one monorepo. Rust crates, generated protocol artifacts,
-Studio, host adapters, extension packaging, and release tooling change together.
+The shared UI, hosts, extension packaging, and release tooling change together.
 Run repository tasks from the root through `cargo xtask`; use direct Cargo or
 pnpm commands only when debugging the task runner or a component-specific test.
 
@@ -15,8 +15,8 @@ pnpm commands only when debugging the task runner or a component-specific test.
   `packages/protocol-ts`.
 - `crates/dezoomify-native` contains native effects used by CLI and Tauri.
 - `crates/dezoomify-wasm` adapts core and job behavior for browser hosts.
-- `packages/studio-ui` is the shared React UI; `packages/browser-runtime` owns
-  browser workers, decoding, surfaces, and bounded caching.
+- `packages/shared-ui` is the shared React UI; `packages/browser-runtime` owns
+  browser workers, decoding, canvases, and bounded caching.
 - `crates/fixture-server` serves controlled origins, `testdata/scenarios`
   contains shared scenarios, and `crates/xtask` owns repository tasks.
 
@@ -78,7 +78,7 @@ allocated URLs and cleanup instructions:
 
 | Target | Environment |
 |---|---|
-| `ui` | isolated Studio UI |
+| `ui` | isolated shared UI |
 | `web` | website with deterministic local services |
 | `desktop` | Tauri development application |
 | `extension` | extension watch build and isolated test profile |
@@ -137,11 +137,11 @@ separate protected CI operations against the verified artifact digests.
 3. Run `cargo xtask test scenario --scenario <scenario-id>`.
 4. Run `cargo xtask parity validate` and inspect `cargo xtask parity report`.
 
-### Change Studio UI
+### Change the shared UI
 
 1. Run `cargo xtask dev ui` while changing host-neutral components.
 2. Run `cargo xtask test ui`, then the affected `test web`, `test desktop`, or
-   `test extension` adapter target.
+   `test extension` integration target.
 3. Run `cargo xtask build web` to catch integration and bundle-policy failures.
 
 ### Change the protocol
@@ -158,9 +158,13 @@ only when the change needs an explicit advisory compatibility sample.
 
 ## Change rules
 
-- Domain decisions belong in core or job code, not UI and transport adapters.
+- Domain decisions belong in core or job code, not UI and transport code.
 - Effectful code implements protocol effects; it does not reproduce job policy.
 - Runtime differences use capabilities and shared error codes.
 - Add a shared scenario whenever more than one runtime exercises behavior.
-- Keep Web Studio's direct-first, classified automatic proxy fallback in job policy; browser adapters report transport results and never invent a hidden fallback or per-attempt proxy consent flow.
+- Keep generic lifecycle, retry, and transport-effect policy in the job engine;
+  keep the website's direct-first, classified automatic metadata proxy
+  eligibility and opt-out policy in `apps/web`. App integrations execute supplied
+  transport effects and report results; they never invent a hidden fallback or
+  per-attempt proxy consent flow.
 - Redact credentials and sensitive URLs at every diagnostic boundary.

@@ -1,6 +1,6 @@
 # Protocol
 
-`crates/dezoomify-protocol` is the Rust source of the boundary between Studio, CLI front ends, and runtimes. It generates the schema and `packages/protocol-ts` bindings plus serialization and compatibility tests. Other handwritten wire types are not accepted.
+`crates/dezoomify-protocol` is the Rust source of the boundary between the shared UI, CLI front ends, and runtimes. It generates the schema and `packages/protocol-ts` bindings plus serialization and compatibility tests. Other handwritten protocol types are not accepted.
 
 ## Commands
 
@@ -12,7 +12,7 @@ Events are ordered per job and include state snapshots, selection requests, phas
 
 ## Capabilities
 
-At connection time a runtime reports supported input schemes, fetch modes, decoders, encoders, processing operations, storage features, concurrency, practical size limits, bulk support, and handoff support. Studio gates controls from this declaration. The job engine also validates the final request, so capability checks are not UI-only.
+At connection time a runtime reports supported input schemes, fetch modes, decoders, encoders, processing operations, storage features, concurrency, practical size limits, bulk support, and handoff support. The shared UI gates controls from this declaration. The job engine also validates the final request, so capability checks are not UI-only.
 
 ## Errors
 

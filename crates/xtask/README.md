@@ -53,9 +53,9 @@ cargo xtask parity report
 ## Boundaries
 
 - Depend on workspace metadata, protocol/schema generators, and tooling
-  libraries; invoke product tools without linking product internals when a
+  libraries; invoke app tools without linking app internals when a
   process boundary suffices.
-- Do not contain runtime product behavior, hide mutation in checks, contact the
+- Do not contain runtime app behavior, hide mutation in checks, contact the
   public network from deterministic tasks, or duplicate policy in CI scripts.
 - Test argument parsing, fixed target/lane allowlists, deterministic and
   idempotent generation, check-mode clean diffs, cleanup, and failure

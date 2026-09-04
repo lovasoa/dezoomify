@@ -1,12 +1,12 @@
 # Architecture
 
-dezoomify-ng is one monorepo containing Rust crates, generated protocol bindings, the shared Studio, browser-extension packaging, and native applications. Dependencies point inward toward pure domain libraries; hosts own all effects.
+dezoomify-ng is one monorepo containing Rust crates, generated protocol bindings, the shared UI, browser-extension packaging, and native applications. Dependencies point inward toward pure domain libraries; hosts own all effects.
 
 ## Components
 
 ### `crates/dezoomify-core`
 
-A pure Rust library that converts supplied resource bytes and URLs into discovery results, image catalogs, tile plans, and processing recipes. It describes required resources but never fetches them. It does not access the network, filesystem, clock, browser, image codecs, or async runtime.
+A pure Rust library that converts supplied resource bytes and URLs into discovery results, image catalogs, tile plans, and processing recipes. It describes required resources but never fetches them. Its library code performs no network, filesystem, async runtime, image decoding/encoding, UI, DOM, clock, random source, process, or environment access. Pure parsing, URL manipulation, deterministic crypto, serialization, and data-structure libraries plus the `log` facade are permitted. Tests may invoke tooling without making it a normal dependency. Each format registers a stable id with a user-visible display name in one ordered registry; registry order defines automatic precedence.
 
 ### `crates/dezoomify-job`
 
@@ -22,15 +22,27 @@ The native effect implementation: HTTP transport, local-file access, persistent 
 
 ### `crates/dezoomify-wasm`
 
-The WASM adapter for core, job, and pure processing code. It does not own fetching, workers, decoding, browser surfaces, storage, or downloads. See [Browser runtime](browser-runtime.md).
+The WASM adapter for core, job, and pure processing code. It does not own fetching, workers, decoding, browser canvases, storage, or downloads. See [Browser runtime](browser-runtime.md).
 
-### `packages/studio-ui`
+### `packages/shared-ui`
 
-One React/Vite application renders discovery, selection, job progress, recovery, and output. Thin adapters connect it to the web worker, Tauri commands, or extension messaging. Studio depends on generated TypeScript protocol types, not host-specific implementation details.
+One React/Vite application renders discovery, selection, job progress, recovery, and output. Thin integrations connect it to the web worker, Tauri commands, or extension messaging. The shared UI depends on generated TypeScript protocol types, not host-specific implementation details.
 
 ### `packages/browser-runtime`
 
-The browser host owns workers, readable-byte fetching, active-transport reporting, image decode, canvas and export surfaces, and an optional bounded browser cache. On the website it tries direct readable fetch first and may automatically use the restricted Cloudflare proxy only after a classified CORS or network failure for an eligible public, non-credential resource when the user has not opted out. It connects `packages/studio-ui` to `crates/dezoomify-wasm` on the website and in the extension.
+The browser host owns workers, readable-byte fetching, active-transport
+reporting, image decode, canvas and save surfaces, and an optional bounded
+browser cache. Hosts supply transport eligibility and fallback
+policy: the web integration tries a direct browser fetch first, with browser
+credentials omitted, and may automatically use the metadata CORS proxy only
+after a classified CORS or network failure for an eligible public,
+non-credential metadata request (never tiles) when the user
+has not opted out. The active transport is always visible. No cookies,
+`Authorization`, browser credentials, or user-supplied credential headers are
+sent to or by the proxy. The extension never uses the metadata CORS proxy;
+extension-to-native cookie handoff is separately consent-gated. It connects
+`packages/shared-ui` to
+`crates/dezoomify-wasm` on the website and in the extension.
 
 ### Support workspaces
 
@@ -39,7 +51,7 @@ The browser host owns workers, readable-byte fetching, active-transport reportin
 ## Data flow
 
 ```text
-Studio or CLI
+Shared UI or CLI
     | typed command
     v
 crates/dezoomify-job <--> crates/dezoomify-core
@@ -48,7 +60,7 @@ crates/dezoomify-job <--> crates/dezoomify-core
 packages/browser-runtime or crates/dezoomify-native
     | typed events
     v
-Studio or CLI
+Shared UI or CLI
 ```
 
 Discovery first emits resource requests. The active host acquires each resource and returns bytes to the core. A selected catalog entry becomes a tile plan and processing recipe. The job engine schedules effects within host limits and turns their results into events.
@@ -59,4 +71,4 @@ Discovery first emits resource requests. The active host acquires each resource 
 - URLs, headers, credentials, bytes, and output destinations cross boundaries only through typed values.
 - Runtime differences appear as negotiated [capabilities](protocol.md#capabilities), and automatic fallback is exposed through active-transport state rather than hidden.
 - Errors cross host boundaries as stable protocol errors with typed [recovery actions](errors.md).
-- Shared scenarios assert equivalent behavior across native, browser, desktop, extension, and CLI adapters; see [Testing](testing.md).
+- Shared scenarios assert equivalent behavior across the native runtime, browser runtime, desktop app, extension, and CLI; see [Testing](testing.md).

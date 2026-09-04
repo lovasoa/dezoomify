@@ -7,7 +7,7 @@
 - **Forbidden responsibilities:** No CLI presentation, desktop UI, browser APIs,
   format parsing duplicated from core, credentials in errors/logs, or trust in a
   Native Messaging payload based only on a challenge or nonce.
-- **Interfaces and tests:** Expose native job drivers and capability adapters.
+- **Interfaces and tests:** Expose native job drivers and capability reporting.
   Test with the fixture server for headers, redirects, retries, cache/resume,
   cancellation, codecs, output atomicity, and credential redaction. Native
   Messaging relies on browser enforcement of the native host manifest's allowed

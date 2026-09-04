@@ -18,7 +18,7 @@ Codes are durable protocol API. Messages may improve without changing behavior. 
 
 ## Recovery actions
 
-Recovery is typed data, not text that Studio must interpret. Actions include:
+Recovery is typed data, not text that the UI must interpret. Actions include:
 
 - `retry_now` and `retry_after`;
 - `edit_source` or `provide_headers`;
@@ -30,10 +30,20 @@ Recovery is typed data, not text that Studio must interpret. Actions include:
 
 Each action carries only the parameters valid for that error and current state. The job engine rejects stale or forged actions by job revision and action identifier.
 
-On Web Studio, a classified direct CORS or network failure automatically selects the restricted proxy only for an eligible public, non-credential resource and only while proxy use is enabled. This transport transition is reported in state and shown by Studio rather than exposed as a per-attempt consent action. Opting out prevents new proxy requests; changing that preference does not authorize credentials or make an ineligible resource eligible.
+On the website, a classified direct CORS or network failure automatically selects the metadata CORS proxy only for an eligible public, non-credential metadata request (never tiles) and only while proxy use is enabled. This transport transition is reported in state and shown by the app rather than exposed as a per-attempt consent action. Opting out prevents new proxy requests; changing that preference does not authorize credentials or make an ineligible resource eligible.
+
+## User presentation
+
+Messages are written for the person seeing them, following the layered rules in [Product](product.md#progressive-disclosure):
+
+- Lead with what happened for this job — which step failed, which image or resource was involved, which route was attempted — and the single best next action. Specific causes never share a generic template sentence.
+- The first message is jargon-free. Technical vocabulary appears only in expandable details or linked documentation.
+- The error's structured context (code, class, phase, transport, resource kind, blocked reason, redacted source origin) drives the wording, so identical causes read identically across apps.
+- Copy diagnostics includes the typed context, job and attempt identifiers, app and protocol versions, and the redacted source origin; never cookies, credentials, full URLs with sensitive queries, or response content.
+- Every typed error has defined user wording. A code without user wording is a release defect. A genuinely unclassified internal failure may say the result is unexpected, but still names a next action and a diagnostics path.
 
 ## Failure policy
 
-Transient transport and service errors follow the configured [retry policy](job-engine.md#retry-and-progress). Before Web Studio exposes a classified direct CORS or network failure, it applies the eligible automatic proxy policy once; proxy-disabled, proxy-ineligible, authentication, authorization, and ordinary HTTP failures do not take that route. Remaining access failures require user action. Invalid metadata and deterministic decode failures stop affected work immediately. A tile failure reaches the configured partial policy only after retries are exhausted.
+Transient transport and service errors follow the configured [retry policy](job-engine.md#retry-and-progress). Before the website exposes a classified direct CORS or network failure, it applies the eligible automatic proxy policy once; proxy-disabled, proxy-ineligible, authentication, authorization, and ordinary HTTP failures do not take that route. Remaining access failures require user action. Invalid metadata and deterministic decode failures stop affected work immediately. A tile failure reaches the configured partial policy only after retries are exhausted.
 
 Internal errors preserve a correlation identifier for diagnostics and expose a safe fallback action. Protocol incompatibility stops before job creation. Security-policy failures never offer a recovery that weakens the policy; see [Security](security.md).

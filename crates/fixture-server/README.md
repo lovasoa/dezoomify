@@ -5,7 +5,7 @@
 - **Allowed dependencies:** Test-oriented HTTP/TLS libraries, scenario data, and
   protocol types when typed event fixtures are needed.
 - **Forbidden responsibilities:** No production proxy, internet dependency,
-  product logic, persistent credentials, fixed public port, or non-loopback
+  app logic, persistent credentials, fixed public port, or non-loopback
   default binding.
 - **Interfaces and tests:** Expose an ephemeral loopback server and scenario
   controls for redirects, headers, cookies, ranges, delays, failures, CORS, and

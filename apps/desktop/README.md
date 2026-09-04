@@ -1,9 +1,9 @@
 # Desktop Application
 
-- **Responsibility:** Package the shared studio UI with native job capabilities,
+- **Responsibility:** Package the shared UI with native job capabilities,
   desktop lifecycle, file dialogs, updates, and platform integration.
 - **Allowed dependencies:** `dezoomify-native`, `dezoomify-protocol`,
-  `packages/studio-ui`, and the selected desktop shell.
+  `packages/shared-ui`, and the selected desktop shell.
 - **Forbidden responsibilities:** No duplicate web UI, core parsing, job state
   machine, or unrestricted bridge from web content to native capabilities.
 - **Interfaces and tests:** Expose a narrow validated IPC bridge. Test capability

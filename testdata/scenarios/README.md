@@ -4,14 +4,42 @@
   requests, responses, expected protocol events, results, and failures.
 - **Allowed dependencies:** Scenario schemas may reference public protocol types
   and fixture-server route vocabulary, with payloads stored beside the scenario.
-- **Forbidden responsibilities:** No product implementation, real credentials,
+- **Forbidden responsibilities:** No app implementation, real credentials,
   private URLs, uncontrolled timing, internet requirement, or host-specific
   expectations unless the scenario explicitly tests that host boundary.
 - **Interfaces and tests:** Each scenario records purpose, provenance, routes,
-  expected request order/headers, readable-fetch or ordinary image-display mode,
+  expected request order/headers, readable-fetch or ordinary image display,
   expected `originClean` transitions, outputs/errors, and license. Include
   bounded extension scan/direct-fetch and validated handoff cases. Run schema
   validation plus native and browser parity where applicable.
 - **Migration source:** Distill scenarios from Rust fixtures and browser
   Playwright fixtures under `migration-sources`; preserve behavior, not legacy
   directory layout.
+
+## Harness maintenance
+
+- **Provenance:** every payload records `source_snapshot`, `source_path`, and
+  `license_provenance` in `manifest.json`; fixtures with unclear licenses,
+  secrets, or personal data are blocked from the corpus.
+- **Adding a scenario:** create `testdata/scenarios/<id>/` with `scenario.json`
+  (see `schema/scenario.schema.json`), `routes.json` (see
+  `schema/routes.schema.json`), byte payloads under `payloads/`, and
+  expectations under `expected/`. Copy payload bytes exactly, record SHA-256
+  in `manifest.json`, and run `cargo xtask fixtures verify`.
+- **Routes and hashes:** routes match exact method/host/path with optional
+  exact query; host matching ignores ephemeral ports. `cargo xtask fixtures
+  verify` checks schemas, references, SHA-256, sizes, duplicate IDs,
+  incompatible duplicate served URLs, unlisted/missing files, traversal, and
+  provenance. Verification never rewrites files.
+- **Serving:** `cargo xtask fixtures serve --port 0 --write-address
+  target/fixture-server.addr` binds loopback only and writes one parseable
+  address after listening. The server has no passthrough: unknown resources get
+  a stable `fixture-missing` response and public egress is impossible by
+  construction.
+- **Transcripts:** `expected/legacy-web.json` files are canonical source-oracle
+  transcripts (UTF-8, LF, sorted keys, `127.0.0.1:PORT` and `blob:URL`
+  normalization). Regenerating twice must be byte-identical
+  (`P03-TRANSCRIPT`); review diffs before accepting updates.
+- **Deterministic vs live:** everything here runs without public DNS or
+  network. Live compatibility (`cargo xtask test live`, later phases) is
+  advisory and never replaces scenario coverage.

@@ -19,7 +19,7 @@ Native is the authoritative runtime for huge images, local sources, bulk queues,
 
 ## Desktop
 
-The Tauri application hosts the same Studio used by web and extension. Its adapter maps generated protocol commands to Tauri invocations and maps native events back to Studio. File pickers and save destinations are represented as native handles rather than browser paths.
+The Tauri application hosts the same shared UI used by the website and extension. Its integration maps generated protocol commands to Tauri invocations and maps native events back to the shared UI. File pickers and save destinations are represented as native handles rather than browser paths.
 
 Desktop treats website and deep-link [handoffs](protocol.md#handoff) as bounded, non-secret, untrusted input. It validates them and asks the user to confirm the source and output; these handoffs use no client-side signing. Extension handoff uses allowlisted Native Messaging: browser enforcement of allowed extension IDs authenticates the extension sender to the native host, while a fresh challenge and one-use nonce bind one session and prevent replay rather than establish identity. Cookies transfer only after separate origin-scoped consent and are not intentionally persisted.
 

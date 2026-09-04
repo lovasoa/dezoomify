@@ -22,7 +22,15 @@ Selection is explicit when discovery returns multiple images or levels. Headless
 
 ## Retry and progress
 
-Retry policy defines attempts, backoff inputs, and retryable error classes. The engine schedules retries; the host implements the delay and request. On Web Studio, the first classified direct CORS or network failure is evaluated as a transport transition before ordinary same-transport retry: an eligible public, non-credential resource moves automatically to the restricted proxy when proxy use is enabled, and the active-transport event makes that transition visible. Opt-out and ineligibility prohibit the proxy effect. Authentication failures, invalid metadata, unsupported formats, and deterministic decode failures are not retried automatically.
+Retry policy defines attempts, backoff inputs, and retryable error classes. The
+engine schedules retries; the host implements the delay and request. The web
+integration evaluates the first classified direct CORS or network failure as an
+application-specific transport transition before ordinary same-transport retry:
+an eligible public, non-credential metadata request supplies a metadata CORS
+proxy effect when proxy use is enabled, and the active-transport event makes
+that transition visible. Opt-out and ineligibility prohibit that effect.
+Authentication failures, invalid metadata, unsupported formats, and
+deterministic decode failures are not retried automatically.
 
 Progress is structured by phase and reports completed, active, queued, failed, and total units where known. Byte counts supplement work-unit counts but do not replace them. Monotonic progress survives retries and cache hits without claiming that unknown totals are complete.
 

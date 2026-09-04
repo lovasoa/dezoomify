@@ -3,7 +3,7 @@
 Dezoomify NG is currently a repository scaffold and migration workspace. The
 planned product unifies the command-line, desktop, web, and browser-extension
 experiences around a pure Rust discovery core, shared job and protocol layers,
-host-specific native and WebAssembly runtimes, and a shared studio UI. Those
+host-specific native and WebAssembly runtimes, and a shared UI. Those
 workspace crates and applications do not exist yet unless their directories
 contain implementation in addition to scaffold documentation.
 
@@ -20,26 +20,27 @@ The canonical target locations are:
 - browser-facing packages in [`packages/`](packages/), with the protocol
   generated from its single Rust source into
   [`packages/protocol-ts`](packages/protocol-ts/);
-- deterministic integration cases in
+- deterministic integration scenarios in
   [`testdata/scenarios`](testdata/scenarios/); and
-- product composition roots in [`apps/`](apps/).
+- the apps in [`apps/`](apps/).
 
 ## Browser transport policy
 
-The planned website first tries a direct browser-readable fetch. After a
+The planned website first tries a direct browser fetch. After a
 classified CORS or network failure, it automatically falls back to the
-restricted proxy for an eligible public, non-credential resource when the user
-setting permits proxy use. The UI always identifies the active transport and
-offers a proxy opt-out; it does not interrupt each fallback with a consent
-prompt.
+metadata CORS proxy for an eligible public, non-credential metadata request
+when the user setting permits proxy use; tiles are never proxied. The UI always
+identifies the active transport and offers a proxy opt-out; it does not
+interrupt each fallback with a consent prompt.
 
-The proxy never receives cookies, `Authorization`, or other browser credentials,
-never accesses private or local destinations, and rejects requests outside its
-method, scheme, port, content, size, time, redirect, concurrency, rate, and
-session-budget limits. Ordinary cross-origin image loading remains available as
-a display-only path: a tainted canvas stays visible, but script cannot read,
-process, hash, persist, or programmatically export its pixels. Cookie handoff is
-separate, native-only, origin-scoped, and explicitly consent-gated.
+The metadata CORS proxy never receives cookies, `Authorization`, or other
+browser credentials, never accesses private or local destinations, and rejects
+requests outside its method, scheme, port, content, size, time, redirect,
+concurrency, rate, and session-budget limits. Ordinary cross-origin image
+loading remains available as a display-only path: a tainted canvas stays
+visible, but script cannot read, process, hash, persist, or programmatically
+save its pixels. Cookie handoff is separate, native-only, origin-scoped, and
+explicitly consent-gated.
 
 For Native Messaging, browser enforcement of the native host manifest's allowed
 extension IDs authenticates the extension sender. A fresh challenge/nonce binds
@@ -58,10 +59,12 @@ in this repository:
 - [`dezoomify-extension`](migration-sources/dezoomify-extension/) supplies the
   browser-extension request monitor and URL recognition.
 
-The locked imported tips are `f7caa07` for `dezoomify-web`, `23c4639` for the
-in-progress `dezoomify-rs` migration snapshot, and `d231dd0` for
-`dezoomify-extension`. The root `main` history contains the corresponding three
-subtree merge commits.
+The locked imported tips are `f7caa07` for `dezoomify-web` and `d231dd0` for
+`dezoomify-extension`. `dezoomify-rs` floats on the latest stable upstream
+release at the moment of implementation (see the Rust baseline rule in
+`plans/00-program-rules-and-gates.md`); `23c4639` is a superseded historical
+snapshot, not the working baseline. The root `main` history contains the
+corresponding subtree merge commits.
 
 Treat these roots as migration evidence. Do not refactor or delete them while
 building the new tree; move behavior into the scaffold in plan-sized steps and
@@ -88,7 +91,7 @@ npm test --prefix migration-sources/dezoomify-extension
 `npm run test:live --prefix migration-sources/dezoomify-web/tests` is an
 optional network-dependent compatibility check, not deterministic regression
 coverage. Set `DEZOOMIFY_LIVE_TESTS=1` when running the Rust test command only if
-the opt-in network compatibility cases are intended. The web test command also
+the opt-in network compatibility checks are intended. The web test command also
 requires a Playwright-compatible Chromium installation.
 
 ## Planned workspace commands
