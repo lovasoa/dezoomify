@@ -81,6 +81,20 @@ async fn rejects_unmapped_network() {
 }
 
 #[tokio::test]
+async fn userinfo_never_reaches_logs_or_bodies() {
+    let srv = TestServer::start().await;
+    let target = "http://canary-user:canary-pass-9@fixtures.test/private/item?view=1";
+    let url = format!("{}/fetch?url={target}", srv.base);
+    let res = reqwest::get(&url).await.expect("get");
+    let body = res.text().await.expect("body");
+    assert!(!body.contains("canary-user"), "body leaks userinfo");
+    assert!(!body.contains("canary-pass-9"), "body leaks password");
+    let log = srv.log_text();
+    assert!(!log.contains("canary-user"), "log leaks userinfo");
+    assert!(!log.contains("canary-pass-9"), "log leaks password");
+}
+
+#[tokio::test]
 async fn sensitive_query_values_are_redacted_in_logs_and_bodies() {
     let srv = TestServer::start().await;
     let target =

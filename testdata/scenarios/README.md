@@ -43,3 +43,16 @@
 - **Deterministic vs live:** everything here runs without public DNS or
   network. Live compatibility (`cargo xtask test live`, later phases) is
   advisory and never replaces scenario coverage.
+
+- **Sensitivity vocabulary:** manifest `sensitive` is `false` for clean data,
+  `true` for real secrets (never committed), or `review:<reason>` for synthetic
+  legacy test-doubles (e.g. `review:test-double-token` for the public demo
+  `apiKey` copied from migration sources). `cargo xtask fixtures verify`
+  accepts `false` and `review:*` but fails closed on `true`. Expected
+  transcripts containing the same public test-double are covered by the same
+  vocabulary; request logs and error bodies redact its value regardless.
+- **Transcript updates:** the legacy-web harness is compare-only by default and
+  fails on drift. Regenerate explicitly with `UPDATE_TRANSCRIPTS=1`, then
+  inspect `git diff` and `git status --porcelain -- testdata/scenarios`
+  before accepting. `lastTile` is order-independent (tiles sorted by x, y,
+  url); `tile_requests` are sorted.

@@ -71,7 +71,12 @@ fn redact_url_for_log(original: &str) -> String {
         Some(i) => (&without_scheme[..i], &without_scheme[i..]),
         None => (without_scheme, "/"),
     };
-    let host = authority.rsplit(':').next().unwrap_or(authority);
+    // Strip userinfo first: `user:pass@host` must never reach logs or bodies.
+    let no_userinfo = authority.rsplit('@').next().unwrap_or(authority);
+    let host = match no_userinfo.rsplit_once(':') {
+        Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => h,
+        _ => no_userinfo,
+    };
     let (path, query) = match path_query.find('?') {
         Some(i) => (&path_query[..i], Some(&path_query[i + 1..])),
         None => (path_query, None),

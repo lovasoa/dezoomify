@@ -28,6 +28,10 @@ function transcript(id, cases, start) {
   }
   tiles.sort();
   const clean = ( result ) => JSON.parse(JSON.stringify(result, (k, v) => (typeof v === "string" ? v : v)));
+  // Deterministic tile pick: concurrent loads race insertion order, so sort
+  // by (x, y, url) before taking first/last instead of arrival order.
+  const ordered = (resultTiles) => [...resultTiles].sort((a, b) =>
+    (a.x - b.x) || (a.y - b.y) || String(a.url).localeCompare(String(b.url)));
   return {
     scenario: id,
     cases: cases.map((c) => ({
@@ -38,7 +42,7 @@ function transcript(id, cases, start) {
       width: c.result?.data?.width ?? null,
       height: c.result?.data?.height ?? null,
       tileCount: c.result ? c.result.tiles.length : 0,
-      lastTile: c.result && c.result.tiles.length ? c.result.tiles.at(-1).url : null,
+      lastTile: c.result && c.result.tiles.length ? ordered(c.result.tiles).at(-1).url : null,
       data: c.result ? clean(c.result.data) : null,
       error: c.error ?? null,
     })),

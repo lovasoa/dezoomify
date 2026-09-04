@@ -204,8 +204,27 @@ async function renderAssembly(page, addr, spec) {
 
 function writeTranscript(id, transcript) {
   const dir = scenarioDir(id);
-  fs.mkdirSync(path.join(dir, "expected"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "expected", "legacy-web.json"), stableStringify(transcript));
+  const dest = path.join(dir, "expected", "legacy-web.json");
+  const next = stableStringify(transcript);
+  let current = null;
+  try {
+    current = fs.readFileSync(dest, "utf8");
+  } catch {
+    current = null;
+  }
+  // Verification is read-only by default: fail on diff so `cargo xtask test`
+  // never silently rewrites goldens. Set UPDATE_TRANSCRIPTS=1 for an explicit
+  // review-mode rewrite, then inspect `git diff` before accepting.
+  if (current !== next) {
+    if (process.env.UPDATE_TRANSCRIPTS === "1") {
+      fs.mkdirSync(path.join(dir, "expected"), { recursive: true });
+      fs.writeFileSync(dest, next);
+    } else {
+      throw new Error(
+        `transcript drift in ${id}/expected/legacy-web.json (rerun with UPDATE_TRANSCRIPTS=1 to review, then inspect git diff)`
+      );
+    }
+  }
 }
 
 module.exports = {

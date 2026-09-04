@@ -105,3 +105,21 @@ removal phase. Missing approval means `blocked`.
 - Deterministic tests: the replacement scenario IDs in the matrix.
 - Approval: program rule (plans README sequencing rule 10).
 - Earliest removal: live suite is retained post-cutover as diagnostic.
+
+## D08: Tile Referer preserves legacy full-URI wire bytes
+
+- Matrix IDs: TILE/HEAD parity rows for IIIF/krpano fixed grids
+- Old behavior: `Referer` defaults to the full first-tile URI (including path
+  and query) for tile requests that opt into referer defaulting.
+- Intended behavior: preserve the exact legacy wire bytes; redaction happens
+  at the log/diagnostic boundary via `redact_uri`, never by altering requests.
+  An `origin_only` helper exists for future display/cache-key contexts but is
+  not applied to wire headers in this phase.
+- User impact: none (same requests as legacy).
+- Compatibility/handoff impact: none.
+- Deterministic tests: IIIF/krpano fixed-grid tests assert the full-URI
+  Referer; `redact_uri` unit coverage proves logs strip userinfo/sensitive
+  query/fragment.
+- Approval: owner approval (autonomous run).
+- Earliest removal of legacy header shape: only with a versioned protocol
+  decision and golden updates.
