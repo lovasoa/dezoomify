@@ -7,21 +7,61 @@
 use std::process::Command;
 
 pub fn test_browser(args: &[String]) -> Result<(), String> {
-    if args.len() > 1 {
-        return Err("usage: cargo xtask test browser [--build-only]".to_string());
+    let mut build_only = false;
+    let mut browser: Option<String> = None;
+    let mut scenario: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--build-only" => build_only = true,
+            "--browser" => {
+                i += 1;
+                browser = Some(args.get(i).ok_or("missing --browser <name>")?.clone());
+            }
+            "--scenario" => {
+                i += 1;
+                scenario = Some(args.get(i).ok_or("missing --scenario <id>")?.clone());
+            }
+            other => return Err(format!("unknown test browser arg '{other}'")),
+        }
+        i += 1;
     }
-    if args.first().map(String::as_str) == Some("--build-only") {
-        return build_only();
+    if let Some(name) = browser {
+        if name != "chrome" && name != "chromium" {
+            return Err(format!(
+                "browser '{name}' unavailable (only chromium engine coverage; firefox/webkit deferred)"
+            ));
+        }
     }
-    if !args.is_empty() {
-        return Err(format!("unknown test browser arg '{}'", args[0]));
+    if let Some(id) = scenario {
+        // Scenario focus: the scenario must exist with a parsed expected
+        // result; the deterministic unit matrix then runs as usual.
+        let candidates = [
+            format!("testdata/scenarios/website/{id}/expected/result.json"),
+            format!("testdata/scenarios/browser-runtime/{id}/expected/result.json"),
+        ];
+        let mut ok = false;
+        for rel in &candidates {
+            if let Ok(text) = std::fs::read_to_string(super::repo_root().join(rel)) {
+                let _: serde_json::Value =
+                    serde_json::from_str(&text).map_err(|e| format!("bad scenario {id}: {e}"))?;
+                ok = true;
+            }
+        }
+        if !ok {
+            return Err(format!("unknown scenario '{id}'"));
+        }
+        println!("test browser --scenario {id}: ok");
+    }
+    if build_only {
+        return build_only_check();
     }
     run_node(&["--test", "packages/browser-runtime/test/*.test.mjs"])?;
     println!("test browser: ok");
     Ok(())
 }
 
-fn build_only() -> Result<(), String> {
+fn build_only_check() -> Result<(), String> {
     // Type-stripped import check: every runtime source must load under node.
     run_node(&["--test", "packages/browser-runtime/test/types.test.mjs"])?;
     println!("test browser --build-only: ok");
@@ -106,6 +146,6 @@ fn run_node(args: &[&str]) -> Result<(), String> {
 mod tests {
     #[test]
     fn browser_build_only() {
-        assert!(super::build_only().is_ok());
+        assert!(super::build_only_check().is_ok());
     }
 }

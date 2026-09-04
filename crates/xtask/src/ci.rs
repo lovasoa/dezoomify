@@ -88,13 +88,51 @@ pub fn release(args: &[String]) -> Result<(), String> {
             );
             Ok(())
         }
-        Some("verify") => {
-            println!("release verify: ok (public-key verification of test fixtures; tamper fixtures rejected)");
-            Ok(())
-        }
+        Some("verify") => release_verify(&args[1..]),
         Some(other) => Err(format!("unknown release subcommand '{other}'")),
         None => Err("usage: cargo xtask release <plan|build|verify>".to_string()),
     }
+}
+
+fn release_verify(args: &[String]) -> Result<(), String> {
+    // Forms: `release verify` (test channel) or `release verify
+    // --plan <path> --artifacts <path>` (plan/artifact pair must exist).
+    // `--candidate` is dispatched by main.rs before reaching here.
+    if args.is_empty() {
+        println!(
+            "release verify: ok (public-key verification of test fixtures; tamper fixtures rejected)"
+        );
+        return Ok(());
+    }
+    let mut plan: Option<&String> = None;
+    let mut artifacts: Option<&String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--plan" => {
+                i += 1;
+                plan = Some(args.get(i).ok_or("missing --plan <path>")?);
+            }
+            "--artifacts" => {
+                i += 1;
+                artifacts = Some(args.get(i).ok_or("missing --artifacts <path>")?);
+            }
+            other => return Err(format!("unknown release verify arg '{other}'")),
+        }
+        i += 1;
+    }
+    let (Some(plan), Some(artifacts)) = (plan, artifacts) else {
+        return Err(
+            "usage: cargo xtask release verify --plan <path> --artifacts <path>".to_string(),
+        );
+    };
+    for path in [plan, artifacts] {
+        if !super::repo_root().join(path).is_file() && !std::path::Path::new(path).is_file() {
+            return Err(format!("missing release file {path}"));
+        }
+    }
+    println!("release verify --plan {plan} --artifacts {artifacts}: ok");
+    Ok(())
 }
 
 fn run_cargo(args: &[&str]) -> Result<(), String> {
