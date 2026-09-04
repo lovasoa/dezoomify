@@ -1,0 +1,81 @@
+//! Security regression tests: traversal, method, credential, and egress
+//! behavior. No public network is contacted; any egress attempt fails the
+//! Network-isolation test by construction (no passthrough exists).
+
+mod common;
+
+use common::TestServer;
+
+#[tokio::test]
+async fn manifest_exists() {
+    let manifest = std::fs::read_to_string(common::TestServer::scenarios_path("manifest.json"))
+        .expect("manifest");
+    assert!(manifest.contains("\"version\": 1") || manifest.contains("\"version\":1"));
+}
+
+#[tokio::test]
+async fn traversal_in_original_url_is_rejected() {
+    let srv = TestServer::start().await;
+    for target in [
+        "http://127.0.0.1/../secret",
+        "http://127.0.0.1/a/../../b",
+        "http://user:pass@127.0.0.1/fixtures/x",
+    ] {
+        let url = format!("{}/fetch?url={target}", srv.base);
+        let res = reqwest::get(&url).await.expect("get");
+        assert_eq!(res.status(), 400, "target {target}");
+    }
+}
+
+#[tokio::test]
+async fn static_traversal_is_forbidden() {
+    let srv = TestServer::start().await;
+    // axum normalizes dot-segments before routing; a non-static root 404s.
+    let res = reqwest::get(format!("{}/..%2f..%2fetc%2fpasswd", srv.base))
+        .await
+        .expect("get");
+    assert!(res.status() == 404 || res.status() == 403);
+}
+
+#[tokio::test]
+async fn credentials_are_never_reflected() {
+    let srv = TestServer::start().await;
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{}/fetch?url=https://nope.test/missing", srv.base))
+        .header("cookie", "session=secret-canary")
+        .header("authorization", "Bearer secret-canary")
+        .send()
+        .await
+        .expect("get");
+    assert_eq!(res.status(), 404);
+    assert!(res.headers().get("set-cookie").is_none());
+    let body = res.text().await.expect("body");
+    assert!(!body.contains("secret-canary"));
+}
+
+#[tokio::test]
+async fn arts_failure_reveals_no_bytes() {
+    let srv = TestServer::start().await;
+    let url = format!(
+        "{}/fetch?url=http://127.0.0.1/arts/path=x0-y0-z0-tWRONG",
+        srv.base
+    );
+    let res = reqwest::get(&url).await.expect("get");
+    assert_eq!(res.status(), 403);
+    assert_eq!(res.bytes().await.expect("body").as_ref(), b"fixture error");
+}
+
+#[tokio::test]
+async fn rejects_unmapped_network() {
+    // Deterministic mode has no passthrough: public hosts get fixture-missing,
+    // never proxied bytes. A real egress would return 200 with foreign content.
+    let srv = TestServer::start().await;
+    for host in ["example.com", "8.8.8.8", "169.254.169.254"] {
+        let url = format!("{}/fetch?url=http://{host}/", srv.base);
+        let res = reqwest::get(&url).await.expect("get");
+        assert_eq!(res.status(), 404, "host {host}");
+        let v: serde_json::Value = res.json().await.expect("json");
+        assert_eq!(v["error"], "fixture-missing");
+    }
+}

@@ -1,0 +1,31 @@
+[package]
+name = "dezoomify-fixture-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dezoomify-fixture-server"
+path = "src/main.rs"
+
+[lib]
+name = "dezoomify_fixture_server"
+path = "src/lib.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.12"
+sha1 = "0.10"
+aes = "0.8"
+cbc = "0.1"
+regex = "1"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "fs"] }
+serde_json = "1"
+hmac = "0.12"
+sha1 = "0.10"
