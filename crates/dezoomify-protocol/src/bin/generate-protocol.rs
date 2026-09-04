@@ -1,7 +1,22 @@
 //! `generate-protocol`: deterministic Rust -> TypeScript/schema generator.
-//! Usage: `generate-protocol --out <dir> [--check]`.
+//! Usage: `generate-protocol --out <dir> [--check]`. All filesystem I/O
+//! lives in this binary; `generate.rs` stays a pure projection.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn write_all(dir: &Path) -> Vec<String> {
+    let mut written = Vec::new();
+    for (rel, content) in dezoomify_protocol::generate::artifacts() {
+        let path = dir.join(&rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create artifact dir");
+        }
+        std::fs::write(&path, content).expect("write artifact");
+        written.push(rel);
+    }
+    written.sort();
+    written
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -26,7 +41,7 @@ fn main() {
     if check {
         let tmp = std::env::temp_dir().join(format!("proto-check-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        dezoomify_protocol::generate::write_all(&tmp).expect("generate to tmp");
+        write_all(&tmp);
         let mut drift = Vec::new();
         for rel in [
             "src/generated.ts",
@@ -48,7 +63,7 @@ fn main() {
         }
         println!("protocol artifacts: clean");
     } else {
-        let written = dezoomify_protocol::generate::write_all(&out).expect("write artifacts");
+        let written = write_all(&out);
         println!("protocol artifacts: wrote {}", written.join(", "));
     }
 }

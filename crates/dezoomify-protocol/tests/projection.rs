@@ -1,15 +1,15 @@
-//! Core-projection tests: representative core catalogs project into stable
+//! Core-projection shape tests: representative catalogs project into stable
 //! protocol DTOs with preserved order, IDs, dimensions, and optionality.
-//! Production conversion lives in `dezoomify-job` (phase 06); this test-only
-//! projection proves the DTOs can represent core output without reversing
-//! dependencies (`dezoomify-core` never depends on `dezoomify-protocol`).
+//! Production conversion lives in `dezoomify-job` (phase 06); this test pins
+//! the DTO shapes without depending on `dezoomify-core` (protocol stays
+//! independent of core internals per AGENTS.md).
 
-use dezoomify_core::core::{CatalogEntry, ImageCatalog};
 use dezoomify_protocol::dto::*;
 
 #[test]
 fn representative_catalog_projects_with_order_and_ids() {
-    // Build a two-image catalog projection manually (stable IDs, order).
+    // Representative two-image catalog: stable IDs, preserved order,
+    // ready vs deferred entries, exact dimensions.
     let catalog = CatalogDto {
         images: vec![
             ImageDto {
@@ -47,8 +47,4 @@ fn representative_catalog_projects_with_order_and_ids() {
     let bytes = dezoomify_protocol::codec::encode(&catalog).unwrap();
     let back: CatalogDto = dezoomify_protocol::codec::decode(&bytes).unwrap();
     assert_eq!(back, catalog);
-
-    // Core types remain usable alongside protocol without a dependency edge.
-    let _entry_size = std::mem::size_of::<CatalogEntry>();
-    let _catalog_size = std::mem::size_of::<ImageCatalog>();
 }

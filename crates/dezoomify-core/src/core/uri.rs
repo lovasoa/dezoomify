@@ -49,6 +49,9 @@ pub fn redact_uri(uri: &str) -> String {
         let _ = url.set_username("REDACTED");
         let _ = url.set_password(Some("REDACTED"));
     }
+    // Fragments never leave the client; drop them so `token=` in a fragment
+    // cannot leak into logs.
+    url.set_fragment(None);
     let pairs: Vec<(String, String)> = url
         .query_pairs()
         .map(|(k, v)| (k.into_owned(), v.into_owned()))

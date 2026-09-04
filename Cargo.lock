@@ -372,7 +372,6 @@ dependencies = [
 name = "dezoomify-protocol"
 version = "1.0.0"
 dependencies = [
- "dezoomify-core",
  "serde",
  "serde_json",
 ]

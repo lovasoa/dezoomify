@@ -134,6 +134,7 @@ const FORBIDDEN_PATTERNS: &[&str] = &[
     "native-tls",
     "openssl",
     "chrono::",
+    "time::",
     "spawn",
     "Mutex",
     "RwLock",
@@ -196,17 +197,27 @@ fn collect_rs(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 }
 
 /// Match `pattern` only on identifier boundaries so module paths such as
-/// `iipimage::` do not trip the `image::` rule.
+/// `iipimage::` do not trip the `image::` rule. Patterns ending in `:` (path
+/// rules like `fs::`) or `!` (macros like `env!`) check the leading boundary
+/// only: the trailing sigil is itself the boundary, and requiring a trailing
+/// non-ident char would make `fs::read` and `env!("X")` invisible.
 fn contains_ident(line: &str, pattern: &str) -> bool {
     let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+    let trailing_sigil = pattern.ends_with(':') || pattern.ends_with('!');
     let mut start = 0;
     while let Some(pos) = line[start..].find(pattern) {
         let s = start + pos;
         let e = s + pattern.len();
         let before = line[..s].chars().next_back().is_some_and(is_ident);
-        let after = line[e..].chars().next().is_some_and(is_ident);
-        if !before && !after {
-            return true;
+        if trailing_sigil {
+            if !before {
+                return true;
+            }
+        } else {
+            let after = line[e..].chars().next().is_some_and(is_ident);
+            if !before && !after {
+                return true;
+            }
         }
         start = e;
     }
@@ -215,7 +226,9 @@ fn contains_ident(line: &str, pattern: &str) -> bool {
 
 /// Remove `#[cfg(test)] mod ... { ... }` regions and bare `#[test] fn`
 /// regions via brace matching so test helpers (which load scenario payloads
-/// from disk) do not trip the scan.
+/// from disk) do not trip the scan. Annotations without a following item
+/// body (e.g. `#[cfg(test)]` on a single `use` line) skip exactly one line
+/// so surrounding library code is never swallowed.
 fn strip_test_modules(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let mut out = Vec::new();
@@ -223,6 +236,31 @@ fn strip_test_modules(text: &str) -> String {
     while i < lines.len() {
         let trimmed = lines[i].trim_start();
         if trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("#[test]") {
+            // Look at the annotated item on this or the next non-empty line.
+            let mut j = i + 1;
+            while j < lines.len() && lines[j].trim().is_empty() {
+                j += 1;
+            }
+            let item = lines.get(j).map(|l| l.trim_start()).unwrap_or("");
+            let is_block_item = item.starts_with("mod ")
+                || item.starts_with("fn ")
+                || item.starts_with("impl ")
+                || item.starts_with("struct ")
+                || item.starts_with("enum ")
+                || item.starts_with("trait ");
+            // `#[cfg(test)]` requires an explicit `mod` (never strip a lone
+            // `use` or other single-line item plus its followers).
+            if trimmed.starts_with("#[cfg(test)]") && !item.starts_with("mod ") {
+                out.push(lines[i]);
+                i += 1;
+                continue;
+            }
+            if !is_block_item {
+                // Single-line item (e.g. `use ...;`): skip the annotation and
+                // the item line only.
+                i = j + 1;
+                continue;
+            }
             // Skip to the opening brace of the module/function, then to its match.
             let mut depth = 0usize;
             let mut opened = false;
@@ -242,4 +280,24 @@ fn strip_test_modules(text: &str) -> String {
         }
     }
     out.join("\n")
+}
+
+#[test]
+fn sigil_patterns_match_path_calls() {
+    // Regression: `fs::read` and `image::open` must trip their rules even
+    // though the patterns end in `:`; `iipimage::` must not trip `image::`.
+    assert!(contains_ident("let b = fs::read(p).unwrap();", "fs::"));
+    assert!(contains_ident("std::fs::read_to_string(p)", "std::fs"));
+    assert!(contains_ident("image::open(p)", "image::"));
+    assert!(!contains_ident("iipimage::open(p)", "image::"));
+    assert!(contains_ident("let p = env!(\"X\");", "env!"));
+}
+
+#[test]
+fn stripper_keeps_code_after_lone_use() {
+    // Regression: `#[cfg(test)]` on a single `use` must not swallow the
+    // following library function.
+    let text = "#[cfg(test)]\nuse std::fs;\nfn evil() { std::fs::read(\"x\"); }";
+    let stripped = strip_test_modules(text);
+    assert!(stripped.contains("evil"), "stripper swallowed library code");
 }

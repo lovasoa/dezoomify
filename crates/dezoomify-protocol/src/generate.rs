@@ -1,8 +1,7 @@
 //! Deterministic projection of [`crate::dto`] into TypeScript, JSON Schema,
 //! capability manifests, and fingerprints. Generation is byte-identical across
-//! runs: no timestamps, sorted keys, LF endings.
-
-use std::path::Path;
+//! runs: no timestamps, sorted keys, LF endings. This module performs no I/O;
+//! the `generate-protocol` binary writes the returned artifacts.
 
 use crate::dto::{CapabilitiesDto, PROTOCOL_VERSION};
 
@@ -92,10 +91,11 @@ pub fn capability_manifest(capabilities: &CapabilitiesDto) -> serde_json::Value 
     })
 }
 
-/// Write (or verify) all generated artifacts under `dir`.
-/// Returns the list of written relative paths.
-pub fn write_all(dir: &Path) -> Result<Vec<String>, String> {
-    let files: Vec<(String, String)> = vec![
+/// Pure artifact projection: returns sorted `(relative path, content)`
+/// pairs without touching the filesystem. The binary writes them.
+#[must_use]
+pub fn artifacts() -> Vec<(String, String)> {
+    let mut files: Vec<(String, String)> = vec![
         ("src/generated.ts".to_string(), typescript()),
         (
             "schema/protocol-v1.schema.json".to_string(),
@@ -115,15 +115,6 @@ pub fn write_all(dir: &Path) -> Result<Vec<String>, String> {
                 + "\n",
         ),
     ];
-    let mut written = Vec::new();
-    for (rel, content) in files {
-        let path = dir.join(&rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        std::fs::write(&path, content).map_err(|e| e.to_string())?;
-        written.push(rel);
-    }
-    written.sort();
-    Ok(written)
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    files
 }

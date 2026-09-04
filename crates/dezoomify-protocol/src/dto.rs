@@ -750,20 +750,28 @@ impl ErrorDto {
     }
 }
 
-/// Redact credential-bearing text from error display strings.
+/// Redact credential-bearing text from error display strings
+/// (case-insensitive key match).
 #[must_use]
 pub fn redact_error_text(input: &str) -> String {
     let mut out = input.to_string();
     for needle in [
-        "apiKey=",
+        "apikey=",
         "api_key=",
         "token=",
         "session=",
         "cookie=",
-        "Authorization:",
+        "authorization:",
+        "auth=",
+        "secret=",
+        "password=",
     ] {
         let mut search_from = 0;
-        while let Some(rel) = out[search_from..].find(needle) {
+        loop {
+            let window = out[search_from..].to_ascii_lowercase();
+            let Some(rel) = window.find(needle) else {
+                break;
+            };
             let pos = search_from + rel;
             let end = out[pos..]
                 .find(['&', ' ', '"', '\''])
