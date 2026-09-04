@@ -17,7 +17,7 @@ programs before any protocol wrapper or host runtime is built.
 - Do not preserve an upstream API solely for hypothetical callers; preserve
   observable behavior and any public compatibility explicitly required by the
   parity inventory.
-- Do not modify source snapshots to make comparisons pass.
+- Do not modify migration sources to make comparisons pass.
 - Do not use live sites as the parity gate.
 - Do not remove legacy JavaScript/Rust implementations or fixtures.
 
@@ -26,7 +26,7 @@ programs before any protocol wrapper or host runtime is built.
 - Phases 00-03 are complete.
 - `cargo xtask sources verify`, `cargo xtask fixtures verify`,
   `cargo xtask parity validate`, and `cargo xtask test` exist and pass.
-- Phase 02 classified every behavioral change in `cb13f0b..23c4639`.
+- Phase 02 classified every behavioral change in `cb13f0b..<resolved-rust-tip>`.
 - No unresolved phase-04 parity row or unapproved Rust snapshot delta remains.
 - The target Rust toolchain is installed, and the `wasm32-unknown-unknown`
   target is available before the WASM portability gate is run.
@@ -36,11 +36,11 @@ programs before any protocol wrapper or host runtime is built.
 
 | Concern | Exact source | Exact destination |
 |---|---|---|
-| Core manifest | `migration-sources/dezoomify-rs/dezoomify-core/Cargo.toml` at `23c4639` | `crates/dezoomify-core/Cargo.toml` |
+| Core manifest | `migration-sources/dezoomify-rs/dezoomify-core/Cargo.toml` at the resolved Rust tip | `crates/dezoomify-core/Cargo.toml` |
 | Core entry/API | `migration-sources/dezoomify-rs/dezoomify-core/src/lib.rs` and `src/core/**` | `crates/dezoomify-core/src/lib.rs`, `src/core/**` |
 | Format implementations | `migration-sources/dezoomify-rs/dezoomify-core/src/{arcgis,bulk_text,custom_yaml,dzi,fsi,generic,google_arts_and_culture,hungaricana,iiif,iipimage,krpano,lizardtech,nypl,pnav,topviewer,vls,wmts,xlimage,zoomify}/**` | Same relative directories under `crates/dezoomify-core/src/` |
 | Upstream comparison | Git paths `cb13f0b:dezoomify-core/**` | Review evidence only; never overwrite the worktree |
-| Candidate snapshot comparison | Git range `cb13f0b..23c4639 -- dezoomify-core` | `docs/migration/core-delta-review.md` |
+| Candidate snapshot comparison | Git range `cb13f0b..<resolved-rust-tip> -- dezoomify-core` | `docs/migration/core-delta-review.md` |
 | Core source fixtures | `migration-sources/dezoomify-rs/dezoomify-core/testdata/**` | Curated into owning `testdata/scenarios/<id>/payloads/**`; no destination crate-local canonical fixture copy |
 | Core tests | `migration-sources/dezoomify-rs/dezoomify-core/tests/dezoomer_coverage.rs`, `dependency_architecture.rs` | `crates/dezoomify-core/tests/parity.rs`, `purity.rs`, and focused test modules |
 | Shared scenarios | `testdata/scenarios/**` | Consumed in place; core expectations are scenario-local `expected/core.json` files |
@@ -70,8 +70,8 @@ cargo clippy -p dezoomify-core --all-targets -- -D warnings
 cargo fmt --all -- --check
 
 # workdir: repository root
-git diff --name-status cb13f0b..23c4639 -- dezoomify-core
-git diff cb13f0b..23c4639 -- dezoomify-core
+git diff --name-status cb13f0b..<resolved-rust-tip> -- dezoomify-core
+git diff cb13f0b..<resolved-rust-tip> -- dezoomify-core
 cargo xtask sources verify
 cargo xtask fixtures verify
 cargo xtask parity validate
@@ -106,12 +106,12 @@ below. It must remain absent from phase-03 help and parsing.
    cargo xtask sources verify
    cargo xtask fixtures verify
    cargo xtask parity validate
-   git diff --quiet 23c4639 HEAD:migration-sources/dezoomify-rs
+   git diff --quiet <resolved-rust-tip> HEAD:migration-sources/dezoomify-rs
    ```
 
 2. Create `docs/migration/core-delta-review.md` from the phase-02 classification.
 
-   List every commit in `cb13f0b..23c4639`, every changed core path, linked
+   List every commit in `cb13f0b..<resolved-rust-tip>`, every changed core path, linked
    parity IDs, decision, tests, and adoption status. Mark documentation-only
    changes explicitly. No row may say merely "take latest." Verify that every
    destination snapshot module and core-model/discovery change is represented.
@@ -119,13 +119,13 @@ below. It must remain absent from phase-03 help and parsing.
    Validation:
 
    ```sh
-   git log --reverse --oneline cb13f0b..23c4639 -- dezoomify-core
-   git diff --name-status cb13f0b..23c4639 -- dezoomify-core
+   git log --reverse --oneline cb13f0b..<resolved-rust-tip> -- dezoomify-core
+   git diff --name-status cb13f0b..<resolved-rust-tip> -- dezoomify-core
    git diff --check -- docs/migration/core-delta-review.md
    cargo xtask parity validate
    ```
 
-3. Materialize the destination crate from the locked `23c4639` prefix.
+3. Materialize the destination crate from the resolved-tip prefix.
 
    Copy only `dezoomify-core/Cargo.toml`, `src/**`, and test harness code from
    `migration-sources/dezoomify-rs`. Curate any required fixture bytes into the
@@ -149,7 +149,7 @@ below. It must remain absent from phase-03 help and parsing.
 
    Keep package name `dezoomify-core`. Update repository/readme paths only as
    needed for the new workspace. Preserve license compatibility. Do not add
-   adapter/runtime feature flags. Default features must not activate I/O.
+   format/runtime feature flags. Default features must not activate I/O.
 
    Validation:
 
@@ -235,10 +235,10 @@ below. It must remain absent from phase-03 help and parsing.
 
 9. Stabilize registry names, hints, and automatic precedence.
 
-   Co-locate each format's `DezoomerSpec` with its implementation. Register only
+   Co-locate each format's `FormatSpec` with its implementation. Register only
    reviewed built-ins in one ordered registry. Match approved legacy URL/content
    detection and precedence. Keep generic/manual semantics explicit so generic
-   matching does not steal automatic cases. Add a test that emits the full
+   matching does not steal automatic scenarios. Add a test that emits the full
    ordered `(id, display_name, hints)` list as a reviewed snapshot.
 
    Validation:
@@ -252,7 +252,7 @@ below. It must remain absent from phase-03 help and parsing.
 10. Reconcile fixed-grid format implementations one format at a time.
 
     Process formats in registry order. For each format: identify matrix rows;
-    run only its cases; make the smallest correction; run all core parity tests;
+    run only its scenarios; make the smallest correction; run all core parity tests;
     update the delta review with accepted code/test evidence. Cover metadata
     mapping, relative/base URLs, query preservation, level order, dimensions,
     tile groups/indexing, tile extension/quality, overlap, headers, and malformed
@@ -267,18 +267,18 @@ below. It must remain absent from phase-03 help and parsing.
     cargo xtask parity validate
     ```
 
-11. Reconcile multi-resource and site-adapter discovery one adapter at a time.
+11. Reconcile multi-resource and site-format discovery one format at a time.
 
     Cover viewer pages, manifests, embedded URLs, iframes/follows, content
-    extraction, request deduplication, cycles, and precedence. Site adapters
+    extraction, request deduplication, cycles, and precedence. Formats
     remain pure parsers/routes and must not acquire resources themselves.
-    Require a deterministic case for every page adapter; a live test alone is
+    Require a deterministic scenario for every page format; a live test alone is
     insufficient.
 
-    Validation after each adapter:
+    Validation after each format:
 
     ```sh
-    cargo test -p dezoomify-core --test parity <adapter-filter>
+    cargo test -p dezoomify-core --test parity <format-filter>
     cargo xtask fixtures verify
     cargo xtask test core --purity
     ```
@@ -301,7 +301,7 @@ below. It must remain absent from phase-03 help and parsing.
 
 13. Compare canonical source-oracle and destination outputs.
 
-    Run every shared discovery case. Canonicalize only representation details
+    Run every shared discovery scenario. Canonicalize only representation details
     approved in phase 03; do not sort semantically ordered requests, catalog
     entries, levels, or tiles. Store destination results under
     each scenario's `testdata/scenarios/<id>/expected/core.json`. Every mismatch
@@ -359,7 +359,7 @@ below. It must remain absent from phase-03 help and parsing.
 |---|---|---|
 | `P04-PURITY` | Inspect core source and direct normal dependencies | No forbidden host capability enters core |
 | `P04-REGISTRY` | Enumerate registry | IDs, names, hints, and precedence match approved matrix |
-| `P04-DISCOVERY` | Replay all resource-response cases | Ordered needs, dedup/cycles/limits, catalog, and errors match |
+| `P04-DISCOVERY` | Replay all resource-response scenarios | Ordered needs, dedup/cycles/limits, catalog, and errors match |
 | `P04-FIXED-GRID` | Enumerate each fixed grid | Dimensions, levels, row-major tiles, edge geometry, URLs/headers match |
 | `P04-ADAPTIVE` | Replay scripted probe observations | Probe order, bounds, limits, and termination match |
 | `P04-MALFORMED` | Supply malformed/truncated/oversized bytes | Typed bounded errors; no panic/overflow/I/O |
@@ -368,7 +368,7 @@ below. It must remain absent from phase-03 help and parsing.
 
 ## Explicit Stop Conditions
 
-- A `cb13f0b..23c4639` behavior remains unclassified or unapproved.
+- A `cb13f0b..<resolved-rust-tip>` behavior remains unclassified or unapproved.
 - Destination output differs from canonical evidence without an approved parity
   decision and replacement test.
 - Any proposed normal core dependency provides I/O, async runtime, image codec,
@@ -379,7 +379,7 @@ below. It must remain absent from phase-03 help and parsing.
 - Untrusted input can panic, overflow, loop without a bound, or allocate beyond
   an explicit checked limit.
 - Native tests pass but the core cannot compile for `wasm32-unknown-unknown`.
-- A source snapshot or unrelated destination path changes.
+- A migration source or unrelated destination path changes.
 
 ## Risks and Mitigations
 
@@ -387,9 +387,9 @@ below. It must remain absent from phase-03 help and parsing.
 |---|---|
 | Candidate snapshot imports unfinished code | Require delta review and matrix evidence for every adopted change. |
 | Core API embeds native assumptions | Compile for WASM and ban host capabilities/dependencies. |
-| Automatic order regresses silently | Snapshot ordered registry and run precedence cases. |
+| Automatic order regresses silently | Snapshot ordered registry and run precedence scenarios. |
 | Parser fixes alter URL/tile semantics | Compare ordered canonical outputs per format. |
-| Malformed metadata causes denial of service | Checked limits, arithmetic, deterministic malformed cases. |
+| Malformed metadata causes denial of service | Checked limits, arithmetic, deterministic malformed scenarios. |
 | Purity test only catches known crate names | Combine dependency capability review, source scan, and architecture direction. |
 
 ## Rollback Guidance
@@ -399,7 +399,7 @@ entry, the core-target hunks in `crates/xtask/src/test.rs`, scenario-local core
 expected outputs, the relevant `docs/architecture.md` sections, and phase gate
 row as owned paths. Reverse only current-phase hunks after checking
 for concurrent edits. Do not restore from `cb13f0b` over the worktree, delete
-`23c4639`, or alter `migration-sources`. If one format batch fails, back out only
+the recorded Rust tip object, or alter `migration-sources`. If one format batch fails, back out only
 that destination format's changes and associated expected-output updates while
 retaining passing batches and audit evidence. Never use reset/clean.
 
@@ -416,9 +416,9 @@ retaining passing batches and audit evidence. Never use reset/clean.
 
 ## Completion Checklist
 
-- [ ] Every adopted `cb13f0b..23c4639` change has matrix/test evidence.
+- [ ] Every adopted `cb13f0b..<resolved-rust-tip>` change has matrix/test evidence.
 - [ ] Registry order/names/hints match approved behavior.
-- [ ] All fixed-grid, multi-resource, site-adapter, and adaptive cases pass.
+- [ ] All fixed-grid, multi-resource, site-format, and adaptive scenarios pass.
 - [ ] Core receives bytes and emits descriptions; it performs no I/O.
 - [ ] Purity command and focused purity test pass.
 - [ ] Malformed and bounded-resource tests pass without panic.

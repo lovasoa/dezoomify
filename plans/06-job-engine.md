@@ -406,7 +406,7 @@ remain absent before then.
 18. Run schedule permutation and determinism tests.
 
     For representative multi-request workflows, deliver independent host
-    responses in every feasible order up to a documented bounded case size.
+    responses in every feasible order up to a documented bounded size.
     Final catalog/result and progress invariants must match; effect order may
     differ only where the contract explicitly allows it. Repeat identical input
     scripts twice and compare transcript bytes.
@@ -474,7 +474,7 @@ remain absent before then.
   buffer, or emit multiple terminal events.
 - Schedule permutations produce unexplained semantic differences.
 - A canonical source behavior differs without approved parity decision.
-- Any source snapshot or unrelated work is modified.
+- Any migration source or unrelated work is modified.
 
 ## Risks and Mitigations
 

@@ -4,13 +4,15 @@
 
 Prove that the complete source histories are reachable from the unified
 repository, that each checked-in `migration-sources` prefix exactly matches its
-locked snapshot, and that the Rust upstream baseline and destination-only
+locked snapshot (for Rust: the resolved tip per the phase-00 Rust baseline
+rule), and that the fixed Rust upstream baseline and the floating Rust
 snapshot are distinguishable. Preserve historical authorship and commit
 identity without replaying imports that already exist.
 
 ## Non-Goals
 
-- Do not re-run a subtree import that is already present.
+- Do not re-run a subtree import that is already present, except a sync pull
+  that moves the Rust prefix to a newly resolved tip.
 - Do not squash, rebase, filter, rewrite, or garbage-collect imported history.
 - Do not copy source code into final workspace paths.
 - Do not resolve Rust parity deltas; classify them in phase 02 and adopt them in
@@ -25,7 +27,8 @@ identity without replaying imports that already exist.
 - The phase-start `git status --short` is recorded.
 - The unified repository currently contains subtree merge commits for web,
   Rust, and extension imports. This must be verified, not assumed.
-- Network access is not required for the normal path. Fetching is a recovery
+- Network access is required only for resolving and syncing the Rust tip per
+  the phase-00 Rust baseline rule. Fetching any other object is a recovery
   path requiring human approval and a canonical remote URL.
 
 ## Exact Source and Destination Paths
@@ -34,7 +37,7 @@ identity without replaying imports that already exist.
 |---|---|---|
 | Web snapshot | `f7caa07^{tree}` | `migration-sources/dezoomify-web/` |
 | Rust upstream baseline | `cb13f0b^{tree}` | Git object only; no checked-in prefix is allowed to masquerade as this tree |
-| Rust destination snapshot | `23c4639^{tree}` | `migration-sources/dezoomify-rs/` |
+| Rust snapshot | Resolved Rust tip (phase-00 rule) | `migration-sources/dezoomify-rs/`, synced to the latest stable release at implementation time |
 | Extension snapshot | `d231dd0^{tree}` | `migration-sources/dezoomify-extension/` |
 | Import metadata report | Subtree merge commits and source commits | `docs/migration/history-imports.md` |
 | Machine lock | `docs/migration/source-lock.json` | Update tree IDs/import commit IDs in place |
@@ -45,7 +48,7 @@ Expected existing subtree merge commits are:
 | Prefix | Import commit | Required second parent |
 |---|---:|---:|
 | `migration-sources/dezoomify-web` | `04df950ad8c6a2a06a5e2dde49c4344ab70aa37f` | `f7caa07e1ebd3e7d600075ca54a152cee30d8602` |
-| `migration-sources/dezoomify-rs` | `857043513d3c4f2ecda3de85386fbea1b9245bd0` | `23c46390c4e3245c278aa3d21145f8b692f19aef` |
+| `migration-sources/dezoomify-rs` | `857043513d3c4f2ecda3de85386fbea1b9245bd0` | `23c46390c4e3245c278aa3d21145f8b692f19aef` (historical first import; the prefix has since been re-synced and no longer equals this tree) |
 | `migration-sources/dezoomify-extension` | `a539c0d83cc4b2eb5f185cd960e0095eb222972c` | `d231dd0bef310a46604140baa50ef29702aef53e` |
 
 ## Command Status
@@ -57,7 +60,7 @@ git show --no-patch --pretty=raw 04df950
 git show --no-patch --pretty=raw 8570435
 git show --no-patch --pretty=raw a539c0d
 git diff --quiet f7caa07 HEAD:migration-sources/dezoomify-web
-git diff --quiet 23c4639 HEAD:migration-sources/dezoomify-rs
+git diff --quiet <resolved-rust-tip> HEAD:migration-sources/dezoomify-rs
 git diff --quiet d231dd0 HEAD:migration-sources/dezoomify-extension
 git log --oneline --decorate --all
 ```
@@ -107,12 +110,15 @@ cargo xtask parity validate
    git diff --quiet f7caa07e1ebd3e7d600075ca54a152cee30d8602 HEAD:migration-sources/dezoomify-web
    ```
 
-3. Verify Rust import ancestry and the two Rust reference points.
+3. Verify Rust import ancestry and resolve the current tip.
 
-   Confirm `8570435` has `23c4639` as its source parent and subtree split.
-   Independently confirm `cb13f0b` is reachable and is an ancestor of
-   `23c4639`. Never label the checked-in Rust prefix as `cb13f0b`; it equals
-   `23c4639` and contains destination-only in-progress work.
+   Confirm `8570435` has `23c4639` as its source parent and subtree split, as
+   historical evidence of the first import. `23c4639` is a superseded local
+   snapshot, not an ancestor of any upstream release; never label the
+   checked-in Rust prefix as `cb13f0b` or `23c4639`. Then resolve the latest
+   stable release per the phase-00 Rust baseline rule, sync the prefix to it,
+   and confirm the new ancestry `cb13f0b -> resolved tip -> unified HEAD`
+   with the prefix tree exactly equal to the resolved tip tree.
 
    Validation:
 
@@ -120,9 +126,10 @@ cargo xtask parity validate
    git cat-file -e cb13f0b^{commit}
    git cat-file -e 23c46390c4e3245c278aa3d21145f8b692f19aef^{commit}
    git show --no-patch --pretty=raw 857043513d3c4f2ecda3de85386fbea1b9245bd0
-   git merge-base --is-ancestor cb13f0b 23c46390c4e3245c278aa3d21145f8b692f19aef
-   git merge-base --is-ancestor 23c46390c4e3245c278aa3d21145f8b692f19aef HEAD
-   git diff --quiet 23c46390c4e3245c278aa3d21145f8b692f19aef HEAD:migration-sources/dezoomify-rs
+   git cat-file -e <resolved-rust-tip>^{commit}
+   git merge-base --is-ancestor cb13f0b <resolved-rust-tip>
+   git merge-base --is-ancestor <resolved-rust-tip> HEAD
+   git diff --quiet <resolved-rust-tip> HEAD:migration-sources/dezoomify-rs
    ```
 
 4. Verify extension import ancestry and subtree metadata.
@@ -151,11 +158,11 @@ cargo xtask parity validate
    ```sh
    git show -s --format=fuller f7caa07
    git show -s --format=fuller cb13f0b
-   git show -s --format=fuller 23c4639
+   git show -s --format=fuller <resolved-rust-tip>
    git show -s --format=fuller d231dd0
    git rev-list --count f7caa07
    git rev-list --count cb13f0b
-   git rev-list --count 23c4639
+   git rev-list --count <resolved-rust-tip>
    git rev-list --count d231dd0
    ```
 
@@ -164,15 +171,15 @@ cargo xtask parity validate
    Include one section per source with canonical repository URL, snapshot SHA,
    tree SHA, subtree prefix, import commit, import parents, exact verification
    commands, and result. Add a Rust subsection listing every commit and changed
-   path in `cb13f0b..23c4639`; label the range "destination-only candidate
+   path in `cb13f0b..<resolved-rust-tip>`; label the range "candidate
    changes, not automatically accepted parity." Do not summarize away file
-   names.
+   names. Record the resolved tag alongside the SHA.
 
    Validation:
 
    ```sh
-   git log --reverse --oneline cb13f0b..23c4639
-   git diff --name-status cb13f0b..23c4639
+   git log --reverse --oneline cb13f0b..<resolved-rust-tip>
+   git diff --name-status cb13f0b..<resolved-rust-tip>
    git diff --check -- docs/migration/history-imports.md
    ```
 
@@ -241,17 +248,18 @@ cargo xtask parity validate
 
 10. Run the phase-01 deterministic import workflow.
 
-    Repeat all three tree comparisons and all four ancestry checks in a fresh
-    shell. Results must not depend on installed dependencies or network access.
-    Record exit status zero for every command.
+    Repeat all three tree comparisons and all ancestry checks in a fresh
+    shell. Results must not depend on installed dependencies. Only the Rust
+    tip resolution may use the network; every check against the recorded tip
+    SHA runs offline. Record exit status zero for every command.
 
     Validation:
 
     ```sh
     git diff --quiet f7caa07 HEAD:migration-sources/dezoomify-web
-    git diff --quiet 23c4639 HEAD:migration-sources/dezoomify-rs
+    git diff --quiet <resolved-rust-tip> HEAD:migration-sources/dezoomify-rs
     git diff --quiet d231dd0 HEAD:migration-sources/dezoomify-extension
-    git merge-base --is-ancestor cb13f0b 23c4639
+    git merge-base --is-ancestor cb13f0b <resolved-rust-tip>
     git diff --exit-code -- migration-sources
     git diff --check
     ```
@@ -259,7 +267,7 @@ cargo xtask parity validate
 11. Close the phase gate.
 
     Record source test pass/fail separately from history proof. A test failure
-    does not authorize changing the source snapshot; capture it as baseline
+    does not authorize changing the migration source; capture it as baseline
     evidence and stop before phase 02 unless explicitly triaged.
 
     Validation:
@@ -274,9 +282,9 @@ cargo xtask parity validate
 | Test ID | Workflow | Required assertion |
 |---|---|---|
 | `P01-WEB-TREE` | Compare `f7caa07` tree to web prefix | No path/content difference |
-| `P01-RUST-TREE` | Compare `23c4639` tree to Rust prefix | No path/content difference |
+| `P01-RUST-TREE` | Compare resolved tip tree to Rust prefix | No path/content difference |
 | `P01-EXT-TREE` | Compare `d231dd0` tree to extension prefix | No path/content difference |
-| `P01-RUST-LINEAGE` | Test ancestry `cb13f0b -> 23c4639 -> unified HEAD` | Both ancestry checks return zero |
+| `P01-RUST-LINEAGE` | Test ancestry `cb13f0b -> resolved tip -> unified HEAD` | Both ancestry checks return zero |
 | `P01-SUBTREE-PARENTS` | Inspect three import merge commits | Locked snapshot is the source parent and trailers match prefix |
 | `P01-LEGACY-TESTS` | Run the three deterministic source suites | Results are recorded without source modifications |
 
@@ -285,7 +293,7 @@ cargo xtask parity validate
 - A source prefix differs from its locked source tree.
 - An expected import commit lacks the source commit as a parent or has an
   incorrect subtree prefix/split trailer.
-- `cb13f0b` is not an ancestor of `23c4639`.
+- `cb13f0b` is not an ancestor of the resolved Rust tip.
 - Any required history object is missing and no canonical recovery URL is
   approved.
 - Source tests modify tracked source files or lockfiles.
@@ -298,7 +306,7 @@ cargo xtask parity validate
 | Risk | Mitigation |
 |---|---|
 | Squashed imports lose attribution | Verify non-squashed merge parents and source ancestry. |
-| Rust in-progress work is mistaken for baseline | Lock `cb13f0b` and `23c4639` as separate roles and audit their range. |
+| Rust in-progress work is mistaken for baseline | Lock `cb13f0b` as the fixed reference, resolve and record the floating tip, and audit their range. |
 | Re-running subtree add duplicates files/history | Detect exact existing import and make normal path verification-only. |
 | Dependency install dirties snapshots | Verify path diff afterward; never commit generated source artifacts. |
 | Missing object triggers an untrusted fetch | Require canonical URL and human approval for recovery. |
@@ -318,16 +326,16 @@ a normal revert commit; do not rewrite shared history.
 
 - `docs/migration/history-imports.md` with exact ancestry evidence
 - Updated `docs/migration/source-lock.json` with import metadata
-- Complete `cb13f0b..23c4639` changed-path inventory
+- Complete `cb13f0b..<resolved-rust-tip>` changed-path inventory
 - Recorded deterministic baseline results for web, Rust core, and extension
 - Phase-01 gate record
 
 ## Completion Checklist
 
 - [ ] Web prefix equals `f7caa07` exactly.
-- [ ] Rust prefix equals destination-only snapshot `23c4639` exactly.
+- [ ] Rust prefix equals the resolved Rust tip exactly.
 - [ ] Extension prefix equals `d231dd0` exactly.
-- [ ] `cb13f0b` remains separately identified as Rust upstream baseline.
+- [ ] `cb13f0b` remains separately identified as the fixed Rust upstream reference.
 - [ ] All source commits and histories are reachable from unified `HEAD`.
 - [ ] No subtree import was unnecessarily replayed.
 - [ ] Deterministic source tests and their tool versions are recorded.

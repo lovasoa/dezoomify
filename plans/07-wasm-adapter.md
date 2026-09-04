@@ -33,7 +33,7 @@ WASM.
   WASM tooling versions are explicitly approved.
 - `wasm32-unknown-unknown` is installed. `wasm-bindgen-cli`/`wasm-pack` versions
   are pinned before generated output is compared.
-- Existing worktree changes are recorded and source snapshots remain immutable.
+- Existing worktree changes are recorded and migration sources remain immutable.
 
 ## Exact Source and Destination Paths
 
@@ -52,14 +52,14 @@ WASM.
 | Rust/WASM tests | Job transcripts and protocol vectors | `crates/dezoomify-wasm/tests/**` |
 | Browser/Node JS harness | New test-only package in phase-05 pnpm workspace | `packages/wasm-harness/**`; contains code/config only, no canonical scenario data |
 | Expected transcripts/pixels | Scenario-local `expected/job.json` and pixels | Scenario-local `expected/wasm.json` and `pixels/**` under `testdata/scenarios/<id>/` |
-| Generated package staging | New build output | `target/wasm-package/**` by default; not source-controlled |
+| Generated package staging | New build output | `target/wasm-package/**` by default; package root named `@dezoomify/wasm` with the stable `index.js` module entrypoint; not source-controlled |
 | JS types | Generated protocol declarations | Import from `packages/protocol-ts`; any WASM wrapper types describe exports only and may not duplicate DTOs |
 | Xtask | Existing | `crates/xtask/src/wasm.rs`, registration in `crates/xtask/src/main.rs` |
 | Workspace/lock | Existing | Root `Cargo.toml`, `Cargo.lock` |
 
 ## Required JavaScript Surface
 
-Keep the exported surface minimal. Final names may change only before goldens
+Keep the exported API minimal. Final names may change only before goldens
 are approved, but semantics must include:
 
 | Export | Required behavior |
@@ -75,7 +75,7 @@ are approved, but semantics must include:
 | `process(operation, inputHandles, outputHandle, geometry)` | Execute one bounded deterministic pure pixel operation on supplied buffers; no decode, canvas, worker, storage, or I/O |
 | `dispose()` | Cancel/release session resources; repeated disposal safe; later dispatch rejected |
 
-If a smaller surface can satisfy all semantics, prefer it and update this table,
+If a smaller API can satisfy all semantics, prefer it and update this table,
 golden protocol vectors, and tests before approval.
 
 ## Command Status
@@ -470,7 +470,7 @@ These become valid only after step 14. `cargo xtask build wasm` writes under
 - Packaging is nondeterministic, exceeds the approved size budget, or embeds
   paths/timestamps/secrets.
 - Generated files overwrite source-controlled paths unexpectedly.
-- Any source snapshot or unrelated work changes.
+- Any migration source or unrelated work changes.
 
 ## Risks and Mitigations
 

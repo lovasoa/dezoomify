@@ -5,20 +5,33 @@ application, and browser extension into one repository. Execute phases in
 numeric order. A later phase may begin only when every completion item and
 stop-condition check in the preceding phase is resolved.
 
-## Immutable Source Snapshots
+## Source Snapshots
+
+Web and extension sources are immutable snapshots. The Rust source floats on
+the latest stable dezoomify-rs release per the Rust baseline rule in
+[`00-program-rules-and-gates.md`](00-program-rules-and-gates.md): resolve the
+newest stable tag at implementation time, sync the prefix to it, and record
+the tag and SHA.
 
 | Source | Required snapshot | Role |
 |---|---:|---|
 | `migration-sources/dezoomify-web/` | `f7caa07e1ebd3e7d600075ca54a152cee30d8602` | Legacy browser behavior, deterministic browser fixtures, proxy, and UI reference |
-| Git object `cb13f0b` | `cb13f0b` | Upstream Rust baseline against which migration deltas are reviewed |
-| `migration-sources/dezoomify-rs/` | `23c46390c4e3245c278aa3d21145f8b692f19aef` | Destination-only Rust snapshot containing in-progress parity work after `cb13f0b` |
+| Git object `cb13f0b` | `cb13f0b` | Fixed upstream Rust reference against which migration deltas are reviewed |
+| `migration-sources/dezoomify-rs/` | Resolved Rust tip (latest stable at implementation time) | Working Rust snapshot: core, native downloader, CLI, encoders, and fixtures |
 | `migration-sources/dezoomify-extension/` | `d231dd0bef310a46604140baa50ef29702aef53e` | Legacy extension behavior and URL-recognition reference |
 
-The source directories are read-only migration evidence. Do not implement new
-behavior in them. Preserve them until phase 15 is complete. The
-destination-only Rust snapshot is not a replacement definition of upstream
-behavior: every change in `cb13f0b..23c4639` must be classified and backed by
+The source directories are read-only migration evidence between syncs. Do not
+implement new behavior in them. Preserve them until phase 15 is complete. The
+floating Rust snapshot is not a replacement definition of upstream
+behavior: every change in `cb13f0b..<resolved-rust-tip>` must be classified and backed by
 the parity inventory before it enters the new workspace.
+
+## Current State
+
+Phase 00-03 are complete and recorded in `docs/migration/gates.md`. Phase 04 is
+the current pending phase; phases 05-15 are blocked until their preceding gate
+records are complete. The root Cargo and JavaScript workspaces, `docs/migration/gates.md`,
+and all `cargo xtask` commands remain unavailable until the phase that creates each one.
 
 ## Command Labels
 
@@ -43,14 +56,14 @@ later target must be absent until its owner phase implements and tests it.
 | 05 | `cargo xtask protocol generate`; `cargo xtask protocol check`; `cargo xtask test protocol` |
 | 06 | `cargo xtask test job`, with a focused `--transcripts` flag |
 | 07 | `cargo xtask build wasm`; `cargo xtask test wasm`, with focused `--transcripts` and `--browser <name>` flags |
-| 08 | `cargo xtask test browser`, with focused `--browser <name>` and `--scenario <id>` flags |
+| 08 | `cargo xtask test browser`, with focused `--build-only`, `--browser <name>`, and `--scenario <id>` flags |
 | 09 | `cargo xtask test ui`; `cargo xtask test web`; `cargo xtask build web`; `cargo xtask dev ui`; `cargo xtask dev web` |
-| 10 | `cargo xtask test native`; `cargo xtask test scenario`; `cargo xtask test live`; `cargo xtask build cli` |
+| 10 | `cargo xtask test native`; `cargo xtask test scenario`; `cargo xtask build cli` |
 | 11 | `cargo xtask test desktop`; `cargo xtask build desktop`; `cargo xtask dev desktop` |
 | 12 | `cargo xtask test extension`; `cargo xtask test native-messaging`; `cargo xtask build extension`; `cargo xtask dev extension` |
-| 13 | `cargo xtask test all`; `cargo xtask ci [lane]`; `cargo xtask release plan`; `cargo xtask release build`; `cargo xtask release verify` |
+| 13 | `cargo xtask test all`; `cargo xtask test live`; `cargo xtask ci <lane>`; `cargo xtask release plan`; `cargo xtask release build`; `cargo xtask release verify --plan <path> --artifacts <path>` |
 
-Use focused flags such as `--check`, `--product`, `--purity`, `--parity`,
+Use focused flags such as `--check`, `--app`, `--purity`, `--parity`,
 `--transcripts`, `--scenario`, `--host`, and `--browser` only where the owning
 plan requires them. Do not create hyphenated aliases or component-specific
 top-level commands.
@@ -60,14 +73,14 @@ top-level commands.
 | Phase | Plan | Primary gate |
 |---:|---|---|
 | 00 | [`00-program-rules-and-gates.md`](00-program-rules-and-gates.md) | Governance, source immutability, validation policy, and stop rules are explicit. |
-| 01 | [`01-baseline-and-history-imports.md`](01-baseline-and-history-imports.md) | All three histories and the special Rust baseline/snapshot relationship are proven and locked. |
+| 01 | [`01-baseline-and-history-imports.md`](01-baseline-and-history-imports.md) | All three histories and the fixed-baseline/floating-tip Rust relationship are proven; the working tip is resolved and recorded. |
 | 02 | [`02-legacy-audit-and-parity-inventory.md`](02-legacy-audit-and-parity-inventory.md) | Every retained, changed, and retired legacy behavior has a matrix row and evidence. |
-| 03 | [`03-shared-fixtures-and-test-harness.md`](03-shared-fixtures-and-test-harness.md) | One deterministic fixture corpus and runner can test legacy and new surfaces without the public network. |
+| 03 | [`03-shared-fixtures-and-test-harness.md`](03-shared-fixtures-and-test-harness.md) | One deterministic fixture corpus and runner can test legacy and new apps without the public network. |
 | 04 | [`04-core-parity-and-stabilization.md`](04-core-parity-and-stabilization.md) | The pure Rust discovery core passes the parity corpus and purity checks. |
 | 05 | [`05-protocol-contract.md`](05-protocol-contract.md) | A versioned, canonical host/core protocol has compatibility and golden-vector tests. |
 | 06 | [`06-job-engine.md`](06-job-engine.md) | A host-independent job state machine passes deterministic workflow transcripts. |
 | 07 | [`07-wasm-adapter.md`](07-wasm-adapter.md) | WASM exposes the protocol without owning browser I/O and matches native transcripts. |
-| 08 | [`08-browser-runtime.md`](08-browser-runtime.md) | Browser fetch, decode, assembly, cancellation, and download adapters pass offline workflows. |
+| 08 | [`08-browser-runtime.md`](08-browser-runtime.md) | Browser fetch, decode, assembly, cancellation, and save behavior passes offline workflows. |
 | 09 | [`09-shared-ui-and-website.md`](09-shared-ui-and-website.md) | The shared UI and website preserve legacy user workflows and accessibility. |
 | 10 | [`10-native-runtime-and-cli.md`](10-native-runtime-and-cli.md) | Native I/O, encoders, cache, bulk mode, and CLI compatibility pass parity tests. |
 | 11 | [`11-desktop-app.md`](11-desktop-app.md) | Desktop shell uses the shared UI/protocol and passes packaged offline workflows. |
@@ -90,16 +103,17 @@ top-level commands.
 10. Deterministic tests are release-blocking. Live-network checks are diagnostic and cannot be the only evidence for a behavior.
 11. A dirty worktree is not permission to discard work. Record pre-existing changes, touch only phase-owned paths, and use path-scoped restoration from a known checkpoint only for changes made by the current phase.
 12. Stop rather than guess when source SHAs, licensing, fixture provenance, expected behavior, or protocol compatibility cannot be proven.
-13. The hosted website always attempts a readable direct browser fetch first.
+13. The website always attempts a direct browser fetch first.
     Only a classified CORS/network failure may automatically fall back to the
-    restricted proxy, and only for an eligible public non-credential resource
-    while the user's proxy opt-out is disabled. Direct and proxy fetches omit
+    metadata CORS proxy, and only for an eligible public non-credential metadata
+    request (never tiles) while the user's proxy opt-out is disabled. Direct and
+    proxy fetches omit
     browser credentials; proxy requests and upstream requests never carry
     cookies, `Authorization`, or user-supplied credential headers. The UI always
     identifies the active transport. Proxy fallback has an opt-out rather than
     an approval transition; extension-to-native cookie handoff remains
     separately and explicitly consent-gated. The extension itself never uses
-    the hosted proxy.
+    the metadata CORS proxy.
 
 ## Cross-Phase Artifacts
 
@@ -123,13 +137,13 @@ its canonical path and compatibility rules.
 | Pure lifecycle state machine | `crates/dezoomify-job` | 06 | 07-15 |
 | WASM core/job and pure-processing adapter | `crates/dezoomify-wasm` | 07 | 08-09, 11-12 |
 | Browser effect runner and rendering surfaces | `packages/browser-runtime` | 08 | 09, 11-12 |
-| Shared Studio and hosted product | `packages/studio-ui`, `apps/web` | 09 | 11-15 |
+| Shared UI and website | `packages/shared-ui`, `apps/web` | 09 | 11-15 |
 | Native runtime and CLI | `crates/dezoomify-native`, `apps/cli` | 10 | 11-15 |
 | Tauri desktop application and native bridge | `apps/desktop` | 11 | 12-15 |
-| Browser extension and handoff adapters | `apps/extension` | 12 | 13-15 |
+| Browser extension and handoff implementation | `apps/extension` | 12 | 13-15 |
 | CI and release inventory | `.github/workflows`, `release/` | 13 | 14-15 |
-| Cutover and deletion evidence | `docs/migration/cutover-*` | 14 | 15 |
-| Post-cutover reports and retained archives | `docs/migration/post-cutover-*` | 15 | Long-term maintenance |
+| Cutover records and deletion evidence | `release/cutover.toml`, `docs/cutover-runbook.md`, `docs/rollback-runbook.md`, `docs/migration.md`, `artifacts/phase-14/deletion-inventory.json` | 14 | 15 |
+| Post-cutover reports and retained archives | `artifacts/phase-15/final-report.md`, `artifacts/phase-15/cleanup-inventory.json`, retained signed artifacts and source archives | 15 | Long-term maintenance |
 
 ## Cross-Phase Gate Record
 
@@ -157,14 +171,19 @@ missing or refers only to live-network results.
 - One shared deterministic corpus drives Rust, WASM, browser, native, desktop,
   and extension workflow tests where applicable.
 - User-supplied headers override format-generated request headers.
+- User-facing guidance and error messages lead with specific, plain-language
+  facts and a next action; technical detail is progressively disclosed; and
+  structured failure context is gathered at error time so support reports are
+  specific.
 - Automatic detection precedence, request deduplication, discovery limits,
   adaptive probing, cancellation, retries, and output correctness are tested.
-- Website transport order is direct readable browser fetch, then automatic
-  restricted-proxy fallback only after classified CORS/network failure for an
-  eligible public non-credential resource unless the user opted out. Active
+- Website transport order is direct browser fetch, then automatic
+  metadata CORS proxy fallback only after classified CORS/network failure for an
+  eligible public non-credential metadata request (never tiles) unless the user
+  opted out. Active
   transport is visible, both transports omit browser credentials, and the proxy
   receives or forwards no cookie, `Authorization`, or credential header.
-- Extension fetch remains direct and never uses the hosted proxy; only cookie
+- Extension fetch is browser-session fetch and never uses the metadata CORS proxy; only cookie
   handoff from extension to native requires separate explicit consent.
 - Legacy deletion occurs only after replacement parity, release rollback, and
   archive retention are proven.

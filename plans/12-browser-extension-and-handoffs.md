@@ -8,8 +8,8 @@ Ship Chromium and Firefox extension builds around the shared UI/browser runtime 
    observation for the **currently active tab only before reload**, reloads that
    tab exactly once, collects candidates for one bounded generation, reaches a
    finite quiet-settle or hard deadline, then removes all listeners and stops.
-   Opening/focusing Studio never reloads or rearms the scan.
-2. Extension downloads use direct privileged extension fetch with the browser's existing session and convert readable response bytes into origin-clean decoded tiles and exports. The extension never uses the hosted website proxy.
+   Opening/focusing the extension page never reloads or rearms the scan.
+2. Extension downloads use browser-session fetch with the browser's existing session under granted host permissions and convert readable response bytes into origin-clean decoded tiles and saves. The extension never uses the metadata CORS proxy.
 3. Website-to-extension and extension-to-native handoffs negotiate generated protocol capabilities and support current plus N-1 versions without requiring synchronized store updates.
 4. Cookies may be handed only to the native runtime through Native Messaging
    after explicit consent, with narrow origin/path/job/expiry scope, memory-only
@@ -23,7 +23,7 @@ Ship Chromium and Firefox extension builds around the shared UI/browser runtime 
 
 - Do not continuously monitor all tabs or all browsing.
 - Do not retain web-request history after a scan settles, tab closes/navigates, or the extension worker suspends.
-- Do not use a hosted proxy from the extension.
+- Do not use a metadata CORS proxy from the extension.
 - Do not send cookies to the website or proxy.
 - Do not persist candidates, source page content, cookie values, authorization headers, or native handoff payloads.
 - Do not require broad permanent host permissions when optional per-origin permissions suffice.
@@ -32,9 +32,11 @@ Ship Chromium and Firefox extension builds around the shared UI/browser runtime 
 
 ## Dependencies
 
-- Phase 08 browser runtime supports injected readable-byte transport and origin-clean export.
-- Phase 09 shared UI supports product adapters and capability-driven escalation.
-- Phase 10 native runtime exposes crate-private scoped ephemeral authorization and current/N-1 protocol handling.
+- Phase 08 browser runtime supports injected readable-byte transport and origin-clean save.
+- Phase 09 shared UI supports app integrations and capability-driven handoff suggestions.
+- Phase 10 native runtime exposes a narrow feature-gated host-only constructor
+  for scoped ephemeral authorization and current/N-1 protocol handling; the
+  ordinary CLI API cannot access the constructor.
 - Phase 11 packages a Native Messaging host executable, registration templates, protocol handler, and generated desktop capabilities.
 - `packages/protocol-ts/` supplies generated current/N-1 message parsing and
   exhaustive tagged unions; extension code must not hand-author duplicate wire
@@ -60,7 +62,7 @@ Create or modify only:
 - `apps/extension/src/background/native.ts`
 - `apps/extension/src/background/redaction.ts`
 - `apps/extension/src/app/main.tsx`
-- `apps/extension/src/app/extensionAdapter.ts`
+- `apps/extension/src/app/extensionIntegration.ts`
 - `apps/extension/src/app/messages.ts`
 - `apps/extension/src/content/reload-marker.ts`
 - `apps/extension/src/manifest/base.json`
@@ -94,7 +96,7 @@ Do not modify the legacy extension snapshot under `migration-sources/`.
 - Available before this phase: the `browser`, `web`, `native`, `desktop`, and `scenario` targets under `cargo xtask test`; both `cargo xtask protocol generate` and `cargo xtask protocol check`; and `cargo xtask build desktop --unsigned-test`.
 - Added during step 7: the `cargo xtask protocol generate --extension-manifests` mode.
 - Added during step 17: `cargo xtask test native-messaging`.
-- Added during step 18: `cargo xtask build extension`.
+- Added during step 18: `cargo xtask build extension` and `cargo xtask dev extension`.
 - Added during step 21: `cargo xtask test extension`.
 - Firefox temporary-install and Chromium unpacked-extension direct commands become meaningful only after generated manifests exist in step 7.
 
@@ -108,19 +110,19 @@ Do not modify the legacy extension snapshot under `migration-sources/`.
 
    **Validate immediately:** unit-test schema parsing, maximum message sizes, malformed objects, prototype pollution keys, stale scan IDs, unknown messages, and current/N-1 scenarios. No handwritten interface may duplicate a generated wire shape.
 
-3. Implement `scan.ts` as a finite state machine: `idle -> arming -> reloading -> observing -> settling -> stopped`. Only an explicit action click may leave `idle`. Query the currently active tab in the current window, reject privileged/browser-internal URLs, allocate a scan generation, install a `webRequest` observer filtered by exact `tabId`, register tab navigation/removal guards, then reload exactly that tab once. Start the finite hard deadline at arm and the quiet-settle timer after reload completion/request activity. Studio/app-page open, focus, reconnect, navigation, and worker restart must never reload or rearm.
+3. Implement `scan.ts` as a finite state machine: `idle -> arming -> reloading -> observing -> settling -> stopped`. Only an explicit action click may leave `idle`. Query the currently active tab in the current window, reject privileged/browser-internal URLs, allocate a scan generation, install a `webRequest` observer filtered by exact `tabId`, register tab navigation/removal guards, then reload exactly that tab once. Start the finite hard deadline at arm and the quiet-settle timer after reload completion/request activity. Extension-page open, focus, reconnect, navigation, and worker restart must never reload or rearm.
 
    **Validate immediately:** fake API tests must prove explicit-action-only start,
    listener-before-reload ordering, exactly one reload, exact tab filter, one
    active generation per tab, replacement cleanup, finite quiet settle and hard
    deadline, tab close/navigation cleanup, terminal removal of all
-   listeners/timers, and zero Studio-triggered reload/rearm.
+   listeners/timers, and zero extension-page-triggered reload/rearm.
 
 4. Implement candidate recognition in `candidates.ts` using generated URL hints/canonicalization from the shared protocol/core artifact. Record only normalized candidate URLs and minimal format hints in memory, deduplicate deterministically, cap count and URL length, and reject schemes other than HTTP(S). Do not inspect response bodies or page DOM during scanning.
 
-   **Validate immediately:** port legacy URL-recognition fixtures plus hostile/userinfo/fragment/duplicate cases. Verify candidate order is first-seen deterministic, secrets are redacted in UI labels, and no candidate survives scan disposal.
+   **Validate immediately:** port legacy URL-recognition scenarios plus hostile/userinfo/fragment/duplicate scenarios. Verify candidate order is first-seen deterministic, secrets are redacted in UI labels, and no candidate survives scan disposal.
 
-5. Make scan completion automatic. On settle or deadline, remove request/tab listeners first, freeze the candidate list, set a final badge count, and open/focus one extension app page scoped to the scan result without rearming or reloading. Clicking the extension action again is the only way to start a new one-click reload scan; Studio controls do not do so. Worker restart with no in-memory scan must display idle and attach no observers.
+5. Make scan completion automatic. On settle or deadline, remove request/tab listeners first, freeze the candidate list, set a final badge count, and open/focus one extension app page scoped to the scan result without rearming or reloading. Clicking the extension action again is the only way to start a new one-click reload scan; extension-page controls do not do so. Worker restart with no in-memory scan must display idle and attach no observers.
 
    **Validate immediately:** inspect mocked listener counts at every terminal state. Assert no interval polling, no listener remains after app page opens, and no browser restart restoration is attempted.
 
@@ -132,13 +134,13 @@ Do not modify the legacy extension snapshot under `migration-sources/`.
 
    **Validate immediately:** run `cargo xtask protocol generate --extension-manifests` twice, run `cargo xtask protocol check`, lint both manifests with browser-specific tools, and inspect permission diffs. This generation mode becomes available only after this step.
 
-8. Implement privileged readable fetch in `background/fetch.ts`. Request optional host permission for the exact candidate origin after clear user intent. Perform extension-origin fetch with `credentials: "include"`, validate redirects and permission scope at each hop, enforce byte/time/type limits, and return bytes to the browser runtime using bounded transferable messages or extension-page fetch ownership. Never route through `/api/proxy` or any hosted relay.
+8. Implement browser-session fetch in `background/fetch.ts`. Request optional host permission for the exact candidate origin after clear user intent. Perform extension-origin fetch with `credentials: "include"`, validate redirects and permission scope at each hop, enforce byte/time/type limits, and return bytes to the browser runtime using bounded transferable messages or extension-page fetch ownership. Never route through `/api/proxy` or any proxy relay.
 
    **Validate immediately:** deterministic tests must cover authenticated success, permission denial, cross-origin redirect requiring separate permission, timeout, oversized body, 401/403, cookie-less failure, and cancellation. Request logs must prove browser session cookies reach only allowed fixture origins and no proxy endpoint is contacted.
 
-9. Bind `extensionAdapter.ts` to shared UI/runtime. Discovery and tiles use the privileged transport; readable bytes go through the origin-clean canvas surface. Opaque preview remains available if the user declines host permission, but export remains disabled. Save via extension download API or a user-gesture file API without broad filesystem access.
+9. Bind `extensionIntegration.ts` to shared UI/runtime. Discovery and tiles use the browser-session transport; readable bytes go through the origin-clean canvas surface. Display-only preview remains available if the user declines host permission, but saving remains disabled. Save via extension download API or a user-gesture file API without broad filesystem access.
 
-   **Validate immediately:** export the authenticated cross-origin scenario and
+   **Validate immediately:** save the authenticated cross-origin scenario and
    compare decoded pixels, dimensions, and MIME in Chromium and Firefox. Compare
    exact encoded SHA-256 only for the repository-owned deterministic encoder.
    Verify origin-clean canvas pixel reads succeed and revoking host permission
@@ -185,7 +187,8 @@ Do not modify the legacy extension snapshot under `migration-sources/`.
     optional `cookies` permission for exact required origins, collect only unexpired
     cookies available through the browser API and within scope, and send them
     directly in one bounded Native Messaging message. The host immediately
-    constructs `EphemeralAuthorization`, performs best-effort overwrite of owned
+    invokes the feature-gated host-only API to construct
+    `EphemeralAuthorization`, performs best-effort overwrite of owned
     parsed buffers after transfer, starts the scoped job, and never echoes or
     intentionally persists secrets. Do not invent signatures or attestation.
 
@@ -233,18 +236,22 @@ Do not modify the legacy extension snapshot under `migration-sources/`.
 
     **Validate immediately:** run `cargo xtask test native-messaging --browser chromium` and `cargo xtask test native-messaging --browser firefox` twice. Kill the test midway once and run `cargo xtask test native-messaging --cleanup-only`; verify no host process or manifest remains. This command and its cleanup mode become available only after this step.
 
-18. Add `cargo xtask build extension` to generate manifests, build shared UI/browser Wasm/extension bundles, prohibit source maps/remote code/secrets, produce deterministic Chromium ZIP and Firefox XPI input directory, and emit manifest/SBOM/checksum files. Browser signing is deferred to release CI.
+18. Add `cargo xtask build extension` and `cargo xtask dev extension` to
+    generate manifests, build shared UI/browser Wasm/extension bundles, prohibit
+    source maps/remote code/secrets, produce deterministic Chromium ZIP and
+    Firefox XPI input directory, and emit manifest/SBOM/checksum files. The dev
+    command uses an isolated profile/watch build. Browser signing is deferred to
+    release CI.
 
-   **Validate immediately:** run `cargo xtask build extension` twice and compare archive content lists and normalized hashes. Unpack and ensure there is no website proxy client path reachable from extension code; ordinary extension discovery and tiles must use privileged direct browser-session fetch. This command becomes available only after this step.
+   **Validate immediately:** run `cargo xtask build extension` twice and compare archive content lists and normalized hashes. Unpack and ensure there is no metadata CORS proxy client path reachable from extension code; ordinary extension discovery and tiles must use browser-session fetch. This command becomes available only after this step.
 
 19. Add Chromium E2E tests with an unpacked extension and fresh profile. Test
     active-window/current-tab selection with two windows and multiple tabs;
     explicit-action-only scan start; listener registration before exactly one
-    reload; noisy background tab exclusion; same-tab subframes; duplicate
-    candidates; finite settle/deadline; action re-click replacement; Studio open
+    reload; noisy background tab exclusion; same-tab subframes; duplicate    candidates; finite settle/deadline; action re-click replacement; extension-page open
     and focus without reload/rearm; tab close; service-worker suspension/restart
-    to idle; host permission decline/grant/revoke; authenticated privileged
-    direct browser-session fetch; origin-clean decoded output; and listener
+    to idle; host permission decline/grant/revoke; authenticated browser-session
+    fetch; origin-clean decoded output; and listener
     cleanup. Compare decoded pixels/dimensions/MIME cross-browser, with exact
     encoded hashes only for the repository-owned deterministic encoder.
 
@@ -284,12 +291,12 @@ Do not modify the legacy extension snapshot under `migration-sources/`.
 8. Inspect test hooks and verify request/tab listeners are zero after settle.
 9. Repeat in Firefox stable and ESR.
 
-### Authenticated Origin-Clean Extension Export
+### Authenticated Origin-Clean Extension Save
 
 1. Log into the deterministic fixture by setting its browser-session cookie through the fixture login page.
 2. Activate the image tab and click the extension once.
 3. Grant exact-origin host permission when prompted.
-4. Choose the detected image and export.
+4. Choose the detected image and save.
 5. Verify upstream request log contains the browser cookie only for the protected origin.
 6. Verify decoded pixels, dimensions, MIME, and successful origin-clean canvas
    read; compare exact output hash only when the deterministic repository-owned
@@ -328,7 +335,7 @@ Do not modify the legacy extension snapshot under `migration-sources/`.
 
 - Stop if the extension continuously monitors requests, observes non-active tabs, or requires permanent `<all_urls>` without an approved platform necessity.
 - Stop if listener installation happens after reload or listeners remain after settle/deadline/error.
-- Stop if extension fetch uses the website proxy or cannot prove origin-clean byte handling.
+- Stop if extension fetch uses the metadata CORS proxy or cannot prove origin-clean byte handling.
 - Stop if cookie values reach website, UI, intentional persistence, URLs, logs,
   CLI/Tauri IPC, files, or artifacts.
 - Stop if cookie handoff can happen before explicit consent and compatibility handshake.
@@ -376,10 +383,10 @@ Do not modify the legacy extension snapshot under `migration-sources/`.
 
 - [ ] Only explicit action starts a scan; listeners register before exactly one active-tab reload.
 - [ ] Every scan settles or times out and removes all listeners/timers automatically.
-- [ ] Background tabs are never observed, Studio never rearms/reloads, and restart returns to idle.
+- [ ] Background tabs are never observed, the extension page never rearms/reloads, and restart returns to idle.
 - [ ] Chromium, Firefox stable, and Firefox ESR pass equivalent scan tests.
-- [ ] Extension direct privileged fetch uses browser session and never hosted proxy.
-- [ ] Readable extension bytes produce origin-clean deterministic export.
+- [ ] Extension fetch uses browser-session fetch with the browser session and never the metadata CORS proxy.
+- [ ] Readable extension bytes produce origin-clean deterministic save.
 - [ ] Host/cookie permissions are optional and narrowly requested.
 - [ ] Website/deep links are untrusted, unsigned, bounded, non-secret, and
   confirmed; browser enforcement of exact Native Messaging allowed extension

@@ -2,7 +2,7 @@
 
 ## Objective
 
-Build the Tauri desktop product using the shared React UI and `dezoomify-native` runtime. Produce secure, signed-capable installers for Windows, macOS, and Linux. The desktop installation must be able to register the `dezoomify://` protocol, install/remove the browser Native Messaging host manifest, expose generated Tauri capabilities, and support signed updater metadata without widening IPC access.
+Build the Tauri desktop app using the shared React UI and `dezoomify-native` runtime. Produce secure, signed-capable installers for Windows, macOS, and Linux. The desktop installation must be able to register the `dezoomify://` protocol, install/remove the browser Native Messaging host manifest, expose generated Tauri capabilities, and support signed updater metadata without widening IPC access.
 
 Desktop commands must pass typed non-secret requests to the runtime. Cookie-bearing handoff is completed only in phase 12 through the Native Messaging host and in-memory authorization path.
 
@@ -18,15 +18,15 @@ Desktop commands must pass typed non-secret requests to the runtime. Cookie-bear
 ## Dependencies
 
 - Phase 10 is green, including native runtime, CLI parity, protocol current/N-1 support, and secret redaction.
-- Phase 09 shared UI accepts a `ProductAdapter` and does not import browser-only product APIs.
+- Phase 09 shared UI accepts a `AppIntegration` and does not import browser-only host APIs.
 - `crates/fixture-server/` serves the canonical desktop scenarios under
   `testdata/scenarios/desktop/`; this phase does not create a second fixture or
   expected-output tree.
 - Tauri major/minor version, plugin list, Rust/Node versions, bundle identifiers, application name, protocol scheme, extension IDs for release/dev, and updater strategy are documented and pinned.
 - Signing/notarization identities are not required for local development but CI secret names and release ownership are agreed before creating workflows.
-- Phase-05 generated protocol schema/types and phase-10 native capabilities are
-  canonical prerequisites. This phase creates desktop/Tauri capability artifacts
-  in step 8; they must not be required at phase start.
+- Phase-05 generated protocol schema/types and the phase-10 native runtime
+  capability API are canonical prerequisites. This phase creates desktop/Tauri
+  capability artifacts in step 8; they must not be required at phase start.
 
 ## Exact Paths
 
@@ -36,7 +36,7 @@ Create or modify only:
 - `apps/desktop/index.html`
 - `apps/desktop/vite.config.ts`
 - `apps/desktop/src/main.tsx`
-- `apps/desktop/src/desktopAdapter.ts`
+- `apps/desktop/src/desktopIntegration.ts`
 - `apps/desktop/src/events.ts`
 - `apps/desktop/src/styles.css`
 - `apps/desktop/src-tauri/Cargo.toml`
@@ -73,6 +73,7 @@ Do not edit `apps/extension/` in this phase. Template native-host manifests may 
 
 - Available before this phase: `cargo xtask test native`, `cargo xtask build web`, `cargo xtask protocol generate`, `cargo xtask protocol check`, and `cargo xtask fixtures serve`.
 - Added during step 8: the `cargo xtask protocol generate --desktop-capabilities` mode.
+- Added during step 2: `cargo xtask dev desktop`.
 - Added during step 15: `cargo xtask build desktop`.
 - Added during step 18: `cargo xtask test desktop`.
 - Platform installer commands only work on their native OS unless the release toolchain explicitly supports safe cross-building.
@@ -81,11 +82,15 @@ Do not edit `apps/extension/` in this phase. Template native-host manifests may 
 
 1. Capture preflight status and run all phase-10 gates. Record target triples, installed WebView versions, Tauri CLI version, platform packaging tools, and unavailable signing credentials in `artifacts/phase-11/preflight.md`.
 
-   **Validate immediately:** run `cargo xtask test native`, `cargo xtask protocol check`, `cargo xtask test`, and `pnpm --filter ./packages/studio-ui test`. Stop on regressions.
+   **Validate immediately:** run `cargo xtask test native`, `cargo xtask protocol check`, `cargo xtask test`, and `pnpm --filter ./packages/shared-ui test`. Stop on regressions.
 
-2. Create the desktop Vite shell and render the shared `App` with a minimal `DesktopAdapter`. Keep routing and component composition shared. Configure Vite for Tauri's fixed local origin and disable production source maps unless release policy explicitly permits sanitized maps.
+2. Create the desktop Vite shell, register `cargo xtask dev desktop`, and render
+   the shared `App` with a minimal `DesktopIntegration`. Keep routing and component
+   composition shared. Configure Vite for Tauri's fixed local origin and disable
+   production source maps unless release policy explicitly permits sanitized
+   maps.
 
-   **Validate immediately:** run `pnpm --filter ./apps/desktop typecheck` and `pnpm --filter ./apps/desktop build`. Verify no website proxy code or extension API is bundled.
+   **Validate immediately:** run `pnpm --filter ./apps/desktop typecheck` and `pnpm --filter ./apps/desktop build`. Verify no metadata CORS proxy code or extension API is bundled.
 
 3. Create `apps/desktop/src-tauri` and wire `dezoomify-native`. Configure one window with strict navigation policy, no remote content, CSP denying unneeded sources, no shell plugin, and the minimum filesystem/dialog/updater plugins. Use `tauri::generate_context!` and checked-in configuration.
 
@@ -119,9 +124,9 @@ Do not edit `apps/extension/` in this phase. Template native-host manifests may 
    links, bounded-queue expiry, malformed link, and application shutdown. Verify
    one app instance, one confirmation per untrusted link, and no lost prompt.
 
-8. Generate Tauri and product capabilities from canonical protocol data. Add the `cargo xtask protocol generate --desktop-capabilities` mode to emit `generated/desktop-capabilities.json` and `apps/desktop/src-tauri/capabilities/generated.json` with exact commands, event channels, protocol range, encoder support, native-host name, and updater support. Hand edits must fail `cargo xtask protocol check` or the desktop generation check.
+8. Generate Tauri and app capabilities from canonical protocol data. Add the `cargo xtask protocol generate --desktop-capabilities` mode to emit `generated/desktop-capabilities.json` and `apps/desktop/src-tauri/capabilities/generated.json` with exact commands, event channels, protocol range, encoder support, native-host name, and updater support. Hand edits must fail `cargo xtask protocol check` or the desktop generation check.
 
-   **Validate immediately:** run `cargo xtask protocol generate --desktop-capabilities` twice and `cargo xtask protocol check`. Compare command names against Rust command registration and TypeScript adapter use. This generation mode becomes available only after this step.
+   **Validate immediately:** run `cargo xtask protocol generate --desktop-capabilities` twice and `cargo xtask protocol check`. Compare command names against Rust command registration and TypeScript integration use. This generation mode becomes available only after this step.
 
 9. Add a minimal handshake-only `dezoomify-native-host` binary and implement install-integration path calculation in `install_integration.rs`. In this phase the host may report identity/version/capabilities and must reject all job and credential messages with `capability.unavailable`; phase 12 adds handoff execution. Generate OS-specific protocol registration and Native Messaging manifest destinations from installed executable paths. Browser manifests must use exact release extension IDs, absolute host executable path, and browser-specific allowed-origin syntax. Browser enforcement of these allowed extension IDs authenticates the sender of an established Native Messaging channel; the host does not invent a separate nonce/signature identity check. Keep dev IDs and destinations isolated under test profiles.
 
@@ -159,7 +164,7 @@ Do not edit `apps/extension/` in this phase. Template native-host manifests may 
 
     **Validate immediately:** replay the compatibility matrix and write `artifacts/phase-11/compatibility-matrix.json`. Current/N-1 deep links must remain usable; unsupported handoffs must retain a manual source workflow.
 
-18. Add `cargo xtask test desktop` to run Tauri unit tests, shared UI adapter tests, deterministic E2E tests available on the current OS, generated capability checks, registration isolation/cleanup checks, and artifact scans. It must fail if test registrations/processes remain.
+18. Add `cargo xtask test desktop` to run Tauri unit tests, shared UI integration tests, deterministic E2E tests available on the current OS, generated capability checks, registration isolation/cleanup checks, and artifact scans. It must fail if test registrations/processes remain.
 
     **Validate immediately:** run `cargo xtask test desktop` twice with fresh integration roots. On the second run verify no state from the first is observed. This command becomes available only after this step.
 
@@ -220,7 +225,7 @@ Do not edit `apps/extension/` in this phase. Template native-host manifests may 
 - Stop if the desktop duplicates native runtime logic or sends tile bytes through IPC.
 - Stop if remote content can navigate inside the privileged WebView or invoke commands.
 - Stop if any deep link can carry cookie/auth/header secrets.
-- Stop if generated capability files do not exactly match registered commands and product support.
+- Stop if generated capability files do not exactly match registered commands and app support.
 - Stop if installer tests touch real user registration locations or cannot clean isolated entries.
 - Stop if unsigned updater payloads can be staged/executed.
 - Stop if current/N-1 protocol flows require synchronized store and desktop releases.
@@ -261,7 +266,7 @@ Do not edit `apps/extension/` in this phase. Template native-host manifests may 
 
 ## Completion Checklist
 
-- [ ] Desktop renders the shared React UI through a product adapter.
+- [ ] Desktop renders the shared React UI through an app integration.
 - [ ] All downloads use `dezoomify-native`; tile bytes never cross Tauri IPC.
 - [ ] Tauri commands/events and capabilities are generated, minimal, and synchronized.
 - [ ] Remote navigation and arbitrary IPC/filesystem access are denied.

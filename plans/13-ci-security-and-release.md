@@ -25,7 +25,7 @@ Release compatibility must tolerate extension-store and desktop-updater lag. The
 - Repository governance defines protected environments, required reviewers, release branches/tags, ownership, incident contacts, and secret names.
 - Apple Developer ID/notarization, Windows code-signing, updater signing, GitHub release, Mozilla AMO, Chrome Web Store, website hosting, and optional package-manager credentials are provisioned in separate protected environments.
 - Release identity, package IDs, extension IDs, native-host name, protocol scheme, update URLs, store URLs, and public keys are final and generated from reviewed config.
-- Current and N-1 protocol/capability scenarios pass all product combinations.
+- Current and N-1 protocol/capability scenarios pass all app combinations.
 
 ## Exact Paths
 
@@ -48,11 +48,13 @@ Create or modify only:
 - `release/channels.toml`
 - `release/compatibility.toml`
 - `release/README.md`
+- `artifacts/release/<version>-<channel>.json`
+- `dist/<version>-<channel>/**`
 - `release/checksums/.gitkeep`
 - `generated/release-capabilities.json`
 - `generated/update-public-keys.json`
 - `docs/security.md`
-- `docs/release-process.md`
+- `docs/releases.md`
 - `docs/incident-response.md`
 - `docs/privacy.md`
 - `crates/xtask/src/ci.rs`
@@ -62,7 +64,7 @@ Create or modify only:
 - `artifacts/phase-13/**` for ignored local evidence
 - lockfiles/toolchain pins only where required
 
-Do not change product behavior in this phase except minimal fixes required to make declared gates truthful; send larger fixes back to the owning phase.
+Do not change app behavior in this phase except minimal fixes required to make declared gates truthful; send larger fixes back to the owning phase.
 
 ## Command Availability
 
@@ -70,8 +72,10 @@ Do not change product behavior in this phase except minimal fixes required to ma
 - Added during step 3: the `cargo xtask protocol generate --release-capabilities` mode.
 - Added during step 5: `cargo xtask ci local` and lane-specific `cargo xtask ci <lane>`.
 - Added during step 10: `cargo xtask test live`, including its `--dry-run --fixtures` mode.
-- Added during step 11: `cargo xtask release plan` and `cargo xtask release build`.
-- Added during step 14: `cargo xtask release verify`.
+- Added during step 11: `cargo xtask release plan` and `cargo xtask release build`
+  (including its `--clean` mode).
+- Added during step 14: `cargo xtask release verify --plan <path> --artifacts <path>`.
+- Added during step 5: `cargo xtask test all`.
 - Signing and submission commands become available only in protected CI after their workflow steps and credentials exist; local commands must refuse production signing.
 
 ## Sequential Implementation Steps
@@ -84,9 +88,9 @@ Do not change product behavior in this phase except minimal fixes required to ma
 
    **Validate immediately:** add parser/schema tests and run `cargo test -p xtask release_config`. Reject duplicate names, missing hashes, wildcard extension IDs, non-HTTPS production URLs, protocol range without N-1, and unknown targets.
 
-3. Add the `cargo xtask protocol generate --release-capabilities` mode to generate release capabilities and updater public-key files from canonical config/protocol. Product builds must consume only generated public data. Private signing keys are referenced by CI secret name and never generated or checked in.
+3. Add the `cargo xtask protocol generate --release-capabilities` mode to generate release capabilities and updater public-key files from canonical config/protocol. App builds must consume only generated public data. Private signing keys are referenced by CI secret name and never generated or checked in.
 
-   **Validate immediately:** run `cargo xtask protocol generate --release-capabilities` twice and `cargo xtask protocol check`. Compare product embedded capabilities against the release matrix. This generation mode becomes available only after this step.
+   **Validate immediately:** run `cargo xtask protocol generate --release-capabilities` twice and `cargo xtask protocol check`. Compare app-embedded capabilities against the release matrix. This generation mode becomes available only after this step.
 
 4. Create CI lane definitions: Rust core/protocol/job; Wasm/browser runtime;
    shared UI/website/proxy security; native/CLI on Linux/macOS/Windows; desktop
@@ -95,14 +99,14 @@ Do not change product behavior in this phase except minimal fixes required to ma
    Explicitly exercise `packages/protocol-ts` against current and N-1 protocol
    scenarios. The website lane must assert direct-before-proxy ordering, no
    proxy before classified CORS/network failure, automatic eligible public non-
-   credential fallback, user opt-out, visible active transport, ineligible-
+   credential metadata fallback, user opt-out, visible active transport, ineligible-
    target rejection, and credential omission/stripping on both proxy hops. The
-   extension lane must assert zero hosted-proxy calls. Assign timeouts and
+   extension lane must assert zero proxy calls. Assign timeouts and
    artifact retention explicitly.
 
    **Validate immediately:** lint workflow YAML and map every phase completion command to at least one required lane in `artifacts/phase-13/gate-map.json`. No required gate may exist only in documentation.
 
-5. Add `cargo xtask ci <lane>` dispatch with a fixed allowlist and `cargo xtask ci local` for all locally applicable lanes. Commands must not evaluate shell input. CI workflows call these commands rather than duplicating long command sequences.
+5. Add `cargo xtask ci <lane>` dispatch with a fixed allowlist, `cargo xtask ci local` for all locally applicable lanes, and `cargo xtask test all` for the full deterministic aggregate. Commands must not evaluate shell input. CI workflows call these commands rather than duplicating long command sequences.
 
    **Validate immediately:** run each locally applicable lane, an unknown-lane rejection, and `cargo xtask ci local`. This command becomes available only after this step.
 
@@ -112,7 +116,7 @@ Do not change product behavior in this phase except minimal fixes required to ma
 
 7. Add cache policy. Cache immutable dependency/build inputs keyed by lockfiles/toolchains/target; never cache browser profiles, native-host manifests, cookies, signing material, updater packages before verification, or arbitrary test artifacts. Restore caches without executing cache-provided scripts before integrity checks.
 
-   **Validate immediately:** inspect cache path allowlist and run a poisoned-cache simulation for generated files; `cargo xtask protocol check` and product generation checks must catch divergence.
+   **Validate immediately:** inspect cache path allowlist and run a poisoned-cache simulation for generated files; `cargo xtask protocol check` and app generation checks must catch divergence.
 
 8. Add dependency and source security gates: `cargo deny`, Rust advisory audit, `pnpm audit` according to reviewed severity policy, license allowlist, lockfile integrity, forbidden dependency boundary checks, secret scanning, SAST, unsafe-code inventory, and generated artifact checks. Pin external tools by version/digest and document update cadence.
 
@@ -138,11 +142,11 @@ Do not change product behavior in this phase except minimal fixes required to ma
 
     **Validate immediately:** use test identities/local fixture keys to dry-run all logic. Tamper with one input and verify signing refuses it. Verify logs mask credentials and temporary keychains/key files are destroyed.
 
-14. Implement `cargo xtask release verify`. Verify source commit, version, package inventory, checksums, SBOM subjects, signatures, notarization metadata, updater signatures, extension manifest IDs/permissions, native-host IDs/paths, website CSP, protocol current/N-1 capabilities, and no unexpected files. Verification must work using public keys only.
+14. Implement `cargo xtask release verify --plan <path> --artifacts <path>`. Verify source commit, version, package inventory, checksums, SBOM subjects, signatures, notarization metadata, updater signatures, extension manifest IDs/permissions, native-host IDs/paths, website CSP, protocol current/N-1 capabilities, and no unexpected files. Verification must work using public keys only.
 
-    **Validate immediately:** run `cargo xtask release verify` on clean fixture artifacts, then individually tamper binary, checksum, updater metadata, manifest permission, capability file, and SBOM. Every tamper must fail. This command becomes available only after this step.
+    **Validate immediately:** run `cargo xtask release verify --plan <path> --artifacts <path>` on clean fixture artifacts, then individually tamper binary, checksum, updater metadata, manifest permission, capability file, and SBOM. Every tamper must fail. This command becomes available only after this step.
 
-15. Add website deployment workflow with preview and production environments. Upload exact verified website assets and restricted proxy function. Run post-deploy deterministic health/CORS tests covering direct first, automatic restricted fallback only after classified failure, opt-out, visible transport, credential stripping, ineligible-target rejection, and proxy denial. Production promotion uses immutable artifact digest and manual approval; no rebuild occurs between preview and production.
+15. Add website deployment workflow with preview and production environments. Upload exact verified website assets and metadata CORS proxy function. Run post-deploy deterministic health/CORS tests covering direct first, automatic metadata fallback only after classified failure (metadata only, never tiles), opt-out, visible transport, credential stripping, ineligible-target rejection, and proxy denial. Production promotion uses immutable artifact digest and manual approval; no rebuild occurs between preview and production.
 
     **Validate immediately:** deploy only to a local/provider preview environment,
     verify direct/automatic-proxy/opt-out/credential-stripping/tainted-canvas
@@ -159,13 +163,13 @@ Do not change product behavior in this phase except minimal fixes required to ma
 
 18. Add staged updater workflow. Publish signed metadata only after desktop artifacts are public and verified; support channels and rollout percentage where platform allows; retain current and N-1 payloads/metadata for rollback and lagging extensions. Prevent metadata from advertising an unavailable binary.
 
-    **Validate immediately:** run against local update feed, test current, N-1, staged next, rollback refusal, paused rollout, and offline behavior. Verify current/N-1 cross-product handoffs remain functional.
+    **Validate immediately:** run against local update feed, test current, N-1, staged next, rollback refusal, paused rollout, and offline behavior. Verify current/N-1 cross-app handoffs remain functional.
 
 19. Document security, privacy, release, and incident procedures. Include proxy abuse response, signing-key compromise, extension compromise, updater compromise, cookie-handoff concern, release rollback, store rejection, store/update lag, vulnerability reporting, retention, and exact owner/escalation contacts.
 
     **Validate immediately:** run docs link/checklist validation and a tabletop exercise using a fake updater key compromise. Record actions and missing automation in `artifacts/phase-13/tabletop.md`.
 
-20. Execute a full release-candidate rehearsal from a signed annotated test tag on a non-production channel. Build once, sign with test identities, verify, deploy preview, generate draft release, create store submission bundles without submitting, stage local updater metadata, run `cargo xtask parity validate --packaged --plan <json>`, then roll all rehearsal surfaces back/clean.
+20. Execute a full release-candidate rehearsal from a signed annotated test tag on a non-production channel. Build once, sign with test identities, verify, deploy preview, generate draft release, create store submission bundles without submitting, stage local updater metadata, then roll all rehearsal deployments back/clean. Packaged parity is owned by phase 14 and is not run in this phase.
 
     **Validate immediately:** `artifacts/phase-13/rehearsal.json` must list every artifact digest, gate, cleanup action, and result. Zero production endpoints/store submissions and zero residual temporary credentials are required.
 
@@ -212,7 +216,7 @@ Do not change product behavior in this phase except minimal fixes required to ma
 3. Verify Chromium N-1 retains baseline website/native handoff.
 4. Verify website hides current-only extension features from N-1.
 5. Pause desktop rollout and verify extension current remains compatible with desktop N-1.
-6. Promote states independently and verify no product assumes synchronized availability.
+6. Promote states independently and verify no app assumes synchronized availability.
 
 ## Stop Conditions
 
@@ -242,7 +246,7 @@ Do not change product behavior in this phase except minimal fixes required to ma
 3. Delete draft-only release/store submissions through platform APIs only after recording IDs/digests.
 4. Revoke test credentials/keychains and remove temporary registrations/profiles.
 5. Revert only phase-13 workflow/config/docs/xtask hunks; preserve unrelated concurrent changes.
-6. Re-run phase-12 gates to prove product behavior is unchanged.
+6. Re-run phase-12 gates to prove app behavior is unchanged.
 7. Never force-push, hard-reset, overwrite signed artifacts, or reuse a compromised version number.
 
 ## Artifacts
@@ -251,8 +255,8 @@ Do not change product behavior in this phase except minimal fixes required to ma
 - `artifacts/phase-13/gate-map.json`
 - `artifacts/phase-13/rehearsal.json`
 - `artifacts/phase-13/tabletop.md`
-- Release plan JSON
-- Unsigned and test-signed release-candidate inventories/checksums
+- Release plans at `artifacts/release/<version>-<channel>.json`
+- Unsigned and test-signed release-candidate inventories/checksums under `dist/<version>-<channel>/`
 - SBOMs and provenance attestations
 - Signature/notarization/updater verification reports
 - Store submission validation reports
@@ -273,7 +277,7 @@ Keep signing material and credentials outside artifacts. Retain only public cert
 - [ ] Public-key release verification catches all tamper fixtures.
 - [ ] Website, releases, updater, Chromium store, and Firefox store promote independently.
 - [ ] Current/N-1 behavior passes store/updater lag matrix.
-- [ ] Release CI enforces website direct-first automatic eligible proxy fallback,
+- [ ] Release CI enforces website direct-first automatic eligible metadata proxy fallback,
   opt-out, transport visibility, and credential stripping, plus extension no-
   proxy behavior.
 - [ ] Full release rehearsal completes with test identities and no production effects.

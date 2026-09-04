@@ -68,7 +68,8 @@ The phase may copy and adapt code from `migration-sources/dezoomify-rs/src/`, bu
 
 - Available before this phase: `cargo xtask protocol check`, `cargo xtask fixtures verify`, the fast deterministic `cargo xtask test`, `cargo xtask test browser`, `cargo xtask test web`, and normal Cargo workspace commands.
 - Added during step 15: the native comparison mode `cargo xtask parity validate --native`.
-- Added during step 18: `cargo xtask test native`.
+- Added during step 18: `cargo xtask test native` and `cargo xtask test scenario`.
+- Added during step 10: `cargo xtask build cli`.
 - The binary command `cargo run -p dezoomify-cli -- ...` becomes available after step 10 creates the CLI crate.
 
 ## Sequential Implementation Steps
@@ -104,9 +105,10 @@ The phase may copy and adapt code from `migration-sources/dezoomify-rs/src/`, bu
    default ports, Unicode/punycode host equivalence, redirects, sibling paths,
    expiry, cancellation, debug formatting, protocol serialization rejection,
    intentional non-persistence, and best-effort owned-buffer overwrite
-   instrumentation. Verify no API accepts a raw cookie string except the
-   crate-private constructor intended for the future Native Messaging adapter;
-   tests and docs must not assert universal memory zeroization.
+   instrumentation. Verify no API accepts a raw cookie string except a narrow
+   feature-gated host-only constructor intended for the future Native
+   Messaging host; the ordinary CLI API cannot access it. Tests and docs
+   must not assert universal memory zeroization.
 
 5. Implement `client.rs`. Build effective request headers from core tile requests, safe runtime defaults, and optional scoped ephemeral authorization. User-configured CLI headers retain documented precedence, but the code must forbid `Cookie`/`Authorization` through any public untrusted handoff field. Disable automatic redirect authorization forwarding; validate each redirect and rebuild headers for the new URL.
 
@@ -128,7 +130,12 @@ The phase may copy and adapt code from `migration-sources/dezoomify-rs/src/`, bu
 
    **Validate immediately:** compare dimensions, pixel hashes, metadata, filenames, file-vs-directory shape, and error codes with baseline fixtures. Test disk-full injection, existing output, invalid extension, path traversal in suggested names, and cancellation during encode.
 
-10. Complete `apps/cli` as the CLI composition crate. Port argument parsing and interactive selection while delegating all work to `dezoomify-native`. Keep stable options and aliases unless the parity record explicitly approves a change. Add `--json` for protocol events only if specified by the earlier protocol plan; ensure stdout machine output and stderr human progress never mix.
+10. Complete `apps/cli` as the CLI composition crate and register
+    `cargo xtask build cli`. Port argument parsing and interactive selection while
+    delegating all work to `dezoomify-native`. Keep stable options and aliases
+    unless the parity record explicitly approves a change. Add `--json` for
+    protocol events only if specified by the earlier protocol plan; ensure stdout
+    machine output and stderr human progress never mix.
 
     **Validate immediately:** run `cargo run -p dezoomify-cli -- --help`, `--version`, representative legacy invocations, non-interactive JSON mode, invalid arguments, stdin source, and output collisions. Snapshot normalized output and exit codes.
 
@@ -168,7 +175,7 @@ The phase may copy and adapt code from `migration-sources/dezoomify-rs/src/`, bu
 
 18. Add `cargo xtask test native` to start deterministic scenarios, run native unit/integration tests, CLI snapshots, protocol compatibility, redaction scan, and `cargo xtask parity validate --native`. It must clean servers, temp directories, and child CLIs on all exits.
 
-    **Validate immediately:** run `cargo xtask test native` twice and once with `RUST_LOG=trace`. Confirm results match and trace artifacts contain no canaries. This command becomes available only after this step.
+    **Validate immediately:** run `cargo xtask test native` and `cargo xtask test scenario` twice and once with `RUST_LOG=trace`. Confirm results match and trace artifacts contain no canaries. These commands become available only after this step.
 
 19. Run final gates: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo xtask protocol check`, `cargo xtask test`, `cargo xtask parity validate --native`, `cargo xtask test native`, `cargo xtask test browser`, and `cargo xtask test web`.
 
@@ -237,7 +244,7 @@ The phase may copy and adapt code from `migration-sources/dezoomify-rs/src/`, bu
   memory-only/no-intentional-persistence policy, no serialization/Debug,
   best-effort owned-buffer overwrite, redirect revalidation, and canary scans
   without a false universal-zeroization guarantee.
-- **Desktop/CLI divergence:** one `dezoomify-native` runtime and adapter-only product layers.
+- **Desktop/CLI divergence:** one `dezoomify-native` runtime and integration-only app layers.
 - **Large-image memory growth:** bounded queues, streaming encoders, counters asserted in tests.
 - **Cache corruption:** atomic writes, versioning, integrity validation, and interruption tests.
 - **Platform filename differences:** native CI matrix and explicit sanitization contracts.

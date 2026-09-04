@@ -50,9 +50,9 @@ types or browser/native capabilities.
 | Canonical DTO source | New | `crates/dezoomify-protocol/src/dto.rs`; the only authored command/effect/response/event/capability/handoff/output/recovery DTO definitions |
 | Codec/generator support | New | `crates/dezoomify-protocol/src/{codec,generate}.rs` and `src/bin/generate-protocol.rs`; may consume DTO metadata but may not redeclare DTOs |
 | Generated TypeScript package | New | `packages/protocol-ts/package.json`, `src/generated.ts`, `schema/protocol-v1.schema.json`, `schema/capabilities-v1.schema.json`, generated fingerprints/manifests, and tests |
-| Root JavaScript workspace | New | Root `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`; includes `packages/*` and uses the phase-approved pinned package manager |
+| Root JavaScript workspace | New | Root `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`; includes `packages/*`, `apps/*`, and `tests/**` and uses the phase-approved pinned package manager |
 | Capability artifacts | Canonical capability DTOs | Generated TypeScript declarations, schemas, capability-key manifest, and fingerprints under `packages/protocol-ts`; capability message examples remain scenario payloads |
-| Golden vectors | New | Rust/TypeScript test harnesses in their owning crate/package; canonical payloads and expected bytes under `testdata/scenarios/protocol-v1-<id>/**` |
+| Golden vectors | New | Rust/TypeScript test harnesses in their owning crate/package; canonical payloads and expected bytes under `testdata/scenarios/protocol-v1/<id>/**` |
 | Xtask check | Phase-03 xtask | `crates/xtask/src/protocol.rs`, `crates/xtask/src/main.rs` registration |
 | Workspace | Existing Cargo workspace plus new pnpm workspace | Root Cargo and pnpm manifests/locks |
 
@@ -73,7 +73,7 @@ phase:
 | Capabilities | Versioned input schemes, scan/fetch modes, decoders, pure processing operations, encoders, destination/publication modes, storage/cache, concurrency/size limits, bulk and handoff support |
 | Handoff | Non-secret input/source intent, selected candidate/catalog identity, selection/recipe/output intent, required capabilities, provenance label, expiry hint, and optional reusable opaque references; no credentials or universal signature requirement |
 | Output | Destination request/response, format/options, dimensions, metadata, partial marker/missing tiles, write/encode/finalize/publication outcomes, output reference, digest/size where available |
-| Recovery | Stable recovery action IDs/kinds, allowed choices, scope, preconditions, user-safe prompt data, retry/skip/partial/escalate/open-settings intent, and correlated choice/result |
+| Recovery | Stable recovery action IDs/kinds, allowed choices, scope, preconditions, user-safe prompt data, retry/skip/partial/hand-off/open-settings intent, and correlated choice/result |
 | Errors | Stable code, phase, retryability, human message, recovery actions, optional source/request/tile/output IDs, and structured details without unstable debug text |
 | Byte transport | Out-of-band byte-buffer handle plus length/checksum where needed; JSON references the handle, not base64 payload by default |
 
@@ -158,8 +158,12 @@ workspace/install commands available.
 
    Add `crates/dezoomify-protocol` to the Cargo workspace. Create root
    `package.json`, `pnpm-workspace.yaml`, and `pnpm-lock.yaml` with a pinned
-   package-manager declaration and `packages/*` membership, then create the
-   minimal `packages/protocol-ts/package.json`. Allow deterministic portable
+   package-manager declaration and `packages/*`, `apps/*`, and `tests/**`
+   membership, then create the minimal `packages/protocol-ts/package.json`.
+   Define root `lint` and `typecheck` scripts that run the corresponding
+   workspace checks; every present workspace package must provide the scripts
+   or be explicitly excluded by the workspace policy. Allow
+   deterministic portable
    serialization/schema/generation libraries only. Do not depend on
    `dezoomify-core` if DTOs can remain independent; conversion belongs in
    `dezoomify-job`. Ban networking, async runtime, image codecs, filesystem,
@@ -258,12 +262,17 @@ workspace/install commands available.
    identify complete or marked-partial results. Define typed recovery actions
    and correlated choices rather than human-message parsing.
 
-   Create reviewed codes for invalid command/state, unsupported version,
-   malformed input, discovery exhaustion/limits, fetch/decode failure, invalid
-   selection, resource limits, cancellation, and internal invariant violation.
-   Separate stable code/details from human presentation. Ensure URLs/headers in
-   errors use redaction rules. Do not serialize arbitrary error chains or
-   platform-specific text as compatibility assertions.
+    Create reviewed codes for invalid command/state, unsupported version,
+    malformed input, discovery exhaustion/limits, fetch/decode failure, invalid
+    selection, resource limits, cancellation, and internal invariant violation.
+    Every error must carry the safe structured context a UI needs to be specific
+    rather than generic: the attempted and active transport, an eligibility or
+    blocked-reason classification, the resource kind, and per-recovery-action
+    user-safe rationale data. Human wording remains the UI's job; the protocol
+    supplies the facts, not display strings. Separate stable code/details from
+    human presentation. Ensure URLs/headers in
+    errors use redaction rules. Do not serialize arbitrary error chains or
+    platform-specific text as compatibility assertions.
 
    Validation:
 
@@ -271,9 +280,10 @@ workspace/install commands available.
    cargo test -p dezoomify-protocol capability
    cargo test -p dezoomify-protocol handoff
    cargo test -p dezoomify-protocol output
-   cargo test -p dezoomify-protocol recovery
-   cargo test -p dezoomify-protocol error
-   cargo test -p dezoomify-protocol redaction
+    cargo test -p dezoomify-protocol recovery
+    cargo test -p dezoomify-protocol error
+    cargo test -p dezoomify-protocol error_context
+    cargo test -p dezoomify-protocol redaction
    ```
 
 9. Implement canonical control-message encoding.
@@ -306,8 +316,8 @@ workspace/install commands available.
     interface is permitted.
 
     Put success vectors for every variant and failure vectors for malformed
-    version/type/ID/range/duplicate/trailing cases under
-    `testdata/scenarios/protocol-v1-<id>/**`. Each vector includes protocol version
+    version/type/ID/range/duplicate/trailing scenarios under
+    `testdata/scenarios/protocol-v1/<id>/**`. Each vector includes protocol version
     and parity/test IDs. Generate twice into separate temporary directories and
     require byte-identical trees before updating checked-in derivatives.
 
@@ -500,6 +510,7 @@ repository.
 - [ ] Byte ownership and release semantics are explicit.
 - [ ] Commands/effects/responses/events cannot be directionally confused.
 - [ ] Error codes and redaction are stable and tested.
+- [ ] Every error carries the safe structured context (transport, blocked reason, resource kind, action rationale) needed for specific, plain-language user guidance.
 - [ ] Every variant has canonical positive and required negative vectors.
 - [ ] Rust and TypeScript run the same vectors and produce the same canonical bytes.
 - [ ] Generated TypeScript/schema/capability artifacts reproduce byte-for-byte from `dto.rs` and have no hand-maintained duplicate.

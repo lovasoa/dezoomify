@@ -12,7 +12,7 @@ retirement to deterministic evidence and a future destination owner.
 - Do not port, redesign, fix, or delete implementation code.
 - Do not declare a behavior obsolete merely because only one source has it.
 - Do not treat live-site success as deterministic parity evidence.
-- Do not accept every `cb13f0b..23c4639` change automatically.
+- Do not accept every `cb13f0b..<resolved-rust-tip>` change automatically.
 - Do not normalize names, detection precedence, URLs, headers, errors, or tile
   order until each difference has a matrix decision.
 - Do not run future `cargo xtask` commands; phase 03 creates the validator.
@@ -20,8 +20,8 @@ retirement to deterministic evidence and a future destination owner.
 ## Dependencies and Preconditions
 
 - Phases 00 and 01 are complete.
-- Source trees are immutable and exactly match web `f7caa07`, Rust destination
-  snapshot `23c4639`, and extension `d231dd0`.
+- Source trees are immutable and exactly match web `f7caa07`, the resolved
+  Rust tip, and extension `d231dd0`.
 - Git object `cb13f0b` is available as the Rust upstream comparison point.
 - Baseline deterministic test results are recorded, including any approved
   known failures.
@@ -32,8 +32,9 @@ retirement to deterministic evidence and a future destination owner.
 |---|---|---|
 | Web registry/order | `migration-sources/dezoomify-web/index.html`, `dezoomers/*.js`, `dezoomers/automatic.js` | `docs/migration/parity-matrix.csv`, `docs/migration/legacy-audit.md` |
 | Web scheduling/render/proxy | `zoommanager.js`, `browser-init.js`, `functions/proxy.js`, `node-app/*.js` | Same audit and matrix |
-| Web deterministic cases | `migration-sources/dezoomify-web/tests/dezoomers.spec.js`, `proxy-function.spec.js`, `node-cli-smoke.js`, `fixture-server.js`, `fixtures/**`, `images/**` beneath that tests directory | `docs/migration/fixture-inventory.csv` |
-| Web live cases | `migration-sources/dezoomify-web/tests/live-compat.spec.js`, `live-playwright.config.js` in that directory | `docs/migration/live-inventory.csv` |
+| Web deterministic scenarios | `migration-sources/dezoomify-web/tests/dezoomers.spec.js`, `proxy-function.spec.js`, `node-cli-smoke.js`, `fixture-server.js`, `fixtures/**`, `images/**` beneath that tests directory | `docs/migration/fixture-inventory.csv` |
+| Web live scenarios | `migration-sources/dezoomify-web/tests/live-compat.spec.js`, `live-playwright.config.js` in that directory | `docs/migration/live-inventory.csv` |
+| User-facing guidance | `migration-sources/dezoomify-web/index.html` help text, `migration-sources/dezoomify-web/zoommanager.js` status/error messages, `migration-sources/dezoomify-web/README.md` guidance, `migration-sources/dezoomify-extension/README.md` usage text | UI/EXT parity rows recording legacy guidance copy and handoff prompts so replacement wording is planned, not improvised |
 | Rust upstream core | Git paths `cb13f0b:dezoomify-core/src/**`, `cb13f0b:dezoomify-core/tests/**` | Matrix baseline columns |
 | Rust candidate snapshot | `migration-sources/dezoomify-rs/dezoomify-core/src/**`, `dezoomify-core/tests/**`, `dezoomify-core/testdata/**` | Matrix candidate columns |
 | Rust native runtime | `migration-sources/dezoomify-rs/src/**`, `tests/**`, `testdata/**`, `tiles.yaml` | Runtime parity rows |
@@ -60,8 +61,8 @@ deletion before phase 14.
 ### Available Now
 
 ```sh
-git diff --name-status cb13f0b..23c4639
-git log --reverse --oneline cb13f0b..23c4639
+git diff --name-status cb13f0b..<resolved-rust-tip>
+git log --reverse --oneline cb13f0b..<resolved-rust-tip>
 cargo test -p dezoomify-core --test dezoomer_coverage
 cargo test -p dezoomify-core --test dependency_architecture
 npm test
@@ -111,10 +112,10 @@ cargo xtask fixtures verify
    git diff --check -- docs/migration/legacy-audit.md docs/migration/parity-matrix.csv
    ```
 
-3. Inventory each web deterministic case, not just each format.
+3. Inventory each web deterministic scenario, not just each format.
 
-   Read all cases and standalone tests in `tests/dezoomers.spec.js`. Create rows
-   for direct metadata, tile-URL normalization, viewer-page adapters, iframes,
+   Read all scenarios and standalone tests in `tests/dezoomers.spec.js`. Create rows
+   for direct metadata, tile-URL normalization, viewer-page formats, iframes,
    query/default-port/private-ID handling, automatic precedence, cycle and
    repeated-parent behavior, malformed metadata, signed/encrypted tiles,
    adaptive generic probing, overlap/cropping, proxy targets, assembly pixels,
@@ -141,9 +142,10 @@ cargo xtask fixtures verify
    retry/skip semantics, and Node proxy/CLI behavior. Distinguish behavior with
    deterministic tests from behavior needing fixtures in phase 03. Record any
    legacy proxy approval prompt or manual retry as historical
-   behavior to be replaced by the approved hosted-browser policy: direct
-   readable fetch first, automatic restricted-proxy fallback only after a
-   classified CORS/network failure for eligible public non-credential resources
+    behavior to be replaced by the approved website transport policy: direct
+    browser fetch first, automatic metadata CORS proxy fallback only after a
+    classified CORS/network failure for eligible public non-credential metadata
+    requests (never tiles)
    unless the user opted out, visible active transport, and no browser
    credentials, cookies, `Authorization`, or credential headers on either proxy
    hop. Keep extension no-proxy behavior and native cookie-handoff consent as
@@ -173,9 +175,9 @@ cargo xtask fixtures verify
    git diff --exit-code -- migration-sources/dezoomify-rs
    ```
 
-6. Classify every Rust destination-snapshot delta.
+6. Classify every Rust snapshot delta against the resolved tip.
 
-   For every changed path and behavior in `cb13f0b..23c4639`, create a matrix
+   For every changed path and behavior in `cb13f0b..<resolved-rust-tip>`, create a matrix
    row or link it to an existing row. Classify it as a web-parity candidate,
    native refactor, bug fix with evidence, tooling/documentation, or unproven.
    In particular audit added ArcGIS, FSI, Hungaricana, LizardTech, PNAV,
@@ -186,14 +188,14 @@ cargo xtask fixtures verify
    Validation:
 
    ```sh
-   git diff --name-status cb13f0b..23c4639
-   git diff --stat cb13f0b..23c4639
+   git diff --name-status cb13f0b..<resolved-rust-tip>
+   git diff --stat cb13f0b..<resolved-rust-tip>
    git diff --check -- docs/migration/parity-matrix.csv docs/migration/parity-decisions.md
    ```
 
 7. Inventory extension behavior at `d231dd0`.
 
-   Record every positive and negative recognition case, query stripping and
+   Record every positive and negative recognition scenario, query stripping and
    canonicalization rule, retired recognizers, self-URL exclusion, activation
    state, request resource-type filter, per-tab deduplication, badges/icons,
    click/context-menu actions, tab cleanup, handoff URL shape and actual trust
@@ -201,7 +203,7 @@ cargo xtask fixtures verify
    packaging differences. Treat website/deep-link parameters as non-secret
    untrusted input; do not infer a universal signature or future Native
    Messaging identity from a legacy URL. Preserve the
-   explicit retired cases for `.pff`, `/viewer/p.xml`, and Rijksmuseum as
+   explicit retired scenarios for `.pff`, `/viewer/p.xml`, and Rijksmuseum as
    negative behavior unless a reviewed decision says otherwise.
 
    Validation:
@@ -285,7 +287,7 @@ cargo xtask fixtures verify
 
 12. Run the phase-02 deterministic workflow test.
 
-    Select at least one fixture-backed case for every inventoried format and all
+    Select at least one fixture-backed scenario for every inventoried format and all
     cross-cutting behaviors: automatic precedence, follow/dedup/cycle,
     fixed-grid ordering, adaptive probing, encrypted tile transformation,
     malformed input, header precedence, assembly edges/overlap, extension
@@ -327,10 +329,10 @@ cargo xtask fixtures verify
 | Test ID | Workflow | Required assertion |
 |---|---|---|
 | `P02-WEB-BASELINE` | Legacy Playwright suite against fixture server | All expected baseline outcomes are recorded |
-| `P02-CORE-BASELINE` | Rust core coverage test | Registry/discovery/tile cases are recorded |
+| `P02-CORE-BASELINE` | Rust core coverage test | Registry/discovery/tile scenarios are recorded |
 | `P02-CORE-PURITY-BASELINE` | Rust dependency architecture test | Existing pure-core rule passes or has approved baseline failure |
-| `P02-EXT-BASELINE` | Extension recognition and TypeScript tests | Positive, negative, retired, and self-URL cases are recorded |
-| `P02-DELTA-COVERAGE` | Map `cb13f0b..23c4639` changed paths | Every behavioral delta links to a parity ID |
+| `P02-EXT-BASELINE` | Extension recognition and TypeScript tests | Positive, negative, retired, and self-URL scenarios are recorded |
+| `P02-DELTA-COVERAGE` | Map `cb13f0b..<resolved-rust-tip>` changed paths | Every behavioral delta links to a parity ID |
 | `P02-MATRIX-COVERAGE` | Review every format and cross-cutting area | No retained behavior lacks deterministic test ID or blocker |
 | `P02-PROXY-POLICY` | Review legacy proxy controls and approved replacement | Per-attempt approval is retired; direct-first automatic eligible fallback, opt-out, visible transport, credential stripping, and extension no-proxy/native-cookie-consent boundaries have distinct rows |
 
@@ -352,9 +354,9 @@ cargo xtask fixtures verify
 |---|---|
 | Format-level rows hide edge cases | Use one row per independently asserted behavior. |
 | Source disagreement is resolved accidentally | Require explicit decisions with old/new behavior and approval. |
-| Destination-only work bypasses review | Classify every `cb13f0b..23c4639` path and behavior. |
+| Destination-only work bypasses review | Classify every `cb13f0b..<resolved-rust-tip>` path and behavior. |
 | Dynamic fixture behavior is omitted | Inventory fixture-server routes as first-class fixtures. |
-| Live tests create false confidence | Require deterministic replacement IDs for every live case. |
+| Live tests create false confidence | Require deterministic replacement IDs for every live scenario. |
 | CSV becomes unmaintainable | Stable IDs, fixed schema, deterministic validator in phase 03. |
 
 ## Rollback Guidance
@@ -374,21 +376,21 @@ after confirming it is untracked and phase-created; never use `git clean`.
 - `docs/migration/fixture-inventory.csv`
 - `docs/migration/live-inventory.csv`
 - Approved `docs/migration/parity-decisions.md`
-- Full classification of `cb13f0b..23c4639`
+- Full classification of `cb13f0b..<resolved-rust-tip>`
 - Phase-02 gate record and list of phase-03 fixture blockers
 
 ## Completion Checklist
 
 - [ ] Every web dezoomer and automatic-order rule is inventoried.
-- [ ] Every deterministic web case and dynamic fixture route is mapped.
+- [ ] Every deterministic web scenario and dynamic fixture route is mapped.
 - [ ] Rust core and native behaviors at `cb13f0b` are inventoried.
 - [ ] Every destination-only Rust snapshot delta is classified.
 - [ ] Extension recognition, lifecycle, permissions, and handoffs are mapped.
 - [ ] Legacy proxy approval/manual-retry behavior is explicitly mapped to the
   approved automatic eligible fallback policy and replacement assertions.
-- [ ] Every live case has deterministic replacement coverage or a blocker.
+- [ ] Every live scenario has deterministic replacement coverage or a blocker.
 - [ ] Every changed/retired behavior has explicit approval.
-- [ ] No source snapshot changed.
+- [ ] No migration source changed.
 - [ ] All baseline suites were rerun and results recorded.
 - [ ] No stop condition remains unresolved.
 - [ ] Phase 02 is marked complete in the gate ledger.

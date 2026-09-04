@@ -9,7 +9,7 @@ surface and make its own behavior reproducible and tested.
 
 ## Non-Goals
 
-- Do not port production dezoomers or change expected parity outcomes.
+- Do not port production formats or change expected parity outcomes.
 - Do not replace all source tests immediately; run legacy tests as an oracle.
 - Do not put fixture-server I/O or test helpers into `dezoomify-core`.
 - Do not fetch/update live fixtures during ordinary test execution.
@@ -33,12 +33,11 @@ surface and make its own behavior reproducible and tested.
 | Material | Exact source | Exact destination |
 |---|---|---|
 | Remote HTTP fixtures | `migration-sources/dezoomify-web/tests/fixtures/remote/**` | Scenario-local `testdata/scenarios/<id>/payloads/**`, preserving exact bytes and served host/path in `routes.json` |
-| Local web fixtures | `migration-sources/dezoomify-web/tests/fixtures/local/**` and other reviewed files under that source fixture tree | Scenario-local `testdata/scenarios/<id>/payloads/**` |
 | Images/assembly fixtures | `migration-sources/dezoomify-web/tests/images/**` | `testdata/scenarios/<id>/payloads/**` and asserted samples under `testdata/scenarios/<id>/pixels/**` |
 | Rust core/app fixtures | `migration-sources/dezoomify-rs/dezoomify-core/testdata/**`, root `tiles.yaml`, and `migration-sources/dezoomify-rs/testdata/**` | Scenario-local payloads under `testdata/scenarios/<id>/payloads/**` |
-| Extension recognition cases | `migration-sources/dezoomify-extension/test/url-recognition.test.js` | `testdata/scenarios/<id>/scenario.json` with no duplicated canonical case tree |
-| Web/Rust case definitions | `migration-sources/dezoomify-web/tests/dezoomers.spec.js` and `migration-sources/dezoomify-rs/dezoomify-core/tests/dezoomer_coverage.rs` | `testdata/scenarios/<id>/scenario.json`, `routes.json`, and `expected/<surface>.json` |
-| Scenario schemas and manifest | Phase-02 inventory plus reviewed bytes/cases | `testdata/scenarios/schema/**`, `testdata/scenarios/manifest.json` |
+| Extension recognition cases | `migration-sources/dezoomify-extension/test/url-recognition.test.js` | `testdata/scenarios/<id>/scenario.json` with no duplicated canonical scenario tree |
+| Web/Rust scenario definitions | `migration-sources/dezoomify-web/tests/dezoomers.spec.js` and `migration-sources/dezoomify-rs/dezoomify-core/tests/dezoomer_coverage.rs` | `testdata/scenarios/<id>/scenario.json`, `routes.json`, and `expected/<runtime>.json` |
+| Scenario schemas and manifest | Phase-02 inventory plus reviewed bytes/scenarios | `testdata/scenarios/schema/**`, `testdata/scenarios/manifest.json` |
 | Fixture server | `migration-sources/dezoomify-web/tests/fixture-server.js` behavior | `crates/fixture-server/Cargo.toml`, `src/**`, and crate-owned tests/harnesses |
 | Xtask runner | New | `.cargo/config.toml`, `crates/xtask/Cargo.toml`, `crates/xtask/src/main.rs`, `crates/xtask/src/{check,fixtures,parity,setup,sources,test}.rs` |
 | Harness docs | Existing destination docs and source test docs | Existing `docs/testing.md` and `testdata/scenarios/README.md`; update in place |
@@ -48,7 +47,7 @@ Do not copy generated `node_modules`, Playwright browser caches, Cargo targets,
 or test output. Canonical route data, payloads, expected transcripts, and pixel
 expectations live only below `testdata/scenarios`; crate/package tests may load
 them but must not create a second canonical corpus. Record every data path in
-`testdata/scenarios/manifest.json` before changing a case reference.
+`testdata/scenarios/manifest.json` before changing a scenario reference.
 
 ## Command Status
 
@@ -94,13 +93,13 @@ phases extend, but must not break, this command surface.
 ## Required Scenario Layout and Manifest Schema
 
 Each `testdata/scenarios/<id>/` contains `scenario.json` and, as needed,
-`routes.json`, `payloads/**`, `expected/<surface>.json`, and `pixels/**`.
+`routes.json`, `payloads/**`, `expected/<runtime>.json`, and `pixels/**`.
 `testdata/scenarios/manifest.json` version 1 contains sorted scenario and file
 records with `id`, `path`, `sha256`, `size`, `content_type`, `source_snapshot`,
 `source_path`, `served_urls`, `license_provenance`, and `sensitive`. Route
 records contain stable `route_id`, method, exact host/path/query matching,
 status, ordered headers, payload reference or deterministic generator, and
-case-scoped state transitions. No current timestamp, generated port, or
+scenario-scoped state transitions. No current timestamp, generated port, or
 machine-specific path is allowed.
 
 ## Numbered Atomic Steps
@@ -204,7 +203,7 @@ machine-specific path is allowed.
    files when required, host/path mapped responses, suffix/index lookup only
    where inventoried, deterministic origin/host substitution, GET and HEAD,
    content types, CORS/exposed headers, status/error bodies, synthetic JPEG/SVG
-   tiles, proxy target handling, and Arts & Culture signing/encryption cases.
+   tiles, proxy target handling, and Arts & Culture signing/encryption scenarios.
    Route vocabulary and dynamic response state are canonical data under
    `testdata/scenarios`, not Rust test constants. Bind loopback only. `--port 0`
    must use an OS-assigned port and write one parseable address only after
@@ -235,14 +234,14 @@ machine-specific path is allowed.
    cargo test -p dezoomify-fixture-server --test security
    ```
 
-8. Transcribe legacy cases into scenario directories without changing behavior.
+8. Transcribe legacy scenarios into scenario directories without changing behavior.
 
    Create one directory per stable scenario ID. Preserve request order, selected
-   dezoomer name, dimensions, tile positions/URLs/headers, final/selected level,
+   format name, dimensions, tile positions/URLs/headers, final/selected level,
    error category, transcript, and assembly pixels. Store canonical route data,
    payloads, expected records, and pixels only in that directory. Record source
    file and line range. If web and Rust assertions differ, create separate
-   `expected/<surface>.json` variants linked to an unresolved parity decision;
+   `expected/<runtime>.json` variants linked to an unresolved parity decision;
    do not blend them.
 
    Validation after each format batch:
@@ -256,7 +255,7 @@ machine-specific path is allowed.
 9. Implement `cargo xtask parity validate` and `cargo xtask parity report`.
 
    Validation checks CSV schema, unique stable IDs, enums, evidence paths,
-   fixture/case references, target phase, decision approvals, and deterministic
+   fixture/scenario references, target phase, decision approvals, and deterministic
    coverage. Report output is sorted by area then ID and fails on blocked rows
    whose target phase is at or before the current gate. The report command does
    not mutate matrix status.
@@ -274,8 +273,8 @@ machine-specific path is allowed.
     Keep legacy source JavaScript read-only. Configure a destination-side test
     wrapper to serve the legacy app from its source prefix while resolving
     fixture/proxy requests through the new server. Do not edit legacy tests to
-    hide differences. Compare selected dezoomer, metadata, ordered requests,
-    tile coordinates/URLs, errors, and assembly pixels to canonical cases.
+    hide differences. Compare selected format, metadata, ordered requests,
+    tile coordinates/URLs, errors, and assembly pixels to canonical scenarios.
 
     Harness implementation belongs to the fixture-server crate; canonical input
     and expected data remains under `testdata/scenarios`. Exact harness paths:
@@ -320,8 +319,7 @@ machine-specific path is allowed.
 
     `cargo xtask setup` verifies the pinned Rust/Node tools and idempotently
     prepares only the dependencies required by the phase-03 workspace and
-    legacy-web harness. It must not install or report readiness for later
-    product toolchains. `cargo xtask check` runs formatting/lint checks plus
+    legacy-web harness. It must not install or report readiness for later    app toolchains. `cargo xtask check` runs formatting/lint checks plus
     read-only source-lock, fixture, and parity validation for artifacts available
     in this phase. Bare `cargo xtask test` runs all fast deterministic suites
     available in this phase: `cargo xtask check`, fixture-server tests, xtask
@@ -383,10 +381,10 @@ machine-specific path is allowed.
 |---|---|---|
 | `P03-SOURCES` | Xtask verifies source lock/prefixes | No fetch; exact trees match |
 | `P03-MANIFEST` | Verify all fixture bytes and metadata | No missing, extra, duplicate, changed, or sensitive fixture |
-| `P03-SERVER` | Replay HTTP contract cases | Exact method/status/headers/body and zero public egress |
-| `P03-LEGACY-WEB` | Run canonical cases through untouched web source | Outputs match transcribed expected records |
+| `P03-SERVER` | Replay HTTP contract scenarios | Exact method/status/headers/body and zero public egress |
+| `P03-LEGACY-WEB` | Run canonical scenarios through untouched web source | Outputs match transcribed expected records |
 | `P03-TRANSCRIPT` | Serialize same workflow twice | Byte-identical canonical transcript |
-| `P03-MATRIX` | Validate parity/evidence/case links | Every due preserve row has deterministic coverage |
+| `P03-MATRIX` | Validate parity/evidence/scenario links | Every due preserve row has deterministic coverage |
 | `P03-AGGREGATE` | Run `cargo xtask test` | All fast blocking deterministic suites run and propagate failure |
 | `P03-COMMAND-SURFACE` | Inspect help and invoke future commands/targets | Only the phase-03 subset is advertised; unavailable commands fail |
 
@@ -396,12 +394,12 @@ machine-specific path is allowed.
   cookies, tokens, personal data, or other sensitive material.
 - Copied bytes do not match recorded SHA-256.
 - Two fixtures need the same served URL with incompatible responses and no
-  case-scoped routing decision exists.
+  scenario-scoped routing decision exists.
 - The new fixture server attempts public network access in deterministic mode.
-- Canonical cases cannot represent an observed legacy distinction.
+- Canonical scenarios cannot represent an observed legacy distinction.
 - Web and Rust expected behavior conflict without an approved matrix decision.
 - `cargo xtask` reports success while skipping a required subcommand/test.
-- Any source snapshot changes.
+- Any migration source changes.
 - A case is made less strict solely to make a replacement pass.
 
 ## Risks and Mitigations
@@ -412,7 +410,7 @@ machine-specific path is allowed.
 | Harness encodes implementation details | Assert protocol-visible requests/results, not private functions. |
 | Dynamic server becomes nondeterministic | No wall clock/randomness/public network; ephemeral port is communicated explicitly. |
 | One expected file is silently regenerated | Verification is read-only; updates require explicit review mode. |
-| Browser-only corpus cannot drive Rust | Store behavior in runtime-neutral JSON cases and transcripts. |
+| Browser-only corpus cannot drive Rust | Store behavior in runtime-neutral JSON scenarios and transcripts. |
 | Xtask becomes a shell-command black box | Unit-test argument construction, failure propagation, ordering, and summaries. |
 
 ## Rollback Guidance
@@ -448,7 +446,7 @@ Preserve fixture inventory and hash evidence if copied data must be re-reviewed.
 - [ ] Fixture server matches required legacy HTTP behavior on loopback only.
 - [ ] Scenario schemas represent success, failure, ordered requests, processing, output, transcripts, and pixels.
 - [ ] No canonical route, payload, expected transcript, or pixel data exists outside `testdata/scenarios`.
-- [ ] Legacy web behavior matches canonical cases.
+- [ ] Legacy web behavior matches canonical scenarios.
 - [ ] Repeated transcript generation is byte-identical.
 - [ ] `cargo xtask --help` advertises exactly the implemented phase-03 subset and future commands/targets fail as unknown.
 - [ ] `cargo xtask setup` and `cargo xtask check` are phase-scoped and failure-safe.

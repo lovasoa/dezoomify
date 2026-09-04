@@ -24,8 +24,9 @@ silently changing compatibility behavior.
 - `git`, a Rust toolchain compatible with edition 2024, Node.js, and npm are
   available for inspection. Installing/pinning versions is a separately
   reviewed phase-00 change.
-- The current repository contains all four required Git objects:
-  `f7caa07`, `cb13f0b`, `23c4639`, and `d231dd0`.
+- The current repository contains all three fixed Git objects:
+  `f7caa07`, `cb13f0b`, and `d231dd0`, plus a resolved Rust tip (see the Rust
+  baseline rule below).
 - Existing worktree changes have been listed with `git status --short` and will
   not be reset, cleaned, stashed, or overwritten.
 
@@ -36,11 +37,11 @@ silently changing compatibility behavior.
 | Program index | `plans/README.md` | Existing; read in place, do not duplicate |
 | Web evidence | `migration-sources/dezoomify-web/` at `f7caa07` | Remains read-only in place |
 | Rust upstream baseline | Git tree `cb13f0b^{tree}` | Referenced by new `docs/migration/source-lock.json` |
-| Rust migration snapshot | `migration-sources/dezoomify-rs/` at `23c4639` | Remains read-only in place |
+| Rust migration snapshot | `migration-sources/dezoomify-rs/` at the resolved Rust tip | Synced to the latest stable release at implementation time; read-only between syncs |
 | Extension evidence | `migration-sources/dezoomify-extension/` at `d231dd0` | Remains read-only in place |
 | Repository rules | Source README and source `AGENTS.md` files | Existing `AGENTS.md`; update in place |
 | Architecture boundary | Existing architecture and source `AGENTS.md` files | Existing `docs/architecture.md`; update in place |
-| Snapshot lock | Four Git objects above | New `docs/migration/source-lock.json` |
+| Snapshot lock | Three fixed Git objects above plus the recorded resolved Rust tip | New `docs/migration/source-lock.json` |
 | Gate ledger | This plan and `plans/README.md` | New `docs/migration/gates.md` |
 | Exceptions | None initially | New `docs/migration/exceptions.md` |
 | Validation guide | Existing test documentation and source test docs | Existing `docs/testing.md`; update in place |
@@ -50,6 +51,33 @@ silently changing compatibility behavior.
 Update existing destination documents in place and create only the files marked
 new above. Do not mechanically copy an entire source `AGENTS.md`; reconcile
 conflicts while retaining the strictest purity and test requirements.
+
+## Rust Baseline Rule
+
+The Rust migration source is based on the latest stable dezoomify-rs release,
+whatever that is at the moment of implementation. It is never pinned to a
+fixed commit across phases.
+
+- **Resolution:** at the start of any implementation work that consumes
+  `migration-sources/dezoomify-rs/`, list upstream tags with
+  `git ls-remote --tags https://github.com/lovasoa/dezoomify-rs`, select the
+  highest stable `vX.Y.Z` tag (excluding prereleases), and record the tag and
+  its commit SHA in the phase execution record and gate row. That commit is
+  the **resolved Rust tip**.
+- **Sync:** bring the prefix to the resolved tip with
+  `git subtree pull --prefix=migration-sources/dezoomify-rs <canonical-url> <tag> --squash`.
+  The resolution and sync steps are the only plan steps allowed to require
+  network access.
+- **Verification:** after resolution, every check runs offline against the
+  recorded SHA (prefix-tree equality, ancestry `cb13f0b -> resolved tip ->
+  unified HEAD`). Anywhere these plans name `23c4639` as the working
+  snapshot, read the resolved Rust tip instead. `23c4639` remains a
+  historical object only: a superseded local snapshot, not an ancestor of any
+  upstream release. `cb13f0b` stays the fixed historical upstream reference
+  point for delta review.
+- **Cleanliness:** after a sync, the prefix tree must exactly equal the
+  resolved tip tree. Local divergence is forbidden; destination-only work
+  lives in destination paths, never in `migration-sources/`.
 
 ## Command Status
 
@@ -62,10 +90,13 @@ different working directory.
 git status --short
 git cat-file -e f7caa07^{commit}
 git cat-file -e cb13f0b^{commit}
-git cat-file -e 23c4639^{commit}
+git cat-file -e <resolved-rust-tip>^{commit}
 git cat-file -e d231dd0^{commit}
 git diff --check
 ```
+
+`<resolved-rust-tip>` is the recorded SHA from the Rust baseline rule above;
+resolve it first if no sync has been recorded yet.
 
 Source-local test commands are documented in phases 01-03. They are available
 now but are not phase-00 gates because dependencies may not yet be installed.
@@ -127,18 +158,19 @@ cargo xtask test wasm --browser chrome
 
    Use the full SHAs in `source-lock.json`; abbreviated SHAs are only for prose.
    Record commit object IDs and root tree IDs. Record that `cb13f0b` is the Rust
-   upstream baseline and `23c4639` is a destination-only follow-up snapshot.
+   upstream baseline and that the Rust working snapshot is the resolved Rust
+   tip, never a fixed commit.
 
    Validation:
 
    ```sh
    git cat-file -e f7caa07e1ebd3e7d600075ca54a152cee30d8602^{commit}
    git cat-file -e cb13f0b^{commit}
-   git cat-file -e 23c46390c4e3245c278aa3d21145f8b692f19aef^{commit}
+   git cat-file -e <resolved-rust-tip>^{commit}
    git cat-file -e d231dd0bef310a46604140baa50ef29702aef53e^{commit}
    git rev-parse f7caa07^{tree}
    git rev-parse cb13f0b^{tree}
-   git rev-parse 23c4639^{tree}
+   git rev-parse <resolved-rust-tip>^{tree}
    git rev-parse d231dd0^{tree}
    ```
 
@@ -150,8 +182,9 @@ cargo xtask test wasm --browser chrome
    full commit SHA, tree SHA, imported prefix, role, and whether the checked-in
    directory must equal that tree. Sort source entries by stable source name and
    JSON keys lexicographically. For Rust, use two entries: `rust-upstream` for
-   `cb13f0b` without a checked-in prefix and `rust-destination-snapshot` for
-   `23c4639` with `migration-sources/dezoomify-rs`.
+   `cb13f0b` without a checked-in prefix and `rust-snapshot` for the resolved
+   Rust tip with `migration-sources/dezoomify-rs`. Re-record the tip entry on
+   every re-sync; it is expected to change.
 
    Validation:
 
@@ -177,7 +210,7 @@ cargo xtask test wasm --browser chrome
 
 5. Update the boundary section in the existing flat `docs/architecture.md`.
 
-   Define dependency direction as adapters and hosts depending inward on the
+   Define dependency direction as integrations and hosts depending inward on the
    protocol, job engine, and pure core. Define `dezoomify-core` purity as no
    network, filesystem, async runtime, image decoding/encoding, UI, DOM, clock,
    random source, process, or environment access in library code. Permit pure
@@ -187,10 +220,10 @@ cargo xtask test wasm --browser chrome
    Preserve its existing component documentation while making dependency
    direction and forbidden capabilities normative. `docs/architecture.md` is
    the canonical architecture document and remains a flat file. Record the
-   hosted-browser transport invariant: direct readable fetch first with browser
-   credentials omitted; automatic restricted-proxy fallback only after a
-   classified CORS/network failure, only for eligible public non-credential
-   resources, and only while the user's proxy opt-out is disabled; visible
+    website transport invariant: direct browser fetch first with browser
+    credentials omitted; automatic metadata CORS proxy fallback only after a
+    classified CORS/network failure, only for eligible public non-credential
+    metadata requests (never tiles), and only while the user's proxy opt-out is disabled; visible
    active transport; and no cookies, `Authorization`, browser credentials, or
    user-supplied credential headers sent to or by the proxy. Keep extension
    no-proxy behavior and separately consent-gated extension-to-native cookie
@@ -242,7 +275,7 @@ cargo xtask test wasm --browser chrome
    Read source CI files and lockfiles. Select versions supported by all required
    build tools, record the evidence in the gate ledger, then create
    `rust-toolchain.toml` and `.node-version`. Do not upgrade dependencies in
-   source snapshots. If exact compatible versions cannot be established, leave
+   migration sources. If exact compatible versions cannot be established, leave
    these destination files absent and stop for a human decision.
 
    Validation after versions are approved:
@@ -269,7 +302,7 @@ cargo xtask test wasm --browser chrome
 
    ```sh
    git show f7caa07:LICENSE >/dev/null
-   git show 23c4639:LICENSE >/dev/null
+   git show <resolved-rust-tip>:LICENSE >/dev/null
    git show d231dd0:LICENSE >/dev/null
    test -s LICENSE
    git diff --check -- LICENSE docs/licensing.md docs/migration/attribution.json
@@ -286,7 +319,7 @@ cargo xtask test wasm --browser chrome
    ```sh
    git rev-parse f7caa07^{commit} f7caa07^{tree}
    git rev-parse cb13f0b^{commit} cb13f0b^{tree}
-   git rev-parse 23c4639^{commit} 23c4639^{tree}
+   git rev-parse <resolved-rust-tip>^{commit} <resolved-rust-tip>^{tree}
    git rev-parse d231dd0^{commit} d231dd0^{tree}
    node -e "JSON.parse(require('fs').readFileSync('docs/migration/source-lock.json'))"
    git diff --exit-code -- migration-sources
@@ -311,11 +344,11 @@ cargo xtask test wasm --browser chrome
 | Test ID | Workflow | Required assertion |
 |---|---|---|
 | `P00-SOURCE-LOCK` | Resolve each full SHA and tree twice | Both resolutions equal the checked-in lock file |
-| `P00-SOURCE-READONLY` | Compare worktree source paths before and after phase | No source snapshot content changed |
+| `P00-SOURCE-READONLY` | Compare worktree source paths before and after phase | No migration source content changed |
 | `P00-GATE-SHAPE` | Parse lock JSON and inspect gate/exception tables | Four sources and phases 00-15 are represented |
 | `P00-LICENSE` | Compare source licenses, root license, and attribution inventory | Every migrated source has a compatible approved grant and retained notice policy |
 | `P00-WHITESPACE` | Run path-scoped and repository diff checks | No malformed patch or whitespace error |
-| `P00-BROWSER-TRANSPORT-POLICY` | Inspect architecture/testing policy | Direct-first, classified automatic restricted fallback, opt-out, visible transport, credential omission/stripping, extension no-proxy, and separate cookie-handoff consent are explicit |
+| `P00-BROWSER-TRANSPORT-POLICY` | Inspect architecture/testing policy | Direct-first, classified automatic metadata proxy fallback, opt-out, visible transport, credential omission/stripping, extension no-proxy, and separate cookie-handoff consent are explicit |
 
 ## Explicit Stop Conditions
 
@@ -323,7 +356,8 @@ cargo xtask test wasm --browser chrome
   full SHA.
 - A checked-in migration source differs from its subtree snapshot before this
   phase starts.
-- The Rust roles of `cb13f0b` and `23c4639` cannot be represented separately.
+- The Rust roles of the fixed `cb13f0b` reference and the floating resolved
+  tip cannot be represented separately.
 - An existing unowned change overlaps a destination file.
 - Toolchain versions cannot be supported by both source tests and intended
   targets without an upgrade decision.
@@ -370,8 +404,10 @@ in a patch or issue before removing a mistaken version.
 
 ## Completion Checklist
 
-- [ ] All four required commit objects and tree IDs are locked.
-- [ ] `cb13f0b` and `23c4639` have distinct documented roles.
+- [ ] All three fixed commit objects and the recorded resolved Rust tip,
+  with tree IDs, are locked.
+- [ ] The fixed `cb13f0b` reference and the floating resolved tip have
+  distinct documented roles.
 - [ ] All migration source paths are unchanged.
 - [ ] Core purity and dependency direction are explicit.
 - [ ] Deterministic, live, and manual validations are distinguished.
