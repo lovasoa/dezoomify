@@ -1,8 +1,8 @@
 //! `cargo xtask test`: fast deterministic aggregate.
-//! Runs check, workspace unit tests, core suites, and the legacy-web harness.
-//! Named test targets exist only for their owner phases (`core` in phase 04).
-//! Rejects opt-in live flags; propagates the first nonzero result with a stable
-//! summary.
+//! Runs check, workspace unit tests, core suites, protocol suites, and the
+//! legacy-web harness. Named test targets exist only for their owner phases
+//! (`core` in phase 04, `protocol` in phase 05). Rejects opt-in live flags;
+//! propagates the first nonzero result with a stable summary.
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
@@ -12,8 +12,17 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if args.first().map(String::as_str) == Some("core") {
             return super::core::run(&args[1..]);
         }
+        if args.first().map(String::as_str) == Some("protocol") {
+            if args.len() > 1 {
+                return Err(format!(
+                    "unknown test protocol arguments: {}",
+                    args[1..].join(" ")
+                ));
+            }
+            return super::protocol::test_protocol();
+        }
         return Err(format!(
-            "unknown test arguments (phase-04 targets: core): {}",
+            "unknown test arguments (phase-04/05 targets: core, protocol): {}",
             args.join(" ")
         ));
     }
@@ -21,6 +30,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
     run_step("check", &mut summary, || super::check::run(&[]))?;
     run_step("cargo-test", &mut summary, cargo_test)?;
     run_step("test-core", &mut summary, || super::core::run(&[]))?;
+    run_step(
+        "test-protocol",
+        &mut summary,
+        super::protocol::test_protocol,
+    )?;
     run_step("legacy-web-harness", &mut summary, legacy_web_harness)?;
     print_summary(&summary);
     println!("test: all fast deterministic suites pass");

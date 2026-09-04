@@ -1,0 +1,9 @@
+{
+  "name": "dezoomify-ng",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

@@ -340,6 +340,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dezoomify-protocol"
+version = "1.0.0"
+dependencies = [
+ "dezoomify-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "decoders": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "encoders": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "fetchModes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "fetchModes",
+    "decoders",
+    "encoders"
+  ],
+  "title": "dezoomify-capabilities-v1",
+  "type": "object"
+}

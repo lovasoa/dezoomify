@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/xtask", "crates/fixture-server", "crates/dezoomify-core"]
+members = ["crates/xtask", "crates/fixture-server", "crates/dezoomify-core", "crates/dezoomify-protocol"]
 resolver = "2"
 
 [workspace.package]

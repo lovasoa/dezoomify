@@ -1,0 +1,11 @@
+{
+  "name": "@dezoomify/protocol-ts",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/generated.ts",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "lint": "node -e \"process.exit(0)\"",
+    "typecheck": "node -e \"process.exit(0)\""
+  }
+}

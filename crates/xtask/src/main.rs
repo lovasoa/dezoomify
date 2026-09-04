@@ -1,10 +1,11 @@
-//! Repository task runner. Phase-gated: only phase-03 commands exist.
+//! Repository task runner. Phase-gated: phases 03-05 commands exist.
 //! Future top-level commands fail as unknown instead of succeeding as no-ops.
 
 mod check;
 mod core;
 mod fixtures;
 mod parity;
+mod protocol;
 mod setup;
 mod sources;
 mod test_cmd;
@@ -12,7 +13,7 @@ mod transcript;
 
 use std::process::ExitCode;
 
-const HELP: &str = "cargo xtask <task>\n\nAvailable tasks (phases 03-04):\n  setup                 verify pinned tools and prepare phase-03 dependencies\n  check                 formatting, lint, and read-only artifact validation\n  sources verify        verify locked source objects and prefix trees\n  fixtures verify       verify scenario schemas, routes, payloads, and manifest\n  fixtures serve        serve deterministic fixtures on loopback\n  parity validate       validate the parity inventory against evidence\n  parity report         write the current parity report under artifacts/\n  test                  run all fast deterministic suites\n  test core [--purity|--parity]\n                        pure discovery core suites\n";
+const HELP: &str = "cargo xtask <task>\n\nAvailable tasks (phases 03-05):\n  setup                 verify pinned tools and prepare phase-03 dependencies\n  check                 formatting, lint, and read-only artifact validation\n  sources verify        verify locked source objects and prefix trees\n  fixtures verify       verify scenario schemas, routes, payloads, and manifest\n  fixtures serve        serve deterministic fixtures on loopback\n  parity validate       validate the parity inventory against evidence\n  parity report         write the current parity report under artifacts/\n  protocol generate     write Rust-derived TypeScript/schema artifacts\n  protocol check        verify generated artifacts, vectors, and portability\n  test                  run all fast deterministic suites\n  test core [--purity|--parity]\n                        pure discovery core suites\n  test protocol         versioned protocol contract suites\n";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -57,9 +58,10 @@ fn dispatch(args: &[String]) -> Result<(), String> {
             )),
             None => Err("usage: cargo xtask parity <validate|report>".to_string()),
         },
+        "protocol" => protocol::run(&args[1..]),
         "test" => test_cmd::run(&args[1..]),
         other => Err(format!(
-            "unknown task '{other}' (phase-03/04 tasks: setup, check, sources, fixtures, parity, test)"
+            "unknown task '{other}' (phase-03/04/05 tasks: setup, check, sources, fixtures, parity, protocol, test)"
         )),
     }
 }
@@ -100,9 +102,11 @@ mod tests {
 
     #[test]
     fn command_help() {
-        // Help lists exactly the phase-03 subset: no future commands.
+        // Help lists exactly the phase-03/04/05 subset: no future commands.
         assert!(dispatch(&s(&["--help"])).is_ok());
-        for cmd in ["setup", "check", "sources", "fixtures", "parity", "test"] {
+        for cmd in [
+            "setup", "check", "sources", "fixtures", "parity", "protocol", "test",
+        ] {
             assert!(HELP.contains(cmd), "help lacks {cmd}");
         }
         for future in [
@@ -110,7 +114,6 @@ mod tests {
             "dev",
             "ci",
             "release",
-            "protocol",
             "job",
             "wasm",
             "browser",
@@ -137,7 +140,7 @@ mod tests {
             vec!["dev", "web"],
             vec!["ci", "local"],
             vec!["release", "plan"],
-            vec!["protocol", "generate"],
+            vec!["protocol", "bogus"],
             vec!["test", "all"],
             vec!["test", "live"],
             vec!["bogus"],

@@ -2,6 +2,22 @@
 
 `crates/dezoomify-protocol` is the Rust source of the boundary between the shared UI, CLI front ends, and runtimes. It generates the schema and `packages/protocol-ts` bindings plus serialization and compatibility tests. Other handwritten protocol types are not accepted.
 
+## Protocol v1 boundary interactions
+
+| Interaction | Producer | Consumer | Direction | Ordering | Payload ownership | Failure | Deterministic test |
+|---|---|---|---|---|---|---|---|
+| Discovery fetch need | job | host | job→host effect | FIFO per job | job allocates request ID; host returns bytes or typed failure | typed fetch/decode error | `P05-VARIANTS` golden round trip |
+| Deferred image selection | job | UI | job→UI event | once per catalog | job owns catalog IDs | invalid selection rejected | `P05-CATALOG` |
+| Fixed tile acquisition | job | host | job→host effect | bounded concurrency | out-of-band buffer handles | retry/partial policy | `P05-BUFFERS` |
+| Adaptive probe/observation | job | host | effect/response pair | deterministic priority | host reports observation | probe limit error | `P05-VARIANTS` |
+| Decode/process/write/encode/finalize/publication | host | job | host→job response | correlated by effect ID | buffers released exactly once | typed outcome | `P05-OUTPUT` |
+| Scan candidate | extension | job | host→job | first-seen order | scan-scoped IDs | stale scan rejected | `P05-SCAN` |
+| Website/deep-link handoff | website/OS | app | inbound intent | one-shot + confirm | receiver validates untrusted input | `handoff.rejected` | `P05-HANDOFF` |
+| Destination request/response | job | host | effect/response pair | before any write | opaque destination ID | rejection recovers | `P05-OUTPUT` |
+| Recovery choice | job/UI | job | event/command pair | correlated by recovery ID | typed allowed actions | stale choice rejected | `P05-RECOVERY` |
+| Progress snapshot | job | UI | job→UI event | monotonic | absolute counts | n/a (transient) | `P05-VARIANTS` |
+| Terminal outcome | job | UI | job→UI event | exactly once | output ID or error | terminal wins | `P05-VARIANTS` |
+
 ## Commands
 
 Commands express user intent and carry a request or job identifier. They cover discovery, selection, job start, pause or resume where supported, cancellation, recovery choice, output confirmation, and handoff import. Commands are idempotent where retries are expected; duplicate identifiers do not duplicate work.

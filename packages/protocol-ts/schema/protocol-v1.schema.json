@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "protocol": {
+      "const": "1.0"
+    }
+  },
+  "required": [
+    "protocol",
+    "kind"
+  ],
+  "title": "dezoomify-protocol-v1",
+  "type": "object"
+}

@@ -1,0 +1,1 @@
+{"error":{"code":"fetch.failed","message":"tile fetch failed","phase":"acquisition","recovery":[],"resource_kind":"tile","retryable":false,"transport":"direct"},"job":"job:golden-1","kind":"event","protocol":"1.0","type":"failed"}
