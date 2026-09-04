@@ -10,16 +10,16 @@ use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
     ImageDescriptor, LevelDescriptor, Request, StableId,
 };
+use crate::web_page::page_title;
 
 static VIEW_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)/(?:thumbview|pageview|zoom)/\d+(?:[?#].*)?$")
         .expect("constant VLS URL pattern")
 });
-static VAR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)<var\b[^>]*\bid\s*=\s*[\"']zoomTileSize[\"'][^>]*\bvalue\s*=\s*[\"'](\d+)[\"']"#,
-    )
-    .expect("constant VLS tile-size pattern")
+static VAR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<var\b([^>]*)>").expect("constant VLS var pattern"));
+static VIEW_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)/(?:thumbview|pageview|zoom)/").expect("constant VLS view path pattern")
 });
 static MAP_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?is)<(?:map|div)\b([^>]*\bid\s*=\s*[\"']map[\"'][^>]*)>"#)
@@ -46,17 +46,9 @@ fn is_view_url(uri: &str) -> bool {
 
 #[allow(clippy::unnecessary_wraps)]
 fn normalize_url(uri: &str) -> Result<Request, DiscoveryError> {
-    let marker = uri
-        .find("/thumbview/")
-        .or_else(|| uri.find("/pageview/"))
-        .unwrap_or(uri.len());
-    Ok(Request::new(format!(
-        "{}{}",
-        &uri[..marker],
-        uri[marker..]
-            .replace("/thumbview/", "/zoom/")
-            .replace("/pageview/", "/zoom/")
-    )))
+    Ok(Request::new(
+        VIEW_PATH_RE.replace(uri, "/zoom/").into_owned(),
+    ))
 }
 
 fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
@@ -76,12 +68,20 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         .or_else(|| positive_attribute(map.as_str(), "height"))
         .ok_or_else(|| DiscoveryError::Session("VLS map has invalid height".into()))?;
     let zoom_tile_size = VAR_RE
-        .captures(&page)
-        .and_then(|captures| captures.get(1))
-        .and_then(|value| value.as_str().parse::<u32>().ok())
+        .captures_iter(&page)
+        .find_map(|captures| {
+            let attributes = captures.get(1)?.as_str();
+            attribute(attributes, "id")
+                .filter(|id| id.eq_ignore_ascii_case("zoomTileSize"))
+                .and_then(|_| attribute(attributes, "value"))
+                .and_then(|value| value.parse::<u32>().ok())
+        })
         .filter(|size| *size > 0)
         .ok_or_else(|| DiscoveryError::Session("VLS page has no valid zoom tile size".into()))?;
-    let height = height.div_ceil(zoom_tile_size) * zoom_tile_size;
+    let height = height
+        .div_ceil(zoom_tile_size)
+        .checked_mul(zoom_tile_size)
+        .ok_or_else(|| DiscoveryError::Session("VLS image height exceeds u32".into()))?;
     let parsed =
         Url::parse(url).map_err(|_| DiscoveryError::Session("invalid VLS viewer URL".into()))?;
     let mut base = parsed;
@@ -102,7 +102,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     .map_err(|error| DiscoveryError::Session(format!("invalid VLS grid: {error}")))?;
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
         id: StableId::new("vls:image"),
-        title: Some(format!("VLS image {id}")),
+        title: page_title(&page),
         format: StableId::new("vls"),
         levels: vec![LevelDescriptor::new(source)],
         ..Default::default()
@@ -120,4 +120,29 @@ fn positive_attribute(tag: &str, name: &str) -> Option<u32> {
     attribute(tag, name)
         .and_then(|value| value.parse().ok())
         .filter(|value| *value > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{catalog, normalize_url};
+
+    #[test]
+    fn viewer_path_normalization_is_case_insensitive() {
+        assert_eq!(
+            normalize_url("https://example.test/ThumbView/12")
+                .unwrap()
+                .uri,
+            "https://example.test/zoom/12"
+        );
+    }
+
+    #[test]
+    fn rounded_height_overflow_is_rejected() {
+        let page = format!(
+            r#"<div id="map" vls:ot_id="1" vls:width="1" vls:height="{}"></div>
+                <var id="zoomTileSize" value="1024">"#,
+            u32::MAX
+        );
+        assert!(catalog("https://example.test/pageview/1", page.as_bytes()).is_err());
+    }
 }

@@ -110,14 +110,6 @@ fn automatic_discovery_selects_every_ready_format() {
             ) ],
             "iipimage",
         ),
-        (
-            "https://digitalcollections.nypl.org/items/a14f3200-fac1-012f-f7a4-58d385a7bbd0",
-            &[ (
-                "https://access.nypl.org/image.php/a14f3200-fac1-012f-f7a4-58d385a7bbd0/tiles/config.js",
-                br#"{"configs":{"0":{"size":{"width":"512","height":"512"},"tilesize":"256","overlap":"0","format":"jpg"}}}"#,
-            ) ],
-            "nypl",
-        ),
     ];
     for (input, resources, format) in cases {
         assert_eq!(
@@ -695,6 +687,7 @@ fn resolve_generic(template: &str, available: &[(u32, u32, Vec2d)]) -> (Grid, Ve
                 previously_output,
             } => return (grid, previously_output),
             DiscoverableStep::Empty => panic!("generic fixture unexpectedly had no tiles"),
+            DiscoverableStep::Error(error) => panic!("unexpected adaptive error: {error}"),
         };
     }
 }
@@ -756,7 +749,7 @@ fn dezoomer_generic_probe_cases() {
         assert_eq!(grid.tile_size(), expected_tile_size, "{template}");
     }
 
-    let (grid, _) = resolve_generic(
+    let (grid, previously_output) = resolve_generic(
         "missing-origin.svg?x={{X}}&y={{Y}}",
         &[
             (1, 0, Vec2d::square(256)),
@@ -766,6 +759,7 @@ fn dezoomer_generic_probe_cases() {
     );
     assert_eq!(grid.image_size(), Vec2d::square(512));
     assert_eq!(grid.tile_size(), Vec2d::square(256));
+    assert!(!previously_output.contains(&Vec2d { x: 256, y: 256 }));
 }
 
 #[test]
@@ -833,6 +827,7 @@ fn dezoomer_generic_one_by_one_placeholders_are_missing_tiles() {
                 return;
             }
             DiscoverableStep::Empty => panic!("placeholder fixture unexpectedly had no tiles"),
+            DiscoverableStep::Error(error) => panic!("unexpected adaptive error: {error}"),
         };
     }
 }
@@ -916,6 +911,14 @@ fn automatic_discovery_selects_part_three_formats() {
             "arcgis",
         ),
         (
+            "https://fixtures.test/arcgis/viewer?basemapUrl=https%3A%2F%2Ffixtures.test%2Farcgis%2FMapServer%3Ftoken%3Dfixture",
+            &[(
+                "https://fixtures.test/arcgis/MapServer?token=fixture&f=json",
+                coverage_fixture!("arcgis/MapServer.json"),
+            )],
+            "arcgis",
+        ),
+        (
             "https://fixtures.test/entity/OBJECT/1",
             &[
                 (
@@ -957,6 +960,7 @@ fn part_three_direct_protocols_generate_expected_tiles() {
         tile_urls(image.levels.last().unwrap()).last().unwrap(),
         "https://fixtures.test/xl/sample.imgi?cmd=tile&x=1&y=1&z=1"
     );
+    assert_eq!(image.title.as_deref(), Some("sample"));
 
     let image = ready_image(
         discover(
@@ -972,6 +976,7 @@ fn part_three_direct_protocols_generate_expected_tiles() {
         tile_urls(image.levels.last().unwrap()).last().unwrap(),
         "https://fixtures.test/topviewer/sample-file/13.jpg"
     );
+    assert_eq!(image.title.as_deref(), Some("sample-file"));
 
     let image = ready_image(
         discover(
@@ -987,6 +992,7 @@ fn part_three_direct_protocols_generate_expected_tiles() {
         tile_urls(image.levels.last().unwrap())[0],
         "https://fixtures.test/fsi/server?type=image&source=image&width=512&height=512&rect=0,0,1,1"
     );
+    assert_eq!(image.title.as_deref(), Some("image"));
 
     let image = ready_image(
         discover(
@@ -1002,6 +1008,7 @@ fn part_three_direct_protocols_generate_expected_tiles() {
         tile_urls(image.levels.last().unwrap()).last().unwrap(),
         "https://fixtures.test/lizardtech/iserv/getimage?cat=North%20America%20and%20United%20States&item=NorthAmerica%2FUS1566a.sid&wid=512&hei=512&oif=jpeg&lev=0&cp=0.75,0.75"
     );
+    assert_eq!(image.title.as_deref(), Some("US1566a"));
 
     let image = ready_image(
         discover(
@@ -1017,6 +1024,7 @@ fn part_three_direct_protocols_generate_expected_tiles() {
         tile_urls(image.levels.last().unwrap())[0],
         "https://fixtures.test/image/tiler/square/fixture/0/0/0"
     );
+    assert_eq!(image.title.as_deref(), Some("Fixture Volume"));
 
     let image = ready_image(
         discover(
@@ -1032,6 +1040,7 @@ fn part_three_direct_protocols_generate_expected_tiles() {
         tile_urls(image.levels.last().unwrap())[0]
             .starts_with("https://fixtures.test/hungaricana/image/sample.ecw/")
     );
+    assert_eq!(image.title.as_deref(), Some("sample"));
 
     let image = ready_image(
         discover(
@@ -1060,6 +1069,7 @@ fn part_three_direct_protocols_generate_expected_tiles() {
     );
     let level = image.levels.last().unwrap();
     assert_eq!(level.source.image_size(), Some(Vec2d { x: 768, y: 768 }));
+    assert_eq!(image.title.as_deref(), Some("Fixture Basemap"));
     assert_eq!(
         tile_urls(level).last().unwrap(),
         "https://fixtures.test/arcgis/MapServer/tile/7/3/4?token=fixture"
@@ -1077,6 +1087,12 @@ fn xlimage_exposes_server_zoom_levels() {
         .unwrap(),
     );
     assert_eq!(image.levels.len(), 3);
+    assert!(image.levels.iter().all(|level| {
+        level
+            .title
+            .as_deref()
+            .is_some_and(|title| title.starts_with("XLimage level "))
+    }));
     assert_eq!(
         image.levels[0].source.image_size(),
         Some(Vec2d { x: 250, y: 175 })
@@ -1099,10 +1115,10 @@ fn xlimage_exposes_server_zoom_levels() {
 fn part_three_page_adapters_follow_their_metadata_resources() {
     let image = ready_image(
         discover(
-            "https://fixtures.test/topviewer/thumbnail.html",
+            "https://fixtures.test/archive/thumbnail.html",
             &[
                 (
-                    "https://fixtures.test/topviewer/thumbnail.html",
+                    "https://fixtures.test/archive/thumbnail.html",
                     coverage_fixture!("topviewer/thumbnail.html"),
                 ),
                 (
@@ -1123,7 +1139,7 @@ fn part_three_page_adapters_follow_their_metadata_resources() {
                 coverage_fixture!("topviewer/mediabank.html"),
             ),
             (
-                "https://fixtures.test/mediabank/media?rows=1&apiKey=fixture-key&entities%5B0%5D=fixture-entity",
+                "https://fixtures.test/mediabank/media?label=fixture&mode=full&rows=1&apiKey=fixture-key&entities%5B0%5D=fixture-entity",
                 coverage_fixture!("topviewer/media.json"),
             ),
             (
@@ -1135,12 +1151,36 @@ fn part_three_page_adapters_follow_their_metadata_resources() {
     .unwrap());
     assert_eq!(image.format.as_str(), "topviewer");
 
+    let detail = "https://fixtures.test/archive/detail/record-id/media/asset-id";
+    let media = "https://fixtures.test/mediabank/media/record-id?apiKey=fixture-key";
     let image = ready_image(
         discover(
-            "https://fixtures.test/fsi/page.html",
+            detail,
             &[
                 (
-                    "https://fixtures.test/fsi/page.html",
+                    detail,
+                    br#"<pic-mediabank data-api-key="fixture-key" data-api-url="/mediabank/"></pic-mediabank>"#,
+                ),
+                (
+                    media,
+                    br#"{"media":[{"asset":[{"uuid":"other-id","topview":"https://fixtures.test/topviewer/wrong.json"},{"uuid":"asset-id","topview":"https://fixtures.test/topviewer/data.json"}]}]}"#,
+                ),
+                (
+                    "https://fixtures.test/topviewer/data.json",
+                    coverage_fixture!("topviewer/data.json"),
+                ),
+            ],
+        )
+        .unwrap(),
+    );
+    assert_eq!(image.format.as_str(), "topviewer");
+
+    let image = ready_image(
+        discover(
+            "https://fixtures.test/archive/fsi.html",
+            &[
+                (
+                    "https://fixtures.test/archive/fsi.html",
                     coverage_fixture!("fsi/page.html"),
                 ),
                 (
@@ -1155,14 +1195,14 @@ fn part_three_page_adapters_follow_their_metadata_resources() {
 
     let image = ready_image(
         discover(
-            "https://fixtures.test/hungaricana/imagepath.html",
+            "https://fixtures.test/hungaricana/page.html",
             &[
                 (
-                    "https://fixtures.test/hungaricana/imagepath.html",
-                    coverage_fixture!("hungaricana/imagepath.html"),
+                    "https://fixtures.test/hungaricana/page.html",
+                    coverage_fixture!("hungaricana/inline-images.html"),
                 ),
                 (
-                    "https://fixtures.test/hungaricana/image/page/imagepath.ecw",
+                    "https://fixtures.test/hungaricana/image/page/first.ecw",
                     coverage_fixture!("hungaricana/sample.ecw.json"),
                 ),
             ],
@@ -1217,6 +1257,25 @@ fn pnav_probe_resolves_scaled_crop_grid_without_repeating_the_probe() {
         grid.tiles_row_major().next().unwrap().unwrap().request.uri,
         tile.request.uri
     );
+
+    let image = ready_image(
+        discover(
+            "https://fixtures.test/entity/OBJECT/1/",
+            &[
+                (
+                    "https://fixtures.test/entity/OBJECT/1/",
+                    coverage_fixture!("pnav/page.html"),
+                ),
+                (
+                    "https://fixtures.test/fixtures/pnav/image.json",
+                    coverage_fixture!("pnav/image.json"),
+                ),
+            ],
+        )
+        .unwrap(),
+    );
+    assert_eq!(image.format.as_str(), "pnav");
+    assert_eq!(image.title.as_deref(), Some("Fixture Object"));
 }
 
 #[test]

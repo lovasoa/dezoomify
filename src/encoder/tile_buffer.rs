@@ -156,6 +156,16 @@ impl TileBuffer {
             encoded_buffer,
             ..
         } = self
+            && buffer.is_empty()
+            && encoded_buffer.is_empty()
+        {
+            return Ok(());
+        }
+        if let TileBuffer::Buffering {
+            buffer,
+            encoded_buffer,
+            ..
+        } = self
         {
             let decoded_size = buffer
                 .iter()

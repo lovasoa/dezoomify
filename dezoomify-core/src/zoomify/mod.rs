@@ -16,10 +16,10 @@ mod image_properties;
 
 const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::UrlPredicate(is_tile_url).map_url(tile_metadata),
-    DiscoveryMatch::UrlSuffix("ImageProperties.xml").extract(load_catalog),
-    ngv::ROUTE,
+    DiscoveryMatch::UrlSuffix("ImageProperties.xml").then(extract_catalog),
     DiscoveryMatch::ContentPredicate(contains_zoomify_declaration)
         .then(extract_image_properties_url),
+    ngv::ROUTE,
 ];
 
 pub const SPEC: DezoomerSpec = DezoomerSpec::new("zoomify", ROUTES).preferring(is_zoomify_url);
@@ -29,18 +29,16 @@ static SHOW_IMAGE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
         .expect("constant Zoomify showImage pattern")
 });
 
-static FLASH_IMAGE_PATH_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(
-        r#"(?i)\bzoomifyImagePath\s*=\s*(?:["'](?P<image>[^"']*)["']|(?P<bare>[^'"&\s]+))"#,
-    )
-    .expect("constant Zoomify FlashVars pattern")
-});
-
 static TILE_SERVICE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(
         r#"(?is)\btype["']?\s*:\s*["']zoomifytileservice["'].*?\btilesUrl["']?\s*:\s*["'](?P<image>[^"']+)"#,
     )
     .expect("constant Zoomify tile service pattern")
+});
+
+static SCRIPT_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r"(?is)<script\b[^>]*>(?P<content>.*?)</script\s*>")
+        .expect("constant script block pattern")
 });
 
 static HTML_BASE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -78,12 +76,20 @@ fn extract_image_properties_url(
     ))))
 }
 
+fn extract_catalog(
+    _: &DiscoveryContext<'_>,
+    resource: crate::core::DiscoveryResource<'_>,
+) -> Result<DiscoveryStep, DiscoveryError> {
+    load_catalog(resource.uri(), resource.bytes()).map(DiscoveryStep::Complete)
+}
+
 mod ngv;
 
 fn contains_zoomify_declaration(contents: &[u8]) -> bool {
     SHOW_IMAGE_RE.is_match(contents)
-        || FLASH_IMAGE_PATH_RE.is_match(contents)
-        || TILE_SERVICE_RE.is_match(contents)
+        || script_blocks(contents)
+            .iter()
+            .any(|(_, script)| TILE_SERVICE_RE.is_match(script))
 }
 
 fn append_path_component(uri: &str, component: &str) -> String {
@@ -96,23 +102,30 @@ fn extract_image_path(html: &[u8]) -> Option<String> {
     let show_image = SHOW_IMAGE_RE
         .captures_iter(html)
         .find_map(|captures| Some((captures.get(0)?.start(), capture_text(&captures, "image")?)));
-    let flash = FLASH_IMAGE_PATH_RE
-        .captures_iter(html)
-        .find_map(|captures| {
-            Some((
-                captures.get(0)?.start(),
-                capture_text(&captures, "image").or_else(|| capture_text(&captures, "bare"))?,
-            ))
-        });
-    let tile_service = TILE_SERVICE_RE
-        .captures_iter(html)
-        .filter_map(|captures| Some((captures.get(0)?.start(), capture_text(&captures, "image")?)))
-        .min_by_key(|(offset, _)| *offset);
-    [show_image, flash, tile_service]
+    let tile_service = script_blocks(html).into_iter().find_map(|(start, script)| {
+        let captures = TILE_SERVICE_RE.captures(script)?;
+        let offset = start + captures.get(0)?.start();
+        Some((offset, capture_text(&captures, "image")?))
+    });
+    [show_image, tile_service]
         .into_iter()
         .flatten()
         .min_by_key(|(offset, _)| *offset)
         .map(|(_, path)| path)
+}
+
+/// Byte ranges of `<script>…</script>` contents with their document offsets.
+///
+/// Tile-service configurations are only meaningful inside script code;
+/// matching outside would pick up documentation snippets.
+fn script_blocks(html: &[u8]) -> Vec<(usize, &[u8])> {
+    SCRIPT_RE
+        .captures_iter(html)
+        .filter_map(|captures| {
+            let content = captures.name("content")?;
+            Some((content.start(), content.as_bytes()))
+        })
+        .collect()
 }
 
 fn capture_text(captures: &regex::bytes::Captures<'_>, name: &str) -> Option<String> {
@@ -171,8 +184,7 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
         .trim_end_matches('/')
         .rsplit('/')
         .next()
-        .filter(|name| !name.is_empty())
-        .unwrap_or("Zoomify");
+        .filter(|name| !name.is_empty());
     let full_resolution_only = properties.is_full_resolution_only();
     let (level_info, warnings) = properties.levels_with_warnings();
     let levels = level_info
@@ -203,10 +215,12 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
                 },
             )
             .map_err(|error| DiscoveryError::Session(format!("invalid Zoomify grid: {error}")))?;
-            Ok(LevelDescriptor::new(source).with_title(Some(format!(
-                "{base_name} Zoomify level {index} ({: >5}×{: >5} pixels)",
-                size.x, size.y,
-            ))))
+            Ok(
+                LevelDescriptor::new(source).with_title(Some(match base_name {
+                    Some(base_name) => format!("{base_name} Zoomify level {index}"),
+                    None => format!("Zoomify level {index}"),
+                })),
+            )
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     let title = base_url
@@ -330,6 +344,21 @@ mod tests {
     }
 
     #[test]
+    fn redirected_metadata_keeps_the_requested_tile_base() {
+        let mut operation = operation("https://origin.example/book/ImageProperties.xml");
+        let metadata = provide_next_at(
+            &mut operation,
+            XML,
+            "https://cdn.example/metadata/content.xml",
+        );
+        assert_eq!(metadata, "https://origin.example/book/ImageProperties.xml");
+        assert_eq!(
+            first_tile(operation),
+            "https://origin.example/book/TileGroup0/0-0-0.jpg"
+        );
+    }
+
+    #[test]
     fn signed_proxy_remains_the_tile_base() {
         let (metadata, tile) = discover_viewer(
             "https://museum.example/viewer/object",
@@ -348,8 +377,6 @@ mod tests {
     #[test]
     fn extracts_general_zoomify_declarations() {
         for (page, expected) in [
-            (r#"zoomifyImagePath=/zoomify";"#, "/zoomify"),
-            (r#"zoomifyImagePath = "/zoomify";"#, "/zoomify"),
             (r#"showImage("viewer", "/zoomify");"#, "/zoomify"),
             (r#"showImage(viewer, "/zoomify");"#, "/zoomify"),
             (
@@ -357,7 +384,7 @@ mod tests {
                 "https://example.com/proxy/IMAGE_ID/",
             ),
             (
-                r#"{"type": "zoomifytileservice", "tilesUrl": "/zoomify"}"#,
+                r#"<script>var config = {"type": "zoomifytileservice", "tilesUrl": "/zoomify"};</script>"#,
                 "/zoomify",
             ),
         ] {
@@ -366,6 +393,13 @@ mod tests {
                 Some(expected)
             );
         }
+        // Configuration snippets displayed outside scripts are ignored.
+        assert_eq!(
+            extract_image_path(
+                br#"<pre>{"type": "zoomifytileservice", "tilesUrl": "/displayed-not-executed"}</pre>"#
+            ),
+            None
+        );
     }
 
     #[test]
@@ -376,6 +410,19 @@ mod tests {
             .provide(ResourceResponse::new(
                 need.id,
                 b"<html><body>ordinary page</body></html>",
+            ))
+            .unwrap_err();
+        assert!(matches!(error, DiscoveryError::NoCandidateAccepted { .. }));
+    }
+
+    #[test]
+    fn generic_var_url_pages_are_not_treated_as_ngv() {
+        let mut operation = operation("https://example.com/page");
+        let need = operation.missing_resources().unwrap().pop().unwrap();
+        let error = operation
+            .provide(ResourceResponse::new(
+                need.id,
+                br"<script>var url = '/zoomify';</script>",
             ))
             .unwrap_err();
         assert!(matches!(error, DiscoveryError::NoCandidateAccepted { .. }));

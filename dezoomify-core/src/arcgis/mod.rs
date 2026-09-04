@@ -14,12 +14,16 @@ use crate::core::{
 pub const SPEC: DezoomerSpec = DezoomerSpec::new(
     "arcgis",
     &[
-        DiscoveryMatch::UrlPredicate(is_map_server_url).map_url(metadata_url),
+        DiscoveryMatch::UrlPredicate(is_arcgis_url).map_url(metadata_url),
         DiscoveryMatch::Any.extract(catalog),
     ],
 )
-.recognizing(is_map_server_url, "not an ArcGIS MapServer URL")
-.preferring(is_map_server_url);
+.recognizing(is_arcgis_url, "not an ArcGIS MapServer URL")
+.preferring(is_arcgis_url);
+
+fn is_arcgis_url(uri: &str) -> bool {
+    is_map_server_url(uri) || basemap_url(uri).is_some()
+}
 
 fn is_map_server_url(uri: &str) -> bool {
     Url::parse(uri).is_ok_and(|url| {
@@ -83,11 +87,16 @@ fn tile_parameters(input: &str) -> Result<String, DiscoveryError> {
 }
 
 fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
-    let metadata: Metadata = serde_json::from_slice(bytes).map_err(|error| {
+    let mut metadata: Metadata = serde_json::from_slice(bytes).map_err(|error| {
         DiscoveryError::Session(format!(
             "unable to parse ArcGIS MapServer metadata: {error}"
         ))
     })?;
+    let title = metadata
+        .map_name
+        .take()
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty());
     let (tile_info, extent) = validate_metadata(metadata)?;
     let service: Arc<str> = service_url(url)?.into();
     let parameters: Arc<str> = tile_parameters(url)?.into();
@@ -99,7 +108,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     }
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
         id: StableId::new("arcgis:image"),
-        title: Some("ArcGIS MapServer".into()),
+        title,
         format: StableId::new("arcgis"),
         levels,
         ..Default::default()
@@ -211,9 +220,7 @@ fn build_levels(
                 },
             )
             .map_err(|error| DiscoveryError::Session(format!("invalid ArcGIS grid: {error}")))?;
-            Ok(LevelDescriptor::new(source).with_title(Some(format!(
-                "ArcGIS level {level} ({width}×{height} pixels)"
-            ))))
+            Ok(LevelDescriptor::new(source).with_title(Some(format!("ArcGIS level {level}"))))
         })
         .collect()
 }
@@ -268,6 +275,8 @@ struct Metadata {
     service_type: Option<String>,
     #[serde(rename = "singleFusedMapCache", default)]
     single_fused_map_cache: bool,
+    #[serde(rename = "mapName", default)]
+    map_name: Option<String>,
     #[serde(rename = "tileInfo")]
     tile_info: Option<TileInfo>,
     #[serde(rename = "fullExtent")]

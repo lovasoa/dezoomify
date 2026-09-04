@@ -76,25 +76,16 @@ fn parse_document(bytes: &[u8]) -> Result<XmlElement, DiscoveryError> {
                 append_element(&mut root, &mut stack, element)?;
             }
             Event::Text(text) => {
-                let decoded = text.decode().map_err(|error| {
-                    DiscoveryError::Session(format!("invalid WMTS text: {error}"))
-                })?;
-                let unescaped = quick_xml::escape::unescape(&decoded).map_err(|error| {
+                let unescaped = quick_xml::escape::unescape(&text).map_err(|error| {
                     DiscoveryError::Session(format!("invalid WMTS text escape: {error}"))
                 })?;
                 append_text(&mut stack, unescaped.as_ref())?;
             }
             Event::CData(text) => {
-                let decoded = text.decode().map_err(|error| {
-                    DiscoveryError::Session(format!("invalid WMTS text: {error}"))
-                })?;
-                append_text(&mut stack, decoded.as_ref())?;
+                append_text(&mut stack, &text)?;
             }
             Event::GeneralRef(reference) => {
-                let decoded = reference.decode().map_err(|error| {
-                    DiscoveryError::Session(format!("invalid WMTS reference: {error}"))
-                })?;
-                let escaped = format!("&{decoded};");
+                let escaped = format!("&{};", reference.as_ref());
                 let unescaped = quick_xml::escape::unescape(&escaped).map_err(|error| {
                     DiscoveryError::Session(format!("invalid WMTS reference: {error}"))
                 })?;
@@ -115,17 +106,14 @@ fn parse_document(bytes: &[u8]) -> Result<XmlElement, DiscoveryError> {
 }
 
 fn element_from_start(start: &BytesStart<'_>) -> Result<XmlElement, DiscoveryError> {
-    let name = String::from_utf8(start.local_name().as_ref().to_vec())
-        .map_err(|_| DiscoveryError::Session("invalid WMTS XML element name".into()))?;
+    let name = start.local_name().into_inner().to_string();
     let mut attributes = Vec::new();
     for attribute in start.attributes() {
         let attribute = attribute.map_err(|error| {
             DiscoveryError::Session(format!("invalid WMTS XML attribute: {error}"))
         })?;
-        let name = String::from_utf8(attribute.key.local_name().as_ref().to_vec())
-            .map_err(|_| DiscoveryError::Session("invalid WMTS XML attribute name".into()))?;
-        let value = attribute
-            .decode_and_unescape_value(start.decoder())
+        let name = attribute.key.local_name().into_inner().to_string();
+        let value = quick_xml::escape::unescape(&attribute.value)
             .map_err(|error| {
                 DiscoveryError::Session(format!("invalid WMTS XML attribute value: {error}"))
             })?
@@ -382,7 +370,7 @@ fn parse_layer_bounds(layer: &XmlElement) -> Result<Option<LayerBounds>, Discove
         element
             .attribute("crs")
             .and_then(coordinate_reference)
-            .unwrap_or(CoordinateReference::WebMercator)
+            .ok_or_else(|| DiscoveryError::Session("unsupported WMTS bounding-box CRS".into()))?
     };
     let lower = coordinates(
         &required_text(element, "LowerCorner", "bounding-box lower corner")?,
@@ -564,10 +552,8 @@ fn build_levels(context: &WmtsContext) -> Result<Vec<LevelDescriptor>, Discovery
                 },
             )
             .map_err(|error| DiscoveryError::Session(format!("invalid WMTS grid: {error}")))?;
-            Ok(LevelDescriptor::new(source).with_title(Some(format!(
-                "WMTS matrix {} ({}x{} pixels)",
-                matrix.identifier, width, height
-            ))))
+            Ok(LevelDescriptor::new(source)
+                .with_title(Some(format!("WMTS matrix {}", matrix.identifier))))
         })
         .collect()
 }
@@ -971,6 +957,44 @@ mod tests {
     }
 
     #[test]
+    fn a_non_default_style_is_kept_in_relative_tile_urls() {
+        let xml = br#"
+            <Capabilities>
+              <Contents>
+                <Layer>
+                  <Identifier>styled</Identifier>
+                  <Style isDefault="false"><Identifier>night</Identifier></Style>
+                  <ResourceURL resourceType="tile"
+                    template="tiles/{Style}/{TileMatrix}/{TileRow}/{TileCol}.jpg" />
+                </Layer>
+                <TileMatrixSet>
+                  <Identifier>set</Identifier>
+                  <SupportedCRS>EPSG:3857</SupportedCRS>
+                  <TileMatrix>
+                    <Identifier>0</Identifier><ScaleDenominator>1</ScaleDenominator>
+                    <TopLeftCorner>0 0</TopLeftCorner>
+                    <TileWidth>256</TileWidth><TileHeight>256</TileHeight>
+                    <MatrixWidth>1</MatrixWidth><MatrixHeight>1</MatrixHeight>
+                  </TileMatrix>
+                </TileMatrixSet>
+              </Contents>
+            </Capabilities>
+        "#;
+
+        let catalog = catalog("https://example.test/wmts/capabilities.xml", xml).unwrap();
+        let [CatalogEntry::Ready(image)] = catalog.entries() else {
+            panic!("expected one ready image")
+        };
+        let TileSource::Grid(grid) = &image.levels[0].source else {
+            panic!("expected a known grid")
+        };
+        assert_eq!(
+            grid.tiles_row_major().next().unwrap().unwrap().request.uri,
+            "https://example.test/wmts/tiles/night/0/0/0.jpg"
+        );
+    }
+
+    #[test]
     fn unknown_template_placeholders_are_rejected() {
         let xml = br#"
             <Capabilities>
@@ -978,6 +1002,37 @@ mod tests {
                 <Layer>
                   <Identifier>invalid-template</Identifier>
                   <ResourceURL resourceType="tile" template="tiles/{Time}/{TileRow}/{TileCol}.jpg" />
+                </Layer>
+                <TileMatrixSet>
+                  <Identifier>set</Identifier>
+                  <SupportedCRS>EPSG:3857</SupportedCRS>
+                  <TileMatrix>
+                    <Identifier>0</Identifier><ScaleDenominator>1</ScaleDenominator>
+                    <TopLeftCorner>0 0</TopLeftCorner>
+                    <TileWidth>256</TileWidth><TileHeight>256</TileHeight>
+                    <MatrixWidth>1</MatrixWidth><MatrixHeight>1</MatrixHeight>
+                  </TileMatrix>
+                </TileMatrixSet>
+              </Contents>
+            </Capabilities>
+        "#;
+
+        assert!(catalog("https://example.test/wmts/capabilities.xml", xml).is_err());
+    }
+
+    #[test]
+    fn unknown_bounding_box_crs_is_rejected() {
+        let xml = br#"
+            <Capabilities>
+              <Contents>
+                <Layer>
+                  <Identifier>unknown-crs</Identifier>
+                  <BoundingBox crs="EPSG:3413">
+                    <LowerCorner>0 0</LowerCorner>
+                    <UpperCorner>1 1</UpperCorner>
+                  </BoundingBox>
+                  <ResourceURL resourceType="tile"
+                    template="tiles/{TileMatrix}/{TileRow}/{TileCol}.jpg" />
                 </Layer>
                 <TileMatrixSet>
                   <Identifier>set</Identifier>

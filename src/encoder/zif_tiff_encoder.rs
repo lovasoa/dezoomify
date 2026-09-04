@@ -76,7 +76,7 @@ impl ZifTiffEncoder {
         } else {
             None
         };
-        if codec == Codec::Jpeg {
+        if codec == Codec::Jpeg && channels == 3 {
             color_model = ColorModel::YCbCr;
         }
         let ycbcr_subsampling = jpeg.map(|info| info.subsampling);
@@ -213,7 +213,7 @@ impl Encoder for ZifTiffEncoder {
         let Ok((mut color_model, channels)) = color_from_encoded_tile(&tile) else {
             return self.decode_or_fall_back(&tile);
         };
-        if codec == Codec::Jpeg {
+        if codec == Codec::Jpeg && channels == 3 {
             color_model = ColorModel::YCbCr;
         }
         let jpeg = if codec == Codec::Jpeg {
@@ -472,6 +472,39 @@ mod tests {
         let tile = image.level_tiles(0).unwrap().next().unwrap();
         let stored = reader.fetch(tile.range()).unwrap();
         assert_eq!(stored.bytes(), bytes.as_slice());
+    }
+
+    #[test]
+    fn writes_grayscale_jpeg_tiles_without_changing_their_channel_count() {
+        let mut encoded = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 95)
+            .write_image(&vec![128; 16 * 16], 16, 16, image::ExtendedColorType::L8)
+            .unwrap();
+        let bytes = Arc::new(encoded);
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("grayscale.tiff");
+        let mut output_encoder =
+            ZifTiffEncoder::new(destination.clone(), Vec2d { x: 16, y: 16 }).unwrap();
+
+        output_encoder
+            .add_encoded_tile(EncodedTile {
+                position: Vec2d::default(),
+                bytes: Arc::clone(&bytes),
+                format: ImageFormat::Jpeg,
+                size: Vec2d { x: 16, y: 16 },
+                color_type: ColorType::L8,
+            })
+            .unwrap();
+        output_encoder.finalize().unwrap();
+
+        let mut reader = RangeReader::open(&destination).unwrap();
+        let image = reader.read_zif().unwrap();
+        assert_eq!(image.channels(), 1);
+        let tile = image.level_tiles(0).unwrap().next().unwrap();
+        assert_eq!(
+            reader.fetch(tile.range()).unwrap().bytes(),
+            bytes.as_slice()
+        );
     }
 
     #[test]

@@ -283,6 +283,18 @@ fn prepare_output_path(
     Ok(save_as)
 }
 
+fn cleanup_output_artifact(path: &Path) {
+    let result = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path),
+        Ok(_) => fs::remove_file(path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = result {
+        warn!("Unable to remove failed output {}: {error}", path.display());
+    }
+}
+
 /// Creates a tile buffer for the given output path
 fn create_tile_buffer(save_as: PathBuf, compression: u8) -> TileBuffer {
     TileBuffer::new(save_as, compression)
@@ -379,17 +391,28 @@ async fn dezoomify_source_pyramid(
         let level_size = level.source.image_size().unwrap_or(full_size);
         let scale_factor =
             source_level_scale_factor(full_size, level_size, level.scale_factor, base_scale_factor);
-        canvas
-            .begin_level(SourceLevel {
-                index,
-                size: full_size,
-                scale_factor,
-                tile_size: level.source.tile_size(),
-                has_overlapping_tiles: level.source.overlap() != Some(Vec2d::default()),
-            })
-            .await?;
-        let state = dezoomify_level_into_buffer(args, level, &mut canvas).await?;
-        validate_download_success(&state)?;
+        let source_level = SourceLevel {
+            index,
+            size: full_size,
+            scale_factor,
+            tile_size: level.source.tile_size(),
+            has_overlapping_tiles: level.source.overlap() != Some(Vec2d::default()),
+        };
+        if let Err(error) = canvas.begin_level(source_level).await {
+            let _ = finalize_canvas(&mut canvas).await;
+            return Err(error);
+        }
+        let state = match dezoomify_level_into_buffer(args, level, &mut canvas).await {
+            Ok(state) => state,
+            Err(error) => {
+                let _ = finalize_canvas(&mut canvas).await;
+                return Err(error);
+            }
+        };
+        if let Err(error) = validate_download_success(&state) {
+            let _ = finalize_canvas(&mut canvas).await;
+            return Err(error);
+        }
         total_tiles += state.total_tiles;
         successful_tiles += state.successful_tiles;
     }
@@ -476,8 +499,16 @@ pub async fn dezoomify(args: &Arguments) -> Result<PathBuf, ZoomError> {
         )?;
         let tile_buffer = create_tile_buffer(save_as.clone(), args.compression);
         info!("Dezooming source pyramid with {} levels", zoom_levels.len());
-        dezoomify_source_pyramid(args, zoom_levels, tile_buffer).await?;
-        Ok(save_as)
+        let result = dezoomify_source_pyramid(args, zoom_levels, tile_buffer).await;
+        match result {
+            Ok(()) => Ok(save_as),
+            Err(error) => {
+                if !matches!(&error, ZoomError::PartialDownload { .. }) {
+                    cleanup_output_artifact(&save_as);
+                }
+                Err(error)
+            }
+        }
     } else {
         let zoom_level = choose_level(zoom_levels, args)?;
         let save_as = prepare_output_path(
@@ -491,8 +522,16 @@ pub async fn dezoomify(args: &Arguments) -> Result<PathBuf, ZoomError> {
             "Dezooming {}",
             zoom_level.title.clone().unwrap_or_else(|| "level".into())
         );
-        dezoomify_level(args, zoom_level, tile_buffer).await?;
-        Ok(save_as)
+        let result = dezoomify_level(args, zoom_level, tile_buffer).await;
+        match result {
+            Ok(()) => Ok(save_as),
+            Err(error) => {
+                if !matches!(&error, ZoomError::PartialDownload { .. }) {
+                    cleanup_output_artifact(&save_as);
+                }
+                Err(error)
+            }
+        }
     }
 }
 
@@ -762,6 +801,7 @@ async fn process_bulk_image(
                 "Failed to process image {} ('{image_title}'): {error}",
                 index + 1
             );
+            cleanup_output_artifact(&save_as);
             stats.record_failure();
         }
     }
@@ -830,9 +870,15 @@ pub async fn dezoomify_level(
 ) -> Result<(), ZoomError> {
     debug!("Starting to dezoomify level {:?}", level.id());
     let mut canvas = tile_buffer;
-    let state = dezoomify_level_into_buffer(args, level, &mut canvas).await?;
-    validate_download_success(&state)?;
+    let state = match dezoomify_level_into_buffer(args, level, &mut canvas).await {
+        Ok(state) => state,
+        Err(error) => {
+            let _ = finalize_canvas(&mut canvas).await;
+            return Err(error);
+        }
+    };
     finalize_canvas(&mut canvas).await?;
+    validate_download_success(&state)?;
     let destination = canvas.destination().to_string_lossy().to_string();
     determine_final_result(&state, destination)
 }
@@ -942,6 +988,11 @@ async fn download_discoverable(
             DiscoverableStep::Empty => {
                 progress.set_resolved_tiles(0, 0);
                 break;
+            }
+            DiscoverableStep::Error(error) => {
+                return Err(ZoomError::Dezoomer {
+                    message: error.to_string(),
+                });
             }
         };
     }
