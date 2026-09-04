@@ -1,0 +1,183 @@
+// Shared UI controller: explicit reducer, stale-seq guard, structured errors.
+export type UiStatus =
+  | "idle"
+  | "discovering"
+  | "choosing-image"
+  | "choosing-level"
+  | "preflighting"
+  | "downloading"
+  | "display-only"
+  | "saving"
+  | "completed"
+  | "cancelled"
+  | "failed";
+
+export interface StructuredError {
+  code: string;
+  category: string;
+  retryable: boolean;
+  message: string;
+  transport?: string;
+  phase?: string;
+}
+
+export interface ControllerState {
+  status: UiStatus;
+  seq: number;
+  sessionId: string;
+  error?: StructuredError;
+  imageCount: number;
+  transport: string | null;
+}
+
+export type ControllerEventKind =
+  | "start-discovery"
+  | "images-found"
+  | "image-chosen"
+  | "level-chosen"
+  | "preflight-ok"
+  | "preflight-display-only"
+  | "progress"
+  | "save-start"
+  | "save-done"
+  | "fail"
+  | "cancel"
+  | "reset";
+
+export interface ControllerEvent {
+  seq: number;
+  sessionId: string;
+  kind: ControllerEventKind;
+  imageCount?: number;
+  transport?: string;
+  error?: StructuredError;
+}
+
+const TRANSITIONS: Record<UiStatus, Partial<Record<ControllerEventKind, UiStatus>>> = {
+  idle: { "start-discovery": "discovering" },
+  discovering: {
+    "images-found": "choosing-image",
+    fail: "failed",
+    cancel: "cancelled",
+  },
+  "choosing-image": {
+    "image-chosen": "choosing-level",
+    fail: "failed",
+    cancel: "cancelled",
+  },
+  "choosing-level": {
+    "level-chosen": "preflighting",
+    fail: "failed",
+    cancel: "cancelled",
+  },
+  preflighting: {
+    "preflight-ok": "downloading",
+    "preflight-display-only": "display-only",
+    fail: "failed",
+    cancel: "cancelled",
+  },
+  downloading: {
+    progress: "downloading",
+    "save-start": "saving",
+    "preflight-display-only": "display-only",
+    fail: "failed",
+    cancel: "cancelled",
+  },
+  "display-only": { cancel: "cancelled", fail: "failed", reset: "idle" },
+  saving: { "save-done": "completed", fail: "failed", cancel: "cancelled" },
+  completed: { reset: "idle" },
+  cancelled: { reset: "idle" },
+  failed: { reset: "idle", "start-discovery": "discovering" },
+};
+
+export function createController(sessionId: string): {
+  getState(): ControllerState;
+  dispatch(ev: ControllerEvent): boolean;
+  reset(newSessionId?: string): void;
+} {
+  let state: ControllerState = {
+    status: "idle",
+    seq: 0,
+    sessionId,
+    imageCount: 0,
+    transport: null,
+  };
+
+  function dispatch(ev: ControllerEvent): boolean {
+    // Ignore events from another session.
+    if (ev.sessionId !== state.sessionId) return false;
+    // Ignore stale sequence numbers.
+    if (ev.seq <= state.seq) return false;
+    const next = TRANSITIONS[state.status]?.[ev.kind];
+    if (next === undefined) return false;
+    state = {
+      ...state,
+      status: next,
+      seq: ev.seq,
+      imageCount: ev.imageCount ?? state.imageCount,
+      transport: ev.transport ?? state.transport,
+      error: ev.kind === "fail" ? ev.error : undefined,
+    };
+    return true;
+  }
+
+  function reset(newSessionId?: string): void {
+    state = {
+      status: "idle",
+      seq: 0,
+      sessionId: newSessionId ?? state.sessionId,
+      imageCount: 0,
+      transport: null,
+    };
+  }
+
+  function getState(): ControllerState {
+    return { ...state };
+  }
+
+  return { getState, dispatch, reset };
+}
+
+export interface AppCapabilities {
+  extensionAvailable?: boolean;
+  nativeAvailable?: boolean;
+  proxyAllowed?: boolean;
+  browserCanSave?: boolean;
+}
+
+/**
+ * Plain-language app-choice guidance rendered from capabilities.
+ * No jargon: avoid technical terms so tests can assert absence.
+ */
+export function renderAppChoice(cap: AppCapabilities): string {
+  const lines: string[] = [];
+  lines.push("Best next step:");
+  if (cap.nativeAvailable) {
+    lines.push(
+      "For very large pictures, use the desktop app on your computer. It can handle bigger files.",
+    );
+  } else if (cap.extensionAvailable) {
+    lines.push(
+      "You can also try the browser add-on. It can open pictures that need you to be signed in.",
+    );
+  } else if (cap.browserCanSave === false) {
+    lines.push(
+      "This preview can only be viewed here. To keep a full copy, try the desktop app on your computer.",
+    );
+  } else {
+    lines.push("You can continue in this browser. No extra steps are needed.");
+  }
+  lines.push("What each choice can do:");
+  lines.push("- This browser works for most public pictures you can already see.");
+  if (cap.extensionAvailable) {
+    lines.push("- The browser add-on helps when a picture needs you to be signed in.");
+  } else {
+    lines.push("- The browser add-on is not connected right now.");
+  }
+  if (cap.nativeAvailable) {
+    lines.push("- The desktop app is ready and handles the largest pictures.");
+  } else {
+    lines.push("- The desktop app is not connected right now.");
+  }
+  return lines.join("\n");
+}

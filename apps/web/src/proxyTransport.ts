@@ -1,0 +1,131 @@
+// Browser-side proxy client: POST same-origin /api/proxy, credentials omit.
+export interface ProxyFetchResult {
+  ok: boolean;
+  status: number;
+  code?: string;
+  bytes?: ArrayBuffer;
+  contentType?: string;
+}
+
+export type ProxyFetchImpl = (
+  input: string,
+  init?: Record<string, unknown>,
+) => Promise<{
+  status: number;
+  headers?: unknown;
+  json?: () => Promise<unknown>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}>;
+
+function safeHeaders(input: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!input) return out;
+  try {
+    const h = input as {
+      get?: (k: string) => string | null;
+      forEach?: (cb: (v: string, k: string) => void) => void;
+    };
+    if (typeof h.get === "function") {
+      for (const k of ["content-type", "content-length"]) {
+        const v = h.get(k);
+        if (v !== null && v !== undefined) out[k] = String(v);
+      }
+      return out;
+    }
+    if (typeof h.forEach === "function") {
+      h.forEach((v: string, k: string) => {
+        out[String(k).toLowerCase()] = String(v);
+      });
+      return out;
+    }
+  } catch {
+    // ignore
+  }
+  return out;
+}
+
+export function createProxyTransport(
+  fetchImpl: ProxyFetchImpl,
+  opts: { protocolVersion: number; maxBytes: number; proxyPath?: string },
+): {
+  fetchViaProxy(
+    targetUrl: string,
+    callOpts?: { signal?: AbortSignal },
+  ): Promise<ProxyFetchResult>;
+} {
+  const proxyPath = opts.proxyPath ?? "/api/proxy";
+
+  async function fetchViaProxy(
+    targetUrl: string,
+    callOpts?: { signal?: AbortSignal },
+  ): Promise<ProxyFetchResult> {
+    // Reject credential-bearing targets before any proxy request.
+    let parsed: URL;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED" };
+    }
+    if (parsed.username !== "" || parsed.password !== "") {
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED" };
+    }
+    if (callOpts?.signal?.aborted) {
+      return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+    }
+    let response: {
+      status: number;
+      headers?: unknown;
+      arrayBuffer(): Promise<ArrayBuffer>;
+    };
+    try {
+      response = await fetchImpl(proxyPath, {
+        method: "POST",
+        credentials: "omit",
+        signal: callOpts?.signal,
+        headers: { "content-type": "application/json" },
+        // Only target URL + protocol version; no cookies/auth/referrer/user headers.
+        body: JSON.stringify({ targetUrl, protocolVersion: opts.protocolVersion }),
+      });
+    } catch (err: unknown) {
+      if (callOpts?.signal?.aborted) {
+        return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+      }
+      void err;
+      return { ok: false, status: 0, code: "TRANSPORT_NETWORK_ERROR" };
+    }
+    if (callOpts?.signal?.aborted) {
+      return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+    }
+    const headers = safeHeaders(response.headers);
+    // Response-size guard before trusting body.
+    const declared = headers["content-length"] ? Number(headers["content-length"]) : NaN;
+    if (Number.isFinite(declared) && declared > opts.maxBytes) {
+      return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED" };
+    }
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await response.arrayBuffer();
+    } catch {
+      return { ok: false, status: response.status, code: "TRANSPORT_NETWORK_ERROR" };
+    }
+    if (bytes.byteLength > opts.maxBytes) {
+      return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED" };
+    }
+    if (response.status === 429) return { ok: false, status: 429, code: "PROXY_RATE_LIMITED" };
+    if (response.status === 413) return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" };
+    if (response.status === 403 || response.status === 422) {
+      return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED" };
+    }
+    if (response.status < 200 || response.status > 299) {
+      return { ok: false, status: response.status, code: "TRANSPORT_HTTP_ERROR" };
+    }
+    return {
+      ok: true,
+      status: response.status,
+      bytes,
+      contentType: headers["content-type"],
+    };
+  }
+
+  return { fetchViaProxy };
+}

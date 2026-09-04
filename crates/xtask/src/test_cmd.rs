@@ -1,28 +1,35 @@
 //! `cargo xtask test`: fast deterministic aggregate.
-//! Runs check, workspace unit tests, core suites, protocol suites, and the
-//! legacy-web harness. Named test targets exist only for their owner phases
-//! (`core` in phase 04, `protocol` in phase 05). Rejects opt-in live flags;
-//! propagates the first nonzero result with a stable summary.
+//! Runs check, workspace unit tests, core, protocol, job, wasm, browser, UI,
+//! and web suites plus the legacy-web harness. Named test targets exist only
+//! for their owner phases (core 04, protocol 05, job 06, wasm 07,
+//! browser/ui/web 08-09). Rejects opt-in live flags; propagates the first
+//! nonzero result with a stable summary.
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         if args.iter().any(|a| a == "--live" || a.starts_with("live")) {
             return Err("live tests are not part of the deterministic suite".to_string());
         }
-        if args.first().map(String::as_str) == Some("core") {
-            return super::core::run(&args[1..]);
-        }
-        if args.first().map(String::as_str) == Some("protocol") {
-            if args.len() > 1 {
-                return Err(format!(
-                    "unknown test protocol arguments: {}",
-                    args[1..].join(" ")
-                ));
+        match args.first().map(String::as_str) {
+            Some("core") => return super::core::run(&args[1..]),
+            Some("protocol") => {
+                if args.len() > 1 {
+                    return Err(format!(
+                        "unknown test protocol arguments: {}",
+                        args[1..].join(" ")
+                    ));
+                }
+                return super::protocol::test_protocol();
             }
-            return super::protocol::test_protocol();
+            Some("job") => return super::job::run(&args[1..]),
+            Some("wasm") => return super::wasm::run(&args[1..]),
+            Some("browser") => return super::browser::test_browser(&args[1..]),
+            Some("ui") => return super::browser::test_ui(&args[1..]),
+            Some("web") => return super::browser::test_web(&args[1..]),
+            _ => {}
         }
         return Err(format!(
-            "unknown test arguments (phase-04/05 targets: core, protocol): {}",
+            "unknown test arguments (targets: core, protocol, job, wasm, browser, ui, web): {}",
             args.join(" ")
         ));
     }
@@ -35,6 +42,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         &mut summary,
         super::protocol::test_protocol,
     )?;
+    run_step("test-job", &mut summary, || super::job::run(&[]))?;
+    run_step("test-wasm", &mut summary, || super::wasm::run(&[]))?;
+    run_step("test-browser", &mut summary, || {
+        super::browser::test_browser(&[])
+    })?;
+    run_step("test-ui", &mut summary, || super::browser::test_ui(&[]))?;
+    run_step("test-web", &mut summary, || super::browser::test_web(&[]))?;
     run_step("legacy-web-harness", &mut summary, legacy_web_harness)?;
     print_summary(&summary);
     println!("test: all fast deterministic suites pass");

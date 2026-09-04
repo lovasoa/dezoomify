@@ -1,0 +1,11 @@
+{
+  "name": "@dezoomify/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/webIntegration.ts",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit"
+  }
+}

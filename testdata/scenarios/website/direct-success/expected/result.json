@@ -1,0 +1,8 @@
+{
+  "scenario": "website-direct-success",
+  "attempts": ["direct"],
+  "transport": "Direct from your browser",
+  "tilePolicy": "direct-readable",
+  "proxyRequests": 0,
+  "originClean": true
+}

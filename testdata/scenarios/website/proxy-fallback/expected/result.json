@@ -1,0 +1,9 @@
+{
+  "scenario": "website-proxy-fallback",
+  "attempts": ["direct", "proxy"],
+  "transport": "Metadata proxy",
+  "tilePolicy": "ordinary-image-display-or-handoff",
+  "proxyRequests": 1,
+  "proxyScope": "metadata-only",
+  "originClean": true
+}
