@@ -59,11 +59,17 @@ fn cors_headers(map: &mut HeaderMap) {
 }
 
 /// Redact credential-bearing URL parts before request-log persistence or
-/// error-body echo. Strips userinfo and replaces sensitive query values.
+/// error-body echo. Preserves `scheme://host/path` shape (transcript-stable)
+/// while stripping userinfo and replacing sensitive query values.
 fn redact_url_for_log(original: &str) -> String {
-    let Some(without_scheme) = original
+    let Some((scheme, without_scheme)) = original
         .strip_prefix("http://")
-        .or_else(|| original.strip_prefix("https://"))
+        .map(|rest| ("http", rest))
+        .or_else(|| {
+            original
+                .strip_prefix("https://")
+                .map(|rest| ("https", rest))
+        })
     else {
         return "invalid-url".to_string();
     };
@@ -73,9 +79,9 @@ fn redact_url_for_log(original: &str) -> String {
     };
     // Strip userinfo first: `user:pass@host` must never reach logs or bodies.
     let no_userinfo = authority.rsplit('@').next().unwrap_or(authority);
-    let host = match no_userinfo.rsplit_once(':') {
-        Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => h,
-        _ => no_userinfo,
+    let (host, port) = match no_userinfo.rsplit_once(':') {
+        Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => (h, Some(p)),
+        _ => (no_userinfo, None),
     };
     let (path, query) = match path_query.find('?') {
         Some(i) => (&path_query[..i], Some(&path_query[i + 1..])),
@@ -109,8 +115,14 @@ fn redact_url_for_log(original: &str) -> String {
             .join("&")
     });
     match redacted_query {
-        Some(q) if !q.is_empty() => format!("{host}{path}?{q}"),
-        _ => format!("{host}{path}"),
+        Some(q) if !q.is_empty() => format!(
+            "{scheme}://{host}{}{path}?{q}",
+            port.map_or_else(String::new, |p| format!(":{p}"))
+        ),
+        _ => format!(
+            "{scheme}://{host}{}{path}",
+            port.map_or_else(String::new, |p| format!(":{p}"))
+        ),
     }
 }
 

@@ -204,22 +204,22 @@
     }
   ],
   "metadata_requests": [
-    "GET https://fixtures.test/arcgis/MapServer?token=fixture&f=json",
-    "GET https://fixtures.test/arcgis/uncached/MapServer?f=json",
-    "GET https://artsandculture.google.com/asset/fixture",
+    "GET https://artsandculture.google.com/arts/path=g",
     "GET https://artsandculture.google.com/arts/path=g",
     "GET https://artsandculture.google.com/arts/path=x0-y0-z0-tALgGuN5iBM1PtrsfvQaeSxbn7Po",
-    "GET https://g.co/arts/fixture",
-    "GET https://artsandculture.google.com/arts/path=g",
     "GET https://artsandculture.google.com/arts/path=x0-y0-z0-tALgGuN5iBM1PtrsfvQaeSxbn7Po",
-    "GET https://artsandculture.google.com/asset/plain",
     "GET https://artsandculture.google.com/arts/plain=g",
     "GET https://artsandculture.google.com/arts/plain=x0-y0-z0-tzdRNize3ufKrS8Sc39e_9KE5HBQ",
+    "GET https://artsandculture.google.com/asset/fixture",
+    "GET https://artsandculture.google.com/asset/plain",
+    "GET https://fixtures.test/arcgis/MapServer?token=REDACTED&f=json",
+    "GET https://fixtures.test/arcgis/uncached/MapServer?f=json",
+    "GET https://fixtures.test/hungaricana/files-url.html?img=1",
+    "GET https://fixtures.test/hungaricana/files.json",
     "GET https://fixtures.test/hungaricana/imagepath.html",
     "GET https://fixtures.test/hungaricana/inline-files.html?img=1",
     "GET https://fixtures.test/hungaricana/inline-images.html?pg=1",
-    "GET https://fixtures.test/hungaricana/files-url.html?img=1",
-    "GET https://fixtures.test/hungaricana/files.json"
+    "GET https://g.co/arts/fixture"
   ],
   "scenario": "web/site-adapters",
   "tile_requests": []

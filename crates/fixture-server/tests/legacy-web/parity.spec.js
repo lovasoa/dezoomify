@@ -27,6 +27,9 @@ function transcript(id, cases, start) {
     else tiles.push(line);
   }
   tiles.sort();
+  // Metadata fetches across independent cases race completion order just
+  // like tiles; sort for determinism (per-case semantics live in `cases`).
+  metadata.sort();
   const clean = ( result ) => JSON.parse(JSON.stringify(result, (k, v) => (typeof v === "string" ? v : v)));
   // Deterministic tile pick: concurrent loads race insertion order, so sort
   // by (x, y, url) before taking first/last instead of arrival order.

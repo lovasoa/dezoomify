@@ -56,8 +56,8 @@
     "GET https://fixtures.test/iip?FIF=/image.tif&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number",
     "GET https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc",
     "GET https://historischarchief.midden-groningen.nl/collectie/beelden/beelden-view/?mode=gallery&view=horizontal&sort=random%7B1785398881908%7D%20asc",
-    "GET https://webservices.memorix.nl/mediabank/media?sort=random%7B1785398881908%7D+asc&rows=1&apiKey=c51f00b2-2034-45a2-85ce-0aca7143dbbc&entities%5B0%5D=77036348-6551-9e9d-5b2e-b505237e84cf",
-    "GET https://images.memorix.nl/ghs/topviewjson/memorix/686dce31-a340-7d19-ae6d-419cee43b952"
+    "GET https://images.memorix.nl/ghs/topviewjson/memorix/686dce31-a340-7d19-ae6d-419cee43b952",
+    "GET https://webservices.memorix.nl/mediabank/media?sort=random%7B1785398881908%7D+asc&rows=1&apiKey=REDACTED&entities%5B0%5D=77036348-6551-9e9d-5b2e-b505237e84cf"
   ],
   "scenario": "web/query-params",
   "tile_requests": []

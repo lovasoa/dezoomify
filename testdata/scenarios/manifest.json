@@ -1759,7 +1759,7 @@
       "path": "web/auto-cycle/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "85e7bfdc1a9ce5b50ed93788f6009ab8b793cee33caa26edd8607ed0566119cb",
+      "sha256": "f88d645193cd3d0ef6d4a182de322205f43a8c8d64abb203d87af7c854de4d8f",
       "size": 1090,
       "source_path": "tests/dezoomers.spec.js cycle",
       "source_snapshot": "f7caa07"
@@ -1903,7 +1903,7 @@
       "path": "web/core-discovery/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "c4e39d0dd2ee96fda05624063084b991a821bb49b607d5ffc05f04812229f9c1",
+      "sha256": "3da9ca5fb23d2f836960d7f400408e25bed7adf5754a7ed926f28b764e02275a",
       "size": 21835,
       "source_path": "tests/dezoomers.spec.js coreCases",
       "source_snapshot": "f7caa07"
@@ -2323,7 +2323,7 @@
       "path": "web/iiif-discovery/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "88b7e2fd1393749b9dc7c9c874fc6a4bf594077b63405ccd0e92173a18e29d4a",
+      "sha256": "7652cd47cf49e7cfe5e2523eb87b4730f5d0ef5b32f75ce371d907365b1d9cd3",
       "size": 15990,
       "source_path": "tests/dezoomers.spec.js iiifCases",
       "source_snapshot": "f7caa07"
@@ -2659,8 +2659,8 @@
       "path": "web/query-params/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "463875d170536439b7d09fa6a99afc9c8e9813c2b792a2916eb11adcbef57187",
-      "size": 2199,
+      "sha256": "e7f3d2e98a8a5f99d531faeb27b767ba9b9013fb5088c38aa0c64262b162829d",
+      "size": 2171,
       "source_path": "tests/dezoomers.spec.js query params",
       "source_snapshot": "f7caa07"
     },
@@ -2767,7 +2767,7 @@
       "path": "web/seadragon-pages/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "8c0c514283e95fc672588ff91515cb4f037de6386634a15e0807ccb0aa556062",
+      "sha256": "5b26843ef3eab748a70fdab52607daa54e896f0ae0637870991d8b53294eb354",
       "size": 10968,
       "source_path": "tests/dezoomers.spec.js seadragonCases",
       "source_snapshot": "f7caa07"
@@ -3019,8 +3019,8 @@
       "path": "web/site-adapters/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "22f2fd26e034419c2009f7440a193aebc82e2730633df60b4b1eebf625ec819e",
-      "size": 6608,
+      "sha256": "d26d2df0065c927ad18c1a66fe50e178f1a4bbd1fa405ff6c29d127be3c47f85",
+      "size": 6609,
       "source_path": "tests/dezoomers.spec.js remaining adapters",
       "source_snapshot": "f7caa07"
     },
@@ -3223,8 +3223,8 @@
       "path": "web/topviewer/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "809b14d393e67f23a919caa61d40096781ac2ae58240fb279b2d02dfe600f813",
-      "size": 6566,
+      "sha256": "9862097c5bebb52241d508db19a58e04b82973014d73238f6653fa8f9b56d54d",
+      "size": 6538,
       "source_path": "tests/dezoomers.spec.js topviewer",
       "source_snapshot": "f7caa07"
     },
@@ -3331,7 +3331,7 @@
       "path": "web/zoomify-pages/expected/legacy-web.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "2242d387b5090a8839928534e70c32321c05943993241fb14413182d2f461f78",
+      "sha256": "e3719f43c546764669bf9a1ed7274b98e84f24eee4e0e6058cd8c279d6d288cb",
       "size": 11741,
       "source_path": "tests/dezoomers.spec.js zoomifyCases",
       "source_snapshot": "f7caa07"

@@ -26,10 +26,10 @@
     }
   ],
   "metadata_requests": [
-    "GET https://fixtures.test/automatic/repeated-parent.html",
     "GET https://fixtures.test/automatic/child.html",
     "GET https://fixtures.test/automatic/cycle-a.html",
-    "GET https://fixtures.test/automatic/cycle-b.html"
+    "GET https://fixtures.test/automatic/cycle-b.html",
+    "GET https://fixtures.test/automatic/repeated-parent.html"
   ],
   "scenario": "web/auto-cycle",
   "tile_requests": []
