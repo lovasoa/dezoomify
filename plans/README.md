@@ -28,10 +28,15 @@ the parity inventory before it enters the new workspace.
 
 ## Current State
 
-Phase 00-03 are complete and recorded in `docs/migration/gates.md`. Phase 04 is
-the current pending phase; phases 05-15 are blocked until their preceding gate
-records are complete. The root Cargo and JavaScript workspaces, `docs/migration/gates.md`,
-and all `cargo xtask` commands remain unavailable until the phase that creates each one.
+Phases 00-15 are implemented and recorded in `docs/migration/gates.md` at the
+test-channel level: deterministic suites pass (`cargo xtask test all`), while
+production promotion, OS packaging/signing, store submissions, real-browser
+E2E beyond node coverage, and live public checks remain explicit exceptions
+owned by their native environments and protected credentials. The root Cargo
+workspace, pnpm workspace, `docs/migration/gates.md`, and all `cargo xtask`
+commands listed in Command Labels below exist; `test live` (non-dry-run),
+production `release` promotion, and store/updater publication require their
+own approvals and credentials.
 
 ## Command Labels
 
