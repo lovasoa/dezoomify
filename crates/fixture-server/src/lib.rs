@@ -46,11 +46,67 @@ pub fn router(state: AppState) -> axum::Router {
 }
 
 fn cors_headers(map: &mut HeaderMap) {
+    // Test-only deterministic origin emulator on loopback: permissive CORS
+    // is intentional so same-server fixtures can exercise both readable
+    // (`cors-readable`) and denied (`cors-denied-*`) paths per-route.
+    // This is NOT the website metadata CORS proxy (phase 09 owns its
+    // restrictive CORS, SSRF, and credential policy).
     map.insert("access-control-allow-origin", HeaderValue::from_static("*"));
     map.insert(
         "access-control-expose-headers",
         HeaderValue::from_static("X-Set-Cookie"),
     );
+}
+
+/// Redact credential-bearing URL parts before request-log persistence or
+/// error-body echo. Strips userinfo and replaces sensitive query values.
+fn redact_url_for_log(original: &str) -> String {
+    let Some(without_scheme) = original
+        .strip_prefix("http://")
+        .or_else(|| original.strip_prefix("https://"))
+    else {
+        return "invalid-url".to_string();
+    };
+    let (authority, path_query) = match without_scheme.find('/') {
+        Some(i) => (&without_scheme[..i], &without_scheme[i..]),
+        None => (without_scheme, "/"),
+    };
+    let host = authority.rsplit(':').next().unwrap_or(authority);
+    let (path, query) = match path_query.find('?') {
+        Some(i) => (&path_query[..i], Some(&path_query[i + 1..])),
+        None => (path_query, None),
+    };
+    let redacted_query = query.map(|q| {
+        q.split('&')
+            .map(|pair| {
+                let (k, _) = pair.split_once('=').unwrap_or((pair, ""));
+                let lower = k.to_ascii_lowercase();
+                if [
+                    "apikey",
+                    "api_key",
+                    "token",
+                    "auth",
+                    "session",
+                    "signature",
+                    "secret",
+                    "password",
+                    "cookie",
+                ]
+                .iter()
+                .any(|n| lower.contains(n))
+                {
+                    format!("{k}=REDACTED")
+                } else {
+                    pair.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("&")
+    });
+    match redacted_query {
+        Some(q) if !q.is_empty() => format!("{host}{path}?{q}"),
+        _ => format!("{host}{path}"),
+    }
 }
 
 fn record(state: &AppState, entry: serde_json::Value) {
@@ -132,7 +188,7 @@ async fn serve_original_url(
         None => {
             record(
                 state,
-                serde_json::json!({"via": via, "url": original, "status": 400, "route": null}),
+                serde_json::json!({"via": via, "url": redact_url_for_log(original), "status": 400, "route": null}),
             );
             return text_response(StatusCode::BAD_REQUEST, "bad url", head_only);
         }
@@ -147,26 +203,27 @@ async fn serve_original_url(
                 Err(status) => {
                     record(
                         state,
-                        serde_json::json!({"via": via, "url": original, "status": status.as_u16(), "route": hit.route.route_id, "scenario": hit.scenario}),
+                        serde_json::json!({"via": via, "url": redact_url_for_log(original), "status": status.as_u16(), "route": hit.route.route_id, "scenario": hit.scenario}),
                     );
                     return text_response(status, "fixture error", head_only);
                 }
             };
             record(
                 state,
-                serde_json::json!({"via": via, "url": original, "status": hit.route.status, "route": hit.route.route_id, "scenario": hit.scenario}),
+                serde_json::json!({"via": via, "url": redact_url_for_log(original), "status": hit.route.status, "route": hit.route.route_id, "scenario": hit.scenario}),
             );
             bytes_response(hit.route.status, body.headers, body.bytes, head_only)
         }
         None => {
             record(
                 state,
-                serde_json::json!({"via": via, "url": original, "status": 404, "route": null}),
+                serde_json::json!({"via": via, "url": redact_url_for_log(original), "status": 404, "route": null}),
             );
             let mut map = HeaderMap::new();
             cors_headers(&mut map);
             map.insert("content-type", HeaderValue::from_static("application/json"));
-            let body = serde_json::json!({"error": "fixture-missing", "url": original}).to_string();
+            // Never echo the full attacker URL cross-origin; log redacted host+path only.
+            let body = serde_json::json!({"error": "fixture-missing", "url": redact_url_for_log(original)}).to_string();
             bytes_response(404, map, body.into_bytes(), head_only)
         }
     }
@@ -311,6 +368,17 @@ async fn handle_static(
         return text_response(StatusCode::FORBIDDEN, "forbidden", head_only);
     }
     let full = dir.join(&rel);
+    // Canonical-prefix traversal guard (symlink-aware): the joined path must
+    // remain under the canonical static dir.
+    let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    let canonical_full = full.canonicalize().unwrap_or_else(|_| full.clone());
+    // For not-yet-existing paths canonicalize fails; fall back to lexical
+    // check plus prefix comparison on the joined path.
+    if canonical_full != full && !canonical_full.starts_with(&canonical_dir)
+        || !full.starts_with(dir)
+    {
+        return text_response(StatusCode::FORBIDDEN, "forbidden", head_only);
+    }
     let full = if full.is_dir() {
         full.join("index.html")
     } else {

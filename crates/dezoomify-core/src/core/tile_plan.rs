@@ -268,6 +268,9 @@ impl Grid {
         let tile = self.grid_tile(ordinal);
         let mut request = self.requests.request(tile);
         if self.requests.use_first_tile_as_referer() {
+            // Legacy parity: Referer carries the full first-tile URI.
+            // Redaction happens at the log/diagnostic boundary via
+            // `redact_uri`, never by altering wire bytes.
             request
                 .headers
                 .entry("Referer".into())

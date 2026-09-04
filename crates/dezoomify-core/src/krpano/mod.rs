@@ -14,6 +14,7 @@ use log::{debug, info, warn};
 
 use crate::Vec2d;
 use crate::core::discovery::ResourceFailure;
+use crate::core::redact_uri;
 use crate::core::resolve_relative;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
@@ -49,7 +50,7 @@ fn handle_html(
         || sibling_uri(resource.final_uri(), "tour.xml"),
         |reference| resolve_relative(resource.final_uri(), &reference),
     );
-    debug!("krpano: resolved XML URI {xml_uri}");
+    debug!("krpano: resolved XML URI {}", redact_uri(&xml_uri));
     Ok(DiscoveryStep::Follow(Request::new(xml_uri)))
 }
 
@@ -124,7 +125,7 @@ fn handle_failure(
     if let Some(xml) = find_xml(context) {
         warn!(
             "krpano: viewer JS fetch failed for {}: {message}",
-            xml.final_uri()
+            redact_uri(xml.final_uri())
         );
         if let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
         {

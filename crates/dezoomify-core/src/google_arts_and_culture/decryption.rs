@@ -83,32 +83,37 @@ custom_error! {pub InvalidEncryptedImage
     IO{source: std::io::Error} = "Unable to read from the buffer: {source}",
 }
 
-#[test]
-fn test_decrypt_dummy() {
-    let encrypted: Vec<u8> = vec![
-        10, 10, 10, 10, // magic bytes
-        186, 186, 192, 192, // unencrypted header
-        16, 0, 0, 0, // encrypted data length
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // encrypted data
-        222, 173, 190, 175, // unencrypted footer
-        4, 0, 0, 0, // size of unencrypted header
-    ];
-    let decrypted: Vec<u8> = vec![
-        186, 186, 192, 192, // unencrypted header
-        202, 37, 17, 24, 3, 15, 249, 175, 241, 134, 189, 204, 188, 226, 106,
-        76, // decrypted data
-        222, 173, 190, 175, // unencrypted footer
-    ];
-    assert_eq!(decrypt(encrypted).unwrap(), decrypted);
-}
-
-#[test]
-fn test_decrypt_sample_tile() {
+#[cfg(test)]
+mod tests {
+    use super::decrypt;
     use std::{fs, path::Path};
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata")
-        .join("google_arts_and_culture");
-    let encrypted = fs::read(root.join("tile_encrypted.bin")).unwrap();
-    let decrypted: Vec<u8> = fs::read(root.join("tile.jpg")).unwrap();
-    assert_eq!(decrypt(encrypted).unwrap(), decrypted);
+
+    #[test]
+    fn test_decrypt_dummy() {
+        let encrypted: Vec<u8> = vec![
+            10, 10, 10, 10, // magic bytes
+            186, 186, 192, 192, // unencrypted header
+            16, 0, 0, 0, // encrypted data length
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // encrypted data
+            222, 173, 190, 175, // unencrypted footer
+            4, 0, 0, 0, // size of unencrypted header
+        ];
+        let decrypted: Vec<u8> = vec![
+            186, 186, 192, 192, // unencrypted header
+            202, 37, 17, 24, 3, 15, 249, 175, 241, 134, 189, 204, 188, 226, 106,
+            76, // decrypted data
+            222, 173, 190, 175, // unencrypted footer
+        ];
+        assert_eq!(decrypt(encrypted).unwrap(), decrypted);
+    }
+
+    #[test]
+    fn test_decrypt_sample_tile() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata")
+            .join("google_arts_and_culture");
+        let encrypted = fs::read(root.join("tile_encrypted.bin")).unwrap();
+        let decrypted: Vec<u8> = fs::read(root.join("tile.jpg")).unwrap();
+        assert_eq!(decrypt(encrypted).unwrap(), decrypted);
+    }
 }

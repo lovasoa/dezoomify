@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct TestServer {
     pub base: String,
+    log: Arc<Mutex<Vec<serde_json::Value>>>,
 }
 
 impl TestServer {
@@ -17,12 +18,13 @@ impl TestServer {
             .await
             .expect("bind");
         let bound = listener.local_addr().expect("addr");
+        let log = Arc::new(Mutex::new(Vec::new()));
         let state = AppState {
             routes: Arc::new(routes),
             scenarios_dir,
             static_dir: None,
             origin: format!("http://{bound}"),
-            log: Arc::new(Mutex::new(Vec::new())),
+            log: Arc::clone(&log),
             log_path: None,
         };
         tokio::spawn(async move {
@@ -32,7 +34,18 @@ impl TestServer {
         });
         TestServer {
             base: format!("http://{bound}"),
+            log,
         }
+    }
+
+    pub fn log_text(&self) -> String {
+        self.log
+            .lock()
+            .expect("log lock")
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn scenarios_path(rel: &str) -> std::path::PathBuf {

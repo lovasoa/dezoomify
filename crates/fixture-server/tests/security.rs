@@ -79,3 +79,20 @@ async fn rejects_unmapped_network() {
         assert_eq!(v["error"], "fixture-missing");
     }
 }
+
+#[tokio::test]
+async fn sensitive_query_values_are_redacted_in_logs_and_bodies() {
+    let srv = TestServer::start().await;
+    let target =
+        "https://fixtures.test/private/item?apiKey=CANARY-KEY-123&token=CANARY-TOKEN-456&view=1";
+    let url = format!("{}/fetch?url={target}", srv.base);
+    let res = reqwest::get(&url).await.expect("get");
+    assert_eq!(res.status(), 404);
+    let body = res.text().await.expect("body");
+    assert!(!body.contains("CANARY-KEY-123"), "body leaks apiKey");
+    assert!(!body.contains("CANARY-TOKEN-456"), "body leaks token");
+    assert!(body.contains("REDACTED"), "body lacks redaction marker");
+    let log = srv.log_text();
+    assert!(!log.contains("CANARY-KEY-123"), "log leaks apiKey");
+    assert!(!log.contains("CANARY-TOKEN-456"), "log leaks token");
+}

@@ -37,6 +37,13 @@ const BANNED: &[&str] = &[
     "wasm-bindgen",
     "web-sys",
     "js-sys",
+    "rand",
+    "getrandom",
+    "rustls",
+    "native-tls",
+    "openssl",
+    "chrono",
+    "time",
 ];
 
 #[test]
@@ -82,16 +89,24 @@ fn direct_dependencies_contain_no_runtime_crates() {
 }
 
 /// Host capabilities that must never appear in non-test library source.
-/// `#[cfg(test)]` modules may use `std::fs` to load scenario payloads; the
-/// scan strips those regions before matching.
+/// `#[cfg(test)]` modules and bare `#[test]` functions may use `std::fs` to
+/// load scenario payloads; the scan strips those regions before matching.
+/// Allowed pure utilities (`Arc`, `LazyLock`, `Cursor`, `include_str!`,
+/// `include_bytes!`, pure collections) are intentionally absent from this
+/// list; threading, locking, clocks, randomness, TLS, and stdio are not.
 const FORBIDDEN_PATTERNS: &[&str] = &[
     "std::fs",
     "std::net",
     "std::process",
     "std::env",
     "std::thread",
+    "std::time",
+    "std::io::stdin",
+    "std::io::stdout",
+    "std::io::stderr",
     "SystemTime",
     "Instant::now",
+    "UNIX_EPOCH",
     "tokio",
     "async_std",
     "smol",
@@ -101,6 +116,38 @@ const FORBIDDEN_PATTERNS: &[&str] = &[
     "web_sys",
     "js_sys",
     "image::",
+    "png::",
+    "tiff::",
+    "image_hasher::",
+    "clap::",
+    "indicatif::",
+    "env_logger::",
+    "tempfile::",
+    "futures::",
+    "rand",
+    "getrandom",
+    "OsRng",
+    "thread_rng",
+    "SmallRng",
+    "rustls",
+    "native_tls",
+    "native-tls",
+    "openssl",
+    "chrono::",
+    "spawn",
+    "Mutex",
+    "RwLock",
+    "stdin",
+    "stdout",
+    "stderr",
+    "fs::",
+    "File::open",
+    "OpenOptions",
+    "read_to_string",
+    "env!",
+    "option_env!",
+    "env::var",
+    "var_os",
 ];
 
 #[test]
@@ -166,15 +213,17 @@ fn contains_ident(line: &str, pattern: &str) -> bool {
     false
 }
 
-/// Remove `#[cfg(test)] mod ... { ... }` regions via brace matching so test
-/// helpers (which load scenario payloads from disk) do not trip the scan.
+/// Remove `#[cfg(test)] mod ... { ... }` regions and bare `#[test] fn`
+/// regions via brace matching so test helpers (which load scenario payloads
+/// from disk) do not trip the scan.
 fn strip_test_modules(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < lines.len() {
-        if lines[i].trim_start().starts_with("#[cfg(test)]") {
-            // Skip to the opening brace of the module, then to its match.
+        let trimmed = lines[i].trim_start();
+        if trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("#[test]") {
+            // Skip to the opening brace of the module/function, then to its match.
             let mut depth = 0usize;
             let mut opened = false;
             while i < lines.len() {

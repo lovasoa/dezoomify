@@ -35,6 +35,89 @@ pub fn resolve_relative(base: &str, reference: &str) -> String {
     }
 }
 
+/// Redact credential-bearing parts of a URI for logs, errors, and
+/// diagnostics. Strips userinfo and replaces sensitive query values
+/// (`apikey`, `token`, `auth`, `session`, `signature`, `secret`, `password`,
+/// `cookie`) with `REDACTED`. The delivered `Request.uri` is unchanged;
+/// only human-visible copies use this form.
+#[must_use]
+pub fn redact_uri(uri: &str) -> String {
+    let Ok(mut url) = Url::parse(uri) else {
+        return redact_query_fallback(uri);
+    };
+    if !url.username().is_empty() || url.password().is_some() {
+        let _ = url.set_username("REDACTED");
+        let _ = url.set_password(Some("REDACTED"));
+    }
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    if pairs.iter().any(|(k, _)| is_sensitive_key(k)) {
+        url.query_pairs_mut()
+            .clear()
+            .extend_pairs(pairs.iter().map(|(k, v)| {
+                if is_sensitive_key(k) {
+                    (k.as_str(), "REDACTED")
+                } else {
+                    (k.as_str(), v.as_str())
+                }
+            }));
+    }
+    url.to_string()
+}
+
+/// Origin (`scheme://host[:port]`) without path, query, or userinfo.
+/// Used for `Referer` defaults so tile requests do not copy tokens.
+#[must_use]
+pub fn origin_only(uri: &str) -> String {
+    if let Ok(url) = Url::parse(uri)
+        && let Some(host) = url.host_str()
+    {
+        let port = url.port().map_or_else(String::new, |p| format!(":{p}"));
+        return format!("{}://{host}{port}/", url.scheme());
+    }
+    uri.to_owned()
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    [
+        "apikey",
+        "api_key",
+        "token",
+        "auth",
+        "session",
+        "signature",
+        "secret",
+        "password",
+        "cookie",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn redact_query_fallback(uri: &str) -> String {
+    let (base, query) = uri.split_once('?').unwrap_or((uri, ""));
+    if query.is_empty() {
+        return uri.to_owned();
+    }
+    let redacted: Vec<String> = query
+        .split('&')
+        .map(|pair| {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            if is_sensitive_key(k) {
+                format!("{k}=REDACTED")
+            } else if v.is_empty() {
+                k.to_owned()
+            } else {
+                pair.to_owned()
+            }
+        })
+        .collect();
+    format!("{base}?{}", redacted.join("&"))
+}
+
 /// True for `scheme://` references. `C:\` style paths carry no `//`, so the
 /// Windows-drive branch below is unaffected.
 fn has_uri_scheme(reference: &str) -> bool {

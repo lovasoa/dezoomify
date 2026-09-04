@@ -31,4 +31,4 @@ pub use tile_plan::{
     Grid, GridCoord, GridRequests, GridTile, Positioned, PositionedTile, TileSource,
     TileSourceError,
 };
-pub use uri::resolve_relative;
+pub use uri::{origin_only, redact_uri, resolve_relative};

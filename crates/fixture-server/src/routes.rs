@@ -54,7 +54,7 @@ pub struct RouteHit<'a> {
 }
 
 pub struct RouteTable {
-    entries: Vec<(String, ScenarioRoute)>,
+    entries: Vec<(String, ScenarioRoute, Option<regex::Regex>)>,
 }
 
 pub struct RenderedRoute {
@@ -99,8 +99,35 @@ impl RouteTable {
                 .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
             let file: RoutesFile =
                 serde_json::from_str(&text).map_err(|e| format!("bad {}: {e}", path.display()))?;
+            if file.routes.len() > 1000 {
+                return Err(format!(
+                    "too many routes in {}: {}",
+                    path.display(),
+                    file.routes.len()
+                ));
+            }
             for route in file.routes {
-                entries.push((id.clone(), route));
+                if let Some(payload) = &route.payload {
+                    if payload.contains("..") || payload.starts_with('/') {
+                        return Err(format!(
+                            "unsafe payload path in {}: {payload}",
+                            route.route_id
+                        ));
+                    }
+                }
+                let compiled = match &route.path_regex {
+                    Some(re) => {
+                        if re.len() > 500 {
+                            return Err(format!("path_regex too long in {}", route.route_id));
+                        }
+                        Some(
+                            regex::Regex::new(re)
+                                .map_err(|e| format!("bad regex in {}: {e}", route.route_id))?,
+                        )
+                    }
+                    None => None,
+                };
+                entries.push((id.clone(), route, compiled));
             }
         }
         Ok(RouteTable { entries })
@@ -125,7 +152,7 @@ impl RouteTable {
     }
 
     fn lookup_exact(&self, host: &str, path: &str, query: Option<&str>) -> Option<RouteHit<'_>> {
-        self.entries.iter().find_map(|(scenario, route)| {
+        self.entries.iter().find_map(|(scenario, route, compiled)| {
             if !route.method.eq_ignore_ascii_case("GET") {
                 return None;
             }
@@ -142,8 +169,7 @@ impl RouteTable {
                 if !path.starts_with(prefix.as_str()) {
                     return None;
                 }
-            } else if let Some(re) = &route.path_regex {
-                let re = regex::Regex::new(re).ok()?;
+            } else if let Some(re) = compiled {
                 if !re.is_match(path) {
                     return None;
                 }
@@ -177,6 +203,17 @@ impl ScenarioRoute {
             );
         }
         let scenario_dir = state.scenarios_dir.join(scenario);
+        let join_under = |name: &str| -> Option<std::path::PathBuf> {
+            if name.contains("..") || name.starts_with('/') {
+                return None;
+            }
+            let full = scenario_dir.join(name);
+            if full.starts_with(&scenario_dir) {
+                Some(full)
+            } else {
+                None
+            }
+        };
         let bytes = if let Some(gen) = &self.generator {
             render_generator(
                 gen,
@@ -185,8 +222,9 @@ impl ScenarioRoute {
                 original.query.as_deref(),
             )?
         } else if let Some(payload) = &self.payload {
-            let mut bytes = std::fs::read(scenario_dir.join(payload))
-                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let full = join_under(payload).ok_or(axum::http::StatusCode::FORBIDDEN)?;
+            let mut bytes =
+                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
             if is_text(&headers) {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 let replaced = text
@@ -223,8 +261,16 @@ fn render_generator(
 ) -> Result<Vec<u8>, axum::http::StatusCode> {
     match gen {
         GeneratorSpec::ArtsTile { image } => {
-            let bytes = std::fs::read(scenario_dir.join(image))
-                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let full = if image.contains("..") || image.starts_with('/') {
+                return Err(axum::http::StatusCode::FORBIDDEN);
+            } else {
+                scenario_dir.join(image)
+            };
+            if !full.starts_with(scenario_dir) {
+                return Err(axum::http::StatusCode::FORBIDDEN);
+            }
+            let bytes =
+                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
             super::arts::verify_and_decrypt(path, &bytes).ok_or(axum::http::StatusCode::FORBIDDEN)
         }
         GeneratorSpec::GenericSvg { shape } => {
@@ -236,13 +282,29 @@ fn render_generator(
         GeneratorSpec::JpegStub { image } => {
             // Legacy serves the shared 256x256 fixture photo for stub tile
             // URLs; exact bytes matter (clients refine tile size from them).
-            let bytes = std::fs::read(scenario_dir.join(image))
-                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let full = if image.contains("..") || image.starts_with('/') {
+                return Err(axum::http::StatusCode::FORBIDDEN);
+            } else {
+                scenario_dir.join(image)
+            };
+            if !full.starts_with(scenario_dir) {
+                return Err(axum::http::StatusCode::FORBIDDEN);
+            }
+            let bytes =
+                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
             Ok(bytes)
         }
         GeneratorSpec::GenericJpg { image } => {
-            let bytes = std::fs::read(scenario_dir.join(image))
-                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            let full = if image.contains("..") || image.starts_with('/') {
+                return Err(axum::http::StatusCode::FORBIDDEN);
+            } else {
+                scenario_dir.join(image)
+            };
+            if !full.starts_with(scenario_dir) {
+                return Err(axum::http::StatusCode::FORBIDDEN);
+            }
+            let bytes =
+                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
             super::svg::generic_jpg(&bytes, query).ok_or(axum::http::StatusCode::NOT_FOUND)
         }
     }
