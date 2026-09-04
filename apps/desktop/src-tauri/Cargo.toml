@@ -1,0 +1,34 @@
+[package]
+name = "dezoomify-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Dezoomify desktop shell (phase-11 lean shell; Tauri SDK wiring deferred, config checked in)"
+repository = "https://github.com/lovasoa/dezoomify-ng"
+
+# Standalone manifest: intentionally NOT a member of the root workspace so
+# this shell stays offline with no dependencies to fetch. No Tauri SDK is
+# required for the lean shell; tauri.conf.json and capabilities are validated
+# by node tests without fetching native dependencies.
+[workspace]
+
+[lib]
+name = "dezoomify_desktop"
+crate-type = ["rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "dezoomify-desktop"
+path = "src/main.rs"
+
+[[bin]]
+name = "dezoomify-native-host"
+path = "src/bin/dezoomify-native-host.rs"
+
+[dependencies]
+# Pure standard-library logic only in this phase.
+
+[dev-dependencies]
+
+[features]
+default = []

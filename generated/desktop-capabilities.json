@@ -1,0 +1,50 @@
+{
+  "app": "desktop",
+  "bundle": {
+    "identifier": "com.dezoomify.app",
+    "protocolScheme": "dezoomify"
+  },
+  "commands": [
+    "answer_choice",
+    "cancel_job",
+    "query_capabilities",
+    "request_destination",
+    "start_job"
+  ],
+  "decoders": [
+    "png",
+    "jpeg",
+    "tiff"
+  ],
+  "encoders": [
+    "png",
+    "jpeg",
+    "tiff"
+  ],
+  "eventChannels": [
+    "dezoomify://job-state",
+    "dezoomify://job-progress",
+    "dezoomify://job-output",
+    "dezoomify://job-error",
+    "dezoomify://deep-link-pending"
+  ],
+  "fingerprint": "b4bad92b24615c58",
+  "generator": "phase-11 lean shell (canonical: crates/dezoomify-protocol/src/dto.rs)",
+  "nativeHost": {
+    "name": "com.dezoomify.native_host"
+  },
+  "protocol": {
+    "max": "1.0",
+    "min": "1.0",
+    "version": "1.0"
+  },
+  "updater": {
+    "allowlist": [
+      "https://updates.dezoomify.example"
+    ],
+    "channel": "stable",
+    "enabled": true,
+    "httpsOnly": true,
+    "requiresUserConfirm": true
+  }
+}

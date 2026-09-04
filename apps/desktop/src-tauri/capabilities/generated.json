@@ -1,0 +1,63 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "description": "Generated desktop capabilities. Do not edit by hand; generated from crates/dezoomify-protocol/src/dto.rs via the desktop capability mode.",
+  "identifier": "generated",
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "updater:allow-check",
+    "dezoomify:allow-answer-choice",
+    "dezoomify:allow-cancel-job",
+    "dezoomify:allow-query-capabilities",
+    "dezoomify:allow-request-destination",
+    "dezoomify:allow-start-job"
+  ],
+  "windows": [
+    "main"
+  ],
+  "x-dezoomify": {
+    "commands": [
+      "answer_choice",
+      "cancel_job",
+      "query_capabilities",
+      "request_destination",
+      "start_job"
+    ],
+    "decoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "encoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "eventChannels": [
+      "dezoomify://job-state",
+      "dezoomify://job-progress",
+      "dezoomify://job-output",
+      "dezoomify://job-error",
+      "dezoomify://deep-link-pending"
+    ],
+    "fingerprint": "b4bad92b24615c58",
+    "nativeHost": {
+      "name": "com.dezoomify.native_host"
+    },
+    "protocol": {
+      "max": "1.0",
+      "min": "1.0",
+      "version": "1.0"
+    },
+    "updater": {
+      "allowlist": [
+        "https://updates.dezoomify.example"
+      ],
+      "channel": "stable",
+      "enabled": true,
+      "httpsOnly": true,
+      "requiresUserConfirm": true
+    }
+  }
+}
