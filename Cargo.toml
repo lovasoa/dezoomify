@@ -1,0 +1,8 @@
+[workspace]
+members = ["crates/xtask", "crates/fixture-server", "crates/dezoomify-core"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/lovasoa/dezoomify-ng"
