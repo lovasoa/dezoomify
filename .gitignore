@@ -1,6 +1,9 @@
 /target/
-/node_modules/
+node_modules/
+test-results/
 /.pnpm-store/
 /dist/
 /artifacts/
 *.log
+/target-wasm/
+/wasm-package/
