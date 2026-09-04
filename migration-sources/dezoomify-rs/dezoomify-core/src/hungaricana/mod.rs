@@ -11,7 +11,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId, resolve_relative,
+    LevelDescriptor, Request, StableId,
 };
 
 static LAYER_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -22,22 +22,13 @@ static PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)(?:^|[^A-Za-z0-9_])path[\"']?\s*:\s*[\"']([^\"']*)"#)
         .expect("constant Hungaricana path pattern")
 });
-static IMAGE_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)imagepath[\"']?\s*=\s*[\"']([^\"']+)"#)
-        .expect("constant Hungaricana image path pattern")
-});
 static FILES_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?is)(?:files|images)[\"']?\s*:\s*(\[.*?\])"#)
         .expect("constant Hungaricana file array pattern")
 });
-static FILES_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)files_url[\"']?\s*:\s*[\"']([^\"']+)"#)
-        .expect("constant Hungaricana file URL pattern")
-});
 
 const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::UrlPredicate(is_ecw_url).extract(catalog),
-    DiscoveryMatch::UrlPredicate(is_files_url).then(follow_files),
     DiscoveryMatch::ContentPredicate(contains_layer).then(follow_layer),
     DiscoveryMatch::Any.extract(catalog),
 ];
@@ -58,13 +49,6 @@ fn is_ecw_url(uri: &str) -> bool {
         .ends_with(".ecw")
 }
 
-fn is_files_url(uri: &str) -> bool {
-    uri.split_once(['?', '#'])
-        .map_or(uri, |(path, _)| path)
-        .to_ascii_lowercase()
-        .ends_with("files.json")
-}
-
 fn contains_layer(bytes: &[u8]) -> bool {
     LAYER_URL_RE.is_match(&String::from_utf8_lossy(bytes))
 }
@@ -74,55 +58,15 @@ fn follow_layer(
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     let page = resource.text_lossy();
-    if let Some(file) = IMAGE_PATH_RE
-        .captures(&page)
-        .and_then(|captures| captures.get(1))
-    {
-        return Ok(DiscoveryStep::Follow(Request::new(layer_file_url(
-            &page,
-            file.as_str(),
-        )?)));
-    }
     if let Some(files) = FILES_ARRAY_RE
         .captures(&page)
         .and_then(|captures| captures.get(1))
     {
         return follow_file_array(&page, resource.final_uri(), files.as_str());
     }
-    if let Some(files_url) = FILES_URL_RE
-        .captures(&page)
-        .and_then(|captures| captures.get(1))
-    {
-        return Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
-            resource.final_uri(),
-            files_url.as_str(),
-        ))));
-    }
     Err(DiscoveryError::Session(
         "unable to find the Hungaricana layer file name".into(),
     ))
-}
-
-fn follow_files(
-    context: &DiscoveryContext<'_>,
-    resource: DiscoveryResource<'_>,
-) -> Result<DiscoveryStep, DiscoveryError> {
-    let files: Vec<String> = serde_json::from_slice(resource.bytes()).map_err(|error| {
-        DiscoveryError::Session(format!("invalid Hungaricana file list: {error}"))
-    })?;
-    let page = context
-        .resources()
-        .rev()
-        .find(|candidate| contains_layer(candidate.bytes()))
-        .ok_or_else(|| DiscoveryError::Session("Hungaricana layer page is missing".into()))?;
-    let page_text = page.text_lossy();
-    let index = image_index(page.final_uri());
-    let file = files
-        .get(index)
-        .ok_or_else(|| DiscoveryError::Session("Hungaricana file index is out of range".into()))?;
-    Ok(DiscoveryStep::Follow(Request::new(layer_file_url(
-        &page_text, file,
-    )?)))
 }
 
 fn follow_file_array(
@@ -207,11 +151,17 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     .map_err(|error| DiscoveryError::Session(format!("invalid Hungaricana grid: {error}")))?;
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
         id: StableId::new("hungaricana:image"),
-        title: Some(path.clone()),
+        title: image_title(&path),
         format: StableId::new("hungaricana"),
         levels: vec![LevelDescriptor::new(source)],
         ..Default::default()
     })]))
+}
+
+fn image_title(path: &str) -> Option<String> {
+    let file = path.rsplit('/').next()?;
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    (!stem.is_empty()).then(|| stem.to_owned())
 }
 
 #[derive(Debug, Deserialize)]
@@ -233,7 +183,7 @@ fn max_zoom(size: u32, tile_size: u32) -> u32 {
 fn tile_hash(x: u32, y: u32, z: u32, base_path: &str) -> String {
     const KEY: &[u8; 16] = b"dGhpcyBpcyBubyBr";
     const IV: [u8; 16] = [0; 16];
-    let sum: u64 = base_path.chars().map(u64::from).sum();
+    let sum = path_sum(base_path);
     let plaintext = format!("{}|{z}|{x}|{y}", sum % 100);
     let mut buffer = [0_u8; 64];
     buffer[..16].fill(b'*');
@@ -248,4 +198,18 @@ fn tile_hash(x: u32, y: u32, z: u32, base_path: &str) -> String {
             write!(hash, "{byte:02x}").expect("writing a hash to String cannot fail");
             hash
         })
+}
+
+fn path_sum(path: &str) -> u64 {
+    path.encode_utf16().map(u64::from).sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_sum;
+
+    #[test]
+    fn hash_path_sum_matches_javascript_utf16_units() {
+        assert_eq!(path_sum("a😀"), 112_286);
+    }
 }

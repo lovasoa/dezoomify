@@ -31,8 +31,7 @@ The following dezoomers are currently available:
  - [**IIIF**](#IIIF) supports the widely used International Image Interoperability Framework format.
  - [**Krpano**](#krpano) supports the [krpano](https://krpano.com/home/) panorama viewer
   - [**IIPImage**](#iipimage) supports the [iipimage](https://iipimage.sourceforge.io/) image format
-  - [**NYPLImage**](#nyplimage) supports the [nypl](https://digitalcollections.nypl.org) image format
-  - [**XLimage**](#xlimage) supports XLimage image servers and KBR viewer URLs;
+  - [**XLimage**](#xlimage) supports XLimage image servers;
   - [**TopViewer**](#topviewer) supports Picturae Memorix image services;
   - [**FSI**](#fsi) supports Neptune Labs FSI Server images;
   - [**LizardTech**](#lizardtech) supports LizardTech ImageServer services;
@@ -113,7 +112,7 @@ https://artsandculture.google.com/asset/light-in-the-dark/ZQFouDGMVmsI2w
 
 You can give dezoomify-rs the URL of a Zoomify viewer page, the
 `ImageProperties.xml` file, or one of the image tiles. Viewer-page discovery
-supports standard `Z.showImage`, legacy `zoomifyImagePath`, and OpenLayers
+supports standard `Z.showImage` viewers and OpenSeadragon
 `zoomifytileservice` declarations.
 You can use [dezoomify-extension](https://lovasoa.github.io/dezoomify-extension/) to
 find the URL of this file.
@@ -156,17 +155,6 @@ for panoramas, virtual tours, photoshperes, and other 3d zoomable images.
 dezoomify-rs supports downloading individual image planes from such images.
 You need to provide the xml meta-information file for the image.
 
-### Nypl
-
-The [digital collections of New York's Public Library](https://digitalcollections.nypl.org)
-use their own zoomable image format, which dezoomify-rs supports.
-Some images have a high-resolution version available, and work with this software.
-Others do not, and can be downloaded by simply right-clicking on them in your browser.
-To download an image, just enter the URL of its viewer page in dezoomify-rs, like for example:
- ```
- https://digitalcollections.nypl.org/items/a28d6e6b-b317-f008-e040-e00a1806635d
-```
-
 ### IIPImage
 
 [IIPImage](https://iipimage.sourceforge.io/) is an image web server that implements
@@ -176,13 +164,13 @@ You can pass an URL containing `FIF=` to dezoomify-rs to let it download the ima
 
 ### XLimage
 
-The XLimage dezoomer accepts `*.imgf`, `*.imgi`, and `*.imgg` metadata URLs.
-It also understands KBR viewer URLs and follows them to their XLimage metadata.
+The XLimage dezoomer accepts `*.imgf` and `*.imgi` metadata URLs
+(such as `image.imgf?cmd=info`).
 
 ### TopViewer
 
-TopViewer supports Picturae Memorix metadata, thumbnail URLs, media API
-responses, and the supported legacy detail-page hosts.
+TopViewer supports Picturae Memorix metadata, thumbnail URLs, and media API
+responses.
 
 ### FSI
 

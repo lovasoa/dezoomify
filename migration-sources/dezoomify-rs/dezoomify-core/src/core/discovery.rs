@@ -209,10 +209,13 @@ fn dispatch_resource(
     unmatched: &str,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     for route in routes {
-        if !route
+        let matches_final = route
             .matcher
-            .matches(resource.final_uri(), Some(resource.bytes()))
-        {
+            .matches(resource.final_uri(), Some(resource.bytes()));
+        let matches_requested = route
+            .matcher
+            .matches(resource.uri(), Some(resource.bytes()));
+        if !matches_final && !matches_requested {
             continue;
         }
         return match route.handler {
@@ -641,7 +644,8 @@ mod tests {
         })]))
     }
 
-    const FINAL_URI: &[DiscoveryRoute] = &[DiscoveryMatch::Any.extract(final_uri_catalog)];
+    const FINAL_URI: &[DiscoveryRoute] =
+        &[DiscoveryMatch::UrlSuffix("/redirect").extract(final_uri_catalog)];
 
     fn reject(
         _: &DiscoveryContext<'_>,

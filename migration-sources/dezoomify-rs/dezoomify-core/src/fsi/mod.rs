@@ -30,14 +30,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::Any.extract(catalog),
 ];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("fsi", ROUTES)
-    .recognizing(is_fsi_url, "not an FSI Server URL")
-    .preferring(is_server_url);
-
-fn is_fsi_url(uri: &str) -> bool {
-    let lower = uri.to_ascii_lowercase();
-    is_server_url(uri) || lower.contains("neptunelabs.com") || lower.contains("/fsi/")
-}
+pub const SPEC: DezoomerSpec = DezoomerSpec::new("fsi", ROUTES).preferring(is_server_url);
 
 fn is_server_url(uri: &str) -> bool {
     uri.split_once('?').is_some_and(|(path, query)| {
@@ -65,7 +58,8 @@ fn follow_page_server(
     _: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
-    let page = resource.text_lossy();
+    // Server URLs are embedded in HTML, where query separators are escaped.
+    let page = resource.text_lossy().replace("&amp;", "&");
     let server = SERVER_RE
         .captures_iter(&page)
         .find_map(|captures| {
@@ -90,6 +84,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         .split_once('?')
         .map_or(url, |(origin, _)| origin)
         .to_owned();
+    let title = image_title(&source);
     let source = Grid::with_requests(
         StableId::new("fsi:level"),
         Vec2d {
@@ -121,7 +116,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     .map_err(|error| DiscoveryError::Session(format!("invalid FSI grid: {error}")))?;
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
         id: StableId::new("fsi:image"),
-        title: Some("FSI image".into()),
+        title,
         format: StableId::new("fsi"),
         levels: vec![LevelDescriptor::new(source)],
         ..Default::default()
@@ -135,6 +130,12 @@ fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError
         .and_then(|value| value.as_str().parse().ok())
         .filter(|number| *number > 0)
         .ok_or_else(|| DiscoveryError::Session(format!("FSI metadata has invalid {name}")))
+}
+
+fn image_title(source: &str) -> Option<String> {
+    let file = source.rsplit('/').next()?;
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    (!stem.is_empty()).then(|| stem.to_owned())
 }
 
 fn ratio(numerator: u32, denominator: u32) -> f64 {

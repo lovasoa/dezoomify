@@ -13,6 +13,7 @@ use crate::core::{
     ProbeContinuation, Request, StableId, TileId, TileRole, TileSourceError, TileSpec,
     resolve_relative,
 };
+use crate::web_page::page_title;
 
 const TILE_SIZE: u32 = 512;
 static META_RE: LazyLock<Regex> =
@@ -33,11 +34,11 @@ pub const SPEC: DezoomerSpec = DezoomerSpec::new("pnav", ROUTES)
 
 fn is_pnav_url(uri: &str) -> bool {
     let path = uri.split_once(['?', '#']).map_or(uri, |(path, _)| path);
+    let path = path.trim_end_matches('/');
     let mut segments = path.rsplit('/');
     segments
         .next()
-        .and_then(|value| value.parse::<u32>().ok())
-        .is_some()
+        .is_some_and(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
         && segments
             .next()
             .is_some_and(|value| value.eq_ignore_ascii_case("OBJECT"))
@@ -98,13 +99,18 @@ fn complete_from_json(
             "pnav image dimensions must be positive".into(),
         ));
     }
-    let image = context
+    let page = context
         .resources()
         .rev()
-        .find_map(|page| extract_image_url(&page.text_lossy(), page.final_uri()))
+        .find(|page| extract_image_url(&page.text_lossy(), page.final_uri()).is_some())
         .ok_or_else(|| {
             DiscoveryError::Session("pnav page is missing from discovery history".into())
         })?;
+    let page_text = page.text_lossy();
+    let image = extract_image_url(&page_text, page.final_uri()).ok_or_else(|| {
+        DiscoveryError::Session("pnav page is missing from discovery history".into())
+    })?;
+    let title = page_title(&page_text);
     let source = AdaptiveSource::new(
         StableId::new("pnav:level"),
         PnavProgram {
@@ -116,7 +122,7 @@ fn complete_from_json(
     Ok(DiscoveryStep::Complete(ImageCatalog::new([
         CatalogEntry::Ready(ImageDescriptor {
             id: StableId::new("pnav:image"),
-            title: Some("pnav image".into()),
+            title,
             format: StableId::new("pnav"),
             levels: vec![LevelDescriptor::new(source)],
             ..Default::default()

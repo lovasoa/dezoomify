@@ -3,20 +3,16 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
-use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, DiscoveryRoute, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId, resolve_relative,
+    ImageDescriptor, LevelDescriptor, Request, StableId,
 };
 
 const INFO_QUERY: &str = "cmd=info";
 
-const ROUTES: &[DiscoveryRoute] = &[
-    DiscoveryMatch::UrlPredicate(is_kbr_viewer).map_url(kbr_info_url),
-    DiscoveryMatch::Any.extract(catalog),
-];
+const ROUTES: &[DiscoveryRoute] = &[DiscoveryMatch::Any.extract(catalog)];
 
 pub const SPEC: DezoomerSpec = DezoomerSpec::new("xlimage", ROUTES)
     .recognizing(is_xlimage_url, "not an XLimage URL")
@@ -24,60 +20,21 @@ pub const SPEC: DezoomerSpec = DezoomerSpec::new("xlimage", ROUTES)
 
 fn is_xlimage_url(uri: &str) -> bool {
     let path = uri.split_once(['?', '#']).map_or(uri, |(path, _)| path);
-    path.to_ascii_lowercase().contains(".img")
-        && (path.to_ascii_lowercase().ends_with(".imgf")
-            || path.to_ascii_lowercase().ends_with(".imgi")
-            || path.to_ascii_lowercase().ends_with(".imgg"))
-        || uri.to_ascii_lowercase().contains("kbr.be/multi/")
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    name.rsplit('.').next().is_some_and(|extension| {
+        let extension = extension.to_ascii_lowercase();
+        extension == "imgf" || extension == "imgi"
+    })
 }
 
 fn is_info_url(uri: &str) -> bool {
     uri.to_ascii_lowercase().contains(INFO_QUERY)
 }
 
-fn is_kbr_viewer(uri: &str) -> bool {
-    kbr_viewer_id(uri).is_some()
-}
-
-fn kbr_viewer_id(uri: &str) -> Option<String> {
-    let parsed = Url::parse(uri).ok()?;
-    let path = parsed.path();
-    let path = path.strip_prefix("/multi/")?;
-    let (id, _) = path.split_once("Viewer")?;
-    (!id.is_empty()
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
-    .then_some(id.to_owned())
-}
-
-fn kbr_info_url(input: &str) -> Result<Request, DiscoveryError> {
-    let id = kbr_viewer_id(input)
-        .ok_or_else(|| DiscoveryError::Session("invalid KBR XLimage viewer URL".into()))?;
-    let mut viewer = Url::parse(input)
-        .map_err(|_| DiscoveryError::Session("invalid KBR XLimage viewer URL".into()))?;
-    viewer.set_path(&format!("/multi/{id}Viewer/xml.php"));
-    viewer.set_query(None);
-    viewer.set_fragment(None);
-    Ok(Request::new(format!(
-        "{viewer}?/multi/{id}/001.imgi?cmd=info"
-    )))
-}
-
 fn image_origin(url: &str) -> String {
-    let (path, query) = url.split_once('?').map_or((url, None), |(path, query)| {
-        (
-            path,
-            Some(query.split_once('#').map_or(query, |(query, _)| query)),
-        )
-    });
-    if path.to_ascii_lowercase().contains(".img") {
-        return path.to_owned();
-    }
-    query
-        .and_then(|query| query.split_once('?').map(|(path, _)| path))
-        .filter(|path| path.to_ascii_lowercase().contains(".img"))
-        .map_or_else(|| path.to_owned(), |path| resolve_relative(url, path))
+    url.split_once(['?', '#'])
+        .map_or(url, |(path, _)| path)
+        .to_owned()
 }
 
 fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
@@ -95,14 +52,26 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     }
     let origin: Arc<str> = image_origin(url).into();
     let levels = build_levels(&metadata, &origin)?;
+    let title = image_title(&origin);
 
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
         id: StableId::new("xlimage:image"),
-        title: Some("XLimage".into()),
+        title,
         format: StableId::new("xlimage"),
         levels,
         ..Default::default()
     })]))
+}
+
+fn image_title(origin: &str) -> Option<String> {
+    origin
+        .split('?')
+        .filter(|part| part.to_ascii_lowercase().contains(".img"))
+        .filter_map(|part| part.rsplit('/').next())
+        .find_map(|file| {
+            let stem = file.split('.').next()?;
+            (!stem.is_empty()).then(|| stem.to_owned())
+        })
 }
 
 fn build_levels(
@@ -132,7 +101,11 @@ fn build_levels(
             },
         )
         .map_err(|error| DiscoveryError::Session(format!("invalid XLimage grid: {error}")))?;
-        levels.push(LevelDescriptor::new(source).with_scale_factor(Some(zoom)));
+        levels.push(
+            LevelDescriptor::new(source)
+                .with_scale_factor(Some(zoom))
+                .with_title(Some(format!("XLimage level {zoom}"))),
+        );
 
         if zoom >= metadata.maxzoom {
             break;
@@ -155,4 +128,18 @@ struct Metadata {
 
 fn default_maxzoom() -> u32 {
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_title_is_the_img_file_stem() {
+        assert_eq!(
+            image_title("https://uffizicloud.centrica.it/7711/closer/hi-res/A1456.imgf"),
+            Some("A1456".to_owned())
+        );
+        assert_eq!(image_title("https://fixtures.test/xl/viewer.php"), None);
+    }
 }

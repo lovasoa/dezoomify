@@ -29,7 +29,6 @@ pub mod iiif;
 pub mod iipimage;
 pub mod krpano;
 pub mod lizardtech;
-pub mod nypl;
 pub mod pnav;
 pub mod topviewer;
 pub mod vec2d;
@@ -40,6 +39,7 @@ pub mod zoomify;
 
 mod json_utils;
 mod template;
+mod web_page;
 
 pub use vec2d::Vec2d;
 
