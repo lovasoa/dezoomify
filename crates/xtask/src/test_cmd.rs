@@ -34,7 +34,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Some("ui") => return super::browser::test_ui(&args[1..]),
             Some("web") => return super::browser::test_web(&args[1..]),
             Some("native") => return super::native::test_native(&args[1..]),
-            Some("scenario") => return super::native::test_scenario(&args[1..]),
+            Some("scenario") => {
+                if args.get(1).map(String::as_str) == Some("--suite") {
+                    return super::cutover::test_scenario_suite(&args[1..]);
+                }
+                return super::native::test_scenario(&args[1..]);
+            }
             Some("desktop") => return super::desktop::test_desktop(&args[1..]),
             Some("extension") => return super::extension::test_extension(&args[1..]),
             Some("native-messaging") => {

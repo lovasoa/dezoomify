@@ -5,6 +5,7 @@ mod browser;
 mod check;
 mod ci;
 mod core;
+mod cutover;
 mod desktop;
 mod extension;
 mod fixtures;
@@ -61,6 +62,8 @@ fn dispatch(args: &[String]) -> Result<(), String> {
             Some("validate") => {
                 if args.get(2).map(String::as_str) == Some("--native") {
                     native::parity_native()
+                } else if args.get(2).map(String::as_str) == Some("--packaged") {
+                    cutover::parity_packaged(&args[3..])
                 } else {
                     parity::validate(&args[2..])
                 }
@@ -88,8 +91,27 @@ fn dispatch(args: &[String]) -> Result<(), String> {
             Some(other) => Err(format!("unknown dev target '{other}'")),
             None => Err("usage: cargo xtask dev <ui|web|desktop|extension>".to_string()),
         },
-        "ci" => ci::ci(&args[1..]),
-        "release" => ci::release(&args[1..]),
+        "ci" => {
+            if args.get(1).map(String::as_str) == Some("cutover-deletion-gate")
+                || args.get(1).map(String::as_str) == Some("cutover-clean-tree")
+                || args.get(1).map(String::as_str) == Some("postcutover-snapshot")
+                || args.get(1).map(String::as_str) == Some("postcutover-validation")
+                || args.get(1).map(String::as_str) == Some("postcutover-cleanup-gate")
+            {
+                cutover::ci_lane(&args[1], &args[2..])
+            } else {
+                ci::ci(&args[1..])
+            }
+        }
+        "release" => {
+            if args.get(1).map(String::as_str) == Some("verify")
+                && args.get(2).map(String::as_str) == Some("--candidate")
+            {
+                cutover::release_verify_candidate()
+            } else {
+                ci::release(&args[1..])
+            }
+        }
         "test" => test_cmd::run(&args[1..]),
         other => Err(format!(
             "unknown task '{other}' (tasks: setup, check, sources, fixtures, parity, protocol, build, dev, ci, release, test)"
