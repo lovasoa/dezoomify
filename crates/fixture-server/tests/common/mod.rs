@@ -6,6 +6,9 @@ use std::sync::{Arc, Mutex};
 
 pub struct TestServer {
     pub base: String,
+    // Only security tests read the log today; other harnesses share this
+    // helper without log assertions.
+    #[allow(dead_code)]
     log: Arc<Mutex<Vec<serde_json::Value>>>,
 }
 
@@ -38,6 +41,7 @@ impl TestServer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn log_text(&self) -> String {
         self.log
             .lock()
