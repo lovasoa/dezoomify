@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "firstTile": "https://fixtures.test/arcgis/MapServer/tile/7/1/2?token=fixture",
+      "format": "ArcGIS MapServer",
+      "height": 768,
+      "input": "https://fixtures.test/arcgis/MapServer?token=fixture&f=html",
+      "lastTile": "https://fixtures.test/arcgis/MapServer/tile/7/3/4?token=fixture",
+      "tileCount": 9,
+      "width": 768
+    }
+  ],
+  "scenario": "web/site-adapters"
+}

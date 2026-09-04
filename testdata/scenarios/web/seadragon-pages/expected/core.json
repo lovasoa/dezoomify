@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "firstTile": "https://www.bl.uk/manuscripts/Proxy.ashx?view=burney_ms_276_f031ar_files/9/0_0.jpg",
+      "format": "Seadragon (Deep Zoom Image)",
+      "height": 512,
+      "input": "https://www.bl.uk/manuscripts/Viewer.aspx?ref=burney_ms_276_f031ar",
+      "lastTile": "https://www.bl.uk/manuscripts/Proxy.ashx?view=burney_ms_276_f031ar_files/9/1_1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/deepzoom/sample_files/9/0_0.jpg",
+      "format": "Seadragon (Deep Zoom Image)",
+      "height": 512,
+      "input": "https://polona.pl/item/9388882/0/",
+      "lastTile": "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://nla.gov.au/nla.obj-152642460/dzi?tile=13/0_0.jpg",
+      "format": "Seadragon (Deep Zoom Image)",
+      "height": 6454,
+      "input": "https://nla.gov.au/nla.obj-152642460/view",
+      "lastTile": "https://nla.gov.au/nla.obj-152642460/dzi?tile=13/20_25.jpg",
+      "tileCount": 546,
+      "width": 5191
+    },
+    {
+      "firstTile": "https://fixtures.test/deepzoom/sample_files/9/0_0.jpg",
+      "format": "Seadragon (Deep Zoom Image)",
+      "height": 512,
+      "input": "https://fixtures.test/deepzoom/iframe-parent.html",
+      "lastTile": "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg",
+      "tileCount": 4,
+      "width": 512
+    }
+  ],
+  "scenario": "web/seadragon-pages"
+}

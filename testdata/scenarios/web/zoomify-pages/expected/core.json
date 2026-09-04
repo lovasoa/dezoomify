@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "firstTile": "https://fixtures.test/zoomify/TileGroup0/1-0-0.jpg",
+      "format": "Zoomify",
+      "height": 512,
+      "input": "https://fixtures.test/zoomify/flash.html",
+      "lastTile": "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://biblio.unibe.ch/zoomify/TileGroup0/1-0-0.jpg",
+      "format": "Zoomify",
+      "height": 512,
+      "input": "https://biblio.unibe.ch/web-apps/maps/zoomify.php?col=ryh&pic=Ryh_7906_6",
+      "lastTile": "https://biblio.unibe.ch/zoomify/TileGroup0/1-1-1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://www.ngv.vic.gov.au/zoomify/TileGroup0/1-0-0.jpg",
+      "format": "Zoomify",
+      "height": 512,
+      "input": "https://www.ngv.vic.gov.au/explore/collection/work/3867/",
+      "lastTile": "https://www.ngv.vic.gov.au/zoomify/TileGroup0/1-1-1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/zoomify/TileGroup0/1-0-0.jpg",
+      "format": "Zoomify",
+      "height": 512,
+      "input": "https://fixtures.test/zoomify/iframe-parent.html",
+      "lastTile": "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
+      "tileCount": 4,
+      "width": 512
+    }
+  ],
+  "scenario": "web/zoomify-pages"
+}

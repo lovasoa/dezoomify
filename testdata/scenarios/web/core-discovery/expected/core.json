@@ -1,0 +1,203 @@
+{
+  "cases": [
+    {
+      "firstTile": "https://fixtures.test/zoomify/TileGroup0/1-0-0.jpg",
+      "format": "Zoomify",
+      "height": 512,
+      "input": "https://fixtures.test/zoomify/ImageProperties.xml",
+      "lastTile": "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/zoomify-base-href/assets/maps/sample/TileGroup0/1-0-0.jpg",
+      "format": "Zoomify",
+      "height": 512,
+      "input": "https://fixtures.test/zoomify-base-href/product.html",
+      "lastTile": "https://fixtures.test/zoomify-base-href/assets/maps/sample/TileGroup0/1-1-1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/deepzoom/sample_files/9/0_0.jpg",
+      "format": "Seadragon (Deep Zoom Image)",
+      "height": 512,
+      "input": "https://fixtures.test/deepzoom/sample.dzi",
+      "lastTile": "https://fixtures.test/deepzoom/sample_files/9/1_1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/deepzoom/png_files/9/0_0.png",
+      "format": "Seadragon (Deep Zoom Image)",
+      "height": 512,
+      "input": "https://fixtures.test/deepzoom/png_files/9/1_1.png",
+      "lastTile": "https://fixtures.test/deepzoom/png_files/9/1_1.png",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/deepzoom/jpeg_files/9/0_0.jpeg",
+      "format": "Seadragon (Deep Zoom Image)",
+      "height": 512,
+      "input": "https://fixtures.test/deepzoom/jpeg_files/9/1_1.jpeg",
+      "lastTile": "https://fixtures.test/deepzoom/jpeg_files/9/1_1.jpeg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/deepzoom/legacy_files/9/0_0.jpg",
+      "format": "Seadragon (Deep Zoom Image)",
+      "height": 512,
+      "input": "https://fixtures.test/deepzoom/legacy-embed.html",
+      "lastTile": "https://fixtures.test/deepzoom/legacy_files/9/1_1.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/iiif/v2/0,0,256,256/256,256/0/native.png",
+      "format": "IIIF",
+      "height": 512,
+      "input": "http://127.0.0.1/fixtures/iiif-v2/info.json",
+      "lastTile": "http://127.0.0.1:PORT/iiif/v2/256,256,256,256/256,256/0/native.png",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/iiif/mirador/0,0,256,256/256,256/0/native.jpg",
+      "format": "IIIF",
+      "height": 512,
+      "input": "https://fixtures.test/mirador?manifest=https://fixtures.test/iiif-presentation/manifest.json",
+      "lastTile": "http://127.0.0.1:PORT/iiif/mirador/256,256,256,256/256,256/0/native.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/iiif/mirador/0,0,256,256/256,256/0/native.jpg",
+      "format": "IIIF",
+      "height": 512,
+      "input": "https://fixtures.test/uv/#?manifest=https%3A%2F%2Ffixtures.test%2Fiiif-presentation%2Fmanifest.json",
+      "lastTile": "http://127.0.0.1:PORT/iiif/mirador/256,256,256,256/256,256/0/native.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://iiif.micr.io/KEimL/0,0,256,256/256,256/0/default.jpg",
+      "format": "IIIF",
+      "height": 512,
+      "input": "https://fixtures.test/micrio-custom-element",
+      "lastTile": "https://iiif.micr.io/KEimL/256,256,256,256/256,256/0/default.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/iip?FIF=/image.tif&JTL=1,0",
+      "format": "IIPImage",
+      "height": 512,
+      "input": "https://fixtures.test/iip?FIF=/image.tif",
+      "lastTile": "https://fixtures.test/iip?FIF=/image.tif&JTL=1,3",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/krpano/tiles/l1/1_1.jpg",
+      "format": "krpano",
+      "height": 512,
+      "input": "https://fixtures.test/krpano/pano.xml",
+      "lastTile": "https://fixtures.test/krpano/tiles/l1/2_2.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/xl/sample.imgi?cmd=tile&x=0&y=0&z=1",
+      "format": "XLimage",
+      "height": 512,
+      "input": "https://fixtures.test/xl/sample.imgi?cmd=info",
+      "lastTile": "https://fixtures.test/xl/sample.imgi?cmd=tile&x=1&y=1&z=1",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/topviewer/sample-file/10.jpg",
+      "format": "TopViewer",
+      "height": 512,
+      "input": "https://fixtures.test/topviewer/data.json",
+      "lastTile": "http://127.0.0.1:PORT/topviewer/sample-file/13.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/topviewer/sample-file/10.jpg",
+      "format": "TopViewer",
+      "height": 512,
+      "input": "https://fixtures.test/topviewer/page?FIF=not-iip",
+      "lastTile": "http://127.0.0.1:PORT/topviewer/sample-file/13.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/fsi/server?type=image&source=image&width=512&height=512&rect=0,0,1,1",
+      "format": "FSI",
+      "height": 512,
+      "input": "https://fixtures.test/fsi/server?type=info&source=image&image=image",
+      "lastTile": "https://fixtures.test/fsi/server?type=image&source=image&width=512&height=512&rect=0,0,1,1",
+      "tileCount": 1,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/lizardtech/iserv/getimage?cat=North%20America%20and%20United%20States&item=NorthAmerica%2FUS1566a.sid&wid=512&hei=512&oif=jpeg&lev=0&cp=0.25,0.25",
+      "format": "LizardTech ImageServer",
+      "height": 1024,
+      "input": "https://fixtures.test/lizardtech/iserv/calcrgn?cat=North%20America%20and%20United%20States&item=NorthAmerica/US1566a.sid&wid=500&hei=400&props=item(Name,Description),cat(Name,Description)&style=default/view.xsl&plugin=true",
+      "lastTile": "https://fixtures.test/lizardtech/iserv/getimage?cat=North%20America%20and%20United%20States&item=NorthAmerica%2FUS1566a.sid&wid=512&hei=512&oif=jpeg&lev=0&cp=0.75,0.75",
+      "tileCount": 4,
+      "width": 1024
+    },
+    {
+      "firstTile": "https://fixtures.test/image/tiler/square/fixture/0/0/0",
+      "format": "VLS",
+      "height": 512,
+      "input": "https://fixtures.test/vls/zoom/1",
+      "lastTile": "https://fixtures.test/image/tiler/square/fixture/0/0/0",
+      "tileCount": 1,
+      "width": 512
+    },
+    {
+      "firstTile": "https://fixtures.test/hungaricana/image/sample.ecw/eead7a64b71d28891bac75371a7dac53",
+      "format": "Hungaricana",
+      "height": 512,
+      "input": "https://fixtures.test/hungaricana/imagesize/sample.ecw",
+      "lastTile": "https://fixtures.test/hungaricana/image/sample.ecw/eead7a64b71d28891bac75371a7dac53",
+      "tileCount": 1,
+      "width": 512
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/wmts/EPSG3857/0/0/0.jpg",
+      "format": "WMTS",
+      "height": 2816,
+      "input": "https://fixtures.test/wmts/WMTSCapabilities.xml",
+      "lastTile": "http://127.0.0.1:PORT/wmts/EPSG3857/0/10/10.jpg",
+      "tileCount": 121,
+      "width": 2816
+    },
+    {
+      "firstTile": "https://fixtures.test/arcgis/MapServer/tile/7/1/2",
+      "format": "ArcGIS MapServer",
+      "height": 768,
+      "input": "https://fixtures.test/arcgis/MapServer",
+      "lastTile": "https://fixtures.test/arcgis/MapServer/tile/7/3/4",
+      "tileCount": 9,
+      "width": 768
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/fixtures/pnav/image.jpg?w=2000&h=2000&cl=0&ct=0&cw=512&ch=512",
+      "format": "pnav",
+      "height": 256,
+      "input": "https://fixtures.test/entity/OBJECT/1",
+      "lastTile": "http://127.0.0.1:PORT/fixtures/pnav/image.jpg?w=2000&h=2000&cl=0&ct=0&cw=512&ch=512",
+      "tileCount": 1,
+      "width": 256
+    }
+  ],
+  "scenario": "web/core-discovery"
+}

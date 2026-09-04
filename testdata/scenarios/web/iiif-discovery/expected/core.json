@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "firstTile": "http://127.0.0.1:PORT/iiif/v3/0,0,256,256/256,256/0/default.jpg",
+      "format": "IIIF",
+      "height": 512,
+      "input": "https://fixtures.test/iiif-v3/info.json",
+      "lastTile": "http://127.0.0.1:PORT/iiif/v3/256,256,256,256/256,256/0/default.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/iiif/onb/10048A37/uk4nGb4kQHe3msbC/0,0,256,256/256,256/0/default.jpg",
+      "format": "IIIF",
+      "height": 512,
+      "input": "https://viewer.onb.ac.at/10048A37/",
+      "lastTile": "http://127.0.0.1:PORT/iiif/onb/10048A37/uk4nGb4kQHe3msbC/256,256,256,256/256,256/0/default.jpg",
+      "tileCount": 4,
+      "width": 512
+    },
+    {
+      "firstTile": "http://127.0.0.1:PORT/iiif/onb/10048A37/uk4nGb4kQHe3msbC/0,0,256,256/256,256/0/default.jpg",
+      "format": "IIIF",
+      "height": 512,
+      "input": "https://api.onb.ac.at/iiif/presentation/v3/manifest/10048A37",
+      "lastTile": "http://127.0.0.1:PORT/iiif/onb/10048A37/uk4nGb4kQHe3msbC/256,256,256,256/256,256/0/default.jpg",
+      "tileCount": 4,
+      "width": 512
+    }
+  ],
+  "scenario": "web/iiif-discovery"
+}
