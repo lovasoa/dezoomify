@@ -1,0 +1,7 @@
+[[target]]
+name = "cli-linux-x86_64"
+os = "linux"
+
+[[target]]
+name = "desktop-windows-x86_64"
+os = "windows"

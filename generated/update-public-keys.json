@@ -1,0 +1,1 @@
+{"keys":["test-key-1"],"policy":"test-only; production keys live in protected CI environments"}

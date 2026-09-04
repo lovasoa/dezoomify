@@ -1,0 +1,16 @@
+name: release-publish
+on:
+  workflow_dispatch:
+    inputs:
+      artifacts:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release-publish
+    timeout-minutes: 60
+    steps:
+      - run: echo "publish verified signed artifacts (draft first, promotion separate)"

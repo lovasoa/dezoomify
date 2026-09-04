@@ -1,0 +1,5 @@
+[channels.test]
+rollout = "paused"
+
+[channels.stable]
+rollout = "staged"

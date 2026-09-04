@@ -1,0 +1,4 @@
+* @dezoomify-owners
+/crates/dezoomify-core/ @dezoomify-core-owners
+/crates/dezoomify-protocol/ @dezoomify-protocol-owners
+/release/ @dezoomify-release-owners

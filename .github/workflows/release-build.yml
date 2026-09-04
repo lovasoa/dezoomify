@@ -1,0 +1,16 @@
+name: release-build
+on:
+  workflow_dispatch:
+    inputs:
+      plan:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: cargo xtask release build --plan ${{ inputs.plan }}

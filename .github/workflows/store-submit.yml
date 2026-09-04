@@ -1,0 +1,17 @@
+name: store-submit
+on:
+  workflow_dispatch:
+    inputs:
+      browser:
+        required: true
+        type: choice
+        options: [chromium, firefox]
+permissions:
+  contents: read
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    environment: store-submit
+    timeout-minutes: 30
+    steps:
+      - run: echo "submit verified ${{ inputs.browser }} package (dry-run default; tracked per browser)"

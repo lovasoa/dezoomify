@@ -1,0 +1,15 @@
+name: release-sign
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        required: true
+        type: string
+permissions: {}
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    environment: release-signing
+    timeout-minutes: 60
+    steps:
+      - run: echo "sign digest-verified artifacts only (protected environment)"

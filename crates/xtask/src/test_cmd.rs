@@ -8,6 +8,12 @@
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
+        // Live compatibility is opt-in and isolated: only the explicit
+        // dry-run form reaches the live handler; every other live spelling
+        // stays rejected from the deterministic suite.
+        if args.first().map(String::as_str) == Some("live") {
+            return super::ci::test_live(&args[1..]);
+        }
         if args.iter().any(|a| a == "--live" || a.starts_with("live")) {
             return Err("live tests are not part of the deterministic suite".to_string());
         }
@@ -34,10 +40,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Some("native-messaging") => {
                 return super::extension::test_native_messaging(&args[1..]);
             }
+            Some("all") => return super::ci::test_all(),
+            Some("live") => return super::ci::test_live(&args[1..]),
             _ => {}
         }
         return Err(format!(
-            "unknown test arguments (targets: core, protocol, job, wasm, browser, ui, web, native, scenario, desktop, extension, native-messaging): {}",
+            "unknown test arguments (targets: core, protocol, job, wasm, browser, ui, web, native, scenario, desktop, extension, native-messaging, all, live): {}",
             args.join(" ")
         ));
     }

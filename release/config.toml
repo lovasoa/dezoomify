@@ -1,0 +1,7 @@
+[release]
+version = "1.0.0"
+channel = "test"
+
+[protocol]
+range = "1.0"
+min_peer = "1.0"

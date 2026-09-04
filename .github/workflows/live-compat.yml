@@ -1,0 +1,14 @@
+name: live-compat
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: cargo xtask test live --dry-run --fixtures
