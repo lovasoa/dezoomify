@@ -1,0 +1,25 @@
+{
+  "scenario": "extension/cookie-handoff",
+  "description": "Consented one-use cookie handoff to native; decline continues cookieless; replay rejected.",
+  "transcript": [
+    { "step": 1, "event": "negotiate", "clientVersion": 2, "result": "ok", "negotiatedVersion": 2 },
+    { "step": 2, "event": "consent-shown", "origins": ["https://protected.example/"], "cookieNames": ["session"], "expiry": "2026-09-05T00:00:00Z" },
+    { "step": 3, "event": "consent-declined-once", "networkCalls": 0, "continuedCookieless": true },
+    { "step": 4, "event": "consent-confirmed", "origins": ["https://protected.example/"], "cookieNames": ["session"] },
+    { "step": 5, "event": "native-redeem-once", "result": "ok", "jobStarted": true },
+    { "step": 6, "event": "replay-attempt", "result": "rejected", "code": "replay", "networkCalls": 0 },
+    { "step": 7, "event": "sibling-request", "url": "https://sibling.example/", "cookieSent": false },
+    { "step": 8, "event": "secret-scan", "canariesFound": [] }
+  ],
+  "expected": {
+    "consent": {
+      "origins": ["https://protected.example/"],
+      "cookieNames": ["session"],
+      "containsValues": false
+    },
+    "singleUse": true,
+    "replayRejectedWithoutNetwork": true,
+    "siblingGetsNoCookie": true,
+    "canariesFound": []
+  }
+}

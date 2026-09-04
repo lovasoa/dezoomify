@@ -1,0 +1,26 @@
+{
+  "scenario": "extension/scan-two-tabs",
+  "description": "Finite one-click active-tab reload scan with noisy background tab excluded.",
+  "transcript": [
+    { "step": 1, "event": "user-action-click", "tabId": 11 },
+    { "step": 2, "event": "query-active-tab", "activeTab": 11 },
+    { "step": 3, "event": "observer-installed", "tabId": 11, "beforeReload": true },
+    { "step": 4, "event": "tab-reloaded-once", "tabId": 11, "reloadCount": 1 },
+    { "step": 5, "event": "request-observed", "tabId": 11, "url": "https://a.example/ImageProperties.xml" },
+    { "step": 6, "event": "request-observed", "tabId": 11, "url": "https://a.example/frame/viewer?view=1" },
+    { "step": 7, "event": "request-ignored", "tabId": 22, "url": "https://b.example/noise.xml", "reason": "non-active-tab" },
+    { "step": 8, "event": "quiet-settle", "state": "settling" },
+    { "step": 9, "event": "settled", "state": "stopped", "reason": "settled" }
+  ],
+  "expected": {
+    "reloadCounts": { "11": 1, "22": 0 },
+    "candidates": [
+      { "url": "https://a.example/ImageProperties.xml", "formatHint": "zoomify" },
+      { "url": "https://a.example/frame/viewer?view=1", "formatHint": "unknown" }
+    ],
+    "excluded": ["https://b.example/noise.xml"],
+    "listeners": { "webRequest": 0, "tab": 0, "timers": 0 },
+    "extensionPageRearm": false,
+    "proxyRequests": 0
+  }
+}

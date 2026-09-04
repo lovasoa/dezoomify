@@ -1,0 +1,21 @@
+{
+  "_compatNote": "Firefox overlay (MV2 for ESR compat; MV3 background.service_worker vs MV2 background.scripts difference documented here). Uses browser_action instead of action, background.scripts instead of service_worker, same least-privilege set. scripting permission omitted on MV2 (tabs fallback); behavior identical. Gecko ID pinned via reviewed release config only.",
+  "background": {
+    "scripts": ["background/index.js"]
+  },
+  "browser_action": {
+    "default_title": "Dezoomify NG"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "dezoomify-ng@example.com",
+      "strict_min_version": "115.0"
+    }
+  },
+  "content_security_policy": "script-src 'self'; object-src 'none';",
+  "host_permissions": [],
+  "manifest_version": 2,
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "optional_permissions": ["cookies"],
+  "permissions": ["activeTab", "webRequest", "downloads", "nativeMessaging"]
+}

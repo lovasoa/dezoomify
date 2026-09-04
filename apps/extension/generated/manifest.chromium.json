@@ -1,0 +1,38 @@
+{
+  "_compatNote": "Chromium MV3 overlay. Service-worker background (suspends; scans are memory-only and restart fails closed to idle). scripting/activeTab for explicit-action reload; webRequest observation only; downloads for save; nativeMessaging for consented handoff. No permanent host access: hosts stay optional.",
+  "action": {
+    "default_title": "Dezoomify NG"
+  },
+  "background": {
+    "service_worker": "background/index.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none';"
+  },
+  "description": "Save full-resolution zoomable images. Finite active-tab scan only; no background monitoring.",
+  "host_permissions": [],
+  "icons": {
+    "128": "icons/icon128.png",
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png"
+  },
+  "manifest_version": 3,
+  "minimum_chrome_version": "120",
+  "name": "Dezoomify NG",
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "optional_permissions": [
+    "cookies"
+  ],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "webRequest",
+    "downloads",
+    "nativeMessaging"
+  ],
+  "version": "0.12.0"
+}

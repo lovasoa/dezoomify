@@ -1,0 +1,10 @@
+{
+  "description": "Save full-resolution zoomable images. Finite active-tab scan only; no background monitoring.",
+  "icons": {
+    "128": "icons/icon128.png",
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png"
+  },
+  "name": "Dezoomify NG",
+  "version": "0.12.0"
+}

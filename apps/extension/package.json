@@ -1,0 +1,16 @@
+{
+  "name": "@dezoomify/extension",
+  "version": "0.12.0",
+  "private": true,
+  "type": "module",
+  "description": "Dezoomify NG browser extension (Phase 12): finite active-tab scan, browser-session fetch, consented native handoff.",
+  "scripts": {
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:unit": "node --test tests/unit/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "build:manifests": "node ./scripts/generate-manifests.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

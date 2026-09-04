@@ -1,9 +1,10 @@
 //! `cargo xtask test`: fast deterministic aggregate.
 //! Runs check, workspace unit tests, core, protocol, job, wasm, browser, UI,
-//! and web suites plus the legacy-web harness. Named test targets exist only
-//! for their owner phases (core 04, protocol 05, job 06, wasm 07,
-//! browser/ui/web 08-09). Rejects opt-in live flags; propagates the first
-//! nonzero result with a stable summary.
+//! web, native, scenario, desktop, extension, and native-messaging suites plus
+//! the legacy-web harness. Named test targets exist only for their owner
+//! phases (core 04, protocol 05, job 06, wasm 07, browser/ui/web 08-09,
+//! native/scenario 10, desktop 11, extension 12). Rejects opt-in live flags;
+//! propagates the first nonzero result with a stable summary.
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
@@ -26,10 +27,17 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Some("browser") => return super::browser::test_browser(&args[1..]),
             Some("ui") => return super::browser::test_ui(&args[1..]),
             Some("web") => return super::browser::test_web(&args[1..]),
+            Some("native") => return super::native::test_native(&args[1..]),
+            Some("scenario") => return super::native::test_scenario(&args[1..]),
+            Some("desktop") => return super::desktop::test_desktop(&args[1..]),
+            Some("extension") => return super::extension::test_extension(&args[1..]),
+            Some("native-messaging") => {
+                return super::extension::test_native_messaging(&args[1..]);
+            }
             _ => {}
         }
         return Err(format!(
-            "unknown test arguments (targets: core, protocol, job, wasm, browser, ui, web): {}",
+            "unknown test arguments (targets: core, protocol, job, wasm, browser, ui, web, native, scenario, desktop, extension, native-messaging): {}",
             args.join(" ")
         ));
     }
@@ -49,6 +57,21 @@ pub fn run(args: &[String]) -> Result<(), String> {
     })?;
     run_step("test-ui", &mut summary, || super::browser::test_ui(&[]))?;
     run_step("test-web", &mut summary, || super::browser::test_web(&[]))?;
+    run_step("test-native", &mut summary, || {
+        super::native::test_native(&[])
+    })?;
+    run_step("test-scenario", &mut summary, || {
+        super::native::test_scenario(&[])
+    })?;
+    run_step("test-desktop", &mut summary, || {
+        super::desktop::test_desktop(&[])
+    })?;
+    run_step("test-extension", &mut summary, || {
+        super::extension::test_extension(&[])
+    })?;
+    run_step("test-native-messaging", &mut summary, || {
+        super::extension::test_native_messaging(&[])
+    })?;
     run_step("legacy-web-harness", &mut summary, legacy_web_harness)?;
     print_summary(&summary);
     println!("test: all fast deterministic suites pass");
