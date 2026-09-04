@@ -1,0 +1,29 @@
+[
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "discovering",
+    "type": "job-state"
+  },
+  {
+    "effect": "fx:wasm-acq-1",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "request": {
+      "headers": [],
+      "id": "req:wasm-meta-1",
+      "purpose": "metadata",
+      "uri": "https://example.com/item/1"
+    },
+    "type": "acquire-resource"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "output": "out:wasm-1",
+    "protocol": "1.0",
+    "type": "completed"
+  }
+]

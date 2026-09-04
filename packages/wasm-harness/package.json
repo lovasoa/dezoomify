@@ -1,0 +1,14 @@
+{
+  "name": "@dezoomify/wasm-harness",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Test-only Node conformance harness for the dezoomify-wasm adapter. No runtime dependencies, no network.",
+  "scripts": {
+    "test": "node --test src/node.spec.mjs",
+    "test:node": "node --test src/node.spec.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
