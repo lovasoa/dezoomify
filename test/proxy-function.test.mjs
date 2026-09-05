@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { onRequestPost, onRequestOptions } from "../functions/api/proxy.ts";
 import { handleProxyRequest } from "../src/server/proxy.ts";
 
-const SITE_URL = "https://ng.dezoomify.pages.dev/api/proxy";
+const SITE_URL = "https://dezoomify.ophir.dev/api/proxy";
 
 function postRequest(rawBody, extraHeaders = {}) {
   return new Request(SITE_URL, {
@@ -34,13 +34,13 @@ test("happy path: relays metadata JSON with CORS and content-type", async (t) =>
   );
   const res = await onRequestPost({
     request: postRequest('{"targetUrl":"https://public.test/iiif.json","protocolVersion":1}', {
-      origin: "https://ng.dezoomify.pages.dev",
+      origin: "https://dezoomify.ophir.dev",
     }),
   });
   assert.equal(res.status, 200);
   assert.equal(await res.text(), '{"x":1}');
   assert.equal(res.headers.get("content-type"), "application/json");
-  assert.equal(res.headers.get("access-control-allow-origin"), "https://ng.dezoomify.pages.dev");
+  assert.equal(res.headers.get("access-control-allow-origin"), "https://dezoomify.ophir.dev");
   assert.equal(res.headers.get("cache-control"), "no-store");
   assert.equal(calls.mock.calls[0].arguments[1].method, "GET");
   // The function must never let fetch follow redirects itself: the relay
@@ -171,11 +171,11 @@ test("transient upstream 429 is retried once and succeeds", async (t) => {
       method: "POST",
       targetUrl: "https://public.test/busy.json",
       protocolVersion: 1,
-      origin: "https://ng.dezoomify.pages.dev",
+      origin: "https://dezoomify.ophir.dev",
     },
     {
       fetchUpstream: (url, init) => upstream(url, init),
-      websiteOrigin: "https://ng.dezoomify.pages.dev",
+      websiteOrigin: "https://dezoomify.ophir.dev",
       rateLimitRetryDelayMs: 1,
     },
   );
@@ -197,11 +197,11 @@ test("persistent upstream 429 fails fast after a single retry", async (t) => {
       method: "POST",
       targetUrl: "https://public.test/busy.json",
       protocolVersion: 1,
-      origin: "https://ng.dezoomify.pages.dev",
+      origin: "https://dezoomify.ophir.dev",
     },
     {
       fetchUpstream: (url, init) => upstream(url, init),
-      websiteOrigin: "https://ng.dezoomify.pages.dev",
+      websiteOrigin: "https://dezoomify.ophir.dev",
       rateLimitRetryDelayMs: 1,
     },
   );
@@ -214,13 +214,13 @@ test("OPTIONS preflight: same origin allowed, cross origin refused", async (t) =
   const ok = await onRequestOptions({
     request: new Request(SITE_URL, {
       method: "OPTIONS",
-      headers: { origin: "https://ng.dezoomify.pages.dev" },
+      headers: { origin: "https://dezoomify.ophir.dev" },
     }),
   });
   assert.equal(ok.status, 204);
   assert.equal(
     ok.headers.get("access-control-allow-origin"),
-    "https://ng.dezoomify.pages.dev",
+    "https://dezoomify.ophir.dev",
   );
   const denied = await onRequestOptions({
     request: new Request(SITE_URL, { method: "OPTIONS", headers: { origin: "https://evil.example" } }),
