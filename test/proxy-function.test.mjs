@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { onRequestPost, onRequestOptions } from "../functions/api/proxy.ts";
-import { handleProxyRequest } from "../functions/proxy.ts";
+import { handleProxyRequest } from "../src/server/proxy.ts";
 
 const SITE_URL = "https://ng.dezoomify.pages.dev/api/proxy";
 

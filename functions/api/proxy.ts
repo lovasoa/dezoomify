@@ -1,7 +1,10 @@
-// Cloudflare Pages Function: binds POST /api/proxy to the pure relay in ../proxy.ts.
-// Metadata files only, never tiles; no cookies or credentials are accepted or forwarded.
-import { handleProxyRequest } from "../proxy.ts";
-import { buildProxyCorsHeaders } from "../security.ts";
+// Cloudflare Pages Function: binds POST /api/proxy to the pure relay in
+// ../../src/server/proxy.ts. Metadata files only, never tiles; no cookies or
+// credentials are accepted or forwarded. Pure modules live outside functions/
+// so that every file under it is a real route (legacy/functions/proxy.js owns
+// the /proxy route for the legacy site).
+import { handleProxyRequest } from "../../src/server/proxy.ts";
+import { buildProxyCorsHeaders } from "../../src/server/security.ts";
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 

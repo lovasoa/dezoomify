@@ -140,9 +140,10 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
         "src/webIntegration.ts",
         "src/proxyTransport.ts",
         "src/worker.js",
-        "functions/proxy.ts",
+        "src/server/proxy.ts",
+        "functions/proxy.js",
         "functions/api/proxy.ts",
-        "functions/security.ts",
+        "src/server/security.ts",
         "packages/shared-ui/src/controller.ts",
     ] {
         let text = std::fs::read_to_string(super::repo_root().join(rel))

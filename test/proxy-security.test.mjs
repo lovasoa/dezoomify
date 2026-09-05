@@ -10,8 +10,8 @@ import {
   stripUpstreamHeaders,
   buildProxyCorsHeaders,
   createProxyRequestId,
-} from "../functions/security.ts";
-import { handleProxyRequest } from "../functions/proxy.ts";
+} from "../src/server/security.ts";
+import { handleProxyRequest } from "../src/server/proxy.ts";
 
 function hdr(obj) {
   const lower = {};
