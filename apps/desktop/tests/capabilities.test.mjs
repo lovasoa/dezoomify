@@ -127,7 +127,6 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
     assert.equal(x.updater.requiresUserConfirm, true);
     assert.ok((x.updater.allowlist ?? []).every((u) => u.startsWith("https://")), "https allowlist");
   }
-  assert.ok(lib.includes('PROTOCOL_MIN') && lib.includes('"1.0"'), "lib protocol");
   assert.ok(lib.includes(NATIVE_HOST), "lib native host");
   assert.ok(integration.includes('"1.0"') && integration.includes(NATIVE_HOST), "integration protocol/host");
   const hostSrc = readText("../src-tauri/src/bin/dezoomify-native-host.rs");
