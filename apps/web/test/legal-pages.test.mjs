@@ -22,3 +22,19 @@ test("privacy and terms pages exist and are linked", () => {
     );
   }
 });
+
+test("header bar has consistent thin structure and styling across pages", () => {
+  const themeCssPath = path.resolve(webDir, "../../packages/shared-ui/src/styles/theme.css");
+  const themeCss = readFileSync(themeCssPath, "utf8");
+
+  // .dz-nav has thin constant height and cannot shrink
+  assert.match(themeCss, /\.dz-nav\s*\{[^}]*height:\s*36px;/);
+  assert.match(themeCss, /\.dz-nav\s*\{[^}]*flex-shrink:\s*0;/);
+
+  for (const page of ["index.html", "privacy.html", "terms.html"]) {
+    const html = readFileSync(path.join(webDir, page), "utf8");
+    assert.ok(html.includes('class="dz-nav"'), `${page} has header.dz-nav`);
+    assert.ok(html.includes('class="dz-brand"'), `${page} has brand`);
+    assert.ok(html.includes('width="20" height="20"'), `${page} has consistent 20x20 logo`);
+  }
+});
