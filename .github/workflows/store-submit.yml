@@ -126,10 +126,17 @@ jobs:
             echo "hint: re-run apps/extension/scripts/chrome-webstore-publish.sh authorize with the listing-owner account and update the CHROME_WS_REFRESH_TOKEN secret, then re-run"
             exit 1
           fi
-          curl -sS --fail --proto '=https' --max-time 120 \
-            -H "Authorization: Bearer ${token}" -X PUT -T "$zip" \
-            "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}" \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("upload:", d.get("uploadState","unknown")); [print("itemError:", e.get("errorDetail", e.get("error_code","?"))) for e in d.get("itemError", [])]'
+          put_resp=$(curl -sS --proto '=https' --max-time 120 -w '\n%{http_code}' \
+            -H "Authorization: Bearer ${token}" -H "x-goog-api-version: 2" -X PUT -T "$zip" \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}") \
+            || { echo "upload endpoint unreachable"; exit 1; }
+          put_code=$(printf '%s' "$put_resp" | tail -n1)
+          put_body=$(printf '%s' "$put_resp" | head -n -1)
+          put_out=$(printf '%s' "$put_body" \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("upload:", d.get("uploadState","unknown")); [print("itemError:", e.get("errorDetail", e.get("error_code","?"))) for e in d.get("itemError", [])]; print(d.get("uploadState",""))') \
+            || { echo "upload failed: HTTP $put_code: $(printf '%s' "$put_body" | head -c 300)"; exit 1; }
+          printf '%s\n' "$put_out" | head -n -1
+          [ "$(printf '%s' "$put_out" | tail -n1)" = "SUCCESS" ] || { echo "upload not accepted (see itemError above)"; exit 1; }
       - name: Publish uploaded draft
         if: inputs.browser == 'chromium' && inputs.upload == true && inputs.publish == true
         env:
@@ -159,7 +166,7 @@ jobs:
             exit 1
           fi
           curl -sS --fail --proto '=https' --max-time 120 \
-            -H "Authorization: Bearer ${token}" -X POST \
+            -H "Authorization: Bearer ${token}" -H "x-goog-api-version: 2" -X POST \
             "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}/publish?deployPercentage=100" \
             | python3 -c 'import json,sys; print("publish:", json.load(sys.stdin).get("status","unknown"))'
       - name: Firefox upload guard

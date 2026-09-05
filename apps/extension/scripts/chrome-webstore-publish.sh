@@ -144,7 +144,7 @@ cmd_upload() {
   id="$(extension_id)"
   token="$(access_token)"
   curl -sS --fail --proto '=https' --max-time 120 \
-    -H "Authorization: Bearer ${token}" -X PUT \
+    -H "Authorization: Bearer ${token}" -H "x-goog-api-version: 2" -X PUT \
     -T "$zip" "${STORE_API}/${id}" | python3 -c 'import json,sys; print("upload:", json.load(sys.stdin).get("uploadState","unknown"))'
   unset token
 }
@@ -154,7 +154,7 @@ cmd_publish() {
   id="$(extension_id)"
   token="$(access_token)"
   curl -sS --fail --proto '=https' --max-time 120 \
-    -H "Authorization: Bearer ${token}" -X POST \
+    -H "Authorization: Bearer ${token}" -H "x-goog-api-version: 2" -X POST \
     "${STORE_API}/${id}/publish?deployPercentage=100" | python3 -c 'import json,sys; print("publish:", json.load(sys.stdin).get("status","unknown"))'
   unset token
 }
