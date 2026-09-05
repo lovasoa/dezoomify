@@ -7,6 +7,7 @@ pub fn machine_event(kind: &str, job: &str, seq: u64) -> String {
 }
 
 #[must_use]
+#[allow(dead_code)]
 pub fn human_progress(acquired: u64, total: u64) -> String {
     format!("progress {acquired}/{total}")
 }

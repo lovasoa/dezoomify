@@ -149,21 +149,16 @@ function update() {
             controller.dispatch(nextEvent("image-chosen") as any);
             controller.dispatch(nextEvent("level-chosen") as any);
             controller.dispatch(nextEvent("preflight-ok", { transport: via }) as any);
-            viewCtx.currentProgress = { current: 1, total: 1, message: "Reading image tiles..." };
+            // Honest stub: discovery found a zoomable signal, but this preview
+            // build has no tile plan/download yet. Stay in downloading at 0%
+            // and never fabricate dimensions, completion, or save output.
+            viewCtx.currentProgress = {
+              current: 0,
+              total: 0,
+              message:
+                "Found zoomable image metadata. Full tile download is not yet available in this preview build.",
+            };
             update();
-
-            // TODO: replace this placeholder completion with the real tile
-            // plan/download once the browser runtime drives core discovery.
-            setTimeout(() => {
-              controller.dispatch(nextEvent("save-start") as any);
-              controller.dispatch(nextEvent("save-done") as any);
-              viewCtx.completedInfo = {
-                width: 4096,
-                height: 3072,
-                mime: "image/jpeg",
-              };
-              update();
-            }, 600);
           })
           .catch((err) => {
             controller.dispatch(
@@ -193,8 +188,8 @@ function update() {
         update();
       },
       onSave() {
-        // Trigger save download
-        alert("Image ready to save! In full runtime, this initiates downloading the final image file.");
+        // Honest stub: no bytes have been assembled, so there is nothing to save yet.
+        alert("Save is not yet available in this preview build: tile download is still being wired up.");
       },
     },
     viewCtx,

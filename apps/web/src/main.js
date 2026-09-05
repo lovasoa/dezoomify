@@ -177,9 +177,14 @@ export function update() {
             controller.dispatch(nextEvent("image-chosen"));
             controller.dispatch(nextEvent("level-chosen"));
             controller.dispatch(nextEvent("preflight-ok", { transport: via }));
-            // Placeholder while the browser runtime gains a real tile plan.
-            // Never fabricate a tile count: 1 of 1 only marks the stub stage.
-            viewCtx.currentProgress = { current: 1, total: 1, message: "Reading image tiles..." };
+            // Honest stub: discovery found a zoomable signal, but this preview
+            // build has no tile plan/download yet. Stay at 0% and never
+            // fabricate dimensions, completion, or save output.
+            viewCtx.currentProgress = {
+              current: 0,
+              total: 0,
+              message: "Found zoomable image metadata. Full tile download is not yet available in this preview build.",
+            };
             update();
           },
           (err) => {
@@ -211,7 +216,7 @@ export function update() {
         update();
       },
       onSave() {
-        alert("Image ready to save! In full runtime, this initiates downloading the final image file.");
+        alert("Save is not yet available in this preview build: tile download is still being wired up.");
       },
     },
     viewCtx,

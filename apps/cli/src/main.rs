@@ -28,12 +28,15 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // Honest scaffold: the native HTTP/decode/encode pipeline is not wired
+    // yet (see crates/dezoomify-native: no HTTP client or image codecs).
+    // Never print fake progress/completion or a stub hash for real inputs.
     handle.emit("started");
-    let result = handle.finish("hash-stub".into());
     if parsed.json {
-        println!("{}", report::machine_event("completed", &handle.id, 2));
+        println!("{}", report::machine_event("started", &handle.id, 1));
     } else {
-        eprintln!("{}", report::human_progress(1, 1));
-        eprintln!("done {} ({})", handle.id, result.output_hash);
+        eprintln!("started {}", handle.id);
     }
+    eprintln!("error: native download pipeline not yet implemented in this preview build");
+    std::process::exit(1);
 }
