@@ -129,15 +129,20 @@ test("error: http statuses map to plain retryable/terminal transport errors", ()
     ["https://public.test/missing", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/missing", status: 404, headers: {} } }, "TRANSPORT_HTTP_ERROR", false],
     ["https://public.test/denied", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/denied", status: 403, headers: {} } }, "TRANSPORT_HTTP_ERROR", false],
     ["https://public.test/busy", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/busy", status: 500, headers: {} } }, "TRANSPORT_HTTP_ERROR", true],
-    ["https://public.test/rate", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/rate", status: 429, headers: {} } }, "TRANSPORT_HTTP_ERROR", true],
+    ["https://public.test/rate", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/rate", status: 429, headers: {} } }, "UPSTREAM_RATE_LIMITED", true],
   ];
   for (const [url, fetchOutput, code, retryable] of cases) {
     const res = classifyDiscovery(url, fetchOutput);
     assert.equal(res.found, false, url);
     assert.equal(res.error.code, code, url);
     assert.equal(res.error.retryable, retryable, url);
-    assert.ok(!res.error.message.match(/cors|proxy|dezoomer/i), `no jargon in ${url}: ${res.error.message}`);
+    assert.ok(!res.error.message.match(/cors|proxy|dezoomer|http 429/i), `no jargon in ${url}: ${res.error.message}`);
   }
+  // A direct 429 throttles the user's own connection, so the copy must not
+  // blame "our server" and must tell the user to wait rather than switch apps.
+  const direct429 = classifyDiscovery("https://public.test/rate", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/rate", status: 429, headers: {} } });
+  assert.ok(!direct429.error.message.includes("our server"), `direct 429 must not mention our server: ${direct429.error.message}`);
+  assert.ok(direct429.error.message.includes("Wait"), `direct 429 must tell the user to wait: ${direct429.error.message}`);
 });
 
 test("error: network, cancelled, policy-denied, and malformed map distinctly", () => {
@@ -168,7 +173,14 @@ test("error: network, cancelled, policy-denied, and malformed map distinctly", (
 test("error: proxy failures map without leaking proxy internals to tile progress", () => {
   const rate = classifyDiscovery("https://public.test/x.json", { via: "proxy", result: { ok: false, status: 429, code: "PROXY_RATE_LIMITED" } });
   assert.equal(rate.found, false);
+  assert.equal(rate.error.code, "UPSTREAM_RATE_LIMITED");
   assert.equal(rate.error.retryable, true);
+  // A proxy 429 throttles OUR server's IP, so the copy must explain that the
+  // website limits our server and point to the apps that fetch from the
+  // user's own connection, without jargon.
+  assert.ok(!rate.error.message.match(/cors|proxy|dezoomer|http 429/i), `no jargon: ${rate.error.message}`);
+  assert.ok(rate.error.message.includes("our server"), `proxy 429 must explain our server was throttled: ${rate.error.message}`);
+  assert.ok(rate.error.message.includes("browser extension") && rate.error.message.includes("desktop app"), `proxy 429 must guide to extension/desktop: ${rate.error.message}`);
 
   const budget = classifyDiscovery("https://public.test/x.json", { via: "proxy", result: { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" } });
   assert.equal(budget.found, false);

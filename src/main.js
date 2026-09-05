@@ -4,7 +4,13 @@
 // assembly -> real PNG save. Nothing here fabricates progress or completion.
 import { createController } from "../packages/shared-ui/src/controller.js";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.js";
-import { classifyDiscovery, classifyReadableBytes, noImageFoundError } from "./discovery.js";
+import {
+  RATE_LIMITED_BY_SITE_MESSAGE,
+  SITE_BUSY_MESSAGE,
+  classifyDiscovery,
+  classifyReadableBytes,
+  noImageFoundError,
+} from "./discovery.js";
 import { createDiscoveryClient } from "../packages/browser-runtime/src/session.js";
 
 let sessionId = `sess:web-${Date.now()}`;
@@ -102,7 +108,17 @@ async function fetchViaProxy(targetUrl, signal) {
       credentials: "omit",
     });
     if (!res.ok) {
-      return { ok: false, status: res.status, code: "PROXY_ERROR" };
+      // Surface the proxy's machine-readable error code (e.g. PROXY_RATE_LIMITED
+      // means the upstream site throttled our server) instead of collapsing
+      // every failure into one generic code.
+      let code = "PROXY_ERROR";
+      try {
+        const body = await res.json();
+        if (body && typeof body.code === "string") code = body.code;
+      } catch {
+        // Unreadable body keeps the generic code.
+      }
+      return { ok: false, status: res.status, code };
     }
     const bytes = await res.arrayBuffer();
     return { ok: true, status: 200, bytes, contentType: res.headers.get("content-type") || undefined };
@@ -132,6 +148,12 @@ async function fetchMetadataFor(url, headers) {
     via = "proxy";
     const proxied = await fetchViaProxy(url);
     if (!proxied.ok) {
+      if (proxied.code === "PROXY_RATE_LIMITED") {
+        throw Object.assign(new Error(RATE_LIMITED_BY_SITE_MESSAGE), {
+          code: "UPSTREAM_RATE_LIMITED",
+          retryable: true,
+        });
+      }
       throw Object.assign(
         new Error("The metadata proxy could not fetch this address."),
         { code: "PROXY_ERROR" },
@@ -139,6 +161,14 @@ async function fetchMetadataFor(url, headers) {
     }
     bytes = proxied.bytes;
   } else if (direct.outcome === "http-error") {
+    if (direct.status === 429) {
+      // A direct fetch uses the user's own connection, so this throttle is on
+      // their IP, not on our server; the fix is waiting, not another app.
+      throw Object.assign(new Error(SITE_BUSY_MESSAGE), {
+        code: "UPSTREAM_RATE_LIMITED",
+        retryable: true,
+      });
+    }
     throw Object.assign(new Error(`The server answered HTTP ${direct.status}.`), {
       code: "DISCOVERY_HTTP_ERROR",
     });

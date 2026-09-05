@@ -5,7 +5,12 @@
 import { createController } from "../packages/shared-ui/src/controller.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.ts";
 import type { ViewContext } from "../packages/shared-ui/src/view.ts";
-import { classifyReadableBytes, noImageFoundError } from "./discovery.ts";
+import {
+  RATE_LIMITED_BY_SITE_MESSAGE,
+  SITE_BUSY_MESSAGE,
+  classifyReadableBytes,
+  noImageFoundError,
+} from "./discovery.ts";
 import {
   createDiscoveryClient,
   failure,
@@ -116,7 +121,17 @@ async function fetchViaProxy(targetUrl: string, signal?: AbortSignal): Promise<{
       credentials: "omit",
     });
     if (!res.ok) {
-      return { ok: false, status: res.status, code: "PROXY_ERROR" };
+      // Surface the proxy's machine-readable error code (e.g. PROXY_RATE_LIMITED
+      // means the upstream site throttled our server) instead of collapsing
+      // every failure into one generic code.
+      let code = "PROXY_ERROR";
+      try {
+        const body = (await res.json()) as { code?: unknown };
+        if (body && typeof body.code === "string") code = body.code;
+      } catch {
+        // Unreadable body keeps the generic code.
+      }
+      return { ok: false, status: res.status, code };
     }
     const bytes = await res.arrayBuffer();
     return { ok: true, status: 200, bytes };
@@ -149,10 +164,18 @@ async function fetchMetadataFor(
     via = "proxy";
     const proxied = await fetchViaProxy(url);
     if (!proxied.ok || !proxied.bytes) {
+      if (proxied.code === "PROXY_RATE_LIMITED") {
+        throw failure("UPSTREAM_RATE_LIMITED", RATE_LIMITED_BY_SITE_MESSAGE, true);
+      }
       throw failure("PROXY_ERROR", "The metadata proxy could not fetch this address.", false);
     }
     bytes = proxied.bytes;
   } else if (direct.outcome === "http-error") {
+    if (direct.status === 429) {
+      // A direct fetch uses the user's own connection, so this throttle is on
+      // their IP, not on our server; the fix is waiting, not another app.
+      throw failure("UPSTREAM_RATE_LIMITED", SITE_BUSY_MESSAGE, true);
+    }
     throw failure("DISCOVERY_HTTP_ERROR", `The server answered HTTP ${direct.status}.`, false);
   } else {
     throw failure("DISCOVERY_FAILED", "Could not fetch this address.");
