@@ -104,9 +104,6 @@ export function renderView(
       renderGenericState(card, state, callbacks, ctx);
       break;
   }
-
-  // Site footer
-  renderFooter(container);
 }
 
 function renderInputSection(
@@ -182,26 +179,47 @@ function renderInputSection(
   }
   form.appendChild(wrapper);
 
-  // Format selection flow
+  // Progressive Disclosure: Collapsible Format Selector
   const dezoomers = ctx?.supportedDezoomers ?? ALL_DEZOOMERS;
-  const formatContainer = document.createElement("div");
-  formatContainer.className = "dz-format-container";
+  const details = document.createElement("details");
+  details.className = "dz-format-details";
+  details.innerHTML = `
+    <summary class="dz-format-summary">
+      <div class="dz-format-summary-indicator">
+        <span class="dz-format-badge"></span>
+        <span id="dz-selected-format-label">Format: <strong>Select automatically</strong> (click to change)</span>
+      </div>
+      <svg class="dz-format-summary-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="6 9 12 15 18 9"></polyline>
+      </svg>
+    </summary>
+    <div class="dz-format-content">
+      <div class="dz-format-grid" id="dz-format-list"></div>
+    </div>
+  `;
 
-  const flow = document.createElement("div");
-  flow.className = "dz-format-flow";
-  formatContainer.appendChild(flow);
-
-  dezoomers.forEach((fmt, idx) => {
-    const label = document.createElement("label");
-    label.className = `dz-format-option ${idx === 0 ? "primary-option" : ""}`;
-    label.title = fmt.description ?? fmt.name;
-    label.innerHTML = `
-      <input type="radio" name="dz-format" value="${fmt.id}" ${idx === 0 ? "checked" : ""} />
-      <span>${fmt.name}</span>
-    `;
-    flow.appendChild(label);
-  });
-  form.appendChild(formatContainer);
+  const formatList = details.querySelector("#dz-format-list");
+  const summaryLabel = details.querySelector("#dz-selected-format-label");
+  if (formatList) {
+    dezoomers.forEach((fmt, idx) => {
+      const label = document.createElement("label");
+      label.className = `dz-format-option ${idx === 0 ? "active" : ""}`;
+      label.title = fmt.description ?? fmt.name;
+      label.innerHTML = `
+        <input type="radio" name="dz-format" value="${fmt.id}" ${idx === 0 ? "checked" : ""} />
+        <span>${fmt.name}</span>
+      `;
+      label.querySelector("input")?.addEventListener("change", () => {
+        formatList.querySelectorAll(".dz-format-option").forEach((el) => el.classList.remove("active"));
+        label.classList.add("active");
+        if (summaryLabel) {
+          summaryLabel.innerHTML = `Format: <strong>${fmt.name}</strong> (click to change)`;
+        }
+      });
+      formatList.appendChild(label);
+    });
+  }
+  form.appendChild(details);
 
   // Centered Tactile "Dezoomify !" Button
   const btnRow = document.createElement("div");
@@ -482,22 +500,4 @@ function renderGenericState(
   `;
   div.querySelector("#dz-btn-reset")?.addEventListener("click", () => callbacks.onReset());
   parent.appendChild(div);
-}
-
-function renderFooter(parent: HTMLElement): void {
-  const footer = document.createElement("footer");
-  footer.className = "dz-site-footer";
-  footer.innerHTML = `
-    <div class="dz-footer-links">
-      <a href="https://github.com/lovasoa/dezoomify" target="_blank" rel="noopener">Open Source (GPL)</a>
-      <a href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ" target="_blank" rel="noopener">FAQ & Help</a>
-      <a href="https://lovasoa.github.io/dezoomify-extension/" target="_blank" rel="noopener">Browser Extension</a>
-      <a href="https://dezoomify-rs.ophir.dev/" target="_blank" rel="noopener">Desktop App</a>
-      <a href="https://github.com/sponsors/lovasoa/" target="_blank" rel="noopener">Support Hosting</a>
-    </div>
-    <div class="dz-footer-disclaimer">
-      Dezoomify is an open-source tool for accessing public zoomable images.
-    </div>
-  `;
-  parent.appendChild(footer);
 }
