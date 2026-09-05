@@ -34,7 +34,7 @@
 //! through, never fabricated. Empty discovery resources fail the job via
 //! the engine (`job.empty-resource`); nothing here can fake completion.
 
-use crate::buffer::{ArenaHandle, ByteArena};
+use crate::buffer::{ArenaHandle, ByteArena, MAX_BUFFERS, MAX_BUFFER_BYTES, MAX_TOTAL_BYTES};
 use crate::codec::{decode_envelope, encode_envelope};
 use crate::error::{redact, AdapterError, AdapterErrorCode};
 use crate::processing::{composite_crop, fnv1a64_hex, CropGeometry};
@@ -57,11 +57,11 @@ pub const HARD_MAX_BUFFERS: usize = 4096;
 pub const HARD_MAX_MESSAGES: usize = 65536;
 
 /// Default per-buffer cap (browser baseline `max_tile_bytes`, 8 MiB).
-pub const DEFAULT_MAX_BUFFER_BYTES: u64 = 8 << 20;
+pub const DEFAULT_MAX_BUFFER_BYTES: u64 = MAX_BUFFER_BYTES;
 /// Default session-total cap (64 MiB).
-pub const DEFAULT_MAX_TOTAL_BYTES: u64 = 64 << 20;
+pub const DEFAULT_MAX_TOTAL_BYTES: u64 = MAX_TOTAL_BYTES;
 /// Default live-buffer cap.
-pub const DEFAULT_MAX_BUFFERS: usize = 256;
+pub const DEFAULT_MAX_BUFFERS: usize = MAX_BUFFERS;
 /// Default queued-message cap.
 pub const DEFAULT_MAX_MESSAGES: usize = 1024;
 
