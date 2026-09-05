@@ -8,6 +8,8 @@
 use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 
+use crate::b64;
+
 const HMAC_KEY: &[u8] = &[0x7b, 0x2b, 0x4e, 0x23, 0xde, 0x2c, 0xc5, 0xc5];
 const AES_KEY: [u8; 16] = [
     0x5b, 0x63, 0xdb, 0x11, 0x3b, 0x7a, 0xf3, 0xe0, 0xb1, 0x43, 0x55, 0x56, 0xc8, 0xf9, 0x53, 0x0c,
@@ -42,7 +44,7 @@ pub fn verify_signature(request_path: &str) -> Option<String> {
     let mut mac = Hmac::<Sha1>::new_from_slice(HMAC_KEY).ok()?;
     mac.update(signed.as_bytes());
     let digest = mac.finalize().into_bytes();
-    let expected = url_safe_nopad(&digest);
+    let expected = b64::encode_nopad(&digest);
     if expected != sig {
         return None;
     }
@@ -59,7 +61,7 @@ pub fn verify_and_decrypt(request_path: &str, stored: &[u8]) -> Option<Vec<u8>> 
         .copied()
         .filter(|b| !b.is_ascii_whitespace())
         .collect();
-    let buffer = base64_decode(&b64)?;
+    let buffer = b64::decode(&b64)?;
     decrypt_image(&buffer)
 }
 
@@ -106,57 +108,5 @@ fn decrypt_image(buffer: &[u8]) -> Option<Vec<u8>> {
     out.extend_from_slice(&buffer[4..prefix_end]);
     out.extend_from_slice(&pt);
     out.extend_from_slice(&buffer[enc_end..suffix_end]);
-    Some(out)
-}
-
-fn url_safe_nopad(bytes: &[u8]) -> String {
-    // Legacy mapping: standard base64 with '+' and '/' both mapped to '_',
-    // trailing padding removed.
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789__";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let n = (chunk[0] as u32) << 16
-            | (*chunk.get(1).unwrap_or(&0) as u32) << 8
-            | (*chunk.get(2).unwrap_or(&0) as u32);
-        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
-        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
-        if chunk.len() > 1 {
-            out.push(ALPHABET[((n >> 6) & 63) as usize] as char);
-        }
-        if chunk.len() > 2 {
-            out.push(ALPHABET[(n & 63) as usize] as char);
-        }
-    }
-    out
-}
-
-fn base64_decode(input: &[u8]) -> Option<Vec<u8>> {
-    let mut vals = Vec::with_capacity(input.len());
-    for b in input {
-        let v = match b {
-            b'A'..=b'Z' => b - b'A',
-            b'a'..=b'z' => b - b'a' + 26,
-            b'0'..=b'9' => b - b'0' + 52,
-            b'+' | b'-' => 62,
-            b'/' | b'_' => 63,
-            b'=' => break,
-            _ => return None,
-        };
-        vals.push(v);
-    }
-    let mut out = Vec::with_capacity(vals.len() * 3 / 4);
-    for chunk in vals.chunks(4) {
-        let mut n: u32 = 0;
-        for (i, v) in chunk.iter().enumerate() {
-            n |= (*v as u32) << (18 - 6 * i);
-        }
-        out.push((n >> 16) as u8);
-        if chunk.len() > 2 {
-            out.push((n >> 8) as u8);
-        }
-        if chunk.len() > 3 {
-            out.push(n as u8);
-        }
-    }
     Some(out)
 }

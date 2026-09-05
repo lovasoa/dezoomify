@@ -21,6 +21,7 @@ hmac.workspace = true
 sha1.workspace = true
 aes.workspace = true
 cbc.workspace = true
+base64.workspace = true
 regex.workspace = true
 
 [dev-dependencies]

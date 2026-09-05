@@ -6,6 +6,7 @@
 //! response and there is no passthrough mode.
 
 mod arts;
+mod b64;
 mod routes;
 mod svg;
 
@@ -176,7 +177,7 @@ async fn serve_original_url(
             None => (if meta.is_empty() { "text/plain" } else { meta }, false),
         };
         let bytes = if is_b64 {
-            match base64_body(payload) {
+            match b64::decode(payload) {
                 Some(b) => b,
                 None => {
                     record(
@@ -258,37 +259,6 @@ impl UrlParts {
     fn method_host(&self) -> String {
         self.host.clone()
     }
-}
-
-fn base64_body(input: &str) -> Option<Vec<u8>> {
-    let mut vals = Vec::with_capacity(input.len());
-    for b in input.bytes() {
-        let v = match b {
-            b'A'..=b'Z' => b - b'A',
-            b'a'..=b'z' => b - b'a' + 26,
-            b'0'..=b'9' => b - b'0' + 52,
-            b'+' | b'-' => 62,
-            b'/' | b'_' => 63,
-            b'=' => break,
-            _ => return None,
-        };
-        vals.push(v);
-    }
-    let mut out = Vec::with_capacity(vals.len() * 3 / 4);
-    for chunk in vals.chunks(4) {
-        let mut n: u32 = 0;
-        for (i, v) in chunk.iter().enumerate() {
-            n |= (*v as u32) << (18 - 6 * i);
-        }
-        out.push((n >> 16) as u8);
-        if chunk.len() > 2 {
-            out.push((n >> 8) as u8);
-        }
-        if chunk.len() > 3 {
-            out.push(n as u8);
-        }
-    }
-    Some(out)
 }
 
 fn url_parts(original: &str) -> Option<UrlParts> {
