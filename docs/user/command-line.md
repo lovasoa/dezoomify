@@ -40,7 +40,7 @@ Put the addresses in a text file, one per line, with an optional title after
 each one:
 
 ```text
-# my-collection.txt — lines starting with # are ignored
+# my-collection.txt: lines starting with # are ignored
 https://museum.example/painting-1 Image 1: portrait
 https://museum.example/painting-2
 https://library.example/manuscript/info.json

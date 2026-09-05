@@ -12,7 +12,7 @@
 # and the refresh token comes from the environment (local `.env`,
 # never committed). This script never prints secret values: no `set -x`, values
 # travel only in curl POST bodies or shell variables, and `check` reports field
-# presence — never field contents.
+# presence, never field contents.
 #
 # Usage:
 #   ./chrome-webstore-publish.sh check                 verify wiring, no secrets shown

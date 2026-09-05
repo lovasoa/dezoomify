@@ -31,17 +31,20 @@ pub fn ci(args: &[String]) -> Result<(), String> {
 
 fn ci_lane(lane: &str) -> Result<(), String> {
     match lane {
-        "rust" => run_cargo(&[
-            "test",
-            "-p",
-            "dezoomify-core",
-            "-p",
-            "dezoomify-protocol",
-            "-p",
-            "dezoomify-job",
-            "-p",
-            "dezoomify-native",
-        ]),
+        "rust" => {
+            super::style::verify(&[])?;
+            run_cargo(&[
+                "test",
+                "-p",
+                "dezoomify-core",
+                "-p",
+                "dezoomify-protocol",
+                "-p",
+                "dezoomify-job",
+                "-p",
+                "dezoomify-native",
+            ])
+        }
         "wasm" => super::wasm::run(&[]),
         "browser" => super::browser::test_browser(&[]),
         "web" => super::browser::test_web(&[]),
@@ -150,7 +153,7 @@ mod tests {
         assert!(super::test_live(&["--dry-run".to_string(), "--fixtures".to_string()]).is_ok());
     }
 
-    // NOTE: no test for `release plan` — it is an honest, documented stub that
+    // NOTE: no test for `release plan`; it is an honest, documented stub that
     // writes nothing and prints "stub-ok". A test asserting it returns Ok(())
     // would be a tautology that masks its unimplemented scope.
 }

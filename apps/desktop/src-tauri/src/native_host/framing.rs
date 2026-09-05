@@ -54,10 +54,10 @@ pub fn parse_length_prefix(buffer: &[u8]) -> Option<u32> {
 
 /// Try to parse one framed message from the front of `buffer`.
 ///
-/// - `Ok(None)` — need more bytes (partial read) or empty buffer (EOF idle).
-/// - `Ok(Some((payload, consumed)))` — one full message; `consumed` counts
+/// - `Ok(None)`: need more bytes (partial read) or empty buffer (EOF idle).
+/// - `Ok(Some((payload, consumed)))`: one full message; `consumed` counts
 ///   prefix + body so callers can drain and parse the next message.
-/// - `Err(Oversized)` — prefix claims > max; caller must drop the channel
+/// - `Err(Oversized)`: prefix claims > max; caller must drop the channel
 ///   without allocating `claimed` bytes.
 /// - Zero-length bodies (`claimed == 0`) are returned as empty payloads;
 ///   callers treat empty JSON as malformed at the envelope layer.

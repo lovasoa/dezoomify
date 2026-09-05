@@ -2,7 +2,7 @@
 
 What the browser can and cannot do with image bytes, in one place: readable
 fetches for decoding and saving, versus ordinary `<img>` display that stays
-visible but tainted — script may show it, never read its pixels
+visible but tainted. Script may show it, never read its pixels
 (`originClean` guards enforce this).
 
 Hosts the WASM worker (built from `crates/dezoomify-wasm`) and reports the

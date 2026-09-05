@@ -1,7 +1,7 @@
 # Desktop Application (lean shell scaffold)
 
 Dezoomify native shell scaffold: validated deep links, command registry, job
-lifecycle table, and capability manifests — standard library only, no Tauri
+lifecycle table, and capability manifests. Standard library only, no Tauri
 window, installer, or execution yet.
 
 - Shell: lean `src-tauri/` (no Tauri SDK vendored); frontend contract from `packages/shared-ui`.

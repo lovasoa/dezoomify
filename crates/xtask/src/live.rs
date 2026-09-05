@@ -427,7 +427,7 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Live webapp port — opens the real webapp in Chromium against the
+/// Live webapp port: opens the real webapp in Chromium against the
 /// real-site targets (opt-in, diagnostic).
 fn run_live_webapp() -> Result<(), String> {
     let root = super::repo_root();

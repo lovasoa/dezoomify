@@ -69,7 +69,7 @@ struct Slot {
     data: Vec<u8>,
 }
 /// Bounded arena. Single-threaded by construction (owned by one `Session`);
-/// the host must not call back into it while another call borrows it —
+/// the host must not call back into it while another call borrows it;
 /// see the reentrancy rule in `lib.rs` (polling/draining only, no callbacks).
 #[derive(Debug)]
 pub struct ByteArena {

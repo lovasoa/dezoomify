@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="What to paste when no image is found." />
-    <title>Finding the image address — Dezoomify Help</title>
+    <title>Finding the image address: Dezoomify Help</title>
     <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
     <link rel="alternate icon" type="image/png" href="../favicon.png" />
     <link rel="stylesheet" href="../src/styles.css" />
@@ -124,16 +124,16 @@
 <h1 id="finding-the-image-address">Finding the image address</h1>
 <p>Dezoomify usually works with the ordinary address of the page that shows the image. If it answers that no image was found, the site probably hides its image description file. Every zoomable viewer loads such a small file that describes the picture; Dezoomify needs its address. There are two ways to find it.</p>
 <h2 id="way-1-let-the-extension-find-it">Way 1: let the extension find it</h2>
-<p>The <a href="browser-extension.html">browser extension</a> watches the page while you look at the image and finds the address for you. Try it first — it exists exactly for this problem.</p>
+<p>The <a href="browser-extension.html">browser extension</a> watches the page while you look at the image and finds the address for you. Try it first; it exists exactly for this problem.</p>
 <h2 id="way-2-find-it-yourself-in-the-browser">Way 2: find it yourself in the browser</h2>
 <p>Your browser keeps a log of every file a page loads. The description file is in there.</p>
 <ol><li>Open the page with the image.</li><li>Open your browser's <strong>network log</strong>:</li></ol>
 <p>- Firefox: press <strong>Ctrl+Shift+E</strong> (menu: *Tools → Browser Tools → Network*). - Chrome/Edge: press <strong>F12</strong>, then open the *Network* tab.</p>
-<ol><li>With the log open, <strong>reload the page</strong> (F5) and zoom into the image.</li><li>The log fills with rows — one per file. Look for a small file, usually a</li></ol>
+<ol><li>With the log open, <strong>reload the page</strong> (F5) and zoom into the image.</li><li>The log fills with rows, one per file. Look for a small file, usually a</li></ol>
 <p>few kilobytes, whose name ends in <code>.json</code>, <code>.xml</code>, or <code>.dzi</code>. Common names are <code>info.json</code> (IIIF), <code>ImageProperties.xml</code> (Zoomify), and anything ending in <code>.dzi</code> (Deep Zoom). Tiles are the big files; ignore them.</p>
 <ol><li>Right-click that row, choose *Copy → Copy URL*, and paste the address</li></ol>
 <p>into Dezoomify.</p>
-<p>You can recognize a good candidate because opening its address in a tab shows a short piece of text describing a picture — dimensions, tile size — rather than a picture itself.</p>
+<p>You can recognize a good candidate because opening its address in a tab shows a short piece of text describing a picture (dimensions, tile size), rather than a picture itself.</p>
 <h2 id="last-resort-describing-the-tile-pattern">Last resort: describing the tile pattern</h2>
 <p>If no description file exists, the <a href="supported-formats.html#generic">generic format</a> can still reconstruct the image from the addresses of the tiles themselves, when those addresses follow a simple pattern.</p>
 <ol><li>In the network log, find one of the picture's tile files (the many</li></ol>
@@ -143,7 +143,7 @@
 <ol><li>Paste the address into Dezoomify and replace those two numbers with <code>--</code>,</li></ol>
 <p>keeping everything else identical: - <code>https://example.com/art/image-0-0.jpg</code> - becomes <code>https://example.com/art/image--.jpg</code></p>
 <p>Dezoomify then works out the image's dimensions by trying the pattern. On the command line, the same trick applies with the <a href="supported-formats.html#generic">generic format</a>.</p>
-<p>If none of this works, the site may use a viewer that needs a new recipe — <a href="https://github.com/lovasoa/dezoomify/issues" target="_blank" rel="noopener">open an issue</a> with the site's address and someone can add support for it.</p>
+<p>If none of this works, the site may use a viewer that needs a new recipe; <a href="https://github.com/lovasoa/dezoomify/issues" target="_blank" rel="noopener">open an issue</a> with the site's address and someone can add support for it.</p>
 <h2 id="next-steps">Next steps</h2>
 <ul><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="supported-formats.html">All supported formats</a></li></ul>
           </article>

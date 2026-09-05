@@ -30,7 +30,7 @@ Explanations are layered so users get the minimum they need first:
 2. **"What happened":** an expandable plain-language explanation of the cause and the honest alternatives, still without jargon.
 3. **Technical detail:** only behind copyable diagnostics and linked documentation, for users who choose to look.
 
-Nothing important is locked behind a tier the user cannot reach, and every failure leaves at least one next action. Structured failure context is gathered automatically at error time — error code, phase, transport, resource kind, blocked reason, redacted source origin, and capability snapshot — so messages and support reports are specific without asking users to describe technology. See [Errors](errors.md#user-presentation).
+Nothing important is locked behind a tier the user cannot reach, and every failure leaves at least one next action. Structured failure context is gathered automatically at error time (error code, phase, transport, resource kind, blocked reason, redacted source origin, and capability snapshot), so messages and support reports are specific without asking users to describe technology. See [Errors](errors.md#user-presentation).
 
 ## Core workflow
 

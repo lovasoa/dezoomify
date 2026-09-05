@@ -86,7 +86,7 @@ pub enum Outcome {
 /// Deterministic host/user input driving the state machine.
 ///
 /// Every variant carries the owning `job` id for correlation. The enum is
-/// synchronous and carries no bytes, clocks, or I/O handles—only ids, sizes,
+/// synchronous and carries no bytes, clocks, or I/O handles, only ids, sizes,
 /// and decisions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]

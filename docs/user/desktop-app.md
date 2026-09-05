@@ -5,15 +5,15 @@
 The desktop app runs Dezoomify natively on Windows, macOS, and Linux,
 without a browser's limits. Use it when:
 
-- the image is **very large** — a browser may refuse to display or save
+- the image is **very large**: a browser may refuse to display or save
   images beyond a certain size; the desktop app assembles images of any size
   and writes them directly to disk;
-- the site **refuses visitors from other pages** — the app can introduce
+- the site **refuses visitors from other pages**: the app can introduce
   itself as coming from the site's own viewer page;
-- you need a **specific file format** — the website saves PNG; the desktop
+- you need a **specific file format**: the website saves PNG; the desktop
   app saves PNG, JPEG, TIFF, and more, including a local zoomable copy for
   gigantic pictures;
-- a download **got interrupted** — with the resume option, already-fetched
+- a download **got interrupted**: with the resume option, already-fetched
   pieces are kept and the job continues where it stopped.
 
 ## Install
@@ -31,7 +31,7 @@ without a browser's limits. Use it when:
 Paste the address of the page (or of the image description file) into the
 app and choose where to save the result, exactly like on the
 [website](./website.md). You can also start the app with the address as an
-argument, or drive it from the terminal — see the
+argument, or drive it from the terminal; see the
 [command-line guide](./command-line.md).
 
 **Members-only sites:** the desktop app cannot sign in by itself. Get the

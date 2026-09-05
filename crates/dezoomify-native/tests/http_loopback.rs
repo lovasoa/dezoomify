@@ -1,4 +1,4 @@
-//! C1 acceptance: real-socket HTTP egress tests — redirects, size limits,
+//! C1 acceptance: real-socket HTTP egress tests (redirects, size limits,
 //! retries, and failures. Each test drives raw TCP listeners on loopback so
 //! every byte crosses a real socket; no emulated transport.
 

@@ -20,8 +20,8 @@ reading is part of it).
 If several images or resolutions are available, Dezoomify shows a list and
 you pick one. The largest resolution is selected by default.
 
-You can also paste the address of an image's description file directly —
-for example an `info.json`, `ImageProperties.xml`, or `.dzi` address — when
+You can also paste the address of an image's description file directly,
+for example an `info.json`, `ImageProperties.xml`, or `.dzi` address, when
 you know it. See [finding the image address](./finding-the-image-address.md).
 
 ## What the website cannot do

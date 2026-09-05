@@ -39,7 +39,7 @@ One-way door, accepted: a Git-integrated Pages project can never switch
 to Direct Upload. The old project is deleted and recreated as a
 wrangler-deployed project (the `dezoomify` subdomain is reclaimed by
 recreating with the same name; the custom domain is moved to the new
-project). `functions/` stays at the repository root — wrangler compiles
+project). `functions/` stays at the repository root; wrangler compiles
 it on `pages deploy`; only `/api/proxy` is a route.
 
 Secrets (GitHub, set by the owner): `CLOUDFLARE_API_TOKEN` (scoped
@@ -48,7 +48,7 @@ closed when they are absent.
 
 ## Phases
 
-### WD1 — Site assembly pipeline (additive)
+### WD1: Site assembly pipeline (additive)
 
 `scripts/build-site.mjs` (mirrors + help + glue + dist/ assembly).
 `cargo xtask build web` calls it. Nothing is untracked yet, so every
@@ -57,7 +57,7 @@ deploy and CI lane stays green.
 Acceptance: `cargo xtask build web` produces a complete `dist/` with
 `_routes.json`; `cargo xtask test web` passes.
 
-### WD2 — E2E serves the deployed tree
+### WD2: E2E serves the deployed tree
 
 The Playwright E2E setup builds via `scripts/build-site.mjs` and serves
 `dist/` (was: the repository root), so E2E exercises exactly what the
@@ -65,7 +65,7 @@ deploy workflow uploads.
 
 Acceptance: `cargo xtask test web` (E2E included) passes against `dist/`.
 
-### WD3 — Deploy workflow
+### WD3: Deploy workflow
 
 `website-deploy.yml` becomes build → deploy → verify: pinned toolchain +
 `Swatinem/rust-cache`, `wasm-bindgen-cli` at the exact `Cargo.lock`
@@ -77,7 +77,7 @@ new exposure checks (repository files must not be served).
 Acceptance: workflow deploys and verification passes on the branch
 preview.
 
-### WD4 — Pages project migration (owner action, between pushes)
+### WD4: Pages project migration (owner action, between pushes)
 
 Owner deletes the Git-integrated project and recreates `dezoomify` as a
 Direct Upload project (`wrangler pages project create dezoomify
@@ -87,7 +87,7 @@ would leave the old project deploying a broken site (it serves committed
 files only), and the new workflow cannot deploy until the project and
 secrets exist.
 
-### WD5 — Untrack the generated artifacts
+### WD5: Untrack the generated artifacts
 
 `git rm` the mirrors, wasm glue, and `help/`; extend `.gitignore`;
 `cargo xtask test web` and the root `pnpm test` regenerate mirrors + help
@@ -97,7 +97,7 @@ mirror drift gate; the help freshness test becomes a determinism check.
 Acceptance: fresh checkout passes `cargo xtask ci local` (web lane
 generates everything it needs); `git status` stays clean after a build.
 
-### WD6 — Documentation
+### WD6: Documentation
 
 `docs/development.md` (build/deploy contract), `docs/user/README.md`
 (help generation), `AGENTS.md` current-state line, this plan's status.

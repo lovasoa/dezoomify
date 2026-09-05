@@ -342,7 +342,7 @@ for (const { stem, blurb } of PAGES) {
   writeFileSync(
     path.join(outDir, `${stem}.html`),
     chrome({
-      title: `${title} — Dezoomify Help`,
+      title: `${title}: Dezoomify Help`,
       description: blurb,
       topicsHtml: topicsNav(stem),
       bodyHtml: rendered.get(stem),
@@ -360,12 +360,12 @@ const indexItems = PAGES.map(
 writeFileSync(
   path.join(outDir, "index.html"),
   chrome({
-    title: "Help & documentation — Dezoomify",
+    title: "Help & documentation: Dezoomify",
     description: "How to download zoomable images with Dezoomify: the website, browser extension, desktop app, troubleshooting, and supported formats.",
     topicsHtml: topicsNav(null),
     bodyHtml: `<h1>Help &amp; documentation</h1>
 <p>Everything you need to save zoomable images with Dezoomify. New here?
-Start with <a href="start-here.html">Start here</a> — it explains which of
+Start with <a href="start-here.html">Start here</a>: it explains which of
 the four apps fits your situation.</p>
 <div class="dz-help-index-grid">
 ${indexItems.join("\n")}

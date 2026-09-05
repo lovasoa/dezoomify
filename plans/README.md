@@ -7,7 +7,7 @@ active plan is simply a plan file that still has unfinished phases.
 
 ## Active plans
 
-- [`website-deploy.md`](website-deploy.md) — GitHub Actions builds the
+- [`website-deploy.md`](website-deploy.md): GitHub Actions builds the
   entire website (mirrors, help, wasm glue) into `dist/` and deploys it
   to Cloudflare Pages with wrangler; no generated website artifacts stay
   committed and the deployment stops serving repository files. Owner

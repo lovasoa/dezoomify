@@ -38,7 +38,7 @@ chat messages, or bug reports.
 Very large pictures can exceed what a browser tab is allowed to hold. When
 Dezoomify sees this coming, it offers to save a scaled-down copy. Options:
 
-- Accept the smaller copy — often perfectly usable on screen.
+- Accept the smaller copy, often perfectly usable on screen.
 - Use the [desktop app](./desktop-app.md), which writes the image to disk
   piece by piece and has no such ceiling. This is the honest fix for
   gigapixel images.
@@ -53,7 +53,7 @@ cleaner route) or the [desktop app](./desktop-app.md).
 ## The download stopped partway
 
 Small network interruptions are retried automatically. If the job stops
-anyway, run it again — and on the desktop app, use a resume folder
+anyway, run it again, and on the desktop app use a resume folder
 (`--tile-cache`) so already-downloaded pieces are kept:
 see [resuming an interrupted download](./desktop-app.md#resuming-an-interrupted-download).
 

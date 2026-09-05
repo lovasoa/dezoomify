@@ -59,10 +59,10 @@ Duplicates return `Outcome::Ignored` with no state change.
 | Input | Valid source state(s) | Validation | Transition | Effects | Events |
 |---|---|---|---|---|---|
 | `start()` | `Created` | Config valid, `job:*` id, `http(s)` URL | `Created` -> `Discovering` | `acquire-resource` (`req:0`, metadata, default-header provenance) | `job-state:Discovering` |
-| `ResourceBytes` | `Discovering` | `job` match, `req:*` equals outstanding, `bytes_len <= max_bytes`, not consumed | -> `AwaitingImageSelection` | — | `catalog` (`img:0`), `job-state` |
+| `ResourceBytes` | `Discovering` | `job` match, `req:*` equals outstanding, `bytes_len <= max_bytes`, not consumed | -> `AwaitingImageSelection` | none | `catalog` (`img:0`), `job-state` |
 | `ResourceBytes` over-limit | `Discovering` | `bytes_len > max_bytes` | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.resource-limit` (terminal once) |
 | `FetchFailure` | `Discovering` | `job` match, outstanding `req:*` | attempts `<= max_retries`: -> `AwaitingRecovery` (`discovery`); else -> `CleaningUp` -> `Failed` | `request-decision` (`rec:*`) or `release-bytes` | `recovery-requested` + `job-state`, or `failed:job.fetch-failed` |
-| `SelectedImage` | `AwaitingImageSelection` | `job` match, `img:0` (same id replays as `Ignored`) | -> `AwaitingLevelSelection` | — | `levels` (`lvl:0`), `job-state` |
+| `SelectedImage` | `AwaitingImageSelection` | `job` match, `img:0` (same id replays as `Ignored`) | -> `AwaitingLevelSelection` | none | `levels` (`lvl:0`), `job-state` |
 | `SelectedLevel` | `AwaitingLevelSelection` | `job` match, `lvl:0` (same id replays as `Ignored`) | -> `AwaitingDestination` | `request-destination` (`fx:*`, `png`) | `job-state` |
 | `DestinationGranted` | `AwaitingDestination` | `job` match, `dst:*` | -> `Planning` -> `AcquiringTiles` (`tile:0`, `tile:1`); `2 > max_tiles`: -> `CleaningUp` -> `Failed` | `acquire-tile` up to `max_concurrent_fetches` in plan order | `job-state:Planning`, `progress:0/2`, `job-state:AcquiringTiles` or `failed:job.resource-limit` |
 | `DestinationDenied` | `AwaitingDestination` | `job` match | -> `AwaitingRecovery` (`destination`) | `request-decision` | `recovery-requested`, `job-state` |
@@ -72,5 +72,5 @@ Duplicates return `Outcome::Ignored` with no state change.
 | `PartialKeep{keep:true}` | `AwaitingPartialDecision` | `job` match | Same pipeline as success but -> `PartiallyCompleted` | Same encode/finalize/publish/release | `job-state` chain + `partial-completed` (terminal once) |
 | `PartialKeep{keep:false}` | `AwaitingPartialDecision` | `job` match | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.partial-discarded` |
 | `Cancel` | Any non-terminal (incl. transient `Planning`/`ProcessingTiles`/`Encoding`/`Finalizing`/`Publishing`) | `job` match | -> `Cancelling` -> `CleaningUp` -> `Cancelled` | `cancel-work`, `release-bytes` | `job-state` chain + `cancelled` (terminal once; second `Cancel` is `post-terminal`) |
-| Duplicate/stale | Same state, already-consumed `req:*` or acquired `tile:*` / same selection | Correlation already settled | No transition | — | — (`Ok(Ignored)`) |
-| Wrong-job / wrong-state / bad id / post-terminal | Any | `job` mismatch, unknown id, invalid state, or terminal set | No transition, no work | — | — (`Err(job.wrong-job | job.invalid-state | job.invalid-id | job.post-terminal)`) |
+| Duplicate/stale | Same state, already-consumed `req:*` or acquired `tile:*` / same selection | Correlation already settled | No transition | none | none (`Ok(Ignored)`) |
+| Wrong-job / wrong-state / bad id / post-terminal | Any | `job` mismatch, unknown id, invalid state, or terminal set | No transition, no work | none | none (`Err(job.wrong-job | job.invalid-state | job.invalid-id | job.post-terminal)`) |

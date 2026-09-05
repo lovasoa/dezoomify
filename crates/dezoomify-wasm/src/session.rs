@@ -702,7 +702,7 @@ impl Session {
                 self.require_engine_state(SessionState::Discovering)?;
                 // Exactly-once consumption: a replayed reference is stale
                 // afterwards. The engine treats a zero-length resource as a
-                // job failure (job.empty-resource) — empty metadata can
+                // job failure (job.empty-resource); empty metadata can
                 // never yield a fake success.
                 let bytes = self.arena.take_buffer(handle)?;
                 self.live_discovery_request = None;

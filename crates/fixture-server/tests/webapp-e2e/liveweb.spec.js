@@ -1,8 +1,8 @@
 // Live webapp suite. Opt-in diagnostic suite (env DEZOOMIFY_LIVE_WEB=1):
 // opens the REAL webapp, pastes the real-site input URL, and asserts the app
 // attempts discovery and
-// reaches a zoomable-image plan — observed as real network requests to the
-// target site (metadata + at least one tile) — then cancels the job.
+// reaches a zoomable-image plan, observed as real network requests to the
+// target site (metadata + at least one tile), then cancels the job.
 // Targets are the legacy input URLs only; nothing is hardcoded per site.
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
@@ -119,7 +119,7 @@ for (const [id, url] of TARGETS) {
     console.log(`live web ${id}: site_requests=${siteRequests} first_tile=${firstTileUrl ?? "none"}`);
     if (errorState !== null && firstTileUrl === null) {
       throw new Error(
-        `${url}: the webapp reported "${errorState}" without ever planning a tile — ` +
+        `${url}: the webapp reported "${errorState}" without ever planning a tile; ` +
           "the target is broken for the new webapp; remove it from the live target list " +
           "with the reason in the commit message",
       );

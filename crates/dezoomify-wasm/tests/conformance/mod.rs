@@ -1,6 +1,6 @@
 //! wasm-pack conformance suite (runs under `wasm-pack test --node` and
-//! `--headless --chrome`): the wasm-bindgen JS surface — protocol version,
-//! the job-delegating `Session`, and the core-backed `DiscoverySession` —
+//! `--headless --chrome`): the wasm-bindgen JS surface (protocol version,
+//! the job-delegating `Session`, and the core-backed `DiscoverySession`)
 //! must behave identically on the wasm target.
 
 // Shared wasm-pack conformance suite: included by `wasm_pack.rs` (Node)

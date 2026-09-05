@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Very large images, more file formats, resuming, protected pages." />
-    <title>Desktop app — Dezoomify Help</title>
+    <title>Desktop app: Dezoomify Help</title>
     <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
     <link rel="alternate icon" type="image/png" href="../favicon.png" />
     <link rel="stylesheet" href="../src/styles.css" />
@@ -123,13 +123,13 @@
           <article class="dz-help-article">
 <h1 id="desktop-app">Desktop app</h1>
 <p>The desktop app runs Dezoomify natively on Windows, macOS, and Linux, without a browser's limits. Use it when:</p>
-<ul><li>the image is <strong>very large</strong> — a browser may refuse to display or save</li></ul>
+<ul><li>the image is <strong>very large</strong>: a browser may refuse to display or save</li></ul>
 <p>images beyond a certain size; the desktop app assembles images of any size and writes them directly to disk;</p>
-<ul><li>the site <strong>refuses visitors from other pages</strong> — the app can introduce</li></ul>
+<ul><li>the site <strong>refuses visitors from other pages</strong>: the app can introduce</li></ul>
 <p>itself as coming from the site's own viewer page;</p>
-<ul><li>you need a <strong>specific file format</strong> — the website saves PNG; the desktop</li></ul>
+<ul><li>you need a <strong>specific file format</strong>: the website saves PNG; the desktop</li></ul>
 <p>app saves PNG, JPEG, TIFF, and more, including a local zoomable copy for gigantic pictures;</p>
-<ul><li>a download <strong>got interrupted</strong> — with the resume option, already-fetched</li></ul>
+<ul><li>a download <strong>got interrupted</strong>: with the resume option, already-fetched</li></ul>
 <p>pieces are kept and the job continues where it stopped.</p>
 <h2 id="install">Install</h2>
 <ol><li>Go to the <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">releases page</a></li></ol>
@@ -137,7 +137,7 @@
 <ol><li>Unpack it and start the program.</li><li>Depending on your system, you may need to confirm that you trust the app:</li></ol>
 <p>on macOS, use *System Settings → Privacy &amp; Security → Open Anyway* the first time you start it. The app is not professionally signed because Dezoomify is a free project without a paid signing certificate.</p>
 <h2 id="download-an-image">Download an image</h2>
-<p>Paste the address of the page (or of the image description file) into the app and choose where to save the result, exactly like on the <a href="website.html">website</a>. You can also start the app with the address as an argument, or drive it from the terminal — see the <a href="command-line.html">command-line guide</a>.</p>
+<p>Paste the address of the page (or of the image description file) into the app and choose where to save the result, exactly like on the <a href="website.html">website</a>. You can also start the app with the address as an argument, or drive it from the terminal; see the <a href="command-line.html">command-line guide</a>.</p>
 <p><strong>Members-only sites:</strong> the desktop app cannot sign in by itself. Get the image address with the <a href="browser-extension.html">browser extension</a> and send the job to the desktop app; the extension asks for your consent before passing the site's credentials, which stay in memory only.</p>
 <p><strong>Sites that refuse visitors:</strong> some servers only send their image to requests that appear to come from the site's own viewer. If the download fails with a &quot;forbidden&quot; style error, tell the app which page the image belongs to (most image viewers open with such a page) and it will introduce itself as coming from there. On the command line, this is the <code>--header &quot;Referer: …&quot;</code> option; see <a href="troubleshooting.html#forbidden-or-unauthorized-errors">protected pages</a>.</p>
 <h2 id="choosing-the-file-format">Choosing the file format</h2>

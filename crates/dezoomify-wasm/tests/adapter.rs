@@ -3,7 +3,7 @@
 //! transcript golden (`testdata/scenarios/wasm/replay/expected/wasm.json`).
 //!
 //! Representation note: [`Session`] delegates its lifecycle to
-//! `dezoomify-job`; the golden pins the delegated basic-success transcript —
+//! `dezoomify-job`; the golden pins the delegated basic-success transcript,
 //! canonical `ControlEnvelope` messages projected from engine effects and
 //! events in engine `seq` order. Engine resources beyond the lean model are
 //! engine limits, not adapter limits. Empty buffers and mismatched request

@@ -5,7 +5,7 @@
  * and is validated: unknown kinds and stale scan/job ids are rejected.
  * Wire shapes must stay compatible with `packages/protocol-ts` generated
  * types; no hand-written interface may duplicate a generated wire DTO for
- * transport — these are host-internal envelopes only.
+ * transport: these are host-internal envelopes only.
  *
  * Plain JavaScript + JSDoc.
  */

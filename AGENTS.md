@@ -56,8 +56,8 @@ cargo xtask dev <target>   # ui|web|desktop|extension
   never branch on display strings; redact credentials in everything that
   leaves a host.
 - **Website fetching:** direct browser fetch first; the metadata CORS proxy
-  is an automatic fallback for eligible public metadata only — never tiles,
-  never credentials. The extension uses browser-session fetch under granted
+  is an automatic fallback for eligible public metadata only (never tiles,
+  never credentials). The extension uses browser-session fetch under granted
   host permissions, and only explicit-action scans.
 - **Edits:** use `apply_patch` for manual edits; make the smallest complete
   change; read the current file first and never revert unrelated or
@@ -95,7 +95,7 @@ Use these terms consistently in docs, plans, code, and user-facing copy.
 Multi-step work runs through a plan in [`plans/`](plans/); never start
 multi-phase changes without an accepted plan, and never execute later phases
 early. Plan status lives in [`plans/README.md`](plans/README.md). When a
-plan's work lands, remove the plan file — completed work is never narrated
+plan's work lands, remove the plan file. Completed work is never narrated
 in docs or READMEs; git history is the record.
 
 ## Git
@@ -115,5 +115,5 @@ in docs or READMEs; git history is the record.
 ## Keeping this file current
 
 When commands, boundaries, vocabulary, or reference docs change, update this
-file in the same change. This file contains rules and links only — never
+file in the same change. This file contains rules and links only, never
 status narration, which belongs in `plans/README.md` and the root `README.md`.

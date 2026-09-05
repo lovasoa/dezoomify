@@ -4,7 +4,7 @@
 
 Zoomable image viewers are built from a handful of underlying formats.
 Dezoomify understands the ones below, and picks the right one automatically
-from the address you give it — you normally never need to choose. The list
+from the address you give it, so you normally never need to choose. The list
 matters when automatic selection fails or when you want to check whether a
 site can be supported at all.
 
@@ -35,7 +35,7 @@ for how to find that file.
 ## Generic
 
 The generic format is the fallback when no named format matches. It needs
-tile addresses that differ only by two numbers — the column and the row of
+tile addresses that differ only by two numbers, the column and the row of
 each piece. Paste one tile's address with both numbers replaced by `--`, as
 described in [finding the image address](./finding-the-image-address.md#last-resort-describing-the-tile-pattern).
 

@@ -11,7 +11,7 @@ find it.
 ## Way 1: let the extension find it
 
 The [browser extension](./browser-extension.md) watches the page while you
-look at the image and finds the address for you. Try it first — it exists
+look at the image and finds the address for you. Try it first; it exists
 exactly for this problem.
 
 ## Way 2: find it yourself in the browser
@@ -24,7 +24,7 @@ in there.
    - Firefox: press **Ctrl+Shift+E** (menu: *Tools → Browser Tools → Network*).
    - Chrome/Edge: press **F12**, then open the *Network* tab.
 3. With the log open, **reload the page** (F5) and zoom into the image.
-4. The log fills with rows — one per file. Look for a small file, usually a
+4. The log fills with rows, one per file. Look for a small file, usually a
    few kilobytes, whose name ends in `.json`, `.xml`, or `.dzi`. Common
    names are `info.json` (IIIF), `ImageProperties.xml` (Zoomify), and
    anything ending in `.dzi` (Deep Zoom). Tiles are the big files; ignore
@@ -33,7 +33,7 @@ in there.
    into Dezoomify.
 
 You can recognize a good candidate because opening its address in a tab
-shows a short piece of text describing a picture — dimensions, tile size —
+shows a short piece of text describing a picture (dimensions, tile size),
 rather than a picture itself.
 
 ## Last resort: describing the tile pattern
@@ -56,7 +56,7 @@ Dezoomify then works out the image's dimensions by trying the pattern.
 On the command line, the same trick applies with the
 [generic format](./supported-formats.md#generic).
 
-If none of this works, the site may use a viewer that needs a new recipe —
+If none of this works, the site may use a viewer that needs a new recipe;
 [open an issue](https://github.com/lovasoa/dezoomify/issues) with the
 site's address and someone can add support for it.
 

@@ -3,7 +3,7 @@
 # Browser extension
 
 The extension adds Dezoomify to your browser. While you look at a zoomable
-image, it can find the image behind the viewer automatically — including on
+image, it can find the image behind the viewer automatically, including on
 pages where you are signed in, such as library portals, museum
 subscriptions, and academic archives.
 
@@ -23,7 +23,7 @@ Firefox version is on its way.
    never for all your browsing.
 4. Reload the page or zoom into the image once. A small badge shows how many
    images were found.
-5. Press the button again, pick the image, and download it — or send the job
+5. Press the button again, pick the image, and download it, or send the job
    to the desktop app if the image is very large.
 
 ## What the extension does with your data

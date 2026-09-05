@@ -9,8 +9,8 @@ High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
   store listing submitted (pending review).
 - Desktop (`apps/desktop/`): lean Tauri shell (logic + config only; window
   and installer not yet implemented).
-- CLI (`apps/cli/`): real download pipeline through the native runtime —
-  discovery, bounded tile download, assembly, and output writing.
+- CLI (`apps/cli/`): real download pipeline through the native runtime,
+  covering discovery, bounded tile download, assembly, and output writing.
 
 ## Quick start
 
@@ -28,21 +28,21 @@ including `build`, `dev`, `ci`, `release`, `protocol`, and `fixtures`. See
 
 ## Layout
 
-- Repository root — the website: paste a URL, download the image.
-- [`apps/`](apps/) — the extension, desktop app, and CLI.
-- [`crates/`](crates/) — Rust engine: pure discovery core, job state machine,
-  versioned protocol, native runtime, WASM adapter, plus test tooling.
-- [`packages/`](packages/) — TypeScript: shared UI, browser runtime, generated
+- Repository root: the website, where you paste a URL and download the image.
+- [`apps/`](apps/): the extension, desktop app, and CLI.
+- [`crates/`](crates/): the Rust engine, with pure discovery core, job state
+  machine, versioned protocol, native runtime, WASM adapter, and test tooling.
+- [`packages/`](packages/): TypeScript shared UI, browser runtime, and generated
   protocol bindings.
-- [`testdata/scenarios`](testdata/scenarios) — deterministic test fixtures.
-- [`docs/`](docs/) — architecture, privacy, security, and release contracts.
+- [`testdata/scenarios`](testdata/scenarios): deterministic test fixtures.
+- [`docs/`](docs/): architecture, privacy, security, and release contracts.
 
 ## How fetching works
 
 The website always tries a direct browser fetch first, with a short 250 ms
 window. If the direct fetch does not complete in time, it automatically retries
 eligible public metadata (never image tiles) through a same-origin metadata
-proxy — visible in the UI and never carrying cookies or credentials. The
-extension uses
+proxy. This proxy is visible in the UI and never carries cookies or
+credentials. The extension instead uses
 your browser session under permissions you grant; cookie handoff to the desktop
 app is a separate, explicitly consented step.
