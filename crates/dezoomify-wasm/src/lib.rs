@@ -57,11 +57,10 @@
 //!   `cargo test --manifest-path crates/dezoomify-wasm/Cargo.toml` (or
 //!   `cargo test -p dezoomify-wasm` from inside `crates/dezoomify-wasm`).
 //!   Add the crate to the root `members` and drop `[workspace]` when allowed.
-//! * `dezoomify-job` now exists (`crates/dezoomify-job`), but [`session`]
-//!   still embeds its temporary minimal state machine instead of delegating.
-//!   Delegation is future work; the transcript shape is pinned by
-//!   `tests/adapter.rs` until then.
-//! * Real `wasm-pack` Node/browser tests need pinned `wasm-pack` plus
+//! * [`session`] delegates its whole lifecycle to `dezoomify-job`; the
+//!   adapter projects engine effects/events onto typed protocol messages.
+//!   Engine resources beyond the lean model (real format parsing, real tile
+//!   plans) remain engine limitations recorded in the job crate docs.//! * Real `wasm-pack` Node/browser tests need pinned `wasm-pack` plus
 //!   browsers, neither installed here; `packages/wasm-harness` records that
 //!   exception and runs native conformance instead.
 
@@ -79,8 +78,8 @@ pub use error::{redact, AdapterError, AdapterErrorCode};
 pub use processing::{composite_crop, fnv1a64_hex, CropGeometry, PIXEL_BYTES};
 pub use session::{
     Session, SessionState, DEFAULT_MAX_BUFFERS, DEFAULT_MAX_BUFFER_BYTES, DEFAULT_MAX_MESSAGES,
-    DEFAULT_MAX_TOTAL_BYTES, FIXED_EFFECT_ID, FIXED_OUTPUT_ID, FIXED_REQUEST_ID, HARD_MAX_BUFFERS,
-    HARD_MAX_BUFFER_BYTES, HARD_MAX_MESSAGES, HARD_MAX_TOTAL_BYTES, PROCESSING_OPERATION,
+    DEFAULT_MAX_TOTAL_BYTES, HARD_MAX_BUFFERS, HARD_MAX_BUFFER_BYTES, HARD_MAX_MESSAGES,
+    HARD_MAX_TOTAL_BYTES, PROCESSING_OPERATION,
 };
 
 /// Protocol major/minor in lossless stable form (`"1.0"`), without creating

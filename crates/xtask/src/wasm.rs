@@ -75,20 +75,28 @@ fn transcripts_only() -> Result<(), String> {
     if job_v.as_array().is_none_or(Vec::is_empty) {
         return Err("job transcript empty".to_string());
     }
-    // Scaffold honesty: wasm transcript must carry its fixed scaffold IDs and
-    // must not pretend progress/catalog events it never emits.
-    for needle in ["req:wasm-meta-1", "fx:wasm-acq-1", "out:wasm-1"] {
+    // Engine delegation: the transcript must be the job engine's lifecycle —
+    // dynamic engine ids, tile acquisition, progress/catalog events, and the
+    // completed output — not a scaffold machine.
+    for needle in [
+        "req:0",
+        "req:tile-0",
+        "out:0",
+        "progress",
+        "catalog",
+        "completed",
+    ] {
         if !wasm.contains(needle) {
-            return Err(format!("wasm transcript lacks scaffold id {needle}"));
+            return Err(format!(
+                "wasm transcript lacks engine-driven marker {needle}"
+            ));
         }
     }
-    if wasm.contains("progress") || wasm.contains("catalog") {
-        return Err("wasm transcript must not claim progress/catalog events".to_string());
+    if wasm.contains("req:wasm-meta-1") || wasm.contains("out:wasm-1") {
+        return Err("wasm transcript still carries scaffold machine ids".to_string());
     }
-    // Representation-only delta is allowed (fixed IDs, no progress/catalog
-    // events); both must be non-empty canonical arrays. Byte identity with
-    // phase-06 native transcripts is proven per-message by adapter replay
-    // tests, not by whole-file equality.
+    // Both transcripts drive the same lean lifecycle; the adapter projects
+    // engine effects/events onto typed protocol messages in seq order.
     println!("test wasm --transcripts: ok");
     Ok(())
 }

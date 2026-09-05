@@ -171,16 +171,25 @@ describe("P07-WORKFLOWS: native conformance", () => {
 });
 
 describe("P07-WORKFLOWS: transcript golden", () => {
-  it("wasm.json is a protocol-1.0 transcript array", () => {
+  it("wasm.json is a protocol-1.0 job-engine-driven transcript array", () => {
     assert.ok(existsSync(GOLDEN), "golden wasm.json is checked in");
     const golden = JSON.parse(readFileSync(GOLDEN, "utf8"));
     assert.ok(Array.isArray(golden), "golden is an array");
-    assert.equal(golden.length, 3, "basic-success emits three messages");
+    assert.ok(golden.length > 3, "delegated lifecycle emits the full engine transcript");
     for (const entry of golden) {
       assert.equal(entry.protocol, "1.0");
     }
     const types = golden.map((entry) => entry.type);
-    assert.deepEqual(types, ["job-state", "acquire-resource", "completed"]);
+    assert.equal(types[0], "acquire-resource", "engine effect leads the transcript");
+    assert.ok(types.includes("job-state"), "state events present");
+    assert.ok(types.includes("catalog"), "catalog event present (delegation)");
+    assert.ok(types.includes("progress"), "progress events present (delegation)");
+    assert.ok(types.includes("acquire-tile"), "tile acquisition present (delegation)");
+    assert.equal(types[types.length - 1], "completed", "terminal completed event");
+    // Scaffold machine ids must never reappear.
+    const text = readFileSync(GOLDEN, "utf8");
+    assert.ok(!text.includes("req:wasm-meta-1"), "no scaffold request id");
+    assert.ok(!text.includes("out:wasm-1"), "no scaffold output id");
   });
 });
 

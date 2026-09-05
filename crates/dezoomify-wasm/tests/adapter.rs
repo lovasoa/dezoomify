@@ -2,16 +2,17 @@
 //! processing, isolation, disposal, redaction, and the `P07-WORKFLOWS`
 //! transcript golden (`testdata/scenarios/wasm/replay/expected/wasm.json`).
 //!
-//! Representation note: [`Session`] is still a minimal scaffold (fixed
-//! per-session IDs, no `dezoomify-job` delegation yet). The golden pins its
-//! basic-success transcript — canonical `ControlEnvelope` messages in job
-//! FIFO order — rather than a full native replay. Fixed IDs and the absence
-//! of progress/catalog events are scaffold limits, not product claims. Empty
-//! buffers and mismatched request IDs are rejected (see negative tests).
+//! Representation note: [`Session`] delegates its lifecycle to
+//! `dezoomify-job`; the golden pins the delegated basic-success transcript —
+//! canonical `ControlEnvelope` messages projected from engine effects and
+//! events in engine `seq` order. Engine resources beyond the lean model are
+//! engine limits, not adapter limits. Empty buffers and mismatched request
+//! IDs fail or are rejected without fabricating success (see negative tests).
 
 use dezoomify_protocol::codec;
 use dezoomify_protocol::dto::{
     ControlBody, ControlEnvelope, ErrorDto, ErrorPhase, HostEffect, JobCommand, JobEvent,
+    RequestPurpose,
 };
 use dezoomify_wasm::{
     protocol_version, AdapterErrorCode, ArenaHandle, CropGeometry, Session, PROCESSING_OPERATION,
@@ -47,15 +48,44 @@ fn cancel_bytes(job: &str) -> Vec<u8> {
     }))
 }
 
-fn provide_resource_bytes(session: &Session, job: &str, handle: ArenaHandle) -> Vec<u8> {
+fn provide_resource_bytes(
+    session: &Session,
+    job: &str,
+    handle: ArenaHandle,
+    request: &dezoomify_protocol::dto::RequestId,
+) -> Vec<u8> {
     let buffer = session
         .protocol_handle(handle)
         .expect("live handle projects");
     envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
         job: job.parse().expect("job id"),
-        request: "req:wasm-meta-1".parse().expect("request id"),
+        request: request.clone(),
         buffer,
     }))
+}
+
+/// Extract the outstanding discovery request id from drained messages.
+fn discovery_request(messages: &[Vec<u8>]) -> dezoomify_protocol::dto::RequestId {
+    for envelope in decode_all(messages) {
+        if let ControlBody::Effect(HostEffect::AcquireResource { request, .. }) = envelope.body {
+            return request.id;
+        }
+    }
+    panic!("no acquire-resource effect in transcript");
+}
+
+/// Extract the next outstanding tile request id from drained messages.
+fn next_tile_request(messages: &[Vec<u8>]) -> Option<dezoomify_protocol::dto::RequestId> {
+    for envelope in decode_all(messages) {
+        if let ControlBody::Effect(HostEffect::AcquireTile { request, .. }) = envelope.body {
+            return Some(request.id);
+        }
+    }
+    None
+}
+
+fn command_bytes(body: JobCommand) -> Vec<u8> {
+    envelope_bytes(ControlBody::Command(body))
 }
 
 /// Commit `bytes` into the session arena and return the sealed handle.
@@ -228,7 +258,7 @@ fn dispatch_rejects_malformed_and_wrong_versions_atomically() {
         AdapterErrorCode::Malformed
     );
     // Nothing was accepted: state and queue are untouched.
-    assert_eq!(session.state().as_str(), "created");
+    assert_eq!(session.state().as_str(), "Created");
     assert!(session.drain_messages().is_empty());
 }
 
@@ -236,7 +266,7 @@ fn dispatch_rejects_malformed_and_wrong_versions_atomically() {
 fn start_dispatch_and_drain_are_fifo_and_once_only() {
     let mut session = new_session();
     session.dispatch(&start_bytes(JOB_A)).expect("start");
-    assert_eq!(session.state().as_str(), "discovering");
+    assert_eq!(session.state().as_str(), "Discovering");
     // Second start is wrong-state, not a second job.
     assert_eq!(
         session.dispatch(&start_bytes(JOB_A)).unwrap_err().code(),
@@ -246,44 +276,114 @@ fn start_dispatch_and_drain_are_fifo_and_once_only() {
     assert_eq!(messages.len(), 2);
     let decoded = decode_all(&messages);
     match &decoded[0].body {
-        ControlBody::Event(JobEvent::JobState { job, state }) => {
-            assert_eq!(job.as_str(), JOB_A);
-            assert_eq!(state, "discovering");
-        }
-        other => panic!("first message must be job-state, got {other:?}"),
-    }
-    match &decoded[1].body {
         ControlBody::Effect(HostEffect::AcquireResource { job, request, .. }) => {
             assert_eq!(job.as_str(), JOB_A);
             assert_eq!(request.uri, "https://example.com/item/1");
+            assert_eq!(request.purpose, RequestPurpose::Metadata);
         }
-        other => panic!("second message must be acquire-resource, got {other:?}"),
+        other => panic!("first message must be acquire-resource, got {other:?}"),
+    }
+    match &decoded[1].body {
+        ControlBody::Event(JobEvent::JobState { job, state }) => {
+            assert_eq!(job.as_str(), JOB_A);
+            assert_eq!(state, "Discovering");
+        }
+        other => panic!("second message must be job-state, got {other:?}"),
     }
     // Draining is exactly-once.
     assert!(session.drain_messages().is_empty());
 }
 
+/// The delegated lifecycle: discovery bytes, selections, destination grant,
+/// tile bytes for both engine tiles, then the engine's full completion tail.
 #[test]
-fn provide_resource_completes_and_consumes_exactly_once() {
+fn delegated_lifecycle_completes_through_tile_bytes() {
     let mut session = new_session();
     session.dispatch(&start_bytes(JOB_A)).expect("start");
-    session.drain_messages();
+    let start_messages = session.drain_messages();
+    let request = discovery_request(&start_messages);
+
     let handle = seal(&mut session, b"metadata-bytes");
+    let meta_reference = session
+        .protocol_handle(handle)
+        .expect("live handle projects");
     session
-        .dispatch(&provide_resource_bytes(&session, JOB_A, handle))
+        .dispatch(&provide_resource_bytes(&session, JOB_A, handle, &request))
         .expect("provide");
-    assert_eq!(session.state().as_str(), "completed");
+    assert_eq!(session.state().as_str(), "AwaitingImageSelection");
     let messages = session.drain_messages();
-    assert_eq!(messages.len(), 1);
     match &decode_all(&messages)[0].body {
+        ControlBody::Event(JobEvent::Catalog { job, catalog }) => {
+            assert_eq!(job.as_str(), JOB_A);
+            assert_eq!(catalog.images.len(), 1);
+        }
+        other => panic!("expected catalog, got {other:?}"),
+    }
+
+    session
+        .dispatch(&command_bytes(JobCommand::SelectImage {
+            job: JOB_A.parse().unwrap(),
+            image: "img:0".parse().unwrap(),
+        }))
+        .expect("select image");
+    assert_eq!(session.state().as_str(), "AwaitingLevelSelection");
+    session.drain_messages();
+
+    session
+        .dispatch(&command_bytes(JobCommand::SelectLevel {
+            job: JOB_A.parse().unwrap(),
+            level: "lvl:0".parse().unwrap(),
+        }))
+        .expect("select level");
+    assert_eq!(session.state().as_str(), "AwaitingDestination");
+    session.drain_messages();
+
+    session
+        .dispatch(&command_bytes(JobCommand::DestinationResponse {
+            job: JOB_A.parse().unwrap(),
+            destination: "dst:0".parse().unwrap(),
+            granted: true,
+        }))
+        .expect("grant destination");
+    assert_eq!(session.state().as_str(), "AcquiringTiles");
+    let acquisition = session.drain_messages();
+    let mut tile_requests = Vec::new();
+    for envelope in decode_all(&acquisition) {
+        if let ControlBody::Effect(HostEffect::AcquireTile { request, .. }) = envelope.body {
+            tile_requests.push(request.id);
+        }
+    }
+    assert_eq!(tile_requests.len(), 2, "lean engine plans two tiles");
+
+    for (index, request) in tile_requests.iter().enumerate() {
+        let bytes = format!("tile-bytes-{index}");
+        let handle = seal(&mut session, bytes.as_bytes());
+        session
+            .dispatch(&provide_resource_bytes(&session, JOB_A, handle, request))
+            .unwrap_or_else(|e| panic!("tile {index} bytes accepted: {e:?}"));
+    }
+    assert_eq!(session.state().as_str(), "Completed");
+    let messages = session.drain_messages();
+    let decoded = decode_all(&messages);
+    match &decoded.last().expect("messages").body {
         ControlBody::Event(JobEvent::Completed { job, output }) => {
             assert_eq!(job.as_str(), JOB_A);
-            assert_eq!(output.as_str(), "out:wasm-1");
+            assert_eq!(output.as_str(), "out:0");
         }
         other => panic!("expected completed, got {other:?}"),
     }
-    // The consumed buffer cannot be replayed.
-    let replay = provide_resource_bytes(&session, JOB_A, handle);
+    // The engine emitted progress and release effects; tile buffers were
+    // released by the adapter on release-bytes.
+    assert!(messages
+        .iter()
+        .any(|m| String::from_utf8_lossy(m).contains("progress")));
+
+    // The consumed discovery buffer cannot be replayed.
+    let replay = envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
+        job: JOB_A.parse().unwrap(),
+        request: request.clone(),
+        buffer: meta_reference,
+    }));
     assert_eq!(
         session.dispatch(&replay).unwrap_err().code(),
         AdapterErrorCode::WrongState,
@@ -292,20 +392,61 @@ fn provide_resource_completes_and_consumes_exactly_once() {
 }
 
 #[test]
-fn failure_and_cancel_paths_emit_terminal_events() {
+fn failure_recovery_and_cancel_paths_follow_the_engine() {
+    // One fetch failure enters recovery (bounded retries), not failure.
     let mut failing = new_session();
     failing.dispatch(&start_bytes("job:fail-1")).expect("start");
-    failing.drain_messages();
+    let first_request = discovery_request(&failing.drain_messages());
     let failure = envelope_bytes(ControlBody::Command(JobCommand::ProvideFetchFailure {
         job: "job:fail-1".parse().unwrap(),
-        request: "req:wasm-meta-1".parse().unwrap(),
+        request: first_request,
         error: ErrorDto::new("acquisition", ErrorPhase::Acquisition, "boom"),
     }));
     failing.dispatch(&failure).expect("failure accepted");
-    assert_eq!(failing.state().as_str(), "failed");
-    match &decode_all(&failing.drain_messages())[0].body {
+    assert_eq!(failing.state().as_str(), "AwaitingRecovery");
+    let messages = failing.drain_messages();
+    match &decode_all(&messages)[0].body {
+        ControlBody::Effect(HostEffect::RequestDecision { recovery, .. }) => {
+            assert!(recovery.as_str().starts_with("rec:"));
+        }
+        other => panic!("expected request-decision, got {other:?}"),
+    }
+    match &decode_all(&messages)[1].body {
+        ControlBody::Event(JobEvent::RecoveryRequest { actions, .. }) => {
+            assert_eq!(actions.len(), 1);
+        }
+        other => panic!("expected recovery-requested, got {other:?}"),
+    }
+
+    // Retry then exhaust the retries: the engine fails honestly.
+    for attempt in 0..3u32 {
+        let attempt_id: dezoomify_protocol::dto::AttemptId =
+            format!("att:{attempt}").parse().unwrap();
+        failing
+            .dispatch(&command_bytes(JobCommand::RetryReady {
+                job: "job:fail-1".parse().unwrap(),
+                attempt: attempt_id,
+            }))
+            .expect("retry ready");
+        assert_eq!(failing.state().as_str(), "Discovering");
+        let request = discovery_request(&failing.drain_messages());
+        let failure = envelope_bytes(ControlBody::Command(JobCommand::ProvideFetchFailure {
+            job: "job:fail-1".parse().unwrap(),
+            request,
+            error: ErrorDto::new("acquisition", ErrorPhase::Acquisition, "boom again"),
+        }));
+        failing.dispatch(&failure).expect("failure accepted");
+        if attempt < 2 {
+            assert_eq!(failing.state().as_str(), "AwaitingRecovery");
+            failing.drain_messages();
+        }
+    }
+    assert_eq!(failing.state().as_str(), "Failed");
+    let messages = failing.drain_messages();
+    match &decode_all(&messages).last().expect("messages").body {
         ControlBody::Event(JobEvent::Failed { error, .. }) => {
-            assert_eq!(error.message, "boom");
+            assert_eq!(error.code, "job.fetch-failed");
+            assert!(!error.message.contains("CANARY"));
         }
         other => panic!("expected failed, got {other:?}"),
     }
@@ -317,7 +458,7 @@ fn failure_and_cancel_paths_emit_terminal_events() {
     cancelling
         .dispatch(&cancel_bytes("job:cancel-1"))
         .expect("cancel");
-    assert_eq!(cancelling.state().as_str(), "cancelled");
+    assert_eq!(cancelling.state().as_str(), "Cancelled");
     assert_eq!(
         cancelling
             .dispatch(&cancel_bytes("job:cancel-1"))
@@ -441,16 +582,17 @@ fn two_interleaved_sessions_stay_isolated() {
         second.take_buffer(handle).unwrap_err().code(),
         AdapterErrorCode::StaleBuffer
     );
+    let first_start = first.drain_messages();
+    assert_eq!(first_start.len(), 2);
+    let request = discovery_request(&first_start);
+    let provide = provide_resource_bytes(&first, "job:iso-1", handle, &request);
     assert_eq!(
-        second
-            .dispatch(&provide_resource_bytes(&first, "job:iso-1", handle))
-            .unwrap_err()
-            .code(),
+        second.dispatch(&provide).unwrap_err().code(),
         AdapterErrorCode::WrongState,
         "foreign job ids are rejected"
     );
     // Each session drains only its own messages.
-    assert_eq!(first.drain_messages().len(), 2);
+    assert!(first.drain_messages().is_empty());
     assert_eq!(second.drain_messages().len(), 2);
     // Disposing one session leaves the other usable.
     first.dispose().expect("dispose first");
@@ -464,7 +606,7 @@ fn two_interleaved_sessions_stay_isolated() {
     second
         .dispatch(&cancel_bytes("job:iso-2"))
         .expect("second still live");
-    assert_eq!(second.state().as_str(), "cancelled");
+    assert_eq!(second.state().as_str(), "Cancelled");
 }
 
 #[test]
@@ -486,10 +628,14 @@ fn dispose_is_idempotent_and_rejects_later_dispatch() {
         session.allocate_buffer(4).unwrap_err().code(),
         AdapterErrorCode::Disposed
     );
-    // Terminal cleanup is still drainable exactly once.
+    // Terminal cleanup is still drainable exactly once: the engine's
+    // cancellation lifecycle ends with the cancelled event.
     let drained = session.drain_messages();
-    assert_eq!(drained.len(), 1);
-    match &decode_all(&drained)[0].body {
+    assert!(
+        drained.len() >= 2,
+        "cancel lifecycle is emitted: {drained:?}"
+    );
+    match &decode_all(&drained).last().expect("messages").body {
         ControlBody::Event(JobEvent::Cancelled { job }) => {
             assert_eq!(job.as_str(), "job:disp-1");
         }
@@ -499,15 +645,15 @@ fn dispose_is_idempotent_and_rejects_later_dispatch() {
 }
 
 #[test]
-fn host_error_text_is_redacted_in_failed_events() {
+fn host_error_text_never_reaches_transcripts() {
     let mut session = new_session();
     session
         .dispatch(&start_bytes("job:redact-1"))
         .expect("start");
-    session.drain_messages();
+    let request = discovery_request(&session.drain_messages());
     let failure = envelope_bytes(ControlBody::Command(JobCommand::ProvideFetchFailure {
         job: "job:redact-1".parse().unwrap(),
-        request: "req:wasm-meta-1".parse().unwrap(),
+        request,
         error: ErrorDto::new(
             "acquisition",
             ErrorPhase::Acquisition,
@@ -515,32 +661,71 @@ fn host_error_text_is_redacted_in_failed_events() {
         ),
     }));
     session.dispatch(&failure).expect("failure accepted");
-    let messages = session.drain_messages();
-    match &decode_all(&messages)[0].body {
-        ControlBody::Event(JobEvent::Failed { error, .. }) => {
-            assert!(!error.message.contains("CANARY"));
-            assert!(error.message.contains("REDACTED"));
-        }
-        other => panic!("expected failed, got {other:?}"),
+    // Host-supplied error text is untrusted and is dropped by the engine
+    // mapping: nothing in the transcript echoes it.
+    for message in session.drain_messages() {
+        let text = String::from_utf8_lossy(&message);
+        assert!(!text.contains("CANARY"), "canary leaked: {text}");
     }
 }
 
-/// P07-WORKFLOWS: the basic-success replay must equal the checked-in golden
-/// transcript byte-for-byte (canonical re-encoding of each entry).
+/// P07-WORKFLOWS: the delegated basic-success replay must equal the
+/// checked-in golden transcript byte-for-byte (canonical re-encoding of
+/// each entry).
 #[test]
 fn basic_success_transcript_matches_golden() {
     let mut session = new_session();
+    let mut transcript = Vec::new();
+
     session.dispatch(&start_bytes(JOB_A)).expect("start");
-    let mut transcript = session.drain_messages();
+    let start_messages = session.drain_messages();
+    let request = discovery_request(&start_messages);
+    transcript.extend(start_messages);
     let handle = seal(&mut session, b"metadata-bytes");
-    let provide = provide_resource_bytes(&session, JOB_A, handle);
-    session.dispatch(&provide).expect("provide");
+    session
+        .dispatch(&provide_resource_bytes(&session, JOB_A, handle, &request))
+        .expect("provide");
     transcript.extend(session.drain_messages());
+
+    session
+        .dispatch(&command_bytes(JobCommand::SelectImage {
+            job: JOB_A.parse().unwrap(),
+            image: "img:0".parse().unwrap(),
+        }))
+        .expect("select image");
+    session
+        .dispatch(&command_bytes(JobCommand::SelectLevel {
+            job: JOB_A.parse().unwrap(),
+            level: "lvl:0".parse().unwrap(),
+        }))
+        .expect("select level");
+    session
+        .dispatch(&command_bytes(JobCommand::DestinationResponse {
+            job: JOB_A.parse().unwrap(),
+            destination: "dst:0".parse().unwrap(),
+            granted: true,
+        }))
+        .expect("grant destination");
+    transcript.extend(session.drain_messages());
+
+    let mut tile_requests = Vec::new();
+    for envelope in decode_all(&transcript) {
+        if let ControlBody::Effect(HostEffect::AcquireTile { request, .. }) = envelope.body {
+            tile_requests.push(request.id);
+        }
+    }
+    for (index, request) in tile_requests.iter().enumerate() {
+        let bytes = format!("tile-bytes-{index}");
+        let handle = seal(&mut session, bytes.as_bytes());
+        session
+            .dispatch(&provide_resource_bytes(&session, JOB_A, handle, request))
+            .expect("tile bytes accepted");
+        transcript.extend(session.drain_messages());
+    }
 
     let golden_text = std::fs::read_to_string(GOLDEN_PATH).expect("golden wasm.json is checked in");
     let golden: Vec<serde_json::Value> =
         serde_json::from_str(&golden_text).expect("golden parses as an array");
-    assert_eq!(golden.len(), 3, "basic-success emits three messages");
     assert_eq!(transcript.len(), golden.len());
     for (bytes, expected) in transcript.iter().zip(golden.iter()) {
         let envelope: ControlEnvelope = codec::decode(bytes).expect("message decodes");
@@ -552,30 +737,39 @@ fn basic_success_transcript_matches_golden() {
 }
 
 #[test]
-fn empty_resource_and_wrong_request_never_complete() {
+fn empty_resource_fails_the_job_and_wrong_request_is_rejected() {
     let mut session = new_session();
     session.dispatch(&start_bytes(JOB_A)).expect("start");
-    session.drain_messages();
-    // Empty buffer: rejected, stays discovering, no completion.
+    let request = discovery_request(&session.drain_messages());
+    // Empty discovery resource: the engine fails the job honestly.
     let empty = seal(&mut session, b"");
-    let provide_empty = provide_resource_bytes(&session, JOB_A, empty);
-    assert_eq!(
-        session.dispatch(&provide_empty).unwrap_err().code(),
-        AdapterErrorCode::Malformed
-    );
-    assert_eq!(session.state().as_str(), "discovering");
-    assert!(session.drain_messages().is_empty());
-    // Wrong request ID: rejected even with non-empty bytes.
-    let handle = seal(&mut session, b"metadata-bytes");
-    let buffer = session.protocol_handle(handle).expect("projects");
+    let provide_empty = provide_resource_bytes(&session, JOB_A, empty, &request);
+    session
+        .dispatch(&provide_empty)
+        .expect("empty resource is accepted and fails the job");
+    assert_eq!(session.state().as_str(), "Failed");
+    let messages = session.drain_messages();
+    match &decode_all(&messages).last().expect("messages").body {
+        ControlBody::Event(JobEvent::Failed { error, .. }) => {
+            assert_eq!(error.code, "job.empty-resource");
+        }
+        other => panic!("expected failed, got {other:?}"),
+    }
+
+    // Wrong request ID: rejected without state change.
+    let mut other = new_session();
+    other.dispatch(&start_bytes(JOB_A)).expect("start");
+    other.drain_messages();
+    let handle = seal(&mut other, b"metadata-bytes");
+    let buffer = other.protocol_handle(handle).expect("projects");
     let wrong = envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
         job: JOB_A.parse().unwrap(),
         request: "req:wasm-wrong-9".parse().unwrap(),
         buffer,
     }));
     assert_eq!(
-        session.dispatch(&wrong).unwrap_err().code(),
+        other.dispatch(&wrong).unwrap_err().code(),
         AdapterErrorCode::WrongState
     );
-    assert_eq!(session.state().as_str(), "discovering");
+    assert_eq!(other.state().as_str(), "Discovering");
 }

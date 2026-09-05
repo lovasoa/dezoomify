@@ -134,10 +134,10 @@ test all` passes; `cargo xtask test live --public` passes on all alive sites.
 
 | phase | commands | result | exceptions closed |
 |---|---|---|---|
-| C1 | pending | not started | E03 (partial) |
-| C2 | pending | not started | — |
+| C1 | `cargo xtask test native` | done 2026-09-05 | E03 (partial) |
+| C2 | `cargo xtask test native`, `cargo xtask test scenario` | done 2026-09-05 | — |
 | C3 | pending | not started | E03 (full) |
-| C4 | pending | not started | E01 |
+| C4 | `cargo xtask test wasm --transcripts` | done 2026-09-05 | E01 |
 | C5 | pending | not started | E02 (web) |
 | C6 | pending | not started | — |
 | C7 | pending | not started | E01, E02, E03 closed |

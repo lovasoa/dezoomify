@@ -1,19 +1,12 @@
 [
   {
-    "job": "job:wasm-basic-1",
-    "kind": "event",
-    "protocol": "1.0",
-    "state": "discovering",
-    "type": "job-state"
-  },
-  {
-    "effect": "fx:wasm-acq-1",
+    "effect": "fx:0",
     "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "1.0",
     "request": {
       "headers": [],
-      "id": "req:wasm-meta-1",
+      "id": "req:0",
       "purpose": "metadata",
       "uri": "https://example.com/item/1"
     },
@@ -22,7 +15,249 @@
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "output": "out:wasm-1",
+    "protocol": "1.0",
+    "state": "Discovering",
+    "type": "job-state"
+  },
+  {
+    "catalog": {
+      "images": [
+        {
+          "format": "lean",
+          "height": 0,
+          "id": "img:0",
+          "label": "img:0",
+          "levels": [
+            {
+              "height": 0,
+              "id": "lvl:0",
+              "tile_height": 0,
+              "tile_width": 0,
+              "width": 0
+            }
+          ],
+          "readiness": "ready",
+          "source_kind": "lean",
+          "width": 0
+        }
+      ]
+    },
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "type": "catalog"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "AwaitingImageSelection",
+    "type": "job-state"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "AwaitingLevelSelection",
+    "type": "job-state"
+  },
+  {
+    "effect": "fx:1",
+    "format": "png",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "type": "request-destination"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "AwaitingDestination",
+    "type": "job-state"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "Planning",
+    "type": "job-state"
+  },
+  {
+    "acquired": 0,
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "total": 2,
+    "type": "progress"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "AcquiringTiles",
+    "type": "job-state"
+  },
+  {
+    "effect": "fx:2",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "request": {
+      "headers": [],
+      "id": "req:tile-0",
+      "purpose": "tile",
+      "uri": "https://example.com/item/1/tiles/tile:0"
+    },
+    "type": "acquire-tile"
+  },
+  {
+    "effect": "fx:3",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "request": {
+      "headers": [],
+      "id": "req:tile-1",
+      "purpose": "tile",
+      "uri": "https://example.com/item/1/tiles/tile:1"
+    },
+    "type": "acquire-tile"
+  },
+  {
+    "acquired": 1,
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "total": 2,
+    "type": "progress"
+  },
+  {
+    "acquired": 2,
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "total": 2,
+    "type": "progress"
+  },
+  {
+    "buffer": {
+      "generation": 2,
+      "id": "buf:0",
+      "length": 12
+    },
+    "effect": "fx:4",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "tile": "tile:0",
+    "type": "decode-pixels"
+  },
+  {
+    "buffer": {
+      "generation": 1,
+      "id": "buf:1",
+      "length": 12
+    },
+    "effect": "fx:5",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "tile": "tile:1",
+    "type": "decode-pixels"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "ProcessingTiles",
+    "type": "job-state"
+  },
+  {
+    "effect": "fx:6",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "type": "open-encoder"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "Encoding",
+    "type": "job-state"
+  },
+  {
+    "effect": "fx:7",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "type": "finalize-encoder"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "Finalizing",
+    "type": "job-state"
+  },
+  {
+    "effect": "fx:8",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "output": "out:0",
+    "protocol": "1.0",
+    "type": "publish-output"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "Publishing",
+    "type": "job-state"
+  },
+  {
+    "buffer": {
+      "generation": 2,
+      "id": "buf:0",
+      "length": 12
+    },
+    "effect": "fx:9",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "type": "release-bytes"
+  },
+  {
+    "buffer": {
+      "generation": 1,
+      "id": "buf:1",
+      "length": 12
+    },
+    "effect": "fx:9",
+    "job": "job:wasm-basic-1",
+    "kind": "effect",
+    "protocol": "1.0",
+    "type": "release-bytes"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "CleaningUp",
+    "type": "job-state"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "protocol": "1.0",
+    "state": "Completed",
+    "type": "job-state"
+  },
+  {
+    "job": "job:wasm-basic-1",
+    "kind": "event",
+    "output": "out:0",
     "protocol": "1.0",
     "type": "completed"
   }

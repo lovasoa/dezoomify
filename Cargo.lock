@@ -424,6 +424,7 @@ name = "dezoomify-wasm"
 version = "0.1.0"
 dependencies = [
  "dezoomify-core",
+ "dezoomify-job",
  "dezoomify-protocol",
  "serde",
  "serde_json",
