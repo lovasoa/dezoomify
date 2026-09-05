@@ -4,7 +4,7 @@
     "scripts": ["background/index.js"]
   },
   "browser_action": {
-    "default_title": "Dezoomify NG"
+    "default_title": "Dezoomify"
   },
   "browser_specific_settings": {
     "gecko": {
