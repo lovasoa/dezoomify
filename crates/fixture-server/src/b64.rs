@@ -69,7 +69,9 @@ mod tests {
     #[test]
     fn encode_matches_legacy_alphabet() {
         for len in 0..40 {
-            let data: Vec<u8> = (0..len as u8).map(|i| i.wrapping_mul(37).wrapping_add(11)).collect();
+            let data: Vec<u8> = (0..len as u8)
+                .map(|i| i.wrapping_mul(37).wrapping_add(11))
+                .collect();
             assert_eq!(encode_nopad(&data), reference(&data), "len {len}");
         }
     }
@@ -77,8 +79,14 @@ mod tests {
     #[test]
     fn decode_round_trips_legacy_output() {
         for len in 0..40 {
-            let data: Vec<u8> = (0..len as u8).map(|i| i.wrapping_mul(53).wrapping_add(7)).collect();
-            assert_eq!(decode(reference(&data)).as_deref(), Some(data.as_slice()), "len {len}");
+            let data: Vec<u8> = (0..len as u8)
+                .map(|i| i.wrapping_mul(53).wrapping_add(7))
+                .collect();
+            assert_eq!(
+                decode(reference(&data)).as_deref(),
+                Some(data.as_slice()),
+                "len {len}"
+            );
         }
     }
 }
