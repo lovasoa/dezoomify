@@ -10,17 +10,6 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aes"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
-dependencies = [
- "cfg-if",
- "cipher 0.4.4",
- "cpufeatures 0.2.17",
-]
-
-[[package]]
-name = "aes"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35f0f96ce78e38c3dc6d8948aa8163d06385be74000f3c7a95bf1eef35d3ea32"
@@ -364,7 +353,7 @@ dependencies = [
 name = "dezoomify-core"
 version = "2.20.0"
 dependencies = [
- "aes 0.9.3",
+ "aes",
  "base64 0.23.1",
  "cbc 0.2.1",
  "custom_error",
@@ -389,7 +378,7 @@ dependencies = [
 name = "dezoomify-fixture-server"
 version = "0.1.0"
 dependencies = [
- "aes 0.8.4",
+ "aes",
  "axum",
  "cbc 0.1.2",
  "hmac 0.12.1",
