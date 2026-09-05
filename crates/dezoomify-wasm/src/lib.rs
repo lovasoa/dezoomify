@@ -67,8 +67,8 @@
 #![forbid(unsafe_code)]
 
 pub mod buffer;
-pub mod discovery;
 pub mod codec;
+pub mod discovery;
 pub mod error;
 pub mod processing;
 pub mod session;
@@ -245,9 +245,7 @@ pub mod wasm_api {
         /// [`Self::finish`] may be called.
         #[wasm_bindgen(js_name = "nextNeed")]
         pub fn next_need(&mut self) -> String {
-            self.inner
-                .next_need()
-                .unwrap_or_else(|| "null".to_string())
+            self.inner.next_need().unwrap_or_else(|| "null".to_string())
         }
 
         /// Provide fetched bytes for one outstanding need (`final_uri` may be
@@ -308,7 +306,9 @@ pub mod wasm_api {
         /// Apply one core processing recipe to tile bytes.
         #[wasm_bindgen(js_name = "applyProcessing")]
         pub fn apply_processing(&mut self, recipe: &str, bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
-            self.inner.apply_processing(recipe, bytes.to_vec()).map_err(js_error)
+            self.inner
+                .apply_processing(recipe, bytes.to_vec())
+                .map_err(js_error)
         }
     }
 }

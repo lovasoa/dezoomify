@@ -57,7 +57,10 @@ struct PointDto {
 pub struct DiscoverySession {
     operation: Option<DiscoveryOperation>,
     catalog: Option<dezoomify_core::core::model::ImageCatalog>,
-    probe_steps: std::collections::HashMap<(usize, usize), dezoomify_core::core::adaptive::ProbeContinuation>,
+    probe_steps: std::collections::HashMap<
+        (usize, usize),
+        dezoomify_core::core::adaptive::ProbeContinuation,
+    >,
     resolved: std::collections::HashMap<(usize, usize), TileSource>,
 }
 
@@ -253,9 +256,7 @@ impl DiscoverySession {
             .ok_or_else(|| malformed("image index out of range"))?;
         let entry = match descriptor {
             CatalogEntry::Ready(image) => image,
-            CatalogEntry::Deferred(_) => {
-                return Err(malformed("image metadata was not fetched"))
-            }
+            CatalogEntry::Deferred(_) => return Err(malformed("image metadata was not fetched")),
         };
         let level_descriptor = entry
             .levels
@@ -276,7 +277,12 @@ impl DiscoverySession {
                     if tile.role == TileRole::Probe {
                         continue;
                     }
-                    tiles.push(project_tile(&tile.request, None, tile.destination, tile.processing));
+                    tiles.push(project_tile(
+                        &tile.request,
+                        None,
+                        tile.destination,
+                        tile.processing,
+                    ));
                 }
                 Ok(project_plan("resolved", canvas, tiles))
             }
@@ -302,13 +308,12 @@ impl DiscoverySession {
         width: u32,
         height: u32,
     ) -> Result<String, AdapterError> {
-        let step = self
-            .probe_steps
-            .remove(&(image, level))
-            .ok_or_else(|| AdapterError::new(
+        let step = self.probe_steps.remove(&(image, level)).ok_or_else(|| {
+            AdapterError::new(
                 AdapterErrorCode::WrongState,
                 "no probe pending for this level",
-            ))?;
+            )
+        })?;
         let observation = match (ok, width, height) {
             (true, w, h) if w > 0 && h > 0 => ObservationResult::Available {
                 size: dezoomify_core::Vec2d { x: w, y: h },
@@ -411,10 +416,17 @@ fn project_tile(
     }
 }
 
-fn project_plan(kind: &'static str, canvas: Option<dezoomify_core::Vec2d>, tiles: Vec<TileDto>) -> String {
+fn project_plan(
+    kind: &'static str,
+    canvas: Option<dezoomify_core::Vec2d>,
+    tiles: Vec<TileDto>,
+) -> String {
     let dto = PlanDto {
         kind,
-        canvas: canvas.map(|size| PointDto { x: size.x, y: size.y }),
+        canvas: canvas.map(|size| PointDto {
+            x: size.x,
+            y: size.y,
+        }),
         tiles,
     };
     serde_json::to_string(&dto).unwrap_or_else(|_| "{\"kind\":\"error\"}".to_string())
@@ -432,8 +444,7 @@ fn tile_error(error: TileSourceError) -> AdapterError {
 mod tests {
     use super::*;
 
-    const IMAGE_PROPERTIES: &str =
-        r#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />"#;
+    const IMAGE_PROPERTIES: &str = r#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />"#;
 
     #[test]
     fn discovery_and_grid_plan_without_network() {
@@ -444,7 +455,11 @@ mod tests {
         let need: serde_json::Value = serde_json::from_str(&need).expect("need parses");
         assert_eq!(need["uri"], "https://example.com/a/ImageProperties.xml");
         session
-            .provide(need["id"].as_u64().unwrap() as usize, IMAGE_PROPERTIES.as_bytes().to_vec(), None)
+            .provide(
+                need["id"].as_u64().unwrap() as usize,
+                IMAGE_PROPERTIES.as_bytes().to_vec(),
+                None,
+            )
             .expect("provide");
         assert!(session.next_need().is_none(), "core is satisfied");
         let catalog = session.finish().expect("catalog");
@@ -476,7 +491,11 @@ mod tests {
         let need = session.next_need().expect("need");
         let need: serde_json::Value = serde_json::from_str(&need).unwrap();
         session
-            .provide(need["id"].as_u64().unwrap() as usize, IMAGE_PROPERTIES.as_bytes().to_vec(), None)
+            .provide(
+                need["id"].as_u64().unwrap() as usize,
+                IMAGE_PROPERTIES.as_bytes().to_vec(),
+                None,
+            )
             .expect("provide");
         session.finish().expect("first finish");
         assert_eq!(

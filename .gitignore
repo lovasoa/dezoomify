@@ -17,3 +17,4 @@ client_secret_*.json
 *client-secret*.json
 *.p12
 *.pfx
+wasm/

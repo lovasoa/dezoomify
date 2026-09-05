@@ -49,6 +49,18 @@
       "source_snapshot": "local"
     },
     {
+      "content_type": "text/html",
+      "id": "native/cli-dzi/payloads/fixtures.test/cli/plain.html",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "native/cli-dzi/payloads/fixtures.test/cli/plain.html",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "acff30d8542a446d115deb25c2247e06b90a808f7205f94f868fe89bd72a8574",
+      "size": 143,
+      "source_path": "crates/fixture-server/tests/webapp-e2e/webapp.spec.js",
+      "source_snapshot": "local"
+    },
+    {
       "content_type": "application/octet-stream",
       "id": "native/cli-dzi/payloads/fixtures.test/cli/pyramid.dzi",
       "license_provenance": "local test fixture (generated, no third-party material)",
@@ -115,8 +127,8 @@
       "path": "native/cli-dzi/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "eefe183e645ed451f65b0d685f48d0d5697ebfe929cf90e12cc80609f3f7ea6d",
-      "size": 1409,
+      "sha256": "87cc6cc8a41df26b7b76d7782d522551250da2887a44bbfeb52a59976c48c696",
+      "size": 1770,
       "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
       "source_snapshot": "local"
     },

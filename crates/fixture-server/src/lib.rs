@@ -40,7 +40,7 @@ pub fn router(state: AppState) -> axum::Router {
     axum::Router::new()
         .route("/fetch", any(handle_fetch))
         .route("/proxy", any(handle_proxy))
-        .route("/", any(handle_static))
+        .route("/", any(handle_static_root))
         .route("/{*path}", any(handle_static))
         .with_state(state)
 }
@@ -364,15 +364,27 @@ fn text_response(status: StatusCode, text: &str, head_only: bool) -> Response {
     (status, headers, body).into_response()
 }
 
+async fn handle_static_root(State(state): State<AppState>, method: Method) -> Response {
+    serve_static(&state, method, String::new()).await
+}
+
 async fn handle_static(
     State(state): State<AppState>,
     method: Method,
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Response {
-    if method != Method::GET && method != Method::HEAD {
-        return text_response(StatusCode::METHOD_NOT_ALLOWED, "method not allowed", false);
-    }
+    serve_static(&state, method, path).await
+}
+
+async fn serve_static(state: &AppState, method: Method, path: String) -> Response {
     let head_only = method == Method::HEAD;
+    if method != Method::GET && method != Method::HEAD {
+        return text_response(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method not allowed",
+            head_only,
+        );
+    }
     let Some(dir) = &state.static_dir else {
         return text_response(StatusCode::NOT_FOUND, "not found", head_only);
     };
@@ -423,6 +435,10 @@ fn content_type(ext: &str) -> &'static str {
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
+        "wasm" => "application/wasm",
+        "mjs" => "application/javascript",
+        "ico" => "image/x-icon",
+        "yaml" | "yml" => "application/yaml",
         _ => "application/octet-stream",
     }
 }

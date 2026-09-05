@@ -81,14 +81,55 @@ pub fn test_ui(_args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-pub fn test_web(_args: &[String]) -> Result<(), String> {
+pub fn test_web(args: &[String]) -> Result<(), String> {
+    let mut e2e = true;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--no-e2e" => e2e = false,
+            other => return Err(format!("unknown test web arg '{other}'")),
+        }
+        i += 1;
+    }
     run_node(&[
         "--test",
         "test/*.test.mjs",
         "packages/browser-runtime/test/*.test.mjs",
     ])?;
+    println!("web unit tests: ok");
+    if e2e {
+        run_e2e()?;
+        println!("webapp E2E (chromium): ok");
+    }
     println!("test web: ok");
     Ok(())
+}
+
+/// Playwright E2E for the real webapp: builds the app (wasm + glue), serves
+/// it through the deterministic fixture server on loopback, and saves real
+/// bytes in Chromium.
+fn run_e2e() -> Result<(), String> {
+    let root = super::repo_root();
+    let e2e_dir = root.join("crates/fixture-server/tests/webapp-e2e");
+    if !e2e_dir.join("node_modules").exists() {
+        let status = Command::new("npm")
+            .args(["ci"])
+            .current_dir(&e2e_dir)
+            .status()
+            .map_err(|e| format!("failed to run npm: {e}"))?;
+        if !status.success() {
+            return Err("npm ci (webapp-e2e) failed".to_string());
+        }
+    }
+    let status = Command::new("npm")
+        .args(["test"])
+        .current_dir(&e2e_dir)
+        .status()
+        .map_err(|e| format!("failed to run npm: {e}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "webapp E2E failed".to_string())
 }
 
 pub fn build_web(_args: &[String]) -> Result<(), String> {
@@ -99,6 +140,7 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
         "src/config.ts",
         "src/webIntegration.ts",
         "src/proxyTransport.ts",
+        "src/worker.js",
         "functions/proxy.ts",
         "functions/api/proxy.ts",
         "functions/security.ts",
@@ -112,8 +154,60 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
             }
         }
     }
+    build_wasm_glue()?;
     run_node(&["--test", "test/*.test.mjs"])?;
-    println!("build web: stub-ok (sources + tests only; no bundle emitted)");
+    println!("build web: ok (wasm + browser glue emitted under wasm/)");
+    Ok(())
+}
+
+/// Build the wasm adapter and generate the browser glue into `wasm/`.
+fn build_wasm_glue() -> Result<(), String> {
+    let root = super::repo_root();
+    let status = Command::new("cargo")
+        .args([
+            "build",
+            "-p",
+            "dezoomify-wasm",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to run cargo: {e}"))?;
+    if !status.success() {
+        return Err("cargo build dezoomify-wasm (wasm32) failed".to_string());
+    }
+    let wasm = root.join("target/wasm32-unknown-unknown/debug/dezoomify_wasm.wasm");
+    if !wasm.exists() {
+        return Err("wasm artifact missing after build".to_string());
+    }
+    let out_dir = root.join("wasm");
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("mkdir wasm/: {e}"))?;
+    let status = Command::new("wasm-bindgen")
+        .args([
+            "--target",
+            "web",
+            "--out-dir",
+            out_dir.to_str().expect("utf8 root"),
+            "--out-name",
+            "dezoomify-wasm",
+            wasm.to_str().expect("utf8 wasm"),
+        ])
+        .current_dir(&root)
+        .status()
+        .map_err(|_| {
+            "wasm-bindgen not found; install wasm-bindgen-cli matching the \
+             crates/dezoomify-wasm wasm-bindgen version (see docs/development.md)"
+                .to_string()
+        })?;
+    if !status.success() {
+        return Err("wasm-bindgen glue generation failed".to_string());
+    }
+    for file in ["dezoomify-wasm.js", "dezoomify-wasm_bg.wasm"] {
+        if !out_dir.join(file).exists() {
+            return Err(format!("wasm glue missing {file}"));
+        }
+    }
     Ok(())
 }
 
