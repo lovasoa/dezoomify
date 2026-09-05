@@ -1,0 +1,9 @@
+{
+  "@context": "http://iiif.io/api/image/2/context.json",
+  "@id": "https://iiif.micr.io/KEimL",
+  "width": 512,
+  "height": 512,
+  "tiles": [{ "width": 256, "height": 256, "scaleFactors": [1, 2] }],
+  "qualities": ["default"],
+  "formats": ["jpg"]
+}

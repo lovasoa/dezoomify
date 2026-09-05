@@ -1,0 +1,34 @@
+{
+  "name": "dezoomify",
+  "version": "1.0.0",
+  "description": "Download images in various zoomable image formats.",
+  "main": "dezoomify-node.js",
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.0",
+    "jsdom": "^29.1.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lovasoa/dezoomify"
+  },
+  "keywords": [
+    "dezoomify",
+    "zoomify",
+    "image",
+    "zoom",
+    "download"
+  ],
+  "author": "Ophir LOJKINE",
+  "license": "GPL-2.0",
+  "bugs": {
+    "url": "https://github.com/lovasoa/dezoomify/issues"
+  },
+  "homepage": "https://github.com/lovasoa/dezoomify",
+  "overrides": {
+    "undici": "7.29.0"
+  }
+}
