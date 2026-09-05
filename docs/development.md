@@ -163,7 +163,7 @@ only when the change needs an explicit advisory compatibility sample.
 - Add a shared scenario whenever more than one runtime exercises behavior.
 - Keep generic lifecycle, retry, and transport-effect policy in the job engine;
   keep the website's direct-first, classified automatic metadata proxy
-  eligibility and opt-out policy in `apps/web`. App integrations execute supplied
+  eligibility and opt-out policy in the web app at the repository root. App integrations execute supplied
   transport effects and report results; they never invent a hidden fallback or
   per-attempt proxy consent flow.
 - Redact credentials and sensitive URLs at every diagnostic boundary.
