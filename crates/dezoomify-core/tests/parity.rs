@@ -1337,7 +1337,7 @@ fn part_three_malformed_metadata_is_rejected() {
 
 // ---------------------------------------------------------------------------
 // Scenario parity: shared web scenarios driven through core discovery and
-// compared with the legacy-web oracle transcripts. Candidate destination
+// compared with the committed web transcripts. Candidate destination
 // results are written to expected/core.json with DEZOOMIFY_UPDATE_CORE=1 and
 // compared by default.
 // ---------------------------------------------------------------------------

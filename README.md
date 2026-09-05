@@ -1,16 +1,14 @@
-# Dezoomify NG (next-generation rewrite)
+# Dezoomify
 
 High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
-The website and CLI genuinely discover, download, assemble, and save zoomable
-images; desktop packaging remains tracked by E04.
 
 - Website (repository root, deployed from this branch): worker-hosted wasm
   core discovery, direct-first transport with automatic eligible metadata
   proxy fallback, canvas assembly, and real save (Chromium E2E covered).
 - Extension (`apps/extension/`): explicit-action scan with unit coverage;
-  no end-to-end browser proof here.
-- Desktop (`apps/desktop/`): lean Tauri shell (logic + config only, no window
-  or installer).
+  store listing submitted (pending review).
+- Desktop (`apps/desktop/`): lean Tauri shell (logic + config only; window
+  and installer not yet implemented).
 - CLI (`apps/cli/`): real download pipeline through the native runtime —
   discovery, bounded tile download, assembly, and output writing.
 
@@ -25,9 +23,8 @@ cargo xtask test all  # full deterministic suite (no public network)
 
 `cargo xtask test live --public` is the only command that contacts real
 websites (explicit opt-in). `cargo xtask --help` lists everything else,
-including `build`, `dev`, `ci`, `release`, `protocol`, `fixtures`, `sources`,
-and `parity`. See [Development](docs/development.md) and
-[Testing](docs/testing.md).
+including `build`, `dev`, `ci`, `release`, `protocol`, and `fixtures`. See
+[Development](docs/development.md) and [Testing](docs/testing.md).
 
 ## Layout
 
@@ -39,8 +36,6 @@ and `parity`. See [Development](docs/development.md) and
   protocol bindings.
 - [`testdata/scenarios`](testdata/scenarios) — deterministic test fixtures.
 - [`docs/`](docs/) — architecture, privacy, security, and release contracts.
-- [`migration-sources/`](migration-sources/) — read-only imported history of
-  the three legacy projects, kept for parity evidence. Do not edit.
 
 ## How fetching works
 

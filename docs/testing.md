@@ -17,8 +17,7 @@ ordering, explicit seeds, controlled time, and canonical snapshots.
 ## Harness maintenance
 
 The deterministic harness is `crates/fixture-server` (loopback route server)
-plus `crates/fixture-server/tests/legacy-web` (untouched-source oracle) driven
-by `testdata/scenarios`. Add scenarios per `testdata/scenarios/README.md`;
+driven by `testdata/scenarios`. Add scenarios per `testdata/scenarios/README.md`;
 review route/payload/hash changes with `cargo xtask fixtures verify`; serve
 locally with `cargo xtask fixtures serve --port 0`; keep tests isolated with
 ephemeral ports and allocated addresses (never fixed shared ports); update
@@ -42,8 +41,9 @@ packaging and browser end-to-end suites. `cargo xtask test all` runs every
 deterministic target, including controlled loopback HTTP and isolated browser
 profiles. Neither command contacts public source sites. Public compatibility
 checks run only through the explicit `cargo xtask test live` target; a live
-target that stops working must be removed from the target list (recorded in
-`docs/migration/live-inventory.csv`), never tolerated as a failing case.
+target that stops working must be removed from the target list in
+`crates/xtask/src/live.rs` with the reason in the commit message, never
+tolerated as a failing case.
 
 Focused targets are:
 
@@ -56,7 +56,7 @@ Focused targets are:
 | `browser` | workers, transports, decoding, canvases, caching, and browser harness |
 | `ui` | shared UI components, controller, accessibility, and host-neutral behavior |
 | `web` | website direct-first transport, metadata CORS proxy fallback, and cross-browser end-to-end behavior |
-| `native` | native runtime, CLI, encoders, cache, and legacy parity |
+| `native` | native runtime, CLI, encoders, cache, and scenario parity |
 | `desktop` | Tauri integration, integration registration, updater fixtures, and E2E |
 | `extension` | manifests, scanning, browser-session fetch, permissions, and browser E2E |
 | `native-messaging` | framing, handoff consent, cookie scope, registration, and cleanup |

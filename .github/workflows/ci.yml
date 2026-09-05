@@ -2,8 +2,8 @@ name: ci
 on:
   pull_request: {}
   push:
-    # NG branch while the migration workspace lives beside production.
-    # Promotion: switch to [main] at cutover (one line, nothing else is branch-locked).
+    # Promotion: switch to [main] when the owner declares the work done
+    # (one line, nothing else is branch-locked).
     branches: [ng]
 permissions:
   contents: read

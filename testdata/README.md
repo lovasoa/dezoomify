@@ -10,6 +10,5 @@
 - **Interfaces and tests:** Document fixture provenance, license/redaction,
   expected behavior, and regeneration. Validate schemas and ensure scenarios
   remain hermetic and minimal.
-- **Migration source:** Curate required cases from
-  `migration-sources/dezoomify-rs/testdata` and
-  `migration-sources/dezoomify-web/tests/fixtures`; do not bulk-copy by default.
+- **Sources:** Curate the minimal payload for a scenario from the real site it
+  represents; never bulk-copy a site's files.

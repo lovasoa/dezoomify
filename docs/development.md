@@ -97,8 +97,8 @@ to loopback and never fall back to public resources.
 ## Maintenance
 
 Generated protocol files are derived from Rust and are never edited by hand.
-Fixture, source, and parity commands are deterministic unless their name
-explicitly says `live`.
+Fixture and protocol commands are deterministic unless their name explicitly
+says `live`.
 
 ```sh
 cargo xtask protocol generate
@@ -106,9 +106,6 @@ cargo xtask protocol generate --check
 cargo xtask protocol check
 cargo xtask fixtures verify
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
-cargo xtask sources verify
-cargo xtask parity validate
-cargo xtask parity report
 ```
 
 `protocol generate` refreshes checked-in TypeScript, schema, and capability
@@ -116,9 +113,7 @@ artifacts. Its `--check` form compares against a temporary generation, while
 `protocol check` runs cross-language goldens, fingerprints, portability, and
 generated-marker checks. Golden candidates change only through the explicit
 maintenance option reported by `protocol generate --help`. `fixtures verify`
-validates manifests, provenance, licenses, routes, and hashes. `sources verify`
-checks imported source locks and trees. `parity validate` checks the parity
-inventory; `parity report` writes the current report under `artifacts/`.
+validates manifests, provenance, licenses, routes, and hashes.
 
 ## Releases
 
@@ -141,7 +136,6 @@ separate protected CI operations against the verified artifact digests.
 1. Add core parser/plan coverage and scenario-local payloads.
 2. Run `cargo xtask fixtures verify` and `cargo xtask test core --parity`.
 3. Run `cargo xtask test scenario --scenario <scenario-id>`.
-4. Run `cargo xtask parity validate` and inspect `cargo xtask parity report`.
 
 ### Change the shared UI
 

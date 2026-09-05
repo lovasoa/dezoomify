@@ -19,8 +19,6 @@ cargo xtask release build --plan <path>
 cargo xtask release verify --plan <path> [--artifacts <path>]
 cargo xtask protocol <generate|check> [options]
 cargo xtask fixtures <verify|serve> [options]
-cargo xtask sources verify
-cargo xtask parity <validate|report>
 ```
 
 With no target, `test` is the fast deterministic development loop. `test all`
@@ -47,7 +45,6 @@ cargo xtask dev extension --browser chromium
 cargo xtask ci local
 cargo xtask protocol generate --check
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
-cargo xtask parity report
 ```
 
 ## Boundaries
@@ -60,5 +57,3 @@ cargo xtask parity report
 - Test argument parsing, fixed target/lane allowlists, deterministic and
   idempotent generation, check-mode clean diffs, cleanup, and failure
   propagation.
-- Preserve the three `migration-sources` trees. Source and parity tasks verify
-  or compare them; they never rewrite them.

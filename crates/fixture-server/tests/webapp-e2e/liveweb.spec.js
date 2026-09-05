@@ -1,6 +1,6 @@
-// C6: live webapp port of `migration-sources/dezoomify-web/tests/live-compat.spec.js`.
-// Opt-in diagnostic suite (env DEZOOMIFY_LIVE_WEB=1): opens the REAL webapp,
-// pastes the legacy input URL, and asserts the app attempts discovery and
+// Live webapp suite. Opt-in diagnostic suite (env DEZOOMIFY_LIVE_WEB=1):
+// opens the REAL webapp, pastes the real-site input URL, and asserts the app
+// attempts discovery and
 // reaches a zoomable-image plan — observed as real network requests to the
 // target site (metadata + at least one tile) — then cancels the job.
 // Targets are the legacy input URLs only; nothing is hardcoded per site.
@@ -121,7 +121,7 @@ for (const [id, url] of TARGETS) {
       throw new Error(
         `${url}: the webapp reported "${errorState}" without ever planning a tile — ` +
           "the target is broken for the new webapp; remove it from the live target list " +
-          "and record it in docs/migration/live-inventory.csv",
+          "with the reason in the commit message",
       );
     }
     expect(siteRequests, `${id}: the app must attempt discovery on the site`).toBeGreaterThanOrEqual(1);

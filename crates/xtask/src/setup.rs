@@ -1,5 +1,5 @@
-//! `cargo xtask setup`: verify pinned tools and prepare phase-03 dependencies.
-//! Idempotent; never installs later-app toolchains.
+//! `cargo xtask setup`: verify pinned tools. Idempotent; never installs
+//! toolchains.
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {

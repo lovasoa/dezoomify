@@ -8,4 +8,5 @@ high (proxy abuse, store compromise), medium (flaky gate, store lag).
    submission) without rebuilding under the same version.
 2. Preserve logs, digests, and evidence; revoke test credentials.
 3. Follow `docs/rollback-runbook.md` for the affected channel only.
-4. Record actions and missing automation in `artifacts/phase-13/tabletop.md`.
+4. Record actions and missing automation in the incident record for the
+   affected channel.

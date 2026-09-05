@@ -2,8 +2,8 @@
 // Source of truth: src/hash.ts (erasable-syntax TypeScript). Regenerate with:
 //   node scripts/sync-web-js.mjs
 
-// Legacy-compatible shareable URL hash.
-// Legacy app (`migration-sources/dezoomify-web/browser-init.js`) did:
+// Shareable URL hash.
+// The original web app did:
 //   window.location.hash = url;            // on submit
 //   var startURL = window.location.hash.slice(1); // on load
 // Keep that exact contract: the hash body IS the target URL, raw, not
@@ -23,7 +23,7 @@ export function parseHash(hash                           )                {
   if (body.startsWith("/")) body = body.slice(1);
   body = body.trim();
   if (body.length === 0) return null;
-  // Legacy wrote the raw URL; modern copies may be percent-encoded.
+  // Older links wrote the raw URL; modern copies may be percent-encoded.
   // Prefer the decoded form only when it looks like a usable URL.
   try {
     if (body.includes("%")) {
