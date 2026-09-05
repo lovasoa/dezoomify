@@ -57,14 +57,14 @@ the Cargo.lock version, build, `wrangler pages deploy`, live
 verification. Deploys are skipped (warning) while the Cloudflare secrets
 are absent.
 
-### WD4: Vendor the legacy site as `legacy/`
+### WD4 (done): Vendor the legacy site as `legacy/`
 
 `git subtree add --prefix=legacy origin/master` (history preserved; the
 prose-style gate skips the verbatim tree, like `migration-sources/`).
 The legacy app's sources live on from here: legacy fixes land in
 `legacy/` on `ng` (or upstream on `master`, then `git subtree pull`).
 
-### WD5: Single-site layout
+### WD5 (done): Single-site layout
 
 `dist/` = the legacy site (verbatim copy of the servable `legacy/`
 files: pages, `zoommanager.js`, `dezoomers/`, assets, `404.html`) plus
@@ -74,26 +74,25 @@ room for the legacy `functions/proxy.js` route via a one-line re-export
 shim; `_routes.json` includes `/proxy` and `/api/proxy`. E2E runs
 against `/beta/`. Verified locally with `wrangler pages dev`.
 
-### WD6: New Pages project (owner action)
+### WD6 (mostly done): New Pages project
 
-Owner creates one Direct Upload project (`dezoomify-ng`, production
-branch `ng`) and sets the `CLOUDFLARE_API_TOKEN` /
-`CLOUDFLARE_ACCOUNT_ID` GitHub secrets; the workflow then deploys
-legacy + beta to `dezoomify-ng.pages.dev` on every `ng` push and
-verifies it live. The owner also disables non-production preview
-deployments on the OLD project, so `ng.dezoomify.pages.dev` stops
-mirroring repository files (this unblocks WD7). Cutover (later,
-explicitly decided): move the custom domain to the new project, then
-delete the old project.
+The project (`dezoomify-ng`, production branch `ng`) is created and the
+`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` GitHub secrets are set;
+the workflow deploys legacy + beta to `dezoomify-ng.pages.dev` on every
+`ng` push and verifies it live (first green deploy: 2026-09-05).
+Remaining owner actions: disable non-production preview deployments on
+the OLD project (dashboard-only; `ng.dezoomify.pages.dev` serves a broken
+SPA fallback until then), and the cutover (later, explicitly decided):
+move the custom domain to the new project, then delete the old project.
 
-### WD7: Untrack the generated artifacts
+### WD7 (done): Untrack the generated artifacts
 
 `git rm` the mirrors, wasm glue, and generated `help/`; extend
 `.gitignore`; `cargo xtask test web` and the root `pnpm test` regenerate
 mirrors + help before running node tests; `cargo xtask check` drops the
 mirror drift gate; the help freshness test becomes a determinism check.
 
-### WD8: Beta invitation popup + documentation
+### WD8 (done): Beta invitation popup + documentation; cutover pending
 
 Replace the legacy popup's stale content with an invitation to try
 `/beta` and report issues on GitHub (owner reviews the wording). Docs:

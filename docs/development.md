@@ -52,7 +52,7 @@ sites.
 | Target | Output |
 |---|---|
 | `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
-| `web` | real WASM artifact plus browser glue under `wasm/` (requires `wasm-bindgen-cli` matching the crate version), plus regenerated browser JS mirrors (see below) |
+| `web` | full site build via `scripts/build-site.mjs`: wasm adapter plus browser glue under `wasm/`, regenerated browser JS mirrors and help pages, and the deployable `dist/` tree (requires `wasm-bindgen-cli` matching the version in `Cargo.lock`; see below) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
 | `desktop` | stub validation only (logic + config); no installer or bundle produced, including with `--unsigned-test` |
 | `extension` | stub validation only (manifests); no ZIP packaged (use `apps/extension/scripts/package-store.sh` for a real package) |
@@ -74,8 +74,34 @@ The website ships static ES modules with no bundler, so browsers need plain
 `.js`. The TypeScript sources (`src/*.ts`, the shared-UI and browser-runtime
 sources they import) are the single source of truth: type-checked and
 unit-tested. `node scripts/sync-web-js.mjs` regenerates the served `.js`
-mirrors from them; never hand-edit a generated mirror. `cargo xtask build web`
-regenerates the mirrors and `cargo xtask check` fails when they drift.
+mirrors from them; never hand-edit a generated mirror. The mirrors, the wasm
+glue under `wasm/`, and the pages under `help/` are generated artifacts and
+are never committed: the `website-deploy` workflow builds them on every push
+to `ng` (see the deployment contract below), `cargo xtask build web` builds
+them locally, and the web test lanes regenerate what they read.
+
+## Website deployment contract
+
+One Cloudflare Pages project (`dezoomify-ng`) receives one build from GitHub
+Actions on every push to `ng` (`.github/workflows/website-deploy.yml`):
+
+1. `scripts/build-site.mjs` regenerates every derived artifact (mirrors, help,
+   wasm glue) and assembles `dist/`: the legacy site (vendored under `legacy/`,
+   from `master`, kept verbatim) serves `/`, the new app serves `/beta`, and
+   `_routes.json` limits Function invocation to `/api/proxy` (new app) and
+   `/proxy` (legacy, re-exported from `legacy/functions/proxy.js`).
+2. `wrangler pages deploy dist` uploads the tree; `functions/` at the
+   repository root is compiled by wrangler alongside it.
+3. The workflow verifies the live deployment: both apps, both proxy routes,
+   wasm content types, the generated help section, and that no repository
+   files are served.
+
+The old git-integrated `dezoomify` project keeps serving production from
+`master` until the cutover; fixes to the legacy site land in `legacy/` on
+`ng` (or on `master`, followed by `git subtree pull --prefix=legacy`). The
+deployment never serves repository files, so internal docs and plans stay
+private. See [`plans/website-deploy.md`](../plans/website-deploy.md) for the
+phase history.
 
 ## Development servers
 

@@ -55,6 +55,11 @@ cargo xtask dev <target>   # ui|web|desktop|extension
   never hand-edited. Errors carry stable codes and typed recovery actions;
   never branch on display strings; redact credentials in everything that
   leaves a host.
+- **Generated artifacts:** nothing generated for the website is committed
+  (JS mirrors, wasm glue, `help/`, `dist/`); the website-deploy workflow
+  builds everything via `scripts/build-site.mjs` (legacy site at `/`, new
+  app at `/beta`) and never serves repository files. `packages/protocol-ts`
+  and `generated/*.json` are the only tracked generated trees.
 - **Website fetching:** direct browser fetch first; the metadata CORS proxy
   is an automatic fallback for eligible public metadata only (never tiles,
   never credentials). The extension uses browser-session fetch under granted

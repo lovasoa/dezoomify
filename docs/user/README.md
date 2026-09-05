@@ -50,8 +50,9 @@ Skip it for internal refactors with no user-visible change.
 - Heading text is stable: error messages and apps deep-link to
   `help/<page>.html#<heading-slug>`. Changing a heading changes an address.
 - Add a page by adding a `.md` file here and registering it in
-  `scripts/build-help.mjs`; the freshness test fails until
-  `node scripts/build-help.mjs` regenerates `help/`.
+  `scripts/build-help.mjs`; `node scripts/build-help.mjs` regenerates
+  `help/` (untracked: the website-deploy workflow builds it at deploy
+  time, and the web test lanes regenerate it before testing).
 - Never hand-edit files under `help/`; they are generated.
 - Never link to legacy external doc sites (the old GitHub wiki, the old
   dezoomify-rs site, the old extension pages). This directory replaces
