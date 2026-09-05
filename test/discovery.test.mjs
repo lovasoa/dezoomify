@@ -58,8 +58,7 @@ const IIIF_MANIFEST_SNIPPET = JSON.stringify({
 });
 
 const DZI_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<Image xmlns="http://schemas.microsoft.com/deepzoom/2008" Format="jpg" Overlap="1" TileSize="254">
-<Size Height="8000" Width="6000"/>
+<Image xmlns="http://schemas.microsoft.com/deepzoom/2008" Format="jpg" Overlap="1" TileSize="254"><Size Height="8000" Width="6000"/>
 </Image>`;
 
 const ZOOMIFY_XML = `<?xml version="1.0"?>
@@ -69,6 +68,9 @@ const OPENSEADRAGON_HTML = `<html><head><script src="/openseadragon.min.js"></sc
 <body><div id="viewer"></div><script>OpenSeadragon({tileSources: "/images/sample.dzi"})</script></body></html>`;
 
 const ZOOMIFY_PAGE_HTML = `<html><body><script>var zoomifyImagePath="/zoomify/pic";</script></body></html>`;
+
+// Real shape served by lh3.googleusercontent.com at "<base_url>=g".
+const GOOGLE_ARTS_TILEINFO_XML = `<?xml version="1.0" encoding="UTF-8"?><TileInfo tile_width="512" tile_height="512" full_pyramid_depth="4" origin="TOP_LEFT" timestamp="1788621048" tiler_version_number="2" image_width="2446" image_height="3524"><pyramid_level num_tiles_x="1" num_tiles_y="1" inverse_scale="8" empty_pels_x="207" empty_pels_y="72"/><pyramid_level num_tiles_x="2" num_tiles_y="2" inverse_scale="4" empty_pels_x="413" empty_pels_y="2"/></TileInfo>`;
 
 function readable(textOrBytes, extra = {}) {
   const bytes =
@@ -96,6 +98,10 @@ test("negative: empty, prose, PWA manifest, schema.org JSON-LD, SVG image tag ar
     ["pwa-manifest", PWA_MANIFEST, "application/manifest+json"],
     ["schema-org", GENERIC_JSON_LD, "application/ld+json"],
     ["generic-xml", "<note><to>you</to></note>", "text/xml"],
+    // Marker words in plain prose are not Google Arts tile metadata: prose
+    // never looks like XML, and the strong-marker path still requires an
+    // XML-shaped document for these markers.
+    ["prose-tileinfo", "The article mentions tileinfo and pyramid_level.", "text/html"],
     // Bare <image> in SVG must not count without DZI structure.
     ["svg-image", `<svg xmlns="http://www.w3.org/2000/svg"><image href="/a.jpg" width="10" height="10"/></svg>`, "image/svg+xml"],
   ]) {
@@ -206,7 +212,7 @@ test("error: proxy failures map without leaking proxy internals to tile progress
   assert.equal(proxyHtml.via, "proxy");
 });
 
-test("positive: DZI, Zoomify, IIIF, and viewer embeds are found (direct and proxy)", () => {
+test("positive: DZI, Zoomify, IIIF, Google Arts tile info, and viewer embeds are found (direct and proxy)", () => {
   const positives = [
     ["dzi-xml", DZI_XML, "text/xml"],
     ["zoomify-xml", ZOOMIFY_XML, "text/xml"],
@@ -215,6 +221,10 @@ test("positive: DZI, Zoomify, IIIF, and viewer embeds are found (direct and prox
     ["openseadragon-html", OPENSEADRAGON_HTML, "text/html"],
     ["zoomify-page", ZOOMIFY_PAGE_HTML, "text/html"],
     ["krpano-html", `<html><body><div id="pano" data-xml="tiles.xml"></div><script src="krpano.js"></script></body></html>`, "text/html"],
+    // Google Arts & Culture tile information, served at "<base_url>=g" and
+    // fetched as the second discovery resource. Without this marker the
+    // webapp rejected real Google Arts tile XML with NO_IMAGE_FOUND.
+    ["google-arts-tileinfo", GOOGLE_ARTS_TILEINFO_XML, "text/xml"],
   ];
   for (const [name, text, ct] of positives) {
     const direct = classifyDiscovery("https://public.test/item", {

@@ -482,7 +482,7 @@ async function runJob(url        )                {
     controller.dispatch(
       nextEvent("images-found", { imageCount: catalog.images.length, transport: via })         ,
     );
-    setStep("Image found — picking the best one…");
+    setStep("Image found; picking the best one…");
     controller.dispatch(nextEvent("image-chosen")         );
     const level = pickLevel(image);
     setStep("Choosing the highest resolution…");
@@ -556,6 +556,7 @@ async function runJob(url        )                {
     if (token !== jobToken) return;
     const code = (error                     )?.code || "DISCOVERY_FAILED";
     pushLog(`Failed (${code}): ${((error         )?.message) || "unknown error"}`);
+    const detail = (error                       )?.detail;
     controller.dispatch(
       nextEvent("fail", {
         error: {
@@ -566,6 +567,7 @@ async function runJob(url        )                {
             (error         )?.message || "Could not download this zoomable image.",
           transport: activeTransport ?? "direct",
           phase: code === "NO_IMAGE_FOUND" ? "discovery" : "acquisition",
+          ...(detail ? { detail } : {}),
         },
       })         ,
     );

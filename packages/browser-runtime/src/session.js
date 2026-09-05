@@ -21,10 +21,11 @@
 //                   {type:"processed", bytes}
 //                   {type:"error", code, message}
 
-export function failure(code        , message        , retryable = true)                    {
+export function failure(code        , message        , retryable = true, detail         )                    {
   const error = new Error(message)                     ;
   error.code = code;
   error.retryable = retryable;
+  if (detail) error.detail = detail;
   return error;
 }
 
@@ -121,10 +122,12 @@ export function createDiscoveryClient(deps                     )                
         return;
       case "error": {
         const code = (msg.code          ) || "DISCOVERY_FAILED";
+        const detail = typeof msg.detail === "string" ? msg.detail : undefined;
         const err = failure(
           code,
           (msg.message          ) || "Discovery failed.",
           code !== "NO_IMAGE_FOUND",
+          detail,
         );
         rejectPending(err);
         return;

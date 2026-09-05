@@ -61,12 +61,15 @@ export interface TilePlan {
 export interface StructuredFailure extends Error {
   code: string;
   retryable: boolean;
+  /** Raw engine diagnostics for the technical-details section; never shown prominently. */
+  detail?: string;
 }
 
-export function failure(code: string, message: string, retryable = true): StructuredFailure {
+export function failure(code: string, message: string, retryable = true, detail?: string): StructuredFailure {
   const error = new Error(message) as StructuredFailure;
   error.code = code;
   error.retryable = retryable;
+  if (detail) error.detail = detail;
   return error;
 }
 
@@ -191,10 +194,12 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
         return;
       case "error": {
         const code = (msg.code as string) || "DISCOVERY_FAILED";
+        const detail = typeof msg.detail === "string" ? msg.detail : undefined;
         const err = failure(
           code,
           (msg.message as string) || "Discovery failed.",
           code !== "NO_IMAGE_FOUND",
+          detail,
         );
         rejectPending(err);
         return;

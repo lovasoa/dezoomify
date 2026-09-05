@@ -426,6 +426,49 @@ test("failed state updates error details in place without destroying error conta
   assert.equal(card.querySelector("#dz-error-message").textContent, "Network timeout contacting server.");
 });
 
+test("error layering: plain message prominent, engine diagnostics only in technical details", () => {
+  const container = createMockElement("div");
+  const callbacks = { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} };
+  const aggregate =
+    "no discovery candidate accepted the input\n" +
+    " - custom: not a tiles.yaml file\n" +
+    " - google_arts_and_culture: The website hosting this image limits how many pages our server may request from it.";
+  const state = {
+    status: "failed",
+    seq: 1,
+    sessionId: "s3",
+    imageCount: 0,
+    transport: "proxy",
+    error: {
+      code: "UPSTREAM_RATE_LIMITED",
+      category: "transport",
+      retryable: true,
+      message:
+        "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened.",
+      detail: aggregate,
+      transport: "proxy",
+      phase: "discovery",
+    },
+  };
+  renderView(container, state, callbacks);
+  const card = container.querySelector(".dz-card");
+  // The prominent slot carries the plain sentence only, never the aggregate.
+  const prominent = card.querySelector("#dz-error-message").textContent;
+  assert.ok(!prominent.includes("discovery candidate"), "aggregate must not be prominent");
+  assert.ok(!prominent.includes("custom:"), "per-format diagnostics must not be prominent");
+  // The collapsible technical section carries the code fields and the detail.
+  const diagnostics = card.querySelector("#dz-error-diagnostics").textContent;
+  assert.match(diagnostics, /Code: UPSTREAM_RATE_LIMITED/);
+  assert.match(diagnostics, /no discovery candidate accepted the input/);
+  assert.match(diagnostics, / - custom: not a tiles\.yaml file/);
+  // Errors without detail keep the previous diagnostics shape.
+  const state2 = { ...state, seq: 2, error: { ...state.error, detail: undefined } };
+  renderView(container, state2, callbacks);
+  const diag2 = card.querySelector("#dz-error-diagnostics").textContent;
+  assert.match(diag2, /Message: The website hosting this image/);
+  assert.ok(!diag2.includes("no discovery candidate"), "stale detail must be replaced");
+});
+
 test("CSS structural invariants prevent button clipping, container overflow, and layout shifts", () => {
   const css = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/styles/theme.css"), "utf8");
 

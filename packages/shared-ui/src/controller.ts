@@ -17,6 +17,8 @@ export interface StructuredError {
   category: string;
   retryable: boolean;
   message: string;
+  /** Raw engine diagnostics (per-format breakdown); rendered only in the collapsible technical section. */
+  detail?: string;
   transport?: string;
   phase?: string;
 }

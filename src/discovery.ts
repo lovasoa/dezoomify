@@ -92,6 +92,9 @@ const XML_MARKERS: readonly string[] = [
   "wmtscapabilities",
   "<capabilities",
   "<tilemap",
+  // Google Arts & Culture tile information (served at "<base_url>=g").
+  "<tileinfo",
+  "pyramid_level",
 ];
 
 function toUint8(bytes: unknown): Uint8Array | null {

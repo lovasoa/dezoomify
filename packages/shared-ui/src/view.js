@@ -506,7 +506,7 @@ function defaultStepFor(status                           )         {
     case "discovering":
       return "Finding the zoomable image…";
     case "choosing-image":
-      return "Image found — picking the best one…";
+      return "Image found; picking the best one…";
     case "choosing-level":
       return "Choosing the highest resolution…";
     case "preflighting":
@@ -898,6 +898,23 @@ function mountCompletedSection(
   parent.appendChild(section);
 }
 
+/**
+ * Technical diagnostics for the collapsible error section. The plain
+ * `message` is shown prominently above; `detail` (raw engine diagnostics,
+ * e.g. the per-format discovery breakdown) lives only here so the first
+ * thing users read stays a single actionable sentence.
+ */
+function errorDiagnosticsText(error                 )         {
+  const base =
+    `Code: ${error.code}\n` +
+    `Category: ${error.category}\n` +
+    `Retryable: ${error.retryable}\n` +
+    `Transport: ${error.transport ?? "direct"}\n` +
+    `Phase: ${error.phase ?? "discovery"}\n` +
+    `Message: ${error.message}`;
+  return error.detail ? `${base}\n\n${error.detail}` : base;
+}
+
 function mountFailedSection(
   parent             ,
   state                 ,
@@ -958,7 +975,7 @@ function mountFailedSection(
         <span>Technical error details &amp; bug report</span>
         <svg class="dz-summary-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </summary>
-      <div class="dz-diagnostics" id="dz-error-diagnostics">Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}</div>
+      <div class="dz-diagnostics" id="dz-error-diagnostics"></div>
       <div class="dz-diagnostics-report">
         <a href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md" target="_blank" rel="noopener">Report a bug on GitHub &rarr;</a>
       </div>
@@ -968,6 +985,10 @@ function mountFailedSection(
       <button type="button" class="dz-btn-tactile" id="dz-btn-try-again" style="min-width: 140px;">Try again</button>
     </div>
   `;
+  // Diagnostics are set as text content (never innerHTML): engine messages
+  // and detail diagnostics must never be interpreted as markup.
+  section.querySelector             ("#dz-error-diagnostics") .textContent =
+    errorDiagnosticsText(error);
 
   section.querySelector("#dz-card-extension")?.addEventListener("click", () => showExtensionGuidance());
   section.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
@@ -996,7 +1017,7 @@ function updateFailedSection(
   }
   const diagEl = sec.querySelector             ("#dz-error-diagnostics");
   if (diagEl) {
-    const text = `Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}`;
+    const text = errorDiagnosticsText(error);
     if (diagEl.textContent !== text) {
       diagEl.textContent = text;
     }

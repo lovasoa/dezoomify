@@ -2,13 +2,48 @@
 // the worker never fetches anything; the main thread performs every network
 // request through the classified transport and feeds bytes back here.
 import init, { DiscoverySession } from "../wasm/dezoomify-wasm.js";
+import { noImageFoundError } from "./discovery.js";
 
 let ready = null;
 let session = null;
 let busy = Promise.resolve();
+// Most recent structured transport failure reported by the main thread.
+// When discovery ultimately fails, this, not the core's per-format
+// diagnostic aggregate, is the outcome the user sees; the aggregate moves
+// to the technical `detail` field.
+let lastFailure = null;
 
 function post(message, transfer) {
   self.postMessage(message, transfer ?? []);
+}
+
+function noteFailure(msg) {
+  lastFailure = { code: msg.code || "DISCOVERY_FAILED", message: msg.message || "fetch failed" };
+}
+
+/**
+ * Surface a discovery failure in layers: the main `code`/`message` pair is a
+ * plain, actionable sentence; `detail` keeps the raw engine text (including
+ * any per-format diagnostics) for the collapsible technical section.
+ */
+function postDiscoveryFailure(error) {
+  const detail = (error && error.message) || String(error);
+  const failure = lastFailure;
+  lastFailure = null;
+  if (failure) {
+    post({ type: "error", code: failure.code, message: failure.message, detail });
+    return;
+  }
+  if (detail.includes("no discovery candidate accepted")) {
+    post({
+      type: "error",
+      code: "NO_IMAGE_FOUND",
+      message: noImageFoundError().message,
+      detail,
+    });
+    return;
+  }
+  post({ type: "error", code: "DISCOVERY_FAILED", message: detail, detail });
 }
 
 async function ensureReady() {
@@ -28,7 +63,14 @@ function pumpNeeds() {
     // Needs are sequential: wait for the main thread to answer this one.
     return false;
   }
-  const catalog = JSON.parse(session.finish());
+  let catalog;
+  try {
+    // Throws the engine's diagnostic aggregate when no candidate accepted.
+    catalog = JSON.parse(session.finish());
+  } catch (error) {
+    postDiscoveryFailure(error);
+    return true;
+  }
   post({ type: "catalog", catalog });
   return true;
 }
@@ -59,18 +101,35 @@ async function handle(msg) {
     case "start": {
       await ensureReady();
       session = new DiscoverySession(msg.url);
-      pumpNeeds();
+      lastFailure = null;
+      try {
+        pumpNeeds();
+      } catch (error) {
+        postDiscoveryFailure(error);
+      }
       return;
     }
     case "provide": {
       if (!session) throw Object.assign(new Error("no discovery session"), { code: "WORKER_FAILED" });
-      session.provide(msg.id, new Uint8Array(msg.bytes), msg.finalUri || "");
+      try {
+        session.provide(msg.id, new Uint8Array(msg.bytes), msg.finalUri || "");
+        lastFailure = null;
+      } catch (error) {
+        postDiscoveryFailure(error);
+        return;
+      }
       pumpNeeds();
       return;
     }
     case "fail": {
       if (!session) throw Object.assign(new Error("no discovery session"), { code: "WORKER_FAILED" });
-      session.provideFailure(msg.id, msg.message || "fetch failed");
+      noteFailure(msg);
+      try {
+        session.provideFailure(msg.id, msg.message || "fetch failed");
+      } catch (error) {
+        postDiscoveryFailure(error);
+        return;
+      }
       pumpNeeds();
       return;
     }
