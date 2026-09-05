@@ -171,20 +171,30 @@ abbr[title] {
   margin-left: 1.5rem;
 }
 
-.dz-nav-link {
+.dz-nav-link,
+.dz-nav-btn {
   text-decoration: none;
   color: var(--dz-text-primary);
+  font-family: inherit;
   font-size: 0.95rem;
+  font-weight: 500;
   padding: 0.25rem 0.5rem;
   border-radius: var(--dz-radius);
+  border: none;
+  background: transparent;
+  cursor: pointer;
   transition: color 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .dz-nav-link:visited {
   color: var(--dz-text-primary);
 }
 
-.dz-nav-link:hover {
+.dz-nav-link:hover,
+.dz-nav-btn:hover {
   color: var(--dz-link-hover);
   border-bottom: 2px solid var(--dz-surface-border);
 }
@@ -202,7 +212,8 @@ abbr[title] {
   margin-left: auto;
 }
 
-.dz-nav-link:focus-visible {
+.dz-nav-link:focus-visible,
+.dz-nav-btn:focus-visible {
   outline: none;
   box-shadow: var(--dz-focus-halo);
 }
@@ -798,6 +809,160 @@ abbr[title] {
   display: flex;
   flex-wrap: wrap;
   gap: 0.85rem;
+}
+
+/* Guidance Modal Dialog */
+.dz-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 14, 20, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: dzFadeIn 0.15s ease-out;
+}
+
+@keyframes dzFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dz-modal-card {
+  background: var(--dz-surface-gradient);
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.25), var(--dz-surface-glow);
+  width: min(100%, 640px);
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 2rem 2.25rem 2rem;
+  color: var(--dz-text-primary);
+  position: relative;
+  animation: dzSlideUp 0.18s ease-out;
+}
+
+@keyframes dzSlideUp {
+  from { transform: translateY(12px) scale(0.98); }
+  to { transform: translateY(0) scale(1); }
+}
+
+.dz-modal-close {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid var(--dz-surface-border);
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--dz-text-primary);
+  font-size: 1.25rem;
+  line-height: 1;
+  display: grid;
+  place-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dz-modal-close {
+    background: rgba(0, 0, 0, 0.4);
+  }
+}
+
+.dz-modal-close:hover {
+  background: var(--dz-accent-cyan);
+  color: #ffffff;
+  border-color: var(--dz-accent-cyan);
+}
+
+.dz-modal-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--dz-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.dz-modal-subtitle {
+  margin: 0 0 1.25rem;
+  font-size: 0.95rem;
+  color: var(--dz-text-secondary);
+}
+
+.dz-modal-section {
+  margin-bottom: 1.25rem;
+}
+
+.dz-modal-section-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dz-accent-cyan);
+  margin-bottom: 0.5rem;
+}
+
+.dz-modal-list {
+  padding-left: 1.25rem;
+  margin: 0.5rem 0;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.dz-modal-list li {
+  margin-bottom: 0.4rem;
+}
+
+.dz-modal-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.dz-modal-step {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.65rem 0.85rem;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  font-size: 0.9rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dz-modal-step {
+    background: rgba(20, 17, 18, 0.6);
+  }
+}
+
+.dz-modal-step-num {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--dz-accent-cyan);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: grid;
+  place-content: center;
+}
+
+.dz-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--dz-surface-border);
 }
 
 /* Canvas Viewport */

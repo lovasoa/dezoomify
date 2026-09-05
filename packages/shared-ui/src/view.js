@@ -28,6 +28,116 @@ export const ALL_DEZOOMERS = [
   { id: "pnav", name: "pnav", description: "pnav image viewer" },
 ];
 
+export function openModal(title, subtitle, contentHtml) {
+  if (typeof document === "undefined") return;
+  document.querySelector(".dz-modal-backdrop")?.remove();
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "dz-modal-backdrop";
+  backdrop.setAttribute("role", "dialog");
+  backdrop.setAttribute("aria-modal", "true");
+  backdrop.setAttribute("aria-labelledby", "dz-modal-title");
+
+  const card = document.createElement("div");
+  card.className = "dz-modal-card";
+  card.innerHTML = `
+    <button type="button" class="dz-modal-close" aria-label="Close dialog" title="Close">&times;</button>
+    <h2 id="dz-modal-title" class="dz-modal-title">${title}</h2>
+    <p class="dz-modal-subtitle">${subtitle}</p>
+    <div class="dz-modal-body">${contentHtml}</div>
+    <div class="dz-modal-actions">
+      <button type="button" class="dz-btn-tactile dz-modal-ok" style="min-width: 100px;">Got it</button>
+    </div>
+  `;
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKeyDown);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === "Escape") close();
+  };
+
+  card.querySelector(".dz-modal-close")?.addEventListener("click", close);
+  card.querySelector(".dz-modal-ok")?.addEventListener("click", close);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) close();
+  });
+  document.addEventListener("keydown", onKeyDown);
+
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+}
+
+export function showDesktopAppGuidance() {
+  openModal(
+    "Dezoomify Desktop App",
+    "High-performance native processing for gigapixel museum artworks and local scans",
+    `
+      <div class="dz-modal-section">
+        <div class="dz-modal-section-title">Why use the Desktop App?</div>
+        <ul class="dz-modal-list">
+          <li><strong>Handles Gigapixel Artworks:</strong> Web browsers enforce strict memory limits (often 2 GB per tab). The Desktop App processes images directly on your computer's RAM with zero canvas size limits.</li>
+          <li><strong>Lossless &amp; Multi-Format Output:</strong> Direct export to uncompressed TIFF, high-quality PNG, or JPEG without browser blob allocation limits.</li>
+          <li><strong>Multi-Threaded Performance:</strong> Downloads and composites tiles in parallel using native CPU concurrency.</li>
+        </ul>
+      </div>
+      <div class="dz-modal-section">
+        <div class="dz-modal-section-title">How to use it</div>
+        <div class="dz-modal-steps">
+          <div class="dz-modal-step">
+            <span class="dz-modal-step-num">1</span>
+            <div>Download the native installer for Windows, macOS, or Linux from our repository releases.</div>
+          </div>
+          <div class="dz-modal-step">
+            <span class="dz-modal-step-num">2</span>
+            <div>Launch Dezoomify on your computer and paste the zoomable image URL.</div>
+          </div>
+          <div class="dz-modal-step">
+            <span class="dz-modal-step-num">3</span>
+            <div>Select your desired maximum resolution and output folder to save the complete composite image.</div>
+          </div>
+        </div>
+      </div>
+    `
+  );
+}
+
+export function showExtensionGuidance() {
+  openModal(
+    "Dezoomify Browser Extension",
+    "Automatic tile discovery for password-protected digital archives and complex viewers",
+    `
+      <div class="dz-modal-section">
+        <div class="dz-modal-section-title">Why use the Browser Extension?</div>
+        <ul class="dz-modal-list">
+          <li><strong>Password-Protected &amp; Academic Archives:</strong> Many university libraries, museum subscriptions, and archive portals require you to be signed in. Web Dezoomify cannot access your cookies or session, but the extension inspects viewers directly within your active browser tab.</li>
+          <li><strong>Automatic Tile Detection:</strong> No need to inspect HTML source or search for hidden XML manifests. The extension monitors viewer requests in real time as you navigate the page.</li>
+          <li><strong>Private &amp; Secure:</strong> Works locally in your browser with granted active-tab permissions only; no credentials leave your computer.</li>
+        </ul>
+      </div>
+      <div class="dz-modal-section">
+        <div class="dz-modal-section-title">How to use it in 3 steps</div>
+        <div class="dz-modal-steps">
+          <div class="dz-modal-step">
+            <span class="dz-modal-step-num">1</span>
+            <div>Add the Dezoomify extension to Chrome, Firefox, or Edge.</div>
+          </div>
+          <div class="dz-modal-step">
+            <span class="dz-modal-step-num">2</span>
+            <div>Navigate to the museum or archive page displaying your zoomable image, logging in if needed.</div>
+          </div>
+          <div class="dz-modal-step">
+            <span class="dz-modal-step-num">3</span>
+            <div>Click the Dezoomify icon in your browser toolbar to automatically extract and download the full-resolution artwork!</div>
+          </div>
+        </div>
+      </div>
+    `
+  );
+}
+
 export function renderView(container, state, callbacks, ctx = {}) {
   container.innerHTML = "";
 
@@ -363,28 +473,31 @@ function renderFailedSection(parent, state, callbacks, _ctx) {
   const suggestions = document.createElement("div");
   suggestions.className = "dz-suggestion-grid";
   suggestions.innerHTML = `
-    <a class="dz-suggestion-card" href="https://lovasoa.github.io/dezoomify-extension/" target="_blank" rel="noopener">
+    <button type="button" class="dz-suggestion-card" id="dz-card-extension" style="text-align: left; font-family: inherit; cursor: pointer;">
       <span class="dz-suggestion-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-        Browser Extension
+        Browser Extension Guide
       </span>
-      <span class="dz-suggestion-desc">Finds zoomable images automatically inside webpages that need login or session cookies.</span>
-    </a>
-    <a class="dz-suggestion-card" href="https://dezoomify-rs.ophir.dev/" target="_blank" rel="noopener">
+      <span class="dz-suggestion-desc">For pages requiring login or session cookies. Automatically detects viewers on active pages.</span>
+    </button>
+    <button type="button" class="dz-suggestion-card" id="dz-card-desktop" style="text-align: left; font-family: inherit; cursor: pointer;">
       <span class="dz-suggestion-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        Desktop App
+        Desktop App Guide
       </span>
-      <span class="dz-suggestion-desc">Handles gigapixel images that are too large for browser memory limits.</span>
-    </a>
+      <span class="dz-suggestion-desc">For gigapixel images that exceed browser memory limits. Processes natively on your computer.</span>
+    </button>
     <a class="dz-suggestion-card" href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ" target="_blank" rel="noopener">
       <span class="dz-suggestion-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        Frequently Asked Questions
+        FAQ &amp; URL Extraction
       </span>
-      <span class="dz-suggestion-desc">How to extract zoomifyImagePath or direct viewer URLs from museum & archive sites.</span>
+      <span class="dz-suggestion-desc">How to extract zoomifyImagePath or direct viewer URLs from museum &amp; archive sites.</span>
     </a>
   `;
+
+  suggestions.querySelector("#dz-card-extension")?.addEventListener("click", () => showExtensionGuidance());
+  suggestions.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
   alert.appendChild(suggestions);
 
   const details = document.createElement("details");

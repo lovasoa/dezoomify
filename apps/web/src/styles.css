@@ -1,4 +1,4 @@
-@import "../../packages/shared-ui/src/styles/theme.css";
+@import "../../../packages/shared-ui/src/styles/theme.css";
 
 /* Web-specific enhancements */
 .dz-web-container {
