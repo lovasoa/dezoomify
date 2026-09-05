@@ -28,6 +28,8 @@ ENV_EXTENSION_ID="${CHROME_WS_EXTENSION_ID:-}"
 
 CLIENT_JSON="${CHROME_WS_CLIENT_JSON:-$HOME/.config/dezoomify-ng/secrets/chrome-webstore-oauth-client.json}"
 TOKEN_URL="https://oauth2.googleapis.com/token"
+# Binary uploads go to the /upload/ media endpoint; publish stays on items/.
+UPLOAD_API="https://www.googleapis.com/upload/chromewebstore/v1.1/items"
 STORE_API="https://www.googleapis.com/chromewebstore/v1.1/items"
 
 # Print one field from the OAuth client JSON (stdout carries only that value).
@@ -145,7 +147,7 @@ cmd_upload() {
   token="$(access_token)"
   curl -sS --fail --proto '=https' --max-time 120 \
     -H "Authorization: Bearer ${token}" -H "x-goog-api-version: 2" -X PUT \
-    -T "$zip" "${STORE_API}/${id}" | python3 -c 'import json,sys; print("upload:", json.load(sys.stdin).get("uploadState","unknown"))'
+    -T "$zip" "${UPLOAD_API}/${id}" | python3 -c 'import json,sys; print("upload:", json.load(sys.stdin).get("uploadState","unknown"))'
   unset token
 }
 
