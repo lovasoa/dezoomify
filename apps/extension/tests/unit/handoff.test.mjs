@@ -191,6 +191,16 @@ test("consent details list names-not-values; snapshot contains no values", () =>
 
 // ---------- internal messages + integration ----------
 
+test("PROTO_KEYS identical in handoff.ts and messages.ts (no drift)", () => {
+  const extract = (rel) => {
+    const src = readFileSync(new URL(rel, import.meta.url), "utf8");
+    const m = src.match(/PROTO_KEYS = Object\.freeze\((\[[^\]]*\])\)/);
+    assert.ok(m, `PROTO_KEYS found in ${rel}`);
+    return JSON.stringify(JSON.parse(m[1]));
+  };
+  assert.equal(extract("../../src/background/handoff.ts"), extract("../../src/app/messages.ts"));
+});
+
 test("messages: version+ids required; stale/unknown rejected", () => {
   const m = messages.createMessage("StartScan", { scanId: "scan-1", jobId: "job-1" }, { x: 1 });
   assert.equal(m.version, 2);
