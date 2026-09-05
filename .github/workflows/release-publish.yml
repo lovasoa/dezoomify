@@ -2,17 +2,59 @@ name: release-publish
 on:
   workflow_dispatch:
     inputs:
-      artifacts:
+      run_id:
         required: true
         type: string
+      draft:
+        required: false
+        type: boolean
+        default: false
 permissions:
-  contents: read
+  actions: read
+  contents: write
 jobs:
   publish:
     runs-on: ubuntu-latest
     environment: release-publish
     timeout-minutes: 60
     steps:
-      # Honest stub: publishing is not wired; fail closed instead of
-      # green-checking an echo as if artifacts were published.
-      - run: echo "STUB: release publishing not implemented; no artifacts published" && exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0 # must match rust-toolchain.toml
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Download signed artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="$(sed -n 's/^version = "\(.*\)"/\1/p' release/config.toml | head -1)"
+          gh run download ${{ inputs.run_id }} -n release-signed -D dist
+          mkdir -p dist/release
+          mv "dist/$v" "dist/release/"
+          test -f "dist/release/$v/SHA256SUMS"
+      # Digest verification at the publish transition (docs/releases.md):
+      # verify recomputes every digest and checks every GPG signature before
+      # anything is published.
+      - run: |
+          v="$(sed -n 's/^version = "\(.*\)"/\1/p' release/config.toml | head -1)"
+          cargo xtask release verify --plan "dist/release/$v/plan.json" --artifacts "dist/release/$v"
+      - name: Publish GitHub release and record the checksum inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="$(sed -n 's/^version = "\(.*\)"/\1/p' release/config.toml | head -1)"
+          draft=""
+          if [ "${{ inputs.draft }}" = "true" ]; then draft="--draft"; fi
+          cargo xtask release publish --plan "dist/release/$v/plan.json" --artifacts "dist/release/$v" $draft
+          if [ -f "release/checksums/$v/SHA256SUMS" ]; then
+            git config user.name "dezoomify release bot"
+            git config user.email "noreply@dezoomify.ophir.dev"
+            git add "release/checksums/$v/SHA256SUMS"
+            git commit -m "release: record v$v checksum inventory"
+            git push origin master
+          fi

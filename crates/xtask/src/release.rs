@@ -432,12 +432,18 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
     if !out.is_file() || std::fs::metadata(&out).map_err(|e| e.to_string())?.len() == 0 {
         return Err(format!("build produced no artifact at {}", out.display()));
     }
-    // Digest keys are target-relative so the aggregate manifest stays flat.
-    append_sums(
-        &plan_dir(&plan.version).join("SHA256SUMS"),
-        &format!("{target}/{artifact}"),
-        &out,
-    )?;
+    // Per-target digest fragment; the aggregate SHA256SUMS is assembled
+    // deterministically at sign time (parallel builds never share state).
+    let fragment = dir.join("SHA256SUMS");
+    if fragment.exists() {
+        return Err(format!(
+            "digest fragment {} already exists; remove dist/release/{}/{} to rebuild",
+            fragment.display(),
+            plan.version,
+            target
+        ));
+    }
+    append_sums(&fragment, &format!("{target}/{artifact}"), &out)?;
     Ok(out)
 }
 
@@ -559,7 +565,8 @@ fn sign_cmd(args: &[String]) -> Result<(), String> {
 
 /// Signs the aggregate SHA256SUMS and every artifact listed in it, writing
 /// `<file>.sig` next to each. Fails closed without a key.
-fn release_sign(_plan: &Plan, artifacts: &Path) -> Result<(), String> {
+fn release_sign(plan: &Plan, artifacts: &Path) -> Result<(), String> {
+    aggregate_sums(plan, artifacts)?;
     let key = std::env::var(GPG_KEY_ENV)
         .ok()
         .filter(|k| !k.trim().is_empty())
@@ -608,6 +615,40 @@ fn parse_sums(sums: &Path) -> Result<Vec<String>, String> {
         .filter_map(|l| l.split_whitespace().nth(1))
         .map(str::to_string)
         .collect())
+}
+
+/// Assembles the top-level SHA256SUMS from the per-target fragments, in plan
+/// order (deterministic). Every available target must have exactly its
+/// fragment; anything else fails closed.
+fn aggregate_sums(plan: &Plan, artifacts: &Path) -> Result<String, String> {
+    let mut aggregate = String::new();
+    for target in &plan.targets {
+        if !target.available {
+            continue;
+        }
+        let fragment = artifacts.join(&target.name).join("SHA256SUMS");
+        let text = std::fs::read_to_string(&fragment)
+            .map_err(|e| format!("missing digest fragment {}: {e}", fragment.display()))?;
+        for line in text.lines() {
+            let name = line.split_whitespace().nth(1).ok_or_else(|| {
+                format!("malformed digest line in {}: {line}", fragment.display())
+            })?;
+            if !name.starts_with(&format!("{}/", target.name)) {
+                return Err(format!(
+                    "fragment for {} lists foreign artifact {name}",
+                    target.name
+                ));
+            }
+            aggregate.push_str(line);
+            aggregate.push('\n');
+        }
+    }
+    if aggregate.is_empty() {
+        return Err("no digest fragments found; nothing to sign".to_string());
+    }
+    std::fs::write(artifacts.join("SHA256SUMS"), &aggregate)
+        .map_err(|e| format!("write aggregate SHA256SUMS: {e}"))?;
+    Ok(aggregate)
 }
 
 fn gpg_home() -> Result<PathBuf, String> {
@@ -1022,14 +1063,61 @@ mod tests {
     fn sign_fails_closed_without_key() {
         let plan = plan_from_repo();
         let dir = temp_root("sign");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("SHA256SUMS"),
-            format!("{}  x.zip\n", "0".repeat(64)),
-        )
-        .unwrap();
+        for target in plan.targets.iter().filter(|t| t.available) {
+            std::fs::create_dir_all(dir.join(&target.name)).unwrap();
+            let artifact = expected_artifact_name(&target.name, &plan.version).unwrap();
+            std::fs::write(
+                dir.join(&target.name).join(&artifact),
+                format!("bytes-for-{}", target.name),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join(&target.name).join("SHA256SUMS"),
+                format!("{}  {}/{}\n", "0".repeat(64), target.name, artifact),
+            )
+            .unwrap();
+        }
         std::env::remove_var(GPG_KEY_ENV);
         assert!(release_sign(&plan, &dir).is_err());
+        // A garbage key must also fail closed, never silently skip signing.
+        std::env::set_var(GPG_KEY_ENV, "not-a-key");
+        assert!(release_sign(&plan, &dir).is_err());
+        std::env::remove_var(GPG_KEY_ENV);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn aggregate_is_deterministic_and_rejects_foreign_entries() {
+        let plan = plan_from_repo();
+        let dir = temp_root("aggregate");
+        for target in plan.targets.iter().filter(|t| t.available) {
+            std::fs::create_dir_all(dir.join(&target.name)).unwrap();
+            std::fs::write(
+                dir.join(&target.name).join("SHA256SUMS"),
+                format!(
+                    "{}  {}/{}\n",
+                    "0".repeat(64),
+                    target.name,
+                    expected_artifact_name(&target.name, &plan.version).unwrap()
+                ),
+            )
+            .unwrap();
+        }
+        let first = aggregate_sums(&plan, &dir).unwrap();
+        let second = aggregate_sums(&plan, &dir).unwrap();
+        assert_eq!(first, second);
+        // A fragment listing another target's artifact fails closed.
+        let cli = plan
+            .targets
+            .iter()
+            .find(|t| t.available && t.name == "cli-linux-x86_64")
+            .unwrap();
+        std::fs::write(
+            dir.join(&cli.name).join("SHA256SUMS"),
+            format!("{}  extension-chromium/evil.zip\n", "0".repeat(64)),
+        )
+        .unwrap();
+        assert!(aggregate_sums(&plan, &dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

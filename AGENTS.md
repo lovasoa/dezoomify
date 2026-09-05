@@ -17,6 +17,8 @@ cargo xtask test           # fast deterministic suite (never contacts public sit
 cargo xtask test <lane>    # core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|all
 cargo xtask build <target> # wasm|web|cli|desktop|extension
 cargo xtask dev <target>   # ui|web|desktop|extension
+cargo xtask release plan|build|sign|verify|publish
+                           # release orchestration (sign/publish need keys)
 ```
 
 - `cargo xtask test live --public` is the only command that contacts real

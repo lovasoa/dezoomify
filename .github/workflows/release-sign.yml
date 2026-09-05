@@ -5,13 +5,42 @@ on:
       run_id:
         required: true
         type: string
-permissions: {}
+permissions:
+  actions: read
 jobs:
   sign:
     runs-on: ubuntu-latest
     environment: release-signing
     timeout-minutes: 60
     steps:
-      # Honest stub: signing is not wired; fail closed instead of green-checking
-      # an echo as if artifacts were signed.
-      - run: echo "STUB: release signing not implemented; no artifacts signed" && exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0 # must match rust-toolchain.toml
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Reassemble the artifact tree from the build run; fail closed when
+      # the signing key secret is absent (xtask enforces this too).
+      - name: Download release plan and artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="$(sed -n 's/^version = "\(.*\)"/\1/p' release/config.toml | head -1)"
+          gh run download ${{ inputs.run_id }} -n release-plan -D dist
+          for t in cli-linux-x86_64 extension-chromium extension-firefox; do
+            gh run download ${{ inputs.run_id }} -n "release-artifacts-$t" -D dist
+          done
+          mkdir -p dist/release
+          mv "dist/$v" "dist/release/"
+          ls -la "dist/release/$v"
+      - name: Sign artifacts
+        env:
+          RELEASE_GPG_KEY: ${{ secrets.RELEASE_GPG_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: cargo xtask release sign
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-signed
+          path: dist/release
