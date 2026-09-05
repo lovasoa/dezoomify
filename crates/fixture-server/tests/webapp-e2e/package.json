@@ -1,0 +1,13 @@
+{
+  "name": "webapp-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-webapp E2E: the new website served by the fixture server, driving the wasm core discovery + real save in Chromium",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0"
+  },
+  "license": "GPL-3.0-or-later"
+}
