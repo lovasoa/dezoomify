@@ -47,16 +47,15 @@ sites.
 
 ## Builds
 
-`cargo xtask build <target>` produces development or unsigned artifacts under
-`target/`:
+`cargo xtask build <target>` scope (honest scaffold):
 
 | Target | Output |
 |---|---|
-| `wasm` | WASM package and generated bindings |
-| `web` | deployable website and proxy bundle |
-| `cli` | native runtime and command-line application |
-| `desktop` | desktop application; use `--unsigned-test` for a local installer |
-| `extension` | Chromium ZIP and Firefox package input |
+| `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
+| `web` | stub validation only (sources + tests); no bundle emitted |
+| `cli` | real `dezoomify-cli` binary under `target/debug/` |
+| `desktop` | stub validation only (logic + config); no installer or bundle produced, including with `--unsigned-test` |
+| `extension` | stub validation only (manifests); no ZIP packaged (use `apps/extension/scripts/package-store.sh` for a real package) |
 
 Examples:
 

@@ -26,6 +26,7 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
+    let browser_flag = browser.is_some();
     if let Some(name) = browser {
         if name != "chrome" && name != "chromium" {
             return Err(format!(
@@ -59,7 +60,11 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
         return build_only_check();
     }
     run_node(&["--test", "packages/browser-runtime/test/*.test.mjs"])?;
-    println!("test browser: ok");
+    if browser_flag {
+        println!("test browser: stub-ok (unit matrix only; no headless browser launched)");
+    } else {
+        println!("test browser: ok");
+    }
     Ok(())
 }
 

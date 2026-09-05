@@ -39,10 +39,26 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
         );
         return Ok(());
     }
-    // Protocol + secret-scope checks via extension unit tests + SVM: no real
-    // browser profiles touched. Browser-specific runs need installed browsers.
+    // Protocol + secret-scope checks via extension unit tests: no real
+    // browser profiles touched. Browser-specific runs need installed browsers;
+    // fail closed for unknown engines instead of silently running the same suite.
     if let Some(name) = args.strip_prefix(&["--browser".to_string()]) {
-        let _ = name;
+        match name.first().map(String::as_str) {
+            Some("chromium") | Some("chrome") => {
+                run_node_glob("apps/extension/tests/unit")?;
+                println!(
+                    "test native-messaging --browser {}: stub-ok (unit API only; no browser profile)",
+                    name[0]
+                );
+                return Ok(());
+            }
+            Some(other) => {
+                return Err(format!(
+                    "browser '{other}' unavailable (unit API only; no firefox/webkit profile here)"
+                ));
+            }
+            None => return Err("missing --browser <name>".to_string()),
+        }
     }
     run_node_glob("apps/extension/tests/unit")?;
     println!("test native-messaging: ok");
