@@ -28,3 +28,4 @@ sha1.workspace = true
 aes.workspace = true
 cbc.workspace = true
 thiserror.workspace = true
+html-escape.workspace = true

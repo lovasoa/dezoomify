@@ -1,6 +1,5 @@
 //! Generic HTML page parsing helpers shared by the site-specific dezoomers.
 
-use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -58,61 +57,7 @@ fn attribute<'a>(tag: &'a str, wanted: &str) -> Option<&'a str> {
 /// Entities without a known expansion are kept verbatim.
 #[must_use]
 pub fn decode_html_entities(text: &str) -> String {
-    static HTML_ENTITIES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
-        HashMap::from([
-            ("amp", "&"),
-            ("lt", "<"),
-            ("gt", ">"),
-            ("quot", "\""),
-            ("apos", "'"),
-            ("nbsp", "\u{00A0}"),
-            ("iexcl", "¡"),
-            ("cent", "¢"),
-            ("pound", "£"),
-            ("curren", "¤"),
-            ("yen", "¥"),
-            ("brvbar", "¦"),
-            ("sect", "§"),
-            ("uml", "¨"),
-            ("copy", "©"),
-            ("ordf", "ª"),
-            ("laquo", "«"),
-            ("not", "¬"),
-            ("shy", "\u{00AD}"),
-            ("reg", "®"),
-            ("macr", "¯"),
-            ("deg", "°"),
-        ])
-    });
-
-    static ENTITY_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"&([a-zA-Z][a-zA-Z0-9]*|#[0-9]+|#x[0-9a-fA-F]+);")
-            .expect("constant HTML entity pattern")
-    });
-
-    ENTITY_RE
-        .replace_all(text, |captures: &regex::Captures| {
-            let entity = &captures[1];
-
-            if let Some(&replacement) = HTML_ENTITIES.get(entity) {
-                return replacement.to_owned();
-            }
-
-            // Handle numeric entities like &#123; or &#x1A;
-            if let Some(stripped) = entity.strip_prefix('#') {
-                let code = if let Some(hex_stripped) = stripped.strip_prefix("x") {
-                    u32::from_str_radix(hex_stripped, 16).ok()
-                } else {
-                    stripped.parse::<u32>().ok()
-                };
-                if let Some(character) = code.and_then(char::from_u32) {
-                    return character.to_string();
-                }
-            }
-
-            format!("&{entity};")
-        })
-        .to_string()
+    html_escape::decode_html_entities(text).into_owned()
 }
 
 #[cfg(test)]
