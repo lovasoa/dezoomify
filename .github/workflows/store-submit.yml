@@ -1,11 +1,16 @@
 name: store-submit
-# Automatic extension publishing. Default is dry-run: package the store
-# payload, validate it, and upload it as a workflow artifact. Pass
-# upload=true to push a draft to the Chrome Web Store (chromium only;
-# firefox/AMO credentials are not wired yet). Draft upload fails closed
-# with a clear message when any required secret is missing.
-# Required secrets: CHROME_WS_CLIENT_ID, CHROME_WS_CLIENT_SECRET,
-# CHROME_WS_REFRESH_TOKEN, CHROME_WS_EXTENSION_ID.
+# Update the EXISTING Chrome Web Store listing (release/config.toml
+# [extension.chromium]: iapjjopjejpelnfdonefbffahmcndfbm). Never create a new
+# store item: the extension ID is public and comes from release/config.toml.
+# Default is dry-run: package the store payload, validate it, and upload it
+# as a workflow artifact. Pass upload=true to push a draft to the existing
+# listing (chromium only; firefox/AMO credentials are not wired yet), and
+# publish=true to publish that draft after upload. Draft upload and publish
+# fail closed with a clear message when any required secret is missing.
+# Required secrets (OAuth only, no IDs): CHROME_WS_CLIENT_ID,
+# CHROME_WS_CLIENT_SECRET, CHROME_WS_REFRESH_TOKEN (one-time owner authorize).
+# Optional override secret: CHROME_WS_EXTENSION_ID (emergency only; must match
+# release/config.toml unless deliberately overridden).
 on:
   # Automatic dry-run on every ng push touching the extension: package,
   # validate, and keep the zip as an artifact. (inputs.upload defaults to
@@ -15,6 +20,7 @@ on:
     branches: [ng] # promotion: switch to [main] at cutover
     paths:
       - apps/extension/**
+      - release/config.toml
       - .github/workflows/store-submit.yml
   workflow_dispatch:
     inputs:
@@ -24,14 +30,19 @@ on:
         options: [chromium, firefox]
         default: chromium
       upload:
-        description: "Upload draft to the store (needs secrets)"
+        description: "Upload draft to the EXISTING listing (needs secrets)"
+        required: false
+        type: boolean
+        default: false
+      publish:
+        description: "Publish the uploaded draft after upload (needs secrets)"
         required: false
         type: boolean
         default: false
 permissions:
   contents: read
 concurrency:
-  group: store-submit-${{ inputs.browser }}
+  group: store-submit-${{ inputs.browser || 'chromium' }}-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   submit:
@@ -43,6 +54,26 @@ jobs:
       BROWSER: ${{ inputs.browser || 'chromium' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Resolve extension ID from release config
+        env:
+          CHROME_WS_EXTENSION_ID_OVERRIDE: ${{ secrets.CHROME_WS_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+          cfg_id=$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["extension"]["chromium"]["id"])')
+          case "$cfg_id" in
+            [a-z]*)
+              if [ "${#cfg_id}" -ne 32 ] || printf '%s' "$cfg_id" | grep -q '[^a-z]'; then
+                echo "bad extension ID in release/config.toml: $cfg_id"; exit 1;
+              fi ;;
+            *) echo "bad extension ID in release/config.toml: $cfg_id"; exit 1 ;;
+          esac
+          if [ -n "${CHROME_WS_EXTENSION_ID_OVERRIDE:-}" ]; then
+            echo "warn: CHROME_WS_EXTENSION_ID secret overrides release/config.toml ($cfg_id)"
+            echo "EXTENSION_ID=$CHROME_WS_EXTENSION_ID_OVERRIDE" >> "$GITHUB_ENV"
+          else
+            echo "EXTENSION_ID=$cfg_id" >> "$GITHUB_ENV"
+          fi
+          echo "target listing: $cfg_id (update in place, no new item)"
       - name: Package store payload
         run: |
           set -euo pipefail
@@ -50,11 +81,14 @@ jobs:
           manifest="apps/extension/generated/manifest.$browser.json"
           test -f "$manifest" || { echo "missing $manifest"; exit 1; }
           version=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("manifest_version"); print(d["version"])' "$manifest")
+          name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name",""))' "$manifest")
+          echo "package: $name v$version -> existing listing ${EXTENSION_ID}"
           staging=$(mktemp -d)
           cp "$manifest" "$staging/manifest.json"
           cp -r apps/extension/src "$staging/src"
           (cd "$staging" && zip -qr "$OLDPWD/dezoomify-extension-$browser-$version.zip" manifest.json src)
           unzip -l "dezoomify-extension-$browser-$version.zip" | head -8
+          sha256sum "dezoomify-extension-$browser-$version.zip"
           echo "package: ok (dezoomify-extension-$browser-$version.zip)"
       - name: Upload artifact (dry-run record)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -68,12 +102,12 @@ jobs:
           CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
           CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
           CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
-          CHROME_WS_EXTENSION_ID: ${{ secrets.CHROME_WS_EXTENSION_ID }}
         run: |
           set -euo pipefail
-          for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN CHROME_WS_EXTENSION_ID; do
+          for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
             [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
           done
+          [ -n "${EXTENSION_ID:-}" ] || { echo "extension ID did not resolve from release/config.toml"; exit 1; }
           zip=$(ls dezoomify-extension-chromium-*.zip)
           token=$(curl -sS --fail --proto '=https' --max-time 30 -X POST https://oauth2.googleapis.com/token \
             -d "client_id=${CHROME_WS_CLIENT_ID}" \
@@ -84,8 +118,30 @@ jobs:
           [ -n "$token" ] || { echo "token refresh failed"; exit 1; }
           curl -sS --fail --proto '=https' --max-time 120 \
             -H "Authorization: Bearer ${token}" -X PUT -T "$zip" \
-            "https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_WS_EXTENSION_ID}" \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}" \
             | python3 -c 'import json,sys; print("upload:", json.load(sys.stdin).get("uploadState","unknown"))'
+      - name: Publish uploaded draft
+        if: inputs.browser == 'chromium' && inputs.upload == true && inputs.publish == true
+        env:
+          CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
+          CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
+          CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
+            [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
+          done
+          token=$(curl -sS --fail --proto '=https' --max-time 30 -X POST https://oauth2.googleapis.com/token \
+            -d "client_id=${CHROME_WS_CLIENT_ID}" \
+            -d "client_secret=${CHROME_WS_CLIENT_SECRET}" \
+            -d "refresh_token=${CHROME_WS_REFRESH_TOKEN}" \
+            -d "grant_type=refresh_token" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')
+          [ -n "$token" ] || { echo "token refresh failed"; exit 1; }
+          curl -sS --fail --proto '=https' --max-time 120 \
+            -H "Authorization: Bearer ${token}" -X POST \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}/publish?deployPercentage=100" \
+            | python3 -c 'import json,sys; print("publish:", json.load(sys.stdin).get("status","unknown"))'
       - name: Firefox upload guard
-        if: inputs.browser == 'firefox' && inputs.upload == true
+        if: inputs.browser == 'firefox' && (inputs.upload == true || inputs.publish == true)
         run: echo "firefox/AMO credentials are not wired yet (no Mozilla account); package validated, upload skipped" && exit 1

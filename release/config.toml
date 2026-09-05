@@ -5,3 +5,15 @@ channel = "test"
 [protocol]
 range = "1.0"
 min_peer = "1.0"
+
+# Extension store identity (plan 13 step 2: exact IDs from reviewed config,
+# never secrets). Updates go to the EXISTING listings below; never create a
+# new store item. Extension IDs are public.
+[extension.chromium]
+id = "iapjjopjejpelnfdonefbffahmcndfbm"
+store_url = "https://chrome.google.com/webstore/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm"
+
+[extension.firefox]
+# AMO listing identity is still TBD (no Mozilla account wired yet); this is a
+# placeholder shape only and must never be used as an allowlist value.
+id = "dezoomify@dezoomify.example"

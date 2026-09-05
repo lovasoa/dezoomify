@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Chrome Web Store publish helper for the Dezoomify NG extension.
 #
+# This script UPDATES the existing store listing
+# (release/config.toml [extension.chromium]: iapjjopjejpelnfdonefbffahmcndfbm).
+# Never create a new store item. The extension ID is public and defaults to
+# the reviewed release config; CHROME_WS_EXTENSION_ID overrides it only in an
+# emergency.
+#
 # Secrets policy: the OAuth client JSON stays OUTSIDE the repo at
 #   ~/.config/dezoomify-ng/secrets/chrome-webstore-oauth-client.json (mode 600)
-# and the refresh token / extension ID come from the environment (local `.env`,
+# and the refresh token comes from the environment (local `.env`,
 # never committed). This script never prints secret values: no `set -x`, values
 # travel only in curl POST bodies or shell variables, and `check` reports field
 # presence — never field contents.
@@ -11,9 +17,14 @@
 # Usage:
 #   ./chrome-webstore-publish.sh check                 verify wiring, no secrets shown
 #   ./chrome-webstore-publish.sh authorize              one-time OAuth consent -> refresh token
-#   ./chrome-webstore-publish.sh upload <store.zip>     upload a store-ready zip
+#   ./chrome-webstore-publish.sh upload <store.zip>     upload a draft to the EXISTING listing
 #   ./chrome-webstore-publish.sh publish <store.zip>    upload + publish to testers
 set -euo pipefail
+
+# Repo root (this script lives at apps/extension/scripts/).
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# Extension ID override (emergency only); empty means "read release/config.toml".
+ENV_EXTENSION_ID="${CHROME_WS_EXTENSION_ID:-}"
 
 CLIENT_JSON="${CHROME_WS_CLIENT_JSON:-$HOME/.config/dezoomify-ng/secrets/chrome-webstore-oauth-client.json}"
 TOKEN_URL="https://oauth2.googleapis.com/token"
@@ -25,15 +36,41 @@ client_field() {
     "$CLIENT_JSON" "$1"
 }
 
+# Extension ID for the EXISTING listing: emergency env override wins,
+# otherwise the reviewed release config is the single source of truth.
+# Prints the id on stdout; fails if it is missing or malformed.
+extension_id() {
+  if [ -n "$ENV_EXTENSION_ID" ]; then
+    printf '%s' "$ENV_EXTENSION_ID"
+    return 0
+  fi
+  python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["extension"]["chromium"]["id"])' \
+    "$REPO_ROOT/release/config.toml"
+}
+
+# Verify the resolved extension ID has the Chromium shape (32 lowercase
+# letters) and matches release/config.toml unless explicitly overridden.
 cmd_check() {
   command -v curl >/dev/null || { echo "missing: curl"; return 1; }
   command -v python3 >/dev/null || { echo "missing: python3"; return 1; }
+  id="$(extension_id)" || { echo "cannot resolve extension ID from release/config.toml"; return 1; }
+  case "$id" in
+    [a-z]*)
+      if [ "${#id}" -ne 32 ] || printf '%s' "$id" | grep -q '[^a-z]'; then
+        echo "bad extension ID shape: ${#id} chars (want 32 lowercase letters)"; return 1;
+      fi ;;
+    *) echo "bad extension ID shape: $id"; return 1 ;;
+  esac
+  if [ -n "$ENV_EXTENSION_ID" ]; then
+    cfg="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["extension"]["chromium"]["id"])' "$REPO_ROOT/release/config.toml")"
+    [ "$id" = "$cfg" ] || echo "warn: CHROME_WS_EXTENSION_ID overrides release/config.toml ($cfg)"
+  fi
   [ -f "$CLIENT_JSON" ] || { echo "missing client JSON at $CLIENT_JSON"; return 1; }
   perms="$(stat -c %a "$CLIENT_JSON")"
   [ "$perms" = "600" ] || echo "warn: $CLIENT_JSON has mode $perms (run: chmod 600)"
   shape="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); c=d.get("installed",d.get("web",{})); m=[k for k in ("client_id","client_secret") if not c.get(k)]; print("shape-ok" if not m else "missing:"+",".join(m))' "$CLIENT_JSON")"
   [ "$shape" = "shape-ok" ] || { echo "bad client JSON: $shape"; return 1; }
-  echo "check: ok (client JSON present, mode $perms, shape-ok; refresh token and extension ID come from env)"
+  echo "check: ok (client JSON present, mode $perms, shape-ok; existing listing $id; refresh token comes from env)"
 }
 
 cmd_authorize() {
@@ -44,7 +81,7 @@ cmd_authorize() {
   redirect="http://127.0.0.1:${port}/"
   client_id="$(client_field client_id)"
   [ -n "$client_id" ] || { echo "client JSON lacks client_id"; return 1; }
-  echo "1. Open this consent URL in your browser (owner account):"
+  echo "1. Open this consent URL in your browser (the Google account that owns the existing listing iapjjopjejpelnfdonefbffahmcndfbm):"
   echo "   https://accounts.google.com/o/oauth2/auth?client_id=${client_id}&redirect_uri=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$redirect")&scope=https://www.googleapis.com/auth/chromewebstore&response_type=code&access_type=offline&prompt=consent"
   echo "   (If Google warns the app is unverified, Advanced -> continue: consent by the owner account is allowed.)"
   echo "2. After Allow, your browser lands on $redirect"
@@ -104,7 +141,7 @@ access_token() {
 cmd_upload() {
   zip="$1"
   [ -f "$zip" ] || { echo "missing zip: $zip"; return 1; }
-  id="${CHROME_WS_EXTENSION_ID:?set CHROME_WS_EXTENSION_ID}"
+  id="$(extension_id)"
   token="$(access_token)"
   curl -sS --fail --proto '=https' --max-time 120 \
     -H "Authorization: Bearer ${token}" -X PUT \
@@ -114,7 +151,7 @@ cmd_upload() {
 
 cmd_publish() {
   cmd_upload "$1"
-  id="${CHROME_WS_EXTENSION_ID:?set CHROME_WS_EXTENSION_ID}"
+  id="$(extension_id)"
   token="$(access_token)"
   curl -sS --fail --proto '=https' --max-time 120 \
     -H "Authorization: Bearer ${token}" -X POST \

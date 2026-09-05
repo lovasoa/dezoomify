@@ -9,9 +9,10 @@
 
 /// Native host name shared with capabilities and installer templates.
 pub const NATIVE_HOST_NAME: &str = "com.dezoomify.native_host";
-/// Example Chromium release extension id (exact, no wildcards).
-/// Final ids are validated in phase 12; tests use this placeholder shape.
-pub const CHROMIUM_RELEASE_EXTENSION_ID: &str = "abcdefghijklmnopqrstuvwxyzabcdef";
+/// Release Chromium extension id (exact, no wildcards).
+/// This is the EXISTING Chrome Web Store listing for Dezoomify; store updates
+/// reuse this public id, never a new item. Reviewed in release/config.toml.
+pub const CHROMIUM_RELEASE_EXTENSION_ID: &str = "iapjjopjejpelnfdonefbffahmcndfbm";
 /// Example Firefox extension id (exact, no wildcards).
 pub const FIREFOX_RELEASE_EXTENSION_ID: &str = "dezoomify@dezoomify.example";
 /// Protocol scheme handled by the desktop app.
@@ -134,7 +135,7 @@ mod tests {
     #[test]
     fn chromium_manifest_uses_exact_origin() {
         let json = chromium_manifest("/opt/dezoomify/dezoomify-native-host", CHROMIUM_RELEASE_EXTENSION_ID).unwrap();
-        assert!(json.contains("chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef/"));
+        assert!(json.contains("chrome-extension://iapjjopjejpelnfdonefbffahmcndfbm/"));
         assert!(!json.contains('*'));
         assert!(chromium_manifest("relative/host", CHROMIUM_RELEASE_EXTENSION_ID).is_err());
         assert!(chromium_manifest("/opt/host", "*").is_err());
