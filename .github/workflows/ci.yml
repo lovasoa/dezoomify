@@ -23,4 +23,19 @@ jobs:
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Resolve wasm-bindgen-cli version from Cargo.lock
+        id: bindgen
+        run: |
+          v="$(awk '/^name = "wasm-bindgen"$/{getline; sub(/^version = "/,""); sub(/"$/,""); print; exit}' Cargo.lock)"
+          test -n "$v" || { echo "wasm-bindgen version not found in Cargo.lock"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
+        with:
+          tool: wasm-bindgen-cli@${{ steps.bindgen.outputs.version }}
+      - name: Install Playwright Chromium (webapp E2E)
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+        working-directory: crates/fixture-server/tests/webapp-e2e
       - run: cargo xtask ci local
