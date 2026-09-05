@@ -38,25 +38,29 @@ jobs:
     runs-on: ubuntu-latest
     environment: store-submit
     timeout-minutes: 30
+    env:
+      # workflow_dispatch supplies inputs.browser; push runs have no inputs.
+      BROWSER: ${{ inputs.browser || 'chromium' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Package store payload
         run: |
           set -euo pipefail
-          manifest="apps/extension/generated/manifest.${{ inputs.browser }}.json"
+          browser="${BROWSER:-chromium}"
+          manifest="apps/extension/generated/manifest.$browser.json"
           test -f "$manifest" || { echo "missing $manifest"; exit 1; }
           version=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("manifest_version"); print(d["version"])' "$manifest")
           staging=$(mktemp -d)
           cp "$manifest" "$staging/manifest.json"
           cp -r apps/extension/src "$staging/src"
-          (cd "$staging" && zip -qr "$OLDPWD/dezoomify-extension-${{ inputs.browser }}-$version.zip" manifest.json src)
-          unzip -l "dezoomify-extension-${{ inputs.browser }}-$version.zip" | head -8
-          echo "package: ok (dezoomify-extension-${{ inputs.browser }}-$version.zip)"
+          (cd "$staging" && zip -qr "$OLDPWD/dezoomify-extension-$browser-$version.zip" manifest.json src)
+          unzip -l "dezoomify-extension-$browser-$version.zip" | head -8
+          echo "package: ok (dezoomify-extension-$browser-$version.zip)"
       - name: Upload artifact (dry-run record)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: dezoomify-extension-${{ inputs.browser }}
-          path: dezoomify-extension-${{ inputs.browser }}-*.zip
+          name: dezoomify-extension
+          path: dezoomify-extension-*.zip
           retention-days: 30
       - name: Draft upload to Chrome Web Store
         if: inputs.browser == 'chromium' && inputs.upload == true
