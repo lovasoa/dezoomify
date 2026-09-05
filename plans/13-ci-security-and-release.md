@@ -23,7 +23,7 @@ Release compatibility must tolerate extension-store and desktop-updater lag. The
   orchestration, job, and TypeScript protocol paths; release automation must not
   introduce parallel legacy layouts.
 - Repository governance defines protected environments, required reviewers, release branches/tags, ownership, incident contacts, and secret names.
-- Apple Developer ID/notarization, Windows code-signing, updater signing, GitHub release, Mozilla AMO, Chrome Web Store, website hosting, and optional package-manager credentials are provisioned in separate protected environments.
+- Updater signing (free self-generated keypair), GitHub release, Mozilla AMO, Chrome Web Store, website hosting, and optional package-manager credentials are provisioned in separate protected environments. Paid signing (Apple Developer ID/notarization, Azure Trusted Signing) is out of plan: recurring fees are incompatible with a free project, so desktop installers ship unsigned.
 - Release identity, package IDs, extension IDs, native-host name, protocol scheme, update URLs, store URLs, and public keys are final and generated from reviewed config.
 - Current and N-1 protocol/capability scenarios pass all app combinations.
 
@@ -138,11 +138,11 @@ Do not change app behavior in this phase except minimal fixes required to make d
 
     **Validate immediately:** run `cargo xtask release build --plan <json>` twice in fresh directories. Compare normalized unsigned payload hashes and inventories; explain only approved platform nondeterminism. Scan all outputs for secrets, repository absolute paths, dev IDs/URLs, debug symbols policy, and remote extension code.
 
-13. Create isolated signing workflow jobs. Download artifacts by exact run ID and expected digest from the release plan; verify provenance before signing; sign/notarize per platform in dedicated protected environments; generate updater signatures separately; sign extension/store packages through platform mechanisms; upload signed outputs with new digests. Never execute contributor-controlled scripts after secrets are exposed.
+13. Create isolated signing workflow jobs. Download artifacts by exact run ID and expected digest from the release plan; verify provenance before signing; sign with free mechanisms only (updater keypair, store submission, GPG tags) in dedicated protected environments; generate updater signatures separately; upload signed outputs with new digests. Never execute contributor-controlled scripts after secrets are exposed.
 
     **Validate immediately:** use test identities/local fixture keys to dry-run all logic. Tamper with one input and verify signing refuses it. Verify logs mask credentials and temporary keychains/key files are destroyed.
 
-14. Implement `cargo xtask release verify --plan <path> --artifacts <path>`. Verify source commit, version, package inventory, checksums, SBOM subjects, signatures, notarization metadata, updater signatures, extension manifest IDs/permissions, native-host IDs/paths, website CSP, protocol current/N-1 capabilities, and no unexpected files. Verification must work using public keys only.
+14. Implement `cargo xtask release verify --plan <path> --artifacts <path>`. Verify source commit, version, package inventory, checksums, SBOM subjects, signatures, updater signatures, extension manifest IDs/permissions, native-host IDs/paths, website CSP, protocol current/N-1 capabilities, and no unexpected files. Verification must work using public keys only.
 
     **Validate immediately:** run `cargo xtask release verify --plan <path> --artifacts <path>` on clean fixture artifacts, then individually tamper binary, checksum, updater metadata, manifest permission, capability file, and SBOM. Every tamper must fail. This command becomes available only after this step.
 

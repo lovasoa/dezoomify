@@ -2,7 +2,7 @@
 
 ## Objective
 
-Build the Tauri desktop app using the shared React UI and `dezoomify-native` runtime. Produce secure, signed-capable installers for Windows, macOS, and Linux. The desktop installation must be able to register the `dezoomify://` protocol, install/remove the browser Native Messaging host manifest, expose generated Tauri capabilities, and support signed updater metadata without widening IPC access.
+Build the Tauri desktop app using the shared React UI and `dezoomify-native` runtime. Produce secure installers for Windows, macOS, and Linux. Installers ship unsigned: paid signing (Apple Developer ID/notarization, Azure Trusted Signing) is out of plan because recurring fees are incompatible with a free project. Updater payloads carry free self-generated signatures instead. The desktop installation must be able to register the `dezoomify://` protocol, install/remove the browser Native Messaging host manifest, expose generated Tauri capabilities, and support signed updater metadata without widening IPC access.
 
 Desktop commands must pass typed non-secret requests to the runtime. Cookie-bearing handoff is completed only in phase 12 through the Native Messaging host and in-memory authorization path.
 
@@ -23,7 +23,7 @@ Desktop commands must pass typed non-secret requests to the runtime. Cookie-bear
   `testdata/scenarios/desktop/`; this phase does not create a second fixture or
   expected-output tree.
 - Tauri major/minor version, plugin list, Rust/Node versions, bundle identifiers, application name, protocol scheme, extension IDs for release/dev, and updater strategy are documented and pinned.
-- Signing/notarization identities are not required for local development but CI secret names and release ownership are agreed before creating workflows.
+- No paid signing/notarization identities exist and none are planned (recurring fees); updater test keys are local fixtures. CI secret names and release ownership are agreed before creating workflows.
 - Phase-05 generated protocol schema/types and the phase-10 native runtime
   capability API are canonical prerequisites. This phase creates desktop/Tauri
   capability artifacts in step 8; they must not be required at phase start.
