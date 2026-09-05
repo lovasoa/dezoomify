@@ -158,7 +158,7 @@ fn hex_key() -> [u8; 8] {
 }
 
 fn arts_signature(x: u32, y: u32, z: u32) -> String {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha1::Sha1;
     let signed = format!("arts/plain=x{x}-y{y}-z{z}-tsample-token");
     let mut mac = Hmac::<Sha1>::new_from_slice(&hex_key()).expect("hmac");

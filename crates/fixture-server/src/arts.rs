@@ -5,7 +5,7 @@
 //! tile container parsing (magic, prefix, replace-count, suffix) with the
 //! encrypt-pad/decrypt-truncate workaround. Mismatch yields `None` (403).
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 
 const HMAC_KEY: &[u8] = &[0x7b, 0x2b, 0x4e, 0x23, 0xde, 0x2c, 0xc5, 0xc5];
@@ -66,8 +66,8 @@ pub fn verify_and_decrypt(request_path: &str, stored: &[u8]) -> Option<Vec<u8>> 
 /// Port of `decrypt_image`: container-aware AES-CBC decrypt with the legacy
 /// pad-encrypt/truncate workaround.
 fn decrypt_image(buffer: &[u8]) -> Option<Vec<u8>> {
+    use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
     use aes::Aes128;
-    use cbc::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
     use cbc::{Decryptor, Encryptor};
     if buffer.len() < 4 || u32::from_be_bytes(buffer[0..4].try_into().ok()?) != 0x0A0A0A0A {
         return Some(buffer.to_vec());
@@ -92,14 +92,14 @@ fn decrypt_image(buffer: &[u8]) -> Option<Vec<u8>> {
     // append, decrypt everything, drop the last 32 bytes.
     let mut pad = [16u8; 48];
     let pad_enc = Encryptor::<Aes128>::new(&AES_KEY.into(), &AES_IV.into())
-        .encrypt_padded_mut::<Pkcs7>(&mut pad, 32)
+        .encrypt_padded::<Pkcs7>(&mut pad, 32)
         .ok()?;
     assert_eq!(pad_enc.len(), 48);
     let mut c = Vec::with_capacity(replace_count + pad_enc.len());
     c.extend_from_slice(&buffer[enc_start..enc_end]);
     c.extend_from_slice(pad_enc);
     let pt = Decryptor::<Aes128>::new(&AES_KEY.into(), &AES_IV.into())
-        .decrypt_padded_mut::<Pkcs7>(&mut c)
+        .decrypt_padded::<Pkcs7>(&mut c)
         .ok()?;
     let pt = pt.get(..pt.len().checked_sub(32)?)?.to_vec();
     let mut out = Vec::with_capacity(4 + index + pt.len() + (suffix_end - enc_end));

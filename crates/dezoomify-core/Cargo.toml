@@ -8,24 +8,22 @@ repository = "https://github.com/lovasoa/dezoomify-rs"
 keywords = ["image", "download"]
 
 [dependencies]
-log = "0.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9"
-serde-xml-rs = "0.8"
-quick-xml = "0.42"
-json5 = "1.3"
-url = "2"
-regex = "1"
-memchr = "2"
-custom_error = "1.7"
-evalexpr = "13"
-itertools = "0.15"
-krpano-decrypt = "0.2"
-base64 = "0.23"
-hmac = "0.13"
-sha1 = "0.11"
-aes = "0.9"
-cbc = "0.2"
-
-[dev-dependencies]
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+serde-xml-rs.workspace = true
+quick-xml.workspace = true
+json5.workspace = true
+url.workspace = true
+regex.workspace = true
+memchr.workspace = true
+custom_error.workspace = true
+evalexpr.workspace = true
+itertools.workspace = true
+krpano-decrypt.workspace = true
+base64.workspace = true
+hmac.workspace = true
+sha1.workspace = true
+aes.workspace = true
+cbc.workspace = true

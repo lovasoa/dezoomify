@@ -13,15 +13,15 @@ name = "dezoomify_fixture_server"
 path = "src/lib.rs"
 
 [dependencies]
-axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "fs"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-hmac = "0.12"
-sha1 = "0.10"
-aes = "0.8"
-cbc = "0.1"
-regex = "1"
+axum.workspace = true
+tokio = { workspace = true, features = ["macros", "io-util", "sync", "time", "fs"] }
+serde.workspace = true
+serde_json.workspace = true
+hmac.workspace = true
+sha1.workspace = true
+aes.workspace = true
+cbc.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots", "json"] }
+reqwest.workspace = true
