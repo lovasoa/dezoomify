@@ -17,12 +17,17 @@ client_secret_*.json
 *client-secret*.json
 *.p12
 *.pfx
-# Generated wasm glue. The two runtime files are committed: Cloudflare Pages
-# serves committed files only, and the site's worker imports the glue from
-# /wasm/. Regenerate with `cargo xtask build web`.
-wasm/*
-!wasm/dezoomify-wasm.js
-!wasm/dezoomify-wasm_bg.wasm
+# Generated website artifacts: nothing generated is committed. The site is
+# built at deploy time by the website-deploy workflow (scripts/
+# build-site.mjs); regenerate locally with `cargo xtask build web` or the
+# individual generators (scripts/sync-web-js.mjs, scripts/build-help.mjs).
+# src/worker.js is handwritten, every other .js mirror is generated.
+/wasm/
+/help/
+/src/*.js
+!/src/worker.js
+/packages/shared-ui/src/*.js
+/packages/browser-runtime/src/*.js
 
 # wrangler local state (wrangler pages dev)
 /.wrangler/

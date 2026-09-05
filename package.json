@@ -5,6 +5,6 @@
   "scripts": {
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "test": "node --test test/*.test.mjs"
+    "test": "node scripts/sync-web-js.mjs && node scripts/build-help.mjs && node --test test/*.test.mjs"
   }
 }

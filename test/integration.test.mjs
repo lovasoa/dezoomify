@@ -197,7 +197,10 @@ test("proxy fallback is unconditional; no opt-out UI remains; 250 ms direct time
   );
 });
 
-test("served browser import graph resolves to committed files", () => {
+test("served browser import graph resolves to generated files", () => {
+  // The mirrors are generated (scripts/sync-web-js.mjs, run by the test
+  // lanes and at deploy time); they must resolve exactly like the deployed
+  // /beta/ tree does.
   const roots = ["src/main.js", "src/worker.js"];
   const seen = new Set();
   const queue = [...roots];

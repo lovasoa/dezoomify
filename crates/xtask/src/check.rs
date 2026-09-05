@@ -15,7 +15,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
     ])?;
     super::fixtures::verify(&[])?;
     super::style::verify(&[])?;
-    super::browser::sync_web_js(true)?;
     println!("check: ok");
     Ok(())
 }

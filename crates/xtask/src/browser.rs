@@ -91,6 +91,7 @@ pub fn test_web(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
+    generate_web_artifacts()?;
     run_node(&[
         "--test",
         "test/*.test.mjs",
@@ -102,6 +103,25 @@ pub fn test_web(args: &[String]) -> Result<(), String> {
         println!("webapp E2E (chromium): ok");
     }
     println!("test web: ok");
+    Ok(())
+}
+
+/// Regenerate the untracked web artifacts (browser JS mirrors, help pages)
+/// the node test suites read. The generated files are never committed:
+/// deployments build them via `scripts/build-site.mjs`.
+fn generate_web_artifacts() -> Result<(), String> {
+    let root = super::repo_root();
+    for script in ["scripts/sync-web-js.mjs", "scripts/build-help.mjs"] {
+        let status = Command::new("node")
+            .env("NODE_NO_WARNINGS", "1")
+            .arg(script)
+            .current_dir(&root)
+            .status()
+            .map_err(|e| format!("failed to run node {script}: {e}"))?;
+        if !status.success() {
+            return Err(format!("{script} failed"));
+        }
+    }
     Ok(())
 }
 
@@ -175,32 +195,6 @@ fn build_site() -> Result<(), String> {
         .map_err(|e| format!("failed to run node scripts/build-site.mjs: {e}"))?;
     if !status.success() {
         return Err("site build failed (scripts/build-site.mjs)".to_string());
-    }
-    Ok(())
-}
-
-/// Regenerate (`check == false`) or verify (`check == true`) the browser JS
-/// mirrors from their TypeScript sources via `scripts/sync-web-js.mjs`.
-/// The `.ts` files are the single source of truth; the served `.js` files
-/// are generated artifacts that must never be hand-edited.
-pub fn sync_web_js(check: bool) -> Result<(), String> {
-    let root = super::repo_root();
-    let mut cmd = Command::new("node");
-    cmd.env("NODE_NO_WARNINGS", "1");
-    cmd.arg("scripts/sync-web-js.mjs");
-    if check {
-        cmd.arg("--check");
-    }
-    cmd.current_dir(&root);
-    let status = cmd
-        .status()
-        .map_err(|e| format!("failed to run node scripts/sync-web-js.mjs: {e}"))?;
-    if !status.success() {
-        return Err(if check {
-            "browser JS mirrors drifted from TypeScript sources (run `node scripts/sync-web-js.mjs`)".to_string()
-        } else {
-            "sync-web-js regeneration failed".to_string()
-        });
     }
     Ok(())
 }

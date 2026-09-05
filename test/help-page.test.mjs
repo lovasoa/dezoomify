@@ -13,7 +13,10 @@ const PAGES = readdirSync(srcDir)
   .filter((f) => f.endsWith(".md") && f !== "README.md")
   .map((f) => f.replace(/\.md$/, ""));
 
-test("help/ is generated from docs/user and up to date", () => {
+test("help/ generation is deterministic and complete", () => {
+  // help/ is a generated, untracked tree (built at deploy time and by the
+  // test lanes); this pins that regeneration is byte-stable and produces
+  // exactly the published page set, never partial or in-place-mutated output.
   const before = mkdtempSync(path.join(os.tmpdir(), "help-before-"));
   const after = mkdtempSync(path.join(os.tmpdir(), "help-after-"));
   cpSync(helpDir, before, { recursive: true });
@@ -25,11 +28,12 @@ test("help/ is generated from docs/user and up to date", () => {
     const namesBefore = readdirSync(before).sort();
     const namesAfter = readdirSync(after).sort();
     assert.deepEqual(namesAfter, namesBefore, "generated file set changed");
+    assert.ok(namesAfter.length >= 8, "help/ is empty; run: node scripts/build-help.mjs");
     for (const name of namesAfter) {
       assert.equal(
         readFileSync(path.join(after, name), "utf8"),
         readFileSync(path.join(before, name), "utf8"),
-        `${name} is stale; run: node scripts/build-help.mjs`,
+        `${name} changed on regeneration (nondeterministic generator)`,
       );
     }
   } finally {
