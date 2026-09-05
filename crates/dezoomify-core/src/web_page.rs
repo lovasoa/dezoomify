@@ -14,6 +14,27 @@ static ATTRIBUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("constant attribute pattern")
 });
 
+static IFRAME_RE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
+    regex::bytes::Regex::new(r#"(?i)<iframe[^>]*\bsrc\s*=\s*["'](?P<src>[^"']*)"#)
+        .expect("constant iframe source pattern")
+});
+
+/// Whether the page embeds a zoomable image through an `<iframe>`.
+#[must_use]
+pub fn has_iframe(bytes: &[u8]) -> bool {
+    IFRAME_RE.is_match(bytes)
+}
+
+/// Extract the `src` of the first `<iframe>` on a page, if any.
+/// `&amp;` in the attribute value is decoded.
+#[must_use]
+pub fn iframe_source(bytes: &[u8]) -> Option<String> {
+    IFRAME_RE
+        .captures(bytes)
+        .and_then(|captures| captures.name("src"))
+        .map(|capture| String::from_utf8_lossy(capture.as_bytes()).replace("&amp;", "&"))
+}
+
 /// Best-effort human-readable title of an HTML page.
 ///
 /// Prefers Open Graph and Twitter Card metadata over the plain `<title>`

@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, LazyLock};
 
+use crate::web_page::{has_iframe, iframe_source};
 use image_properties::ImageProperties;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
@@ -70,11 +71,6 @@ static UNIBE_URL_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 static OPENLAYERS_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"(?is)<[^>]*class="ete-openlayers-src"[^>]*>(?P<source>.*?)</.*?>"#)
         .expect("constant OpenLayers source pattern")
-});
-
-static IFRAME_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)<iframe[^>]*\bsrc\s*=\s*["'](?P<src>[^"']*)"#)
-        .expect("constant iframe source pattern")
 });
 
 static ETE_URL_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -206,17 +202,11 @@ fn extract_openlayers_catalog(
     ))))
 }
 
-fn has_iframe(bytes: &[u8]) -> bool {
-    IFRAME_RE.is_match(bytes)
-}
-
 fn follow_iframe(
     _: &DiscoveryContext<'_>,
     resource: crate::core::DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
-    let src = IFRAME_RE
-        .captures(resource.bytes())
-        .and_then(|captures| capture_text(&captures, "src"))
+    let src = iframe_source(resource.bytes())
         .ok_or_else(|| DiscoveryError::Session("page iframe has no source".into()))?;
     Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
         resource.final_uri(),

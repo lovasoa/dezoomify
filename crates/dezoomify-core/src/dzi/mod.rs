@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, LazyLock};
 
+use crate::web_page::{has_iframe, iframe_source};
 use dzi_file::DziFile;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
@@ -50,11 +51,6 @@ fn is_tile_url(input: &str) -> bool {
 
 static POLONA_ITEM_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"polona\.pl/item/\d+/").expect("constant Polona item pattern"));
-
-static IFRAME_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)<iframe[^>]*\bsrc\s*=\s*["'](?P<src>[^"']*)"#)
-        .expect("constant iframe source pattern")
-});
 
 static DZI_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"(?i)[^"'()<>]+\.(?:xml|dzi)"#).expect("constant DZI link pattern")
@@ -135,18 +131,11 @@ fn follow_wdl_template(
     ))))
 }
 
-fn has_iframe(bytes: &[u8]) -> bool {
-    IFRAME_RE.is_match(bytes)
-}
-
 fn follow_iframe(
     _: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
-    let src = IFRAME_RE
-        .captures(resource.bytes())
-        .and_then(|captures| captures.name("src"))
-        .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
+    let src = iframe_source(resource.bytes())
         .ok_or_else(|| DiscoveryError::Session("page iframe has no source".into()))?;
     Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
         resource.final_uri(),
