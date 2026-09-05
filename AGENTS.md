@@ -76,6 +76,15 @@ one.
   Never commit to, push to, or rewrite `main` (or any other branch) without a
   fresh explicit instruction; the `ng` to `main` promotion happens only when
   the owner declares the work done.
+- Standing store authorization (owner, 2026-09-05): as extension work completes,
+  package the store payload and keep the existing Chrome Web Store listing in
+  compliance and resubmitted, without per-step confirmation. This covers running
+  `apps/extension/scripts/package-store.sh`, invoking the `store-submit`
+  workflow via `gh workflow run` with `upload`/`publish` for the Chromium
+  listing ID in `release/config.toml` (`iapjjopjejpelnfdonefbffahmcndfbm`), and
+  committing any packaging or manifest-compliance changes those steps require.
+  Never create a new store item, never publish to Firefox/AMO, and fail closed
+  (do not upload) when store secrets are absent.
 - Inspect `git status` and the final diff before declaring completion. Never use
   destructive Git commands to clean a working tree.
 

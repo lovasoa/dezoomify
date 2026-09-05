@@ -1,5 +1,5 @@
 {
-  "_compatNote": "Chromium MV3 overlay. Service-worker background (suspends; scans are memory-only and restart fails closed to idle). scripting/activeTab for explicit-action reload; webRequest observation only; downloads for save; nativeMessaging for consented handoff. No permanent host access: hosts stay optional.",
+  "_compatNote": "Chromium MV3 overlay. Service-worker background (suspends; scans are memory-only and restart fails closed to idle). activeTab for explicit-action reload; webRequest observation only; downloads for save; nativeMessaging for consented handoff. No permanent host access: hosts stay optional.",
   "action": {
     "default_title": "Dezoomify"
   },
@@ -29,7 +29,6 @@
   ],
   "permissions": [
     "activeTab",
-    "scripting",
     "webRequest",
     "downloads",
     "nativeMessaging"
