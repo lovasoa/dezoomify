@@ -160,10 +160,18 @@ jobs:
             echo "hint: re-run apps/extension/scripts/chrome-webstore-publish.sh authorize with the listing-owner account and update the CHROME_WS_REFRESH_TOKEN secret, then re-run"
             exit 1
           fi
-          curl -sS --fail --proto '=https' --max-time 120 \
+          pub_resp=$(curl -sS --proto '=https' --max-time 120 -w '\n%{http_code}' \
             -H "Authorization: Bearer ${token}" -H "x-goog-api-version: 2" -X POST \
-            "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}/publish?deployPercentage=100" \
-            | python3 -c 'import json,sys; print("publish:", json.load(sys.stdin).get("status","unknown"))'
+            "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}/publish?deployPercentage=100") \
+            || { echo "publish endpoint unreachable"; exit 1; }
+          pub_code=$(printf '%s' "$pub_resp" | tail -n1)
+          pub_body=$(printf '%s' "$pub_resp" | head -n -1)
+          pub_out=$(printf '%s' "$pub_body" \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("publish:", d.get("status","unknown")); print("OK" if d.get("status") == ["OK"] else "NOT-OK")') \
+            || { echo "publish failed: HTTP $pub_code: $(printf '%s' "$pub_body" | head -c 500)"; exit 1; }
+          printf '%s\n' "$pub_out" | head -n -1
+          echo "http: $pub_code"
+          [ "$(printf '%s' "$pub_out" | tail -n1)" = "OK" ] || { echo "publish not accepted (see response above)"; exit 1; }
       - name: Firefox upload guard
         if: inputs.browser == 'firefox' && (inputs.upload == true || inputs.publish == true)
         run: echo "firefox/AMO credentials are not wired yet (no Mozilla account); package validated, upload skipped" && exit 1
