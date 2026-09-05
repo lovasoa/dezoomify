@@ -251,18 +251,21 @@ test("entries never fabricate tile progress; negatives carry a structured error"
   // The reported bug was a hardcoded fake count shown for any URL.
   assert.ok(!mainJs.includes("14 of 28"), "main.js must not hardcode fake tile counts");
   assert.ok(!mainJs.includes("14, total: 28"), "main.js must not hardcode fake totals");
-  // Positive-path fabrications removed: no fake dimensions, completion, or save.
+  // Positive-path fabrications stay banned: no hardcoded dimensions or fake
+  // save success. A real save lifecycle is allowed, but only when backed by
+  // actual canvas encoding (toBlob) of assembled pixels.
   for (const [name, text] of [["main.js", mainJs], ["main.ts", mainTs]]) {
     assert.ok(!text.includes("4096"), `${name} must not hardcode fake dimensions`);
     assert.ok(!text.includes("3072"), `${name} must not hardcode fake dimensions`);
-    assert.ok(!text.includes("save-done"), `${name} must not fabricate completion`);
-    assert.ok(!text.includes("save-start"), `${name} must not fabricate save lifecycle`);
     assert.ok(!text.includes("Image ready to save"), `${name} must not fake save success`);
     assert.ok(!text.includes("Reading image tiles"), `${name} must not imply tile fetch`);
+    if (text.includes("save-done")) {
+      assert.ok(text.includes("toBlob"), `${name} must encode real pixels before save-done`);
+    }
   }
-  // Both entries must gate success on the classifier.
-  assert.ok(mainJs.includes("classifyDiscovery"), "main.js gates on discovery");
-  assert.ok(mainTs.includes("classifyDiscovery"), "main.ts gates on discovery");
+  // Both entries must gate success on the readable-bytes classifier.
+  assert.ok(mainJs.includes("classifyReadableBytes"), "main.js gates on discovery");
+  assert.ok(mainTs.includes("classifyReadableBytes"), "main.ts gates on discovery");
   // Negative verdict shape always carries a terminal discovery error.
   const err = noImageFoundError("direct");
   assert.equal(err.code, "NO_IMAGE_FOUND");

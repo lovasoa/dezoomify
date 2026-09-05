@@ -1,157 +1,248 @@
-// Session coordinator with worker-client stub (no real Worker in unit tests).
-export interface WorkerClientStub {
+// Discovery client over a real worker that owns the wasm `DiscoverySession`.
+//
+// The client runs on the main thread and owns every network decision
+// (direct-first transport, metadata proxy fallback, tile policy); the worker
+// is a pure compute engine: it hosts the wasm core discovery session and
+// never fetches anything itself. Messages:
+//
+//   main -> worker: {type:"start", url}            begin discovery
+//                   {type:"provide", id, bytes, finalUri}
+//                   {type:"fail", id, message}
+//                   {type:"plan", image, level}
+//                   {type:"probe-submit", image, level, ok, width, height}
+//                   {type:"process", recipe, bytes}
+//   worker -> main: {type:"need", id, uri, headers}
+//                   {type:"catalog", catalog}
+//                   {type:"plan", canvas, tiles} | {type:"probe", uri, headers}
+//                   {type:"processed", bytes}
+//                   {type:"error", code, message}
+
+export interface WorkerLike {
   postMessage(msg: unknown, transfer?: ArrayBuffer[]): void;
   terminate(): void;
-  postedCount?: number;
+  onmessage: ((ev: { data: unknown }) => void) | null;
 }
 
-export interface SessionEvent {
-  seq: number;
-  kind: string;
-  [key: string]: unknown;
+export interface CatalogLevel {
+  index: number;
+  title?: string;
+  scale?: number;
+  imageSize?: { x: number; y: number };
 }
 
-export interface SessionOptions {
-  maxPendingBytes?: number;
-  workerClient?: WorkerClientStub;
-  onEvent?: (ev: SessionEvent) => void;
+export interface CatalogImage {
+  id: number;
+  title?: string;
+  format: string;
+  levels: CatalogLevel[];
 }
 
-export interface BrowserSessionHandle {
-  readonly seq: number;
-  readonly pendingBytes: number;
-  readonly backpressure: boolean;
-  readonly cancelled: boolean;
-  readonly disposed: boolean;
-  readonly completed: boolean;
-  postBuffer(buffer: ArrayBuffer): { transferred: boolean; backpressure: boolean };
-  handleWorkerMessage(msg: { seq?: number; kind: string; byteLength?: number } & Record<string, unknown>): void;
-  completeOnce(result?: unknown): void;
-  cancel(): void;
+export interface WebCatalog {
+  images: CatalogImage[];
+}
+
+export interface PlanTile {
+  uri: string;
+  headers: Record<string, string>;
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+  processing: string;
+}
+
+export interface TilePlan {
+  canvas?: { x: number; y: number };
+  tiles: PlanTile[];
+}
+
+export interface StructuredFailure extends Error {
+  code: string;
+  retryable: boolean;
+}
+
+export function failure(code: string, message: string, retryable = true): StructuredFailure {
+  const error = new Error(message) as StructuredFailure;
+  error.code = code;
+  error.retryable = retryable;
+  return error;
+}
+
+export interface DiscoveryClientDeps {
+  worker: WorkerLike;
+  /** Fetch one metadata resource (direct-first + eligible proxy fallback). */
+  fetchMetadata(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<{ bytes: ArrayBuffer; finalUri?: string }>;
+  /** Fetch one tile as readable bytes (direct only; never the proxy). */
+  fetchTile(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
+  /** Decode one probe tile far enough to report its size. */
+  probeSize(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<{ ok: boolean; width: number; height: number }>;
+}
+
+export interface DiscoveryClient {
+  start(url: string): Promise<WebCatalog>;
+  plan(image: number, level: number): Promise<TilePlan>;
+  process(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer>;
   dispose(): void;
 }
 
-/** Transfer ArrayBuffer ownership; detaches the original (neutering check). */
-export function transferBuffer(buffer: ArrayBuffer): ArrayBuffer {
-  const len = buffer.byteLength;
-  if (typeof (buffer as unknown as { transfer?: () => ArrayBuffer }).transfer === "function") {
-    const moved = (buffer as unknown as { transfer: () => ArrayBuffer }).transfer();
-    void len;
-    return moved;
-  }
-  // Fallback: copy then detach via resize(0) if resizable, else return copy.
-  const copy = buffer.slice(0);
-  try {
-    const anyBuf = buffer as unknown as { resize?: (n: number) => void };
-    if (typeof anyBuf.resize === "function") anyBuf.resize(0);
-  } catch {
-    // ignore
-  }
-  return copy;
+interface Pending {
+  resolve: (value: never) => void;
+  reject: (error: unknown) => void;
 }
 
-export function createBrowserSession(opts?: SessionOptions): BrowserSessionHandle {
-  const maxPendingBytes = opts?.maxPendingBytes ?? 8 * 1024 * 1024;
-  const workerClient = opts?.workerClient;
-  const onEvent = opts?.onEvent;
-  let seq = 0;
-  let pendingBytes = 0;
-  let cancelled = false;
+export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClient {
+  const { worker } = deps;
+  let pending: Pending | null = null;
+  let pendingKind: "start" | "plan" | "process" | null = null;
+  let currentImage = 0;
+  let currentLevel = 0;
   let disposed = false;
-  let completed = false;
-  let completedEmitted = false;
 
-  function emit(kind: string, extra?: Record<string, unknown>): void {
-    seq += 1;
-    try {
-      onEvent?.({ seq, kind, ...extra });
-    } catch {
-      // never let listener break coordinator
+  worker.onmessage = (ev: { data: unknown }) => {
+    const msg = ev.data as Record<string, unknown> & { type: string };
+    switch (msg.type) {
+      case "need": {
+        const id = msg.id as number;
+        const uri = msg.uri as string;
+        const headers = (msg.headers ?? {}) as Record<string, string>;
+        deps
+          .fetchMetadata(uri, headers)
+          .then(({ bytes, finalUri }) => {
+            worker.postMessage(
+              { type: "provide", id, bytes, finalUri: finalUri ?? "" },
+              [bytes],
+            );
+          })
+          .catch((error: unknown) => {
+            const structured = error as { code?: string; message?: string };
+            worker.postMessage({
+              type: "fail",
+              id,
+              message: structured?.message || String(error),
+              code: structured?.code || "DISCOVERY_FAILED",
+            });
+          });
+        return;
+      }
+      case "catalog":
+        settle(pendingKind === "start" ? pending : null, msg.catalog as WebCatalog);
+        return;
+      case "plan":
+        settle(pendingKind === "plan" ? pending : null, {
+          canvas: msg.canvas as { x: number; y: number } | undefined,
+          tiles: (msg.tiles ?? []) as PlanTile[],
+        });
+        return;
+      case "probe": {
+        const uri = msg.uri as string;
+        const headers = (msg.headers ?? {}) as Record<string, string>;
+        deps
+          .probeSize(uri, headers)
+          .then((size) => {
+            worker.postMessage({
+              type: "probe-submit",
+              image: currentImage,
+              level: currentLevel,
+              ok: size.ok,
+              width: size.width,
+              height: size.height,
+            });
+          })
+          .catch(() => {
+            worker.postMessage({
+              type: "probe-submit",
+              image: currentImage,
+              level: currentLevel,
+              ok: false,
+              width: 0,
+              height: 0,
+            });
+          });
+        return;
+      }
+      case "processed":
+        settle(pendingKind === "process" ? pending : null, msg.bytes as ArrayBuffer);
+        return;
+      case "error": {
+        const code = (msg.code as string) || "DISCOVERY_FAILED";
+        const err = failure(
+          code,
+          (msg.message as string) || "Discovery failed.",
+          code !== "NO_IMAGE_FOUND",
+        );
+        rejectPending(err);
+        return;
+      }
+      default:
+        return;
+    }
+  };
+
+  function settle(kind: Pending | null, value: unknown): void {
+    const current = pending;
+    pending = null;
+    pendingKind = null;
+    if (kind && current === kind) {
+      (current.resolve as (v: unknown) => void)(value);
     }
   }
 
-  function postBuffer(buffer: ArrayBuffer): { transferred: boolean; backpressure: boolean } {
-    if (cancelled || disposed || completed) return { transferred: false, backpressure: pendingBytes > maxPendingBytes };
-    const size = buffer.byteLength;
-    const moved = transferBuffer(buffer);
-    pendingBytes += moved.byteLength;
-    void size;
-    try {
-      workerClient?.postMessage({ kind: "tile-bytes", byteLength: moved.byteLength }, [moved]);
-      if (typeof workerClient?.postedCount === "number") workerClient.postedCount += 1;
-    } catch {
-      // posting failed; roll back counter
-      pendingBytes -= moved.byteLength;
-      return { transferred: false, backpressure: pendingBytes > maxPendingBytes };
-    }
-    return { transferred: true, backpressure: pendingBytes > maxPendingBytes };
+  function rejectPending(error: unknown): void {
+    const current = pending;
+    pending = null;
+    pendingKind = null;
+    current?.reject(error);
   }
 
-  function handleWorkerMessage(
-    msg: { seq?: number; kind: string; byteLength?: number } & Record<string, unknown>,
-  ): void {
-    // Late responses ignored after cancel/dispose.
-    if (cancelled || disposed) return;
-    if (completed) return;
-    if (typeof msg.byteLength === "number" && msg.byteLength > 0) {
-      pendingBytes = Math.max(0, pendingBytes - msg.byteLength);
+  function send(
+    message: Record<string, unknown>,
+    kind: "start" | "plan" | "process",
+  ): Promise<unknown> {
+    if (disposed) {
+      return Promise.reject(failure("DISPOSED", "Discovery client is disposed.", false));
     }
-    if (msg.kind === "completed") {
-      completeOnce(msg);
-      return;
+    if (pending) {
+      return Promise.reject(
+        failure("CLIENT_BUSY", "Another discovery operation is already running.", false),
+      );
     }
-    emit(`worker:${String(msg.kind)}`, { ...msg });
-  }
-
-  function completeOnce(result?: unknown): void {
-    if (completedEmitted) return;
-    if (cancelled || disposed) return;
-    completedEmitted = true;
-    completed = true;
-    emit("completed", result !== undefined ? { result } : undefined);
-  }
-
-  function cancel(): void {
-    if (cancelled || disposed || completed) return;
-    cancelled = true;
-    pendingBytes = 0;
-    emit("cancelled");
-  }
-
-  function dispose(): void {
-    if (disposed) return;
-    disposed = true;
-    pendingBytes = 0;
-    try {
-      workerClient?.terminate();
-    } catch {
-      // ignore
-    }
+    return new Promise((resolve, reject) => {
+      pending = { resolve: resolve as never, reject };
+      pendingKind = kind;
+      worker.postMessage(message);
+    });
   }
 
   return {
-    get seq(): number {
-      return seq;
+    start(url: string): Promise<WebCatalog> {
+      currentImage = 0;
+      currentLevel = 0;
+      return send({ type: "start", url }, "start") as Promise<WebCatalog>;
     },
-    get pendingBytes(): number {
-      return pendingBytes;
+    plan(image: number, level: number): Promise<TilePlan> {
+      currentImage = image;
+      currentLevel = level;
+      return send({ type: "plan", image, level }, "plan") as Promise<TilePlan>;
     },
-    get backpressure(): boolean {
-      return pendingBytes > maxPendingBytes;
+    process(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> {
+      return send({ type: "process", recipe, bytes }, "process").then(
+        (value) => value as ArrayBuffer,
+      );
     },
-    get cancelled(): boolean {
-      return cancelled;
+    dispose(): void {
+      disposed = true;
+      rejectPending(failure("DISPOSED", "Discovery client is disposed.", false));
+      try {
+        worker.terminate();
+      } catch {
+        // Terminating twice must never throw.
+      }
     },
-    get disposed(): boolean {
-      return disposed;
-    },
-    get completed(): boolean {
-      return completed;
-    },
-    postBuffer,
-    handleWorkerMessage,
-    completeOnce,
-    cancel,
-    dispose,
   };
 }
