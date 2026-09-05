@@ -2,9 +2,9 @@ name: ci
 on:
   pull_request: {}
   push:
-    # Promotion: switch to [main] when the owner declares the work done
-    # (one line, nothing else is branch-locked).
-    branches: [ng]
+    # Single-branch repository: master holds legacy/ and the new app.
+
+    branches: [master]
 permissions:
   contents: read
 concurrency:

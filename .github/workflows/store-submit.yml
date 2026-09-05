@@ -18,7 +18,7 @@ on:
   # false on push, so pushes never touch the store. Manual dispatch with
   # upload=true lights up once these workflows reach the default branch.)
   push:
-    branches: [ng] # promotion: switch to [main] when the owner declares the work done
+    branches: [master]
     paths:
       - apps/extension/**
       - release/config.toml

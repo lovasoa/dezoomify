@@ -1,6 +1,12 @@
 # Plan: One Pages project: legacy site at /, new app at /beta
 
-Status: in progress (2026-09-05).
+Status: complete (2026-09-05). Final architecture, restated (owner,
+2026-09-05): the original `dezoomify` project is the only Pages project;
+GitHub Actions builds `dist/` and uploads it with wrangler; `master` is
+the single branch holding `legacy/` and the new app; automatic git
+deployments on the project are disabled so the workflow is the only
+publisher; `dezoomify.ophir.dev` serves the legacy site at `/` and the
+new app at `/beta`. The intermediate `dezoomify-ng` project was deleted.
 
 ## Problem
 
@@ -74,16 +80,18 @@ room for the legacy `functions/proxy.js` route via a one-line re-export
 shim; `_routes.json` includes `/proxy` and `/api/proxy`. E2E runs
 against `/beta/`. Verified locally with `wrangler pages dev`.
 
-### WD6 (mostly done): New Pages project
+### WD6 (done): The Pages project
 
-The project (`dezoomify-ng`, production branch `ng`) is created and the
-`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` GitHub secrets are set;
-the workflow deploys legacy + beta to `dezoomify-ng.pages.dev` on every
-`ng` push and verifies it live (first green deploy: 2026-09-05).
-Remaining owner actions: disable non-production preview deployments on
-the OLD project (dashboard-only; `ng.dezoomify.pages.dev` serves a broken
-SPA fallback until then), and the cutover (later, explicitly decided):
-move the custom domain to the new project, then delete the old project.
+The original `dezoomify` project (production branch `master`) is the
+deploy target. Its automatic git deployments are disabled via the API
+(`deployments_enabled: false`, `production_deployments_enabled: false`,
+`preview_deployment_setting: "none"`), which also unlocks wrangler
+uploads for a previously git-integrated project; the
+`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` GitHub secrets are set.
+A wrangler upload to a throwaway branch was verified end to end (legacy,
+beta, both proxies, no repository files) before `master` switched over.
+The temporary `dezoomify-ng` project created during the transition was
+deleted.
 
 ### WD7 (done): Untrack the generated artifacts
 

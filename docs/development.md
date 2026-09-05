@@ -82,26 +82,30 @@ them locally, and the web test lanes regenerate what they read.
 
 ## Website deployment contract
 
-One Cloudflare Pages project (`dezoomify-ng`) receives one build from GitHub
-Actions on every push to `ng` (`.github/workflows/website-deploy.yml`):
+One Cloudflare Pages project (the original `dezoomify`) receives one build
+from GitHub Actions on every push to `master`
+(`.github/workflows/website-deploy.yml`):
 
 1. `scripts/build-site.mjs` regenerates every derived artifact (mirrors, help,
    wasm glue) and assembles `dist/`: the legacy site (vendored under `legacy/`,
-   from `master`, kept verbatim) serves `/`, the new app serves `/beta`, and
-   `_routes.json` limits Function invocation to `/api/proxy` (new app) and
-   `/proxy` (legacy, re-exported from `legacy/functions/proxy.js`).
-2. `wrangler pages deploy dist` uploads the tree; `functions/` at the
-   repository root is compiled by wrangler alongside it.
-3. The workflow verifies the live deployment: both apps, both proxy routes,
-   wasm content types, the generated help section, and that no repository
-   files are served.
+   from `master` before the merge, kept verbatim) serves `/`, the new app
+   serves `/beta`, and `_routes.json` limits Function invocation to
+   `/api/proxy` (new app) and `/proxy` (legacy, re-exported from
+   `legacy/functions/proxy.js`).
+2. `wrangler pages deploy dist` uploads the tree to the project; `functions/`
+   at the repository root is compiled by wrangler alongside it. The
+   project's automatic git deployments are disabled, so the workflow is the
+   only publisher; a push can never clobber production with a repository
+   tree.
+3. The workflow verifies the live production deployment
+   (`dezoomify.ophir.dev`): both apps, both proxy routes, wasm content
+   types, the generated help section, and that no repository files are
+   served.
 
-The old git-integrated `dezoomify` project keeps serving production from
-`master` until the cutover; fixes to the legacy site land in `legacy/` on
-`ng` (or on `master`, followed by `git subtree pull --prefix=legacy`). The
-deployment never serves repository files, so internal docs and plans stay
-private. See [`plans/website-deploy.md`](../plans/website-deploy.md) for the
-phase history.
+`master` is the single branch: pushes to it build and deploy production
+directly. The deployment never serves repository files, so internal docs
+and plans stay private. See [`plans/website-deploy.md`](../plans/
+website-deploy.md) for the phase history.
 
 ## Development servers
 

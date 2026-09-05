@@ -1,20 +1,21 @@
 name: website-deploy
 # GitHub Actions builds the entire website into dist/ via scripts/
 # build-site.mjs: the legacy site (vendored under legacy/) at / and the new
-# app at /beta. It deploys dist/ to the new Cloudflare Pages project with
-# wrangler (Direct Upload; see plans/website-deploy.md and
-# docs/development.md). Nothing generated is committed. Until the owner sets
-# the CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID secrets (WD6), the deploy
-# and verify steps are skipped with a warning: secrets absent means no
-# deploy, ever. The old git-integrated project keeps serving production
-# until the cutover.
+# app at /beta. It uploads dist/ to the existing Cloudflare Pages project
+# (dezoomify) with wrangler; the project's automatic git deployments are
+# disabled, so this workflow is the only publisher (see plans/
+# website-deploy.md and docs/development.md). Deploys to master are
+# production deployments: dezoomify.ophir.dev. Nothing generated is
+# committed. Until the CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID secrets
+# exist, the deploy and verify steps are skipped with a warning: secrets
+# absent means no deploy, ever.
 on:
   push:
-    branches: [ng]
+    branches: [master]
   workflow_dispatch: {}
 env:
-  SITE_HOST: dezoomify-ng.pages.dev
-  CLOUDFLARE_PROJECT: dezoomify-ng
+  SITE_HOST: dezoomify.ophir.dev
+  CLOUDFLARE_PROJECT: dezoomify
 permissions:
   contents: read
 concurrency:
@@ -57,7 +58,7 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "::warning::website deploy skipped: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set (Pages project migration pending; see plans/website-deploy.md WD4)"
           fi
-      - name: Deploy to Cloudflare Pages (branch preview)
+      - name: Deploy to Cloudflare Pages (master = production)
         if: steps.creds.outputs.ready == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

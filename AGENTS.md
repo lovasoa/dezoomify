@@ -105,9 +105,11 @@ in docs or READMEs; git history is the record.
 
 ## Git
 
-- Standing authorization (owner, 2026-09-05): commit and push freely to the
-  `ng` branch of `lovasoa/dezoomify`; never force-push; never touch `main`
-  or any other branch without a fresh explicit instruction.
+- Single-branch repository (owner, 2026-09-05): `master` holds both the
+  legacy site (`legacy/`) and the new apps; the `ng` branch is retired.
+  Standing authorization (owner, 2026-09-05): commit and push freely to
+  `master` of `lovasoa/dezoomify`; never force-push; never touch any other
+  branch without a fresh explicit instruction.
 - Standing store authorization (owner, 2026-09-05): as extension work
   completes, package the store payload (`apps/extension/scripts/package-store.sh`)
   and keep the Chromium listing (`iapjjopjejpelnfdonefbffahmcndfbm` in
