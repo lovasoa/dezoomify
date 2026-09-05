@@ -1,0 +1,8 @@
+@import "../../packages/shared-ui/src/styles/theme.css";
+
+/* Web-specific enhancements */
+.dz-web-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
