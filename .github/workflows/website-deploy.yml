@@ -1,6 +1,11 @@
 name: website-deploy
-# Cloudflare Pages Git integration deploys this branch automatically on push;
-# this workflow verifies the live branch preview actually serves the site.
+# GitHub Actions builds the entire website (browser JS mirrors, help pages,
+# wasm glue) into dist/ via scripts/build-site.mjs and deploys it to
+# Cloudflare Pages with wrangler (Direct Upload; see plans/website-deploy.md
+# and docs/development.md). Nothing generated is committed. Until the owner
+# completes the Pages project migration (WD4: wrangler-deployed project +
+# CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID secrets), the deploy and verify
+# steps are skipped with a warning: secrets absent means no deploy, ever.
 # Promotion: switch `branches` to [main] and SITE_HOST to dezoomify.pages.dev.
 on:
   push:
@@ -8,17 +13,62 @@ on:
   workflow_dispatch: {}
 env:
   SITE_HOST: ng.dezoomify.pages.dev
+  CLOUDFLARE_PROJECT: dezoomify
 permissions:
   contents: read
 concurrency:
   group: website-deploy-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  verify-preview:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
-      - name: Verify branch preview serves the site
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4: matches .node-version
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0 # must match rust-toolchain.toml
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Resolve wasm-bindgen-cli version from Cargo.lock
+        id: bindgen
+        run: |
+          v="$(awk '/^name = "wasm-bindgen"$/{getline; sub(/^version = "/,""); sub(/"$/,""); print; exit}' Cargo.lock)"
+          test -n "$v" || { echo "wasm-bindgen version not found in Cargo.lock"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
+        with:
+          tool: wasm-bindgen-cli@${{ steps.bindgen.outputs.version }}
+      - name: Build the site (mirrors, help, wasm glue, dist/)
+        run: node scripts/build-site.mjs
+      - name: Check deploy credentials
+        id: creds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::website deploy skipped: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set (Pages project migration pending; see plans/website-deploy.md WD4)"
+          fi
+      - name: Deploy to Cloudflare Pages (branch preview)
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@4 pages deploy dist \
+            --project-name "$CLOUDFLARE_PROJECT" \
+            --branch "${{ github.ref_name }}" \
+            --commit-hash "${{ github.sha }}" \
+            --commit-message "deploy ${{ github.sha }}"
+      - name: Verify the deployment serves the site and no repository files
+        if: steps.creds.outputs.ready == 'true'
         run: |
           set -u
           for i in $(seq 1 24); do
@@ -42,19 +92,33 @@ jobs:
             # Honest gate: HTTP 200 plus real app markers (input, entry,
             # classifier), not just the word Dezoomify. Rejects error pages,
             # stale bundles, and placeholder shells.
+            help=$(curl -sS -o /tmp/help.html -w "%{http_code}" --max-time 20 \
+              "https://${{ env.SITE_HOST }}/help/index.html" || true)
+            # Exposure gate: the deployment must serve only the assembled
+            # dist/ tree. Repository files (README, crates) must not appear;
+            # with SPA fallback they would be 200 text/html, so match on
+            # content, not status.
+            readme=$(curl -sS --max-time 20 "https://${{ env.SITE_HOST }}/README.md" || true)
+            cargo_toml_ct=$(curl -sS -o /dev/null -w "%{content_type}" --max-time 20 \
+              "https://${{ env.SITE_HOST }}/crates/dezoomify-wasm/Cargo.toml" || true)
+            repo_files_served=0
+            if grep -q "next-generation rewrite" <<<"$readme"; then repo_files_served=1; fi
+            if [ "$cargo_toml_ct" = "application/toml" ]; then repo_files_served=1; fi
             if [ "$apex" = "200" ] \
               && [ "$main_js" = "200" ] && [ "$discovery_js" = "200" ] \
               && [ "$proxy" = "403" ] \
               && [ "$wasm_js" = "200 application/javascript" ] \
               && [ "$wasm_bin" = "200 application/wasm" ] \
+              && [ "$help" = "200" ] && grep -q "dz-help-topics" /tmp/help.html \
+              && [ "$repo_files_served" = "0" ] \
               && grep -q "Dezoomify" /tmp/apex.html \
               && grep -q "dz-url-input\|id=\"app\"" /tmp/apex.html \
               && grep -q "src/main.js" /tmp/apex.html \
               && ! grep -q "14 of 28" /tmp/apex.html; then
-              echo "preview live: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy wasm_js=$wasm_js wasm_bin=$wasm_bin"
+              echo "preview live: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served"
               exit 0
             fi
-            echo "attempt $i: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy wasm_js=$wasm_js wasm_bin=$wasm_bin; retrying in 30s"
+            echo "attempt $i: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served; retrying in 30s"
             sleep 30
           done
           echo "branch preview did not serve expected content in time"
