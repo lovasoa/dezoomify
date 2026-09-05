@@ -30,7 +30,8 @@ and `parity`. See [Development](docs/development.md) and
 
 ## Layout
 
-- [`apps/`](apps/) — the four user-facing programs.
+- Repository root — the website: paste a URL, download the image.
+- [`apps/`](apps/) — the extension, desktop app, and CLI.
 - [`crates/`](crates/) — Rust engine: pure discovery core, job state machine,
   versioned protocol, native runtime, WASM adapter, plus test tooling.
 - [`packages/`](packages/) — TypeScript: shared UI, browser runtime, generated

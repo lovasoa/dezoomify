@@ -93,7 +93,7 @@ driving; the "temporary minimal job machine" comment and fallback are removed.
 
 ### C5 — Webapp real pipeline
 
-Wire `apps/web` to the full flow: shared-UI controller → browser-runtime real
+Wire the webapp (repository root since 2026-09-05) to the full flow: shared-UI controller → browser-runtime real
 worker (replace the session.ts stub) → direct-first transport + eligible
 metadata proxy fallback → ordinary image display assembly → readable-byte
 processing → real save. Remove the preview-build alerts.
@@ -126,7 +126,7 @@ tests; ensure `cargo xtask test all` green means real behavior. Update
 `docs/migration/exceptions.md` (close E01, E03; narrow E02) and this file's
 gate table.
 
-Acceptance: `grep` for stub markers in apps/cli, apps/web, dezoomify-native,
+Acceptance: `grep` for stub markers in apps/cli, the webapp (repository root), dezoomify-native,
 dezoomify-wasm, browser-runtime returns no test-relevant stubs; `cargo xtask
 test all` passes; `cargo xtask test live --public` passes on all alive sites.
 
