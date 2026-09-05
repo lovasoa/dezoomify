@@ -26,19 +26,26 @@ jobs:
             app=$(curl -sS -o /tmp/app.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/apps/web/" || true)
             main_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/apps/web/src/main.js" || true)
             discovery_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/apps/web/src/discovery.js" || true)
+            # Metadata proxy function must be bound: a blocked loopback target is
+            # answered by the function itself (403), not static-asset 405.
+            proxy=$(curl -sS -o /tmp/proxy.json -w "%{http_code}" --max-time 20 \
+              -H 'Content-Type: application/json' \
+              -d '{"targetUrl":"http://127.0.0.1/x.json","protocolVersion":1}' \
+              "https://${{ env.SITE_HOST }}/api/proxy" || true)
             # Honest gate: HTTP 200 plus real app markers (input, entry,
             # classifier), not just the word Dezoomify. Rejects error pages,
             # stale bundles, and placeholder shells.
             if [ "$apex" = "200" ] && [ "$app" = "200" ] \
               && [ "$main_js" = "200" ] && [ "$discovery_js" = "200" ] \
+              && [ "$proxy" = "403" ] \
               && grep -q "Dezoomify" /tmp/apex.html && grep -q "Dezoomify" /tmp/app.html \
               && grep -q "dz-url-input\|id=\"app\"" /tmp/app.html \
               && grep -q "src/main.js" /tmp/app.html \
               && ! grep -q "14 of 28" /tmp/app.html; then
-              echo "preview live: apex=$apex app=$app main.js=$main_js discovery.js=$discovery_js"
+              echo "preview live: apex=$apex app=$app main.js=$main_js discovery.js=$discovery_js proxy=$proxy"
               exit 0
             fi
-            echo "attempt $i: apex=$apex app=$app main.js=$main_js discovery.js=$discovery_js; retrying in 30s"
+            echo "attempt $i: apex=$apex app=$app main.js=$main_js discovery.js=$discovery_js proxy=$proxy; retrying in 30s"
             sleep 30
           done
           echo "branch preview did not serve expected content in time"

@@ -92,6 +92,7 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
         "apps/web/src/webIntegration.ts",
         "apps/web/src/proxyTransport.ts",
         "apps/web/functions/proxy.ts",
+        "apps/web/functions/api/proxy.ts",
         "apps/web/functions/security.ts",
         "packages/shared-ui/src/controller.ts",
     ] {
