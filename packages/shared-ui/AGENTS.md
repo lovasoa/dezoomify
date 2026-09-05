@@ -28,7 +28,7 @@ Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinct
    - The URL input field must be full-width (`width: 100%`) with `3.25rem` (52px) height and `1.05rem` font size, accommodating 100–250+ character URLs from IIIF manifests and digital collections without horizontal truncation.
 
 6. **Format Selection & Progressive Disclosure:**
-   - Display a serene, uncluttered default view: full-width input, a compact interactive format indicator (`● Format: Select automatically (click to change)`), and the centered `Dezoomify !` button.
+   - Display a serene, uncluttered default view: full-width input, a compact interactive format indicator (`Format: Select automatically (click to change)`), and the centered `Dezoomify !` button.
    - Clicking smoothly discloses the full 17-format grid.
 
 7. **Pinned Bottom Footer & Error Guidance:**

@@ -340,7 +340,6 @@ function renderInputSection(parent, state, callbacks, ctx) {
   details.innerHTML = `
     <summary class="dz-format-summary">
       <div class="dz-format-summary-indicator">
-        <span class="dz-format-badge"></span>
         <span id="dz-selected-format-label">Format: <strong>Select automatically</strong> (click to change)</span>
       </div>
       <svg class="dz-format-summary-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

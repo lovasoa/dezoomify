@@ -17,7 +17,7 @@
 
   /* Harmonious Scholarly Link Colors */
   --dz-link-color: #1d4ed8;
-  --dz-link-visited: #3730a3;
+  --dz-link-visited: var(--dz-link-color);
   --dz-link-hover: #0284c7;
   --dz-link-subtle: #57534e;
 
@@ -70,7 +70,7 @@
 
     /* Dignified Scholarly & Illuminated Manuscript Colors (Warm Ochre / Antique Gold) */
     --dz-link-color: #dfa44e;
-    --dz-link-visited: #b89ce2;
+    --dz-link-visited: var(--dz-link-color);
     --dz-link-hover: #f0be6c;
     --dz-link-subtle: #9c9288;
 
@@ -82,9 +82,9 @@
     --dz-btn-text: #ece5dd;
 
     --dz-accent-blue: #7fa9ec;
-    --dz-focus-ring: 0 0 0 2px rgba(223, 164, 78, 0.45);
+    --dz-focus-ring: 0 0 0 2px rgba(127, 169, 236, 0.4);
     --dz-radio-border: #665c54;
-    --dz-radio-active: #dfa44e;
+    --dz-radio-active: #7fa9ec;
 
     --dz-progress-bar: linear-gradient(90deg, #dfa44e, #c78d38);
     --dz-progress-track: rgba(63, 57, 53, 0.5);
@@ -421,15 +421,6 @@ abbr[title] {
 .dz-format-summary-indicator {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-}
-
-.dz-format-badge {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--dz-radius);
-  background: var(--dz-radio-active);
 }
 
 .dz-format-summary-icon {
@@ -518,7 +509,7 @@ abbr[title] {
 
 .dz-format-option.active {
   font-weight: 600;
-  color: var(--dz-radio-active);
+  color: var(--dz-text-primary);
 }
 
 /* Primary Tactile Action Button */
