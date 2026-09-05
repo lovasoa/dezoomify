@@ -1,0 +1,13 @@
+{
+ "description": "Google Arts & Culture webapp flow: proxy-served asset page, direct tile info, signed encrypted tiles decrypted in the browser",
+ "id": "web/google-arts-web",
+ "input": {
+  "mode": "explicit",
+  "url": "https://artsandculture.google.com/asset/liza-kottou-0113.html"
+ },
+ "operation": "discover",
+ "source_evidence": {
+  "path": "https://artsandculture.google.com/asset/liza-kottou-0113/3gGrYhjfhcwvbA",
+  "snapshot": "local"
+ }
+}

@@ -2485,6 +2485,42 @@
       "source_snapshot": "f7caa07"
     },
     {
+      "content_type": "text/html",
+      "id": "web/google-arts-web/payloads/artsandculture.google.com/asset/liza-kottou-0113.html",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "web/google-arts-web/payloads/artsandculture.google.com/asset/liza-kottou-0113.html",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "57626036c250a2ab15add5102f49fc6ed44b71a9974faa34789195bc5fd4bf69",
+      "size": 765,
+      "source_path": "crates/fixture-server/tests/webapp-e2e/webapp.spec.js",
+      "source_snapshot": "local"
+    },
+    {
+      "content_type": "application/octet-stream",
+      "id": "web/google-arts-web/payloads/fixtures.test/arts/encrypted-tile.bin",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "web/google-arts-web/payloads/fixtures.test/arts/encrypted-tile.bin",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "889489d761c940add5c7e9081d1419e5dcbd1da101331687368ee00889d8027e",
+      "size": 171,
+      "source_path": "crates/fixture-server/tests/webapp-e2e/webapp.spec.js",
+      "source_snapshot": "local"
+    },
+    {
+      "content_type": "text/xml",
+      "id": "web/google-arts-web/payloads/fixtures.test/arts/gap/path=g.xml",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "web/google-arts-web/payloads/fixtures.test/arts/gap/path=g.xml",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "af3436baa07dbfd9e5ac39c52eb1fedcbc6221efa7f0ef7b8585afbd78f491d1",
+      "size": 317,
+      "source_path": "crates/fixture-server/tests/webapp-e2e/webapp.spec.js",
+      "source_snapshot": "local"
+    },
+    {
       "content_type": "application/json",
       "id": "web/iiif-discovery/expected/core.json",
       "license_provenance": "GPL-2.0-or-later (web fixture)",

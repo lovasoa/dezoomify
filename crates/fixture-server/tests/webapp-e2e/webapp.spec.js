@@ -145,3 +145,71 @@ test("default job attempts the metadata proxy after direct failure", async ({ pa
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
   assert.ok(proxyPosts >= 1, "job must attempt the metadata proxy after direct failure");
 });
+
+// Production topology of a Google Arts & Culture asset page: no CORS grant
+// on the page (the direct browser fetch fails) while the tile-info XML and
+// the signed, AES-CBC-encrypted tiles are readable. The metadata CORS proxy
+// relays the page; the browser decrypts tiles via the wasm adapter.
+const ARTS_PAGE_URL = "https://artsandculture.google.com/asset/liza-kottou-0113.html";
+
+test("webapp downloads a Google Arts & Culture image through the metadata proxy", async ({ page }) => {
+  // The asset page is not CORS-readable: the direct fetch fails like in
+  // production, so discovery must fall back to the metadata proxy.
+  await page.route((url) => url.href === ARTS_PAGE_URL, (route) => route.abort());
+
+  // Test double of the /api/proxy Pages Function: same wire contract,
+  // relayed against the deterministic fixture server on loopback. The relay
+  // is always a GET regardless of the intercepted request's method.
+  const proxyTargets = [];
+  const relayToFixture = async (route, targetUrl) => {
+    const response = await route.fetch({
+      url: `${ADDR}/proxy?url=${encodeURIComponent(targetUrl)}`,
+      method: "GET",
+    });
+    await route.fulfill({ response });
+  };
+  await page.route("**/api/proxy", async (route) => {
+    const body = route.request().postDataJSON();
+    proxyTargets.push(body.targetUrl);
+    await relayToFixture(route, body.targetUrl);
+  });
+
+  // fixtures.test never resolves (RFC 2606): metadata fetches therefore take
+  // the proxy fallback above, while tiles are never proxied by policy — this
+  // interception stands in for direct tile egress against the same fixture
+  // server, preserving the signed-URL and encrypted-payload semantics.
+  await page.route(
+    (url) => url.host === "fixtures.test" && url.pathname.startsWith("/arts/gap/path=x"),
+    async (route) => {
+      await relayToFixture(route, route.request().url());
+    },
+  );
+
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
+  await page.locator("#dz-url-input").fill(ARTS_PAGE_URL);
+  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+
+  await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
+  const downloadPromise = page.waitForEvent("download", { timeout: 30000 });
+  await page.getByRole("button", { name: "Save image" }).click();
+  const download = await downloadPromise;
+  const target = path.join(__dirname, "downloads", `arts-${Date.now()}.png`);
+  await download.saveAs(target);
+  const bytes = fs.readFileSync(target);
+  const { width, height } = decodePngSize(bytes);
+  assert.equal(width, 64, "saved image width");
+  assert.equal(height, 64, "saved image height");
+  // The single encrypted tile decrypts (in wasm) to a solid RGBA PNG.
+  const { pixels } = decodePngPixels(bytes);
+  const at = (x, y) => {
+    const o = (y * width + x) * 4;
+    return [pixels[o], pixels[o + 1], pixels[o + 2], pixels[o + 3]];
+  };
+  for (const [x, y] of [[0, 0], [63, 0], [0, 63], [63, 63], [32, 32]]) {
+    assert.deepEqual(at(x, y), [200, 48, 48, 255], `solid tile color at ${x},${y}`);
+  }
+  assert.ok(
+    proxyTargets.includes(ARTS_PAGE_URL),
+    "the asset page must have been fetched through the metadata proxy",
+  );
+});

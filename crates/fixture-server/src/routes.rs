@@ -33,6 +33,11 @@ pub struct ScenarioRoute {
 pub enum GeneratorSpec {
     #[serde(rename = "arts-tile")]
     ArtsTile { image: String },
+    /// Verifies the Google Arts tile signature of the request path and serves
+    /// the stored bytes verbatim (still encrypted): the client-side wasm
+    /// pipeline owns the decryption, as it does in production.
+    #[serde(rename = "arts-signed-tile")]
+    ArtsSignedTile { image: String },
     #[serde(rename = "generic-svg")]
     GenericSvg { shape: String },
     #[serde(rename = "assembly-tile")]
@@ -272,6 +277,20 @@ fn render_generator(
             let bytes =
                 std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
             super::arts::verify_and_decrypt(path, &bytes).ok_or(axum::http::StatusCode::FORBIDDEN)
+        }
+        GeneratorSpec::ArtsSignedTile { image } => {
+            let full = if image.contains("..") || image.starts_with('/') {
+                return Err(axum::http::StatusCode::FORBIDDEN);
+            } else {
+                scenario_dir.join(image)
+            };
+            if !full.starts_with(scenario_dir) {
+                return Err(axum::http::StatusCode::FORBIDDEN);
+            }
+            let bytes =
+                std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+            super::arts::verify_signature(path).ok_or(axum::http::StatusCode::FORBIDDEN)?;
+            Ok(bytes)
         }
         GeneratorSpec::GenericSvg { shape } => {
             super::svg::generic_tile(shape, query).ok_or(axum::http::StatusCode::NOT_FOUND)

@@ -15,19 +15,18 @@ const AES_KEY: [u8; 16] = [
 const AES_IV: [u8; 16] = [
     0x71, 0xe7, 0x04, 0x05, 0x35, 0x3a, 0x77, 0x8b, 0xfa, 0x6f, 0xbc, 0x30, 0x32, 0x1b, 0x95, 0x92,
 ];
-const IMAGE_PATH: &str = "arts/path";
-const PLAIN_PATH: &str = "arts/plain";
 
-pub fn verify_and_decrypt(request_path: &str, stored: &[u8]) -> Option<Vec<u8>> {
-    let (kind, rest) = request_path
-        .strip_prefix("/arts/path=x")
-        .map(|r| ("path", r))
-        .or_else(|| {
-            request_path
-                .strip_prefix("/arts/plain=x")
-                .map(|r| ("plain", r))
-        })?;
-    let mut parts = rest.split("-y");
+/// Verify the HMAC-SHA1 tile signature of an
+/// `/arts/<base>=x{X}-y{Y}-z{Z}-t{sig}` request path, where `<base>` is the
+/// page-provided image path (the client signs exactly that base). Returns the
+/// verified base (`path`, `plain`, or a scenario-specific one) on success.
+pub fn verify_signature(request_path: &str) -> Option<String> {
+    let rest = request_path.strip_prefix("/arts/")?;
+    let (base, tail) = rest.split_once("=x")?;
+    if base.is_empty() || base.contains('=') {
+        return None;
+    }
+    let mut parts = tail.split("-y");
     let x = parts.next()?;
     let rest = parts.next()?;
     let mut parts = rest.split("-z");
@@ -39,12 +38,7 @@ pub fn verify_and_decrypt(request_path: &str, stored: &[u8]) -> Option<Vec<u8>> 
     if sig.contains('/') || parts.next().is_some() {
         return None;
     }
-    let base = if kind == "path" {
-        IMAGE_PATH
-    } else {
-        PLAIN_PATH
-    };
-    let signed = format!("{base}=x{x}-y{y}-z{z}-tsample-token");
+    let signed = format!("arts/{base}=x{x}-y{y}-z{z}-tsample-token");
     let mut mac = Hmac::<Sha1>::new_from_slice(HMAC_KEY).ok()?;
     mac.update(signed.as_bytes());
     let digest = mac.finalize().into_bytes();
@@ -52,7 +46,12 @@ pub fn verify_and_decrypt(request_path: &str, stored: &[u8]) -> Option<Vec<u8>> 
     if expected != sig {
         return None;
     }
-    if kind == "plain" {
+    Some(base.to_string())
+}
+
+pub fn verify_and_decrypt(request_path: &str, stored: &[u8]) -> Option<Vec<u8>> {
+    let base = verify_signature(request_path)?;
+    if base == "plain" {
         return Some(b"plain-tile".to_vec());
     }
     let b64: Vec<u8> = stored

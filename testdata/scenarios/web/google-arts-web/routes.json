@@ -1,0 +1,31 @@
+{
+ "routes": [
+  {
+   "route_id": "artsandculture-google-com-asset-liza-kottou-0113-html",
+   "method": "GET",
+   "host": "artsandculture.google.com",
+   "path": "/asset/liza-kottou-0113.html",
+   "status": 200,
+   "headers": {"Content-Type": "text/html; charset=utf-8"},
+   "payload": "payloads/artsandculture.google.com/asset/liza-kottou-0113.html"
+  },
+  {
+   "route_id": "fixtures-test-arts-gap-path-g",
+   "method": "GET",
+   "host": "fixtures.test",
+   "path": "/arts/gap/path=g",
+   "status": 200,
+   "headers": {"Content-Type": "text/xml"},
+   "payload": "payloads/fixtures.test/arts/gap/path=g.xml"
+  },
+  {
+   "route_id": "fixtures-test-arts-gap-signed-tile",
+   "method": "GET",
+   "host": "fixtures.test",
+   "path_regex": "^/arts/gap/path=x[0-9]+-y[0-9]+-z[0-9]+-t[^/]+$",
+   "status": 200,
+   "headers": {"Content-Type": "application/octet-stream"},
+   "generator": {"type": "arts-signed-tile", "image": "payloads/fixtures.test/arts/encrypted-tile.bin"}
+  }
+ ]
+}
