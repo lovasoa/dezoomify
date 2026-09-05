@@ -71,9 +71,13 @@ export function createReadableCanvasSurface(opts: {
   async function compositeTile(bytes: ArrayBuffer, dx: number, dy: number): Promise<void> {
     ensureLive();
     guardClean(originClean, "compositeTile");
+    // Local transient marker only (never a real blob URL): tracks the pending
+    // decode for cleanup accounting when no createObjectURL hook is injected
+    // (unit tests). Production callers inject a real hook; nothing here is
+    // exposed as a savable URL.
     const url = hooks?.createObjectURL
       ? hooks.createObjectURL(bytes)
-      : `blob:fake-${(urlCounter += 1)}`;
+      : `local:transient-${(urlCounter += 1)}`;
     liveUrls.push(url);
     let decoded: DecodedImage;
     try {

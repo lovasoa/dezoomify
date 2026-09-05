@@ -57,9 +57,10 @@
 //!   `cargo test --manifest-path crates/dezoomify-wasm/Cargo.toml` (or
 //!   `cargo test -p dezoomify-wasm` from inside `crates/dezoomify-wasm`).
 //!   Add the crate to the root `members` and drop `[workspace]` when allowed.
-//! * `dezoomify-job` has no `Cargo.toml`/`src/` yet, so it cannot be a
-//!   dependency; [`session`] documents the temporary minimal state machine
-//!   that mirrors its transcript shape until the job crate lands.
+//! * `dezoomify-job` now exists (`crates/dezoomify-job`), but [`session`]
+//!   still embeds its temporary minimal state machine instead of delegating.
+//!   Delegation is future work; the transcript shape is pinned by
+//!   `tests/adapter.rs` until then.
 //! * Real `wasm-pack` Node/browser tests need pinned `wasm-pack` plus
 //!   browsers, neither installed here; `packages/wasm-harness` records that
 //!   exception and runs native conformance instead.

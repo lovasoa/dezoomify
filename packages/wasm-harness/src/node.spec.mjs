@@ -147,7 +147,10 @@ describe("P07-WORKFLOWS: native conformance", () => {
       { encoding: "utf8", timeout: 600_000 },
     );
     assert.equal(run.status, 0, `cargo test failed:\n${run.stdout}\n${run.stderr}`);
-    assert.match(run.stdout, /14 passed/);
+    // Honest gate: all suites pass, none fail. Never pin an exact test count
+    // (counts grow with negative coverage); assert pass + zero failures.
+    assert.match(run.stdout, /[0-9]+ passed/);
+    assert.ok(!/failed/.test(run.stdout) || /0 failed/.test(run.stdout), "no failures");
   });
 
   it("cargo check passes for wasm32-unknown-unknown", () => {

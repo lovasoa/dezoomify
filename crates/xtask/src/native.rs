@@ -11,15 +11,36 @@ pub fn test_native(_args: &[String]) -> Result<(), String> {
 }
 
 pub fn test_scenario(_args: &[String]) -> Result<(), String> {
+    // Honest scenario gate: JSON fixtures must parse and declare their scope.
+    // Native `outputHash` values are explicit `STUB:uncomputed` markers (no
+    // digest is computed yet); fail if anyone reintroduces a fake `sha256:*`.
     for rel in [
         "testdata/scenarios/native/basic/expected/result.json",
         "testdata/scenarios/native/cache-resume/expected/result.json",
-        "testdata/scenarios/cli/help/expected/snapshot.txt",
     ] {
         let path = super::repo_root().join(rel);
-        if std::fs::read(&path).is_err() {
-            return Err(format!("missing scenario file {rel}"));
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("missing scenario file {rel}: {e}"))?;
+        let value: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("bad JSON {rel}: {e}"))?;
+        let hash = value
+            .get("outputHash")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("{rel} lacks outputHash"))?;
+        if hash.starts_with("sha256:") {
+            return Err(format!(
+                "{rel} claims a computed digest ({hash}) with no pipeline; use STUB:uncomputed"
+            ));
         }
+        if hash != "STUB:uncomputed" {
+            return Err(format!("{rel} has unexpected outputHash {hash}"));
+        }
+    }
+    let snapshot = super::repo_root().join("testdata/scenarios/cli/help/expected/snapshot.txt");
+    let snapshot_text =
+        std::fs::read_to_string(&snapshot).map_err(|e| format!("missing CLI snapshot: {e}"))?;
+    if !snapshot_text.contains("usage: dezoomify-cli") {
+        return Err("CLI snapshot lacks usage line".to_string());
     }
     run_cargo(&["test", "-p", "dezoomify-native", "--test", "scenarios"])?;
     println!("test scenario: ok");

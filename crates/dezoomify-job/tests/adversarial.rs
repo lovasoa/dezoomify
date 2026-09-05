@@ -164,3 +164,24 @@ fn double_cancel_is_idempotent() {
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.terminal_count(), 1);
 }
+
+#[test]
+fn empty_resource_bytes_fail_without_catalog() {
+    let mut host = host_with_id("job:empty");
+    host.start().unwrap();
+    host.apply(JobResponse::ResourceBytes {
+        job: "job:empty".to_string(),
+        request: "req:0".to_string(),
+        bytes_len: 0,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "Failed");
+    assert_eq!(host.terminal_count(), 1);
+    assert!(
+        !host
+            .transcript()
+            .iter()
+            .any(|line| line.starts_with("event:catalog:")),
+        "empty bytes must not emit a catalog"
+    );
+}

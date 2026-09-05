@@ -1,29 +1,30 @@
 //! One-session job owner: version/config validation, canonical dispatch,
 //! FIFO message draining, buffer lifecycle, one pure processing op, disposal.
 //!
-//! ## Temporary minimal job machine
+//! ## Temporary minimal job machine (honest scaffold, not a full engine)
 //!
-//! `crates/dezoomify-job` currently contains only its `README.md` (no
-//! `src/` or `Cargo.toml`), so there is no job API to wrap yet. Until that
-//! crate lands, [`Session`] embeds a minimal synchronous state machine with
-//! the same transcript shape — canonical [`ControlEnvelope`] messages
-//! encoded by [`dezoomify_protocol::codec`] — over the states
+//! [`Session`] embeds a minimal synchronous state machine with the same
+//! transcript shape — canonical [`ControlEnvelope`] messages encoded by
+//! [`dezoomify_protocol::codec`] — over the states
 //! `Created -> Discovering -> {Completed, Failed, Cancelled}`:
 //!
 //! * `Start` (in `Created`) emits `job-state/discovering` plus one
 //!   `acquire-resource` host effect and moves to `Discovering`.
-//! * `ProvideResource` with a committed arena buffer (consumed exactly once)
-//!   emits `completed` and moves to `Completed` (the basic-success path).
+//! * `ProvideResource` with the outstanding fixed request and a non-empty
+//!   committed arena buffer (consumed exactly once) emits `completed` and
+//!   moves to `Completed` (the basic-success path). Wrong request IDs,
+//!   empty buffers, stale, or unsealed references are rejected without
+//!   completing — empty metadata can never yield a fake success.
 //! * `ProvideFetchFailure` emits `failed` and moves to `Failed`.
 //! * `Cancel` emits `cancelled` and moves to `Cancelled`.
 //! * Outcome/selection commands are accepted as no-ops while `Discovering`
 //!   (matching job only) so replays of richer scripts do not diverge on
 //!   unknown-command errors; every other state mismatch is `wrong-state`.
 //!
-//! When `dezoomify-job` becomes available this machine must be replaced by a
-//! thin wrapper that delegates transitions to the job crate, keeping the
-//! canonical transcript byte-identical. The `P07-WORKFLOWS` transcript test
-//! (`tests/adapter.rs`) pins the current shape.
+//! `dezoomify-job` exists but delegation is future work; when it lands this
+//! machine must become a thin wrapper keeping the canonical transcript
+//! byte-identical. The `P07-WORKFLOWS` transcript test (`tests/adapter.rs`)
+//! pins the current shape.
 //!
 //! ## Deterministic fixed IDs
 //!
@@ -425,14 +426,14 @@ impl Session {
             JobCommand::Cancel { job } => self.on_cancel(job),
             JobCommand::ProvideResource {
                 job,
-                request: _,
+                request,
                 buffer,
-            } => self.on_provide_resource(job, &buffer),
+            } => self.on_provide_resource(job, &request, &buffer),
             JobCommand::ProvideFetchFailure {
                 job,
-                request: _,
+                request,
                 error,
-            } => self.on_fetch_failure(job, error),
+            } => self.on_fetch_failure(job, &request, error),
             // Accepted as no-ops while Discovering so richer replays do not
             // diverge; rejected in any other phase.
             JobCommand::SelectImage { job, .. }
@@ -549,6 +550,7 @@ impl Session {
     fn on_provide_resource(
         &mut self,
         job: JobId,
+        request: &dezoomify_protocol::dto::RequestId,
         buffer: &dezoomify_protocol::dto::BufferHandle,
     ) -> Result<(), AdapterError> {
         self.require_job(&job)?;
@@ -556,6 +558,12 @@ impl Session {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
                 format!("resource not accepted in state {}", self.state.as_str()),
+            ));
+        }
+        if request.as_str() != FIXED_REQUEST_ID {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "resource request does not match outstanding discovery request",
             ));
         }
         // Resolve before mutating anything: stale or unsealed references are
@@ -568,7 +576,14 @@ impl Session {
             ));
         }
         // Exactly-once consumption: a replayed reference is stale afterwards.
-        let _consumed = self.arena.take_buffer(handle)?;
+        // Empty buffers can never complete discovery — reject without state change.
+        let consumed = self.arena.take_buffer(handle)?;
+        if consumed.is_empty() {
+            return Err(AdapterError::new(
+                AdapterErrorCode::Malformed,
+                "empty resource cannot complete discovery",
+            ));
+        }
         let output: OutputId = FIXED_OUTPUT_ID.parse().map_err(|_| {
             AdapterError::new(AdapterErrorCode::Malformed, "fixed output id is invalid")
         })?;
@@ -577,8 +592,19 @@ impl Session {
         Ok(())
     }
 
-    fn on_fetch_failure(&mut self, job: JobId, error: ErrorDto) -> Result<(), AdapterError> {
+    fn on_fetch_failure(
+        &mut self,
+        job: JobId,
+        request: &dezoomify_protocol::dto::RequestId,
+        error: ErrorDto,
+    ) -> Result<(), AdapterError> {
         self.require_job(&job)?;
+        if request.as_str() != FIXED_REQUEST_ID {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "failure request does not match outstanding discovery request",
+            ));
+        }
         if self.state != SessionState::Discovering {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,

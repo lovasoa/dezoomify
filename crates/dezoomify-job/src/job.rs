@@ -259,6 +259,15 @@ impl Job {
             )?;
             return Ok(Outcome::Applied);
         }
+        if bytes_len == 0 {
+            self.consumed_requests.insert(request.to_string());
+            self.pending_request = None;
+            self.fail_via_cleanup(
+                "job.empty-resource",
+                "empty resource cannot yield a catalog".to_string(),
+            )?;
+            return Ok(Outcome::Applied);
+        }
         self.consumed_requests.insert(request.to_string());
         self.pending_request = None;
         self.set_state(State::AwaitingImageSelection)?;

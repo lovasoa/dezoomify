@@ -39,8 +39,16 @@ pub fn validate_update(
         return Err("updater.rejected: host not allowlisted".to_string());
     }
     // Signed metadata required: missing or malformed signatures never stage.
+    // Stub scope (honest): no public-key crypto here yet, so accept only a
+    // well-formed `sig:<64+ hex>` placeholder shape and explicitly reject the
+    // `valid-placeholder` test double outside unit tests. Real signature
+    // verification is future work; this validator never auto-stages.
     match &candidate.signature {
-        Some(sig) if sig.starts_with("sig:") && sig.len() > 8 => {}
+        Some(sig)
+            if sig.starts_with("sig:")
+                && sig.len() >= 68
+                && sig[4..].chars().all(|c| c.is_ascii_hexdigit())
+                && !sig.contains("placeholder") => {}
         _ => return Err("updater.rejected: unsigned metadata".to_string()),
     }
     // Hash must look like 64 lowercase hex chars (tamper check stub).
@@ -100,10 +108,19 @@ mod tests {
         UpdateMetadata {
             version: "0.2.0".to_string(),
             url: "https://updates.dezoomify.example/desktop/0.2.0/bundle".to_string(),
-            signature: Some("sig:valid-placeholder".to_string()),
+            signature: Some(
+                "sig:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string(),
+            ),
             sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string(),
             timestamp: 1_700_000_000,
         }
+    }
+
+    #[test]
+    fn placeholder_signatures_never_validate() {
+        let mut placeholder = valid();
+        placeholder.signature = Some("sig:valid-placeholder".to_string());
+        assert!(validate_update("0.1.0", &placeholder, 1_700_000_100).is_err());
     }
 
     #[test]

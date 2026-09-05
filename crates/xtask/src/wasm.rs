@@ -75,6 +75,16 @@ fn transcripts_only() -> Result<(), String> {
     if job_v.as_array().is_none_or(Vec::is_empty) {
         return Err("job transcript empty".to_string());
     }
+    // Scaffold honesty: wasm transcript must carry its fixed scaffold IDs and
+    // must not pretend progress/catalog events it never emits.
+    for needle in ["req:wasm-meta-1", "fx:wasm-acq-1", "out:wasm-1"] {
+        if !wasm.contains(needle) {
+            return Err(format!("wasm transcript lacks scaffold id {needle}"));
+        }
+    }
+    if wasm.contains("progress") || wasm.contains("catalog") {
+        return Err("wasm transcript must not claim progress/catalog events".to_string());
+    }
     // Representation-only delta is allowed (fixed IDs, no progress/catalog
     // events); both must be non-empty canonical arrays. Byte identity with
     // phase-06 native transcripts is proven per-message by adapter replay

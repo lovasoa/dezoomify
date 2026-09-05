@@ -2,12 +2,12 @@
 //! processing, isolation, disposal, redaction, and the `P07-WORKFLOWS`
 //! transcript golden (`testdata/scenarios/wasm/replay/expected/wasm.json`).
 //!
-//! Representation note: `dezoomify-job` has no implementation yet, so the
-//! golden pins the minimal session machine's basic-success transcript —
-//! canonical `ControlEnvelope` messages in job FIFO order — rather than a
-//! phase-06 native replay. The only delta from a future native transcript
-//! is representational: fixed per-session IDs and no progress/catalog
-//! events. The encoding itself is the approved canonical codec.
+//! Representation note: [`Session`] is still a minimal scaffold (fixed
+//! per-session IDs, no `dezoomify-job` delegation yet). The golden pins its
+//! basic-success transcript — canonical `ControlEnvelope` messages in job
+//! FIFO order — rather than a full native replay. Fixed IDs and the absence
+//! of progress/catalog events are scaffold limits, not product claims. Empty
+//! buffers and mismatched request IDs are rejected (see negative tests).
 
 use dezoomify_protocol::codec;
 use dezoomify_protocol::dto::{
@@ -549,4 +549,33 @@ fn basic_success_transcript_matches_golden() {
         let actual: serde_json::Value = serde_json::from_slice(bytes).expect("message is JSON");
         assert_eq!(&actual, expected);
     }
+}
+
+#[test]
+fn empty_resource_and_wrong_request_never_complete() {
+    let mut session = new_session();
+    session.dispatch(&start_bytes(JOB_A)).expect("start");
+    session.drain_messages();
+    // Empty buffer: rejected, stays discovering, no completion.
+    let empty = seal(&mut session, b"");
+    let provide_empty = provide_resource_bytes(&session, JOB_A, empty);
+    assert_eq!(
+        session.dispatch(&provide_empty).unwrap_err().code(),
+        AdapterErrorCode::Malformed
+    );
+    assert_eq!(session.state().as_str(), "discovering");
+    assert!(session.drain_messages().is_empty());
+    // Wrong request ID: rejected even with non-empty bytes.
+    let handle = seal(&mut session, b"metadata-bytes");
+    let buffer = session.protocol_handle(handle).expect("projects");
+    let wrong = envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
+        job: JOB_A.parse().unwrap(),
+        request: "req:wasm-wrong-9".parse().unwrap(),
+        buffer,
+    }));
+    assert_eq!(
+        session.dispatch(&wrong).unwrap_err().code(),
+        AdapterErrorCode::WrongState
+    );
+    assert_eq!(session.state().as_str(), "discovering");
 }

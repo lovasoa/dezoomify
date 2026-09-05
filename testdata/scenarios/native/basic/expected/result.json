@@ -1,1 +1,1 @@
-{"requests":["GET https://fixtures.test/item"],"outputHash":"sha256:stub","events":2}
+{"events":2,"outputHash":"STUB:uncomputed","requests":["GET https://fixtures.test/item"]}
