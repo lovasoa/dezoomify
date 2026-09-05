@@ -76,9 +76,9 @@ pub fn release(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         Some("build") => {
-            println!(
-                "release build: ok (unsigned test artifacts; normalized hashes match on rebuild)"
-            );
+            // Honest stub: no artifacts are built or hashed here; real
+            // packaging happens on native OS runners with signing.
+            println!("release build: stub-ok (no artifacts built; test-channel placeholder)");
             Ok(())
         }
         Some("verify") => release_verify(&args[1..]),
@@ -92,8 +92,10 @@ fn release_verify(args: &[String]) -> Result<(), String> {
     // --plan <path> --artifacts <path>` (plan/artifact pair must exist).
     // `--candidate` is dispatched by main.rs before reaching here.
     if args.is_empty() {
+        // Honest stub: fixture tamper checks live in protocol/check; no real
+        // public-key artifact verification happens in this environment.
         println!(
-            "release verify: ok (public-key verification of test fixtures; tamper fixtures rejected)"
+            "release verify: stub-ok (no signed artifacts verified; test-channel placeholder)"
         );
         return Ok(());
     }

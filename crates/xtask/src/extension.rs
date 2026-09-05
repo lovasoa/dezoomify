@@ -19,7 +19,7 @@ pub fn build_extension(_args: &[String]) -> Result<(), String> {
             return Err(format!("manifest {rel} lacks manifest_version"));
         }
     }
-    println!("build extension: ok (deterministic manifests verified)");
+    println!("build extension: stub-ok (manifests verified; no zip packaged)");
     Ok(())
 }
 
@@ -32,7 +32,11 @@ pub fn test_extension(_args: &[String]) -> Result<(), String> {
 
 pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
     if args.first().map(String::as_str) == Some("--cleanup-only") {
-        println!("test native-messaging --cleanup-only: ok (no test registrations remain)");
+        // Honest stub: no registry/profile inspection here; only reports that
+        // the unit gate left no in-process registrations behind.
+        println!(
+            "test native-messaging --cleanup-only: stub-ok (no filesystem/registry inspection)"
+        );
         return Ok(());
     }
     // Protocol + secret-scope checks via extension unit tests + SVM: no real

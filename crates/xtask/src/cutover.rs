@@ -11,7 +11,8 @@ pub fn release_verify_candidate() -> Result<(), String> {
     if !text.contains("version") || !text.contains("protocol_range") {
         return Err("cutover.toml lacks version/protocol_range".to_string());
     }
-    println!("release verify --candidate: ok (test-channel candidate)");
+    // Honest scope: shape check only; no installer/signature/prod verification.
+    println!("release verify --candidate: stub-ok (shape only; test-channel candidate)");
     Ok(())
 }
 
@@ -21,9 +22,11 @@ pub fn parity_packaged(args: &[String]) -> Result<(), String> {
     super::parity::validate(&[])?;
     super::native::test_scenario(&[])?;
     if args.iter().any(|a| a == "--security") {
-        println!("parity validate --packaged --security: ok (taint/proxy/scan/redaction unit gates green)");
+        println!(
+            "parity validate --packaged --security: stub-ok (no installers; corpus gates only)"
+        );
     } else {
-        println!("parity validate --packaged: ok (deterministic corpus gates green)");
+        println!("parity validate --packaged: stub-ok (no installers; corpus gates only)");
     }
     Ok(())
 }
@@ -57,6 +60,31 @@ pub fn ci_lane(name: &str, extra: &[String]) -> Result<(), String> {
             Ok(())
         }
         "cutover-clean-tree" => {
+            // Honest check: fail when the working tree has staged/unstaged
+            // changes or untracked files outside known build outputs.
+            let out = std::process::Command::new("git")
+                .args(["status", "--porcelain"])
+                .current_dir(super::repo_root())
+                .output()
+                .map_err(|e| format!("failed to run git status: {e}"))?;
+            if !out.status.success() {
+                return Err("git status failed".to_string());
+            }
+            let text = String::from_utf8_lossy(&out.stdout);
+            let dirty: Vec<&str> = text
+                .lines()
+                .filter(|l| {
+                    !(l.contains("apps/desktop/src-tauri/target/")
+                        || l.contains("apps/desktop/src-tauri/Cargo.lock"))
+                })
+                .collect();
+            if !dirty.is_empty() {
+                return Err(format!(
+                    "working tree not clean ({} entries): {}",
+                    dirty.len(),
+                    dirty.join(", ").chars().take(300).collect::<String>()
+                ));
+            }
             println!("ci cutover-clean-tree: ok");
             Ok(())
         }

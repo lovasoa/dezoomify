@@ -20,9 +20,9 @@ pub fn build_desktop(args: &[String]) -> Result<(), String> {
             serde_json::from_str(&text).map_err(|e| format!("bad json {rel}: {e}"))?;
     }
     if !unsigned_test {
-        println!("build desktop: ok (logic verified; unsigned-test packaging needs OS toolchain)");
+        println!("build desktop: stub-ok (logic only; no installer produced; needs OS toolchain)");
     } else {
-        println!("build desktop --unsigned-test: ok (logic verified; unsigned bundle placeholder)");
+        println!("build desktop --unsigned-test: stub-ok (logic only; no bundle produced)");
     }
     Ok(())
 }
