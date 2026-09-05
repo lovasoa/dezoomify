@@ -426,7 +426,7 @@ function mountInputSection(
       Enter the <abbr title="Uniform Resource Locator, the address of a webpage">URL</abbr>
       of such an image in the text field below. The image will be downloaded at maximal resolution.
       You can then right-click on the image, and choose "Save As" in order to save it as a PNG file on your computer.
-      If it doesn't work, read our <a href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ" target="_blank" rel="noopener">FAQ</a>.
+      If it doesn't work, read our <a href="https://dezoomify.ophir.dev/help/troubleshooting.html" target="_blank" rel="noopener">troubleshooting guide</a>.
       If you want more information, read our <a href="https://github.com/lovasoa/dezoomify#dezoomify" target="_blank" rel="noopener">project page</a>.
     </p>
     <p class="dz-license-text">
