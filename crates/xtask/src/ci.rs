@@ -66,14 +66,7 @@ pub fn test_all() -> Result<(), String> {
 }
 
 pub fn test_live(args: &[String]) -> Result<(), String> {
-    if args == ["--dry-run", "--fixtures"] {
-        println!("test live --dry-run --fixtures: ok (rate limits + redaction verified, no public targets hit)");
-        return Ok(());
-    }
-    if args == ["--postcutover", "--low-volume"] || args == ["--packaged", "--low-volume"] {
-        return Err("live packaged/postcutover runs require explicit production approval; dry-run only in this environment".to_string());
-    }
-    Err("usage: cargo xtask test live --dry-run --fixtures".to_string())
+    super::live::test_live(args)
 }
 
 pub fn release(args: &[String]) -> Result<(), String> {
