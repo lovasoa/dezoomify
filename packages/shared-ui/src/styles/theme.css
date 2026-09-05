@@ -3,18 +3,19 @@
   --dz-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --dz-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Authentic Dezoomify Palette */
+  /* Authentic Dezoomify Palette (Light Theme - Warm Parchment & Cultural Heritage) */
   --dz-page-bg: #fcfeff;
   --dz-surface-gradient: linear-gradient(180deg, #f7eded 0%, #f7eeee 100%);
   --dz-surface-border: #a19797;
-  --dz-surface-glow: 0 0 14px rgba(185, 190, 240, 0.45), 0 2px 8px rgba(0, 0, 0, 0.04);
-  --dz-footer-bg: rgba(247, 237, 237, 0.6);
+  /* Natural warm elevation shadow (No sci-fi purple neon aura) */
+  --dz-surface-shadow: 0 4px 20px rgba(130, 115, 110, 0.12), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --dz-footer-bg: rgba(247, 237, 237, 0.7);
 
   --dz-text-primary: #1c1917;
   --dz-text-secondary: #44403c;
   --dz-text-muted: #78716c;
 
-  /* Harmonious Scholarly Link Colors (No harsh raw blue or purple) */
+  /* Harmonious Scholarly Link Colors */
   --dz-link-color: #1d4ed8;
   --dz-link-visited: #3730a3;
   --dz-link-hover: #0284c7;
@@ -27,61 +28,77 @@
   --dz-btn-hover-border: #736767;
   --dz-btn-text: #1c1917;
 
-  /* Accent & Interactive Halo */
-  --dz-accent-cyan: #0284c7;
-  --dz-accent-cyan-hover: #0369a1;
-  --dz-focus-halo: 0 0 0 3px rgba(2, 132, 199, 0.25), 0 0 12px rgba(185, 190, 240, 0.55);
+  /* Clean architectural focus ring (No glowing neon halos) */
+  --dz-accent-blue: #3c7bff;
+  --dz-focus-ring: 0 0 0 2px rgba(60, 123, 255, 0.35);
   --dz-radio-border: #998c8c;
+  --dz-radio-active: #1d4ed8;
 
-  /* Status Tones */
-  --dz-progress-bar: linear-gradient(90deg, #0284c7, #3c7bff);
-  --dz-progress-track: rgba(161, 151, 151, 0.25);
+  /* Status & Progress Tones (Architectural Rectangular Geometry - No Pills) */
+  --dz-progress-bar: linear-gradient(90deg, #3c7bff, #1d4ed8);
+  --dz-progress-track: rgba(161, 151, 151, 0.22);
 
-  --dz-error-bg: linear-gradient(180deg, #fdf2f2 0%, #fae6e6 100%);
-  --dz-error-border: #d97777;
+  /* Dignified Venetian Terracotta / Rust for Errors (Warm, calm, editorial) */
   --dz-error-text: #991b1b;
+  --dz-error-accent: #c2410c;
+  --dz-error-tint: rgba(194, 65, 12, 0.06);
 
-  --dz-success-bg: linear-gradient(180deg, #f0fdf4 0%, #e6f9ed 100%);
-  --dz-success-border: #86efac;
+  /* Forest Sage for Completion */
   --dz-success-text: #166534;
+  --dz-success-accent: #15803d;
 
+  /* Amber Gold for Display-Only Notices */
+  --dz-notice-text: #92400e;
+  --dz-notice-accent: #d97706;
+
+  /* Crisp, architectural border radius (No rounded pill shapes) */
   --dz-radius: 4px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --dz-page-bg: #0b0d13;
-    --dz-surface-gradient: linear-gradient(180deg, #1c1819 0%, #161314 100%);
-    --dz-surface-border: #524747;
-    --dz-surface-glow: 0 0 18px rgba(120, 125, 185, 0.22);
-    --dz-footer-bg: rgba(22, 19, 20, 0.85);
+    /* Art Gallery at Night / Archival Atelier Palette (Warm Charcoal & Dark Walnut) */
+    --dz-page-bg: #181615;
+    --dz-surface-gradient: linear-gradient(180deg, #252220 0%, #1e1c1a 100%);
+    --dz-surface-border: #3f3935;
+    --dz-surface-shadow: 0 6px 28px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
+    --dz-footer-bg: rgba(24, 22, 21, 0.9);
 
-    --dz-text-primary: #f5ecec;
-    --dz-text-secondary: #d6cbcb;
-    --dz-text-muted: #a39595;
+    --dz-text-primary: #ece5dd;
+    --dz-text-secondary: #b8ada2;
+    --dz-text-muted: #82776e;
 
-    /* Dark Mode Links: Soft cyan/ice-blue (Never purple or bruised magenta) */
-    --dz-link-color: #38bdf8;
-    --dz-link-visited: #93c5fd;
-    --dz-link-hover: #7dd3fc;
-    --dz-link-subtle: #a8a29e;
+    /* Dignified Scholarly & Illuminated Manuscript Colors (Warm Ochre / Antique Gold) */
+    --dz-link-color: #dfa44e;
+    --dz-link-visited: #b89ce2;
+    --dz-link-hover: #f0be6c;
+    --dz-link-subtle: #9c9288;
 
-    --dz-btn-gradient: linear-gradient(180deg, #2b2526 0%, #201c1d 100%);
-    --dz-btn-border: #665959;
-    --dz-btn-hover-gradient: linear-gradient(180deg, #362f30 0%, #272223 100%);
-    --dz-btn-hover-border: #7d6e6e;
-    --dz-btn-text: #f5ecec;
+    /* Tactile Dark Bronze / Aged Wood Button */
+    --dz-btn-gradient: linear-gradient(180deg, #332e2a 0%, #25211e 100%);
+    --dz-btn-border: #4d453f;
+    --dz-btn-hover-gradient: linear-gradient(180deg, #3d3732 0%, #2c2825 100%);
+    --dz-btn-hover-border: #635850;
+    --dz-btn-text: #ece5dd;
 
-    --dz-accent-cyan: #38bdf8;
-    --dz-radio-border: #857878;
+    --dz-accent-blue: #7fa9ec;
+    --dz-focus-ring: 0 0 0 2px rgba(223, 164, 78, 0.45);
+    --dz-radio-border: #665c54;
+    --dz-radio-active: #dfa44e;
 
-    --dz-error-bg: linear-gradient(180deg, #261415 0%, #1e1011 100%);
-    --dz-error-border: #7f1d1d;
-    --dz-error-text: #fca5a5;
+    --dz-progress-bar: linear-gradient(90deg, #dfa44e, #c78d38);
+    --dz-progress-track: rgba(63, 57, 53, 0.5);
 
-    --dz-success-bg: linear-gradient(180deg, #102316 0%, #0c1c11 100%);
-    --dz-success-border: #15803d;
+    /* Venetian Terracotta / Florentine Red for Dark Mode Errors (Warm, painterly, dignified) */
+    --dz-error-text: #f09595;
+    --dz-error-accent: #e07a7a;
+    --dz-error-tint: rgba(224, 122, 122, 0.08);
+
     --dz-success-text: #86efac;
+    --dz-success-accent: #4ade80;
+
+    --dz-notice-text: #fcd34d;
+    --dz-notice-accent: #f59e0b;
   }
 }
 
@@ -141,7 +158,7 @@ abbr[title] {
   height: 48px;
   background: var(--dz-surface-gradient);
   border-bottom: 1px solid var(--dz-surface-border);
-  box-shadow: var(--dz-surface-glow);
+  box-shadow: var(--dz-surface-shadow);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -215,7 +232,7 @@ abbr[title] {
 .dz-nav-link:focus-visible,
 .dz-nav-btn:focus-visible {
   outline: none;
-  box-shadow: var(--dz-focus-halo);
+  box-shadow: var(--dz-focus-ring);
 }
 
 /* Main Layout: Spacious card centered with sticky footer structure */
@@ -229,12 +246,12 @@ abbr[title] {
   justify-content: center;
 }
 
-/* Status Card */
+/* Status Card - Canvas / Mat for artwork presentation */
 .dz-card {
   background: var(--dz-surface-gradient);
   border: 1px solid var(--dz-surface-border);
   border-radius: var(--dz-radius);
-  box-shadow: var(--dz-surface-glow);
+  box-shadow: var(--dz-surface-shadow);
   padding: 2.5rem 3rem 2.25rem;
   color: var(--dz-text-primary);
 }
@@ -312,14 +329,15 @@ abbr[title] {
 
 @media (prefers-color-scheme: dark) {
   .dz-input {
-    background: #141112;
+    background: #1c1a18;
+    border-color: var(--dz-surface-border);
   }
 }
 
 .dz-input:focus {
   outline: none;
-  border-color: #3c7bff;
-  box-shadow: var(--dz-focus-halo);
+  border-color: var(--dz-accent-blue);
+  box-shadow: var(--dz-focus-ring);
 }
 
 .dz-input::placeholder {
@@ -333,7 +351,7 @@ abbr[title] {
   transform: translateY(-50%);
   width: 1.6rem;
   height: 1.6rem;
-  border-radius: 50%;
+  border-radius: var(--dz-radius);
   border: none;
   background: var(--dz-surface-border);
   color: #ffffff;
@@ -360,7 +378,7 @@ abbr[title] {
 
 @media (prefers-color-scheme: dark) {
   .dz-format-details {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.02);
   }
 }
 
@@ -387,7 +405,7 @@ abbr[title] {
 
 .dz-format-summary:focus-visible {
   outline: none;
-  box-shadow: var(--dz-focus-halo);
+  box-shadow: var(--dz-focus-ring);
 }
 
 .dz-format-summary-indicator {
@@ -398,10 +416,10 @@ abbr[title] {
 
 .dz-format-badge {
   display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dz-accent-cyan);
+  width: 7px;
+  height: 7px;
+  border-radius: var(--dz-radius);
+  background: var(--dz-radio-active);
 }
 
 .dz-format-summary-icon {
@@ -421,7 +439,7 @@ abbr[title] {
 
 @media (prefers-color-scheme: dark) {
   .dz-format-content {
-    background: rgba(20, 17, 18, 0.7);
+    background: rgba(28, 26, 24, 0.7);
   }
 }
 
@@ -457,10 +475,10 @@ abbr[title] {
 .dz-format-option input[type="radio"] {
   appearance: none;
   -webkit-appearance: none;
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   border: 1.5px solid var(--dz-radio-border);
-  border-radius: 50%;
+  border-radius: var(--dz-radius);
   margin: 0;
   outline: none;
   background: #ffffff;
@@ -472,25 +490,25 @@ abbr[title] {
 
 @media (prefers-color-scheme: dark) {
   .dz-format-option input[type="radio"] {
-    background: #141112;
+    background: #1c1a18;
   }
 }
 
 .dz-format-option input[type="radio"]:checked {
-  border-color: var(--dz-accent-cyan);
+  border-color: var(--dz-radio-active);
 }
 
 .dz-format-option input[type="radio"]:checked::before {
   content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--dz-accent-cyan);
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--dz-radio-active);
 }
 
 .dz-format-option.active {
   font-weight: 600;
-  color: var(--dz-accent-cyan);
+  color: var(--dz-radio-active);
 }
 
 /* Primary Tactile Action Button */
@@ -505,7 +523,7 @@ abbr[title] {
   height: 46px;
   padding: 0 2rem;
   font-family: inherit;
-  font-size: 1.1rem;
+  font-size: 1.08rem;
   font-weight: 600;
   color: var(--dz-btn-text);
   background: var(--dz-btn-gradient);
@@ -532,7 +550,7 @@ abbr[title] {
 
 .dz-btn-tactile:focus-visible {
   outline: none;
-  box-shadow: var(--dz-focus-halo);
+  box-shadow: var(--dz-focus-ring);
 }
 
 .dz-btn-tactile:disabled {
@@ -574,10 +592,10 @@ abbr[title] {
 
 .dz-btn-secondary:focus-visible {
   outline: none;
-  box-shadow: var(--dz-focus-halo);
+  box-shadow: var(--dz-focus-ring);
 }
 
-/* Progress Area */
+/* Progress Area (Slender Architectural Geometry - No Pills) */
 .dz-progress-section {
   display: flex;
   flex-direction: column;
@@ -601,21 +619,21 @@ abbr[title] {
 .dz-progress-percent {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  color: var(--dz-accent-cyan);
+  color: var(--dz-link-color);
 }
 
 .dz-progress-track {
   width: 100%;
-  height: 9px;
+  height: 7px;
   background: var(--dz-progress-track);
-  border-radius: 9999px;
+  border-radius: var(--dz-radius);
   overflow: hidden;
 }
 
 .dz-progress-bar {
   height: 100%;
   background: var(--dz-progress-bar);
-  border-radius: 9999px;
+  border-radius: var(--dz-radius);
   transition: width 0.25s ease;
 }
 
@@ -626,196 +644,326 @@ abbr[title] {
   margin-top: 0.5rem;
 }
 
-/* Transport Badge */
+/* Transport Indicator Tag (Architectural, Not a Pill) */
 .dz-transport-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  border-radius: 9999px;
-  background: rgba(2, 132, 199, 0.12);
-  color: var(--dz-accent-cyan);
-  border: 1px solid rgba(2, 132, 199, 0.25);
-}
-
-/* Error Alert Box */
-.dz-alert-error {
-  margin-top: 1.75rem;
-  padding: 1.5rem;
-  background: var(--dz-error-bg);
-  border: 1px solid var(--dz-error-border);
+  padding: 0.2rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 500;
   border-radius: var(--dz-radius);
-  display: flex;
-  flex-direction: column;
-  gap: 1.15rem;
-}
-
-.dz-alert-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.85rem;
-}
-
-.dz-alert-icon {
-  flex-shrink: 0;
-  width: 1.75rem;
-  height: 1.75rem;
-  color: var(--dz-error-text);
-  margin-top: 0.1rem;
-}
-
-.dz-alert-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--dz-error-text);
-}
-
-.dz-alert-message {
-  margin: 0;
-  font-size: 0.98rem;
-  color: var(--dz-text-primary);
-  line-height: 1.55;
-}
-
-.dz-suggestion-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.85rem;
-}
-
-.dz-suggestion-card {
-  display: flex;
-  flex-direction: column;
-  padding: 0.95rem 1rem;
-  background: #ffffff;
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--dz-text-secondary);
   border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
-  text-decoration: none;
-  color: inherit;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.08s ease;
 }
 
 @media (prefers-color-scheme: dark) {
-  .dz-suggestion-card {
-    background: #191617;
+  .dz-transport-badge {
+    background: rgba(255, 255, 255, 0.04);
   }
 }
 
-.dz-suggestion-card:hover {
-  border-color: var(--dz-accent-cyan);
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
-  text-decoration: none;
+/* Action Rows */
+.dz-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 1.75rem;
 }
 
+/* ============================================================
+   ERROR & FAILED STATE (Airy, Dignified, ZERO Nested Boxes)
+   ============================================================ */
+.dz-error-section {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0 0;
+}
+
+.dz-error-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.15rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--dz-surface-border);
+}
+
+.dz-error-icon {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  color: var(--dz-error-accent);
+  margin-top: 0.15rem;
+}
+
+.dz-error-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--dz-error-text);
+  letter-spacing: -0.01em;
+}
+
+.dz-error-message {
+  margin: 0;
+  font-size: 1.02rem;
+  color: var(--dz-text-secondary);
+  line-height: 1.6;
+}
+
+/* Suggested Alternatives (Open, Breathable Layout - No Nested Cards) */
+.dz-guidance-section {
+  margin: 1.75rem 0 1.25rem;
+}
+
+.dz-guidance-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dz-text-muted);
+  margin: 0 0 1.15rem;
+}
+
+.dz-guidance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem;
+}
+
+.dz-guidance-item,
+.dz-suggestion-card {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--dz-surface-border);
+  padding: 0.95rem 0 0.5rem;
+  cursor: pointer;
+  color: inherit;
+  text-decoration: none;
+  font-family: inherit;
+  box-shadow: none;
+  transition: opacity 0.15s ease;
+}
+
+.dz-guidance-item:hover,
+.dz-suggestion-card:hover {
+  text-decoration: none;
+  box-shadow: none;
+  transform: none;
+}
+
+.dz-guidance-item-header,
 .dz-suggestion-title {
   font-weight: 600;
-  font-size: 0.95rem;
-  color: var(--dz-text-primary);
-  margin-bottom: 0.35rem;
+  font-size: 0.98rem;
+  color: var(--dz-link-color);
+  margin-bottom: 0.4rem;
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.5rem;
+  transition: color 0.15s ease;
 }
 
+.dz-guidance-item:hover .dz-guidance-item-title,
+.dz-guidance-item:hover .dz-suggestion-title,
+.dz-suggestion-card:hover .dz-suggestion-title {
+  color: var(--dz-link-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dz-guidance-icon {
+  flex-shrink: 0;
+  color: var(--dz-link-color);
+}
+
+.dz-guidance-item-desc,
 .dz-suggestion-desc {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: var(--dz-text-secondary);
-  line-height: 1.45;
+  line-height: 1.55;
 }
 
+/* Technical Details Collapsible */
 .dz-details {
-  border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
-  background: rgba(0, 0, 0, 0.02);
-  overflow: hidden;
+  border: none;
+  border-top: 1px solid var(--dz-surface-border);
+  background: transparent;
+  margin-top: 1.25rem;
+  padding-top: 0.25rem;
 }
 
 .dz-summary {
-  padding: 0.75rem 1rem;
-  font-size: 0.9rem;
+  padding: 0.65rem 0;
+  font-size: 0.88rem;
   font-weight: 500;
-  color: var(--dz-text-secondary);
+  color: var(--dz-text-muted);
   cursor: pointer;
   user-select: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  transition: color 0.15s ease;
 }
 
 .dz-summary:hover {
   color: var(--dz-text-primary);
 }
 
+.dz-summary-icon {
+  transition: transform 0.2s ease;
+}
+
+.dz-details[open] .dz-summary-icon {
+  transform: rotate(180deg);
+}
+
 .dz-diagnostics {
   font-family: var(--dz-font-mono);
-  font-size: 0.85rem;
-  padding: 0.85rem 1rem;
-  background: #ffffff;
-  border-top: 1px solid var(--dz-surface-border);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  padding: 0.9rem 1.15rem;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--dz-text-secondary);
+  margin: 0.5rem 0;
 }
 
 @media (prefers-color-scheme: dark) {
   .dz-diagnostics {
-    background: #141112;
+    background: rgba(255, 255, 255, 0.03);
   }
 }
 
-/* Completion View */
-.dz-completion {
-  margin-top: 1.5rem;
-  padding: 1.75rem;
-  background: var(--dz-success-bg);
-  border: 1px solid var(--dz-success-border);
-  border-radius: var(--dz-radius);
+.dz-diagnostics-report {
+  font-size: 0.85rem;
+  margin: 0.5rem 0;
+}
+
+/* Backwards compatibility for any .dz-alert-error references */
+.dz-alert-error {
+  margin-top: 1rem;
+  padding: 0;
+  background: transparent;
+  border: none;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
 }
 
-.dz-completion-header {
+/* ============================================================
+   NOTICE / DISPLAY-ONLY STATE (Airy, No Nested Boxes)
+   ============================================================ */
+.dz-notice-section {
   display: flex;
-  align-items: center;
-  gap: 0.85rem;
+  flex-direction: column;
+  padding: 0.5rem 0 0;
 }
 
-.dz-completion-icon {
+.dz-notice-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.15rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--dz-surface-border);
+}
+
+.dz-notice-icon {
+  flex-shrink: 0;
   width: 2rem;
   height: 2rem;
-  color: var(--dz-success-text);
+  color: var(--dz-notice-accent);
+  margin-top: 0.15rem;
 }
 
-.dz-completion-title {
+.dz-notice-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--dz-notice-accent);
+  letter-spacing: -0.01em;
+}
+
+.dz-notice-message {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 1.02rem;
+  color: var(--dz-text-primary);
+  line-height: 1.6;
+}
+
+.dz-notice-guidance {
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--dz-text-secondary);
+  margin: 1.25rem 0 0.5rem;
+  white-space: pre-line;
+}
+
+/* ============================================================
+   COMPLETION VIEW (Airy, Dignified, No Nested Boxes)
+   ============================================================ */
+.dz-completed-section,
+.dz-completion {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0 0;
+  background: transparent;
+  border: none;
+}
+
+.dz-completed-header,
+.dz-completion-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.15rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--dz-surface-border);
+}
+
+.dz-completed-icon,
+.dz-completion-icon {
+  flex-shrink: 0;
+  width: 2.2rem;
+  height: 2.2rem;
+  color: var(--dz-success-accent);
+  margin-top: 0.1rem;
+}
+
+.dz-completed-title,
+.dz-completion-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
   font-weight: 700;
   color: var(--dz-success-text);
 }
 
+.dz-completed-summary,
 .dz-completion-info {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 1.02rem;
   color: var(--dz-text-primary);
 }
 
-.dz-completion-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.85rem;
+.dz-completed-guidance {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.95rem;
+  color: var(--dz-text-secondary);
+  line-height: 1.6;
 }
 
 /* Guidance Modal Dialog */
 .dz-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(12, 14, 20, 0.65);
+  background: rgba(18, 16, 15, 0.7);
   backdrop-filter: blur(4px);
   z-index: 100;
   display: flex;
@@ -834,18 +982,18 @@ abbr[title] {
   background: var(--dz-surface-gradient);
   border: 1px solid var(--dz-surface-border);
   border-radius: var(--dz-radius);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.25), var(--dz-surface-glow);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), var(--dz-surface-shadow);
   width: min(100%, 640px);
   max-height: 88vh;
   overflow-y: auto;
-  padding: 2rem 2.25rem 2rem;
+  padding: 2.25rem 2.5rem;
   color: var(--dz-text-primary);
   position: relative;
   animation: dzSlideUp 0.18s ease-out;
 }
 
 @keyframes dzSlideUp {
-  from { transform: translateY(12px) scale(0.98); }
+  from { transform: translateY(10px) scale(0.99); }
   to { transform: translateY(0) scale(1); }
 }
 
@@ -853,30 +1001,29 @@ abbr[title] {
   position: absolute;
   top: 1.25rem;
   right: 1.25rem;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: var(--dz-radius);
   border: 1px solid var(--dz-surface-border);
-  background: rgba(255, 255, 255, 0.5);
+  background: transparent;
   color: var(--dz-text-primary);
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   line-height: 1;
   display: grid;
   place-content: center;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-@media (prefers-color-scheme: dark) {
-  .dz-modal-close {
-    background: rgba(0, 0, 0, 0.4);
-  }
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .dz-modal-close:hover {
-  background: var(--dz-accent-cyan);
-  color: #ffffff;
-  border-color: var(--dz-accent-cyan);
+  background: rgba(0, 0, 0, 0.06);
+  border-color: var(--dz-text-secondary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .dz-modal-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
 }
 
 .dz-modal-title {
@@ -890,33 +1037,34 @@ abbr[title] {
 }
 
 .dz-modal-subtitle {
-  margin: 0 0 1.25rem;
+  margin: 0 0 1.5rem;
   font-size: 0.95rem;
   color: var(--dz-text-secondary);
+  line-height: 1.5;
 }
 
 .dz-modal-section {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
 }
 
 .dz-modal-section-title {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--dz-accent-cyan);
-  margin-bottom: 0.5rem;
+  letter-spacing: 0.05em;
+  color: var(--dz-link-color);
+  margin-bottom: 0.65rem;
 }
 
 .dz-modal-list {
   padding-left: 1.25rem;
   margin: 0.5rem 0;
   font-size: 0.92rem;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .dz-modal-list li {
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
 }
 
 .dz-modal-steps {
@@ -928,28 +1076,20 @@ abbr[title] {
 
 .dz-modal-step {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.85rem;
   align-items: flex-start;
-  padding: 0.65rem 0.85rem;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
-  font-size: 0.9rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  .dz-modal-step {
-    background: rgba(20, 17, 18, 0.6);
-  }
+  padding: 0.4rem 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
 }
 
 .dz-modal-step-num {
   flex-shrink: 0;
   width: 1.5rem;
   height: 1.5rem;
-  border-radius: 50%;
-  background: var(--dz-accent-cyan);
-  color: #ffffff;
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface-border);
+  color: var(--dz-text-primary);
   font-weight: 700;
   font-size: 0.85rem;
   display: grid;
@@ -960,8 +1100,8 @@ abbr[title] {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
-  margin-top: 1.5rem;
-  padding-top: 1rem;
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
   border-top: 1px solid var(--dz-surface-border);
 }
 
@@ -978,25 +1118,22 @@ abbr[title] {
   align-items: center;
   gap: 0.85rem;
   padding: 0.85rem 1.25rem;
-  background: #ffffff;
-  border: 1.5px solid var(--dz-surface-border);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--dz-surface-border);
   border-radius: var(--dz-radius);
   color: var(--dz-text-primary);
   text-decoration: none;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.08s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 @media (prefers-color-scheme: dark) {
   .dz-btn-store {
-    background: #191617;
+    background: rgba(255, 255, 255, 0.04);
   }
 }
 
 .dz-btn-store:hover {
-  border-color: var(--dz-accent-cyan);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
-  transform: translateY(-1px);
+  border-color: var(--dz-link-color);
   text-decoration: none;
 }
 
@@ -1005,7 +1142,7 @@ abbr[title] {
 }
 
 .dz-modal-download-box {
-  margin: 1.25rem 0;
+  margin: 1.5rem 0;
   text-align: center;
 }
 
@@ -1016,14 +1153,14 @@ abbr[title] {
   justify-content: center;
   padding: 0.95rem 2.5rem;
   background: var(--dz-btn-gradient);
-  border: 1.5px solid var(--dz-btn-border);
+  border: 1px solid var(--dz-btn-border);
   border-radius: var(--dz-radius);
   color: var(--dz-btn-text);
   font-size: 1.15rem;
   font-weight: 700;
   text-decoration: none;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: background 0.15s ease, border-color 0.15s ease;
   min-width: 260px;
 }
 
@@ -1033,7 +1170,7 @@ abbr[title] {
 
 .dz-btn-download-primary:hover {
   background: var(--dz-btn-hover-gradient);
-  border-color: var(--dz-accent-cyan);
+  border-color: var(--dz-btn-hover-border);
   text-decoration: none;
 }
 
@@ -1045,10 +1182,9 @@ abbr[title] {
 /* CLI Section */
 .dz-modal-cli-box {
   margin-top: 1.5rem;
-  padding: 1rem 1.15rem;
+  padding: 1.15rem;
   background: rgba(0, 0, 0, 0.02);
-  border: 1px dashed var(--dz-surface-border);
-  border-radius: var(--dz-radius);
+  border-top: 1px solid var(--dz-surface-border);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1066,8 +1202,8 @@ abbr[title] {
 .dz-modal-cli-desc {
   font-size: 0.85rem;
   color: var(--dz-text-secondary);
-  line-height: 1.5;
-  margin: 0 0 0.75rem;
+  line-height: 1.55;
+  margin: 0 0 0.85rem;
 }
 
 .dz-modal-cli-links {
@@ -1085,11 +1221,17 @@ abbr[title] {
   background: repeating-conic-gradient(#e7dede 0% 25%, #f7eded 0% 50%) 50% / 24px 24px;
   border: 1px solid var(--dz-surface-border);
   border-radius: var(--dz-radius);
-  box-shadow: var(--dz-surface-glow);
+  box-shadow: var(--dz-surface-shadow);
   display: flex;
   align-items: center;
   justify-content: center;
   margin-top: 2rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dz-canvas-container {
+    background: repeating-conic-gradient(#24201e 0% 25%, #1a1817 0% 50%) 50% / 24px 24px;
+  }
 }
 
 .dz-canvas-container canvas {
@@ -1155,7 +1297,7 @@ abbr[title] {
   }
 
   .dz-card {
-    padding: 1.5rem 1.25rem;
+    padding: 1.75rem 1.25rem;
   }
 
   .dz-title {
@@ -1191,6 +1333,7 @@ abbr[title] {
     grid-template-columns: 1fr;
   }
 
+  .dz-guidance-grid,
   .dz-suggestion-grid {
     grid-template-columns: 1fr;
   }

@@ -478,50 +478,39 @@ function renderDisplayOnlySection(
   ctx?: ViewContext,
 ): void {
   const guidance = renderSaveGuidance(false);
-  const div = document.createElement("div");
-  div.className = "dz-alert-error";
-  div.style.borderColor = "#f59e0b";
-  div.style.background = "linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%)";
-  div.innerHTML = `
-    <div class="dz-alert-header">
-      <svg class="dz-alert-icon" style="color: #d97706" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+  const section = document.createElement("div");
+  section.className = "dz-notice-section";
+  section.innerHTML = `
+    <div class="dz-notice-header">
+      <svg class="dz-notice-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="12" y1="8" x2="12" y2="12"></line>
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
       <div>
-        <h3 class="dz-alert-title" style="color: #b45309">Display Only Preview</h3>
-        <p class="dz-alert-message" style="color: #78350f">${guidance}</p>
+        <h2 class="dz-notice-title">Display-Only Preview</h2>
+        <p class="dz-notice-message">${guidance}</p>
       </div>
     </div>
   `;
 
   if (ctx?.capabilities) {
     const appChoice = renderAppChoice(ctx.capabilities);
-    const guidanceBox = document.createElement("div");
-    guidanceBox.style.fontSize = "0.92rem";
-    guidanceBox.style.padding = "0.85rem 1.15rem";
-    guidanceBox.style.background = "#ffffff";
-    guidanceBox.style.borderRadius = "var(--dz-radius)";
-    guidanceBox.style.border = "1px solid #fcd34d";
-    guidanceBox.style.whiteSpace = "pre-line";
-    guidanceBox.style.lineHeight = "1.65";
-    guidanceBox.style.color = "#78350f";
+    const guidanceBox = document.createElement("p");
+    guidanceBox.className = "dz-notice-guidance";
     guidanceBox.textContent = appChoice;
-    div.appendChild(guidanceBox);
+    section.appendChild(guidanceBox);
   }
 
   const actions = document.createElement("div");
-  actions.style.display = "flex";
-  actions.style.gap = "0.75rem";
-  actions.style.marginTop = "0.5rem";
+  actions.className = "dz-actions-row";
   actions.innerHTML = `
     <button type="button" class="dz-btn-secondary" id="dz-btn-reset">Start over</button>
   `;
   actions.querySelector("#dz-btn-reset")?.addEventListener("click", () => callbacks.onReset());
-  div.appendChild(actions);
+  section.appendChild(actions);
 
-  parent.appendChild(div);
+  parent.appendChild(section);
 }
 
 function renderCompletedSection(
@@ -535,23 +524,23 @@ function renderCompletedSection(
   const summary = info ? renderCompletion(info.width, info.height, info.mime) : "Your image is ready.";
   const guidance = renderSaveGuidance(isClean);
 
-  const comp = document.createElement("div");
-  comp.className = "dz-completion";
-  comp.innerHTML = `
-    <div class="dz-completion-header">
-      <svg class="dz-completion-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+  const section = document.createElement("div");
+  section.className = "dz-completed-section";
+  section.innerHTML = `
+    <div class="dz-completed-header">
+      <svg class="dz-completed-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
         <polyline points="22 4 12 14.01 9 11.01"></polyline>
       </svg>
       <div>
-        <h2 class="dz-completion-title">Download complete!</h2>
-        <p class="dz-completion-info">${summary}</p>
+        <h2 class="dz-completed-title">Download complete!</h2>
+        <p class="dz-completed-summary">${summary}</p>
       </div>
     </div>
-    <p style="margin: 0; font-size: 0.95rem; color: var(--dz-text-secondary)">${guidance}</p>
-    <div class="dz-completion-actions">
+    <p class="dz-completed-guidance">${guidance}</p>
+    <div class="dz-actions-row">
       ${isClean ? `<button type="button" class="dz-btn-tactile" id="dz-btn-save" style="min-width: 180px;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="7 10 12 15 17 10"></polyline>
           <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -562,9 +551,9 @@ function renderCompletedSection(
     </div>
   `;
 
-  comp.querySelector("#dz-btn-save")?.addEventListener("click", () => callbacks.onSave());
-  comp.querySelector("#dz-btn-another")?.addEventListener("click", () => callbacks.onReset());
-  parent.appendChild(comp);
+  section.querySelector("#dz-btn-save")?.addEventListener("click", () => callbacks.onSave());
+  section.querySelector("#dz-btn-another")?.addEventListener("click", () => callbacks.onReset());
+  parent.appendChild(section);
 }
 
 function renderFailedSection(
@@ -580,77 +569,69 @@ function renderFailedSection(
     message: "Dezoomify could not find or download the zoomable image at this address.",
   };
 
-  const alert = document.createElement("div");
-  alert.className = "dz-alert-error";
-  alert.innerHTML = `
-    <div class="dz-alert-header">
-      <svg class="dz-alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  const section = document.createElement("div");
+  section.className = "dz-error-section";
+  section.innerHTML = `
+    <div class="dz-error-header">
+      <svg class="dz-error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="12" y1="8" x2="12" y2="12"></line>
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
       <div>
-        <h3 class="dz-alert-title">Could not dezoomify image</h3>
-        <p class="dz-alert-message">${error.message}</p>
+        <h2 class="dz-error-title">Could not dezoomify image</h2>
+        <p class="dz-error-message">${error.message}</p>
       </div>
     </div>
-  `;
 
-  const suggestions = document.createElement("div");
-  suggestions.className = "dz-suggestion-grid";
-  suggestions.innerHTML = `
-    <button type="button" class="dz-suggestion-card" id="dz-card-extension" style="text-align: left; font-family: inherit; cursor: pointer;">
-      <span class="dz-suggestion-title">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-        Browser Extension Guide
-      </span>
-      <span class="dz-suggestion-desc">For pages requiring login or session cookies. Automatically detects viewers on active pages.</span>
-    </button>
-    <button type="button" class="dz-suggestion-card" id="dz-card-desktop" style="text-align: left; font-family: inherit; cursor: pointer;">
-      <span class="dz-suggestion-title">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        Desktop App Guide
-      </span>
-      <span class="dz-suggestion-desc">For gigapixel images that exceed browser memory limits. Processes natively on your computer.</span>
-    </button>
-    <a class="dz-suggestion-card" href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ" target="_blank" rel="noopener">
-      <span class="dz-suggestion-title">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        FAQ &amp; URL Extraction
-      </span>
-      <span class="dz-suggestion-desc">How to extract zoomifyImagePath or direct viewer URLs from museum &amp; archive sites.</span>
-    </a>
-  `;
+    <div class="dz-guidance-section">
+      <h3 class="dz-guidance-title">Ways to download this artwork</h3>
+      <div class="dz-guidance-grid">
+        <button type="button" class="dz-guidance-item" id="dz-card-extension">
+          <div class="dz-guidance-item-header">
+            <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            <span class="dz-guidance-item-title">Browser Extension Guide &rarr;</span>
+          </div>
+          <span class="dz-guidance-item-desc">For pages requiring login or session cookies. Automatically detects viewers on active pages.</span>
+        </button>
+        <button type="button" class="dz-guidance-item" id="dz-card-desktop">
+          <div class="dz-guidance-item-header">
+            <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            <span class="dz-guidance-item-title">Desktop App Guide &rarr;</span>
+          </div>
+          <span class="dz-guidance-item-desc">For gigapixel images that exceed browser memory limits. Processes natively on your computer.</span>
+        </button>
+        <a class="dz-guidance-item" href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ" target="_blank" rel="noopener">
+          <div class="dz-guidance-item-header">
+            <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span class="dz-guidance-item-title">FAQ &amp; URL Extraction &rarr;</span>
+          </div>
+          <span class="dz-guidance-item-desc">How to extract zoomifyImagePath or direct viewer URLs from museum &amp; archive sites.</span>
+        </a>
+      </div>
+    </div>
 
-  suggestions.querySelector("#dz-card-extension")?.addEventListener("click", () => showExtensionGuidance());
-  suggestions.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
-  alert.appendChild(suggestions);
+    <details class="dz-details">
+      <summary class="dz-summary">
+        <span>Technical error details &amp; bug report</span>
+        <svg class="dz-summary-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </summary>
+      <div class="dz-diagnostics">Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}</div>
+      <div class="dz-diagnostics-report">
+        <a href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md" target="_blank" rel="noopener">Report a bug on GitHub &rarr;</a>
+      </div>
+    </details>
 
-  const details = document.createElement("details");
-  details.className = "dz-details";
-  details.innerHTML = `
-    <summary class="dz-summary">
-      <span>Technical error details & bug report</span>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-    </summary>
-    <div class="dz-diagnostics">Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}</div>
-    <div style="padding: 0.75rem 1rem; background: rgba(0,0,0,0.02); display: flex; gap: 0.5rem; font-size: 0.85rem">
-      <a href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md" target="_blank" rel="noopener" style="font-weight: 600">Report a bug on GitHub &rarr;</a>
+    <div class="dz-actions-row">
+      <button type="button" class="dz-btn-tactile" id="dz-btn-try-again" style="min-width: 140px;">Try again</button>
     </div>
   `;
-  alert.appendChild(details);
 
-  const actions = document.createElement("div");
-  actions.style.display = "flex";
-  actions.style.gap = "0.75rem";
-  actions.style.marginTop = "0.5rem";
-  actions.innerHTML = `
-    <button type="button" class="dz-btn-tactile" id="dz-btn-try-again" style="min-width: 140px;">Try again</button>
-  `;
-  actions.querySelector("#dz-btn-try-again")?.addEventListener("click", () => callbacks.onReset());
-  alert.appendChild(actions);
+  section.querySelector("#dz-card-extension")?.addEventListener("click", () => showExtensionGuidance());
+  section.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
+  section.querySelector("#dz-btn-try-again")?.addEventListener("click", () => callbacks.onReset());
 
-  parent.appendChild(alert);
+  parent.appendChild(section);
 }
 
 function renderCancelledSection(
@@ -659,19 +640,17 @@ function renderCancelledSection(
   callbacks: ViewCallbacks,
   _ctx?: ViewContext,
 ): void {
-  const div = document.createElement("div");
-  div.className = "dz-alert-error";
-  div.style.borderColor = "var(--dz-surface-border)";
-  div.style.background = "var(--dz-surface-gradient)";
-  div.innerHTML = `
-    <h3 class="dz-alert-title" style="color: var(--dz-text-primary)">Download cancelled</h3>
-    <p class="dz-alert-message">The image download was stopped.</p>
-    <div style="margin-top: 0.5rem">
+  const section = document.createElement("div");
+  section.className = "dz-notice-section";
+  section.innerHTML = `
+    <h2 class="dz-notice-title" style="color: var(--dz-text-primary);">Download cancelled</h2>
+    <p class="dz-notice-message">The image download was stopped.</p>
+    <div class="dz-actions-row">
       <button type="button" class="dz-btn-secondary" id="dz-btn-reset">Start over</button>
     </div>
   `;
-  div.querySelector("#dz-btn-reset")?.addEventListener("click", () => callbacks.onReset());
-  parent.appendChild(div);
+  section.querySelector("#dz-btn-reset")?.addEventListener("click", () => callbacks.onReset());
+  parent.appendChild(section);
 }
 
 function renderGenericState(
