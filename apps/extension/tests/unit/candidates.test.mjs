@@ -15,6 +15,24 @@ test("caps exported", () => {
   assert.equal(MAX_CANDIDATES, 100);
 });
 
+test("sensitive query keys match redaction.ts (no drift)", () => {
+  for (const rel of ["../../src/background/candidates.ts", "../../src/background/redaction.ts"]) {
+    const src = readFileSync(new URL(rel, import.meta.url), "utf8");
+    // The canonical list lives in redaction.ts; candidates.ts mirrors it.
+    assert.ok(src.includes('"sessiontoken"'), `${rel} missing sessiontoken`);
+    assert.ok(src.includes('"passwd"'), `${rel} missing passwd`);
+  }
+  // Byte-identical list contents, extracted from both files.
+  const extract = (src) => {
+    const m = src.match(/SENSITIVE_QUERY_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/);
+    assert.ok(m, "SENSITIVE_QUERY_KEYS list found");
+    return JSON.stringify([...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]));
+  };
+  const candidates = extract(readFileSync(new URL("../../src/background/candidates.ts", import.meta.url), "utf8"));
+  const redaction = extract(readFileSync(new URL("../../src/background/redaction.ts", import.meta.url), "utf8"));
+  assert.equal(candidates, redaction, "sensitive key lists must stay identical");
+});
+
 test("http/https accepted, other schemes rejected", () => {
   assert.equal(validateCandidateUrl("https://a.example/x").ok, true);
   assert.equal(validateCandidateUrl("http://a.example/x").ok, true);

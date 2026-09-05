@@ -6,8 +6,9 @@
  * - Length caps (URL) + count caps (store) with deterministic first-seen order.
  * - Deduplicates deterministically (first-seen wins).
  * - Never inspects response bodies or page DOM during scanning.
- * - Labels are redacted (userinfo + sensitive query) via a local helper that
- *   mirrors `redaction.ts` so this module stays dependency-free for tests.
+ * - Labels are redacted (userinfo + sensitive query). This module stays
+ *   import-free for isolated tests and classic-script loading, so it mirrors
+ *   `redaction.ts`; `candidates.test.mjs` asserts the two stay identical.
  *
  * Plain JavaScript + JSDoc (no TypeScript-only syntax).
  *
@@ -17,7 +18,8 @@
 export const MAX_URL_LENGTH = 2048;
 export const MAX_CANDIDATES = 100;
 
-/** Query keys whose values must never appear in UI labels. */
+/** Query keys whose values must never appear in UI labels.
+ *  Must stay identical to SENSITIVE_QUERY_KEYS in redaction.ts (tested). */
 export const SENSITIVE_QUERY_KEYS = Object.freeze([
   "token",
   "auth",
@@ -33,6 +35,7 @@ export const SENSITIVE_QUERY_KEYS = Object.freeze([
   "passwd",
   "code",
   "state",
+  "sessiontoken",
 ]);
 
 /**

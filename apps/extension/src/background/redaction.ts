@@ -117,13 +117,3 @@ export function bestEffortOverwrite(buf) {
   buf.fill(0);
   return true;
 }
-
-/**
- * Render a consent-safe cookie-name list (names only, never values).
- * @param {string[]} names
- * @returns {string[]}
- */
-export function consentCookieNames(names) {
-  if (!Array.isArray(names)) return [];
-  return names.filter((n) => typeof n === "string" && n.length > 0).slice(0, 64);
-}

@@ -178,7 +178,3 @@ export function allowedFallbacksFor(
   if (directOutcome.outcome === "network-error") return [...hostSupplied];
   return [];
 }
-
-export function describeActiveTransport(attempt: number, transport: string): string {
-  return `attempt ${attempt}: ${transport}`;
-}
