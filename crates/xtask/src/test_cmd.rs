@@ -46,7 +46,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 return super::extension::test_native_messaging(&args[1..]);
             }
             Some("all") => return super::ci::test_all(),
-            Some("live") => return super::ci::test_live(&args[1..]),
             _ => {}
         }
         return Err(format!(

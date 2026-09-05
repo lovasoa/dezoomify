@@ -38,7 +38,8 @@ test("handoff: current and N-1 accepted", () => {
 });
 
 test("handoff: N-2, future, oversize, secret, wrong-origin rejected with zero network", () => {
-  const net = { count: 0 };
+  // Observable side-effect probe: no rejected envelope may confirm anything.
+  let confirmations = 0;
   const cases = [
     ["n-2", validEnvelope({ protocolVersion: 0 }), "https://site.example"],
     ["future", validEnvelope({ protocolVersion: 99 }), "https://site.example"],
@@ -55,8 +56,14 @@ test("handoff: N-2, future, oversize, secret, wrong-origin rejected with zero ne
       isAllowedSender: allowExample,
     });
     assert.equal(r.ok, false, name);
-    assert.equal(net.count, 0, `${name} must not touch network`);
+    // A rejected envelope must never reach the confirmation gate.
+    assert.equal(
+      handoff.confirmHandoff(r, true, { onConfirmed: () => confirmations += 1 }).ok,
+      false,
+      `${name} must not be confirmable`,
+    );
   }
+  assert.equal(confirmations, 0, "rejected envelopes must cause zero confirmations (and thus zero network/permission effects)");
   // oversize envelope bytes
   const big = validEnvelope({ capabilities: ["a".repeat(64)], requestId: "r" });
   big.extra = "x".repeat(9000);

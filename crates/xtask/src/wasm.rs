@@ -57,47 +57,19 @@ pub fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn transcripts_only() -> Result<(), String> {
-    let wasm = std::fs::read_to_string(
-        super::repo_root().join("testdata/scenarios/wasm/replay/expected/wasm.json"),
-    )
-    .map_err(|e| format!("missing wasm transcript: {e}"))?;
-    let job = std::fs::read_to_string(
-        super::repo_root().join("testdata/scenarios/job/basic-success/expected/job.json"),
-    )
-    .map_err(|e| format!("missing job transcript: {e}"))?;
-    let wasm_v: serde_json::Value =
-        serde_json::from_str(&wasm).map_err(|e| format!("bad wasm transcript: {e}"))?;
-    let job_v: serde_json::Value =
-        serde_json::from_str(&job).map_err(|e| format!("bad job transcript: {e}"))?;
-    if wasm_v.as_array().is_none_or(Vec::is_empty) {
-        return Err("wasm transcript empty".to_string());
-    }
-    if job_v.as_array().is_none_or(Vec::is_empty) {
-        return Err("job transcript empty".to_string());
-    }
-    // Engine delegation: the transcript must be the job engine's lifecycle —
-    // dynamic engine ids, tile acquisition, progress/catalog events, and the
-    // completed output — not a scaffold machine.
-    for needle in [
-        "req:0",
-        "req:tile-0",
-        "out:0",
-        "progress",
-        "catalog",
-        "completed",
-    ] {
-        if !wasm.contains(needle) {
-            return Err(format!(
-                "wasm transcript lacks engine-driven marker {needle}"
-            ));
-        }
-    }
-    if wasm.contains("req:wasm-meta-1") || wasm.contains("out:wasm-1") {
-        return Err("wasm transcript still carries scaffold machine ids".to_string());
-    }
-    // Both transcripts drive the same lean lifecycle; the adapter projects
-    // engine effects/events onto typed protocol messages in seq order.
-    println!("test wasm --transcripts: ok");
+    // The real transcript gate is the adapter's runtime comparison against
+    // the checked-in golden (tests/adapter.rs
+    // basic_success_transcript_matches_golden); run it rather than statically
+    // grepping the checked-in file, which cannot detect golden rot.
+    run_cargo(&[
+        "test",
+        "-p",
+        "dezoomify-wasm",
+        "--test",
+        "adapter",
+        "transcript",
+    ])?;
+    println!("test wasm --transcripts: ok (adapter golden comparison green)");
     Ok(())
 }
 

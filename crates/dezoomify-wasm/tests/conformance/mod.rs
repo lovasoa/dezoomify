@@ -44,6 +44,8 @@ fn session_lifecycle_via_js_surface() {
 fn session_rejects_wrong_version() {
     let error = Session::new("2.0", "{}").expect_err("2.0 rejected");
     assert!(error.to_string().contains("version"), "{error}");
+    let error = Session::new("9.9", "{}").expect_err("9.9 rejected");
+    assert!(error.to_string().contains("version"), "{error}");
 }
 
 #[wasm_bindgen_test]
@@ -64,4 +66,23 @@ fn discovery_session_resolves_a_zoomify_catalog_without_network() {
     let catalog = session.finish().expect("catalog");
     let catalog: serde_json::Value = serde_json::from_str(&catalog).expect("catalog parses");
     assert_eq!(catalog["images"][0]["format"], "zoomify");
+    // The 512-wide level must plan a real 2x2 tile grid, matching the native
+    // conformance suite (src/discovery.rs tests).
+    let levels = catalog["images"][0]["levels"]
+        .as_array()
+        .expect("levels array")
+        .len();
+    let mut plan = None;
+    for level in 0..levels {
+        let candidate: serde_json::Value =
+            serde_json::from_str(&session.level_tiles(0, level as u32).expect("plan"))
+                .expect("plan json");
+        if candidate["canvas"]["x"] == 512 {
+            plan = Some(candidate);
+            break;
+        }
+    }
+    let plan = plan.expect("512-wide level exists");
+    assert_eq!(plan["kind"], "resolved");
+    assert_eq!(plan["tiles"].as_array().expect("tiles").len(), 4);
 }

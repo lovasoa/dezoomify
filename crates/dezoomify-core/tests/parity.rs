@@ -1628,19 +1628,26 @@ mod scenario_parity {
     }
 
     fn normalize_url(url: &str) -> String {
-        // Hosts/ports vary between oracle runs only by the normalized PORT
-        // token; strip scheme+authority query noise for comparison.
-        let without_scheme = url.split("://").nth(1).unwrap_or(url);
-        let path = without_scheme.split_once('/').map(|(_, p)| p).unwrap_or("");
-        // Drop volatile query keys while keeping significant ones.
-        let (path, query) = match path.split_once('?') {
-            Some((p, q)) => (p, Some(q)),
-            None => (path, None),
+        // Keep scheme+authority (loopback ports normalized to the PORT token)
+        // plus path and query, so a tile emitted from the wrong host or
+        // with wrong query parameters fails the comparison.
+        let (scheme, rest) = match url.split_once("://") {
+            Some((s, r)) => (s, r),
+            None => ("", url),
         };
-        match query {
-            Some(q) => format!("{path}?{q}"),
-            None => path.to_string(),
-        }
+        let (authority, path_query) = match rest.find('/') {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, ""),
+        };
+        let authority = if authority.starts_with("127.0.0.1") {
+            match authority.split_once(':') {
+                Some((host, _port)) => format!("{host}:PORT"),
+                None => authority.to_string(),
+            }
+        } else {
+            authority.to_string()
+        };
+        format!("{scheme}://{authority}{path_query}")
     }
 
     macro_rules! parity_cases {

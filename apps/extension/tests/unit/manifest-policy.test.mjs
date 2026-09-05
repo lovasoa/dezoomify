@@ -69,7 +69,16 @@ for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefo
 
   test(`${name}: no remote code`, () => {
     const raw = JSON.stringify(manifest);
-    assert.ok(!raw.includes("http://") || raw.includes("http://*/*"), `${name} unexpected remote http`);
+    // Optional host permissions may contain scheme wildcards; everything else
+    // in the manifest must be free of remote http references.
+    const withoutOptionalHosts = JSON.stringify({ ...manifest, optional_host_permissions: undefined });
+    assert.ok(!withoutOptionalHosts.includes("http://"), `${name} unexpected remote http`);
+    for (const p of manifest.optional_host_permissions ?? []) {
+      assert.ok(
+        ["http://*/*", "https://*/*"].includes(p),
+        `${name} unexpected optional host pattern ${p}`,
+      );
+    }
     for (const u of backgroundUrls(manifest)) {
       assert.ok(!u.startsWith("http://") && !u.startsWith("https://"), `${name} remote background ${u}`);
       assert.ok(!u.startsWith("data:"), `${name} data background ${u}`);

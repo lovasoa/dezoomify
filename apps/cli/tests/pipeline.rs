@@ -101,13 +101,71 @@ fn json_mode_emits_machine_events() {
         .expect("run cli");
     assert!(run.status.success());
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(
-        stdout.contains("\"kind\":\"started\""),
-        "events on stdout: {stdout}"
+    // Machine output must be line-delimited JSON events with honest shapes.
+    let mut saw_started = false;
+    let mut completed_hash: Option<String> = None;
+    let mut last_seq: u64 = 0;
+    for line in stdout.lines() {
+        let value: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("every stdout line is JSON: {line} ({e})"));
+        let seq = value
+            .get("seq")
+            .and_then(serde_json::Value::as_u64)
+            .expect("event carries seq");
+        assert!(
+            seq > last_seq,
+            "seq strictly increases ({seq} after {last_seq})"
+        );
+        last_seq = seq;
+        let kind = value
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if kind == "started" {
+            saw_started = true;
+        }
+        if kind == "completed" {
+            let hash = value
+                .get("outputHash")
+                .and_then(serde_json::Value::as_str)
+                .expect("completed event carries outputHash")
+                .to_string();
+            completed_hash = Some(hash);
+        }
+    }
+    assert!(saw_started, "started event present: {stdout}");
+    // The digest must equal the pinned scenario expectation, not merely exist.
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../testdata/scenarios/native/cli-dzi/expected/result.json"
+        ))
+        .expect("read scenario golden"),
+    )
+    .expect("parse scenario golden");
+    let expected_hash = golden
+        .get("outputHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("golden outputHash");
+    assert_eq!(
+        completed_hash.as_deref(),
+        Some(expected_hash),
+        "cli --json outputHash must match the pinned scenario digest"
     );
-    assert!(
-        stdout.contains("\"kind\":\"completed\""),
-        "completed event: {stdout}"
+    // And the bytes on disk must hash to the same digest.
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(&output).expect("open output");
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).expect("read output");
+    let digest = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        format!("sha256:{:x}", hasher.finalize())
+    };
+    assert_eq!(
+        digest, expected_hash,
+        "written file hashes to the pinned digest"
     );
-    assert!(stdout.contains("sha256:"), "real digest: {stdout}");
 }

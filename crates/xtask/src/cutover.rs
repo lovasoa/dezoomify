@@ -140,7 +140,7 @@ mod tests {
         // This gate is intentionally a shape check only. Pin the honesty of
         // its own report: it must say stub-ok, never claim real verification.
         let child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--nocapture", "--exact", "capture_candidate_verify_output"])
+            .args(["--nocapture", "capture_candidate_verify_output"])
             .stdout(std::process::Stdio::piped())
             .spawn()
             .expect("spawn test harness");

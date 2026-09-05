@@ -32,7 +32,7 @@ Run tests from the repository root:
 ```sh
 cargo xtask test
 cargo xtask test core --parity
-cargo xtask test scenario --scenario website/tainted-display-canvas
+cargo xtask test scenario
 cargo xtask test all
 ```
 
@@ -41,8 +41,9 @@ short unit and contract suites, and generated-artifact validation while omitting
 packaging and browser end-to-end suites. `cargo xtask test all` runs every
 deterministic target, including controlled loopback HTTP and isolated browser
 profiles. Neither command contacts public source sites. Public compatibility
-checks run only through the explicit `cargo xtask test live` target; they are
-advisory and non-blocking.
+checks run only through the explicit `cargo xtask test live` target; a live
+target that stops working must be removed from the target list (recorded in
+`docs/migration/live-inventory.csv`), never tolerated as a failing case.
 
 Focused targets are:
 
@@ -59,14 +60,14 @@ Focused targets are:
 | `desktop` | Tauri integration, integration registration, updater fixtures, and E2E |
 | `extension` | manifests, scanning, browser-session fetch, permissions, and browser E2E |
 | `native-messaging` | framing, handoff consent, cookie scope, registration, and cleanup |
-| `scenario` | one or more named shared scenarios selected with `--scenario` |
+| `scenario` | scenario-corpus gates: native pipeline scenarios over loopback plus CLI snapshots |
 | `live` | explicit low-volume public-network compatibility checks |
 | `all` | every deterministic focused target; excludes `live` |
 
 Use the narrowest owning target first. Focus with supported flags such as
-`--purity`, `--parity`, `--transcripts`, `--scenario <id>`, `--host <name>`, and
-`--browser <name>`. Unknown flags and filters fail instead of silently widening
-or skipping coverage.
+`--purity`, `--parity`, `--transcripts`, and `--browser <name>`. Targets that
+accept no options (for example `native`, `extension`, `scenario`) reject unknown
+flags instead of silently widening or skipping coverage.
 
 ## Test layers
 
@@ -91,22 +92,20 @@ unknown lane names and does not evaluate shell input.
 
 | Lane | Scope |
 |---|---|
-| `rust` | core, protocol, job, formatting, clippy, and Rust unit tests |
-| `wasm-browser` | WASM and browser runtime |
-| `ui-web-proxy` | shared UI, website, accessibility, and proxy security |
-| `native` | native runtime and CLI on the Linux/macOS/Windows matrix |
-| `desktop` | desktop tests and packaging on native OS runners |
-| `extension` | extension unit, manifest, and package checks |
-| `chromium-e2e` | website and extension Chromium workflows |
-| `firefox-e2e` | website plus Firefox stable/ESR extension workflows |
-| `native-messaging` | packaged host handoff and cleanup |
-| `generated` | protocol generation, fixtures, source locks, parity, reproducibility |
-| `security` | dependency, license, advisory, secret, and policy checks |
+| `rust` | core, protocol, job, and native Rust unit and contract tests |
+| `wasm` | WASM adapter portability and transcript suites |
+| `browser` | browser-runtime unit matrix |
+| `web` | website integration suites (unit + Playwright E2E where browsers are installed) |
+| `native` | native runtime and CLI suites |
+| `desktop` | desktop shell suites |
+| `extension` | extension unit, manifest, and Native Messaging API suites |
+| `protocol` | protocol contract suites |
+| `security` | parity inventory validation and protocol artifact checks |
 
-`cargo xtask ci local` runs every lane applicable to the current host and
-reports platform-only lanes as unavailable, never as passed. Required CI and
-`test all` remain deterministic; scheduled/manual live CI invokes `test live`
-separately.
+`cargo xtask ci local` runs all lanes listed above; lanes that need installed
+browsers or native runners report their narrowed scope in their output rather
+than claiming full platform coverage. Required CI and `test all` remain
+deterministic; scheduled/manual live CI invokes `test live` separately.
 
 ## Network coverage
 
@@ -123,10 +122,11 @@ states and transitions.
 Proxy opt-out must produce no new proxy request. Authentication, authorization,
 ordinary HTTP, parse, and decode failures do not activate the proxy, nor do
 private, local, signed, token-bearing, or otherwise credential-requiring
-metadata requests; tile requests never use the proxy at all. Request
-transcripts verify that both the browser-to-proxy and
-proxy-to-upstream legs contain no cookies, `Authorization`, or browser
-credentials, including across redirects.
+metadata requests; tile requests never use the proxy at all. The proxy security
+suites verify that the relay strips all inbound credential headers and forwards
+only a narrow allowlist upstream (both browser-to-proxy and proxy-to-upstream
+legs), and the deployed function fetches with `redirect: "manual"` so every
+redirect hop is revalidated against the same policy.
 
 Live checks use no source-site credentials, bounded targets, low request rates,
 and redacted reports. A live failure never replaces deterministic regression
@@ -137,30 +137,29 @@ coverage or blocks an ordinary pull request.
 ### Extension cookies and Native Messaging
 
 ```sh
-cargo xtask test extension --browser chromium --scenario authenticated-fetch
-cargo xtask test native-messaging --scenario cookie-handoff
-cargo xtask test scenario --scenario extension/cookie-scope-redirect
+cargo xtask test extension
+cargo xtask test native-messaging
 ```
 
-Verify exact-origin permission, explicit consent, path and expiry scope,
-one-use handoff, no proxy request, no intentional persistence, redacted
-artifacts, and process/profile/registration cleanup. Native Messaging scenarios also
-verify that browser enforcement of allowed extension IDs accepts the configured
-extension sender and rejects other IDs. Reused, expired, or cross-session
-challenges or nonces are rejected as replay or session-binding failures; tests
-never treat the challenge or nonce as identity proof.
+Verify manifests and permissions (narrow host grants, no remote code, strict
+CSP), scanning state machines with observer-before-reload ordering and bounded
+settle, browser-session fetch scoping, and handoff envelope validation with
+replay/expiry/origin rejection and zero side effects on rejection. These gates
+run the unit suites; full browser-profile E2E remains manual or CI-runner work.
 
 ### Browser tainted canvas
 
 ```sh
-cargo xtask test browser --scenario cors-denied-display
-cargo xtask test web --scenario tainted-display-canvas
+cargo xtask test browser
+cargo xtask test web
 ```
 
-Verify the image remains visible, `originClean` becomes false, browser save
-guidance remains available, and app code performs no pixel read, processing,
-hash, persistence, `toBlob`, `toDataURL`, or clean programmatic save. Only the
-controlled assertion reads the canvas and expects `SecurityError`.
+The browser-runtime display suites verify that tainted display never enables
+readable bytes: the image remains visible, `originClean` becomes false, and
+pixel reads, `toBlob`, and `toDataURL` are guarded. The website suites verify
+direct-first transport, metadata CORS proxy fallback classification, and the
+opt-out. Full cross-browser E2E runs under `test web` when browsers are
+installed; otherwise the unit matrix reports the narrowed scope.
 
 ## Cross-runtime guarantees
 

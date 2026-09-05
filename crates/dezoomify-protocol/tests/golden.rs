@@ -123,6 +123,30 @@ fn canonical_vectors_match_checked_in_files() {
             "vector {id} not canonical"
         );
         check_version(&envelope);
+        assert_vector_semantics(id, &envelope);
+    }
+}
+
+// Canonical round-tripping alone would accept a checked-in vector whose
+// content drifted (e.g. a corrupted handshake). Pin what each vector means.
+fn assert_vector_semantics(id: &str, envelope: &ControlEnvelope) {
+    match (&envelope.body, id) {
+        (ControlBody::Command(JobCommand::Start { job, input_url }), "handshake-ok") => {
+            assert_eq!(job.as_str(), "job:golden-1");
+            assert_eq!(input_url, "https://example.com/item/1");
+        }
+        (ControlBody::Handoff(handoff), "handoff-ok") => {
+            assert_eq!(handoff.id.as_str(), "hand:golden-1");
+            assert_eq!(handoff.source_url, "https://example.com/item/1");
+            assert_eq!(handoff.provenance_label, "web");
+            assert_eq!(handoff.required_capabilities, vec!["direct".to_string()]);
+        }
+        (ControlBody::Event(event @ JobEvent::Failed { job, error }), "error-terminal") => {
+            assert_eq!(job.as_str(), "job:golden-1");
+            assert_eq!(error.code, "fetch.failed");
+            assert_eq!(event.kind(), EventKind::Terminal);
+        }
+        _ => panic!("vector {id} has unexpected body shape: {:?}", envelope.body),
     }
 }
 

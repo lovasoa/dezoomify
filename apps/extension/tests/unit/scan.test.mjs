@@ -107,8 +107,7 @@ test("privileged URLs rejected with zero observer/reload", async () => {
     assert.deepEqual(s.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
   }
   assert.equal(isPrivilegedUrl("https://a.example/x"), false);
-  assert.equal(isPrivilegedUrl("http://a.example/x"), true === false ? true : false); // http allowed
-  assert.equal(isPrivilegedUrl("http://a.example/x"), false);
+  assert.equal(isPrivilegedUrl("http://a.example/x"), false); // http allowed for scans
 });
 
 test("observer installed before exactly one reload with exact tab filter", async () => {

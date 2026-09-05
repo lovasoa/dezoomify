@@ -20,6 +20,18 @@ pub fn validate(args: &[String]) -> Result<(), String> {
     let rows = load_matrix()?;
     let mut fails = 0;
     for r in &rows {
+        // A row may only claim deterministic coverage when it names a real
+        // test; "covered"/"green" without a test id is exactly the drift the
+        // matrix exists to prevent.
+        if matches!(r.status.as_str(), "covered" | "green")
+            && r.deterministic_test_id.trim().is_empty()
+        {
+            eprintln!(
+                "row {} is {} but names no deterministic_test_id",
+                r.id, r.status
+            );
+            fails += 1;
+        }
         if r.status == "blocked" {
             let row_phase = PHASE_ORDER
                 .iter()
@@ -80,6 +92,7 @@ struct Row {
     target_phase: String,
     decision: String,
     status: String,
+    deterministic_test_id: String,
 }
 
 fn load_matrix() -> Result<Vec<Row>, String> {
@@ -111,6 +124,7 @@ fn load_matrix() -> Result<Vec<Row>, String> {
             target_phase: f[11].to_string(),
             decision: f[12].to_string(),
             status: f[15].to_string(),
+            deterministic_test_id: f[14].to_string(),
         };
         if row.id.is_empty() || !ids.insert(row.id.clone()) {
             return Err(format!("line {}: duplicate or empty id", n + 2));

@@ -497,3 +497,32 @@ fn explicit_default_ports_are_rewritten_to_the_info_origin() {
         Some("http://127.0.0.1:9877/iiif/default-port")
     );
 }
+
+#[cfg(test)]
+mod best_format_tests {
+    use super::*;
+
+    fn info_with(json_formats: Option<&str>) -> ImageInfo {
+        let formats_json = json_formats
+            .map(|f| format!(r#""formats": {f},"#))
+            .unwrap_or_default();
+        let text = format!(
+            r#"{{"@id":"https://iiif.test/img","width":100,"height":100,{formats_json}"qualities": ["default"]}}"#
+        );
+        serde_json::from_str(&text).expect("parse info.json")
+    }
+
+    #[test]
+    fn best_format_pins_web_parity_policy() {
+        // No declared formats -> jpg (legacy web client default).
+        assert_eq!(info_with(None).best_format(), "jpg");
+        // png declared -> png, wherever it appears in the list.
+        assert_eq!(
+            info_with(Some(r#"["jpg","png","webp"]"#)).best_format(),
+            "png"
+        );
+        assert_eq!(info_with(Some(r#"["png","jpg"]"#)).best_format(), "png");
+        // Without png, the first declared format wins.
+        assert_eq!(info_with(Some(r#"["webp","gif"]"#)).best_format(), "webp");
+    }
+}
