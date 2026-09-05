@@ -11,7 +11,7 @@ Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinct
 2. **Colors & Atmosphere (No Sci-Fi / LLM Smell):**
    - Light Mode: Page background is cool off-white `#fcfeff`. Surface card and navigation use the signature warm parchment gradient `linear-gradient(180deg, #f7eded 0%, #f7eeee 100%)` with warm slate border `1px solid #a19797` and natural warm drop shadow `0 4px 20px rgba(130, 115, 110, 0.12)`.
    - Dark Mode: Night gallery / archivist atelier palette. Warm charcoal background `#181615` (never cold blue-black), warm dark walnut/parchment surface `linear-gradient(180deg, #252220 0%, #1e1c1a 100%)`, warm stone border `1px solid #3f3935`, and natural dark shadow. Avoid cold space-terminal voids or neon halos.
-   - Link colors: scholarly sapphire `#1d4ed8` in light mode; illuminated manuscript warm ochre/gold `#dfa44e` in dark mode.
+   - Link colors: scholarly sapphire `#1d4ed8` in light mode; archival olive/sage green `#acaf50` in dark mode.
    - Primary button: tactile beveled parchment `linear-gradient(180deg, #fffafa 0%, #dfd8d8 100%)` in light mode; tactile dark bronze `linear-gradient(180deg, #332e2a 0%, #25211e 100%)` in dark mode.
    - Interactive focus: crisp architectural focus ring `0 0 0 2px rgba(...)`, never blurry neon halos.
 

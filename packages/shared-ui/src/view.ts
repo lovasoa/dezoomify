@@ -149,7 +149,7 @@ export function showDesktopAppGuidance(): void {
         </a>
         <div style="margin-top: 0.65rem; font-size: 0.85rem; color: var(--dz-text-muted);">
           Also available for Windows, macOS, and Linux on
-          <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">GitHub Releases &rarr;</a>
+          <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">GitHub Releases</a>
         </div>
       </div>
 
@@ -998,21 +998,21 @@ function mountFailedSection(
         <button type="button" class="dz-guidance-item" id="dz-card-extension">
           <div class="dz-guidance-item-header">
             <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-            <span class="dz-guidance-item-title">Browser Extension Guide &rarr;</span>
+            <span class="dz-guidance-item-title">Browser Extension Guide</span>
           </div>
           <span class="dz-guidance-item-desc">For pages requiring login or session cookies. Automatically detects viewers on active pages.</span>
         </button>
         <button type="button" class="dz-guidance-item" id="dz-card-desktop">
           <div class="dz-guidance-item-header">
             <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            <span class="dz-guidance-item-title">Desktop App Guide &rarr;</span>
+            <span class="dz-guidance-item-title">Desktop App Guide</span>
           </div>
           <span class="dz-guidance-item-desc">For gigapixel images that exceed browser memory limits. Processes natively on your computer.</span>
         </button>
         <a class="dz-guidance-item" href="https://dezoomify.ophir.dev/help/finding-the-image-address.html" target="_blank" rel="noopener">
           <div class="dz-guidance-item-header">
             <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            <span class="dz-guidance-item-title">Help &amp; URL Extraction &rarr;</span>
+            <span class="dz-guidance-item-title">Help &amp; URL Extraction</span>
           </div>
           <span class="dz-guidance-item-desc">How to find the image address on museum &amp; archive sites, and what to try when nothing is found.</span>
         </a>
@@ -1026,7 +1026,7 @@ function mountFailedSection(
       </summary>
       <div class="dz-diagnostics" id="dz-error-diagnostics"></div>
       <div class="dz-diagnostics-report">
-        <a href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md" target="_blank" rel="noopener">Report a bug on GitHub &rarr;</a>
+        <a href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md" target="_blank" rel="noopener">Report a bug on GitHub</a>
       </div>
     </details>
 

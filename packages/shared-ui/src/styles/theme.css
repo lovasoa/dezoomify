@@ -68,10 +68,10 @@
     --dz-text-secondary: #b8ada2;
     --dz-text-muted: #82776e;
 
-    /* Dignified Scholarly & Illuminated Manuscript Colors (Warm Ochre / Antique Gold) */
-    --dz-link-color: #dfa44e;
+    /* Dignified Scholarly & Archival Botany Colors (Muted Olive / Sage Green) */
+    --dz-link-color: #acaf50;
     --dz-link-visited: var(--dz-link-color);
-    --dz-link-hover: #f0be6c;
+    --dz-link-hover: #c3c76f;
     --dz-link-subtle: #9c9288;
 
     /* Tactile Dark Bronze / Aged Wood Button */
@@ -86,7 +86,7 @@
     --dz-radio-border: #665c54;
     --dz-radio-active: #7fa9ec;
 
-    --dz-progress-bar: linear-gradient(90deg, #dfa44e, #c78d38);
+    --dz-progress-bar: linear-gradient(90deg, #acaf50, #8a8e3e);
     --dz-progress-track: rgba(63, 57, 53, 0.5);
 
     /* Venetian Terracotta / Florentine Red for Dark Mode Errors (Warm, painterly, dignified) */
@@ -97,8 +97,8 @@
     --dz-success-text: #86efac;
     --dz-success-accent: #4ade80;
 
-    --dz-notice-text: #fcd34d;
-    --dz-notice-accent: #f59e0b;
+    --dz-notice-text: #ccd185;
+    --dz-notice-accent: #acaf50;
   }
 }
 
