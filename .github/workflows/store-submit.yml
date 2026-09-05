@@ -109,13 +109,23 @@ jobs:
           done
           [ -n "${EXTENSION_ID:-}" ] || { echo "extension ID did not resolve from release/config.toml"; exit 1; }
           zip=$(ls dezoomify-extension-chromium-*.zip)
-          token=$(curl -sS --fail --proto '=https' --max-time 30 -X POST https://oauth2.googleapis.com/token \
+          token_resp=$(curl -sS --proto '=https' --max-time 30 -w '\n%{http_code}' -X POST https://oauth2.googleapis.com/token \
             -d "client_id=${CHROME_WS_CLIENT_ID}" \
             -d "client_secret=${CHROME_WS_CLIENT_SECRET}" \
             -d "refresh_token=${CHROME_WS_REFRESH_TOKEN}" \
-            -d "grant_type=refresh_token" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')
-          [ -n "$token" ] || { echo "token refresh failed"; exit 1; }
+            -d "grant_type=refresh_token") \
+            || { echo "token endpoint unreachable"; exit 1; }
+          http_code=$(printf '%s' "$token_resp" | tail -n1)
+          token=$(printf '%s' "$token_resp" | head -n -1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)
+          if [ -z "$token" ]; then
+            err=$(printf '%s' "$token_resp" | head -n -1 \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("error_description", d.get("error","unknown")))' 2>/dev/null \
+              || echo "unparseable response")
+            echo "token refresh failed: HTTP $http_code: $err"
+            echo "hint: re-run apps/extension/scripts/chrome-webstore-publish.sh authorize with the listing-owner account and update the CHROME_WS_REFRESH_TOKEN secret, then re-run"
+            exit 1
+          fi
           curl -sS --fail --proto '=https' --max-time 120 \
             -H "Authorization: Bearer ${token}" -X PUT -T "$zip" \
             "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}" \
@@ -131,13 +141,23 @@ jobs:
           for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
             [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
           done
-          token=$(curl -sS --fail --proto '=https' --max-time 30 -X POST https://oauth2.googleapis.com/token \
+          token_resp=$(curl -sS --proto '=https' --max-time 30 -w '\n%{http_code}' -X POST https://oauth2.googleapis.com/token \
             -d "client_id=${CHROME_WS_CLIENT_ID}" \
             -d "client_secret=${CHROME_WS_CLIENT_SECRET}" \
             -d "refresh_token=${CHROME_WS_REFRESH_TOKEN}" \
-            -d "grant_type=refresh_token" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')
-          [ -n "$token" ] || { echo "token refresh failed"; exit 1; }
+            -d "grant_type=refresh_token") \
+            || { echo "token endpoint unreachable"; exit 1; }
+          http_code=$(printf '%s' "$token_resp" | tail -n1)
+          token=$(printf '%s' "$token_resp" | head -n -1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)
+          if [ -z "$token" ]; then
+            err=$(printf '%s' "$token_resp" | head -n -1 \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("error_description", d.get("error","unknown")))' 2>/dev/null \
+              || echo "unparseable response")
+            echo "token refresh failed: HTTP $http_code: $err"
+            echo "hint: re-run apps/extension/scripts/chrome-webstore-publish.sh authorize with the listing-owner account and update the CHROME_WS_REFRESH_TOKEN secret, then re-run"
+            exit 1
+          fi
           curl -sS --fail --proto '=https' --max-time 120 \
             -H "Authorization: Bearer ${token}" -X POST \
             "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}/publish?deployPercentage=100" \
