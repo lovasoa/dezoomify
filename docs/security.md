@@ -22,7 +22,7 @@ Transferred cookies are not intentionally persisted. Implementations drop refere
 
 ## Proxy controls
 
-The website attempts a direct browser fetch first. Only a classified CORS or network failure can trigger automatic metadata CORS proxy fallback, and only when proxy use is enabled and the metadata request is an eligible public, non-credential `http` or `https` destination. There is no per-attempt proxy consent. The website shows the active transport and honors opt-out by issuing no new proxy requests while the preference is disabled.
+The website attempts a direct browser fetch first with a short (250 ms) completion window. A classified CORS or network failure, or a direct fetch that does not complete within that window, triggers automatic metadata CORS proxy fallback, and only when the metadata request is an eligible public, non-credential `http` or `https` destination. There is no per-attempt proxy consent and no opt-out. The website shows the active transport.
 
 The proxy permits only supported HTTP methods and serves metadata only, never tiles. It resolves and rejects loopback, private, link-local, reserved, and cloud-metadata addresses before connecting and after redirects. It rechecks public-resource and credential eligibility across redirects; bounds redirects, response bytes, duration, and concurrency; validates expected metadata content; omits credentials; strips request and response headers outside an allowlist; and applies abuse controls without recording sensitive URLs. Authentication failures and ordinary HTTP application errors do not qualify as CORS or network failures and do not activate the fallback.
 

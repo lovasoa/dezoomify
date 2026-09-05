@@ -22,8 +22,6 @@ export interface ViewCallbacks {
   onSelectLevel?(level: number): void;
   onOpenExternalLink?(url: string): void;
   onCopyShareLink?(): void;
-  /** Metadata-proxy opt-out toggle (website only; session-scoped). */
-  onToggleProxyOptOut?(optOut: boolean): void;
 }
 
 export interface JobActivity {
@@ -56,8 +54,6 @@ export interface ViewContext {
   jobActivity?: JobActivity;
   /** Prefilled URL (e.g. restored from a legacy `#url` hash). */
   initialUrl?: string;
-  /** Metadata-proxy opt-out (website only; session-scoped, default allows fallback). */
-  proxyOptOut?: boolean;
 }
 
 export const ALL_DEZOOMERS = [
@@ -529,22 +525,6 @@ function mountInputSection(
     });
   }
   form.appendChild(details);
-
-  // Metadata-proxy opt-out: plain checkbox row (architectural geometry, no
-  // pills). Checked (default) allows the automatic eligible metadata-proxy
-  // fallback after a direct-fetch failure; unchecking disables it for the
-  // session. Tiles never use the proxy either way.
-  const proxyRow = document.createElement("label");
-  proxyRow.className = "dz-proxy-toggle";
-  proxyRow.innerHTML = `
-    <input type="checkbox" id="dz-proxy-optin"${ctx?.proxyOptOut === true ? "" : " checked"} />
-    <span>Allow the metadata proxy when a direct fetch fails (metadata only, never tiles)</span>
-  `;
-  proxyRow.querySelector("input")?.addEventListener("change", (e) => {
-    const box = e.target as HTMLInputElement;
-    callbacks.onToggleProxyOptOut?.(!box.checked);
-  });
-  form.appendChild(proxyRow);
 
   // Centered Tactile "Dezoomify !" Button
   const btnRow = document.createElement("div");

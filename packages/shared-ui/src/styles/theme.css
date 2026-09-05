@@ -519,23 +519,6 @@ abbr[title] {
   margin-top: 0.25rem;
 }
 
-/* Metadata-proxy opt-out: plain checkbox row, architectural geometry. */
-.dz-proxy-toggle {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 0.5rem;
-  margin-top: 0.35rem;
-  font-size: 0.85rem;
-  color: var(--dz-text-secondary);
-  cursor: pointer;
-}
-
-.dz-proxy-toggle input {
-  margin-top: 0.15rem;
-  accent-color: var(--dz-text-secondary);
-}
-
 .dz-btn-tactile {
   min-width: 200px;
   min-height: 46px;

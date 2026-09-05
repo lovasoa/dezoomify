@@ -4,7 +4,7 @@ dezoomify-ng turns tiled, zoomable images into portable image files. A user supp
 
 ## Surfaces
 
-- **Website** handles common public sources without installation. It fetches readable bytes with a direct browser fetch first, then automatically uses the metadata CORS proxy only after a classified CORS or network failure and only for an eligible public, non-credential metadata request; tiles are never proxied. The website shows the active transport, honors proxy opt-out, and never prompts for per-attempt proxy consent. Unprocessed ordinary tiles may remain visible through a tainted canvas without clean programmatic save.
+- **Website** handles common public sources without installation. It fetches readable bytes with a direct browser fetch first (250 ms window), then automatically uses the metadata CORS proxy only after a classified CORS or network failure or a direct fetch that does not complete in that window, and only for an eligible public, non-credential metadata request; tiles are never proxied. The website shows the active transport and never prompts for per-attempt proxy consent. Unprocessed ordinary tiles may remain visible through a tainted canvas without clean programmatic save.
 - **Browser extension** discovers viewers in the current page and performs browser-session requests under extension permissions.
 - **The desktop app** uses the native runtime for local files, large images, durable caching, and full encoder support.
 - **CLI** exposes the same native discovery and job behavior for scripts and bulk work.

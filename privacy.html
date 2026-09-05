@@ -36,9 +36,9 @@
         <h2>What runs where</h2>
         <ul>
           <li><strong>Website.</strong> Image URLs you enter are fetched directly
-          by your browser. If a direct fetch fails because of a network or CORS
-          error, public metadata files (never image tiles) may be retried through
-          a metadata proxy, unless you opt out. The proxy never receives cookies,
+          by your browser. If a direct fetch does not complete quickly, public
+          metadata files (never image tiles) are retried through
+          a metadata proxy. The proxy never receives cookies,
           authorization headers, or credentials of any kind.</li>
           <li><strong>Browser extension.</strong> Runs only when you explicitly
           invoke it on a tab, with per-site permissions you grant. It uses your

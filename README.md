@@ -44,9 +44,10 @@ and `parity`. See [Development](docs/development.md) and
 
 ## How fetching works
 
-The website always tries a direct browser fetch first. Only after a classified
-network/CORS failure does it automatically retry eligible public metadata
-(never image tiles) through a same-origin metadata proxy — visible in the UI,
-with an opt-out, and never carrying cookies or credentials. The extension uses
+The website always tries a direct browser fetch first, with a short 250 ms
+window. If the direct fetch does not complete in time, it automatically retries
+eligible public metadata (never image tiles) through a same-origin metadata
+proxy — visible in the UI and never carrying cookies or credentials. The
+extension uses
 your browser session under permissions you grant; cookie handoff to the desktop
 app is a separate, explicitly consented step.

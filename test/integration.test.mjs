@@ -66,25 +66,23 @@ test("eligible metadata failure automatically calls proxy without extra user act
 
 test("proxy eligibility matrix", () => {
   const okReq = { url: "https://public.test/image.json", kind: "metadata" };
-  assert.equal(isProxyEligible(okReq, { proxyOptOut: false }).eligible, true);
+  assert.equal(isProxyEligible(okReq).eligible, true);
   // Tile never proxied.
-  assert.equal(isProxyEligible({ ...okReq, kind: "tile" }, { proxyOptOut: false }).eligible, false);
-  // Opt-out suppresses.
-  assert.equal(isProxyEligible(okReq, { proxyOptOut: true }).eligible, false);
+  assert.equal(isProxyEligible({ ...okReq, kind: "tile" }).eligible, false);
   // Credential-bearing targets ineligible.
-  assert.equal(isProxyEligible({ url: "https://user:pw@public.test/x", kind: "metadata" }, { proxyOptOut: false }).eligible, false);
-  assert.equal(isProxyEligible({ url: "https://public.test/x?token=abc", kind: "metadata" }, { proxyOptOut: false }).eligible, false);
-  assert.equal(isProxyEligible({ url: "https://public.test/x", kind: "metadata", headers: { Cookie: "a=b" } }, { proxyOptOut: false }).eligible, false);
-  assert.equal(isProxyEligible({ url: "https://public.test/x", kind: "metadata", headers: { Authorization: "Bearer x" } }, { proxyOptOut: false }).eligible, false);
-  assert.equal(isProxyEligible({ url: "https://public.test/x", kind: "metadata", requiresCookies: true }, { proxyOptOut: false }).eligible, false);
-  assert.equal(isProxyEligible({ url: "https://public.test/x", kind: "metadata", requiresAuth: true }, { proxyOptOut: false }).eligible, false);
+  assert.equal(isProxyEligible({ url: "https://user:pw@public.test/x", kind: "metadata" }).eligible, false);
+  assert.equal(isProxyEligible({ url: "https://public.test/x?token=abc", kind: "metadata" }).eligible, false);
+  assert.equal(isProxyEligible({ url: "https://public.test/x", kind: "metadata", headers: { Cookie: "a=b" } }).eligible, false);
+  assert.equal(isProxyEligible({ url: "https://public.test/x", kind: "metadata", headers: { Authorization: "Bearer x" } }).eligible, false);
+  assert.equal(isProxyEligible({ url: "https://public.test/x", kind: "metadata", requiresCookies: true }).eligible, false);
+  assert.equal(isProxyEligible({ url: "https://public.test/x", kind: "metadata", requiresAuth: true }).eligible, false);
   // Private/local ineligible.
   for (const u of ["http://localhost/x", "http://127.0.0.1/x", "https://10.0.0.5/x", "https://192.168.1.1/x"]) {
-    assert.equal(isProxyEligible({ url: u, kind: "metadata" }, { proxyOptOut: false }).eligible, false, u);
+    assert.equal(isProxyEligible({ url: u, kind: "metadata" }).eligible, false, u);
   }
 });
 
-test("no proxy for http-error, policy-denied, cancelled, opt-out, tile", async () => {
+test("no proxy for http-error, policy-denied, cancelled, tile", async () => {
   for (const outcome of [
     { outcome: "http-error", finalUrl: "https://public.test/x", status: 404, headers: {} },
     { outcome: "policy-denied", reason: "x", code: "TRANSPORT_POLICY_DENIED" },
@@ -103,15 +101,6 @@ test("no proxy for http-error, policy-denied, cancelled, opt-out, tile", async (
     const proxy = proxyOk();
     const web = createWebIntegration({ direct, proxy, onTransport: () => {} });
     const res = await web.fetchTile({ url: "https://public.test/0_0.jpg", kind: "tile" });
-    assert.equal(res.via, "direct");
-    assert.equal(proxy.calls, 0);
-  }
-  // Opt-out suppresses proxy on network-error.
-  {
-    const direct = directCorsFail();
-    const proxy = proxyOk();
-    const web = createWebIntegration({ direct, proxy, onTransport: () => {}, proxyOptOut: true });
-    const res = await web.fetchMetadata({ url: "https://public.test/x", kind: "metadata" });
     assert.equal(res.via, "direct");
     assert.equal(proxy.calls, 0);
   }
@@ -188,19 +177,23 @@ test("shipped webapp uses the shared proxy policy (no inline duplicate)", () => 
   assert.ok(mainJs.includes("./proxyTransport.js"), "generated main.js must import the shared transport mirror");
 });
 
-test("proxy opt-out is wired from the idle view to the webapp", () => {
+test("proxy fallback is unconditional; no opt-out UI remains; 250 ms direct timeout", () => {
   const viewTs = fs.readFileSync(
     path.join(REPO_ROOT, "packages", "shared-ui", "src", "view.ts"),
     "utf8",
   );
-  assert.ok(viewTs.includes("dz-proxy-optin"), "idle view renders the proxy toggle");
-  assert.ok(viewTs.includes("onToggleProxyOptOut"), "view reports toggle changes");
+  assert.ok(!viewTs.includes("dz-proxy-optin"), "idle view must not render the proxy toggle");
+  assert.ok(!viewTs.includes("onToggleProxyOptOut"), "view must not report toggle changes");
   const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
-  assert.ok(mainTs.includes("onToggleProxyOptOut"), "webapp handles the toggle");
-  assert.ok(mainTs.includes("proxyOptOut"), "webapp keeps session opt-out state");
+  assert.ok(!mainTs.includes("onToggleProxyOptOut"), "webapp must not handle the toggle");
+  assert.ok(!mainTs.includes("proxyOptOut"), "webapp must not keep session opt-out state");
   assert.ok(
-    mainTs.includes("isProxyEligible({") && mainTs.includes("proxyOptOut }"),
-    "eligibility check honors the session opt-out",
+    mainTs.includes("DIRECT_METADATA_TIMEOUT_MS = 250"),
+    "direct metadata fetch uses a 250 ms timeout before the proxy takes over",
+  );
+  assert.ok(
+    mainTs.includes("fetchDirect(url, headers, undefined, DIRECT_METADATA_TIMEOUT_MS)"),
+    "metadata discovery applies the 250 ms direct timeout",
   );
 });
 

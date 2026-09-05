@@ -55,7 +55,7 @@ Focused targets are:
 | `wasm` | WASM portability, bindings, transcripts, and memory ownership |
 | `browser` | workers, transports, decoding, canvases, caching, and browser harness |
 | `ui` | shared UI components, controller, accessibility, and host-neutral behavior |
-| `web` | website direct-first transport, metadata CORS proxy fallback, opt-out, and cross-browser end-to-end behavior |
+| `web` | website direct-first transport, metadata CORS proxy fallback, and cross-browser end-to-end behavior |
 | `native` | native runtime, CLI, encoders, cache, and legacy parity |
 | `desktop` | Tauri integration, integration registration, updater fixtures, and E2E |
 | `extension` | manifests, scanning, browser-session fetch, permissions, and browser E2E |
@@ -115,11 +115,13 @@ truncation, malformed responses, cancellation, and proxy security. It binds to
 loopback on allocated ports and public-network fallback is forbidden.
 
 Website transport scenarios assert the full policy matrix: direct browser
-success makes no proxy request; only a classified CORS or network failure can
-cause automatic metadata proxy fallback; the fallback has no per-attempt consent prompt;
+success makes no proxy request; only a classified CORS or network failure (or a
+direct fetch that does not complete within the 250 ms metadata window) can
+cause automatic metadata proxy fallback;
+the fallback has no per-attempt consent prompt and no opt-out;
 and the website reports direct browser fetch and metadata CORS proxy transport
 states and transitions.
-Proxy opt-out must produce no new proxy request. Authentication, authorization,
+Authentication, authorization,
 ordinary HTTP, parse, and decode failures do not activate the proxy, nor do
 private, local, signed, token-bearing, or otherwise credential-requiring
 metadata requests; tile requests never use the proxy at all. The proxy security
@@ -158,7 +160,7 @@ The browser-runtime display suites verify that tainted display never enables
 readable bytes: the image remains visible, `originClean` becomes false, and
 pixel reads, `toBlob`, and `toDataURL` are guarded. The website suites verify
 direct-first transport, metadata CORS proxy fallback classification, and the
-opt-out. Full cross-browser E2E runs under `test web` when browsers are
+automatic 250 ms direct-metadata timeout. Full cross-browser E2E runs under `test web` when browsers are
 installed; otherwise the unit matrix reports the narrowed scope.
 
 ## Cross-runtime guarantees

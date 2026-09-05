@@ -80,10 +80,8 @@ function isPrivateOrLocalHostname(hostname: string): boolean {
 
 export function isProxyEligible(
   req: WebFetchRequest,
-  opts: { proxyOptOut: boolean },
 ): { eligible: boolean; reason: string } {
   if (req.kind === "tile") return { eligible: false, reason: "tile-never-proxied" };
-  if (opts.proxyOptOut) return { eligible: false, reason: "proxy-opt-out" };
   if (req.requiresCookies) return { eligible: false, reason: "cookie-requiring" };
   if (req.requiresAuth) return { eligible: false, reason: "auth-dependent" };
   if (hasCredentialHeader(req.headers)) return { eligible: false, reason: "credential-header" };
@@ -104,23 +102,15 @@ export function createWebIntegration(deps: {
   direct: DirectLike;
   proxy: ProxyLike;
   onTransport?: (label: string) => void;
-  proxyOptOut?: boolean;
   capabilities?: { extensionAvailable?: boolean; nativeAvailable?: boolean };
 }): {
   fetchMetadata(req: WebFetchRequest): Promise<{ via: string; result: unknown }>;
   fetchTile(req: WebFetchRequest): Promise<{ via: string; result: unknown }>;
   getHandoffSuggestions(): string[];
-  setProxyOptOut(v: boolean): void;
   isProxyEligible(req: WebFetchRequest): { eligible: boolean; reason: string };
 } {
-  let proxyOptOut = deps.proxyOptOut ?? false;
-
-  function setProxyOptOut(v: boolean): void {
-    proxyOptOut = v;
-  }
-
   function eligible(req: WebFetchRequest): { eligible: boolean; reason: string } {
-    return isProxyEligible(req, { proxyOptOut });
+    return isProxyEligible(req);
   }
 
   async function fetchMetadata(req: WebFetchRequest): Promise<{ via: string; result: unknown }> {
@@ -159,5 +149,5 @@ export function createWebIntegration(deps: {
     return out;
   }
 
-  return { fetchMetadata, fetchTile, getHandoffSuggestions, setProxyOptOut, isProxyEligible: eligible };
+  return { fetchMetadata, fetchTile, getHandoffSuggestions, isProxyEligible: eligible };
 }

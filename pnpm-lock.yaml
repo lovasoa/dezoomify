@@ -8,4 +8,14 @@ importers:
 
   .: {}
 
+  apps/desktop: {}
+
+  apps/extension: {}
+
+  packages/browser-runtime: {}
+
   packages/protocol-ts: {}
+
+  packages/shared-ui: {}
+
+  packages/wasm-harness: {}

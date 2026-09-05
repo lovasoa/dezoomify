@@ -54,10 +54,8 @@ function isPrivateOrLocalHostname(hostname        )          {
 
 export function isProxyEligible(
   req                 ,
-  opts                          ,
 )                                        {
   if (req.kind === "tile") return { eligible: false, reason: "tile-never-proxied" };
-  if (opts.proxyOptOut) return { eligible: false, reason: "proxy-opt-out" };
   if (req.requiresCookies) return { eligible: false, reason: "cookie-requiring" };
   if (req.requiresAuth) return { eligible: false, reason: "auth-dependent" };
   if (hasCredentialHeader(req.headers)) return { eligible: false, reason: "credential-header" };
@@ -79,14 +77,8 @@ export function createWebIntegration(deps
  )
 
   {
-  let proxyOptOut = deps.proxyOptOut ?? false;
-
-  function setProxyOptOut(v         )       {
-    proxyOptOut = v;
-  }
-
   function eligible(req                 )                                        {
-    return isProxyEligible(req, { proxyOptOut });
+    return isProxyEligible(req);
   }
 
   async function fetchMetadata(req                 )                                            {
@@ -125,5 +117,5 @@ export function createWebIntegration(deps
     return out;
   }
 
-  return { fetchMetadata, fetchTile, getHandoffSuggestions, setProxyOptOut, isProxyEligible: eligible };
+  return { fetchMetadata, fetchTile, getHandoffSuggestions, isProxyEligible: eligible };
 }

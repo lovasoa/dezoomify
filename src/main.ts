@@ -27,14 +27,19 @@ let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
 let currentSeq = 0;
 let activeTransport: string | null = null;
-/** User opt-out for the metadata CORS proxy (UI toggle; default allows fallback). */
-let proxyOptOut = false;
 let client: DiscoveryClient | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
 
 /** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
+
+/**
+ * Short timeout for the direct metadata fetch: if the site does not answer
+ * within 250 ms, the eligible metadata proxy takes over automatically.
+ * Tiles keep the full 30 s timeout (they never use the proxy).
+ */
+export const DIRECT_METADATA_TIMEOUT_MS = 250;
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
 let requestSeq = 0;
@@ -229,9 +234,14 @@ interface DirectOutcome {
   bytes?: ArrayBuffer;
 }
 
-async function fetchDirect(url: string, headers?: Record<string, string>, signal?: AbortSignal): Promise<DirectOutcome> {
+async function fetchDirect(
+  url: string,
+  headers?: Record<string, string>,
+  signal?: AbortSignal,
+  ms: number = REQUEST_TIMEOUT_MS,
+): Promise<DirectOutcome> {
   const reqId = noteRequestStart("direct");
-  const combined = timeoutSignal(signal);
+  const combined = timeoutSignal(signal, ms);
   try {
     const res = await fetch(url, { headers, signal: combined.signal, credentials: "omit" });
     if (!res.ok) {
@@ -246,7 +256,7 @@ async function fetchDirect(url: string, headers?: Record<string, string>, signal
     if (signal?.aborted) return { outcome: "cancelled" };
     const name = (e as { name?: string })?.name;
     if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
-      pushLog(`Request timed out after 30 s: ${shortUrl(url)}`);
+      pushLog(`Direct fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
       return { outcome: "network-error" };
     }
     return { outcome: "network-error" };
@@ -319,14 +329,14 @@ async function fetchMetadataFor(
   headers: Record<string, string>,
 ): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }> {
   activeTransport = DIRECT_LABEL;
-  const direct = await fetchDirect(url, headers);
+  const direct = await fetchDirect(url, headers, undefined, DIRECT_METADATA_TIMEOUT_MS);
   let via = "direct";
   let bytes: ArrayBuffer | null = null;
   if (direct.outcome === "readable" && direct.bytes) {
     bytes = direct.bytes;
   } else if (
     direct.outcome === "network-error" &&
-    isProxyEligible({ url, kind: "metadata", headers }, { proxyOptOut }).eligible
+    isProxyEligible({ url, kind: "metadata", headers }).eligible
   ) {
     activeTransport = PROXY_LABEL;
     via = "proxy";
@@ -586,7 +596,6 @@ let viewCtx: ViewContext = {
   },
   originClean: true,
   initialUrl: undefined,
-  proxyOptOut: false,
 };
 
 function update(): void {
@@ -651,12 +660,6 @@ function update(): void {
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();
-      },
-      onToggleProxyOptOut(optOut: boolean) {
-        // Session-scoped only (no storage effect). The checkbox already
-        // reflects the choice, so no re-render here (it would steal focus).
-        proxyOptOut = optOut;
-        viewCtx.proxyOptOut = optOut;
       },
       onCopyShareLink() {
         const href = (typeof window !== "undefined" && window.location && window.location.href) || "";

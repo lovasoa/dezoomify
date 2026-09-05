@@ -174,12 +174,14 @@ Preserve Dezoomify's distinctive visual identity and atmospheric parchment aesth
 - Route operations that require metadata bytes, header inspection, image
   decoding into JavaScript-readable pixels, hashing, pixel persistence, or clean
   programmatic save through a readable-byte fetch. On the website, try a direct
-  browser fetch first. After a classified CORS/network failure, automatically
+  browser fetch first with a short (250 ms) completion window. After a
+  classified CORS/network failure or a direct fetch that does not complete in
+  that window, automatically
   retry eligible public non-credential metadata requests through the metadata
-  CORS proxy while the user's proxy setting permits it; the proxy serves
-  metadata only, never tiles. Provide an opt-out and do not show a per-attempt
+  CORS proxy; the proxy serves
+  metadata only, never tiles. Do not show a per-attempt
   consent prompt. Keep the active transport clearly visible. Test direct
-  success, automatic metadata proxy fallback, proxy opt-out, transport
+  success, automatic metadata proxy fallback, the direct-metadata timeout, transport
   visibility, tainted display, `originClean` guards, user-agent save
   availability, and unsupported readable operations independently.
 - In the extension, normally use browser-session fetch with narrowly granted
