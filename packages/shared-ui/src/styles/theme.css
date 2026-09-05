@@ -842,13 +842,6 @@ abbr[title] {
   flex: 1 1 auto;
 }
 
-.dz-share-hint {
-  margin: 0;
-  font-size: 0.82rem;
-  color: var(--dz-text-muted);
-  text-align: center;
-}
-
 .dz-log {
   margin-top: 0.5rem;
   max-height: 12rem;

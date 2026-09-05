@@ -504,11 +504,6 @@ function mountInputSection(
   btnRow.appendChild(submitBtn);
   form.appendChild(btnRow);
 
-  const shareHint = document.createElement("p");
-  shareHint.className = "dz-share-hint";
-  shareHint.textContent = "A shareable link appears in the address bar once you start — send it to reopen the same image.";
-  form.appendChild(shareHint);
-
   body.appendChild(form);
   parent.appendChild(body);
 }
