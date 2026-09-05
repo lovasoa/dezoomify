@@ -53,16 +53,6 @@ impl JobError {
     }
 
     #[must_use]
-    pub fn invalid_config(detail: String) -> Self {
-        Self::new("job.invalid-config", detail)
-    }
-
-    #[must_use]
-    pub fn resource_limit(detail: String) -> Self {
-        Self::new("job.resource-limit", detail)
-    }
-
-    #[must_use]
     pub fn overflow(detail: &str) -> Self {
         Self::new("job.overflow", format!("counter overflow: {detail}"))
     }

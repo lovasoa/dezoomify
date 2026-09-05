@@ -23,9 +23,3 @@ pub fn machine_completed(job: &str, seq: u64, output_hash: &str) -> String {
     })
     .to_string()
 }
-
-#[must_use]
-#[allow(dead_code)]
-pub fn human_progress(acquired: u64, total: u64) -> String {
-    format!("progress {acquired}/{total}")
-}

@@ -322,23 +322,6 @@ pub struct PositionedTile {
     pub processing: ProcessingRecipe,
 }
 
-#[derive(Debug)]
-struct ExplicitPositioned(Arc<[PositionedTile]>);
-
-impl PositionedGenerator for ExplicitPositioned {
-    fn count(&self) -> u64 {
-        self.0.len() as u64
-    }
-
-    fn tile(&self, ordinal: u64) -> Result<PositionedTile, TileSourceError> {
-        usize::try_from(ordinal)
-            .ok()
-            .and_then(|index| self.0.get(index))
-            .cloned()
-            .ok_or_else(|| TileSourceError::InvalidTile("tile ordinal is out of bounds".into()))
-    }
-}
-
 #[derive(Clone)]
 pub struct Positioned {
     level: StableId,
@@ -357,15 +340,6 @@ impl fmt::Debug for Positioned {
 }
 
 impl Positioned {
-    #[must_use]
-    pub fn from_tiles(
-        level: StableId,
-        canvas_size: Option<Vec2d>,
-        tiles: Vec<PositionedTile>,
-    ) -> Self {
-        Self::from_generator(level, canvas_size, ExplicitPositioned(tiles.into()))
-    }
-
     pub(crate) fn from_generator(
         level: StableId,
         canvas_size: Option<Vec2d>,
