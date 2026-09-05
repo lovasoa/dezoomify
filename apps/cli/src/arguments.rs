@@ -44,7 +44,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 max_width = Some(width);
             }
             "--help" | "-h" => return Err(help()),
-            "--version" => return Err("dezoomify-cli 1.0.0".to_string()),
+            "--version" => return Err("dezoomify-cli 3.0.0".to_string()),
             "-H" => {
                 i += 1;
                 let raw = args

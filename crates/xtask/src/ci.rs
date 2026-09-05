@@ -1,4 +1,4 @@
-//! `cargo xtask ci <lane>|local`, `test all|live`, `release plan|build|verify`.
+//! `cargo xtask ci <lane>|local`, `test all|live`.
 
 use std::process::Command;
 
@@ -71,69 +71,6 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
     super::live::test_live(args)
 }
 
-pub fn release(args: &[String]) -> Result<(), String> {
-    match args.first().map(String::as_str) {
-        Some("plan") => {
-            // Honest stub: no plan file is written; test-channel values only.
-            println!("release plan: stub-ok (no file written; test channel 1.0.0; protocol 1.0)");
-            Ok(())
-        }
-        Some("build") => {
-            // Honest stub: no artifacts are built or hashed here; real
-            // packaging happens on native OS runners with signing.
-            println!("release build: stub-ok (no artifacts built; test-channel placeholder)");
-            Ok(())
-        }
-        Some("verify") => release_verify(&args[1..]),
-        Some(other) => Err(format!("unknown release subcommand '{other}'")),
-        None => Err("usage: cargo xtask release <plan|build|verify>".to_string()),
-    }
-}
-
-fn release_verify(args: &[String]) -> Result<(), String> {
-    // Forms: `release verify` (test channel) or `release verify
-    // --plan <path> --artifacts <path>` (plan/artifact pair must exist).
-    // `--candidate` is dispatched by main.rs before reaching here.
-    if args.is_empty() {
-        // Honest stub: fixture tamper checks live in protocol/check; no real
-        // public-key artifact verification happens in this environment.
-        println!(
-            "release verify: stub-ok (no signed artifacts verified; test-channel placeholder)"
-        );
-        return Ok(());
-    }
-    let mut plan: Option<&String> = None;
-    let mut artifacts: Option<&String> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--plan" => {
-                i += 1;
-                plan = Some(args.get(i).ok_or("missing --plan <path>")?);
-            }
-            "--artifacts" => {
-                i += 1;
-                artifacts = Some(args.get(i).ok_or("missing --artifacts <path>")?);
-            }
-            other => return Err(format!("unknown release verify arg '{other}'")),
-        }
-        i += 1;
-    }
-    let (Some(plan), Some(artifacts)) = (plan, artifacts) else {
-        return Err(
-            "usage: cargo xtask release verify --plan <path> --artifacts <path>".to_string(),
-        );
-    };
-    for path in [plan, artifacts] {
-        if !super::repo_root().join(path).is_file() && !std::path::Path::new(path).is_file() {
-            return Err(format!("missing release file {path}"));
-        }
-    }
-    // Honest scope: existence only; no signature/hash/capability verification.
-    println!("release verify --plan {plan} --artifacts {artifacts}: stub-ok (existence only)");
-    Ok(())
-}
-
 fn run_cargo(args: &[&str]) -> Result<(), String> {
     let status = Command::new("cargo")
         .args(args)
@@ -152,8 +89,4 @@ mod tests {
     fn live_dry_run() {
         assert!(super::test_live(&["--dry-run".to_string(), "--fixtures".to_string()]).is_ok());
     }
-
-    // NOTE: no test for `release plan`; it is an honest, documented stub that
-    // writes nothing and prints "stub-ok". A test asserting it returns Ok(())
-    // would be a tautology that masks its unimplemented scope.
 }

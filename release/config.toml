@@ -1,6 +1,6 @@
 [release]
-version = "1.0.0"
-channel = "test"
+version = "3.0.0"
+channel = "stable"
 
 [protocol]
 range = "1.0"

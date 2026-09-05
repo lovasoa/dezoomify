@@ -226,6 +226,7 @@ const coreCases = [
   c("VLS", fixture("vls/zoom/1"), "VLS", "/image/tiler/square/fixture/0/0/0"),
   c("Hungaricana", fixture("hungaricana/imagesize/sample.ecw"), "Hungaricana", "image/sample.ecw/"),
   c("WMTS", fixture("wmts/WMTSCapabilities.xml"), "WMTS", "/wmts/EPSG3857/0/10/10.jpg"),
+  c("WMTS KVP endpoint", fixture("wmts"), "WMTS", "/wmts/EPSG3857/0/10/10.jpg"),
   c("ArcGIS", fixture("arcgis/MapServer"), "ArcGIS MapServer", "/arcgis/MapServer/tile/7/3/4"),
   c("pnav", fixture("entity/OBJECT/1"), "pnav", "/fixtures/pnav/image.jpg?w=2000&h=2000&cl=0&ct=0&cw=512&ch=512"),
 ];

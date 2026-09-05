@@ -118,14 +118,24 @@ pub struct Annotation {
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
-#[serde(untagged)] // AnnotationBody can be a single ImageBody or potentially an array or other types.
-// For "painting" motivation, it's typically a single ImageBody object.
-// If it can be an array, this definition needs adjustment.
-// For now, assuming it's a single object or can be missing (handled by Option in usage or default)
+#[serde(untagged)] // AnnotationBody can be a single ImageBody, an array of them, or something else.
 pub enum AnnotationBody {
     Image(ImageBody),
+    Multiple(Vec<ImageBody>),
     #[default]
     EmptyOrUnsupported, // Catch-all for missing body or types we don't handle
+}
+
+impl AnnotationBody {
+    /// The image bodies carried by this annotation (empty when missing or
+    /// unsupported). Painting annotations choose the first usable body.
+    fn images(&self) -> &[ImageBody] {
+        match self {
+            AnnotationBody::Image(body) => std::slice::from_ref(body),
+            AnnotationBody::Multiple(bodies) => bodies,
+            AnnotationBody::EmptyOrUnsupported => &[],
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -294,7 +304,7 @@ impl Manifest {
                 // if annotation_page.annotation_page_type != "AnnotationPage" { continue; }
 
                 for annotation in &annotation_page.items {
-                    if let AnnotationBody::Image(image_body) = &annotation.body {
+                    for image_body in annotation.body.images() {
                         // Expect "Image" type for the body, but rely on service presence.
                         // if image_body.image_type != "Image" { continue; }
 
@@ -749,6 +759,32 @@ mod tests {
             0,
             "Expected no image infos from empty or unsupported bodies"
         );
+    }
+
+    #[test]
+    fn test_array_annotation_bodies_extract_each_image() {
+        let json_data = r#"
+        {
+          "id": "manifest-array-body", "type": "Manifest",
+          "items": [{ "id": "c1", "type": "Canvas", "items": [{ "id": "ap1", "type": "AnnotationPage", "items": [
+            { "id": "a1", "type": "Annotation", "motivation": "painting",
+              "body": [
+                { "id": "https://example.org/images/thumbnail.jpg", "type": "Image" },
+                { "id": "img_full.jpg", "type": "Image", "service": [{ "id": "svc_full", "type": "ImageService3" }] }
+              ]
+            },
+            { "id": "a2", "type": "Annotation", "motivation": "painting", "body": [] }
+          ]}]}]
+        }
+        "#;
+        let manifest: Manifest = serde_json::from_str(json_data).unwrap();
+        let infos = manifest.extract_image_infos("https://example.org/manifest");
+        assert_eq!(infos.len(), 2);
+        assert_eq!(
+            infos[0].image_uri,
+            "https://example.org/images/thumbnail.jpg"
+        );
+        assert_eq!(infos[1].image_uri, "https://example.org/svc_full/info.json");
     }
 
     #[test]

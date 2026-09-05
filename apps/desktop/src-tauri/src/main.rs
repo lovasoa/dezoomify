@@ -6,5 +6,5 @@
 // This stub keeps the standalone manifest checkable offline.
 
 fn main() {
-    println!("dezoomify-desktop 0.1.0 (phase-11 shell)");
+    println!("dezoomify-desktop 3.0.0");
 }

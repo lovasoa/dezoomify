@@ -1,7 +1,8 @@
 //! Protocol DTO shape test: a representative catalog encodes to canonical
 //! bytes and decodes back unchanged. This pins the wire shape (field names,
 //! ordering stability through the codec, exact dimensions). The core→DTO
-//! projection itself is not implemented yet, so it is not tested here.
+//! projection itself lives in `dezoomify-job` (the module depends on both
+//! core and protocol without inverting a boundary) and is tested there.
 
 use dezoomify_protocol::dto::*;
 

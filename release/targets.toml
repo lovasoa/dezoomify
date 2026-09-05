@@ -2,6 +2,17 @@
 name = "cli-linux-x86_64"
 os = "linux"
 
+# Desktop installers stay unavailable until the Tauri shell is real
+# (plan release-pipeline, owner decision 2026-09-05).
 [[target]]
 name = "desktop-windows-x86_64"
 os = "windows"
+available = false
+
+[[target]]
+name = "extension-chromium"
+os = "any"
+
+[[target]]
+name = "extension-firefox"
+os = "any"

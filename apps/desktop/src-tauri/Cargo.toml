@@ -1,6 +1,6 @@
 [package]
 name = "dezoomify-desktop"
-version = "0.1.0"
+version = "3.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Dezoomify desktop shell (phase-11 lean shell; Tauri SDK wiring deferred, config checked in)"

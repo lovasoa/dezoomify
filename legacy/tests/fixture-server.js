@@ -102,6 +102,10 @@ function fixtureFile(hostname, pathname) {
   const candidates = [basePath, ...extensions.map((ext) => `${basePath}${ext}`)];
   if (fs.existsSync(basePath) && fs.statSync(basePath).isDirectory()) {
     candidates.push(...extensions.map((ext) => path.join(basePath, `index${ext}`)));
+    // A service fixture directory also exposes its well-known capabilities
+    // document, so bare KVP endpoints (e.g. /wmts?service=WMTS&request=
+    // GetCapabilities) resolve like they would on a real server.
+    candidates.push(path.join(basePath, "WMTSCapabilities.xml"));
   }
 
   for (const candidate of candidates) {

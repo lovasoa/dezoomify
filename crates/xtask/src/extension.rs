@@ -19,7 +19,32 @@ pub fn build_extension(_args: &[String]) -> Result<(), String> {
             return Err(format!("manifest {rel} lacks manifest_version"));
         }
     }
-    println!("build extension: stub-ok (manifests verified; no zip packaged)");
+    // Package real store-shaped ZIPs for both listings via the same script
+    // the store-submission workflow uses, so local builds cannot diverge
+    // from what is uploaded.
+    let out_dir = super::repo_root().join("target/extension");
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("create target/extension: {e}"))?;
+    for browser in ["chromium", "firefox"] {
+        let zip = out_dir.join(format!("dezoomify-{browser}.zip"));
+        let status = Command::new("bash")
+            .arg("apps/extension/scripts/package-store.sh")
+            .arg(browser)
+            .arg(&zip)
+            .current_dir(super::repo_root())
+            .status()
+            .map_err(|e| format!("failed to run package-store.sh: {e}"))?;
+        if !status.success() {
+            return Err(format!("packaging {browser} extension failed"));
+        }
+        let size = std::fs::metadata(&zip)
+            .map_err(|e| format!("missing package {}: {e}", zip.display()))?
+            .len();
+        println!(
+            "build extension: packaged {} ({} bytes)",
+            zip.display(),
+            size
+        );
+    }
     Ok(())
 }
 
@@ -33,25 +58,36 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
 
 pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
     if args.first().map(String::as_str) == Some("--cleanup-only") {
-        // Honest stub: no registry/profile inspection here; only reports that
-        // the unit gate left no in-process registrations behind.
+        // Real cleanup: remove our per-user registrations (profile manifest
+        // files and, on Windows, HKCU registry values). The unit gate never
+        // registers anything in-process, so a clean report afterwards proves
+        // no residual registration.
         if args.len() > 1 {
             return Err(format!(
                 "unknown test native-messaging --cleanup-only argument(s): {}",
                 args[1..].join(" ")
             ));
         }
-        println!(
-            "test native-messaging --cleanup-only: stub-ok (no filesystem/registry inspection)"
-        );
+        let removed =
+            super::native_messaging::cleanup(&super::native_messaging::known_registrations())?;
+        if removed.is_empty() {
+            println!("test native-messaging --cleanup-only: ok (no registrations present)");
+        } else {
+            for entry in &removed {
+                println!("test native-messaging --cleanup-only: removed {entry}");
+            }
+        }
         return Ok(());
     }
-    // Protocol + secret-scope checks via extension unit tests: no real
-    // browser profiles touched. Browser-specific runs need installed browsers;
-    // fail closed for unknown engines instead of silently running the same suite.
+    // Protocol + secret-scope checks via extension unit tests, then real
+    // per-user registration inspection for the named engine. Browser-specific
+    // handshakes need installed browsers; unknown engines fail closed.
     if let Some(name) = args.strip_prefix(&["--browser".to_string()]) {
-        match name.first().map(String::as_str) {
-            Some("chromium") | Some("chrome") => {
+        match name
+            .first()
+            .and_then(|n| super::native_messaging::normalize_engine(n))
+        {
+            Some(engine) => {
                 if name.len() > 1 {
                     return Err(format!(
                         "unknown test native-messaging argument(s): {}",
@@ -59,22 +95,24 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
                     ));
                 }
                 run_node_glob("apps/extension/tests/unit")?;
+                let found = super::native_messaging::inspect_and_report(Some(engine))?;
                 println!(
-                    "test native-messaging --browser {}: stub-ok (unit API only; no browser profile)",
-                    name[0]
+                    "test native-messaging --browser {engine}: ok ({} registration(s) found)",
+                    found
                 );
                 return Ok(());
             }
-            Some(other) => {
+            None => {
+                let offered = name.first().map(String::as_str).unwrap_or("");
                 return Err(format!(
-                    "browser '{other}' unavailable (unit API only; no firefox/webkit profile here)"
+                    "browser '{offered}' unavailable (engines: chromium, chrome, firefox)"
                 ));
             }
-            None => return Err("missing --browser <name>".to_string()),
         }
     }
     super::reject_unknown_args("test native-messaging", args)?;
     run_node_glob("apps/extension/tests/unit")?;
+    super::native_messaging::inspect_and_report(None)?;
     println!("test native-messaging: ok");
     Ok(())
 }

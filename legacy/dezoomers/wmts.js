@@ -73,14 +73,53 @@ function xmlNumber(root, tagName) {
 
 const floor = (x) => Math.floor(x);
 
+/**
+ * Extracts the URL of a WMTS capabilities document from a service endpoint
+ * or viewer URL. Returns null when the URL already points at a capabilities
+ * document or does not look like a WMTS endpoint.
+ * @param {string} urlString
+ * @returns {string|null}
+ */
+function wmtsCapabilitiesUrl(urlString) {
+  let url;
+  try {
+    url = new URL(urlString);
+  } catch (e) {
+    return null;
+  }
+  // ArcGIS-style viewer pages carry the tile service in a basemapUrl query
+  // parameter (see the ArcGIS dezoomer for the MapServer variant).
+  const basemapUrl = url.searchParams.get("basemapUrl");
+  if (basemapUrl) {
+    const extracted = wmtsCapabilitiesUrl(basemapUrl);
+    if (extracted) return extracted;
+  }
+  if (!/\bwmts\b/i.test(urlString)) return null;
+  // REST-style capabilities URLs and explicit KVP GetCapabilities requests
+  // already are metadata URLs.
+  if (/wmtscapabilities(\.xml)?\/?$/i.test(url.pathname)) return null;
+  const request = [...url.searchParams.entries()].find(
+    ([name]) => name.toLowerCase() === "request"
+  );
+  if (request && request[1].toLowerCase() === "getcapabilities") return null;
+  // Otherwise treat the URL as a KVP service endpoint and make the
+  // capabilities request explicit.
+  const params = new URLSearchParams(url.search);
+  if (![...params.keys()].some((name) => name.toLowerCase() === "service")) {
+    params.set("service", "WMTS");
+  }
+  params.set("request", "GetCapabilities");
+  url.search = params.toString();
+  return url.href;
+}
+
 // See the standard: https://www.ogc.org/standards/wmts
 ZoomManager.addDezoomer({
   name: "WMTS",
   description: "OpenGIS Web Map Tile Service Implementation Standard",
   urls: [/\bwmts\b/i],
   findFile(baseUrl, callback) {
-    // metadata file URL extraction is not implemented yet
-    return callback(baseUrl);
+    callback(wmtsCapabilitiesUrl(baseUrl) || baseUrl);
   },
   open(url) {
     ZoomManager.getFile(url, { type: "xml" }, function (doc, xhr) {
