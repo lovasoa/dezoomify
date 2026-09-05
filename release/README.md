@@ -19,4 +19,4 @@ with digest verification at every transition; each stage fails closed.
   verbatim in the release notes when present.
 
 Working release trees (`plan.json`, artifacts, signatures) live under
-`dist/release/<version>/` and are never committed.
+`target/release-dist/<version>/` and are never committed.

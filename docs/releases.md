@@ -46,7 +46,9 @@ environment secret) and the public key lives at
 checks artifact names against the plan, and validates every signature. The
 publish stage verifies again, then creates the GitHub release from the
 planned commit with artifacts, checksums, signatures, and notes, and
-records the inventory at `release/checksums/<version>/SHA256SUMS`.
+records the inventory at `release/checksums/<version>/SHA256SUMS`. Working
+release trees live under `target/release-dist/<version>/` and are never
+committed; `target/` is used so website builds cannot clobber them.
 
 The `release-build`, `release-sign`, and `release-publish` workflows chain
 these stages by run id: the build workflow runs `cargo xtask ci local` on

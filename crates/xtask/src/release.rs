@@ -2,7 +2,8 @@
 //! pipeline. Every stage validates the previous stage's digests and fails
 //! closed on missing inputs, secrets, or tools (docs/releases.md).
 //!
-//! Layout under `dist/release/<version>/` (never committed):
+//! Layout under `target/release-dist/<version>/` (never committed; `target/`
+//! is chosen so website builds cannot clobber release trees):
 //!   plan.json      deterministic frozen release contract
 //!   notes.md       release notes (metadata + curated `release/notes/<v>.md`)
 //!   SHA256SUMS     aggregate digest manifest (published)
@@ -18,7 +19,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const ARTIFACTS_ROOT: &str = "dist/release";
+const ARTIFACTS_ROOT: &str = "target/release-dist";
 
 // ---------------------------------------------------------------------------
 // Release inventory inputs (release/*.toml, generated/*.json)
@@ -305,7 +306,7 @@ fn release_plan_at(base: &Path, version: &str) -> Result<PathBuf, String> {
             std::fs::read_to_string(&plan_path).map_err(|e| format!("read existing plan: {e}"))?;
         if existing != json {
             return Err(format!(
-                "plan {} already exists with different content; bump the version or remove dist/release/{version}",
+                "plan {} already exists with different content; bump the version or remove target/release-dist/{version}",
                 plan_path.display()
             ));
         }
@@ -417,7 +418,7 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
     let out = dir.join(&artifact);
     if out.exists() {
         return Err(format!(
-            "artifact {} already exists; remove dist/release/{}/{} to rebuild",
+            "artifact {} already exists; remove target/release-dist/{}/{} to rebuild",
             out.display(),
             plan.version,
             target
@@ -437,7 +438,7 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
     let fragment = dir.join("SHA256SUMS");
     if fragment.exists() {
         return Err(format!(
-            "digest fragment {} already exists; remove dist/release/{}/{} to rebuild",
+            "digest fragment {} already exists; remove target/release-dist/{}/{} to rebuild",
             fragment.display(),
             plan.version,
             target

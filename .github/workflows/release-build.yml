@@ -44,7 +44,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-plan
-          path: dist/release
+          path: target/release-dist
   build:
     needs: gate-and-plan
     runs-on: ubuntu-latest
@@ -69,14 +69,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh run download ${{ github.run_id }} -n release-plan -D dist
-          test -f "dist/release/$(cat release/config.toml | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)/plan.json"
+          test -f "target/release-dist/$(cat release/config.toml | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)/plan.json"
       - run: |
           v="$(sed -n 's/^version = "\(.*\)"/\1/p' release/config.toml | head -1)"
-          cargo xtask release build --plan "dist/release/$v/plan.json" --target ${{ matrix.target }}
+          cargo xtask release build --plan "target/release-dist/$v/plan.json" --target ${{ matrix.target }}
           # Upload only the target dir; plan.json/notes.md travel separately
           # so the sign job can reassemble the tree without collisions.
-          rm "dist/release/$v/plan.json" "dist/release/$v/notes.md"
+          rm "target/release-dist/$v/plan.json" "target/release-dist/$v/notes.md"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-artifacts-${{ matrix.target }}
-          path: dist/release
+          path: target/release-dist

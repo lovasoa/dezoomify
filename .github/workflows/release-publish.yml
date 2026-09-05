@@ -34,15 +34,15 @@ jobs:
         run: |
           v="$(sed -n 's/^version = "\(.*\)"/\1/p' release/config.toml | head -1)"
           gh run download ${{ inputs.run_id }} -n release-signed -D dist
-          mkdir -p dist/release
-          mv "dist/$v" "dist/release/"
-          test -f "dist/release/$v/SHA256SUMS"
+          mkdir -p target/release-dist
+          mv "dist/$v" "target/release-dist/"
+          test -f "target/release-dist/$v/SHA256SUMS"
       # Digest verification at the publish transition (docs/releases.md):
       # verify recomputes every digest and checks every GPG signature before
       # anything is published.
       - run: |
           v="$(sed -n 's/^version = "\(.*\)"/\1/p' release/config.toml | head -1)"
-          cargo xtask release verify --plan "dist/release/$v/plan.json" --artifacts "dist/release/$v"
+          cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
       - name: Publish GitHub release and record the checksum inventory
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,7 +50,7 @@ jobs:
           v="$(sed -n 's/^version = "\(.*\)"/\1/p' release/config.toml | head -1)"
           draft=""
           if [ "${{ inputs.draft }}" = "true" ]; then draft="--draft"; fi
-          cargo xtask release publish --plan "dist/release/$v/plan.json" --artifacts "dist/release/$v" $draft
+          cargo xtask release publish --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v" $draft
           if [ -f "release/checksums/$v/SHA256SUMS" ]; then
             git config user.name "dezoomify release bot"
             git config user.email "noreply@dezoomify.ophir.dev"
