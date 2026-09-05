@@ -1,35 +1,65 @@
 # Repository Guide
 
-Use this file for repository-wide implementation rules. Apply a more specific
-`AGENTS.md` when one exists below the file being changed.
+Repository-wide rules for working in this repo. Apply a more specific
+`AGENTS.md` when one exists below the file being changed. Specialized
+contracts live in [`docs/`](docs/) and component READMEs; this file links to
+them instead of duplicating them.
 
 ## Current State
 
-- Treat this checkout as a scaffold and migration workspace. The only imported
-  implementations currently live under `migration-sources/`; scaffold README
-  files describe boundaries, not completed components.
-- Implement only the current phase of an accepted plan in [`plans/`](plans/).
-  Do not opportunistically fill empty crates or applications.
-- Preserve the three imported roots and their retained Git history. Do not edit,
-  move, reformat, or delete anything under `migration-sources/` unless an
-  explicit migration-plan step requires that exact change. Do not remove legacy
-  material before the phase-14 parity and cutover gates approve removal.
+- The migration (phases 00–15) and the post-migration
+  [`webapp-cli-completion`](plans/webapp-cli-completion.md) plan (C1–C7) are
+  complete. No plan is currently active. Status and evidence:
+  [`plans/README.md`](plans/README.md),
+  [`docs/migration/gates.md`](docs/migration/gates.md), and open exceptions
+  (E02, E04, E05, E06) in
+  [`docs/migration/exceptions.md`](docs/migration/exceptions.md).
+- The website and CLI run the real pipeline end to end. The extension has
+  explicit-action scan and store packaging (listing pending review, E05). The
+  desktop app is a lean Tauri shell without an installer (E04).
+- `migration-sources/` holds the three imported legacy trees with retained
+  Git history. Treat them as read-only evidence: never edit, move, reformat,
+  or delete anything under them unless an explicit accepted-plan step
+  requires that exact change.
+- Implement only the current phase of an accepted plan in
+  [`plans/`](plans/). When no plan covers the work, propose one instead of
+  starting multi-phase changes. Do not opportunistically fill empty crates or
+  applications.
 
 ## Sources Of Truth
 
 Resolve conflicts in this order:
 
-1. Follow the user's explicit task and scope.
-2. Follow the active plan and its accepted decisions.
-3. Follow contracts and architecture in `docs/`.
-4. Follow this file and any narrower `AGENTS.md`.
-5. Follow the nearest component README for ownership and dependency boundaries.
-6. Consult `migration-sources/` for legacy behavior and parity evidence, not as
+1. The user's explicit task and scope.
+2. The active plan and its accepted decisions.
+3. Contracts and architecture in [`docs/`](docs/).
+4. This file and any narrower `AGENTS.md`.
+5. The nearest component README for ownership and dependency boundaries.
+6. `migration-sources/` for legacy behavior and parity evidence, never as
    authority for the target architecture.
 
 Stop and ask one focused question when higher-priority sources conflict or a
 decision affects a public protocol, security boundary, persisted data, or more
 than the current plan phase.
+
+## Reference Docs
+
+| Topic | Source |
+|---|---|
+| Architecture, crate boundaries, data flow | [`docs/architecture.md`](docs/architecture.md) |
+| Job engine (phases, retries, cancellation) | [`docs/job-engine.md`](docs/job-engine.md) |
+| Browser runtime, transports, tainted canvas | [`docs/browser-runtime.md`](docs/browser-runtime.md) |
+| Extension behavior and packaging | [`docs/extension.md`](docs/extension.md) |
+| Native apps (CLI, desktop, native messaging) | [`docs/native-apps.md`](docs/native-apps.md) |
+| Protocol (commands, events, handoff, versions) | [`docs/protocol.md`](docs/protocol.md) |
+| Errors and typed recovery | [`docs/errors.md`](docs/errors.md) |
+| Security and credential rules | [`docs/security.md`](docs/security.md) |
+| Testing policy, fixtures, live checks | [`docs/testing.md`](docs/testing.md) |
+| Workflows, builds, task grammar | [`docs/development.md`](docs/development.md), [`crates/xtask/README.md`](crates/xtask/README.md) |
+| UI visual language | [`packages/shared-ui/AGENTS.md`](packages/shared-ui/AGENTS.md) |
+| User-facing documentation | [`docs/user/README.md`](docs/user/README.md) |
+| Releases and operations | [`docs/releases.md`](docs/releases.md), [`docs/operations.md`](docs/operations.md), [`docs/incident-response.md`](docs/incident-response.md) |
+| Migration evidence and decisions | [`docs/migration/`](docs/migration/) |
 
 ## Vocabulary
 
@@ -70,27 +100,31 @@ one.
   abstractions, dependencies, or public API.
 - Keep commits atomic when commits are requested. Never commit, amend, push,
   force-push, rewrite history, or create a pull request without explicit user
-  instruction, except for the standing authorization below.
-- Standing authorization (owner, 2026-09-05): commit and push freely to the
-  `ng` branch of `lovasoa/dezoomify` as work completes. Never force-push.
+  instruction, except for the standing authorizations below.
+- Standing git authorization (owner, 2026-09-05): commit and push freely to
+  the `ng` branch of `lovasoa/dezoomify` as work completes. Never force-push.
   Never commit to, push to, or rewrite `main` (or any other branch) without a
   fresh explicit instruction; the `ng` to `main` promotion happens only when
   the owner declares the work done.
-- Standing store authorization (owner, 2026-09-05): as extension work completes,
-  package the store payload and keep the existing Chrome Web Store listing in
-  compliance and resubmitted, without per-step confirmation. This covers running
-  `apps/extension/scripts/package-store.sh`, invoking the `store-submit`
-  workflow via `gh workflow run` with `upload`/`publish` for the Chromium
-  listing ID in `release/config.toml` (`iapjjopjejpelnfdonefbffahmcndfbm`), and
-  committing any packaging or manifest-compliance changes those steps require.
-  Never create a new store item, never publish to Firefox/AMO, and fail closed
-  (do not upload) when store secrets are absent.
-- Inspect `git status` and the final diff before declaring completion. Never use
-  destructive Git commands to clean a working tree.
+- Standing store authorization (owner, 2026-09-05): as extension work
+  completes, package the store payload and keep the existing Chrome Web Store
+  listing in compliance and resubmitted, without per-step confirmation. This
+  covers running `apps/extension/scripts/package-store.sh`, invoking the
+  `store-submit` workflow via `gh workflow run` with `upload`/`publish` for
+  the Chromium listing ID in `release/config.toml`
+  (`iapjjopjejpelnfdonefbffahmcndfbm`), and committing any packaging or
+  manifest-compliance changes those steps require. Never create a new store
+  item, never publish to Firefox/AMO, and fail closed (do not upload) when
+  store secrets are absent.
+- Inspect `git status` and the final diff before declaring completion. Never
+  use destructive Git commands to clean a working tree.
+- Keep this file current: when a plan's status changes, or when commands,
+  boundaries, vocabulary, or reference docs change, update the affected
+  section here in the same change.
 
-## Architecture Boundaries
+## Architecture
 
-Keep dependency direction toward stable, portable layers:
+Dependencies point inward toward stable, portable layers:
 
 ```text
 dezoomify-core       dezoomify-protocol
@@ -100,172 +134,14 @@ dezoomify-core       dezoomify-protocol
    dezoomify-native   dezoomify-wasm
 ```
 
-- Keep `dezoomify-core` deterministic and pure. It may parse supplied bytes,
-  describe discovery requests, validate catalogs and grids, and produce tile
-  and processing plans. It must not perform network or filesystem I/O, decode
-  images, read clocks or environment state, spawn tasks, or depend on Tokio,
-  Reqwest, browser APIs, CLI/UI frameworks, or application crates. A logging
-  facade is allowed; runtime logging configuration is not.
-- Keep `dezoomify-protocol` transport-neutral and independent of core internals.
-  It owns versioned protocol types, commands, events, typed error shapes, and schema
-  compatibility. It must not perform work or depend on applications, hosts, or
-  UI packages.
-- Put portable job orchestration, cancellation, progress, retries, and host
-  capability requests in `dezoomify-job`. Depend only on `core`, `protocol`, and
-  small portable libraries; inject all I/O and time.
-- Keep HTTP, filesystem, cache, image codec, and native concurrency code in
-  `dezoomify-native`. Put browser APIs, workers, JS interop, and browser storage
-  code in `dezoomify-wasm` and `packages/browser-runtime`.
-- Keep each app self-contained. Do not import one app from another,
-  put reusable domain logic in an app, or let crates depend on packages/apps.
-- Keep `shared-ui` host-neutral. Access jobs and host capabilities through
-  protocol/runtime interfaces, never through native, extension, or raw browser
-  globals.
-- Add an architecture test whenever a boundary can be enforced mechanically.
-
-## Visual Language And UI Guidelines
-
-Preserve Dezoomify's distinctive visual identity and atmospheric parchment aesthetic; avoid generic SaaS blue/gray cards or sci-fi terminal clichés. The interface serves an art and cultural heritage audience (historians, researchers, archivists, artists) who value craftsmanship, dignity, and visual calm:
-- **Logo & Heritage:** Use the authentic Dezoomify logo everywhere: a sapphire blue magnifying glass (`#3c7bff`) framing internal coral-salmon tile quadrants (`#ff8080`), symbolizing high-resolution image tile inspection and assembly. In headers and navigation, pair the logo with clean title typography and dedicated user guidance triggers (`Browser Extension`, `Desktop App`, right-anchored `Help`, and bold `Donate`). Do not link to obsolete legacy external sites (e.g. `dezoomify-rs.ophir.dev` or GitHub Pages extension docs); reference our own applications with step-by-step user-guiding instructions. Avoid duplicating top navigation links in the bottom footer.
-- **Atmosphere & Palette (No Sci-Fi / LLM Smell):** Page background is cool off-white (`#fcfeff`) in light mode, and warm museum gallery charcoal (`#181615`) in dark mode (never cold blue-black). Surface cards and navigation bar use the signature warm parchment/blush gradient (`linear-gradient(180deg, #f7eded 0%, #f7eeee 100%)`) with warm slate border (`1px solid #a19797`) and natural warm drop shadow in light mode, or dark walnut/parchment (`linear-gradient(180deg, #252220 0%, #1e1c1a 100%)`) with warm stone border (`1px solid #3f3935`) in dark mode. Link colors avoid unstyled browser defaults, purple visited states, or neon cyan: use deep scholarly sapphire (`#1d4ed8`) in light mode and illuminated manuscript warm ochre/amber (`#dfa44e`) in dark mode.
-- **Forbidden Pills & Architectural Geometry:** "Pills" in the UI are strictly forbidden. Progress bars, tracks, badges, clear buttons, and modal step indicators use crisp architectural geometry (`border-radius: var(--dz-radius)`, 3–4px), never `9999px` or bubble pills. Primary action buttons use a tactile beveled parchment gradient (`linear-gradient(180deg, #fffafa 0%, #dfd8d8 100%)`) in light mode or tactile dark bronze (`linear-gradient(180deg, #332e2a 0%, #25211e 100%)`) in dark mode. Interactive focus uses a crisp architectural ring, never glowing neon halos.
-- **Zero Nested Boxes (Breathable Layout):** Eliminate nested container syndrome (no box inside a box inside a box). The status card is the single surface container. In error, display-only, and completed states, content flows directly within the card with generous vertical rhythm and whitespace. Guidance paths (Extension, Desktop, FAQ) render as an open, breathable typographic grid without heavy bordered card containers.
-- **Spacious Card & Full-Width URL Input:** Zoomable image URLs (IIIF manifests, deepzoom DZI queries, zoomify paths) are exceptionally long (100–250+ characters). The status card must be spacious (`max-width: 960px` or `width: min(92%, 960px)`). The URL input box must span the full card width (`width: 100%`) with ample height (`3.25rem` / 52px) and clean padding so long URLs remain readable and editable without horizontal truncation.
-- **Format Selection & Progressive Disclosure:** Present an uncluttered, serene default view: the full-width input, a compact interactive format indicator (`Format: Select automatically (click to change)`), and the centered primary `Dezoomify !` button. Clicking the format indicator smoothly discloses the complete 17-format grid. Left-align body copy (never `text-align: justify`).
-- **Pinned Bottom Footer:** The footer is pinned to the true bottom of the viewport (`margin-top: auto`) and contains only legal and repository metadata (`Open Source (GPL)`, `FAQ`, `Privacy`, `Terms`, `Donate`). Avoid redundant slogans or duplicate top-bar links. When errors occur, layer explanations: first a plain sentence, then actionable guided paths for our extension and desktop app, and technical diagnostics behind collapsible details. Progress displays a smooth track and tabular counts.
-
-## Protocol And Errors
-
-- Make the versioned Rust definitions in `crates/dezoomify-protocol` the single
-  canonical protocol source. Generate `packages/protocol-ts` from that Rust
-  source through `crates/xtask`; never maintain a second hand-written schema or
-  hand-edit generated TypeScript wire types. Make generation deterministic and
-  fail CI when regeneration produces a diff.
-- Version wire-breaking changes deliberately. Add Rust serialization tests,
-  TypeScript type/fixture tests, and cross-language golden round trips for every
-  protocol change.
-- Represent failures with stable machine-readable codes, a category, retry and
-  cancellation semantics, safe structured context, and a user-facing message.
-  Preserve source chains inside the owning host, but do not expose host-specific
-  error types over the protocol.
-- Represent recovery as typed, revision-bound actions such as retry, edit input,
-  choose output, grant permission, change transport, keep/discard partial, or
-  hand off to native. Never require the shared UI or the CLI to infer an action from an
-  error message, and reject stale or forged recovery actions.
-- Never branch on display strings. Map errors once at each boundary. Model
-  cancellation, unsupported capability, invalid input, transport failure,
-  decode failure, and partial completion distinctly.
-- Redact credentials, cookies, authorization headers, local paths, and sensitive
-  URLs from errors, protocol events, telemetry, snapshots, and logs.
-
-## Browser And Security Rules
-
-- Keep readable-byte fetches and ordinary image loading explicit. A readable response
-  may expose validated status, headers, and bytes to discovery or decoding. On
-  the website, an ordinary cross-origin tile may instead load through `<img>`
-  without `crossorigin` and be drawn to the display canvas. The result remains
-  visible, including browser/user-agent right-click save where offered, even
-  though the canvas becomes tainted.
-- Track canvas capability as `originClean`. Set it to `false` when a potentially
-  tainting tile is drawn. While false, forbid JavaScript pixel reads, pixel
-  processing, hashing, persistence of pixels, `toBlob`, `toDataURL`, and any
-  claim of clean programmatic save. Do not forbid drawing, display, or
-  user-agent save behavior merely because the canvas is tainted.
-- Route operations that require metadata bytes, header inspection, image
-  decoding into JavaScript-readable pixels, hashing, pixel persistence, or clean
-  programmatic save through a readable-byte fetch. On the website, try a direct
-  browser fetch first with a short (250 ms) completion window. After a
-  classified CORS/network failure or a direct fetch that does not complete in
-  that window, automatically
-  retry eligible public non-credential metadata requests through the metadata
-  CORS proxy; the proxy serves
-  metadata only, never tiles. Do not show a per-attempt
-  consent prompt. Keep the active transport clearly visible. Test direct
-  success, automatic metadata proxy fallback, the direct-metadata timeout, transport
-  visibility, tainted display, `originClean` guards, user-agent save
-  availability, and unsupported readable operations independently.
-- In the extension, normally use browser-session fetch with narrowly granted
-  host permissions. Create blob-backed images or `ImageBitmap` tiles and keep
-  the composed canvas origin-clean. A same-origin or page-context fallback may
-  exist, but the extension never uses the metadata CORS proxy.
-- Do not put cookies, bearer tokens, or authorization data in URLs, query
-  strings, protocol payloads, persisted job state, or logs. Do not expose the
-  browser cookie jar to WASM or UI code.
-- Send credentials only through a host-owned capability, only after explicit
-  user intent, and only to the matching origin. Default website/WASM requests to
-  credential-free behavior; the extension's active-job browser-session fetch may use
-  its current browser session as described above. Preserve CLI/user headers only in
-  trusted native memory and redact them in diagnostics.
-- Never send cookies, `Authorization`, or other browser credentials through the
-  metadata CORS proxy. Never proxy private/local destinations or requests outside the
-  configured method, scheme, port, content, size, time, redirect, concurrency,
-  rate, and session-budget limits.
-- Allow cookie handoff only to the native host, after explicit consent and only
-  for named origins. Automatic metadata CORS proxy fallback never grants or implies
-  this consent. Do not intentionally persist handed-off cookies; keep them for a
-  best-effort short lifetime and release references promptly. Do not claim
-  impossible guaranteed zeroization in managed browser or operating-system
-  memory.
-- Treat website/deep-link handoff as bounded, versioned, non-secret, untrusted
-  input. Validate its schema, size, URLs, and requested capabilities, then require
-  user confirmation before starting work.
-- For extension-to-native Native Messaging, browser enforcement of the native
-  host manifest's allowed extension IDs authenticates the extension sender. A
-  fresh challenge/nonce binds one handoff and its consent and blocks replay; it
-  does not establish sender identity. Never embed a private signing key in
-  extension JavaScript.
-- Do not ship an open proxy. Validate schemes and destinations, revalidate every
-  redirect, block loopback/private/link-local/metadata targets unless a narrowly
-  documented local mode requires them, strip hop-by-hop and inbound credential
-  headers, enforce size/time/redirect limits, and return restrictive CORS.
-- Give the extension the narrowest permissions possible. Start one finite scan
-  only from an explicit extension action, register its observers/listeners
-  before its one scan-triggering reload, and bound and deduplicate results.
-  Stop after settling, a deadline, or extension-page/tab close, and detach observers,
-  timers, page references, and listeners. An extension-page reload never rearms a scan by
-  itself. Restrict browser-session background fetch to the active job and granted
-  origin; service-worker recovery must not silently resume scanning.
-
-## Fixtures And Tests
-
-- Put deterministic, host-independent scenario data in `testdata/scenarios/`.
-  Record provenance, expected requests/events/results, and any license or
-  redaction constraints. Keep fixtures minimal and never include credentials or
-  private user data.
-- Serve browser/native integration fixtures through `crates/fixture-server`.
-  Bind to loopback on an ephemeral port, use deterministic routes, and simulate
-  redirects, headers, cookies, range behavior, opaque and readable responses, failures,
-  and timing without contacting third parties.
-- Keep live compatibility tests opt-in and non-blocking. Every behavior relied
-  on by an app must also have deterministic regression coverage. Live tests
-  assert real success: every target in a live list must actually pass when run.
-  Never add a target expected to fail, never tolerate, skip-after-attempt, or
-  mask a failing target, and never weaken an assertion to make a live target
-  pass. When a site stops working, remove it from the live target list and
-  record it with the reason in `docs/migration/live-inventory.csv`; re-add it
-  only once it genuinely works again. A dead or bot-blocked site is documented
-  in the issue or inventory, never encoded as a tolerated test failure.
-- Test at the lowest owning layer first, then boundary integration, then the
-  affected app. Add parity tests before deleting migrated legacy behavior.
-
-## Plan Execution
-
-1. Read the entire active plan, linked docs, relevant scaffold READMEs, and
-   legacy implementation before editing.
-2. Identify the current phase, allowed files, prerequisites, acceptance checks,
-   and rollback boundary. Do not execute later phases early.
-3. Establish a focused failing test or parity observation when behavior changes.
-4. Implement one coherent increment and run its smallest relevant formatter,
-   unit tests, architecture tests, protocol checks, and integration scenario.
-5. Repeat incrementally. Do not defer all validation until the end.
-6. Run the phase-level checks, inspect status/diff, and report completed scope,
-   validation, residual risks, and any checks not run. Update plan status only
-   when the plan explicitly assigns that responsibility.
+Per-crate purity and permission rules are normative in
+[`docs/architecture.md`](docs/architecture.md#boundary-rules) and enforced by
+`cargo xtask check`. Add an architecture test whenever a boundary can be
+enforced mechanically.
 
 ## Validation Commands
 
-The root workspace and `xtask` are implemented and authoritative; run them
-from the repository root:
+Run from the repository root:
 
 ```sh
 cargo xtask check
@@ -273,87 +149,55 @@ cargo xtask test [core|protocol|job|wasm|browser|ui|web|native|desktop|extension
 cargo xtask build <wasm|web|cli|desktop|extension>
 ```
 
-```sh
-cargo test --manifest-path migration-sources/dezoomify-rs/Cargo.toml --workspace
-cargo clippy --manifest-path migration-sources/dezoomify-rs/Cargo.toml --workspace --all-targets -- -D warnings
-cargo fmt --manifest-path migration-sources/dezoomify-rs/Cargo.toml --all -- --check
-npm ci --prefix migration-sources/dezoomify-web/tests
-npm test --prefix migration-sources/dezoomify-web/tests
-npm ci --prefix migration-sources/dezoomify-extension
-npm test --prefix migration-sources/dezoomify-extension
-```
-
-Treat network-dependent web and Rust tests as live checks and report them
-separately from deterministic checks.
-
-The canonical final-state task grammar is documented now so implementation
-phases converge on one interface:
-
-```sh
-cargo xtask setup
-cargo xtask check
-cargo xtask test [core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|live|all]
-cargo xtask build <wasm|web|cli|desktop|extension>
-cargo xtask dev <ui|web|desktop|extension>
-cargo xtask ci <lane>
-cargo xtask release <plan|build|verify>
-cargo xtask protocol <generate|check>
-cargo xtask fixtures <verify|serve>
-cargo xtask sources verify
-cargo xtask parity <validate|report>
-```
-
-Bare `cargo xtask test` is the fast deterministic suite; `test all` is the
-complete deterministic suite. Neither may contact public sites. Only
-`cargo xtask test live` enables public-network compatibility checks. Prefer
-`check` plus bare `test` while iterating, the narrowest focused test after each
-change, and `test all` plus `ci local` before a pull request. See
-`docs/development.md`, `docs/testing.md`, and
-`crates/xtask/README.md` for target and lane definitions.
-The migration-source commands below remain authoritative for legacy-only
-verification; they are not a substitute for the xtask gates above.
+- Bare `cargo xtask test` is the fast deterministic suite; `test all` is the
+  complete deterministic suite. Neither contacts public sites; only
+  `cargo xtask test live` enables public-network compatibility checks.
+- Prefer `check` plus bare `test` while iterating, the narrowest focused test
+  after each change, and `test all` plus `cargo xtask ci local` before a pull
+  request.
+- Full command grammar, lanes, builds, and maintenance tasks:
+  [`docs/development.md`](docs/development.md),
+  [`docs/testing.md`](docs/testing.md),
+  [`crates/xtask/README.md`](crates/xtask/README.md).
+- Legacy-only verification commands for `migration-sources/` are recorded in
+  [`docs/migration.md`](docs/migration.md); they are not a substitute for the
+  xtask gates.
 
 ## Documentation
 
-- Write normative architecture and product contracts in present tense as clear
-  invariants. Record implementation status, sequencing, and unavailable commands
-  in the root README and plans; label scaffold status there so present-tense
-  target documentation is never mistaken for evidence of completed code.
-- Update architecture, protocol, security, and migration docs in the same change
-  that changes those contracts, within the ownership assigned by the task.
+- Write normative contracts in [`docs/`](docs/) in present tense as clear
+  invariants, and update architecture, protocol, security, and migration docs
+  in the same change that changes those contracts.
+- Record implementation status and sequencing in the root `README.md` and
+  [`plans/`](plans/); label scaffold or incomplete status there so
+  present-tense target documentation is never mistaken for evidence of
+  completed code.
+- [`docs/user/`](docs/user/) is the single source of truth for user-facing
+  documentation. Authoring, publishing, and deep-linking rules are in
+  [`docs/user/README.md`](docs/user/README.md). Never duplicate its content
+  in READMEs, wikis, app listings, or external sites, and never link users to
+  legacy doc sites.
 - Keep commands executable from the stated directory and distinguish
   deterministic checks from live/network-dependent checks.
 
-### User documentation (when and how)
+## Plan Execution
 
-- `docs/user/` is the single source of truth for everything users read. Never
-  duplicate its content in READMEs, wikis, app listings, or external sites;
-  link to it instead. Never link users to legacy doc sites (the old GitHub
-  wiki, `dezoomify-rs.ophir.dev`, `lovasoa.github.io`, `ophir.alwaysdata.net`).
-- Add or edit user documentation when: a user-visible behavior, limitation, or
-  app boundary changes; a new app or capability ships; a support question
-  appears more than once; an error message gains a recovery path worth
-  explaining. Skip it for internal refactors with no user-visible change.
-- Write for Dezoomify's users (historians, researchers, archivists, artists):
-  plain language, no mechanism vocabulary (transports, headers, policies);
-  name user actions and outcomes; state platform limits as facts about the
-  app, precisely and without blame; layer answers so the common case is
-  first and every problem ends with at least one concrete next step.
-- Pages are plain markdown with a `# <stem>` marker line, listed in
-  `docs/user/README.md`, and published to `/help/` by
-  `node scripts/build-help.mjs`. The generated `help/` output is committed;
-  never hand-edit it. `test/help-page.test.mjs` fails on drift, broken
-  anchors, and legacy links.
-- Treat page filenames and heading text as addresses: apps and error
-  messages deep-link to `help/<page>.html#<heading-slug>`, so update every
-  reference in the same change you rename a page or heading.
+When a plan in [`plans/`](plans/) is active: read the entire plan and its
+linked docs before editing; identify the current phase, allowed files,
+prerequisites, acceptance checks, and rollback boundary; and never execute
+later phases early. Establish a focused failing test or parity observation
+when behavior changes, implement one coherent increment, run its smallest
+relevant checks, and repeat incrementally. Finish with the phase-level
+checks, then report completed scope, validation, residual risks, and any
+checks not run. Update plan status only when the plan explicitly assigns that
+responsibility.
 
 ## Safe Completion
 
 A change is safely complete only when it stays within assigned files and the
 current plan phase; preserves migration sources and unrelated work; respects
-dependency, protocol, browser, credential, and fixture boundaries; includes the
-lowest useful regression coverage; passes all applicable incremental and final
-checks; produces no unintended generated or formatted files; leaves the diff
-reviewable; and reports exact validation plus any remaining risk. If any item is
-not true, state that the work is partial rather than calling it complete.
+dependency, protocol, security, and fixture boundaries; includes the lowest
+useful regression coverage; passes all applicable checks; produces no
+unintended generated or formatted files; leaves the diff reviewable; and
+reports exact validation plus any remaining risk. If any item is not true,
+state that the work is partial rather than calling it complete.

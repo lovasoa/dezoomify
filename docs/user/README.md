@@ -27,6 +27,15 @@ Rendered order (also the navigation order in the website help section):
 7. [troubleshooting](troubleshooting.md) — problems and their next steps.
 8. [supported-formats](supported-formats.md) — every understood site format.
 
+## When to add or edit
+
+- A user-visible behavior, limitation, or app boundary changes.
+- A new app or capability ships.
+- A support question appears more than once.
+- An error message gains a recovery path worth explaining.
+
+Skip it for internal refactors with no user-visible change.
+
 ## Editing rules
 
 - A filename stem is the page identity and its web address

@@ -16,6 +16,8 @@ Each error includes:
 
 Codes are durable protocol API. Messages may improve without changing behavior. Secrets, cookies, authorization headers, signed query values, and local path details are redacted before logging or serialization.
 
+Hosts may preserve host-specific error source chains internally, but only the typed shape crosses the protocol. Map errors to the typed model once at each boundary; never branch on display strings.
+
 ## Recovery actions
 
 Recovery is typed data, not text that the UI must interpret. Actions include:
