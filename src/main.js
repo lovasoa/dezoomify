@@ -446,10 +446,22 @@ function pickLevel(image                                                        
   return best ?? { index: 0 };
 }
 
+// Encrypted-tile processing (e.g. Google Arts & Culture XOR-free AES
+// container) goes through the single-pending worker client. Tile downloads
+// run concurrently, so processing calls are serialized here: fetching stays
+// parallel, only the short decrypt step queues.
+let processQueue                   = Promise.resolve();
+
+function enqueueProcess(client2                 , recipe        , bytes             )                       {
+  const run = processQueue.then(() => client2.process(recipe, bytes));
+  processQueue = run.catch(() => undefined);
+  return run;
+}
+
 async function drawTile(client2                 , ctx2d                          , tile          )                {
   let { bytes } = await fetchTileFor(tile.uri, tile.headers ?? {});
   if (tile.processing && tile.processing !== "none") {
-    bytes = await client2.process(tile.processing, bytes);
+    bytes = await enqueueProcess(client2, tile.processing, bytes);
   }
   const bitmap = await createImageBitmap(new Blob([bytes]));
   try {

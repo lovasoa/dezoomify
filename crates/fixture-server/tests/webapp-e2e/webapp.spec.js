@@ -175,7 +175,7 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
   });
 
   // fixtures.test never resolves (RFC 2606): metadata fetches therefore take
-  // the proxy fallback above, while tiles are never proxied by policy — this
+  // the proxy fallback above, while tiles are never proxied by policy; this
   // interception stands in for direct tile egress against the same fixture
   // server, preserving the signed-URL and encrypted-payload semantics.
   await page.route(
@@ -197,15 +197,17 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
   await download.saveAs(target);
   const bytes = fs.readFileSync(target);
   const { width, height } = decodePngSize(bytes);
-  assert.equal(width, 64, "saved image width");
+  assert.equal(width, 128, "saved image width");
   assert.equal(height, 64, "saved image height");
-  // The single encrypted tile decrypts (in wasm) to a solid RGBA PNG.
+  // Two signed encrypted tiles decrypt (in wasm) to a solid RGBA PNG. Two
+  // tiles also pin the concurrent-processing path: tile downloads run in
+  // parallel, decrypt steps queue on the single-pending worker client.
   const { pixels } = decodePngPixels(bytes);
   const at = (x, y) => {
     const o = (y * width + x) * 4;
     return [pixels[o], pixels[o + 1], pixels[o + 2], pixels[o + 3]];
   };
-  for (const [x, y] of [[0, 0], [63, 0], [0, 63], [63, 63], [32, 32]]) {
+  for (const [x, y] of [[0, 0], [63, 0], [64, 32], [127, 63], [0, 63], [127, 0]]) {
     assert.deepEqual(at(x, y), [200, 48, 48, 255], `solid tile color at ${x},${y}`);
   }
   assert.ok(

@@ -2515,8 +2515,8 @@
       "path": "web/google-arts-web/payloads/fixtures.test/arts/gap/path=g.xml",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "af3436baa07dbfd9e5ac39c52eb1fedcbc6221efa7f0ef7b8585afbd78f491d1",
-      "size": 317,
+      "sha256": "b8cd4b2ea9da5f64cef36b3dd02388b4a6b2089c72c400f8df35af528014a32b",
+      "size": 318,
       "source_path": "crates/fixture-server/tests/webapp-e2e/webapp.spec.js",
       "source_snapshot": "local"
     },
