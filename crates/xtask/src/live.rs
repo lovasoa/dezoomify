@@ -341,8 +341,11 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
         if args == ["--postcutover", "--low-volume"] || args == ["--packaged", "--low-volume"] {
             return Err("live packaged/postcutover runs require explicit production approval; use `cargo xtask test live --public` for the opted-in public check".to_string());
         }
+        if args == ["--webapp"] {
+            return run_live_webapp();
+        }
         return Err(
-            "usage: cargo xtask test live --dry-run --fixtures | --public [--limit <n>] [--site <name>]"
+            "usage: cargo xtask test live --dry-run --fixtures | --public [--limit <n>] [--site <name>] | --webapp"
                 .to_string(),
         );
     }
@@ -465,6 +468,33 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// C6: live webapp port — opens the real webapp in Chromium against the
+/// legacy dezoomify-web targets (opt-in, diagnostic).
+fn run_live_webapp() -> Result<(), String> {
+    let root = super::repo_root();
+    let e2e_dir = root.join("crates/fixture-server/tests/webapp-e2e");
+    if !e2e_dir.join("node_modules").exists() {
+        let status = Command::new("npm")
+            .args(["ci"])
+            .current_dir(&e2e_dir)
+            .status()
+            .map_err(|e| format!("failed to run npm: {e}"))?;
+        if !status.success() {
+            return Err("npm ci (webapp-e2e) failed".to_string());
+        }
+    }
+    let status = Command::new("npm")
+        .args(["test"])
+        .env("DEZOOMIFY_LIVE_WEB", "1")
+        .current_dir(&e2e_dir)
+        .status()
+        .map_err(|e| format!("failed to run npm: {e}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "live webapp suite failed".to_string())
 }
 
 fn build_cli() -> Result<std::path::PathBuf, String> {

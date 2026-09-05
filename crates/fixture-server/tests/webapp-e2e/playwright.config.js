@@ -2,7 +2,7 @@ const { defineConfig } = require("@playwright/test");
 
 module.exports = defineConfig({
   testDir: ".",
-  testMatch: "webapp.spec.js",
+  testMatch: ["webapp.spec.js", "liveweb.spec.js"],
   timeout: 90000,
   fullyParallel: false,
   workers: 1,
