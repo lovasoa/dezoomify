@@ -24,7 +24,7 @@ test("privacy and terms pages exist and are linked", () => {
 });
 
 test("header bar has consistent thin structure and styling across pages", () => {
-  const themeCssPath = path.resolve(webDir, "../../packages/shared-ui/src/styles/theme.css");
+  const themeCssPath = path.resolve(webDir, "packages/shared-ui/src/styles/theme.css");
   const themeCss = readFileSync(themeCssPath, "utf8");
 
   // .dz-nav has thin constant height and cannot shrink

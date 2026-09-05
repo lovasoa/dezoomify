@@ -76,7 +76,7 @@ fn build_only_check() -> Result<(), String> {
 }
 
 pub fn test_ui(_args: &[String]) -> Result<(), String> {
-    run_node(&["--test", "apps/web/test/controller.test.mjs"])?;
+    run_node(&["--test", "test/controller.test.mjs"])?;
     println!("test ui: ok");
     Ok(())
 }
@@ -84,7 +84,7 @@ pub fn test_ui(_args: &[String]) -> Result<(), String> {
 pub fn test_web(_args: &[String]) -> Result<(), String> {
     run_node(&[
         "--test",
-        "apps/web/test/*.test.mjs",
+        "test/*.test.mjs",
         "packages/browser-runtime/test/*.test.mjs",
     ])?;
     println!("test web: ok");
@@ -94,14 +94,14 @@ pub fn test_web(_args: &[String]) -> Result<(), String> {
 pub fn build_web(_args: &[String]) -> Result<(), String> {
     // Deterministic asset check: all web sources present, no secrets embedded.
     for rel in [
-        "apps/web/package.json",
-        "apps/web/src/config.ts",
-        "apps/web/src/webIntegration.ts",
-        "apps/web/src/proxyTransport.ts",
-        "apps/web/functions/proxy.ts",
-        "apps/web/functions/api/proxy.ts",
-        "apps/web/functions/security.ts",
+        "package.json",
+        "index.html",
+        "src/config.ts",
+        "src/webIntegration.ts",
+        "src/proxyTransport.ts",
+        "functions/proxy.ts",
         "functions/api/proxy.ts",
+        "functions/security.ts",
         "packages/shared-ui/src/controller.ts",
     ] {
         let text = std::fs::read_to_string(super::repo_root().join(rel))
@@ -112,7 +112,7 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
             }
         }
     }
-    run_node(&["--test", "apps/web/test/*.test.mjs"])?;
+    run_node(&["--test", "test/*.test.mjs"])?;
     println!("build web: stub-ok (sources + tests only; no bundle emitted)");
     Ok(())
 }

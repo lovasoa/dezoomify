@@ -1,7 +1,7 @@
 // Web application entry point: wire shared controller and modern view to web integration.
-import { createController } from "../../../packages/shared-ui/src/controller.ts";
-import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../../../packages/shared-ui/src/view.ts";
-import type { ViewContext } from "../../../packages/shared-ui/src/view.ts";
+import { createController } from "../packages/shared-ui/src/controller.ts";
+import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.ts";
+import type { ViewContext } from "../packages/shared-ui/src/view.ts";
 import { createWebIntegration } from "./webIntegration.ts";
 import { loadWebConfig, isAllowedSourceUrl } from "./config.ts";
 import { classifyDiscovery } from "./discovery.ts";

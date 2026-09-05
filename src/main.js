@@ -3,8 +3,8 @@
 // shared discovery classifier gates every later transition. Generic pages
 // without a zoomable signal fail with NO_IMAGE_FOUND and never show tile
 // progress.
-import { createController } from "../../../packages/shared-ui/src/controller.js";
-import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../../../packages/shared-ui/src/view.js";
+import { createController } from "../packages/shared-ui/src/controller.js";
+import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.js";
 import { classifyDiscovery } from "./discovery.js";
 
 let sessionId = `sess:web-${Date.now()}`;

@@ -1,5 +1,5 @@
 // Web integration: direct-first, automatic eligible metadata-proxy fallback.
-import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../../../packages/browser-runtime/src/types.ts";
+import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/types.ts";
 
 export interface WebFetchRequest {
   url: string;

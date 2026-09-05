@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebIntegration, isProxyEligible } from "../src/webIntegration.ts";
 import { createProxyTransport } from "../src/proxyTransport.ts";
-import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../../../packages/browser-runtime/src/types.ts";
+import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/types.ts";
 
 function directOk() {
   return {

@@ -3,20 +3,15 @@
 High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more)
 are the goal; this branch is a preview scaffold, not a working release.
 
-- Website preview (`apps/web/`, deployed from this branch): direct-first
+- Website preview (repository root, deployed from this branch): direct-first
   metadata fetch with classifier-gated negative handling. Full tile download
   and save are not wired yet — positives stop at an honest preview message.
 - Extension (`apps/extension/`): explicit-action scan scaffolding with unit
   coverage; no end-to-end browser proof here.
 - Desktop (`apps/desktop/`): lean Tauri shell (logic + config only, no window
-  or installer). CLI (`apps/cli/`): fails closed until the native pipeline lands.
-
-- Website: paste an image URL at the live preview
-  (`apps/web/`, deployed from this branch).
-- Extension: finite active-tab scan with your browser session
-  (`apps/extension/`).
-- Desktop / CLI: native downloads, bulk mode, local files
-  (`apps/desktop/`, `apps/cli/`).
+  or installer).
+- CLI (`apps/cli/`): real download pipeline through the native runtime —
+  discovery, bounded tile download, assembly, and output writing.
 
 ## Quick start
 

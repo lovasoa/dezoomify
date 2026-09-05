@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createController, renderAppChoice } from "../../../packages/shared-ui/src/controller.ts";
+import { createController, renderAppChoice } from "../packages/shared-ui/src/controller.ts";
 import {
   renderTransportLabel,
   renderSaveGuidance,
   renderErrorSummary,
   renderProgress,
-} from "../../../packages/shared-ui/src/components.ts";
+} from "../packages/shared-ui/src/components.ts";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -91,7 +91,7 @@ test("components render transport/save/error/progress plainly", () => {
 });
 
 test("website scenario transcripts have fixed shape", () => {
-  const root = new URL("../../../", import.meta.url);
+  const root = new URL("../", import.meta.url);
   const directPath = new URL("testdata/scenarios/website/direct-success/expected/result.json", root);
   const fallbackPath = new URL("testdata/scenarios/website/proxy-fallback/expected/result.json", root);
   const direct = JSON.parse(fs.readFileSync(directPath, "utf8"));
