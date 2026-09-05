@@ -79,15 +79,8 @@ jobs:
         run: |
           set -euo pipefail
           browser="${BROWSER:-chromium}"
-          manifest="apps/extension/generated/manifest.$browser.json"
-          test -f "$manifest" || { echo "missing $manifest"; exit 1; }
-          version=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("manifest_version"); print(d["version"])' "$manifest")
-          name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name",""))' "$manifest")
-          echo "package: $name v$version -> existing listing ${EXTENSION_ID}"
-          staging=$(mktemp -d)
-          cp "$manifest" "$staging/manifest.json"
-          cp -r apps/extension/src "$staging/src"
-          (cd "$staging" && zip -qr "$OLDPWD/dezoomify-extension-$browser-$version.zip" manifest.json src)
+          version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "apps/extension/generated/manifest.$browser.json")
+          ./apps/extension/scripts/package-store.sh "$browser" "dezoomify-extension-$browser-$version.zip"
           unzip -l "dezoomify-extension-$browser-$version.zip" | head -8
           sha256sum "dezoomify-extension-$browser-$version.zip"
           echo "package: ok (dezoomify-extension-$browser-$version.zip)"
@@ -134,7 +127,7 @@ jobs:
           put_code=$(printf '%s' "$put_resp" | tail -n1)
           put_body=$(printf '%s' "$put_resp" | head -n -1)
           put_out=$(printf '%s' "$put_body" \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("upload:", d.get("uploadState","unknown")); [print("itemError:", e.get("errorDetail", e.get("error_code","?"))) for e in d.get("itemError", [])]; print(d.get("uploadState",""))') \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("upload:", d.get("uploadState","unknown")); [print("itemError:", e.get("error_code","?"), "-", e.get("error_detail","")) for e in d.get("itemError", [])]; print(d.get("uploadState",""))') \
             || { echo "upload failed: HTTP $put_code: $(printf '%s' "$put_body" | head -c 300)"; exit 1; }
           printf '%s\n' "$put_out" | head -n -1
           echo "http: $put_code"
