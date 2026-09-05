@@ -12,6 +12,7 @@ import {
   noImageFoundError,
 } from "./discovery.js";
 import { createDiscoveryClient } from "../packages/browser-runtime/src/session.js";
+import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.js";
 
 let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
@@ -20,6 +21,160 @@ let activeTransport = null;
 let client = null;
 let jobToken = 0;
 let resultBlobUrl = null;
+
+/** Per-request timeout applied to every individual HTTP request (30 s). */
+export const REQUEST_TIMEOUT_MS = 30000;
+
+// --- Live job activity (drives the progressive-disclosure job view) ---
+let requestSeq = 0;
+const pendingStarts = new Map();
+let completedRequests = 0;
+let failedRequests = 0;
+let heartbeatTimer = null;
+let suppressHashWrite = false;
+
+function activity() {
+  if (!viewCtx.jobActivity) viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
+  return viewCtx.jobActivity;
+}
+
+function resetActivity(url) {
+  pendingStarts.clear();
+  completedRequests = 0;
+  failedRequests = 0;
+  const now = Date.now();
+  viewCtx.jobActivity = {
+    url,
+    startedAt: now,
+    now,
+    stepLabel: "Finding the zoomable image…",
+    detail: "Contacting the museum server…",
+    pendingRequests: 0,
+    completedRequests: 0,
+    failedRequests: 0,
+    longestPendingMs: 0,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    lastProgressAt: now,
+    log: [],
+  };
+}
+
+function touchProgress() {
+  activity().lastProgressAt = Date.now();
+}
+
+function setStep(label, detail) {
+  const a = activity();
+  a.stepLabel = label;
+  if (detail !== undefined) a.detail = detail;
+  touchProgress();
+  update();
+}
+
+function pushLog(line) {
+  const a = activity();
+  if (!a.log) a.log = [];
+  const elapsed = a.startedAt ? Math.round((Date.now() - a.startedAt) / 1000) : 0;
+  a.log.push(`${elapsed}s: ${line}`);
+  if (a.log.length > 60) a.log.splice(0, a.log.length - 60);
+}
+
+function noteRequestStart(label) {
+  const id = ++requestSeq;
+  pendingStarts.set(id, { startedAt: Date.now(), label });
+  const a = activity();
+  a.pendingRequests = pendingStarts.size;
+  refreshLongestPending();
+  return id;
+}
+
+function noteRequestEnd(id, ok) {
+  pendingStarts.delete(id);
+  if (ok) completedRequests += 1;
+  else failedRequests += 1;
+  const a = activity();
+  a.pendingRequests = pendingStarts.size;
+  a.completedRequests = completedRequests;
+  a.failedRequests = failedRequests;
+  refreshLongestPending();
+  touchProgress();
+}
+
+function refreshLongestPending() {
+  const a = activity();
+  const now = Date.now();
+  a.now = now;
+  let longest = 0;
+  for (const { startedAt } of pendingStarts.values()) {
+    longest = Math.max(longest, now - startedAt);
+  }
+  a.longestPendingMs = longest;
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    refreshLongestPending();
+    update();
+  }, 500);
+  if (heartbeatTimer && typeof heartbeatTimer.unref === "function") {
+    try { heartbeatTimer.unref(); } catch { /* browser timers lack unref */ }
+  }
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+/**
+ * Combine a caller signal with the 30 s per-request timeout.
+ * Uses AbortSignal.any/timeout when available, manual wiring otherwise.
+ */
+function timeoutSignal(parentSignal, ms = REQUEST_TIMEOUT_MS) {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    const timeout = AbortSignal.timeout(ms);
+    if (parentSignal && typeof AbortSignal.any === "function") {
+      return { signal: AbortSignal.any([parentSignal, timeout]), cleanup() {} };
+    }
+    if (!parentSignal) return { signal: timeout, cleanup() {} };
+  }
+  const ctrl = new AbortController();
+  let timer = null;
+  let onAbort = null;
+  const cleanup = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (parentSignal && onAbort) parentSignal.removeEventListener("abort", onAbort);
+  };
+  if (parentSignal?.aborted) {
+    ctrl.abort(parentSignal.reason);
+    return { signal: ctrl.signal, cleanup() {}, timedOut: () => false };
+  }
+  let timedOut = false;
+  timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      ctrl.abort(new DOMException(`Request timed out after ${ms / 1000}s`, "TimeoutError"));
+    } catch {
+      ctrl.abort();
+    }
+  }, ms);
+  if (parentSignal) {
+    onAbort = () => {
+      cleanup();
+      try {
+        ctrl.abort(parentSignal.reason);
+      } catch {
+        ctrl.abort();
+      }
+    };
+    parentSignal.addEventListener("abort", onAbort, { once: true });
+  }
+  return { signal: ctrl.signal, cleanup, timedOut: () => timedOut };
+}
 
 function nextEvent(kind, extra = {}) {
   currentSeq++;
@@ -85,32 +240,58 @@ function isProxyEligible(urlString) {
 }
 
 async function fetchDirect(url, headers, signal) {
+  const reqId = noteRequestStart("direct");
+  const combined = timeoutSignal(signal);
   try {
-    const res = await fetch(url, { headers, signal, credentials: "omit" });
+    const res = await fetch(url, { headers, signal: combined.signal, credentials: "omit" });
     if (!res.ok) {
+      noteRequestEnd(reqId, false);
       return { outcome: "http-error", finalUrl: res.url, status: res.status, headers: {} };
     }
     const bytes = await res.arrayBuffer();
+    noteRequestEnd(reqId, true);
     return { outcome: "readable", finalUrl: res.url, status: res.status, headers: {}, bytes };
   } catch (e) {
+    noteRequestEnd(reqId, false);
     if (signal?.aborted) return { outcome: "cancelled", reason: "aborted" };
+    const name = e && e.name;
+    if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
+      pushLog(`Request timed out after 30 s: ${shortUrl(url)}`);
+      return { outcome: "network-error", reason: "timeout after 30s" };
+    }
     return { outcome: "network-error", reason: String((e && e.message) || e) };
+  } finally {
+    combined.cleanup();
+    update();
+  }
+}
+
+function shortUrl(url) {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.length > 40 ? `…${u.pathname.slice(-39)}` : u.pathname;
+    return `${u.host}${path}`;
+  } catch {
+    return String(url).slice(0, 60);
   }
 }
 
 async function fetchViaProxy(targetUrl, signal) {
+  const reqId = noteRequestStart("proxy");
+  const combined = timeoutSignal(signal);
   try {
     const res = await fetch("/api/proxy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ targetUrl, protocolVersion: 1 }),
-      signal,
+      signal: combined.signal,
       credentials: "omit",
     });
     if (!res.ok) {
       // Surface the proxy's machine-readable error code (e.g. PROXY_RATE_LIMITED
       // means the upstream site throttled our server) instead of collapsing
       // every failure into one generic code.
+      noteRequestEnd(reqId, false);
       let code = "PROXY_ERROR";
       try {
         const body = await res.json();
@@ -121,10 +302,19 @@ async function fetchViaProxy(targetUrl, signal) {
       return { ok: false, status: res.status, code };
     }
     const bytes = await res.arrayBuffer();
+    noteRequestEnd(reqId, true);
     return { ok: true, status: 200, bytes, contentType: res.headers.get("content-type") || undefined };
-  } catch {
+  } catch (e) {
+    noteRequestEnd(reqId, false);
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+    if ((e && e.name === "TimeoutError") || (combined.timedOut && combined.timedOut())) {
+      pushLog("Metadata proxy request timed out after 30 s.");
+      return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
+    }
     return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
+  } finally {
+    combined.cleanup();
+    update();
   }
 }
 
@@ -218,7 +408,32 @@ function disposeClient() {
 
 function reportProgress(current, total, message) {
   viewCtx.currentProgress = { current, total, message };
+  touchProgress();
   update();
+}
+
+function writeHash(url) {
+  if (suppressHashWrite || typeof window === "undefined" || !window.location) return;
+  try {
+    // Legacy contract: the hash body IS the target URL (`#https://…`).
+    window.location.hash = buildHash(url);
+  } catch {
+    // Hash writes must never break the job.
+  }
+}
+
+function clearHash() {
+  if (typeof window === "undefined") return;
+  try {
+    if (window.history && typeof window.history.replaceState === "function") {
+      const clean = `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState(null, "", clean);
+    } else {
+      window.location.hash = "";
+    }
+  } catch {
+    // Hash cleanup must never break reset.
+  }
 }
 
 function makeClient() {
@@ -266,25 +481,35 @@ async function drawTile(client2, ctx2d, tile) {
 
 async function runJob(url) {
   const token = ++jobToken;
+  resetActivity(url);
+  writeHash(url);
+  startHeartbeat();
+  setStep("Finding the zoomable image…", "Contacting the museum server…");
   controller.dispatch(nextEvent("start-discovery", { transport: "direct" }));
   update();
   try {
     client = makeClient();
+    pushLog(`Starting discovery for ${shortUrl(url)}`);
     const catalog = await client.start(url);
     if (token !== jobToken) return;
+    pushLog(`Found ${catalog.images.length} image${catalog.images.length === 1 ? "" : "s"}`);
     const image = catalog.images[0];
     const via = activeTransport === PROXY_LABEL ? "proxy" : "direct";
     controller.dispatch(
       nextEvent("images-found", { imageCount: catalog.images.length, transport: via }),
     );
+    setStep("Image found — picking the best one…");
     controller.dispatch(nextEvent("image-chosen"));
     const level = pickLevel(image);
+    setStep("Choosing the highest resolution…");
     controller.dispatch(nextEvent("level-chosen"));
+    setStep("Checking the image size…");
     controller.dispatch(nextEvent("preflight-ok", { transport: via }));
     update();
 
     const plan = await client.plan(image.id, level.index);
     if (token !== jobToken) return;
+    pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
     const canvas = document.getElementById("rendering-canvas");
     if (!canvas) throw Object.assign(new Error("no rendering canvas"), { code: "WORKER_FAILED" });
     const width = plan.canvas ? plan.canvas.x : 0;
@@ -300,6 +525,7 @@ async function runJob(url) {
     ctx2d.clearRect(0, 0, width, height);
 
     const total = plan.tiles.length;
+    setStep("Downloading image tiles…", `${total} tiles at full resolution`);
     reportProgress(0, total, `Downloading ${total} tiles…`);
     let done = 0;
     let failed = null;
@@ -325,6 +551,7 @@ async function runJob(url) {
     if (token !== jobToken) return;
 
     controller.dispatch(nextEvent("save-start"));
+    setStep("Assembling the final picture…", "Encoding PNG in your browser");
     reportProgress(total, total, "Encoding PNG…");
     const blob = await new Promise((resolve, reject) => {
       canvas.toBlob(
@@ -341,11 +568,13 @@ async function runJob(url) {
       blobUrl: resultBlobUrl,
     };
     viewCtx.originClean = true;
+    pushLog(`Done: ${width}×${height} PNG (${total} tiles)`);
     controller.dispatch(nextEvent("save-done"));
     update();
   } catch (error) {
     if (token !== jobToken) return;
     const code = (error && error.code) || "DISCOVERY_FAILED";
+    pushLog(`Failed (${code}): ${(error && error.message) || "unknown error"}`);
     controller.dispatch(
       nextEvent("fail", {
         error: {
@@ -362,6 +591,8 @@ async function runJob(url) {
     update();
   } finally {
     if (token === jobToken) {
+      stopHeartbeat();
+      refreshLongestPending();
       disposeClient();
     }
   }
@@ -376,14 +607,26 @@ let viewCtx = {
     browserCanSave: true,
   },
   originClean: true,
+  initialUrl: undefined,
 };
 
 export function update() {
   if (!appContainer) return;
+  // Preserve open <details> across heartbeat re-renders so the collapsed
+  // technical logs don't snap shut while elapsed time ticks.
+  const openDetails = [];
+  try {
+    appContainer.querySelectorAll("details").forEach((d, i) => {
+      if (d.open) openDetails.push(i);
+    });
+  } catch {
+    // Non-fatal: re-render without preservation.
+  }
   const state = controller.getState();
   if (activeTransport && !state.transport) {
     state.transport = activeTransport;
   }
+  if (viewCtx.jobActivity) refreshLongestPending();
   renderView(
     appContainer,
     state,
@@ -407,19 +650,24 @@ export function update() {
       },
       onCancel() {
         jobToken += 1;
+        stopHeartbeat();
         disposeClient();
         controller.dispatch(nextEvent("cancel"));
         update();
       },
       onReset() {
         jobToken += 1;
+        stopHeartbeat();
         disposeClient();
         sessionId = `sess:web-${Date.now()}`;
         controller.reset(sessionId);
         currentSeq = 0;
         viewCtx.currentProgress = undefined;
         viewCtx.completedInfo = undefined;
+        viewCtx.jobActivity = undefined;
+        viewCtx.initialUrl = undefined;
         activeTransport = null;
+        clearHash();
         if (resultBlobUrl) {
           URL.revokeObjectURL(resultBlobUrl);
           resultBlobUrl = null;
@@ -435,14 +683,80 @@ export function update() {
         anchor.click();
         anchor.remove();
       },
+      onCopyShareLink() {
+        const href = (typeof window !== "undefined" && window.location && window.location.href) || "";
+        const btn = document.getElementById("dz-btn-share");
+        const done = () => {
+          if (btn) {
+            btn.textContent = "Copied!";
+            setTimeout(() => {
+              try {
+                if (btn.isConnected) btn.textContent = "Copy shareable link";
+              } catch {
+                // Button may be gone after re-render; ignore.
+              }
+            }, 2000);
+          }
+        };
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(href).then(done, done);
+          } else if (href) {
+            const ta = document.createElement("textarea");
+            ta.value = href;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+            done();
+          }
+        } catch {
+          // Copy failures stay silent; the address bar link still works.
+        }
+      },
     },
     viewCtx,
   );
+  try {
+    const details = appContainer.querySelectorAll("details");
+    for (const i of openDetails) {
+      if (details[i]) details[i].open = true;
+    }
+  } catch {
+    // Non-fatal.
+  }
+}
+
+function startFromHash() {
+  if (typeof window === "undefined") return;
+  const raw = parseHash(window.location.hash);
+  if (raw && looksLikeUsableUrl(raw) && isAllowedSourceUrl(raw)) {
+    viewCtx.initialUrl = raw;
+    update();
+    runJob(raw);
+  } else if (raw) {
+    viewCtx.initialUrl = raw;
+    update();
+  }
 }
 
 if (appContainer) {
   document.getElementById("dz-nav-btn-extension")?.addEventListener("click", () => showExtensionGuidance());
   document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
+  if (typeof window !== "undefined") {
+    window.addEventListener("hashchange", () => {
+      const raw = parseHash(window.location.hash);
+      const current = viewCtx.jobActivity?.url;
+      if (raw && raw !== current && looksLikeUsableUrl(raw) && isAllowedSourceUrl(raw)) {
+        suppressHashWrite = false;
+        runJob(raw);
+      } else if (!raw && !current) {
+        viewCtx.initialUrl = undefined;
+        update();
+      }
+    });
+  }
+  startFromHash();
   update();
 }
 

@@ -11,6 +11,7 @@ import {
   classifyReadableBytes,
   noImageFoundError,
 } from "./discovery.ts";
+import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import {
   createDiscoveryClient,
   failure,
@@ -26,6 +27,175 @@ let activeTransport: string | null = null;
 let client: DiscoveryClient | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
+
+/** Per-request timeout applied to every individual HTTP request (30 s). */
+export const REQUEST_TIMEOUT_MS = 30000;
+
+// --- Live job activity (drives the progressive-disclosure job view) ---
+let requestSeq = 0;
+const pendingStarts = new Map<number, { startedAt: number; label: string }>();
+let completedRequests = 0;
+let failedRequests = 0;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let suppressHashWrite = false;
+
+function activity(): NonNullable<ViewContext["jobActivity"]> {
+  if (!viewCtx.jobActivity) viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
+  return viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
+}
+
+function resetActivity(url: string): void {
+  pendingStarts.clear();
+  completedRequests = 0;
+  failedRequests = 0;
+  const now = Date.now();
+  viewCtx.jobActivity = {
+    url,
+    startedAt: now,
+    now,
+    stepLabel: "Finding the zoomable image…",
+    detail: "Contacting the museum server…",
+    pendingRequests: 0,
+    completedRequests: 0,
+    failedRequests: 0,
+    longestPendingMs: 0,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    lastProgressAt: now,
+    log: [],
+  };
+}
+
+function touchProgress(): void {
+  activity().lastProgressAt = Date.now();
+}
+
+function setStep(label: string, detail?: string): void {
+  const a = activity();
+  a.stepLabel = label;
+  if (detail !== undefined) a.detail = detail;
+  touchProgress();
+  update();
+}
+
+function pushLog(line: string): void {
+  const a = activity();
+  if (!a.log) a.log = [];
+  const elapsed = a.startedAt ? Math.round((Date.now() - a.startedAt) / 1000) : 0;
+  a.log.push(`${elapsed}s: ${line}`);
+  if (a.log.length > 60) a.log.splice(0, a.log.length - 60);
+}
+
+function noteRequestStart(label: string): number {
+  const id = ++requestSeq;
+  pendingStarts.set(id, { startedAt: Date.now(), label });
+  const a = activity();
+  a.pendingRequests = pendingStarts.size;
+  refreshLongestPending();
+  return id;
+}
+
+function noteRequestEnd(id: number, ok: boolean): void {
+  pendingStarts.delete(id);
+  if (ok) completedRequests += 1;
+  else failedRequests += 1;
+  const a = activity();
+  a.pendingRequests = pendingStarts.size;
+  a.completedRequests = completedRequests;
+  a.failedRequests = failedRequests;
+  refreshLongestPending();
+  touchProgress();
+}
+
+function refreshLongestPending(): void {
+  const a = activity();
+  const now = Date.now();
+  a.now = now;
+  let longest = 0;
+  for (const { startedAt } of pendingStarts.values()) {
+    longest = Math.max(longest, now - startedAt);
+  }
+  a.longestPendingMs = longest;
+}
+
+function startHeartbeat(): void {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    refreshLongestPending();
+    update();
+  }, 500);
+  const t = heartbeatTimer as unknown as { unref?: () => void };
+  if (t && typeof t.unref === "function") {
+    try {
+      t.unref();
+    } catch {
+      // browser timers lack unref
+    }
+  }
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+interface TimeoutCombined {
+  signal: AbortSignal;
+  cleanup(): void;
+  timedOut?: () => boolean;
+}
+
+/**
+ * Combine a caller signal with the 30 s per-request timeout.
+ * Uses AbortSignal.any/timeout when available, manual wiring otherwise.
+ */
+function timeoutSignal(parentSignal?: AbortSignal, ms: number = REQUEST_TIMEOUT_MS): TimeoutCombined {
+  const AS = AbortSignal as unknown as {
+    timeout?: (ms: number) => AbortSignal;
+    any?: (signals: AbortSignal[]) => AbortSignal;
+  };
+  if (typeof AbortSignal !== "undefined" && typeof AS.timeout === "function") {
+    const timeout = (AS.timeout as (ms: number) => AbortSignal)(ms);
+    if (parentSignal && typeof AS.any === "function") {
+      return { signal: (AS.any as (s: AbortSignal[]) => AbortSignal)([parentSignal, timeout]), cleanup() {} };
+    }
+    if (!parentSignal) return { signal: timeout, cleanup() {} };
+  }
+  const ctrl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let onAbort: (() => void) | null = null;
+  const cleanup = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (parentSignal && onAbort) parentSignal.removeEventListener("abort", onAbort);
+  };
+  if (parentSignal?.aborted) {
+    ctrl.abort((parentSignal as AbortSignal & { reason?: unknown }).reason);
+    return { signal: ctrl.signal, cleanup() {}, timedOut: () => false };
+  }
+  let timedOut = false;
+  timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      ctrl.abort(new DOMException(`Request timed out after ${ms / 1000}s`, "TimeoutError"));
+    } catch {
+      ctrl.abort();
+    }
+  }, ms);
+  if (parentSignal) {
+    onAbort = () => {
+      cleanup();
+      try {
+        ctrl.abort((parentSignal as AbortSignal & { reason?: unknown }).reason);
+      } catch {
+        ctrl.abort();
+      }
+    };
+    parentSignal.addEventListener("abort", onAbort, { once: true });
+  }
+  return { signal: ctrl.signal, cleanup, timedOut: () => timedOut };
+}
 
 function nextEvent(kind: string, extra: Record<string, unknown> = {}) {
   currentSeq++;
@@ -98,32 +268,58 @@ interface DirectOutcome {
 }
 
 async function fetchDirect(url: string, headers?: Record<string, string>, signal?: AbortSignal): Promise<DirectOutcome> {
+  const reqId = noteRequestStart("direct");
+  const combined = timeoutSignal(signal);
   try {
-    const res = await fetch(url, { headers, signal, credentials: "omit" });
+    const res = await fetch(url, { headers, signal: combined.signal, credentials: "omit" });
     if (!res.ok) {
+      noteRequestEnd(reqId, false);
       return { outcome: "http-error", finalUrl: res.url, status: res.status };
     }
     const bytes = await res.arrayBuffer();
+    noteRequestEnd(reqId, true);
     return { outcome: "readable", finalUrl: res.url, status: res.status, bytes };
   } catch (e) {
+    noteRequestEnd(reqId, false);
     if (signal?.aborted) return { outcome: "cancelled" };
+    const name = (e as { name?: string })?.name;
+    if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
+      pushLog(`Request timed out after 30 s: ${shortUrl(url)}`);
+      return { outcome: "network-error" };
+    }
     return { outcome: "network-error" };
+  } finally {
+    combined.cleanup();
+    update();
+  }
+}
+
+function shortUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.length > 40 ? `…${u.pathname.slice(-39)}` : u.pathname;
+    return `${u.host}${path}`;
+  } catch {
+    return String(url).slice(0, 60);
   }
 }
 
 async function fetchViaProxy(targetUrl: string, signal?: AbortSignal): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string }> {
+  const reqId = noteRequestStart("proxy");
+  const combined = timeoutSignal(signal);
   try {
     const res = await fetch("/api/proxy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ targetUrl, protocolVersion: 1 }),
-      signal,
+      signal: combined.signal,
       credentials: "omit",
     });
     if (!res.ok) {
       // Surface the proxy's machine-readable error code (e.g. PROXY_RATE_LIMITED
       // means the upstream site throttled our server) instead of collapsing
       // every failure into one generic code.
+      noteRequestEnd(reqId, false);
       let code = "PROXY_ERROR";
       try {
         const body = (await res.json()) as { code?: unknown };
@@ -134,10 +330,19 @@ async function fetchViaProxy(targetUrl: string, signal?: AbortSignal): Promise<{
       return { ok: false, status: res.status, code };
     }
     const bytes = await res.arrayBuffer();
+    noteRequestEnd(reqId, true);
     return { ok: true, status: 200, bytes };
-  } catch {
+  } catch (e) {
+    noteRequestEnd(reqId, false);
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+    if (((e as { name?: string })?.name === "TimeoutError") || (combined.timedOut && combined.timedOut())) {
+      pushLog("Metadata proxy request timed out after 30 s.");
+      return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
+    }
     return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
+  } finally {
+    combined.cleanup();
+    update();
   }
 }
 
@@ -217,7 +422,32 @@ function disposeClient(): void {
 
 function reportProgress(current: number, total: number, message: string): void {
   viewCtx.currentProgress = { current, total, message };
+  touchProgress();
   update();
+}
+
+function writeHash(url: string): void {
+  if (suppressHashWrite || typeof window === "undefined" || !window.location) return;
+  try {
+    // Legacy contract: the hash body IS the target URL (`#https://…`).
+    window.location.hash = buildHash(url);
+  } catch {
+    // Hash writes must never break the job.
+  }
+}
+
+function clearHash(): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (window.history && typeof window.history.replaceState === "function") {
+      const clean = `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState(null, "", clean);
+    } else {
+      window.location.hash = "";
+    }
+  } catch {
+    // Hash cleanup must never break reset.
+  }
 }
 
 function makeClient(): DiscoveryClient {
@@ -269,25 +499,35 @@ async function drawTile(client2: DiscoveryClient, ctx2d: CanvasRenderingContext2
 
 async function runJob(url: string): Promise<void> {
   const token = ++jobToken;
+  resetActivity(url);
+  writeHash(url);
+  startHeartbeat();
+  setStep("Finding the zoomable image…", "Contacting the museum server…");
   controller.dispatch(nextEvent("start-discovery", { transport: "direct" }) as never);
   update();
   try {
     client = makeClient();
+    pushLog(`Starting discovery for ${shortUrl(url)}`);
     const catalog: WebCatalog = await client.start(url);
     if (token !== jobToken) return;
+    pushLog(`Found ${catalog.images.length} image${catalog.images.length === 1 ? "" : "s"}`);
     const image = catalog.images[0];
     const via = activeTransport === PROXY_LABEL ? "proxy" : "direct";
     controller.dispatch(
       nextEvent("images-found", { imageCount: catalog.images.length, transport: via }) as never,
     );
+    setStep("Image found — picking the best one…");
     controller.dispatch(nextEvent("image-chosen") as never);
     const level = pickLevel(image);
+    setStep("Choosing the highest resolution…");
     controller.dispatch(nextEvent("level-chosen") as never);
+    setStep("Checking the image size…");
     controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
     update();
 
     const plan = await client.plan(image.id, level.index);
     if (token !== jobToken) return;
+    pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
     const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
     if (!canvas) throw failure("WORKER_FAILED", "no rendering canvas", false);
     const width = plan.canvas ? plan.canvas.x : 0;
@@ -301,6 +541,7 @@ async function runJob(url: string): Promise<void> {
     ctx2d.clearRect(0, 0, width, height);
 
     const total = plan.tiles.length;
+    setStep("Downloading image tiles…", `${total} tiles at full resolution`);
     reportProgress(0, total, `Downloading ${total} tiles…`);
     let done = 0;
     let failed: unknown = null;
@@ -325,6 +566,7 @@ async function runJob(url: string): Promise<void> {
     if (token !== jobToken) return;
 
     controller.dispatch(nextEvent("save-start") as never);
+    setStep("Assembling the final picture…", "Encoding PNG in your browser");
     reportProgress(total, total, "Encoding PNG…");
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
@@ -341,11 +583,13 @@ async function runJob(url: string): Promise<void> {
       blobUrl: resultBlobUrl,
     };
     viewCtx.originClean = true;
+    pushLog(`Done: ${width}×${height} PNG (${total} tiles)`);
     controller.dispatch(nextEvent("save-done") as never);
     update();
   } catch (error) {
     if (token !== jobToken) return;
     const code = (error as { code?: string })?.code || "DISCOVERY_FAILED";
+    pushLog(`Failed (${code}): ${((error as Error)?.message) || "unknown error"}`);
     controller.dispatch(
       nextEvent("fail", {
         error: {
@@ -362,6 +606,8 @@ async function runJob(url: string): Promise<void> {
     update();
   } finally {
     if (token === jobToken) {
+      stopHeartbeat();
+      refreshLongestPending();
       disposeClient();
     }
   }
@@ -376,14 +622,26 @@ let viewCtx: ViewContext = {
     browserCanSave: true,
   },
   originClean: true,
+  initialUrl: undefined,
 };
 
 function update(): void {
   if (!appContainer) return;
+  // Preserve open <details> across heartbeat re-renders so the collapsed
+  // technical logs don't snap shut while elapsed time ticks.
+  const openDetails: number[] = [];
+  try {
+    appContainer.querySelectorAll("details").forEach((d, i) => {
+      if ((d as HTMLDetailsElement).open) openDetails.push(i);
+    });
+  } catch {
+    // Non-fatal: re-render without preservation.
+  }
   const state = controller.getState();
   if (activeTransport && !state.transport) {
     state.transport = activeTransport;
   }
+  if (viewCtx.jobActivity) refreshLongestPending();
   renderView(
     appContainer,
     state,
@@ -407,19 +665,24 @@ function update(): void {
       },
       onCancel() {
         jobToken += 1;
+        stopHeartbeat();
         disposeClient();
         controller.dispatch(nextEvent("cancel") as never);
         update();
       },
       onReset() {
         jobToken += 1;
+        stopHeartbeat();
         disposeClient();
         sessionId = `sess:web-${Date.now()}`;
         controller.reset(sessionId);
         currentSeq = 0;
         viewCtx.currentProgress = undefined;
         viewCtx.completedInfo = undefined;
+        viewCtx.jobActivity = undefined;
+        viewCtx.initialUrl = undefined;
         activeTransport = null;
+        clearHash();
         if (resultBlobUrl) {
           URL.revokeObjectURL(resultBlobUrl);
           resultBlobUrl = null;
@@ -435,14 +698,81 @@ function update(): void {
         anchor.click();
         anchor.remove();
       },
+      onCopyShareLink() {
+        const href = (typeof window !== "undefined" && window.location && window.location.href) || "";
+        const btn = document.getElementById("dz-btn-share");
+        const done = () => {
+          if (btn) {
+            btn.textContent = "Copied!";
+            setTimeout(() => {
+              try {
+                if (btn.isConnected) btn.textContent = "Copy shareable link";
+              } catch {
+                // Button may be gone after re-render; ignore.
+              }
+            }, 2000);
+          }
+        };
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            (navigator.clipboard.writeText(href) as Promise<void>).then(done, done);
+          } else if (href) {
+            const ta = document.createElement("textarea");
+            ta.value = href;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+            done();
+          }
+        } catch {
+          // Copy failures stay silent; the address bar link still works.
+        }
+      },
     },
     viewCtx,
   );
+  try {
+    const details = appContainer.querySelectorAll("details");
+    for (const i of openDetails) {
+      const el = details[i] as HTMLDetailsElement | undefined;
+      if (el) el.open = true;
+    }
+  } catch {
+    // Non-fatal.
+  }
+}
+
+function startFromHash(): void {
+  if (typeof window === "undefined") return;
+  const raw = parseHash(window.location.hash);
+  if (raw && looksLikeUsableUrl(raw) && isAllowedSourceUrl(raw)) {
+    viewCtx.initialUrl = raw;
+    update();
+    runJob(raw);
+  } else if (raw) {
+    viewCtx.initialUrl = raw;
+    update();
+  }
 }
 
 if (appContainer) {
   document.getElementById("dz-nav-btn-extension")?.addEventListener("click", () => showExtensionGuidance());
   document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
+  if (typeof window !== "undefined") {
+    window.addEventListener("hashchange", () => {
+      const raw = parseHash(window.location.hash);
+      const current = viewCtx.jobActivity?.url;
+      if (raw && raw !== current && looksLikeUsableUrl(raw) && isAllowedSourceUrl(raw)) {
+        suppressHashWrite = false;
+        runJob(raw);
+      } else if (!raw && !current) {
+        viewCtx.initialUrl = undefined;
+        update();
+      }
+    });
+  }
+  startFromHash();
   update();
 }
 
