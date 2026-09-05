@@ -14,7 +14,11 @@ on:
     branches: [master]
   workflow_dispatch: {}
 env:
-  SITE_HOST: dezoomify.ophir.dev
+  # Verify against the project's pages.dev domain: it serves the same
+  # production deployment as the custom domain, but without the zone's
+  # bot management, which starts blocking curl's TLS fingerprint after a
+  # few bursts and would make the verification flap.
+  SITE_HOST: dezoomify.pages.dev
   CLOUDFLARE_PROJECT: dezoomify
 permissions:
   contents: read
