@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline fails honestly (with bounded retries) when tiles 404; no output is written",
+  "id": "native/cli-tile-failure",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/cli/broken.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

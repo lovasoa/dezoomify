@@ -18,6 +18,30 @@ impl NativeError {
     }
 }
 
+impl From<String> for NativeError {
+    fn from(message: String) -> Self {
+        Self::new("native.internal", message)
+    }
+}
+
+impl From<dezoomify_core::core::discovery::DiscoveryError> for NativeError {
+    fn from(error: dezoomify_core::core::discovery::DiscoveryError) -> Self {
+        Self::new("discovery.failed", error.to_string())
+    }
+}
+
+impl From<dezoomify_core::core::tile_plan::TileSourceError> for NativeError {
+    fn from(error: dezoomify_core::core::tile_plan::TileSourceError) -> Self {
+        Self::new("discovery.tile-plan", error.to_string())
+    }
+}
+
+impl From<dezoomify_core::core::processing::ProcessingError> for NativeError {
+    fn from(error: dezoomify_core::core::processing::ProcessingError) -> Self {
+        Self::new("tile.processing-failed", error.to_string())
+    }
+}
+
 fn redact(input: &str) -> String {
     dezoomify_protocol::dto::redact_error_text(input)
 }

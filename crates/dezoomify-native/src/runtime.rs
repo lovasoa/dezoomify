@@ -24,6 +24,8 @@ pub struct JobEvent {
     pub job: String,
     pub seq: u64,
     pub kind: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub detail: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -80,11 +82,16 @@ impl JobHandle {
     }
 
     pub fn emit(&mut self, kind: &str) {
+        self.emit_detail(kind, BTreeMap::new());
+    }
+
+    pub fn emit_detail(&mut self, kind: &str, detail: BTreeMap<String, String>) {
         self.seq = self.seq.checked_add(1).expect("seq overflow");
         self.events.push(JobEvent {
             job: self.id.clone(),
             seq: self.seq,
             kind: kind.to_string(),
+            detail,
         });
     }
 
@@ -97,13 +104,18 @@ impl JobHandle {
     }
 
     #[must_use]
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    #[must_use]
     pub fn events(&self) -> &[JobEvent] {
         &self.events
     }
 
-    /// Finish with a caller-supplied output digest (honest scaffold: the
-    /// runtime does not compute or verify this hash; hosts must supply a
-    /// digest of bytes they actually wrote, never a stub).
+    /// Finish with a caller-supplied output digest: hosts must supply a
+    /// digest of bytes they actually wrote, never a stub. The pipeline
+    /// computes the real sha256 of the encoded output it wrote.
     pub fn finish(&mut self, output_hash: String) -> JobResult {
         if !self.done {
             self.emit("completed");

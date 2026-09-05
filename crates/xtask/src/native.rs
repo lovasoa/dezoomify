@@ -11,30 +11,32 @@ pub fn test_native(_args: &[String]) -> Result<(), String> {
 }
 
 pub fn test_scenario(_args: &[String]) -> Result<(), String> {
-    // Honest scenario gate: JSON fixtures must parse and declare their scope.
-    // Native `outputHash` values are explicit `STUB:uncomputed` markers (no
-    // digest is computed yet); fail if anyone reintroduces a fake `sha256:*`.
-    for rel in [
-        "testdata/scenarios/native/basic/expected/result.json",
-        "testdata/scenarios/native/cache-resume/expected/result.json",
-    ] {
-        let path = super::repo_root().join(rel);
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| format!("missing scenario file {rel}: {e}"))?;
-        let value: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| format!("bad JSON {rel}: {e}"))?;
-        let hash = value
-            .get("outputHash")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| format!("{rel} lacks outputHash"))?;
-        if hash.starts_with("sha256:") {
-            return Err(format!(
-                "{rel} claims a computed digest ({hash}) with no pipeline; use STUB:uncomputed"
-            ));
-        }
-        if hash != "STUB:uncomputed" {
-            return Err(format!("{rel} has unexpected outputHash {hash}"));
-        }
+    // Real-pipeline scenario gate: the native scenarios run the actual
+    // pipeline over loopback sockets; their expected results must pin a
+    // computed digest (never a stub marker) or an honest failure code.
+    let dzi = super::repo_root().join("testdata/scenarios/native/cli-dzi/expected/result.json");
+    let dzi_value: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&dzi).map_err(|e| format!("missing native scenario: {e}"))?,
+    )
+    .map_err(|e| format!("bad native scenario JSON: {e}"))?;
+    let hash = dzi_value
+        .get("outputHash")
+        .and_then(|v| v.as_str())
+        .ok_or("cli-dzi scenario lacks outputHash")?;
+    if !hash.starts_with("sha256:") || hash.len() != 7 + 64 {
+        return Err(format!(
+            "cli-dzi expected result must pin a real sha256 digest; got {hash}"
+        ));
+    }
+    let failure =
+        super::repo_root().join("testdata/scenarios/native/cli-tile-failure/expected/result.json");
+    let failure_value: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&failure)
+            .map_err(|e| format!("missing native failure scenario: {e}"))?,
+    )
+    .map_err(|e| format!("bad failure scenario JSON: {e}"))?;
+    if failure_value.get("code").and_then(|v| v.as_str()) != Some("tile.download-failed") {
+        return Err("cli-tile-failure scenario must pin the honest failure code".to_string());
     }
     let snapshot = super::repo_root().join("testdata/scenarios/cli/help/expected/snapshot.txt");
     let snapshot_text =
@@ -43,6 +45,13 @@ pub fn test_scenario(_args: &[String]) -> Result<(), String> {
         return Err("CLI snapshot lacks usage line".to_string());
     }
     run_cargo(&["test", "-p", "dezoomify-native", "--test", "scenarios"])?;
+    run_cargo(&[
+        "test",
+        "-p",
+        "dezoomify-native",
+        "--test",
+        "pipeline_loopback",
+    ])?;
     println!("test scenario: ok");
     Ok(())
 }

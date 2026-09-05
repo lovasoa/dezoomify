@@ -1,0 +1,31 @@
+{
+  "routes": [
+    {
+      "route_id": "cli-tile-failure-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/broken.dzi",
+      "status": 200,
+      "headers": {"Content-Type": "application/xml"},
+      "payload": "payloads/fixtures.test/cli/broken.dzi"
+    },
+    {
+      "route_id": "cli-tile-failure-tile-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/broken_files/9/0_0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/tile-0_0.png"
+    },
+    {
+      "route_id": "cli-tile-failure-tile-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/broken_files/9/1_0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/tile-1_0.png"
+    }
+  ]
+}

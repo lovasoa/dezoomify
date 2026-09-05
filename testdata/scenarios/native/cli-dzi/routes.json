@@ -1,0 +1,49 @@
+{
+  "routes": [
+    {
+      "route_id": "cli-dzi-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/pyramid.dzi",
+      "status": 200,
+      "headers": {"Content-Type": "application/xml"},
+      "payload": "payloads/fixtures.test/cli/pyramid.dzi"
+    },
+    {
+      "route_id": "cli-dzi-tile-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/pyramid_files/9/0_0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/tile-0_0.png"
+    },
+    {
+      "route_id": "cli-dzi-tile-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/pyramid_files/9/1_0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/tile-1_0.png"
+    },
+    {
+      "route_id": "cli-dzi-tile-0-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/pyramid_files/9/0_1.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/tile-0_1.png"
+    },
+    {
+      "route_id": "cli-dzi-tile-1-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/pyramid_files/9/1_1.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/tile-1_1.png"
+    }
+  ]
+}

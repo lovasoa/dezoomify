@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline assembles a 512x512 DZI pyramid from real PNG tiles over loopback HTTP",
+  "id": "native/cli-dzi",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/cli/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

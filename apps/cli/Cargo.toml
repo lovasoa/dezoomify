@@ -13,3 +13,8 @@ path = "src/main.rs"
 [dependencies]
 dezoomify-native = { path = "../../crates/dezoomify-native" }
 serde_json = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+dezoomify-fixture-server = { path = "../../crates/fixture-server" }
+axum = "0.8"
