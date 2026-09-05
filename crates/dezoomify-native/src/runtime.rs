@@ -101,6 +101,9 @@ impl JobHandle {
         &self.events
     }
 
+    /// Finish with a caller-supplied output digest (honest scaffold: the
+    /// runtime does not compute or verify this hash; hosts must supply a
+    /// digest of bytes they actually wrote, never a stub).
     pub fn finish(&mut self, output_hash: String) -> JobResult {
         if !self.done {
             self.emit("completed");
