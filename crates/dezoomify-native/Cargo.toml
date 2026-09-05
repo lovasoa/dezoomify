@@ -9,7 +9,6 @@ repository = "https://github.com/lovasoa/dezoomify-ng"
 [dependencies]
 dezoomify-core = { path = "../dezoomify-core" }
 dezoomify-protocol = { path = "../dezoomify-protocol" }
-dezoomify-job = { path = "../dezoomify-job" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ureq = "2.12"
@@ -22,6 +21,3 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 dezoomify-fixture-server = { path = "../fixture-server" }
 axum = "0.8"
-
-[features]
-pipeline-debug = []
