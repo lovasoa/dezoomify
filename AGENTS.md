@@ -41,7 +41,7 @@ one.
 | Term | Meaning |
 |---|---|
 | app | One of the four user-facing programs: the website, the extension, the desktop app, and the CLI. Never "surface", "Studio", "client", or "product". |
-| shared UI | The host-neutral React UI (`packages/shared-ui`) embedded by graphical apps. |
+| shared UI | The host-neutral UI (`packages/shared-ui`) embedded by graphical apps. |
 | runtime | The effect-execution layer inside an app: the browser runtime (`packages/browser-runtime` with `crates/dezoomify-wasm`) and the native runtime (`crates/dezoomify-native`). Internal term; never used in user-facing copy. |
 | host | Whatever executes a job's effects; also the app embedding the shared UI. |
 | integration | An app's typed implementation connecting the shared UI to its runtime and host capabilities (`AppIntegration`, `webIntegration.ts`). Never "adapter". |
@@ -262,9 +262,14 @@ Preserve Dezoomify's distinctive visual identity and atmospheric parchment aesth
 
 ## Validation Commands
 
-This checkout is still a scaffold. The root workspace and `xtask` are not
-implemented yet; do not claim a `cargo xtask` command ran. Until they exist, run
-the current imported checks from the repository root:
+The root workspace and `xtask` are implemented and authoritative; run them
+from the repository root:
+
+```sh
+cargo xtask check
+cargo xtask test [core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|live|all]
+cargo xtask build <wasm|web|cli|desktop|extension>
+```
 
 ```sh
 cargo test --manifest-path migration-sources/dezoomify-rs/Cargo.toml --workspace
@@ -302,9 +307,9 @@ complete deterministic suite. Neither may contact public sites. Only
 `check` plus bare `test` while iterating, the narrowest focused test after each
 change, and `test all` plus `ci local` before a pull request. See
 `docs/development.md`, `docs/testing.md`, and
-`crates/xtask/README.md` for target and lane definitions. These commands remain
-unavailable until the root workspace and xtask implementation exist; the
-migration-source commands above remain authoritative in the meantime.
+`crates/xtask/README.md` for target and lane definitions.
+The migration-source commands below remain authoritative for legacy-only
+verification; they are not a substitute for the xtask gates above.
 
 ## Documentation
 

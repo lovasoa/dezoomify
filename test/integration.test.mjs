@@ -188,6 +188,22 @@ test("shipped webapp uses the shared proxy policy (no inline duplicate)", () => 
   assert.ok(mainJs.includes("./proxyTransport.js"), "generated main.js must import the shared transport mirror");
 });
 
+test("proxy opt-out is wired from the idle view to the webapp", () => {
+  const viewTs = fs.readFileSync(
+    path.join(REPO_ROOT, "packages", "shared-ui", "src", "view.ts"),
+    "utf8",
+  );
+  assert.ok(viewTs.includes("dz-proxy-optin"), "idle view renders the proxy toggle");
+  assert.ok(viewTs.includes("onToggleProxyOptOut"), "view reports toggle changes");
+  const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
+  assert.ok(mainTs.includes("onToggleProxyOptOut"), "webapp handles the toggle");
+  assert.ok(mainTs.includes("proxyOptOut"), "webapp keeps session opt-out state");
+  assert.ok(
+    mainTs.includes("isProxyEligible({") && mainTs.includes("proxyOptOut }"),
+    "eligibility check honors the session opt-out",
+  );
+});
+
 test("served browser import graph resolves to committed files", () => {
   const roots = ["src/main.js", "src/worker.js"];
   const seen = new Set();

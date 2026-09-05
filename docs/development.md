@@ -15,7 +15,7 @@ pnpm commands only when debugging the task runner or a component-specific test.
   `packages/protocol-ts`.
 - `crates/dezoomify-native` contains native effects used by CLI and Tauri.
 - `crates/dezoomify-wasm` adapts core and job behavior for browser hosts.
-- `packages/shared-ui` is the shared React UI; `packages/browser-runtime` owns
+- `packages/shared-ui` is the shared UI; `packages/browser-runtime` owns
   browser workers, decoding, canvases, and bounded caching.
 - `crates/fixture-server` serves controlled origins, `testdata/scenarios`
   contains shared scenarios, and `crates/xtask` owns repository tasks.
@@ -52,7 +52,7 @@ sites.
 | Target | Output |
 |---|---|
 | `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
-| `web` | real WASM artifact plus browser glue under `wasm/` (requires `wasm-bindgen-cli` matching the crate version) |
+| `web` | real WASM artifact plus browser glue under `wasm/` (requires `wasm-bindgen-cli` matching the crate version), plus regenerated browser JS mirrors (see below) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
 | `desktop` | stub validation only (logic + config); no installer or bundle produced, including with `--unsigned-test` |
 | `extension` | stub validation only (manifests); no ZIP packaged (use `apps/extension/scripts/package-store.sh` for a real package) |
@@ -69,6 +69,13 @@ The browser-runtime build is `cargo xtask test browser --build-only`. Shared UI
 artifacts are built by `build web`, `build desktop`, and `build extension`; there
 are no separate `build browser`, `build ui`, `build native`, or `build all`
 aliases.
+
+The website ships static ES modules with no bundler, so browsers need plain
+`.js`. The TypeScript sources (`src/*.ts`, the shared-UI and browser-runtime
+sources they import) are the single source of truth: type-checked and
+unit-tested. `node scripts/sync-web-js.mjs` regenerates the served `.js`
+mirrors from them; never hand-edit a generated mirror. `cargo xtask build web`
+regenerates the mirrors and `cargo xtask check` fails when they drift.
 
 ## Development servers
 

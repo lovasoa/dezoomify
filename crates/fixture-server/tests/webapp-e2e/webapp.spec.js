@@ -122,3 +122,42 @@ test("webapp fails honestly on a page without a zoomable signal", async ({ page 
   const body = await page.locator("#app").innerText();
   assert.match(body, /No zoomable image was found/i);
 });
+
+// `.invalid` never resolves (RFC 2606), so the direct browser fetch fails
+// deterministically with a network error, offline or online. The metadata
+// URL is public and credential-free, hence proxy-eligible: the only
+// variable under test is the opt-out toggle.
+const UNREACHABLE_METADATA_URL = "https://dezoomify.invalid/unreachable.json";
+
+test("default job attempts the metadata proxy after direct failure", async ({ page }) => {
+  let proxyPosts = 0;
+  await page.route("**/api/proxy", (route) => {
+    if (route.request().method() === "POST") proxyPosts += 1;
+    route.fulfill({
+      status: 403,
+      contentType: "application/json",
+      body: JSON.stringify({ code: "PROXY_POLICY_DENIED" }),
+    });
+  });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
+  // Proxy fallback is allowed by default.
+  await expect(page.locator("#dz-proxy-optin")).toBeChecked();
+  await page.locator("#dz-url-input").fill(UNREACHABLE_METADATA_URL);
+  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+  await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
+  assert.ok(proxyPosts >= 1, "default job must attempt the metadata proxy after direct failure");
+});
+
+test("metadata proxy opt-out suppresses all /api/proxy traffic", async ({ page }) => {
+  let proxyPosts = 0;
+  await page.route("**/api/proxy", (route) => {
+    if (route.request().method() === "POST") proxyPosts += 1;
+    route.abort("failed");
+  });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
+  await page.locator("#dz-proxy-optin").uncheck();
+  await page.locator("#dz-url-input").fill(UNREACHABLE_METADATA_URL);
+  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+  await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
+  assert.equal(proxyPosts, 0, "opted-out job must never call the metadata proxy");
+});

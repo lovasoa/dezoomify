@@ -22,6 +22,8 @@ export interface ViewCallbacks {
   onSelectLevel?(level: number): void;
   onOpenExternalLink?(url: string): void;
   onCopyShareLink?(): void;
+  /** Metadata-proxy opt-out toggle (website only; session-scoped). */
+  onToggleProxyOptOut?(optOut: boolean): void;
 }
 
 export interface JobActivity {
@@ -54,6 +56,8 @@ export interface ViewContext {
   jobActivity?: JobActivity;
   /** Prefilled URL (e.g. restored from a legacy `#url` hash). */
   initialUrl?: string;
+  /** Metadata-proxy opt-out (website only; session-scoped, default allows fallback). */
+  proxyOptOut?: boolean;
 }
 
 export const ALL_DEZOOMERS = [
@@ -432,7 +436,7 @@ function mountInputSection(
     <p class="dz-license-text">
       This script is released under the <a href="http://www.gnu.org/licenses/gpl.html" target="_blank" rel="noopener">GPL</a>.
       <a href="http://github.com/lovasoa/dezoomify" target="_blank" rel="noopener">See the source code</a>.
-      <a href="./terms.html">We decline any responsibility for an illegal use of this software</a>.
+      <a href="https://dezoomify.ophir.dev/terms.html" target="_blank" rel="noopener">We decline any responsibility for an illegal use of this software</a>.
     </p>
   `;
   body.appendChild(desc);
@@ -526,6 +530,22 @@ function mountInputSection(
   }
   form.appendChild(details);
 
+  // Metadata-proxy opt-out: plain checkbox row (architectural geometry, no
+  // pills). Checked (default) allows the automatic eligible metadata-proxy
+  // fallback after a direct-fetch failure; unchecking disables it for the
+  // session. Tiles never use the proxy either way.
+  const proxyRow = document.createElement("label");
+  proxyRow.className = "dz-proxy-toggle";
+  proxyRow.innerHTML = `
+    <input type="checkbox" id="dz-proxy-optin"${ctx?.proxyOptOut === true ? "" : " checked"} />
+    <span>Allow the metadata proxy when a direct fetch fails (metadata only, never tiles)</span>
+  `;
+  proxyRow.querySelector("input")?.addEventListener("change", (e) => {
+    const box = e.target as HTMLInputElement;
+    callbacks.onToggleProxyOptOut?.(!box.checked);
+  });
+  form.appendChild(proxyRow);
+
   // Centered Tactile "Dezoomify !" Button
   const btnRow = document.createElement("div");
   btnRow.className = "dz-button-row";
@@ -566,19 +586,99 @@ function defaultStepFor(status: ControllerState["status"]): string {
 }
 
 /**
- * Live job view. Replaces the idle explanation (which fades away via
- * `.dz-job-section` animation) with a calm hierarchy:
- *  1. step + progress (always),
- *  2. elapsed / pending requests (only once meaningful, > ~2 s),
- *  3. reassurance when stalled (> ~10 s without progress),
- *  4. collapsed technical logs (on demand).
+ * Mount the live job view into the status card.
+ * Mounted only ONCE upon entering the active job phase.
+ * All subsequent ticks, progress reports, and step changes
+ * execute `updateJobSection` to mutate existing DOM elements in place.
+ * This guarantees zero flashing, no animation restarts, and preserves
+ * user-opened details, clipboard feedback, and text selection.
  */
-function renderJobSection(
+function mountJobSection(
   parent: HTMLElement,
   state: ControllerState,
   callbacks: ViewCallbacks,
   ctx?: ViewContext,
 ): void {
+  const sec = document.createElement("div");
+  sec.className = "dz-view-body dz-job-section dz-fade-in";
+  sec.setAttribute("role", "status");
+  sec.setAttribute("aria-live", "polite");
+
+  // Keep latest callbacks accessible on the element without listener churn
+  (sec as unknown as { _callbacks: ViewCallbacks })._callbacks = callbacks;
+
+  sec.innerHTML = `
+    <p class="dz-source-line" id="dz-job-source-line" style="display: none;">
+      Working on <span class="dz-source-url" id="dz-job-source-url"></span>
+    </p>
+    <div class="dz-progress-header">
+      <span class="dz-progress-status">
+        <span class="dz-pulse" aria-hidden="true"></span>
+        <span class="dz-progress-step-text" id="dz-job-step-text"></span>
+      </span>
+      <span class="dz-progress-percent" id="dz-job-percent"></span>
+    </div>
+    <div class="dz-progress-track dz-indeterminate" id="dz-job-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+      <div class="dz-progress-bar" id="dz-job-bar" style="width: 35%;"></div>
+    </div>
+    <p class="dz-tile-counts" id="dz-job-counts"></p>
+    <div class="dz-pending-box" id="dz-job-pending-box" style="display: none;">
+      <div class="dz-pending-line">
+        <span id="dz-job-pending-status"></span>
+        <span class="dz-pending-time" id="dz-job-pending-time"></span>
+      </div>
+      <div class="dz-remaining-track" aria-hidden="true">
+        <div class="dz-remaining-bar" id="dz-job-remaining-bar" style="width: 0%;"></div>
+      </div>
+    </div>
+    <p class="dz-reassure" id="dz-job-reassure" style="display: none;">
+      Still working — the museum server is slow to answer. You can wait, or cancel and try again later.
+    </p>
+    <p class="dz-job-detail" id="dz-job-detail" style="display: none;"></p>
+    <div class="dz-progress-controls">
+      <span class="dz-transport-badge" id="dz-job-transport">Direct from your browser</span>
+      <div class="dz-job-actions">
+        <button type="button" class="dz-btn-secondary" id="dz-btn-share" style="display: none;">Copy shareable link</button>
+        <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel</button>
+      </div>
+    </div>
+    <details class="dz-details" id="dz-job-details">
+      <summary class="dz-summary">
+        <span>Technical details &amp; logs</span>
+        <svg class="dz-summary-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </summary>
+      <div class="dz-diagnostics" id="dz-job-diagnostics"></div>
+      <div class="dz-diagnostics dz-log" id="dz-job-log" style="display: none;"></div>
+    </details>
+  `;
+
+  sec.querySelector("#dz-btn-cancel")?.addEventListener("click", () => {
+    const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
+    cb?.onCancel();
+  });
+  sec.querySelector("#dz-btn-share")?.addEventListener("click", () => {
+    const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
+    cb?.onCopyShareLink?.();
+  });
+
+  parent.appendChild(sec);
+  updateJobSection(parent, state, callbacks, ctx);
+}
+
+/**
+ * Perform targeted in-place DOM updates on the mounted job section.
+ */
+function updateJobSection(
+  card: HTMLElement,
+  state: ControllerState,
+  callbacks: ViewCallbacks,
+  ctx?: ViewContext,
+): void {
+  const sec = card.querySelector<HTMLElement>(".dz-job-section");
+  if (!sec) return;
+
+  (sec as unknown as { _callbacks: ViewCallbacks })._callbacks = callbacks;
+
   const activity = ctx?.jobActivity ?? {};
   const current = ctx?.currentProgress?.current ?? 0;
   const total = ctx?.currentProgress?.total ?? 0;
@@ -597,57 +697,147 @@ function renderJobSection(
   const timeoutMs = activity.timeoutMs ?? 30000;
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
   const stalledMs = Math.max(0, now - lastProgressAt);
-  // Progressive disclosure thresholds: stay quiet for fast requests, speak
-  // up once the user could plausibly wonder what is happening.
   const showPending = pending > 0 && (elapsedMs >= 2000 || longestPending >= 2000);
   const showStalled = stalledMs >= 10000 && state.status !== "saving";
   const sourceUrl = activity.url ? truncateMiddle(activity.url, 90) : "";
 
-  const sec = document.createElement("div");
-  sec.className = "dz-job-section dz-fade-in";
-  sec.setAttribute("role", "status");
-  sec.setAttribute("aria-live", "polite");
-  sec.innerHTML = `
-    ${sourceUrl ? `<p class="dz-source-line" title="${escapeHtml(activity.url ?? "")}">Working on <span class="dz-source-url">${escapeHtml(sourceUrl)}</span></p>` : ""}
-    <div class="dz-progress-header">
-      <span class="dz-progress-status"><span class="dz-pulse" aria-hidden="true"></span>${escapeHtml(step)}</span>
-      ${determinate ? `<span class="dz-progress-percent">${pct}%</span>` : elapsed ? `<span class="dz-progress-percent dz-elapsed">${escapeHtml(elapsed)}</span>` : ""}
-    </div>
-    <div class="dz-progress-track${determinate ? "" : " dz-indeterminate"}" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(step)}">
-      <div class="dz-progress-bar" style="width: ${determinate ? pct : 35}%"></div>
-    </div>
-    ${determinate ? `<p class="dz-tile-counts">${current} of ${total} tiles${elapsed ? ` · ${escapeHtml(elapsed)} elapsed` : ""}</p>` : elapsed ? `<p class="dz-tile-counts">${escapeHtml(elapsed)} elapsed</p>` : ""}
-    ${showPending ? `
-      <div class="dz-pending-line">
-        <span>${pending} request${pending === 1 ? "" : "s"} in flight${completed > 0 ? ` · ${completed} done` : ""}${failed > 0 ? ` · ${failed} failed, retrying` : ""}</span>
-        <span class="dz-pending-time">${formatElapsed(longestPending)} waiting · ${formatRemaining(longestPending, timeoutMs)}</span>
-      </div>
-      <div class="dz-remaining-track" aria-hidden="true">
-        <div class="dz-remaining-bar" style="width: ${Math.max(0, Math.min(100, Math.round((longestPending / timeoutMs) * 100)))}%"></div>
-      </div>
-    ` : ""}
-    ${showStalled ? `<p class="dz-reassure">Still working — the museum server is slow to answer. You can wait, or cancel and try again later.</p>` : ""}
-    ${activity.detail ? `<p class="dz-job-detail">${escapeHtml(activity.detail)}</p>` : ""}
-    <div class="dz-progress-controls">
-      <span class="dz-transport-badge">${transport}</span>
-      <span class="dz-job-actions">
-        ${callbacks.onCopyShareLink ? `<button type="button" class="dz-btn-secondary" id="dz-btn-share">Copy shareable link</button>` : ""}
-        <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel</button>
-      </span>
-    </div>
-    <details class="dz-details">
-      <summary class="dz-summary">
-        <span>Technical details &amp; logs</span>
-        <svg class="dz-summary-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-      </summary>
-      <div class="dz-diagnostics">${escapeHtml(diagnosticsText(state, ctx, elapsedMs, timeoutMs))}</div>
-      ${activity.log && activity.log.length > 0 ? `<div class="dz-diagnostics dz-log">${activity.log.slice(-20).map((l) => escapeHtml(l)).join("\n")}</div>` : ""}
-    </details>
-  `;
+  // 1. Source Line
+  const sourceLine = sec.querySelector<HTMLElement>("#dz-job-source-line");
+  const sourceUrlEl = sec.querySelector<HTMLElement>("#dz-job-source-url");
+  if (sourceLine && sourceUrlEl) {
+    if (sourceUrl) {
+      sourceLine.style.display = "";
+      sourceLine.title = activity.url ?? "";
+      if (sourceUrlEl.textContent !== sourceUrl) {
+        sourceUrlEl.textContent = sourceUrl;
+      }
+    } else {
+      sourceLine.style.display = "none";
+    }
+  }
 
-  sec.querySelector("#dz-btn-cancel")?.addEventListener("click", () => callbacks.onCancel());
-  sec.querySelector("#dz-btn-share")?.addEventListener("click", () => callbacks.onCopyShareLink?.());
-  parent.appendChild(sec);
+  // 2. Step Label & Percent/Elapsed
+  const stepEl = sec.querySelector<HTMLElement>("#dz-job-step-text");
+  if (stepEl && stepEl.textContent !== step) {
+    stepEl.textContent = step;
+  }
+
+  const percentEl = sec.querySelector<HTMLElement>("#dz-job-percent");
+  if (percentEl) {
+    const percentText = determinate ? `${pct}%` : (elapsed || "");
+    if (percentEl.textContent !== percentText) {
+      percentEl.textContent = percentText;
+    }
+  }
+
+  // 3. Track and Bar
+  const track = sec.querySelector<HTMLElement>("#dz-job-track");
+  const bar = sec.querySelector<HTMLElement>("#dz-job-bar");
+  if (track && bar) {
+    track.setAttribute("aria-valuenow", String(pct));
+    track.setAttribute("aria-label", step);
+    if (determinate) {
+      track.classList.remove("dz-indeterminate");
+      bar.style.width = `${pct}%`;
+    } else {
+      track.classList.add("dz-indeterminate");
+      bar.style.width = "35%";
+    }
+  }
+
+  // 4. Counts
+  const countsEl = sec.querySelector<HTMLElement>("#dz-job-counts");
+  if (countsEl) {
+    const countsText = determinate
+      ? `${current} of ${total} tiles${elapsed ? ` · ${elapsed} elapsed` : ""}`
+      : elapsed
+        ? `${elapsed} elapsed`
+        : "";
+    if (countsEl.textContent !== countsText) {
+      countsEl.textContent = countsText;
+    }
+  }
+
+  // 5. Pending section
+  const pendingBox = sec.querySelector<HTMLElement>("#dz-job-pending-box");
+  const pendingStatus = sec.querySelector<HTMLElement>("#dz-job-pending-status");
+  const pendingTime = sec.querySelector<HTMLElement>("#dz-job-pending-time");
+  const remainingBar = sec.querySelector<HTMLElement>("#dz-job-remaining-bar");
+  if (pendingBox) {
+    if (showPending) {
+      pendingBox.style.display = "";
+      if (pendingStatus) {
+        const text = `${pending} request${pending === 1 ? "" : "s"} in flight${completed > 0 ? ` · ${completed} done` : ""}${failed > 0 ? ` · ${failed} failed, retrying` : ""}`;
+        if (pendingStatus.textContent !== text) {
+          pendingStatus.textContent = text;
+        }
+      }
+      if (pendingTime) {
+        const timeText = `${formatElapsed(longestPending)} waiting · ${formatRemaining(longestPending, timeoutMs)}`;
+        if (pendingTime.textContent !== timeText) {
+          pendingTime.textContent = timeText;
+        }
+      }
+      if (remainingBar) {
+        const remainingPct = Math.max(0, Math.min(100, Math.round((longestPending / timeoutMs) * 100)));
+        remainingBar.style.width = `${remainingPct}%`;
+      }
+    } else {
+      pendingBox.style.display = "none";
+    }
+  }
+
+  // 6. Stalled Reassurance
+  const reassureEl = sec.querySelector<HTMLElement>("#dz-job-reassure");
+  if (reassureEl) {
+    reassureEl.style.display = showStalled ? "" : "none";
+  }
+
+  // 7. Detail
+  const detailEl = sec.querySelector<HTMLElement>("#dz-job-detail");
+  if (detailEl) {
+    if (activity.detail) {
+      detailEl.style.display = "";
+      if (detailEl.textContent !== activity.detail) {
+        detailEl.textContent = activity.detail;
+      }
+    } else {
+      detailEl.style.display = "none";
+    }
+  }
+
+  // 8. Transport badge & Action buttons
+  const transportEl = sec.querySelector<HTMLElement>("#dz-job-transport");
+  if (transportEl && transportEl.textContent !== transport) {
+    transportEl.textContent = transport;
+  }
+
+  const shareBtn = sec.querySelector<HTMLElement>("#dz-btn-share");
+  if (shareBtn) {
+    shareBtn.style.display = callbacks.onCopyShareLink ? "" : "none";
+  }
+
+  // 9. Diagnostics & Logs (preserved in-place, keeping details open state intact)
+  const diagEl = sec.querySelector<HTMLElement>("#dz-job-diagnostics");
+  if (diagEl) {
+    const diagText = diagnosticsText(state, ctx, elapsedMs, timeoutMs);
+    if (diagEl.textContent !== diagText) {
+      diagEl.textContent = diagText;
+    }
+  }
+
+  const logEl = sec.querySelector<HTMLElement>("#dz-job-log");
+  if (logEl) {
+    if (activity.log && activity.log.length > 0) {
+      logEl.style.display = "";
+      const logText = activity.log.slice(-20).join("\n");
+      if (logEl.textContent !== logText) {
+        logEl.textContent = logText;
+      }
+    } else {
+      logEl.style.display = "none";
+    }
+  }
 }
 
 function diagnosticsText(
@@ -676,10 +866,15 @@ function renderProgressSection(
   callbacks: ViewCallbacks,
   ctx?: ViewContext,
 ): void {
-  renderJobSection(parent, state, callbacks, ctx);
+  const sec = parent.querySelector(".dz-job-section");
+  if (!sec) {
+    mountJobSection(parent, state, callbacks, ctx);
+  } else {
+    updateJobSection(parent, state, callbacks, ctx);
+  }
 }
 
-function renderDisplayOnlySection(
+function mountDisplayOnlySection(
   parent: HTMLElement,
   _state: ControllerState,
   callbacks: ViewCallbacks,
@@ -687,7 +882,7 @@ function renderDisplayOnlySection(
 ): void {
   const guidance = renderSaveGuidance(false);
   const section = document.createElement("div");
-  section.className = "dz-notice-section";
+  section.className = "dz-view-body dz-notice-section dz-fade-in";
   section.innerHTML = `
     <div class="dz-notice-header">
       <svg class="dz-notice-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -721,7 +916,7 @@ function renderDisplayOnlySection(
   parent.appendChild(section);
 }
 
-function renderCompletedSection(
+function mountCompletedSection(
   parent: HTMLElement,
   _state: ControllerState,
   callbacks: ViewCallbacks,
@@ -733,7 +928,7 @@ function renderCompletedSection(
   const guidance = renderSaveGuidance(isClean);
 
   const section = document.createElement("div");
-  section.className = "dz-completed-section";
+  section.className = "dz-view-body dz-completed-section dz-fade-in";
   section.innerHTML = `
     <div class="dz-completed-header">
       <svg class="dz-completed-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -766,7 +961,7 @@ function renderCompletedSection(
   parent.appendChild(section);
 }
 
-function renderFailedSection(
+function mountFailedSection(
   parent: HTMLElement,
   state: ControllerState,
   callbacks: ViewCallbacks,
@@ -780,7 +975,7 @@ function renderFailedSection(
   };
 
   const section = document.createElement("div");
-  section.className = "dz-error-section";
+  section.className = "dz-view-body dz-error-section dz-fade-in";
   section.innerHTML = `
     <div class="dz-error-header">
       <svg class="dz-error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -790,7 +985,7 @@ function renderFailedSection(
       </svg>
       <div>
         <h2 class="dz-error-title">Could not dezoomify image</h2>
-        <p class="dz-error-message">${error.message}</p>
+        <p class="dz-error-message" id="dz-error-message">${error.message}</p>
       </div>
     </div>
 
@@ -826,7 +1021,7 @@ function renderFailedSection(
         <span>Technical error details &amp; bug report</span>
         <svg class="dz-summary-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </summary>
-      <div class="dz-diagnostics">Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}</div>
+      <div class="dz-diagnostics" id="dz-error-diagnostics">Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}</div>
       <div class="dz-diagnostics-report">
         <a href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md" target="_blank" rel="noopener">Report a bug on GitHub &rarr;</a>
       </div>
@@ -844,14 +1039,41 @@ function renderFailedSection(
   parent.appendChild(section);
 }
 
-function renderCancelledSection(
+function updateFailedSection(
+  card: HTMLElement,
+  state: ControllerState,
+  _callbacks: ViewCallbacks,
+  _ctx?: ViewContext,
+): void {
+  const sec = card.querySelector<HTMLElement>(".dz-error-section");
+  if (!sec) return;
+  const error: StructuredError = state.error ?? {
+    code: "UNKNOWN",
+    category: "unknown",
+    retryable: true,
+    message: "Dezoomify could not find or download the zoomable image at this address.",
+  };
+  const msgEl = sec.querySelector<HTMLElement>("#dz-error-message");
+  if (msgEl && msgEl.textContent !== error.message) {
+    msgEl.textContent = error.message;
+  }
+  const diagEl = sec.querySelector<HTMLElement>("#dz-error-diagnostics");
+  if (diagEl) {
+    const text = `Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}`;
+    if (diagEl.textContent !== text) {
+      diagEl.textContent = text;
+    }
+  }
+}
+
+function mountCancelledSection(
   parent: HTMLElement,
   _state: ControllerState,
   callbacks: ViewCallbacks,
   _ctx?: ViewContext,
 ): void {
   const section = document.createElement("div");
-  section.className = "dz-notice-section";
+  section.className = "dz-view-body dz-notice-section dz-fade-in";
   section.innerHTML = `
     <h2 class="dz-notice-title" style="color: var(--dz-text-primary);">Download cancelled</h2>
     <p class="dz-notice-message">The image download was stopped.</p>
@@ -863,13 +1085,14 @@ function renderCancelledSection(
   parent.appendChild(section);
 }
 
-function renderGenericState(
+function mountGenericState(
   parent: HTMLElement,
   state: ControllerState,
   callbacks: ViewCallbacks,
   _ctx?: ViewContext,
 ): void {
   const div = document.createElement("div");
+  div.className = "dz-view-body dz-fade-in";
   div.style.padding = "1rem 0";
   div.innerHTML = `
     <p style="color: var(--dz-text-secondary)">Status: <strong>${state.status}</strong></p>

@@ -570,20 +570,11 @@ let viewCtx              = {
   },
   originClean: true,
   initialUrl: undefined,
+  proxyOptOut: false,
 };
 
 function update()       {
   if (!appContainer) return;
-  // Preserve open <details> across heartbeat re-renders so the collapsed
-  // technical logs don't snap shut while elapsed time ticks.
-  const openDetails           = [];
-  try {
-    appContainer.querySelectorAll("details").forEach((d, i) => {
-      if ((d                      ).open) openDetails.push(i);
-    });
-  } catch {
-    // Non-fatal: re-render without preservation.
-  }
   const state = controller.getState();
   if (activeTransport && !state.transport) {
     state.transport = activeTransport;
@@ -645,6 +636,12 @@ function update()       {
         anchor.click();
         anchor.remove();
       },
+      onToggleProxyOptOut(optOut         ) {
+        // Session-scoped only (no storage effect). The checkbox already
+        // reflects the choice, so no re-render here (it would steal focus).
+        proxyOptOut = optOut;
+        viewCtx.proxyOptOut = optOut;
+      },
       onCopyShareLink() {
         const href = (typeof window !== "undefined" && window.location && window.location.href) || "";
         const btn = document.getElementById("dz-btn-share");
@@ -679,15 +676,6 @@ function update()       {
     },
     viewCtx,
   );
-  try {
-    const details = appContainer.querySelectorAll("details");
-    for (const i of openDetails) {
-      const el = details[i]                                  ;
-      if (el) el.open = true;
-    }
-  } catch {
-    // Non-fatal.
-  }
 }
 
 function startFromHash()       {

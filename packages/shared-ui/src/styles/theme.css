@@ -519,13 +519,32 @@ abbr[title] {
   margin-top: 0.25rem;
 }
 
+/* Metadata-proxy opt-out: plain checkbox row, architectural geometry. */
+.dz-proxy-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+}
+
+.dz-proxy-toggle input {
+  margin-top: 0.15rem;
+  accent-color: var(--dz-text-secondary);
+}
+
 .dz-btn-tactile {
-  min-width: 240px;
-  height: 46px;
-  padding: 0 2rem;
+  min-width: 200px;
+  min-height: 46px;
+  height: auto;
+  padding: 0.55rem 2rem;
   font-family: inherit;
-  font-size: 1.08rem;
+  font-size: 1.05rem;
   font-weight: 600;
+  line-height: 1.35;
   color: var(--dz-btn-text);
   background: var(--dz-btn-gradient);
   border: 1px solid var(--dz-btn-border);
@@ -536,7 +555,9 @@ abbr[title] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  text-align: center;
   gap: 0.5rem;
+  box-sizing: border-box;
 }
 
 .dz-btn-tactile:hover {
@@ -560,13 +581,15 @@ abbr[title] {
   transform: none;
 }
 
-/* Secondary Button */
+/* Secondary Button - Flexible height, centered text, never overflows container */
 .dz-btn-secondary {
-  height: 38px;
-  padding: 0 1.25rem;
+  min-height: 38px;
+  height: auto;
+  padding: 0.45rem 1.15rem;
   font-family: inherit;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   font-weight: 500;
+  line-height: 1.35;
   color: var(--dz-text-primary);
   background: var(--dz-btn-gradient);
   border: 1px solid var(--dz-btn-border);
@@ -576,8 +599,11 @@ abbr[title] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  text-align: center;
   gap: 0.4rem;
   text-decoration: none;
+  box-sizing: border-box;
+  white-space: nowrap;
 }
 
 .dz-btn-secondary:hover {
@@ -608,19 +634,41 @@ abbr[title] {
 .dz-progress-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
+  gap: 0.75rem;
   font-size: 1.05rem;
+  width: 100%;
+  min-width: 0;
 }
 
 .dz-progress-status {
   font-weight: 600;
   color: var(--dz-text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  flex: 1 1 auto;
+}
+
+.dz-progress-step-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dz-progress-percent {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--dz-link-color);
+  flex-shrink: 0;
+  white-space: nowrap;
+  text-align: right;
+  min-width: 2.2rem;
 }
 
 .dz-progress-track {
@@ -640,18 +688,25 @@ abbr[title] {
 
 .dz-progress-controls {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
-  margin-top: 0.5rem;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  width: 100%;
+  min-width: 0;
 }
 
 /* Live job view: replaces the idle explanation (which fades away). */
 .dz-job-section {
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 0.85rem;
   padding: 1.25rem 0 0.5rem;
   margin-top: 0.25rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .dz-fade-in {
@@ -659,7 +714,7 @@ abbr[title] {
 }
 
 @keyframes dzJobIn {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -676,12 +731,15 @@ abbr[title] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .dz-source-url {
   font-family: var(--dz-font-mono);
   font-size: 0.82rem;
   color: var(--dz-text-secondary);
+  word-break: break-all;
 }
 
 .dz-pulse {
@@ -691,6 +749,7 @@ abbr[title] {
   border-radius: var(--dz-radius);
   background: var(--dz-link-color);
   margin-right: 0.55rem;
+  flex-shrink: 0;
   vertical-align: baseline;
   animation: dzPulse 1.6s ease-in-out infinite;
 }
@@ -714,20 +773,35 @@ abbr[title] {
   font-size: 0.88rem;
   font-variant-numeric: tabular-nums;
   color: var(--dz-text-secondary);
+  min-height: 1.35em;
+  line-height: 1.35;
+}
+
+.dz-pending-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+  min-width: 0;
 }
 
 .dz-pending-line {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
   font-size: 0.88rem;
   color: var(--dz-text-secondary);
-  margin: 0.35rem 0 0;
+  margin: 0;
+  min-width: 0;
 }
 
 .dz-pending-time {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .dz-remaining-track {
@@ -760,9 +834,12 @@ abbr[title] {
 }
 
 .dz-job-actions {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.6rem;
   align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
 }
 
 .dz-share-hint {
@@ -783,13 +860,18 @@ abbr[title] {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.2rem 0.65rem;
+  padding: 0.25rem 0.65rem;
   font-size: 0.82rem;
   font-weight: 500;
   border-radius: var(--dz-radius);
   background: rgba(0, 0, 0, 0.03);
   color: var(--dz-text-secondary);
   border: 1px solid var(--dz-surface-border);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1426,12 +1508,15 @@ abbr[title] {
 /* Responsive Rules */
 @media (max-width: 768px) {
   .dz-main {
-    width: 95%;
-    margin: 1.5rem auto 2.5rem;
+    width: min(94%, 960px);
+    margin: 1.25rem auto 2rem;
   }
 
   .dz-card {
-    padding: 1.75rem 1.25rem;
+    padding: 1.5rem 1.15rem;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   .dz-title {
@@ -1445,6 +1530,7 @@ abbr[title] {
 
   .dz-btn-tactile {
     width: 100%;
+    min-width: 0;
   }
 
   .dz-nav {
@@ -1452,11 +1538,17 @@ abbr[title] {
   }
 
   .dz-nav-links {
-    gap: 0.75rem;
-    margin-left: 0.75rem;
+    gap: 0.5rem;
+    margin-left: 0.5rem;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+  }
+
+  .dz-nav-btn,
+  .dz-nav-link {
+    font-size: 0.82rem;
+    padding: 0.25rem 0.45rem;
   }
 
   .dz-nav-links::-webkit-scrollbar {
@@ -1474,5 +1566,59 @@ abbr[title] {
 
   .dz-footer-links {
     gap: 0.85rem 1.25rem;
+  }
+}
+
+/* Small phone screens (portrait mobile, e.g. 360px) */
+@media (max-width: 560px) {
+  .dz-progress-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .dz-transport-badge {
+    align-self: flex-start;
+  }
+
+  .dz-job-actions {
+    width: 100%;
+    justify-content: stretch;
+    gap: 0.5rem;
+  }
+
+  .dz-job-actions .dz-btn-secondary {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .dz-actions-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dz-actions-row .dz-btn-tactile,
+  .dz-actions-row .dz-btn-secondary {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Narrow devices (<= 380px) */
+@media (max-width: 380px) {
+  .dz-card {
+    padding: 1.25rem 0.85rem;
+  }
+
+  .dz-title {
+    font-size: 1.45rem;
+  }
+
+  .dz-job-actions {
+    flex-direction: column;
+  }
+
+  .dz-job-actions .dz-btn-secondary {
+    width: 100%;
   }
 }

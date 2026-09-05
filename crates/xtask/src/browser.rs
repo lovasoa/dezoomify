@@ -137,7 +137,6 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
     for rel in [
         "package.json",
         "index.html",
-        "src/config.ts",
         "src/webIntegration.ts",
         "src/proxyTransport.ts",
         "src/worker.js",
