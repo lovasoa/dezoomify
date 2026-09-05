@@ -103,3 +103,28 @@ test("docs/user pages carry their stem marker and unique title", () => {
     seen.add(title);
   }
 });
+
+test("app pages link the in-app docs instead of legacy doc sites", () => {
+  for (const page of ["index.html", "privacy.html", "terms.html"]) {
+    const html = readFileSync(path.join(webDir, page), "utf8");
+    assert.ok(html.includes("./help/"), `${page} links ./help/`);
+    assert.ok(
+      !html.includes("github.com/lovasoa/dezoomify/wiki"),
+      `${page} must not link the legacy wiki`,
+    );
+  }
+  for (const source of [
+    path.join(webDir, "packages", "shared-ui", "src", "view.ts"),
+    path.join(webDir, "packages", "shared-ui", "src", "view.js"),
+  ]) {
+    const code = readFileSync(source, "utf8");
+    assert.ok(
+      !code.includes("github.com/lovasoa/dezoomify/wiki"),
+      `${source} must not link the legacy wiki`,
+    );
+    assert.ok(
+      code.includes("dezoomify.ophir.dev/help/troubleshooting.html"),
+      `${source} points failures at the in-app troubleshooting page`,
+    );
+  }
+});

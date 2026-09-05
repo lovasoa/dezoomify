@@ -261,67 +261,122 @@ export function showExtensionGuidance(): void {
   );
 }
 
-export function renderView(
-  container: HTMLElement,
-  state: ControllerState,
-  callbacks: ViewCallbacks,
-  ctx?: ViewContext,
-): void {
-  container.innerHTML = "";
+export type ViewPhase =
+  | "idle"
+  | "job"
+  | "display-only"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "generic";
 
-  // Main status card
-  const card = document.createElement("div");
-  card.className = "dz-card";
-  container.appendChild(card);
-
-  // Header with authentic title & icon
-  const header = document.createElement("div");
-  header.className = "dz-header";
-  header.innerHTML = `
-    <h1 class="dz-title">
-      <span>Dezoomify</span>
-      ${getDezoomifyLogoSvg(28)}
-    </h1>
-  `;
-  card.appendChild(header);
-
-  // Body content based on state. Active job states share one live job view
-  // so the UI never looks stuck: discovering through saving all render the
-  // step, elapsed time, pending requests, and collapsed technical logs.
-  // The long introductory explanation only shows when idle.
-  switch (state.status) {
+export function getPhaseForStatus(status: ControllerState["status"]): ViewPhase {
+  switch (status) {
     case "idle":
-      renderInputSection(card, state, callbacks, ctx);
-      break;
-
+      return "idle";
     case "discovering":
     case "choosing-image":
     case "choosing-level":
     case "preflighting":
     case "downloading":
     case "saving":
-      renderJobSection(card, state, callbacks, ctx);
-      break;
-
+      return "job";
     case "display-only":
-      renderDisplayOnlySection(card, state, callbacks, ctx);
-      break;
-
+      return "display-only";
     case "completed":
-      renderCompletedSection(card, state, callbacks, ctx);
-      break;
-
+      return "completed";
     case "failed":
-      renderFailedSection(card, state, callbacks, ctx);
-      break;
-
+      return "failed";
     case "cancelled":
-      renderCancelledSection(card, state, callbacks, ctx);
-      break;
-
+      return "cancelled";
     default:
-      renderGenericState(card, state, callbacks, ctx);
-      break;
+      return "generic";
+  }
+}
+
+export function renderView(
+  container: HTMLElement,
+  state: ControllerState,
+  callbacks: ViewCallbacks,
+  ctx?: ViewContext,
+): void {
+  // Ensure the card container is stable across updates
+  let card = container.querySelector<HTMLElement>(".dz-card");
+  if (!card) {
+    container.innerHTML = "";
+    card = document.createElement("div");
+    card.className = "dz-card";
+    container.appendChild(card);
+  }
+
+  // Header with authentic title & icon (mounted once)
+  let header = card.querySelector<HTMLElement>(".dz-header");
+  if (!header) {
+    header = document.createElement("div");
+    header.className = "dz-header";
+    header.innerHTML = `
+      <h1 class="dz-title">
+        <span>Dezoomify</span>
+        ${getDezoomifyLogoSvg(28)}
+      </h1>
+    `;
+    card.prepend(header);
+  }
+
+  // Major view phase management:
+  // Transition between different screens (idle -> job -> completed/failed) mounts
+  // new body elements once with entrance animation. Within an active job, fine-grained
+  // in-place updates mutate existing nodes, guaranteeing that animations do not
+  // re-trigger, open details do not snap shut, and the screen NEVER flickers or blinks.
+  const phase = getPhaseForStatus(state.status);
+  const currentPhase = card.dataset.viewPhase;
+
+  if (currentPhase !== phase) {
+    card.querySelectorAll(".dz-view-body").forEach((el) => el.remove());
+    card.dataset.viewPhase = phase;
+
+    switch (phase) {
+      case "idle":
+        mountInputSection(card, state, callbacks, ctx);
+        break;
+
+      case "job":
+        mountJobSection(card, state, callbacks, ctx);
+        break;
+
+      case "display-only":
+        mountDisplayOnlySection(card, state, callbacks, ctx);
+        break;
+
+      case "completed":
+        mountCompletedSection(card, state, callbacks, ctx);
+        break;
+
+      case "failed":
+        mountFailedSection(card, state, callbacks, ctx);
+        break;
+
+      case "cancelled":
+        mountCancelledSection(card, state, callbacks, ctx);
+        break;
+
+      default:
+        mountGenericState(card, state, callbacks, ctx);
+        break;
+    }
+  } else {
+    // Same phase: mutate existing DOM elements in place
+    switch (phase) {
+      case "idle":
+        updateInputSection(card, ctx);
+        break;
+      case "job":
+        updateJobSection(card, state, callbacks, ctx);
+        break;
+      case "failed":
+        updateFailedSection(card, state, callbacks, ctx);
+        break;
+    }
   }
 }
 
@@ -340,14 +395,26 @@ function truncateMiddle(value: string, max = 90): string {
   return `${s.slice(0, half)}…${s.slice(s.length - half)}`;
 }
 
-function renderInputSection(
+function updateInputSection(
+  card: HTMLElement,
+  ctx?: ViewContext,
+): void {
+  const input = card.querySelector<HTMLInputElement>("#dz-url-input");
+  if (input && !input.value && ctx?.initialUrl) {
+    input.value = ctx.initialUrl;
+    const clearBtn = card.querySelector<HTMLButtonElement>("#dz-btn-clear");
+    if (clearBtn) clearBtn.style.display = "flex";
+  }
+}
+
+function mountInputSection(
   parent: HTMLElement,
   _state: ControllerState,
   callbacks: ViewCallbacks,
   ctx?: ViewContext,
 ): void {
-  // Idle only: the full explanation lives here and fades away once a job
-  // starts (the job view replaces it instead of stacking below it).
+  const body = document.createElement("div");
+  body.className = "dz-view-body dz-fade-in";
 
   // Description
   const desc = document.createElement("div");
@@ -365,10 +432,10 @@ function renderInputSection(
     <p class="dz-license-text">
       This script is released under the <a href="http://www.gnu.org/licenses/gpl.html" target="_blank" rel="noopener">GPL</a>.
       <a href="http://github.com/lovasoa/dezoomify" target="_blank" rel="noopener">See the source code</a>.
-      <a href="https://github.com/lovasoa/dezoomify/wiki/Legal-concerns" target="_blank" rel="noopener">We decline any responsibility for an illegal use of this software</a>.
+      <a href="./terms.html">We decline any responsibility for an illegal use of this software</a>.
     </p>
   `;
-  parent.appendChild(desc);
+  body.appendChild(desc);
 
   const form = document.createElement("form");
   form.className = "dz-form";
@@ -475,7 +542,8 @@ function renderInputSection(
   shareHint.textContent = "A shareable link appears in the address bar once you start — send it to reopen the same image.";
   form.appendChild(shareHint);
 
-  parent.appendChild(form);
+  body.appendChild(form);
+  parent.appendChild(body);
 }
 
 function defaultStepFor(status: ControllerState["status"]): string {
@@ -743,12 +811,12 @@ function renderFailedSection(
           </div>
           <span class="dz-guidance-item-desc">For gigapixel images that exceed browser memory limits. Processes natively on your computer.</span>
         </button>
-        <a class="dz-guidance-item" href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ" target="_blank" rel="noopener">
+        <a class="dz-guidance-item" href="https://dezoomify.ophir.dev/help/finding-the-image-address.html" target="_blank" rel="noopener">
           <div class="dz-guidance-item-header">
             <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            <span class="dz-guidance-item-title">FAQ &amp; URL Extraction &rarr;</span>
+            <span class="dz-guidance-item-title">Help &amp; URL Extraction &rarr;</span>
           </div>
-          <span class="dz-guidance-item-desc">How to extract zoomifyImagePath or direct viewer URLs from museum &amp; archive sites.</span>
+          <span class="dz-guidance-item-desc">How to find the image address on museum &amp; archive sites, and what to try when nothing is found.</span>
         </a>
       </div>
     </div>
