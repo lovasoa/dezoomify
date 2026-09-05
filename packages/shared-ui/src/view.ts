@@ -28,19 +28,24 @@ export interface ViewContext {
   originClean?: boolean;
 }
 
-const DEFAULT_DEZOOMERS = [
-  { id: "auto", name: "Select automatically", description: "Detects the viewer format automatically (recommended for 99% of sites)" },
-  { id: "zoomify", name: "Zoomify", description: "Zoomify tiles (ImageProperties.xml)" },
-  { id: "seadragon", name: "Deep Zoom / Seadragon", description: "Deep Zoom Image (.dzi)" },
-  { id: "iiif", name: "IIIF", description: "International Image Interoperability Framework" },
-  { id: "krpano", name: "krpano", description: "krpano panoramic and high-resolution viewers" },
-  { id: "iipimage", name: "IIPImage", description: "IIPImage protocol (?FIF=...)" },
-  { id: "topviewer", name: "TopViewer", description: "TopViewer JSON" },
+export const ALL_DEZOOMERS = [
+  { id: "auto", name: "Select automatically", description: "Select automatically based on URL and page contents" },
+  { id: "zoomify", name: "Zoomify", description: "Zoomify tiles" },
+  { id: "seadragon", name: "Seadragon (Deep Zoom Image)", description: "Deep Zoom Image (.dzi)" },
+  { id: "iipimage", name: "IIPImage", description: "IIPImage protocol" },
   { id: "xlimage", name: "XLimage", description: "XLimage protocol" },
-  { id: "fsi", name: "FSI Viewer", description: "FSI server" },
-  { id: "lizardtech", name: "LizardTech", description: "LizardTech ImageServer" },
+  { id: "topviewer", name: "TopViewer", description: "TopViewer JSON" },
+  { id: "krpano", name: "krpano", description: "krpano panorama and high-resolution viewers" },
+  { id: "iiif", name: "IIIF", description: "International Image Interoperability Framework" },
+  { id: "fsi", name: "FSI", description: "FSI Viewer" },
+  { id: "lizardtech", name: "LizardTech ImageServer", description: "LizardTech ImageServer" },
   { id: "vls", name: "VLS", description: "Virtual Light Stage viewer" },
-  { id: "generic", name: "Generic / Custom template", description: "Custom URL tile template with {x}, {y}, {z}" },
+  { id: "generic", name: "Generic dezoomer", description: "Custom URL tile template" },
+  { id: "arts-culture", name: "Arts & Culture", description: "Google Arts & Culture" },
+  { id: "hungaricana", name: "Hungaricana", description: "Hungaricana digital library" },
+  { id: "arcgis", name: "ArcGIS MapServer", description: "ArcGIS MapServer tiles" },
+  { id: "wmts", name: "WMTS", description: "Web Map Tile Service" },
+  { id: "pnav", name: "pnav", description: "pnav image viewer" },
 ];
 
 export function renderView(
@@ -51,17 +56,25 @@ export function renderView(
 ): void {
   container.innerHTML = "";
 
-  // Main card
+  // Main status card
   const card = document.createElement("div");
   card.className = "dz-card";
   container.appendChild(card);
 
-  // Header / Hero
+  // Header with authentic title & icon
   const header = document.createElement("div");
   header.className = "dz-header";
   header.innerHTML = `
-    <h1 class="dz-title">Dezoomify</h1>
-    <p class="dz-subtitle">Download high-resolution zoomable images with maximum quality</p>
+    <h1 class="dz-title">
+      <span>Dezoomify</span>
+      <svg class="dz-brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: #0284c7;">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        <circle cx="11" cy="11" r="3" fill="#ef4444" stroke="none" opacity="0.75"></circle>
+        <line x1="11" y1="8" x2="11" y2="14" stroke="#ffffff" stroke-width="1.2"></line>
+        <line x1="8" y1="11" x2="14" y2="11" stroke="#ffffff" stroke-width="1.2"></line>
+      </svg>
+    </h1>
   `;
   card.appendChild(header);
 
@@ -97,7 +110,7 @@ export function renderView(
       break;
   }
 
-  // Footer is rendered outside the card for clean separation
+  // Site footer
   renderFooter(container);
 }
 
@@ -108,6 +121,27 @@ function renderInputSection(
   ctx?: ViewContext,
 ): void {
   const isBusy = state.status === "discovering";
+
+  // Description
+  const desc = document.createElement("div");
+  desc.className = "dz-description";
+  desc.innerHTML = `
+    <p>
+      <strong>Dezoomify</strong> allows you to download
+      <abbr title="Large images in which you can navigate inside a webpage.">zoomable images</abbr>.
+      Enter the <abbr title="Uniform Resource Locator, the address of a webpage">URL</abbr>
+      of such an image in the text field below. The image will be downloaded at maximal resolution.
+      You can then right-click on the image, and choose "Save As" in order to save it as a PNG file on your computer.
+      If it doesn't work, read our <a href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ" target="_blank" rel="noopener">FAQ</a>.
+      If you want more information, read our <a href="https://github.com/lovasoa/dezoomify#dezoomify" target="_blank" rel="noopener">project page</a>.
+    </p>
+    <p class="dz-license-text">
+      This script is released under the <a href="http://www.gnu.org/licenses/gpl.html" target="_blank" rel="noopener">GPL</a>.
+      <a href="http://github.com/lovasoa/dezoomify" target="_blank" rel="noopener">See the source code</a>.
+      <a href="https://github.com/lovasoa/dezoomify/wiki/Legal-concerns" target="_blank" rel="noopener">We decline any responsibility for an illegal use of this software</a>.
+    </p>
+  `;
+  parent.appendChild(desc);
 
   const form = document.createElement("form");
   form.className = "dz-form";
@@ -123,24 +157,18 @@ function renderInputSection(
     callbacks.onSubmitUrl(url, selectedFormat?.value);
   };
 
-  const inputGroup = document.createElement("div");
-  inputGroup.className = "dz-input-group";
-
+  // Full-width URL input row
   const wrapper = document.createElement("div");
   wrapper.className = "dz-input-wrapper";
   wrapper.innerHTML = `
-    <svg class="dz-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <circle cx="11" cy="11" r="8"></circle>
-      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-    </svg>
     <input
       type="url"
       id="dz-url-input"
       class="dz-input"
-      placeholder="Paste image or webpage URL..."
+      placeholder="URL of the webpage containing your image"
       required
       ${isBusy ? "disabled" : "autofocus"}
-      aria-label="Webpage URL containing zoomable image"
+      aria-label="URL of the webpage containing your zoomable image"
     />
     <button type="button" class="dz-input-clear" id="dz-btn-clear" title="Clear input" aria-label="Clear input">&times;</button>
   `;
@@ -157,61 +185,44 @@ function renderInputSection(
       inputEl.focus();
     });
   }
+  form.appendChild(wrapper);
+
+  // Format selection flow
+  const dezoomers = ctx?.supportedDezoomers ?? ALL_DEZOOMERS;
+  const formatContainer = document.createElement("div");
+  formatContainer.className = "dz-format-container";
+
+  const flow = document.createElement("div");
+  flow.className = "dz-format-flow";
+  formatContainer.appendChild(flow);
+
+  dezoomers.forEach((fmt, idx) => {
+    const label = document.createElement("label");
+    label.className = `dz-format-option ${idx === 0 ? "primary-option" : ""}`;
+    label.title = fmt.description ?? fmt.name;
+    label.innerHTML = `
+      <input type="radio" name="dz-format" value="${fmt.id}" ${idx === 0 ? "checked" : ""} />
+      <span>${fmt.name}</span>
+    `;
+    flow.appendChild(label);
+  });
+  form.appendChild(formatContainer);
+
+  // Centered Tactile "Dezoomify !" Button
+  const btnRow = document.createElement("div");
+  btnRow.className = "dz-button-row";
 
   const submitBtn = document.createElement("button");
   submitBtn.type = "submit";
-  submitBtn.className = "dz-btn-primary";
+  submitBtn.className = "dz-btn-tactile";
   submitBtn.disabled = isBusy;
   submitBtn.innerHTML = isBusy
     ? `<span>Finding image...</span>`
-    : `<span>Dezoomify</span>
-       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-         <polyline points="9 18 15 12 9 6"></polyline>
-       </svg>`;
+    : `<span>Dezoomify !</span>`;
+  btnRow.appendChild(submitBtn);
+  form.appendChild(btnRow);
 
-  inputGroup.appendChild(wrapper);
-  inputGroup.appendChild(submitBtn);
-  form.appendChild(inputGroup);
-
-  // Progressive Disclosure: Collapsible Advanced Options
-  const dezoomers = ctx?.supportedDezoomers ?? DEFAULT_DEZOOMERS;
-  const details = document.createElement("details");
-  details.className = "dz-details";
-  details.innerHTML = `
-    <summary class="dz-summary">
-      <span>Format: Automatic (click to change)</span>
-      <svg class="dz-summary-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <polyline points="6 9 12 15 18 9"></polyline>
-      </svg>
-    </summary>
-    <div class="dz-details-content">
-      <p style="margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--dz-color-text-secondary)">
-        By default, Dezoomify identifies the image format automatically. Select a specific format if auto-detection fails:
-      </p>
-      <div class="dz-format-grid" id="dz-format-list"></div>
-    </div>
-  `;
-
-  const formatList = details.querySelector("#dz-format-list");
-  if (formatList) {
-    dezoomers.forEach((fmt, idx) => {
-      const opt = document.createElement("label");
-      opt.className = `dz-format-option ${idx === 0 ? "active" : ""}`;
-      opt.title = fmt.description ?? fmt.name;
-      opt.innerHTML = `
-        <input type="radio" name="dz-format" value="${fmt.id}" ${idx === 0 ? "checked" : ""} />
-        <span>${fmt.name}</span>
-      `;
-      opt.querySelector("input")?.addEventListener("change", () => {
-        formatList.querySelectorAll(".dz-format-option").forEach((el) => el.classList.remove("active"));
-        opt.classList.add("active");
-      });
-      formatList.appendChild(opt);
-    });
-  }
-
-  form.appendChild(details);
-
+  // If discovering, show active indicator
   if (isBusy) {
     const searching = document.createElement("div");
     searching.className = "dz-progress-section";
@@ -220,7 +231,7 @@ function renderInputSection(
         <span class="dz-progress-status">Analyzing page and finding image levels...</span>
         ${state.transport ? `<span class="dz-transport-badge">${renderTransportLabel(state.transport)}</span>` : ""}
       </div>
-      <div style="display: flex; justify-content: flex-end; margin-top: 0.5rem">
+      <div class="dz-progress-controls">
         <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel</button>
       </div>
     `;
@@ -252,7 +263,7 @@ function renderProgressSection(
     <div class="dz-progress-track" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
       <div class="dz-progress-bar" style="width: ${pct}%"></div>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem">
+    <div class="dz-progress-controls">
       <span class="dz-transport-badge">${transport}</span>
       <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel download</button>
     </div>
@@ -270,19 +281,19 @@ function renderDisplayOnlySection(
 ): void {
   const guidance = renderSaveGuidance(false);
   const div = document.createElement("div");
-  div.className = "dz-alert";
-  div.style.borderColor = "var(--dz-color-warning-border)";
-  div.style.background = "var(--dz-color-warning-bg)";
+  div.className = "dz-alert-error";
+  div.style.borderColor = "#f59e0b";
+  div.style.background = "linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%)";
   div.innerHTML = `
     <div class="dz-alert-header">
-      <svg class="dz-alert-icon" style="color: var(--dz-color-warning)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <svg class="dz-alert-icon" style="color: #d97706" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="12" y1="8" x2="12" y2="12"></line>
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
       <div>
-        <h3 class="dz-alert-title" style="color: var(--dz-color-warning)">Display Only Preview</h3>
-        <p class="dz-alert-message">${guidance}</p>
+        <h3 class="dz-alert-title" style="color: #b45309">Display Only Preview</h3>
+        <p class="dz-alert-message" style="color: #78350f">${guidance}</p>
       </div>
     </div>
   `;
@@ -290,13 +301,14 @@ function renderDisplayOnlySection(
   if (ctx?.capabilities) {
     const appChoice = renderAppChoice(ctx.capabilities);
     const guidanceBox = document.createElement("div");
-    guidanceBox.style.fontSize = "0.9rem";
-    guidanceBox.style.padding = "0.75rem 1rem";
-    guidanceBox.style.background = "var(--dz-color-surface)";
-    guidanceBox.style.borderRadius = "var(--dz-radius-sm)";
-    guidanceBox.style.border = "1px solid var(--dz-color-border)";
+    guidanceBox.style.fontSize = "0.92rem";
+    guidanceBox.style.padding = "0.85rem 1.15rem";
+    guidanceBox.style.background = "#ffffff";
+    guidanceBox.style.borderRadius = "var(--dz-radius)";
+    guidanceBox.style.border = "1px solid #fcd34d";
     guidanceBox.style.whiteSpace = "pre-line";
-    guidanceBox.style.lineHeight = "1.6";
+    guidanceBox.style.lineHeight = "1.65";
+    guidanceBox.style.color = "#78350f";
     guidanceBox.textContent = appChoice;
     div.appendChild(guidanceBox);
   }
@@ -338,10 +350,10 @@ function renderCompletedSection(
         <p class="dz-completion-info">${summary}</p>
       </div>
     </div>
-    <p style="margin: 0; font-size: 0.9rem; color: var(--dz-color-text-secondary)">${guidance}</p>
+    <p style="margin: 0; font-size: 0.95rem; color: var(--dz-text-secondary)">${guidance}</p>
     <div class="dz-completion-actions">
-      ${isClean ? `<button type="button" class="dz-btn-primary" id="dz-btn-save">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      ${isClean ? `<button type="button" class="dz-btn-tactile" id="dz-btn-save" style="min-width: 180px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="7 10 12 15 17 10"></polyline>
           <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -371,7 +383,7 @@ function renderFailedSection(
   };
 
   const alert = document.createElement("div");
-  alert.className = "dz-alert";
+  alert.className = "dz-alert-error";
   alert.innerHTML = `
     <div class="dz-alert-header">
       <svg class="dz-alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -392,23 +404,23 @@ function renderFailedSection(
     <a class="dz-suggestion-card" href="https://lovasoa.github.io/dezoomify-extension/" target="_blank" rel="noopener">
       <span class="dz-suggestion-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-        Try Browser Extension
+        Browser Extension
       </span>
       <span class="dz-suggestion-desc">Finds zoomable images automatically inside webpages that need login or session cookies.</span>
     </a>
     <a class="dz-suggestion-card" href="https://dezoomify-rs.ophir.dev/" target="_blank" rel="noopener">
       <span class="dz-suggestion-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        Try Desktop App
+        Desktop App
       </span>
-      <span class="dz-suggestion-desc">Handles gigapixel images that are too large for browsers to process in memory.</span>
+      <span class="dz-suggestion-desc">Handles gigapixel images that are too large for browser memory limits.</span>
     </a>
     <a class="dz-suggestion-card" href="https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ" target="_blank" rel="noopener">
       <span class="dz-suggestion-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         Frequently Asked Questions
       </span>
-      <span class="dz-suggestion-desc">Learn how to extract direct viewer URLs from unsupported museum or archive sites.</span>
+      <span class="dz-suggestion-desc">How to extract zoomifyImagePath or direct viewer URLs from museum & archive sites.</span>
     </a>
   `;
   alert.appendChild(suggestions);
@@ -418,13 +430,11 @@ function renderFailedSection(
   details.innerHTML = `
     <summary class="dz-summary">
       <span>Technical error details & bug report</span>
-      <svg class="dz-summary-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
     </summary>
-    <div class="dz-details-content">
-      <div class="dz-diagnostics">Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}</div>
-      <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; font-size: 0.85rem">
-        <a href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md" target="_blank" rel="noopener" style="color: var(--dz-color-primary); font-weight: 500">Report a bug on GitHub &rarr;</a>
-      </div>
+    <div class="dz-diagnostics">Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\nTransport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}</div>
+    <div style="padding: 0.75rem 1rem; background: rgba(0,0,0,0.02); display: flex; gap: 0.5rem; font-size: 0.85rem">
+      <a href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md" target="_blank" rel="noopener" style="font-weight: 600">Report a bug on GitHub &rarr;</a>
     </div>
   `;
   alert.appendChild(details);
@@ -434,7 +444,7 @@ function renderFailedSection(
   actions.style.gap = "0.75rem";
   actions.style.marginTop = "0.5rem";
   actions.innerHTML = `
-    <button type="button" class="dz-btn-primary" id="dz-btn-try-again">Try again</button>
+    <button type="button" class="dz-btn-tactile" id="dz-btn-try-again" style="min-width: 140px;">Try again</button>
   `;
   actions.querySelector("#dz-btn-try-again")?.addEventListener("click", () => callbacks.onReset());
   alert.appendChild(actions);
@@ -449,11 +459,11 @@ function renderCancelledSection(
   _ctx?: ViewContext,
 ): void {
   const div = document.createElement("div");
-  div.className = "dz-alert";
-  div.style.borderColor = "var(--dz-color-border)";
-  div.style.background = "var(--dz-color-bg)";
+  div.className = "dz-alert-error";
+  div.style.borderColor = "var(--dz-surface-border)";
+  div.style.background = "var(--dz-surface-gradient)";
   div.innerHTML = `
-    <h3 class="dz-alert-title" style="color: var(--dz-color-text-primary)">Download cancelled</h3>
+    <h3 class="dz-alert-title" style="color: var(--dz-text-primary)">Download cancelled</h3>
     <p class="dz-alert-message">The image download was stopped.</p>
     <div style="margin-top: 0.5rem">
       <button type="button" class="dz-btn-secondary" id="dz-btn-reset">Start over</button>
@@ -472,7 +482,7 @@ function renderGenericState(
   const div = document.createElement("div");
   div.style.padding = "1rem 0";
   div.innerHTML = `
-    <p style="color: var(--dz-color-text-secondary)">Status: <strong>${state.status}</strong></p>
+    <p style="color: var(--dz-text-secondary)">Status: <strong>${state.status}</strong></p>
     <button type="button" class="dz-btn-secondary" id="dz-btn-reset">Reset</button>
   `;
   div.querySelector("#dz-btn-reset")?.addEventListener("click", () => callbacks.onReset());
@@ -491,7 +501,7 @@ function renderFooter(parent: HTMLElement): void {
       <a href="https://github.com/sponsors/lovasoa/" target="_blank" rel="noopener">Support Hosting</a>
     </div>
     <div class="dz-footer-disclaimer">
-      Dezoomify is a tool for accessing public zoomable images. Please respect copyright and licensing terms of source images.
+      Dezoomify is an open-source tool for accessing public zoomable images.
     </div>
   `;
   parent.appendChild(footer);
