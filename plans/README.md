@@ -7,8 +7,8 @@ active plan is simply a plan file that still has unfinished phases.
 
 ## Completed plans
 
-- [`website-deploy.md`](website-deploy.md): one Pages project (the
-  original `dezoomify`), one build (GitHub Actions → `dist/` via
-  `scripts/build-site.mjs`, uploaded with wrangler), one branch
-  (`master`): legacy at `/`, new app at `/beta`, nothing generated
-  committed, no repository files served (completed 2026-09-05).
+Website deployment consolidation (2026-09-05): one Pages project (the
+original `dezoomify`), one build (GitHub Actions to `dist/` via
+`scripts/build-site.mjs`, uploaded with wrangler), one branch (`master`):
+legacy at `/`, new app at `/beta`, nothing generated committed, no
+repository files served. Plan removed; git history is the record.
