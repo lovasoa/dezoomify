@@ -119,6 +119,94 @@ fn schema_fingerprint() -> Result<String, String> {
         .ok_or_else(|| "desktop-capabilities.json lacks fingerprint".to_string())
 }
 
+// The release version is one version across all apps (docs/releases.md);
+// the plan stage fails closed when any app manifest disagrees.
+fn assert_app_versions(version: &str) -> Result<(), String> {
+    let json = |rel: &str| -> Result<String, String> {
+        let path = crate::repo_root().join(rel);
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("missing {rel}: {e}"))?;
+        let value: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("bad {rel}: {e}"))?;
+        value
+            .get("version")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| format!("{rel} lacks version"))
+    };
+    let cargo = |rel: &str| -> Result<String, String> {
+        let text = std::fs::read_to_string(crate::repo_root().join(rel))
+            .map_err(|e| format!("missing {rel}: {e}"))?;
+        let needle = "version = \"";
+        let i = text
+            .find(needle)
+            .ok_or_else(|| format!("{rel} lacks version"))?;
+        let rest = &text[i + needle.len()..];
+        let end = rest.find('"').ok_or_else(|| format!("{rel} bad version"))?;
+        Ok(rest[..end].to_string())
+    };
+    let rust_const = |rel: &str, name: &str| -> Result<String, String> {
+        let text = std::fs::read_to_string(crate::repo_root().join(rel))
+            .map_err(|e| format!("missing {rel}: {e}"))?;
+        let needle = format!("{name}: &str = \"");
+        let i = text
+            .find(&needle)
+            .ok_or_else(|| format!("{rel} lacks {name}"))?;
+        let rest = &text[i + needle.len()..];
+        let end = rest.find('"').ok_or_else(|| format!("{rel} bad {name}"))?;
+        Ok(rest[..end].to_string())
+    };
+    let sources: Vec<(&str, String)> = vec![
+        ("apps/cli/Cargo.toml", cargo("apps/cli/Cargo.toml")?),
+        (
+            "apps/desktop/src-tauri/Cargo.toml",
+            cargo("apps/desktop/src-tauri/Cargo.toml")?,
+        ),
+        (
+            "apps/desktop/src-tauri/tauri.conf.json",
+            json("apps/desktop/src-tauri/tauri.conf.json")?,
+        ),
+        (
+            "apps/desktop/package.json",
+            json("apps/desktop/package.json")?,
+        ),
+        (
+            "apps/desktop/src-tauri/src/bin/dezoomify-native-host.rs",
+            rust_const(
+                "apps/desktop/src-tauri/src/bin/dezoomify-native-host.rs",
+                "HOST_VERSION",
+            )?,
+        ),
+        (
+            "apps/extension/package.json",
+            json("apps/extension/package.json")?,
+        ),
+        (
+            "apps/extension/src/manifest/base.json",
+            json("apps/extension/src/manifest/base.json")?,
+        ),
+        (
+            "apps/extension/generated/manifest.chromium.json",
+            json("apps/extension/generated/manifest.chromium.json")?,
+        ),
+        (
+            "apps/extension/generated/manifest.firefox.json",
+            json("apps/extension/generated/manifest.firefox.json")?,
+        ),
+    ];
+    let mismatched: Vec<&str> = sources
+        .iter()
+        .filter(|(_, found)| found != version)
+        .map(|(rel, _)| *rel)
+        .collect();
+    if mismatched.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "app versions disagree with release version {version}; bump {mismatched:?} too"
+        ))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Plan document
 // ---------------------------------------------------------------------------
@@ -290,6 +378,7 @@ fn release_plan_at(base: &Path, version: &str) -> Result<PathBuf, String> {
             config.release.version
         ));
     }
+    assert_app_versions(version)?;
     let targets = load_targets()?;
     let compat = load_compatibility()?;
     let caps = load_capabilities()?;
@@ -1052,6 +1141,18 @@ mod tests {
             .find(|t| t.name == "desktop-windows-x86_64")
             .expect("desktop target in inventory");
         assert!(!desktop.available);
+    }
+
+    #[test]
+    fn app_versions_agree_with_the_release_version() {
+        // Drift guard: a bump that misses any app manifest fails the plan.
+        let version = load_config().unwrap().release.version;
+        assert_eq!(assert_app_versions(&version), Ok(()));
+        let err = assert_app_versions("9.9.9").unwrap_err();
+        assert!(
+            err.contains("apps/cli/Cargo.toml"),
+            "error lists offenders: {err}"
+        );
     }
 
     #[test]

@@ -57,7 +57,8 @@ these stages by run id: the build workflow runs `cargo xtask ci local` on
 the tagged revision before planning, and no artifact exists that has not
 passed the deterministic suite. Desktop installers stay an unavailable
 target until the Tauri shell is real; the inventory marks them so, and a
-release never claims an artifact it did not build.
+release never claims an artifact it did not build. The operator sequence
+for cutting a release is the runbook in [Operations](operations.md).
 
 Artifacts are built from a tagged revision, signed with free mechanisms only (updater keypair, store submission, GPG tags), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project. Web release notes identify the automatic metadata CORS proxy fallback, active-transport indicator, and opt-out behavior; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
 
