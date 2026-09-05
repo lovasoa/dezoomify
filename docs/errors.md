@@ -42,6 +42,7 @@ Messages are written for the person seeing them, following the layered rules in 
 - The first message is jargon-free. Technical vocabulary appears only in expandable details or linked documentation.
 - The error's structured context (code, class, phase, transport, resource kind, blocked reason, redacted source origin) drives the wording, so identical causes read identically across apps.
 - A transport-level fetch failure is the job outcome itself: the host reports its plain message and stable code, and the engine's raw diagnostics (for discovery, the per-format breakdown) appear only in the expandable technical details (`detail`), never in the first message.
+- Technical and user wording never mix. Every failure carries two layers: a plain actionable sentence for the user, and a dense technical chain (transport, HTTP status, proxy or classifier outcome, trimmed non-secret URL) for engine diagnostics, logs, and bug reports. Hosts feed the technical chain into engine per-candidate diagnostics; user copy never enters them.
 - Copy diagnostics includes the typed context, job and attempt identifiers, app and protocol versions, and the redacted source origin; never cookies, credentials, full URLs with sensitive queries, or response content.
 - Every typed error has defined user wording. A code without user wording is a release defect. A genuinely unclassified internal failure may say the result is unexpected, but still names a next action and a diagnostics path.
 

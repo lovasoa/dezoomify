@@ -2,7 +2,7 @@
 // the worker never fetches anything; the main thread performs every network
 // request through the classified transport and feeds bytes back here.
 import init, { DiscoverySession } from "../wasm/dezoomify-wasm.js";
-import { noImageFoundError } from "./discovery.js";
+import { discoveryFailedError, noImageFoundError } from "./discovery.js";
 
 let ready = null;
 let session = null;
@@ -18,19 +18,28 @@ function post(message, transfer) {
 }
 
 function noteFailure(msg) {
-  lastFailure = { code: msg.code || "DISCOVERY_FAILED", message: msg.message || "fetch failed" };
+  lastFailure = {
+    code: msg.code || "DISCOVERY_FAILED",
+    // Hand-holding sentence for the prominent UI slot.
+    message: msg.userMessage || msg.message || "fetch failed",
+    // Dense technical diagnostics (HTTP status, transport) for the engine
+    // and the technical-details section.
+    technical: msg.message || "fetch failed",
+  };
 }
 
 /**
  * Surface a discovery failure in layers: the main `code`/`message` pair is a
- * plain, actionable sentence; `detail` keeps the raw engine text (including
- * any per-format diagnostics) for the collapsible technical section.
+ * plain, actionable sentence; `detail` keeps the dense technical chain (the
+ * last transport failure with HTTP status/transport, then the engine's
+ * per-format diagnostic aggregate) for the collapsible technical section.
  */
 function postDiscoveryFailure(error) {
-  const detail = (error && error.message) || String(error);
+  const engineDetail = (error && error.message) || String(error);
   const failure = lastFailure;
   lastFailure = null;
   if (failure) {
+    const detail = [failure.technical, engineDetail].filter(Boolean).join("\n\n");
     post({ type: "error", code: failure.code, message: failure.message, detail });
     return;
   }
@@ -43,7 +52,12 @@ function postDiscoveryFailure(error) {
     });
     return;
   }
-  post({ type: "error", code: "DISCOVERY_FAILED", message: detail, detail });
+  post({
+    type: "error",
+    code: "DISCOVERY_FAILED",
+    message: discoveryFailedError().message,
+    detail,
+  });
 }
 
 async function ensureReady() {
@@ -88,10 +102,12 @@ self.onmessage = (event) => {
   const msg = event.data;
   if (!msg || typeof msg.type !== "string") return;
   busy = busy.then(() => handle(msg)).catch((error) => {
+    // Prominent slot stays user-readable; the wasm text moves to `detail`.
     post({
       type: "error",
       code: (error && error.code) || "WORKER_FAILED",
-      message: (error && error.message) || String(error),
+      message: "Something went wrong in the image engine. Reload the page and try again.",
+      detail: (error && error.message) || String(error),
     });
   });
 };

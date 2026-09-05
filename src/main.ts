@@ -10,6 +10,7 @@ import {
   RATE_LIMITED_BY_SITE_MESSAGE,
   SITE_BUSY_MESSAGE,
   classifyReadableBytes,
+  discoveryFailedError,
   noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
@@ -332,11 +333,17 @@ const PROXY_LABEL = "Metadata proxy";
  * Fetch one metadata resource for discovery: direct first, then the eligible
  * metadata proxy after a classified network failure. The zoomable-content
  * classifier gates every success: generic pages fail with NO_IMAGE_FOUND.
+ *
+ * Every thrown failure carries two layers: `message` (a plain, actionable
+ * sentence for the UI) and `technical` (transport, HTTP status, proxy code,
+ * trimmed URL) which the engine feeds into its per-candidate diagnostics and
+ * the technical-details section. The two never mix.
  */
 async function fetchMetadataFor(
   url: string,
   headers: Record<string, string>,
 ): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }> {
+  const target = shortUrl(url);
   activeTransport = DIRECT_LABEL;
   const direct = await fetchDirect(url, headers, undefined, DIRECT_METADATA_TIMEOUT_MS);
   let via = "direct";
@@ -352,24 +359,60 @@ async function fetchMetadataFor(
     const proxied = await fetchViaProxy(url);
     if (!proxied.ok || !proxied.bytes) {
       if (proxied.code === "PROXY_RATE_LIMITED") {
-        throw failure("UPSTREAM_RATE_LIMITED", RATE_LIMITED_BY_SITE_MESSAGE, true);
+        throw failure(
+          "UPSTREAM_RATE_LIMITED",
+          RATE_LIMITED_BY_SITE_MESSAGE,
+          true,
+          undefined,
+          `metadata proxy: upstream rate limit (HTTP 429, PROXY_RATE_LIMITED) fetching ${target}`,
+        );
       }
-      throw failure("PROXY_ERROR", "The metadata proxy could not fetch this address.", false);
+      throw failure(
+        "PROXY_ERROR",
+        "The metadata proxy could not fetch this address. Try again shortly.",
+        false,
+        undefined,
+        `metadata proxy: ${proxied.code ?? "PROXY_ERROR"} (HTTP ${proxied.status || 0}) fetching ${target}`,
+      );
     }
     bytes = proxied.bytes;
   } else if (direct.outcome === "http-error") {
     if (direct.status === 429) {
       // A direct fetch uses the user's own connection, so this throttle is on
       // their IP, not on our server; the fix is waiting, not another app.
-      throw failure("UPSTREAM_RATE_LIMITED", SITE_BUSY_MESSAGE, true);
+      throw failure(
+        "UPSTREAM_RATE_LIMITED",
+        SITE_BUSY_MESSAGE,
+        true,
+        undefined,
+        `direct fetch: HTTP 429 Too Many Requests from ${target}`,
+      );
     }
-    throw failure("DISCOVERY_HTTP_ERROR", `The server answered HTTP ${direct.status}.`, false);
+    throw failure(
+      "DISCOVERY_HTTP_ERROR",
+      "This page could not be opened. Check the address and try again.",
+      false,
+      undefined,
+      `direct fetch: HTTP ${direct.status} from ${target}`,
+    );
   } else {
-    throw failure("DISCOVERY_FAILED", "Could not fetch this address.");
+    throw failure(
+      "DISCOVERY_FAILED",
+      discoveryFailedError(via).message,
+      true,
+      undefined,
+      `direct fetch: no readable response (network error or blocked read) fetching ${target}`,
+    );
   }
   const verdict = classifyReadableBytes(bytes, { via });
   if (!verdict.found) {
-    throw failure("NO_IMAGE_FOUND", noImageFoundError(via).message, false);
+    throw failure(
+      "NO_IMAGE_FOUND",
+      noImageFoundError(via).message,
+      false,
+      undefined,
+      `content classifier: no zoomable-image content in ${bytes.byteLength} bytes (${via}) from ${target}`,
+    );
   }
   return { bytes, finalUri: direct.finalUrl, via };
 }
@@ -377,7 +420,13 @@ async function fetchMetadataFor(
 async function fetchTileFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }> {
   const direct = await fetchDirect(url, headers);
   if (direct.outcome !== "readable" || !direct.bytes) {
-    throw failure("TILE_FAILED", `Tile request failed (HTTP ${direct.status ?? "network"}).`);
+    throw failure(
+      "TILE_FAILED",
+      "Part of the image could not be downloaded. Try again in a moment.",
+      true,
+      undefined,
+      `tile fetch: ${direct.outcome} (HTTP ${direct.status ?? "n/a"}) from ${shortUrl(url)}`,
+    );
   }
   return { bytes: direct.bytes };
 }
@@ -395,6 +444,21 @@ async function probeSizeFor(
   } catch {
     return { ok: false, width: 0, height: 0 };
   }
+}
+
+/** Stable error classification derived from the code, never from text. */
+function categoryFor(code: string): string {
+  if (code === "NO_IMAGE_FOUND") return "discovery";
+  if (code === "INVALID_URL") return "validation";
+  if (code.startsWith("OUTPUT_")) return "output";
+  if (code === "WORKER_FAILED" || code === "PLAN_INVALID") return "internal";
+  return "transport";
+}
+
+function phaseFor(code: string): string {
+  if (code === "NO_IMAGE_FOUND") return "discovery";
+  if (code.startsWith("OUTPUT_")) return "output";
+  return "acquisition";
 }
 
 function disposeClient(): void {
@@ -523,11 +587,25 @@ async function runJob(url: string): Promise<void> {
     if (token !== jobToken) return;
     pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
     const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
-    if (!canvas) throw failure("WORKER_FAILED", "no rendering canvas", false);
+    if (!canvas) {
+      throw failure(
+        "WORKER_FAILED",
+        "The picture could not be assembled in this browser. Try reloading the page.",
+        false,
+        undefined,
+        "no #rendering-canvas element in the document",
+      );
+    }
     const width = plan.canvas ? plan.canvas.x : 0;
     const height = plan.canvas ? plan.canvas.y : 0;
     if (!(width > 0 && height > 0 && width * height <= 268435456)) {
-      throw failure("PLAN_INVALID", "The image size could not be determined.", false);
+      throw failure(
+        "PLAN_INVALID",
+        "The image size could not be determined.",
+        false,
+        undefined,
+        `invalid tile plan: canvas ${width}x${height}`,
+      );
     }
     canvas.width = width;
     canvas.height = height;
@@ -564,7 +642,13 @@ async function runJob(url: string): Promise<void> {
     reportProgress(total, total, "Encoding PNG…");
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("PNG encoding failed"))),
+        (b) => (b ? resolve(b) : reject(failure(
+          "OUTPUT_ENCODE_FAILED",
+          "The final picture could not be created from the downloaded pieces.",
+          false,
+          undefined,
+          "canvas.toBlob returned null while encoding the PNG",
+        ))),
         "image/png",
       );
     });
@@ -582,19 +666,26 @@ async function runJob(url: string): Promise<void> {
     update();
   } catch (error) {
     if (token !== jobToken) return;
-    const code = (error as { code?: string })?.code || "DISCOVERY_FAILED";
-    pushLog(`Failed (${code}): ${((error as Error)?.message) || "unknown error"}`);
-    const detail = (error as { detail?: string })?.detail;
+    const structured = error as {
+      code?: string;
+      message?: string;
+      detail?: string;
+      technical?: string;
+    };
+    const code = structured?.code || "DISCOVERY_FAILED";
+    const message = structured?.message || "Could not download this zoomable image.";
+    const detail = structured?.detail ?? structured?.technical;
+    // The activity log is technical: prefer the dense chain over UI copy.
+    pushLog(`Failed (${code}): ${structured?.technical || message}`);
     controller.dispatch(
       nextEvent("fail", {
         error: {
           code,
-          category: code === "NO_IMAGE_FOUND" ? "discovery" : "transport",
-          retryable: (error as { retryable?: boolean })?.retryable ?? code !== "NO_IMAGE_FOUND",
-          message:
-            (error as Error)?.message || "Could not download this zoomable image.",
+          category: categoryFor(code),
+          retryable: structured?.retryable ?? code !== "NO_IMAGE_FOUND",
+          message,
           transport: activeTransport ?? "direct",
-          phase: code === "NO_IMAGE_FOUND" ? "discovery" : "acquisition",
+          phase: phaseFor(code),
           ...(detail ? { detail } : {}),
         },
       }) as never,

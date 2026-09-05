@@ -128,7 +128,13 @@ test("fetch failures are forwarded to the worker as fail messages", async () => 
   const client = createDiscoveryClient({
     worker,
     fetchMetadata: async () => {
-      throw failure("PROXY_ERROR", "proxy down", false);
+      throw failure(
+        "PROXY_ERROR",
+        "The metadata proxy could not fetch this address. Try again shortly.",
+        false,
+        undefined,
+        "metadata proxy: PROXY_ERROR (HTTP 502) fetching site.test/x.json",
+      );
     },
     fetchTile: async () => ({ bytes: new ArrayBuffer(1) }),
     probeSize: async () => ({ ok: false, width: 0, height: 0 }),
@@ -136,6 +142,16 @@ test("fetch failures are forwarded to the worker as fail messages", async () => 
   const catalog = await client.start("https://site.test/blocked.json");
   assert.equal(failures.length, 1);
   assert.equal(failures[0].code, "PROXY_ERROR");
+  // The engine aggregates per-candidate diagnostics: it gets the dense
+  // technical message, never the hand-holding UI sentence.
+  assert.equal(
+    failures[0].message,
+    "metadata proxy: PROXY_ERROR (HTTP 502) fetching site.test/x.json",
+  );
+  assert.equal(
+    failures[0].userMessage,
+    "The metadata proxy could not fetch this address. Try again shortly.",
+  );
   assert.deepEqual(catalog.images, []);
   client.dispose();
 });

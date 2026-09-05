@@ -356,6 +356,18 @@ export function noImageFoundError(via?: string): DiscoveryStructuredError {
   };
 }
 
+export function discoveryFailedError(via?: string): DiscoveryStructuredError {
+  return {
+    code: "DISCOVERY_FAILED",
+    category: "transport",
+    retryable: true,
+    message:
+      "Something went wrong while looking for a zoomable image here. Try again in a moment, or try the browser extension below.",
+    transport: via ?? "direct",
+    phase: "discovery",
+  };
+}
+
 function httpErrorFor(status: number, via: string): DiscoveryStructuredError {
   if (status === 404) {
     return {

@@ -63,13 +63,26 @@ export interface StructuredFailure extends Error {
   retryable: boolean;
   /** Raw engine diagnostics for the technical-details section; never shown prominently. */
   detail?: string;
+  /**
+   * Dense technical diagnostics (transport, HTTP status, failure chain) for
+   * logs, the engine, and bug reports. `message` stays the hand-holding UI
+   * sentence; `technical` never reaches the prominent error slot.
+   */
+  technical?: string;
 }
 
-export function failure(code: string, message: string, retryable = true, detail?: string): StructuredFailure {
+export function failure(
+  code: string,
+  message: string,
+  retryable = true,
+  detail?: string,
+  technical?: string,
+): StructuredFailure {
   const error = new Error(message) as StructuredFailure;
   error.code = code;
   error.retryable = retryable;
   if (detail) error.detail = detail;
+  if (technical) error.technical = technical;
   return error;
 }
 
@@ -143,11 +156,14 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
             );
           })
           .catch((error: unknown) => {
-            const structured = error as { code?: string; message?: string };
+            const structured = error as { code?: string; message?: string; technical?: string };
             worker.postMessage({
               type: "fail",
               id,
-              message: structured?.message || String(error),
+              // The engine aggregates per-candidate diagnostics, so it must
+              // receive the dense technical message, never the UI copy.
+              message: structured?.technical || structured?.message || String(error),
+              userMessage: structured?.message,
               code: structured?.code || "DISCOVERY_FAILED",
             });
           });
