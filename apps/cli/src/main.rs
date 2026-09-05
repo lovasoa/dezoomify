@@ -3,6 +3,7 @@
 mod arguments;
 mod report;
 
+use dezoomify_native::http::{FetchLimits, TlsPolicy};
 use dezoomify_native::pipeline::{PipelineConfig, PipelineEvent};
 use dezoomify_native::{pipeline, JobEvent, JobRequest, NativeRuntime};
 
@@ -36,6 +37,13 @@ fn main() {
 
     let config = PipelineConfig {
         user_headers: parsed.headers.clone(),
+        max_width: parsed.max_width,
+        fetch: FetchLimits {
+            tls: TlsPolicy {
+                accept_invalid_certs: parsed.accept_invalid_certs,
+            },
+            ..FetchLimits::default()
+        },
         ..PipelineConfig::default()
     };
     let output = parsed.output.to_string_lossy().into_owned();

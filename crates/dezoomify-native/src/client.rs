@@ -24,7 +24,11 @@ pub fn build_request(
     }
     let mut headers = BTreeMap::new();
     headers.insert("user-agent".to_string(), "dezoomify-ng/1.0".to_string());
-    headers.extend(extra.clone());
+    // Header names are case-insensitive: normalize so the same name can
+    // never appear twice with different cases on the wire.
+    for (name, value) in extra {
+        headers.insert(name.to_ascii_lowercase(), value.clone());
+    }
     if let Some(auth) = auth {
         let (scheme, host, port, path) = split_url(uri)?;
         if let Some(cookie) = auth.header_for(&scheme, &host, port, &path) {

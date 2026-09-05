@@ -6,9 +6,63 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::time::{Duration, Instant};
 
+/// Trusted user headers (CLI `-H`). They are native-memory only, redacted
+/// from diagnostics, and credential headers (`cookie`, `authorization`) are
+/// sent exclusively to the input origin and its same-host redirects.
+#[derive(Clone, Debug, Default)]
+pub struct UserHeaders {
+    pub map: BTreeMap<String, String>,
+    /// Host of the input URL, for credential scoping.
+    pub origin_host: Option<String>,
+}
+
+impl UserHeaders {
+    #[must_use]
+    pub fn new(map: BTreeMap<String, String>, origin_host: Option<String>) -> Self {
+        Self { map, origin_host }
+    }
+
+    fn is_credential(name: &str) -> bool {
+        name.eq_ignore_ascii_case("cookie") || name.eq_ignore_ascii_case("authorization")
+    }
+
+    fn apply(&self, request: &mut EffectiveRequest) {
+        for (name, value) in &self.map {
+            if Self::is_credential(name) {
+                // Credentials only ever reach the matching origin.
+                let same_host = url::Url::parse(&request.uri)
+                    .ok()
+                    .and_then(|parsed| parsed.host_str().map(str::to_string))
+                    .is_some_and(|host| {
+                        self.origin_host
+                            .as_deref()
+                            .is_some_and(|origin| origin.eq_ignore_ascii_case(&host))
+                    });
+                if same_host {
+                    request
+                        .headers
+                        .insert(name.to_ascii_lowercase(), value.clone());
+                }
+            } else {
+                request
+                    .headers
+                    .insert(name.to_ascii_lowercase(), value.clone());
+            }
+        }
+    }
+}
+
 use crate::auth::EphemeralAuthorization;
 use crate::client::{build_request, rebuild_for_redirect, EffectiveRequest};
 use crate::error::NativeError;
+
+/// TLS policy for one logical fetch. `accept_invalid_certs` is a legacy
+/// parity escape hatch, explicitly requested by the user via the CLI
+/// `--accept-invalid-certs` flag; it is never enabled by default.
+#[derive(Clone, Debug, Default)]
+pub struct TlsPolicy {
+    pub accept_invalid_certs: bool,
+}
 
 /// Transport limits for one logical fetch (including its redirects).
 #[derive(Clone, Debug)]
@@ -18,6 +72,7 @@ pub struct FetchLimits {
     pub connect_timeout: Duration,
     pub max_redirects: usize,
     pub retries: u32,
+    pub tls: TlsPolicy,
 }
 
 impl Default for FetchLimits {
@@ -28,6 +83,7 @@ impl Default for FetchLimits {
             connect_timeout: Duration::from_secs(15),
             max_redirects: 5,
             retries: 1,
+            tls: TlsPolicy::default(),
         }
     }
 }
@@ -53,16 +109,23 @@ const REDIRECT_CODES: [u16; 6] = [301, 302, 303, 307, 308, 300];
 pub fn fetch(
     uri: &str,
     extra_headers: &BTreeMap<String, String>,
+    user: Option<&UserHeaders>,
     auth: Option<&EphemeralAuthorization>,
     limits: &FetchLimits,
 ) -> Result<FetchOutcome, NativeError> {
     let mut request = build_request(uri, extra_headers, auth)?;
+    if let Some(user) = user {
+        user.apply(&mut request);
+    }
     let deadline = Instant::now() + limits.timeout;
     let mut redirects: usize = 0;
-    let agent = ureq::AgentBuilder::new()
+    let mut builder = ureq::AgentBuilder::new()
         .redirects(0)
-        .timeout_connect(limits.connect_timeout)
-        .build();
+        .timeout_connect(limits.connect_timeout);
+    if limits.tls.accept_invalid_certs {
+        builder = builder.tls_config(std::sync::Arc::new(insecure_client_config()?));
+    }
+    let agent = builder.build();
     loop {
         let response = fetch_once(&agent, &request, limits, &deadline)?;
         let is_redirect =
@@ -90,6 +153,9 @@ pub fn fetch(
         let next = resolve_redirect(&request.uri, location)?;
         request = rebuild_for_redirect(&request, &next, auth)
             .map_err(|m| NativeError::new("transport.bad-redirect", m))?;
+        if let Some(user) = user {
+            user.apply(&mut request);
+        }
     }
 }
 
@@ -145,6 +211,63 @@ fn read_body(response: ureq::Response, limits: &FetchLimits) -> Result<Vec<u8>, 
         ));
     }
     Ok(body)
+}
+
+fn insecure_client_config() -> Result<rustls::ClientConfig, NativeError> {
+    use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+    use rustls::crypto::ring as provider;
+    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+    use std::sync::Arc as StdArc;
+
+    #[derive(Debug)]
+    struct AcceptAll;
+    impl ServerCertVerifier for AcceptAll {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &CertificateDer<'_>,
+            _intermediates: &[CertificateDer<'_>],
+            _server_name: &ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: UnixTime,
+        ) -> Result<ServerCertVerified, rustls::Error> {
+            Ok(ServerCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            _message: &[u8],
+            _cert: &CertificateDer<'_>,
+            _algorithm: &rustls::DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+            Ok(HandshakeSignatureValid::assertion())
+        }
+        fn verify_tls13_signature(
+            &self,
+            _message: &[u8],
+            _cert: &CertificateDer<'_>,
+            _algorithm: &rustls::DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+            Ok(HandshakeSignatureValid::assertion())
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            vec![
+                rustls::SignatureScheme::RSA_PKCS1_SHA256,
+                rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+                rustls::SignatureScheme::ED25519,
+                rustls::SignatureScheme::RSA_PSS_SHA256,
+            ]
+        }
+    }
+
+    let builder =
+        rustls::ClientConfig::builder_with_provider(StdArc::new(provider::default_provider()))
+            .with_safe_default_protocol_versions()
+            .map_err(|e| NativeError::new("transport.tls", format!("tls setup failed: {e}")))?;
+    let mut config = builder
+        .dangerous()
+        .with_custom_certificate_verifier(StdArc::new(AcceptAll))
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok(config)
 }
 
 fn resolve_redirect(base: &str, location: &str) -> Result<String, NativeError> {

@@ -13,6 +13,7 @@ dezoomify-job = { path = "../dezoomify-job" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ureq = "2.12"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 url = "2.5"
 sha2 = "0.10"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -21,3 +22,6 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 dezoomify-fixture-server = { path = "../fixture-server" }
 axum = "0.8"
+
+[features]
+pipeline-debug = []

@@ -1,4 +1,4 @@
-// Web worker: owns the real wasm core discovery session. Pure computation —
+// Web worker: owns the real wasm core discovery session. Pure computation:
 // the worker never fetches anything; the main thread performs every network
 // request through the classified transport and feeds bytes back here.
 import init, { DiscoverySession } from "../wasm/dezoomify-wasm.js";

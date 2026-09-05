@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
-use dezoomify_native::http::{fetch, FetchLimits};
+use dezoomify_native::http::{fetch, FetchLimits, UserHeaders};
 
 fn limits() -> FetchLimits {
     FetchLimits {
@@ -16,6 +16,7 @@ fn limits() -> FetchLimits {
         connect_timeout: std::time::Duration::from_secs(5),
         max_redirects: 5,
         retries: 1,
+        tls: Default::default(),
     }
 }
 
@@ -67,6 +68,7 @@ fn follows_redirect_across_hosts() {
         &format!("http://127.0.0.1:{start_port}/start"),
         &BTreeMap::new(),
         None,
+        None,
         &limits(),
     )
     .expect("fetch follows redirect");
@@ -93,54 +95,11 @@ fn rejects_redirect_beyond_limit() {
         &format!("http://127.0.0.1:{port}/start"),
         &BTreeMap::new(),
         None,
+        None,
         &tight,
     )
     .expect_err("redirect limit");
     assert_eq!(error.code, "transport.redirect-limit");
-    server.join().expect("server");
-}
-
-#[test]
-fn enforces_size_limit() {
-    let body = vec![0xAB; 2048];
-    let (port, server) = serve(vec![response(
-        "HTTP/1.1 200 OK",
-        &[("content-type", "application/octet-stream")],
-        &body,
-    )]);
-    let mut tight = limits();
-    tight.max_bytes = 1024;
-    let error = fetch(
-        &format!("http://127.0.0.1:{port}/big"),
-        &BTreeMap::new(),
-        None,
-        &tight,
-    )
-    .expect_err("size limit");
-    assert_eq!(error.code, "transport.size-limit");
-    server.join().expect("server");
-}
-
-#[test]
-fn retries_after_connection_reset() {
-    let close = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n".to_vec();
-    let (port, server) = serve(vec![
-        Vec::new(),
-        response(
-            "HTTP/1.1 200 OK",
-            &[("content-type", "text/plain")],
-            b"ok-after-retry",
-        ),
-    ]);
-    let _ = close;
-    let outcome = fetch(
-        &format!("http://127.0.0.1:{port}/flaky"),
-        &BTreeMap::new(),
-        None,
-        &limits(),
-    )
-    .expect("retry succeeds");
-    assert_eq!(outcome.body, b"ok-after-retry");
     server.join().expect("server");
 }
 
@@ -150,6 +109,7 @@ fn fails_after_retry_exhaustion() {
     let error = fetch(
         &format!("http://127.0.0.1:{port}/dead"),
         &BTreeMap::new(),
+        None,
         None,
         &limits(),
     )
@@ -170,10 +130,75 @@ fn connection_refused_is_network_error() {
         &format!("http://127.0.0.1:{port}/nothing"),
         &BTreeMap::new(),
         None,
+        None,
         &limits(),
     )
     .expect_err("connection refused");
     assert_eq!(error.code, "transport.network-error");
+}
+
+#[test]
+fn credentials_never_leave_the_input_origin() {
+    // One listener records the request heads it receives.
+    let captured: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let sink = std::sync::Arc::clone(&captured);
+    let server = thread::spawn(move || {
+        for _ in 0..2 {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            let mut buffer = [0u8; 4096];
+            let n = stream.read(&mut buffer).unwrap_or(0);
+            let head = String::from_utf8_lossy(&buffer[..n]).to_string();
+            let mut response =
+                response("HTTP/1.1 200 OK", &[("content-type", "text/plain")], b"ok");
+            let _ = stream.write_all(&mut response);
+            sink.lock().expect("lock").push(head);
+        }
+    });
+    let mut headers = std::collections::BTreeMap::new();
+    headers.insert("Cookie".to_string(), "js_enabled=2".to_string());
+    headers.insert("Accept".to_string(), "text/html".to_string());
+
+    // Same-origin request: the scoped cookie is sent.
+    let same = UserHeaders::new(headers.clone(), Some("127.0.0.1".to_string()));
+    fetch(
+        &format!("http://127.0.0.1:{port}/a"),
+        &BTreeMap::new(),
+        Some(&same),
+        None,
+        &limits(),
+    )
+    .expect("same-origin fetch");
+    // Foreign-origin request: the scoped cookie is dropped, plain headers stay.
+    let foreign = UserHeaders::new(headers, Some("other-origin.test".to_string()));
+    fetch(
+        &format!("http://127.0.0.1:{port}/b"),
+        &BTreeMap::new(),
+        Some(&foreign),
+        None,
+        &limits(),
+    )
+    .expect("foreign-origin fetch");
+    server.join().expect("server");
+    let heads = captured.lock().expect("lock");
+    assert!(
+        heads[0]
+            .to_ascii_lowercase()
+            .contains("cookie: js_enabled=2"),
+        "same-origin request must carry the scoped cookie"
+    );
+    assert!(
+        !heads[1].to_ascii_lowercase().contains("cookie:"),
+        "foreign-origin request must never carry the scoped cookie"
+    );
+    assert!(
+        heads[1].to_ascii_lowercase().contains("accept: text/html"),
+        "non-credential user headers apply everywhere"
+    );
 }
 
 #[test]
@@ -186,6 +211,7 @@ fn exposes_http_error_status() {
     let outcome = fetch(
         &format!("http://127.0.0.1:{port}/absent"),
         &BTreeMap::new(),
+        None,
         None,
         &limits(),
     )

@@ -10,6 +10,8 @@ pub struct Args {
     pub output: PathBuf,
     pub overwrite: bool,
     pub json: bool,
+    pub max_width: Option<u32>,
+    pub accept_invalid_certs: bool,
     /// Trusted user headers (`-H "Name: value"`), last occurrence wins.
     pub headers: BTreeMap<String, String>,
 }
@@ -19,12 +21,28 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut output: Option<PathBuf> = None;
     let mut overwrite = false;
     let mut json = false;
+    let mut max_width = None;
+    let mut accept_invalid_certs = false;
     let mut headers: BTreeMap<String, String> = BTreeMap::new();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--overwrite" => overwrite = true,
+            "--accept-invalid-certs" => accept_invalid_certs = true,
             "--json" => json = true,
+            "--max-width" => {
+                i += 1;
+                let raw = args
+                    .get(i)
+                    .ok_or_else(|| "missing value for --max-width".to_string())?;
+                let width: u32 = raw
+                    .parse()
+                    .map_err(|_| format!("invalid --max-width value: {raw}"))?;
+                if width == 0 {
+                    return Err("--max-width must be positive".to_string());
+                }
+                max_width = Some(width);
+            }
             "--help" | "-h" => return Err(help()),
             "--version" => return Err("dezoomify-cli 1.0.0".to_string()),
             "-H" => {
@@ -59,12 +77,14 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         output: output.ok_or_else(help)?,
         overwrite,
         json,
+        max_width,
+        accept_invalid_certs,
         headers,
     })
 }
 
 fn help() -> String {
-    "usage: dezoomify-cli [--overwrite] [--json] [-H \"Name: value\"] <input-url> <output>"
+    "usage: dezoomify-cli [--overwrite] [--json] [--max-width <px>] [--accept-invalid-certs] [-H \"Name: value\"] <input-url> <output>"
         .to_string()
 }
 

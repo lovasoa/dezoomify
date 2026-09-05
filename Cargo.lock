@@ -403,6 +403,7 @@ dependencies = [
  "dezoomify-job",
  "dezoomify-protocol",
  "image",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

@@ -34,3 +34,30 @@ L32,migration-sources/dezoomify-web/tests/live-compat.spec.js,OpenSeadragon,open
 L33,migration-sources/dezoomify-web/tests/live-compat.spec.js,NLS,auchinleck.nls.uk,IIIF,auto-select + first tile loads,web-iiif-info,manual,unassigned
 L34,migration-sources/dezoomify-web/tests/live-compat.spec.js,NLS map-view,map-view.nls.uk,IIIF,auto-select + first tile loads,web-iiif-info,manual,unassigned
 L35,migration-sources/dezoomify-web/tests/live-compat.spec.js,Ethnomuseum,collection.ethnomuseum.ru,pnav,auto-select + first tile loads,web-pnav,manual,unassigned
+L36,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Google Arts & Culture,artsandculture.google.com,Arts & Culture,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L37,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,OpenSeadragon (Zoomify),openseadragon.github.io,Zoomify,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L38,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,NGV,www.ngv.vic.gov.au,Zoomify,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L39,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Zoomify Express (romanlaptev),romanlaptev.github.io,Zoomify,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L40,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,OpenSeadragon (Zoomify tile service),openseadragon.github.io,Zoomify,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L41,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Micr.io,i.micr.io,IIIF,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L42,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Philadelphia Museum,www.philamuseum.org,IIIF,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L43,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,CSNTM,collections.csntm.org,IIIF,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L44,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,ONB,viewer.onb.ac.at,IIIF,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L45,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Oklahoma CONTENTdm,dc.library.okstate.edu,IIIF,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L46,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Liechtenstein Collections,www.liechtensteincollections.at,IIIF,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L47,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,BLB Karlsruhe,digital.blb-karlsruhe.de,Generic,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L48,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Academia Sinica,bronze.asdc.sinica.edu.tw,DeepZoom,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L49,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Bibliotheques Paris,bibliotheques-specialisees.paris.fr,DeepZoom,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L50,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Washington Mirador,digitalcollections.lib.washington.edu,IIIF,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L51,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,HNG IIPImage,image.hng-data.org,IIPImage,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L52,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,dezoomify-rs tiles.yaml,raw.githubusercontent.com,custom_yaml,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L53,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Memorix TopViewer,images.memorix.nl,TopViewer,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L54,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Memorix Media API,webservices.memorix.nl,TopViewer,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L55,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,FSI server,fsi-site.neptunelabs.com,FSI,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L56,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,NeptuneLabs FSI,www.neptunelabs.com,FSI,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L57,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Hungaricana,gallery.hungaricana.hu,Hungaricana,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L58,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,ArcGIS WMTS,server.arcgisonline.com,WMTS,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L59,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,NGI ArcGIS,wmts.ngi.be,ArcGIS,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L60,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Cartesius basemap,www.cartesius.be,ArcGIS,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L61,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,LizardTech Iserv,cartweb.geography.ua.edu,LizardTech,real CLI downloads a bounded output image,cli-live,manual,unassigned
+L62,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Uffizi XLimage,uffizicloud.centrica.it,XLimage,real CLI downloads a bounded output image,cli-live,manual,unassigned
