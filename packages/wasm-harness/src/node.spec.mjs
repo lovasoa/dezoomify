@@ -193,22 +193,32 @@ describe("P07-WORKFLOWS: transcript golden", () => {
   });
 });
 
-describe("P07-PACKAGE: pinned browser-tooling exception", () => {
-  it("records the wasm-pack/browser exception instead of claiming it", () => {
+describe("P07-PACKAGE: wasm-pack conformance", () => {
+  it("runs wasm-pack --node tests when wasm-pack is installed", () => {
     const probe = spawnSync("wasm-pack", ["--version"], { encoding: "utf8" });
-    // wasm-pack is intentionally not installed here; the exception is that
-    // generated-glue and headless-browser runs happen only where pinned
-    // wasm-pack + browsers exist.
-    assert.ok(
-      probe.status !== 0 || typeof probe.stdout === "string",
-      "wasm-pack probe completed",
-    );
     if (probe.status !== 0) {
       console.warn(
         "EXCEPTION-RECORDED: wasm-pack is not installed; " +
           "wasm-pack --node/--headless browser tests are out of scope. " +
           "Native conformance above exercises the same adapter logic.",
       );
+      return;
     }
+    // wasm-pack present: the conformance suite must actually run on the
+    // wasm target through the real toolchain.
+    const run = spawnSync("wasm-pack", ["test", "--node", CRATE], {
+      encoding: "utf8",
+      timeout: 600_000,
+    });
+    assert.equal(
+      run.status,
+      0,
+      `wasm-pack test --node failed:\n${run.stdout}\n${run.stderr}`,
+    );
+    assert.match(
+      `${run.stdout}\n${run.stderr}`,
+      /4 passed/,
+      "all wasm-bindgen conformance tests ran on the wasm target",
+    );
   });
 });

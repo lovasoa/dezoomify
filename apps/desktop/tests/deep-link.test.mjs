@@ -334,9 +334,13 @@ test("rust deep_link.rs carries required guards", () => {
   assert.ok(!src.includes("cookie=") || src.includes("SecretForbidden"), "no secret passthrough");
 });
 
-test("tauri bundle registers dezoomify protocol scheme", () => {
+test("desktop metadata registers dezoomify protocol scheme", () => {
+  // The v1 `bundle.protocol` block is not valid Tauri 2 config; the scheme
+  // registration now lives in src-tauri/dezoomify.json (deepLink.schemes)
+  // and is applied by the deep-link plugin at SDK-wiring time (E04).
   const conf = JSON.parse(readText("../src-tauri/tauri.conf.json"));
-  const schemes = conf?.bundle?.protocol?.schemes ?? [];
+  const meta = JSON.parse(readText("../src-tauri/dezoomify.json"));
+  const schemes = meta?.deepLink?.schemes ?? [];
   assert.ok(schemes.includes("dezoomify"), "protocol scheme dezoomify");
   assert.equal(conf.identifier, "com.dezoomify.app");
 });

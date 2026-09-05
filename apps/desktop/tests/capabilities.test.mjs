@@ -60,6 +60,8 @@ const EXPECTED_CHANNELS = [
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff"];
 const NATIVE_HOST = "com.dezoomify.native_host";
 
+const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
+
 function xdezoomify(doc) {
   return doc["x-dezoomify"] ?? doc;
 }
@@ -87,7 +89,7 @@ test("generated files list exact commands and channels", () => {
   const capGen = readJson("../src-tauri/capabilities/generated.json");
   const desktopCap = readJson("../../../generated/desktop-capabilities.json");
   for (const [label, doc] of [
-    ["tauri.conf.json", tauriConf],
+    ["src-tauri/dezoomify.json", DESKTOP_META],
     ["capabilities/generated.json", capGen],
     ["generated/desktop-capabilities.json", desktopCap],
   ]) {
@@ -98,7 +100,7 @@ test("generated files list exact commands and channels", () => {
     assert.deepEqual(sorted(channels), sorted(EXPECTED_CHANNELS), `${label} channels`);
   }
   // Cross-file byte-level agreement on shared fields.
-  const a = xdezoomify(tauriConf);
+  const a = DESKTOP_META;
   const b = xdezoomify(capGen);
   const c = xdezoomify(desktopCap);
   for (const field of ["commands", "eventChannels", "encoders", "decoders", "protocol", "nativeHost", "updater", "fingerprint"]) {
@@ -112,7 +114,10 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
   const desktopCap = readJson("../../../generated/desktop-capabilities.json");
   const lib = readText("../src-tauri/src/lib.rs");
   const integration = readText("../src/desktopIntegration.ts");
-  for (const doc of [tauriConf, desktopCap]) {
+  // The bundle identifier and deep-link scheme live in the tauri config.
+  assert.equal(tauriConf.identifier, "com.dezoomify.app");
+  assert.deepEqual(DESKTOP_META.deepLink.schemes, ["dezoomify"]);
+  for (const doc of [DESKTOP_META, desktopCap]) {
     const x = xdezoomify(doc);
     assert.deepEqual(x.protocol, { max: "1.0", min: "1.0", version: "1.0" });
     assert.deepEqual(sorted(x.encoders), sorted(EXPECTED_ENCODERS));
