@@ -163,9 +163,8 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
 
 /// Build the entire website via `scripts/build-site.mjs`: browser JS
 /// mirrors, help pages, wasm glue, and the deployable `dist/` tree. The
-/// same script runs on Cloudflare Pages at deploy time (scripts/cf-build.sh
-/// is the dashboard build command), so local builds and deployments cannot
-/// diverge.
+/// same script runs in the website-deploy GitHub Actions workflow, so
+/// local builds and deployments cannot diverge.
 fn build_site() -> Result<(), String> {
     let root = super::repo_root();
     let status = Command::new("node")
