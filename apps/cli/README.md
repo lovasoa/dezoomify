@@ -1,11 +1,12 @@
-# CLI Application
+# CLI Application (preview scaffold)
 
-The `dezoomify` command for scripts and bulk jobs: give it URLs, get image
-files, with progress reporting and meaningful exit codes.
+The `dezoomify` command parses args and fails closed until the native
+download pipeline lands. Real inputs exit non-zero with an honest
+not-implemented error; no files are written and no fake hashes are printed.
 
 ```sh
 cargo xtask build cli
-./target/debug/dezoomify --help
+./target/debug/dezoomify-cli --help
 ```
 
 Errors are redacted (no credentials, cookies, or local paths leak into

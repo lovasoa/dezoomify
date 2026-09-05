@@ -1,10 +1,10 @@
-# Desktop Application
+# Desktop Application (lean shell scaffold)
 
-Dezoomify as a native app: same interface as the website, plus local file
-output, `dezoomify://` deep links, and hosting the extension's Native
-Messaging bridge.
+Dezoomify native shell scaffold: validated deep links, command registry, job
+lifecycle table, and capability manifests — standard library only, no Tauri
+window, installer, or execution yet.
 
-- Shell: Tauri (`src-tauri/`), frontend from `packages/shared-ui`.
+- Shell: lean `src-tauri/` (no Tauri SDK vendored); frontend contract from `packages/shared-ui`.
 - Deep links are validated, bounded, and confirmed before any work starts.
 - Installers ship unsigned (no paid signing in this free project); update
   payloads carry free self-generated signatures.

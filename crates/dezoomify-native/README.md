@@ -1,9 +1,11 @@
-# dezoomify-native
+# dezoomify-native (policy scaffold, no I/O yet)
 
-Does the actual downloading outside browsers: HTTP with redirects/retries,
-resume cache, image decoding/encoding, concurrency, and atomic file output —
-with credentials redacted from every error, log, and snapshot. Powers the CLI
-and desktop app (and the extension's Native Messaging host).
+Policy bookkeeping outside browsers: auth/header scope, redirect header
+stripping, bounded scheduler counters, cache helpers, output validation, and
+progress counters — with credentials redacted from every error, log, and
+snapshot. No HTTP client, TLS, image decoding/encoding, or file output lives
+here yet; callers get bookkeeping only. Powers CLI/desktop scaffolds, which
+fail closed until the pipeline lands.
 
 ```sh
 cargo xtask test native     # runtime suites

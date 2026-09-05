@@ -1,8 +1,11 @@
-# Web Application
+# Web Application (preview scaffold)
 
-The Dezoomify website: paste a zoomable-image URL, pick a format (or let it
-detect), press **Dezoomify !**, and save the full-resolution result.
+The Dezoomify website preview: paste a URL, run direct-first metadata fetch
+through the shared classifier, and get honest negative/error handling.
 
+- Preview scope: generic pages fail with `NO_IMAGE_FOUND` (no fake tiles);
+  zoomable signals stop at a preview message — tile download and save are not
+  wired yet.
 - Entry: [`index.html`](index.html) (+ [`privacy.html`](privacy.html),
   [`terms.html`](terms.html)); logic in [`src/`](src/).
 - Transport, always visible in the UI: direct browser fetch first; only after
