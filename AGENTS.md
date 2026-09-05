@@ -109,6 +109,15 @@ dezoomify-core       dezoomify-protocol
   globals.
 - Add an architecture test whenever a boundary can be enforced mechanically.
 
+## Visual Language And UI Guidelines
+
+Preserve Dezoomify's distinctive visual identity and atmospheric parchment aesthetic; avoid generic SaaS blue/gray cards:
+- **Atmosphere & Palette:** Page background is cool off-white (`#fcfeff`). Surface cards and navigation bar use the signature warm parchment/blush gradient (`linear-gradient(180deg, #f7eded 0%, #f7eeee 100%)`), framed with a warm slate border (`1px solid #a19797`) and diffuse lilac atmospheric glow (`box-shadow: 0 0 12px rgba(185, 190, 240, 0.45)`). Dark mode adapts these tones while preserving the parchment warmth.
+- **Tactile Primary Controls:** Primary action buttons use a tactile beveled parchment gradient (`linear-gradient(180deg, #fffafa 0%, #dfd8d8 100%)`), border (`1px solid #8c8080`), dark text (`#1c1917`), and active press shadow (`inset 0 1px 3px rgba(0,0,0,0.18)`). Interactive focus uses a vivid cyan halo (`box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.3)`). Radio indicators use an active teal/cyan accent (`#0284c7`).
+- **Spacious Card & Full-Width URL Input:** Zoomable image URLs (IIIF manifests, deepzoom DZI queries, zoomify paths) are exceptionally long (100–250+ characters). The status card must be spacious (`max-width: 960px` or `width: min(92%, 960px)`). The URL input box must span the full card width (`width: 100%`) with ample height (`3rem` / 48px) and clean padding so long URLs remain readable and editable without horizontal truncation.
+- **Format Selection & Button Placement:** Expose supported formats with "Select automatically" as the prominent default choice. Place the primary `Dezoomify !` button centered and substantial below the format selectors.
+- **Typography & Progressive Disclosure:** Left-align body copy (never `text-align: justify`). When errors occur, layer explanations: first a plain sentence, then actionable paths (browser extension for session/auth, desktop app for gigapixel images, FAQ), and technical diagnostics only behind collapsible details. Progress displays a smooth cyan/blue track and tabular counts.
+
 ## Protocol And Errors
 
 - Make the versioned Rust definitions in `crates/dezoomify-protocol` the single
