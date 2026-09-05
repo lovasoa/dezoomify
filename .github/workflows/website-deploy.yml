@@ -73,6 +73,11 @@ jobs:
         if: steps.creds.outputs.ready == 'true'
         run: |
           set -u
+          # The custom domain sits in a zone with bot protection: a plain
+          # curl user agent gets 403 on every path. Verify with a browser
+          # user agent, like real users.
+          UA="Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0"
+          curl() { command curl -sS -A "$UA" "$@"; }
           for i in $(seq 1 24); do
             # / is the legacy site: the dezoomify-web app, served verbatim.
             legacy=$(curl -sS -o /tmp/legacy.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/" || true)
