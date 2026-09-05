@@ -44,9 +44,11 @@ it runs only with the release signing key (the `release-signing`
 environment secret) and the public key lives at
 `release/gpg-public-key.asc`. The verify stage recomputes every digest,
 checks artifact names against the plan, and validates every signature. The
-publish stage verifies again, then creates the GitHub release from the
-planned commit with artifacts, checksums, signatures, and notes, and
-records the inventory at `release/checksums/<version>/SHA256SUMS`. Working
+publish stage verifies again, resolves the release tag to its commit and
+refuses to publish unless it is exactly the planned revision, then creates
+the GitHub release from the tagged revision with artifacts, checksums,
+signatures, and notes, and records the inventory at
+`release/checksums/<version>/SHA256SUMS`. Working
 release trees live under `target/release-dist/<version>/` and are never
 committed; `target/` is used so website builds cannot clobber them.
 

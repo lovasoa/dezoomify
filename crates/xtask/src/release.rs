@@ -167,6 +167,44 @@ fn git_commit() -> Result<String, String> {
     Ok(commit)
 }
 
+/// Resolves the tag to the commit it points at, fetching it from the origin
+/// when the shallow/CI checkout lacks it. Fails closed when the tag does
+/// not exist.
+fn tag_commit(tag: &str) -> Result<String, String> {
+    let resolve = |label: &str| -> Option<String> {
+        let out = Command::new("git")
+            .args(["rev-parse", &format!("{label}^{{commit}}")])
+            .current_dir(crate::repo_root())
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let s = String::from_utf8(out.stdout).ok()?;
+        let commit = s.trim().to_string();
+        (commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit())).then_some(commit)
+    };
+    if let Some(commit) = resolve(tag) {
+        return Ok(commit);
+    }
+    let fetched = Command::new("git")
+        .args([
+            "fetch",
+            "--no-tags",
+            "origin",
+            &format!("refs/tags/{tag}:refs/tags/{tag}"),
+        ])
+        .current_dir(crate::repo_root())
+        .status()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !fetched.success() {
+        return Err(format!(
+            "tag {tag} does not exist; create and push it before publishing"
+        ));
+    }
+    resolve(tag).ok_or_else(|| format!("tag {tag} exists but does not resolve to a commit"))
+}
+
 fn plan_dir(version: &str) -> PathBuf {
     crate::repo_root().join(ARTIFACTS_ROOT).join(version)
 }
@@ -321,7 +359,8 @@ fn release_plan_at(base: &Path, version: &str) -> Result<PathBuf, String> {
 
 fn release_notes(plan: &Plan) -> Result<String, String> {
     let mut notes = format!(
-        "# dezoomify {}\n\n`{}` channel release, built from commit `{}`.\n\n\
+        "# dezoomify {}\n\n`{}` channel release, built from the tagged \
+        revision `{}`.\n\n\
         - Supported protocol: `{}` (peers back to `{}`)\n\
         - Schema fingerprint: `{}`\n\
         - Capabilities: {}\n\n\
@@ -341,10 +380,7 @@ fn release_notes(plan: &Plan) -> Result<String, String> {
         }
         let name = expected_artifact_name(&target.name, &plan.version)
             .ok_or_else(|| format!("target '{}' has no artifact name rule", target.name))?;
-        notes.push_str(&format!(
-            "| [`{name}`]({}/{name}) | see [SHA256SUMS](SHA256SUMS) |\n",
-            target.name
-        ));
+        notes.push_str(&format!("| `{name}` | see `SHA256SUMS` |\n"));
     }
     notes.push_str(
         "\nEvery artifact ships with a GPG detached signature (`.sig`); the \
@@ -893,7 +929,15 @@ fn release_publish(plan: &Plan, artifacts: &Path, draft: bool) -> Result<(), Str
     {
         return Err("gh is not available or authenticated; cannot publish".to_string());
     }
-    // The release must be tied to the planned revision.
+    // The tag must exist and point at the planned revision; the release is
+    // never published for a revision other than the one it is tagged with.
+    let tag_commit = tag_commit(&plan.tag)?;
+    if tag_commit != plan.commit {
+        return Err(format!(
+            "tag {} points at {tag_commit}, but the plan pins {}; regenerate the plan from the tagged revision",
+            plan.tag, plan.commit
+        ));
+    }
     let tag = plan.tag.clone();
     let exists = Command::new("gh")
         .args(["release", "view", &tag])
