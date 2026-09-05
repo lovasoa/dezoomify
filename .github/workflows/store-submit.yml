@@ -1,4 +1,11 @@
 name: store-submit
+# Automatic extension publishing. Default is dry-run: package the store
+# payload, validate it, and upload it as a workflow artifact. Pass
+# upload=true to push a draft to the Chrome Web Store (chromium only;
+# firefox/AMO credentials are not wired yet). Draft upload fails closed
+# with a clear message when any required secret is missing.
+# Required secrets: CHROME_WS_CLIENT_ID, CHROME_WS_CLIENT_SECRET,
+# CHROME_WS_REFRESH_TOKEN, CHROME_WS_EXTENSION_ID.
 on:
   workflow_dispatch:
     inputs:
@@ -6,12 +13,66 @@ on:
         required: true
         type: choice
         options: [chromium, firefox]
+        default: chromium
+      upload:
+        description: "Upload draft to the store (needs secrets)"
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
+concurrency:
+  group: store-submit-${{ inputs.browser }}
+  cancel-in-progress: false
 jobs:
   submit:
     runs-on: ubuntu-latest
     environment: store-submit
     timeout-minutes: 30
     steps:
-      - run: echo "submit verified ${{ inputs.browser }} package (dry-run default; tracked per browser)"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Package store payload
+        run: |
+          set -euo pipefail
+          manifest="apps/extension/generated/manifest.${{ inputs.browser }}.json"
+          test -f "$manifest" || { echo "missing $manifest"; exit 1; }
+          version=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("manifest_version"); print(d["version"])' "$manifest")
+          staging=$(mktemp -d)
+          cp "$manifest" "$staging/manifest.json"
+          cp -r apps/extension/src "$staging/src"
+          (cd "$staging" && zip -qr "$OLDPWD/dezoomify-extension-${{ inputs.browser }}-$version.zip" manifest.json src)
+          unzip -l "dezoomify-extension-${{ inputs.browser }}-$version.zip" | head -8
+          echo "package: ok (dezoomify-extension-${{ inputs.browser }}-$version.zip)"
+      - name: Upload artifact (dry-run record)
+        uses: actions/upload-artifact@65c4c4a6ddee5b05f233a5622aab93b0d01e7330501 # v4.6.0
+        with:
+          name: dezoomify-extension-${{ inputs.browser }}
+          path: dezoomify-extension-${{ inputs.browser }}-*.zip
+          retention-days: 30
+      - name: Draft upload to Chrome Web Store
+        if: inputs.browser == 'chromium' && inputs.upload == true
+        env:
+          CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
+          CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
+          CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
+          CHROME_WS_EXTENSION_ID: ${{ secrets.CHROME_WS_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+          for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN CHROME_WS_EXTENSION_ID; do
+            [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
+          done
+          zip=$(ls dezoomify-extension-chromium-*.zip)
+          token=$(curl -sS --fail --proto '=https' --max-time 30 -X POST https://oauth2.googleapis.com/token \
+            -d "client_id=${CHROME_WS_CLIENT_ID}" \
+            -d "client_secret=${CHROME_WS_CLIENT_SECRET}" \
+            -d "refresh_token=${CHROME_WS_REFRESH_TOKEN}" \
+            -d "grant_type=refresh_token" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')
+          [ -n "$token" ] || { echo "token refresh failed"; exit 1; }
+          curl -sS --fail --proto '=https' --max-time 120 \
+            -H "Authorization: Bearer ${token}" -X PUT -T "$zip" \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_WS_EXTENSION_ID}" \
+            | python3 -c 'import json,sys; print("upload:", json.load(sys.stdin).get("uploadState","unknown"))'
+      - name: Firefox upload guard
+        if: inputs.browser == 'firefox' && inputs.upload == true
+        run: echo "firefox/AMO credentials are not wired yet (no Mozilla account); package validated, upload skipped" && exit 1

@@ -1,16 +1,36 @@
 name: website-deploy
+# Cloudflare Pages Git integration deploys this branch automatically on push;
+# this workflow verifies the live branch preview actually serves the site.
+# Promotion: switch `branches` to [main] and SITE_HOST to dezoomify.pages.dev.
 on:
-  workflow_dispatch:
-    inputs:
-      digest:
-        required: true
-        type: string
+  push:
+    branches: [ng]
+  workflow_dispatch: {}
+env:
+  SITE_HOST: ng.dezoomify.pages.dev
 permissions:
   contents: read
+concurrency:
+  group: website-deploy-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  deploy:
+  verify-preview:
     runs-on: ubuntu-latest
-    environment: website-prod
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-      - run: echo "deploy immutable website digest ${{ inputs.digest }} (preview first, production promotion separate)"
+      - name: Verify branch preview serves the site
+        run: |
+          set -u
+          for i in $(seq 1 24); do
+            apex=$(curl -sS -o /tmp/apex.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/" || true)
+            app=$(curl -sS -o /tmp/app.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/apps/web/" || true)
+            if [ "$apex" = "200" ] && [ "$app" = "200" ] \
+              && grep -q "Dezoomify" /tmp/apex.html && grep -q "Dezoomify" /tmp/app.html; then
+              echo "preview live: apex=$apex app=$app"
+              exit 0
+            fi
+            echo "attempt $i: apex=$apex app=$app; retrying in 30s"
+            sleep 30
+          done
+          echo "branch preview did not serve expected content in time"
+          exit 1
