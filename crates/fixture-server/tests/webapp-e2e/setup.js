@@ -1,5 +1,7 @@
-// Builds the real webapp (wasm + browser glue) and serves the repo root
-// through the deterministic fixture server on loopback. Writes addr.json.
+// Builds the real webapp via scripts/build-site.mjs (wasm + glue + browser
+// JS mirrors + help) and serves the assembled dist/ tree through the
+// deterministic fixture server on loopback, exactly what the website-deploy
+// workflow uploads to Cloudflare Pages. Writes addr.json.
 const { spawnSync, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -7,36 +9,14 @@ const path = require("node:path");
 
 async function globalSetup() {
   const root = path.resolve(__dirname, "..", "..", "..", "..");
-  // Rebuild the wasm adapter and its browser glue (wasm-bindgen must be
-  // installed and match the crate's wasm-bindgen version).
-  const bindgen = spawnSync("wasm-bindgen", ["--version"], { encoding: "utf8" });
-  if (bindgen.status !== 0) {
-    throw new Error(
-      "wasm-bindgen is required for the webapp E2E; install wasm-bindgen-cli " +
-        "matching crates/dezoomify-wasm's wasm-bindgen version",
-    );
-  }
-  // Release profile: matches `cargo xtask build web` so the regenerated glue
-  // is byte-identical to the committed artifact served by Cloudflare Pages.
-  const build = spawnSync(
-    "cargo",
-    ["build", "-p", "dezoomify-wasm", "--release", "--target", "wasm32-unknown-unknown"],
-    { cwd: root, stdio: "inherit" },
-  );
-  if (build.status !== 0) throw new Error("failed to build dezoomify-wasm");
-  const outDir = path.join(root, "wasm");
-  fs.mkdirSync(outDir, { recursive: true });
-  const glue = spawnSync(
-    "wasm-bindgen",
-    [
-      "--target", "web",
-      "--out-dir", outDir,
-      "--out-name", "dezoomify-wasm",
-      path.join(root, "target", "wasm32-unknown-unknown", "release", "dezoomify_wasm.wasm"),
-    ],
-    { cwd: root, stdio: "inherit" },
-  );
-  if (glue.status !== 0) throw new Error("failed to generate wasm glue");
+  // Full site build: mirrors, help, wasm adapter (release profile) and its
+  // glue, then the dist/ assembly. wasm-bindgen must be installed and match
+  // the wasm-bindgen version pinned by Cargo.lock.
+  const site = spawnSync("node", ["scripts/build-site.mjs"], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if (site.status !== 0) throw new Error("failed to build the site (scripts/build-site.mjs)");
 
   const bin = path.join(root, "target", "debug", "dezoomify-fixture-server");
   if (!fs.existsSync(bin)) {
@@ -55,8 +35,9 @@ async function globalSetup() {
       "--port", "0",
       "--write-address", addrFile,
       "--scenarios-dir", path.join(root, "testdata", "scenarios"),
-      // The web root is the repository root: /src, /packages, /wasm all resolve.
-      "--static-dir", root,
+      // The web root is the assembled dist/ tree: /src, /packages, /wasm,
+      // /help all resolve exactly as deployed.
+      "--static-dir", path.join(root, "dist"),
       "--request-log", logFile,
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
