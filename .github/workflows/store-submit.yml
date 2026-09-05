@@ -53,7 +53,7 @@ jobs:
           unzip -l "dezoomify-extension-${{ inputs.browser }}-$version.zip" | head -8
           echo "package: ok (dezoomify-extension-${{ inputs.browser }}-$version.zip)"
       - name: Upload artifact (dry-run record)
-        uses: actions/upload-artifact@65c4c4a6ddee5b05f233a5622aab93b0d01e7330501 # v4.6.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dezoomify-extension-${{ inputs.browser }}
           path: dezoomify-extension-${{ inputs.browser }}-*.zip

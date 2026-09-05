@@ -19,7 +19,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4: matches .node-version
         with:
           node-version-file: .node-version
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned: honors rust-toolchain.toml
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
+          toolchain: 1.98.0 # must match rust-toolchain.toml
           targets: wasm32-unknown-unknown
       - run: cargo xtask ci local
