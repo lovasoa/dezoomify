@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Dezoomify privacy policy: what the app fetches, stores, and never collects." />
+    <title>Dezoomify — Privacy Policy</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <link rel="stylesheet" href="../../packages/shared-ui/src/styles/theme.css" />
+  </head>
+  <body>
+    <header class="dz-nav">
+      <a href="./index.html" class="dz-brand">
+        <svg class="dz-brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          <line x1="11" y1="8" x2="11" y2="14"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+        </svg>
+        <span>Dezoomify</span>
+      </a>
+      <nav class="dz-nav-links" aria-label="Main Navigation">
+        <a href="./index.html" class="dz-nav-link"><span>App</span></a>
+        <a href="./terms.html" class="dz-nav-link"><span>Terms</span></a>
+      </nav>
+    </header>
+
+    <main class="dz-main">
+      <div class="dz-card">
+        <h1>Privacy Policy</h1>
+        <p>Effective: September 2026. Dezoomify is a free, open-source tool for
+        downloading high-resolution zoomable images. There are no accounts, no
+        advertising, no analytics, and no tracking.</p>
+
+        <h2>What runs where</h2>
+        <ul>
+          <li><strong>Website.</strong> Image URLs you enter are fetched directly
+          by your browser. If a direct fetch fails because of a network or CORS
+          error, public metadata files (never image tiles) may be retried through
+          a metadata proxy, unless you opt out. The proxy never receives cookies,
+          authorization headers, or credentials of any kind.</li>
+          <li><strong>Browser extension.</strong> Runs only when you explicitly
+          invoke it on a tab, with per-site permissions you grant. It uses your
+          browser's existing session for that site; it never sends your cookies
+          anywhere except, with your explicit consent, to the Dezoomify desktop
+          app on your own machine — kept in memory only and never stored.</li>
+          <li><strong>Desktop app and CLI.</strong> Process images locally on
+          your machine. Any credentials you provide stay in memory and are never
+          written to disk or logs.</li>
+        </ul>
+
+        <h2>What we store</h2>
+        <p>Nothing about you.Jobs run in your browser or on your machine; source
+        URLs, cookies, authorization headers, and image bytes never enter
+        telemetry, crash reports, or document titles. Proxy access logs carry
+        request IDs and coarse policy codes only — never target URLs or query
+        strings. Diagnostics shown to you are redacted and copied only when you
+        explicitly copy them.</p>
+
+        <h2>What we share</h2>
+        <p>Nothing. There is no data sale, no third-party analytics, and no data
+        transfer, because there is no data collection.</p>
+
+        <h2>Contact</h2>
+        <p>Questions: open an issue at
+        <a href="https://github.com/lovasoa/dezoomify" rel="noopener">github.com/lovasoa/dezoomify</a>.</p>
+      </div>
+    </main>
+
+    <footer class="dz-footer">
+      <a href="./privacy.html">Privacy</a> · <a href="./terms.html">Terms</a>
+    </footer>
+  </body>
+</html>
