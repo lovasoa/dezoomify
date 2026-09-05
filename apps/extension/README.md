@@ -1,29 +1,17 @@
 # Browser Extension
 
-- **Responsibility:** Run a finite scan for an explicitly activated tab, detect
-  candidate zoomable resources, show status, and hand selected candidates to
-  the embedded shared UI with narrowly scoped browser capabilities.
-- **Allowed dependencies:** `packages/browser-runtime`,
-  `packages/protocol-ts`, shared recognition data, and browser extension APIs.
-- **Forbidden responsibilities:** No always-on global monitoring, duplicate  format duplication, silent credential exfiltration,, broad persistent permissions without
-  need, metadata CORS proxy use, JavaScript private signing key, scan rearming caused by
-  an extension-page reload, or listeners/timers surviving their session.
-- **Interfaces and tests:** Start only on explicit extension action, register the
-  per-tab scan before its one reload, and stop after settling, a deadline, or
-  extension-page/tab close. Normally fetch active-job resources directly with the
-  current browser session and granted host permissions, create blob-backed
-  images or `ImageBitmap` tiles, and compose them on an origin-clean canvas; a
-  same-origin/page-context fallback may exist. Test one listener per tab,
-  deduplication, finite deadlines, no reload rearm, cleanup, permissions, direct
-  readable fetch, and clean save.
-- **Handoffs:** Treat website/deep-link input as bounded, versioned, non-secret,
-  untrusted data requiring validation and user confirmation. For Native
-  Messaging, browser enforcement of the native host manifest's allowed extension
-  IDs authenticates the extension sender. A fresh challenge/nonce binds one
-  handoff and its consent and blocks replay; it does not establish identity.
-  Cookie handoff is native-only, explicitly consented, origin-scoped,
-  intentionally unpersisted, and best-effort short-lived, with no guarantee of
-  zeroization in managed memory. Metadata CORS proxy fallback neither carries cookies
-  nor supplies cookie-handoff consent.
-- **Migration source:** Migrate recognition and lifecycle behavior from
-  `migration-sources/dezoomify-extension`.
+Detects zoomable images in your current tab and hands the job to Dezoomify —
+using your browser's own session, so logged-in and interactive viewers work.
+
+- **Use:** click the extension button on a page with a zoomable image; approve
+  the per-site permission; pick the image; download it or hand it to the
+  desktop app.
+- One finite scan per explicit click — no background monitoring, no permanent
+  broad permissions. The extension never uses the website's metadata proxy.
+- Cookie handoff to the desktop app is native-only, explicitly consented, and
+  memory-only.
+
+Contributing: narrow manifest permissions, explicit-action scans with cleanup,
+no private signing keys in shipped JS. Tests: `cargo xtask test extension`.
+Store publishing: `apps/extension/scripts/chrome-webstore-publish.sh`
+(see `.env.example`); CI packages every push via `store-submit`.

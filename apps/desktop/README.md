@@ -1,14 +1,13 @@
 # Desktop Application
 
-- **Responsibility:** Package the shared UI with native job capabilities,
-  desktop lifecycle, file dialogs, updates, and platform integration.
-- **Allowed dependencies:** `dezoomify-native`, `dezoomify-protocol`,
-  `packages/shared-ui`, and the selected desktop shell.
-- **Forbidden responsibilities:** No duplicate web UI, core parsing, job state
-  machine, or unrestricted bridge from web content to native capabilities.
-- **Interfaces and tests:** Expose a narrow validated IPC bridge. Test capability
-  authorization, window/job shutdown, file selection, output flow, packaging
-  smoke, and shared UI contracts.
-- **Migration source:** Native workflows and output behavior come from
-  `migration-sources/dezoomify-rs`; the shared interaction model starts from
-  `migration-sources/dezoomify-web`.
+Dezoomify as a native app: same interface as the website, plus local file
+output, `dezoomify://` deep links, and hosting the extension's Native
+Messaging bridge.
+
+- Shell: Tauri (`src-tauri/`), frontend from `packages/shared-ui`.
+- Deep links are validated, bounded, and confirmed before any work starts.
+- Installers ship unsigned (no paid signing in this free project); update
+  payloads carry free self-generated signatures.
+
+Contributing: talk to the engine only through the narrow validated IPC
+bridge. Tests: `cargo xtask test desktop`.

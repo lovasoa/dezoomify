@@ -13,7 +13,7 @@ cargo xtask check
 cargo xtask test [core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|live|all] [options]
 cargo xtask build <wasm|web|cli|desktop|extension> [options]
 cargo xtask dev <ui|web|desktop|extension> [options]
-cargo xtask ci <rust|wasm-browser|ui-web-proxy|native|desktop|extension|chromium-e2e|firefox-e2e|native-messaging|generated|security|local>
+cargo xtask ci <rust|wasm|browser|web|native|desktop|extension|protocol|security|local>
 cargo xtask release plan <version> <channel>
 cargo xtask release build --plan <path>
 cargo xtask release verify --plan <path> [--artifacts <path>]

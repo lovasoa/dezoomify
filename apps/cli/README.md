@@ -1,13 +1,15 @@
 # CLI Application
 
-- **Responsibility:** Parse command-line input, configure the native runtime,
-  render progress/errors, and choose process exit status.
-- **Allowed dependencies:** `dezoomify-native`, `dezoomify-protocol`, and focused
-  CLI/presentation libraries.
-- **Forbidden responsibilities:** No format parsing, downloader implementation,
-  codec logic, or protocol DTO duplication; never print secrets.
-- **Interfaces and tests:** Expose the `dezoomify` executable and stable help/exit
-  behavior. Test argument parsing, headers, batch mode, cancellation, output
-  selection, redacted errors, and fixture-backed end-to-end downloads.
-- **Migration source:** Migrate CLI arguments and composition from
-  `migration-sources/dezoomify-rs/src`.
+The `dezoomify` command for scripts and bulk jobs: give it URLs, get image
+files, with progress reporting and meaningful exit codes.
+
+```sh
+cargo xtask build cli
+./target/debug/dezoomify --help
+```
+
+Errors are redacted (no credentials, cookies, or local paths leak into
+output). Tests: `cargo xtask test native` and `cargo xtask test scenario`.
+
+Contributing: argument parsing and presentation live here; format parsing,
+downloading, and codecs belong to `dezoomify-native`/`dezoomify-core`.

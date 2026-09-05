@@ -1,13 +1,15 @@
 # Applications
 
-- **Responsibility:** Compose reusable crates and packages into the CLI,
-  desktop app, website, and extension.
-- **Allowed dependencies:** Apps may depend on their host runtime and shared UI;
-  no application may depend on another application.
-- **Forbidden responsibilities:** Do not duplicate domain, protocol, job, or
-  reusable transport logic inside an app.
-- **Interfaces and tests:** Each app owns its entry point, configuration, smoke
-  tests, packaging, and end-to-end scenarios while shared behavior is tested at
-  its lower owning layer.
-- **Migration sources:** App behavior comes from the corresponding roots in
-  `migration-sources`; shared behavior must move to crates/packages first.
+The four user-facing programs. Each composes the shared engine
+(`crates/`) and shared UI (`packages/`) with its own host capabilities —
+no app imports another app, and reusable logic lives below, not in apps.
+
+- [`web/`](web/) — the website: paste a URL, download the image.
+- [`extension/`](extension/) — browser extension: one-shot active-tab scan
+  using your browser session.
+- [`desktop/`](desktop/) — Tauri desktop app: local files, deep links,
+  native messaging host.
+- [`cli/`](cli/) — `dezoomify` command: scripting, bulk mode, exit codes.
+
+Contributing: an app owns its entry point, config, smoke tests, and packaging.
+Put reusable domain logic in a crate/package instead.

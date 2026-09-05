@@ -1,15 +1,11 @@
 # dezoomify-job
 
-- **Responsibility:** Run the portable download job state machine, including
-  discovery, selection, scheduling, progress, retries, cancellation, and result
-  accounting through injected host capabilities.
-- **Allowed dependencies:** `dezoomify-core`, `dezoomify-protocol`, and small
-  platform-neutral libraries.
-- **Forbidden responsibilities:** No direct HTTP, filesystem, image codec,
-  browser, native runtime, CLI, or UI access and no host-specific errors.
-- **Interfaces and tests:** Expose command/event-driven job control and host
-  capability traits. Test deterministic state transitions, bounded retries,
-  cancellation, backpressure, partial completion, and replayable event order.
-- **Migration source:** Extract orchestration from
-  `migration-sources/dezoomify-rs/src` and scheduling behavior from
-  `migration-sources/dezoomify-web/zoommanager.js` without importing host I/O.
+Runs one download end-to-end as a deterministic state machine: discovery,
+selection, scheduling, retries, cancellation, and progress. Hosts (browser,
+native) inject fetch/save capabilities; the machine itself does no I/O, so
+workflows replay identically everywhere, including in tests.
+
+```sh
+cargo xtask test job                 # workflows + adversarial cases
+cargo xtask test job --transcripts   # recorded event transcripts
+```

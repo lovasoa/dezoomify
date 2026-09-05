@@ -1,13 +1,16 @@
 # Rust Crates
 
-- **Responsibility:** Hold reusable Rust libraries and repository tooling with
-  explicit pure, portable, native, browser, fixture, and task-runner boundaries.
-- **Allowed dependencies:** Dependencies flow from hosts toward `job`, `core`,
-  and `protocol`; leaf crates remain independent and applications compose them.
-- **Forbidden responsibilities:** Do not place UI or app-specific policy
-  here, create cycles, or make `core`/`protocol` depend on runtime hosts.
-- **Interfaces and tests:** Every crate exposes a narrow documented API and owns
-  unit, architecture, and boundary tests appropriate to that API.
-- **Migration sources:** Rust discovery/native behavior starts in
-  `migration-sources/dezoomify-rs`; browser and extension behavior may supply
-  parity cases but not crate architecture.
+Reusable engine libraries and repository tooling, layered from pure logic
+outward to hosts:
+
+- [`dezoomify-core/`](dezoomify-core/) — pure image discovery (no I/O).
+- [`dezoomify-protocol/`](dezoomify-protocol/) — the versioned wire contract.
+- [`dezoomify-job/`](dezoomify-job/) — portable download state machine.
+- [`dezoomify-native/`](dezoomify-native/) — native HTTP, cache, codecs.
+- [`dezoomify-wasm/`](dezoomify-wasm/) — browser adapter for core/job.
+- [`fixture-server/`](fixture-server/) — deterministic local test server.
+- [`xtask/`](xtask/) — `cargo xtask`, the repo task runner.
+
+Contributing: dependencies flow toward `core`/`protocol`, never away; `core`
+and `job` stay free of I/O, clocks, and host frameworks (enforced by purity
+tests).
