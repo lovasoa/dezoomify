@@ -1,13 +1,12 @@
 //! Application of processing recipes to fetched tile payloads.
 
-use custom_error::custom_error;
-
 use super::model::ProcessingRecipe;
 use crate::google_arts_and_culture::decryption;
 
-custom_error! {pub ProcessingError
-    GoogleArtsDecrypt{source: decryption::InvalidEncryptedImage} =
-        "unable to decrypt a Google Arts & Culture tile: {source}",
+#[derive(Debug, thiserror::Error)]
+pub enum ProcessingError {
+    #[error("unable to decrypt a Google Arts & Culture tile: {0}")]
+    GoogleArtsDecrypt(#[from] decryption::InvalidEncryptedImage),
 }
 
 impl ProcessingRecipe {

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use custom_error::custom_error;
 use tile_info::ImageInfo;
 use url::Url;
 
@@ -77,10 +76,14 @@ pub fn determine_title(image_info: &manifest_types::ExtractedImageInfo) -> Optio
     }
 }
 
-custom_error! {pub IIIFError
-    JsonError{source: serde_json::Error} = "Invalid IIIF info.json file: {source}",
-    ManifestParseError{description: String} = "Could not parse IIIF manifest: {description}",
-    GeometryError{description: String} = "Invalid IIIF tile grid: {description}",
+#[derive(Debug, thiserror::Error)]
+pub enum IIIFError {
+    #[error("Invalid IIIF info.json file: {0}")]
+    JsonError(#[from] serde_json::Error),
+    #[error("Could not parse IIIF manifest: {description}")]
+    ManifestParseError { description: String },
+    #[error("Invalid IIIF tile grid: {description}")]
+    GeometryError { description: String },
 }
 
 impl From<IIIFError> for DiscoveryError {
@@ -496,8 +499,7 @@ pub fn parse_iiif_manifest_from_bytes(
     bytes: &[u8],
     manifest_url: &str,
 ) -> Result<Vec<manifest_types::ExtractedImageInfo>, IIIFError> {
-    let value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|e| IIIFError::JsonError { source: e })?;
+    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(IIIFError::JsonError)?;
 
     if is_legacy_presentation_manifest(&value) {
         parse_legacy_presentation_manifest(bytes, manifest_url)
@@ -543,7 +545,7 @@ fn parse_presentation3_manifest(
     manifest_url: &str,
 ) -> Result<Vec<manifest_types::ExtractedImageInfo>, IIIFError> {
     let manifest: manifest_types::Manifest =
-        serde_json::from_slice(bytes).map_err(|e| IIIFError::JsonError { source: e })?;
+        serde_json::from_slice(bytes).map_err(IIIFError::JsonError)?;
 
     Ok(manifest.extract_image_infos(manifest_url))
 }
@@ -553,7 +555,7 @@ fn parse_legacy_presentation_manifest(
     manifest_url: &str,
 ) -> Result<Vec<manifest_types::ExtractedImageInfo>, IIIFError> {
     let manifest: manifest_types::LegacyManifest =
-        serde_json::from_slice(bytes).map_err(|e| IIIFError::JsonError { source: e })?;
+        serde_json::from_slice(bytes).map_err(IIIFError::JsonError)?;
 
     Ok(manifest.extract_image_infos(manifest_url))
 }
@@ -964,7 +966,7 @@ mod manifest_parsing_tests {
         let json_data = r#"{ "id": "test", "type": "Manifest", items: [ -- broken json -- ] }"#;
         assert!(matches!(
             parse_iiif_manifest_from_bytes(json_data.as_bytes(), manifest_url),
-            Err(IIIFError::JsonError { .. })
+            Err(IIIFError::JsonError(_))
         ));
     }
 

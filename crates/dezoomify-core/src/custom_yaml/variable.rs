@@ -4,8 +4,6 @@ use evalexpr::{ContextWithMutableVariables, DefaultNumericTypes, HashMapContext}
 use regex::Regex;
 use serde::Deserialize;
 
-use custom_error::custom_error;
-
 use self::VarOrConst::Var;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -221,7 +219,7 @@ impl Variables {
         values.reverse();
         for (variable, value) in self.0.iter().zip(values) {
             ctx.set_value(variable.name().into(), evalexpr::Value::Int(value))
-                .map_err(|source| BadVariableError::EvalError { source })?;
+                .map_err(BadVariableError::EvalError)?;
         }
         Ok(ctx)
     }
@@ -232,11 +230,16 @@ fn build_context() -> HashMapContext<DefaultNumericTypes> {
     // Add custom variables and functions here
 }
 
-custom_error! {pub BadVariableError
-    BadName{name: String} = "invalid variable name: '{name}'",
-    TooManyValues{name:String, steps:i64}= "the range of values for {name} is too wide: {steps} steps",
-    Infinite{name:String}= "the range of values for {name} is incorrect",
-    EvalError{source:evalexpr::EvalexprError} = "{source}",
+#[derive(Debug, thiserror::Error)]
+pub enum BadVariableError {
+    #[error("invalid variable name: '{name}'")]
+    BadName { name: String },
+    #[error("the range of values for {name} is too wide: {steps} steps")]
+    TooManyValues { name: String, steps: i64 },
+    #[error("the range of values for {name} is incorrect")]
+    Infinite { name: String },
+    #[error(transparent)]
+    EvalError(#[from] evalexpr::EvalexprError),
 }
 
 #[cfg(test)]

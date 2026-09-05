@@ -311,7 +311,7 @@ checksum = "4f8a51dd197fa6ba5b4dc98a990a43cc13693c23eb0089ebb0fcc1f04152bca6"
 
 [[package]]
 name = "dezoomify-cli"
-version = "1.0.0"
+version = "3.0.0"
 dependencies = [
  "axum",
  "dezoomify-fixture-server",
@@ -343,6 +343,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha1",
+ "thiserror",
  "url",
 ]
 

@@ -5,7 +5,6 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, de};
 
-use custom_error::custom_error;
 use evalexpr::DefaultNumericTypes;
 
 use crate::Vec2d;
@@ -58,7 +57,7 @@ impl TileSet {
         let context = self
             .variables
             .context_at(ordinal)
-            .map_err(|source| UrlTemplateError::BadVariable { source })?;
+            .map_err(UrlTemplateError::BadVariable)?;
         Ok(TileEntry {
             uri: self.url_template.eval(&context)?,
             position: Vec2d {
@@ -186,11 +185,19 @@ impl<'de> Deserialize<'de> for UrlTemplate {
     }
 }
 
-custom_error! {pub UrlTemplateError
-    BadExpression{expr:String, source:evalexpr::EvalexprError} = "'{expr}' is not a valid expression: {source}",
-    EvalError{source:evalexpr::EvalexprError} = "{source}",
-    NumberError{source:std::num::TryFromIntError} = "Number too large: {source}",
-    BadVariable{source: BadVariableError} = "Invalid variable: {source}"
+#[derive(Debug, thiserror::Error)]
+pub enum UrlTemplateError {
+    #[error("'{expr}' is not a valid expression: {source}")]
+    BadExpression {
+        expr: String,
+        source: evalexpr::EvalexprError,
+    },
+    #[error(transparent)]
+    EvalError(#[from] evalexpr::EvalexprError),
+    #[error("Number too large: {0}")]
+    NumberError(#[from] std::num::TryFromIntError),
+    #[error("Invalid variable: {0}")]
+    BadVariable(#[from] BadVariableError),
 }
 
 #[cfg(test)]

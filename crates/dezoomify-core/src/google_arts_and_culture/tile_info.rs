@@ -4,8 +4,6 @@ use std::str::FromStr;
 use regex::Regex;
 use serde::Deserialize;
 
-use custom_error::custom_error;
-
 use crate::web_page::decode_html_entities;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -97,11 +95,10 @@ impl FromStr for PageInfo {
     }
 }
 
-custom_error! {pub PageParseError
-    NoPath                      = "Unable to find path information",
-    BadPath                     = "The path has an invalid form",
-    NoToken                     = "Unable to find the token in the page",
-    InvalidToken{token: String} = "Invalid token: '{token}'",
+#[derive(Debug, thiserror::Error)]
+pub enum PageParseError {
+    #[error("Unable to find the token in the page")]
+    NoToken,
 }
 
 #[cfg(test)]
