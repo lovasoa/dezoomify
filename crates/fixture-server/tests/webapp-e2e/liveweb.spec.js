@@ -4,6 +4,8 @@
 // reaches a zoomable-image plan, observed as real network requests to the
 // target site (metadata + at least one tile), then cancels the job.
 // Targets are the legacy input URLs only; nothing is hardcoded per site.
+// Both http and https targets are exercised; there is no http/https
+// distinction.
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -69,8 +71,8 @@ for (const [id, url] of TARGETS) {
   test(`live web ${id}: app attempts discovery and reaches the tile plan`, async ({ page }) => {
     test.setTimeout(PER_TARGET_MS + 30000);
     const origin = siteOriginOf(url);
-    if (!origin || origin.startsWith("http://")) {
-      test.skip(true, "http-only policy row");
+    if (!origin) {
+      test.skip(true, "unparseable URL");
       return;
     }
     let siteRequests = 0;
