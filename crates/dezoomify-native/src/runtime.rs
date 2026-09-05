@@ -7,6 +7,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::download::{Scheduler, SchedulerConfig};
 
+/// Redacted job origin: scheme + host (+ port if non-default), never the
+/// path, query, or fragment, which may carry credentials or tokens.
+fn redact_origin(input_url: &str) -> String {
+    match url::Url::parse(input_url) {
+        Ok(mut parsed) => {
+            parsed.set_path("");
+            parsed.set_query(None);
+            parsed.set_fragment(None);
+            parsed.as_str().trim_end_matches('/').to_string()
+        }
+        Err(_) => "unknown-origin".to_string(),
+    }
+}
+
 pub struct NativeRuntime {
     max_bytes: u64,
     next_job: AtomicU64,
@@ -36,6 +50,8 @@ pub struct JobResult {
 
 pub struct JobHandle {
     pub id: String,
+    /// Redacted input origin (scheme://host); the full URL is never stored.
+    pub origin: String,
     scheduler: Scheduler,
     events: Vec<JobEvent>,
     seq: u64,
@@ -59,6 +75,7 @@ impl NativeRuntime {
         let id = self.next_job.fetch_add(1, Ordering::SeqCst);
         Ok(JobHandle {
             id: format!("job:native-{id}"),
+            origin: redact_origin(&request.input_url),
             scheduler: Scheduler::new(SchedulerConfig::default()),
             events: Vec::new(),
             seq: 0,
@@ -131,6 +148,7 @@ impl JobHandle {
         BTreeMap::from([
             ("job".to_string(), self.id.clone()),
             ("protocol".to_string(), "1.0".to_string()),
+            ("input".to_string(), self.origin.clone()),
         ])
     }
 }

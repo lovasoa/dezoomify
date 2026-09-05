@@ -33,7 +33,7 @@ fn main() {
         }
     };
     handle.emit("started");
-    print_event(parsed.json, &handle.events().last().expect("started event"));
+    print_event(parsed.json, handle.events().last().expect("started event"));
 
     let config = PipelineConfig {
         user_headers: parsed.headers.clone(),

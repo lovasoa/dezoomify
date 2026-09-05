@@ -136,7 +136,28 @@ fn run_cargo(args: &[&str]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn candidate_verifies() {
-        assert!(super::release_verify_candidate().is_ok());
+    fn candidate_verify_is_an_honest_shape_only_stub() {
+        // This gate is intentionally a shape check only. Pin the honesty of
+        // its own report: it must say stub-ok, never claim real verification.
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--nocapture", "--exact", "capture_candidate_verify_output"])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn test harness");
+        let output = child.wait_with_output().expect("wait");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("stub-ok (shape only"),
+            "release verify --candidate must report its stub-ok scope; got: {stdout}"
+        );
+        assert!(
+            !stdout.to_ascii_lowercase().contains("verified candidate"),
+            "release verify --candidate must not claim candidate verification"
+        );
+    }
+
+    #[test]
+    fn capture_candidate_verify_output() {
+        super::release_verify_candidate().expect("candidate verify stub ok");
     }
 }

@@ -151,8 +151,7 @@ mod tests {
         assert!(super::test_live(&["--dry-run".to_string(), "--fixtures".to_string()]).is_ok());
     }
 
-    #[test]
-    fn release_plan() {
-        assert!(super::release(&["plan".to_string()]).is_ok());
-    }
+    // NOTE: no test for `release plan` — it is an honest, documented stub that
+    // writes nothing and prints "stub-ok". A test asserting it returns Ok(())
+    // would be a tautology that masks its unimplemented scope.
 }

@@ -129,6 +129,19 @@ fn repo_root() -> std::path::PathBuf {
         .unwrap_or(dir)
 }
 
+/// Targets that take no options must fail on unknown flags instead of
+/// silently widening or skipping coverage (docs/testing.md).
+pub(crate) fn reject_unknown_args(target: &str, args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "unknown {target} argument(s): {}; this target takes no options",
+            args.join(" ")
+        ))
+    }
+}
+
 fn run_git(args: &[&str]) -> Result<String, String> {
     let out = std::process::Command::new("git")
         .args(args)

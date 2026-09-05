@@ -7,10 +7,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     run_cargo(&["fmt", "--all", "--", "--check"])?;
     run_cargo(&[
         "clippy",
-        "-p",
-        "xtask",
-        "-p",
-        "dezoomify-fixture-server",
+        "--workspace",
         "--all-targets",
         "--",
         "-D",

@@ -23,7 +23,10 @@ fn version_snapshot() {
         .output()
         .expect("run cli");
     assert!(version.status.success());
-    assert_eq!(String::from_utf8(version.stdout).unwrap(), "dezoomify-cli 1.0.0\n");
+    assert_eq!(
+        String::from_utf8(version.stdout).unwrap(),
+        "dezoomify-cli 1.0.0\n"
+    );
 }
 
 mod testdata {
@@ -32,7 +35,8 @@ mod testdata {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../testdata/scenarios")
             .join(rel);
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("missing scenario file {rel}: {e}"))
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("missing scenario file {rel}: {e}"))
     }
 }
 

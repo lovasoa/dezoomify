@@ -23,7 +23,8 @@ pub fn build_extension(_args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-pub fn test_extension(_args: &[String]) -> Result<(), String> {
+pub fn test_extension(args: &[String]) -> Result<(), String> {
+    super::reject_unknown_args("test extension", args)?;
     run_node_glob("apps/extension/tests/unit")?;
     test_native_messaging(&[])?;
     println!("test extension: ok");
@@ -34,6 +35,12 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
     if args.first().map(String::as_str) == Some("--cleanup-only") {
         // Honest stub: no registry/profile inspection here; only reports that
         // the unit gate left no in-process registrations behind.
+        if args.len() > 1 {
+            return Err(format!(
+                "unknown test native-messaging --cleanup-only argument(s): {}",
+                args[1..].join(" ")
+            ));
+        }
         println!(
             "test native-messaging --cleanup-only: stub-ok (no filesystem/registry inspection)"
         );
@@ -45,6 +52,12 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
     if let Some(name) = args.strip_prefix(&["--browser".to_string()]) {
         match name.first().map(String::as_str) {
             Some("chromium") | Some("chrome") => {
+                if name.len() > 1 {
+                    return Err(format!(
+                        "unknown test native-messaging argument(s): {}",
+                        name[1..].join(" ")
+                    ));
+                }
                 run_node_glob("apps/extension/tests/unit")?;
                 println!(
                     "test native-messaging --browser {}: stub-ok (unit API only; no browser profile)",
@@ -60,6 +73,7 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
             None => return Err("missing --browser <name>".to_string()),
         }
     }
+    super::reject_unknown_args("test native-messaging", args)?;
     run_node_glob("apps/extension/tests/unit")?;
     println!("test native-messaging: ok");
     Ok(())

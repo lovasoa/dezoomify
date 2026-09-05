@@ -15,8 +15,19 @@ fn canaries_never_appear_in_events() {
         .unwrap();
     handle.emit("started");
     let result = handle.finish("hash-1".into());
-    let text = format!("{:?}{:?}", handle.events(), result);
-    assert!(!text.contains("CANARY-TOKEN"));
+    // The input URL (with its secret query) flows through the runtime; every
+    // observable surface must carry only the redacted origin.
+    let text = format!(
+        "{:?}{:?}{:?}",
+        handle.events(),
+        result,
+        handle.event_context()
+    );
+    assert!(!text.contains("CANARY-TOKEN"), "canary leaked: {text}");
+    assert!(
+        text.contains("https://fixtures.test"),
+        "redacted origin should be present in event context: {text}"
+    );
 }
 
 #[test]

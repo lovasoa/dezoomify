@@ -74,6 +74,7 @@ for (const [id, url] of TARGETS) {
       return;
     }
     let siteRequests = 0;
+    let siteOkResponses = 0;
     let firstTileUrl = null;
     page.on("request", (request) => {
       const target = request.url();
@@ -82,6 +83,11 @@ for (const [id, url] of TARGETS) {
         if (target !== url && firstTileUrl === null) {
           firstTileUrl = target;
         }
+      }
+    });
+    page.on("response", (response) => {
+      if (response.url().startsWith(origin) && !response.url().startsWith(ADDR)) {
+        if (response.status() < 400) siteOkResponses += 1;
       }
     });
     await page.goto(ADDR + "/", { waitUntil: "domcontentloaded" });
@@ -93,10 +99,16 @@ for (const [id, url] of TARGETS) {
     // Bounded observation: a real tile request (the app planned tiles from
     // real, auto-selected metadata) or an honest terminal state.
     const deadline = Date.now() + PER_TARGET_MS;
+    let errorState = null;
     while (Date.now() < deadline) {
       if (firstTileUrl !== null) break;
       const state = await page.locator("#app").innerText().catch(() => "");
-      if (/Download complete|Could not dezoomify|No zoomable image|cancelled/i.test(state)) break;
+      const failed = state.match(/Could not dezoomify|No zoomable image/i);
+      if (failed) {
+        errorState = failed[0];
+        break;
+      }
+      if (/Download complete|cancelled/i.test(state)) break;
       await page.waitForTimeout(500);
     }
     // Never leave a background download running.
@@ -105,16 +117,17 @@ for (const [id, url] of TARGETS) {
       await cancel.click().catch(() => {});
     }
     console.log(`live web ${id}: site_requests=${siteRequests} first_tile=${firstTileUrl ?? "none"}`);
-    assertSiteReached(origin, siteRequests, url);
+    if (errorState !== null && firstTileUrl === null) {
+      throw new Error(
+        `${url}: the webapp reported "${errorState}" without ever planning a tile — ` +
+          "the target is broken for the new webapp; remove it from the live target list " +
+          "and record it in docs/migration/live-inventory.csv",
+      );
+    }
     expect(siteRequests, `${id}: the app must attempt discovery on the site`).toBeGreaterThanOrEqual(1);
+    expect(
+      siteOkResponses,
+      `${id}: the app must get at least one readable (2xx/3xx) response from the site`,
+    ).toBeGreaterThanOrEqual(1);
   });
-}
-
-function assertSiteReached(origin, siteRequests, url) {
-  if (siteRequests === 0) {
-    throw new Error(
-      `${url}: the webapp made no request to ${origin} — the site is unreachable or blocked; ` +
-        "document it in docs/migration/live-inventory.csv",
-    );
-  }
 }

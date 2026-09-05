@@ -145,10 +145,7 @@ fn discover(
     let registry = default_registry(input_url);
     let mut operation: DiscoveryOperation = registry.start(input_url);
     let mut fetched = 0usize;
-    loop {
-        let Some(need) = operation.next_priority_need().map_err(NativeError::from)? else {
-            break;
-        };
+    while let Some(need) = operation.next_priority_need().map_err(NativeError::from)? {
         fetched += 1;
         on_event(PipelineEvent {
             kind: "discovery".to_string(),

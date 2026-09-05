@@ -1020,7 +1020,7 @@ impl Session {
                 let recovery = self
                     .pending_recovery
                     .clone()
-                    .and_then(|id| RecoveryId::new(id))
+                    .and_then(RecoveryId::new)
                     .ok_or_else(|| AdapterError::new(AdapterErrorCode::Malformed, "recovery id"))?;
                 let reason = value
                     .get("reason")

@@ -58,7 +58,7 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
     let mut events = 0usize;
     let outcome = pipeline::run(
         &input,
-        &output.to_str().expect("utf8 output"),
+        output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
         &mut |_event| events += 1,
@@ -122,7 +122,7 @@ fn tile_failure_fails_honestly_without_output() {
     let output = out_dir.join("broken.png");
     let error = pipeline::run(
         &input,
-        &output.to_str().expect("utf8 output"),
+        output.to_str().expect("utf8 output"),
         false,
         &PipelineConfig::default(),
         &mut |_event| {},

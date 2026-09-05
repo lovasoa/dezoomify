@@ -153,9 +153,8 @@ fn credentials_never_leave_the_input_origin() {
             let mut buffer = [0u8; 4096];
             let n = stream.read(&mut buffer).unwrap_or(0);
             let head = String::from_utf8_lossy(&buffer[..n]).to_string();
-            let mut response =
-                response("HTTP/1.1 200 OK", &[("content-type", "text/plain")], b"ok");
-            let _ = stream.write_all(&mut response);
+            let response = response("HTTP/1.1 200 OK", &[("content-type", "text/plain")], b"ok");
+            let _ = stream.write_all(&response);
             sink.lock().expect("lock").push(head);
         }
     });

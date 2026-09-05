@@ -74,16 +74,6 @@ fn discovery_request(messages: &[Vec<u8>]) -> dezoomify_protocol::dto::RequestId
     panic!("no acquire-resource effect in transcript");
 }
 
-/// Extract the next outstanding tile request id from drained messages.
-fn next_tile_request(messages: &[Vec<u8>]) -> Option<dezoomify_protocol::dto::RequestId> {
-    for envelope in decode_all(messages) {
-        if let ControlBody::Effect(HostEffect::AcquireTile { request, .. }) = envelope.body {
-            return Some(request.id);
-        }
-    }
-    None
-}
-
 fn command_bytes(body: JobCommand) -> Vec<u8> {
     envelope_bytes(ControlBody::Command(body))
 }

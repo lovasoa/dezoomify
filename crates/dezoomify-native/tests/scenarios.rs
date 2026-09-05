@@ -61,7 +61,27 @@ fn scheduler_bounds_concurrency_and_tiles() {
     assert!(scheduler.push("d".into()).is_err());
     let batch = scheduler.next_batch();
     assert_eq!(batch.len(), 2);
-    assert!(scheduler.peak_in_flight() <= 2);
+    assert_eq!(scheduler.peak_in_flight(), 2);
+}
+
+#[test]
+fn scheduler_retries_failures_then_gives_up() {
+    let mut scheduler = Scheduler::new(SchedulerConfig {
+        max_concurrent: 2,
+        max_tiles: 3,
+        max_retries: 1,
+    });
+    scheduler.push("a".into()).unwrap();
+    let batch = scheduler.next_batch();
+    assert_eq!(batch, vec!["a".to_string()]);
+    // First failure is retryable (attempts 1 <= max_retries 1).
+    assert!(scheduler.fail("a").unwrap());
+    assert_eq!(scheduler.next_batch(), vec!["a".to_string()]);
+    // Second failure exhausts the retry budget.
+    assert!(!scheduler.fail("a").unwrap());
+    // No retry is scheduled after exhaustion.
+    assert_eq!(scheduler.next_batch(), Vec::<String>::new());
+    assert_eq!(scheduler.done_count(), 0);
 }
 
 #[test]
@@ -72,13 +92,23 @@ fn cache_keys_exclude_query_and_never_persist_secrets() {
     );
     let dir = std::env::temp_dir().join(format!("dz-cache-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let path = cache::store(&dir, "job1", "https://h/item", b"bytes").unwrap();
+    // A credential-bearing URL must never leak into the cache path or the
+    // stored artifact: only the query-stripped key and the payload itself.
+    let path = cache::store(&dir, "job1", "https://h/item?token=CANARY", b"bytes").unwrap();
     assert_eq!(
-        cache::load(&dir, "job1", "https://h/item").unwrap(),
+        cache::load(&dir, "job1", "https://h/item?token=CANARY").unwrap(),
         b"bytes"
     );
+    let path_text = path.to_string_lossy();
+    assert!(
+        !path_text.contains("CANARY"),
+        "cache path must exclude the query string: {path_text}"
+    );
     let content = std::fs::read(&path).unwrap();
-    assert!(!content.windows(6).any(|w| w == b"CANARY"));
+    assert_eq!(
+        content, b"bytes",
+        "stored artifact must be the payload only"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
