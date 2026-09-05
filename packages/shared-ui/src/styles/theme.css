@@ -157,6 +157,8 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 1.5rem;
+  flex: 1;
+  margin-left: 1.5rem;
 }
 
 .dz-nav-link {
@@ -176,6 +178,10 @@ a:hover {
 .dz-nav-link.donate {
   color: var(--dz-link-color);
   font-weight: 600;
+}
+
+.dz-nav-link.help-link {
+  margin-left: auto;
 }
 
 .dz-nav-link:focus-visible {

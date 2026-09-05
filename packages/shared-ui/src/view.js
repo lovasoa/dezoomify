@@ -5,6 +5,7 @@ import {
   renderSaveGuidance,
   renderProgress,
   renderCompletion,
+  getDezoomifyLogoSvg,
 } from "./components.js";
 
 export const ALL_DEZOOMERS = [
@@ -41,13 +42,7 @@ export function renderView(container, state, callbacks, ctx = {}) {
   header.innerHTML = `
     <h1 class="dz-title">
       <span>Dezoomify</span>
-      <svg class="dz-brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: #0284c7;">
-        <circle cx="11" cy="11" r="8"></circle>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        <circle cx="11" cy="11" r="3" fill="#ef4444" stroke="none" opacity="0.75"></circle>
-        <line x1="11" y1="8" x2="11" y2="14" stroke="#ffffff" stroke-width="1.2"></line>
-        <line x1="8" y1="11" x2="14" y2="11" stroke="#ffffff" stroke-width="1.2"></line>
-      </svg>
+      ${getDezoomifyLogoSvg(28)}
     </h1>
   `;
   card.appendChild(header);
