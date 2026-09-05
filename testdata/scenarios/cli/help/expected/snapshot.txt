@@ -1,1 +1,1 @@
-usage: dezoomify-cli [--overwrite] [--json] [-H "Name: value"] <input-url> <output>
+usage: dezoomify-cli [--overwrite] [--json] [--max-width <px>] [--accept-invalid-certs] [-H "Name: value"] <input-url> <output>

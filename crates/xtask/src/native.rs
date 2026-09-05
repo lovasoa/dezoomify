@@ -3,14 +3,16 @@
 
 use std::process::Command;
 
-pub fn test_native(_args: &[String]) -> Result<(), String> {
+pub fn test_native(args: &[String]) -> Result<(), String> {
+    super::reject_unknown_args("test native", args)?;
     run_cargo(&["test", "-p", "dezoomify-native"])?;
     run_cargo(&["test", "-p", "dezoomify-cli"])?;
     println!("test native: ok");
     Ok(())
 }
 
-pub fn test_scenario(_args: &[String]) -> Result<(), String> {
+pub fn test_scenario(args: &[String]) -> Result<(), String> {
+    super::reject_unknown_args("test scenario", args)?;
     // Real-pipeline scenario gate: the native scenarios run the actual
     // pipeline over loopback sockets; their expected results must pin a
     // computed digest (never a stub marker) or an honest failure code.
@@ -41,9 +43,12 @@ pub fn test_scenario(_args: &[String]) -> Result<(), String> {
     let snapshot = super::repo_root().join("testdata/scenarios/cli/help/expected/snapshot.txt");
     let snapshot_text =
         std::fs::read_to_string(&snapshot).map_err(|e| format!("missing CLI snapshot: {e}"))?;
-    if !snapshot_text.contains("usage: dezoomify-cli") {
+    if !snapshot_text.starts_with("usage: dezoomify-cli") {
         return Err("CLI snapshot lacks usage line".to_string());
     }
+    // Enforce the golden against the real binary (byte-for-byte comparison
+    // lives in apps/cli/tests/snapshots.rs).
+    run_cargo(&["test", "-p", "dezoomify-cli", "--test", "snapshots"])?;
     run_cargo(&["test", "-p", "dezoomify-native", "--test", "scenarios"])?;
     run_cargo(&[
         "test",

@@ -14,13 +14,15 @@ function postRequest(rawBody, extraHeaders = {}) {
 }
 
 function mockUpstream(upstreamImpl, t) {
-  const impl = (url, init) =>
-    Promise.resolve(
-      new Response(upstreamImpl(url, init)?.body ?? null, {
-        status: upstreamImpl(url, init)?.status ?? 200,
-        headers: upstreamImpl(url, init)?.headers ?? {},
+  const impl = (url, init) => {
+    const result = upstreamImpl(url, init) ?? {};
+    return Promise.resolve(
+      new Response(result.body ?? null, {
+        status: result.status ?? 200,
+        headers: result.headers ?? {},
       }),
     );
+  };
   return t.mock.method(globalThis, "fetch", impl);
 }
 
@@ -46,23 +48,21 @@ test("happy path: relays metadata JSON with CORS and content-type", async (t) =>
 });
 
 test("redirect hops are revalidated by the relay, not followed by fetch", async (t) => {
-  let fetchCalls = 0;
-  const calls = mockUpstream(
-    (url) => {
-      fetchCalls += 1;
-      if (fetchCalls === 1) {
-        return { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data" } };
-      }
-      return { status: 200, headers: { "content-type": "application/json" }, body: "{}" };
-    },
-    t,
+  // A plain object instead of `new Response` because the Response headers
+  // guard strips `location`, which would hide the redirect from the relay.
+  const calls = t.mock.method(globalThis, "fetch", () =>
+    Promise.resolve({
+      status: 302,
+      headers: { get: (name) => (name.toLowerCase() === "location" ? "http://169.254.169.254/latest/meta-data" : null) },
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+    }),
   );
   const res = await onRequestPost({
     request: postRequest('{"targetUrl":"https://public.test/redirect.json","protocolVersion":1}'),
   });
   assert.equal(res.status, 403);
   // The private redirect target was never fetched.
-  assert.equal(fetchCalls, 1);
+  assert.equal(calls.mock.callCount(), 1);
   assert.equal(calls.mock.calls[0].arguments[1].redirect, "manual");
 });
 
