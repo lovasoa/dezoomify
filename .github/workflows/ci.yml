@@ -16,5 +16,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rust-lang/rustup@1f9d37de10b3e3c5e0eda39d824b19d0f1f8c8f5 # pinned toolchain via rust-toolchain.toml
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4: matches .node-version
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned: honors rust-toolchain.toml
+        with:
+          targets: wasm32-unknown-unknown
       - run: cargo xtask ci local

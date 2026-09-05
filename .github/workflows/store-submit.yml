@@ -7,6 +7,15 @@ name: store-submit
 # Required secrets: CHROME_WS_CLIENT_ID, CHROME_WS_CLIENT_SECRET,
 # CHROME_WS_REFRESH_TOKEN, CHROME_WS_EXTENSION_ID.
 on:
+  # Automatic dry-run on every ng push touching the extension: package,
+  # validate, and keep the zip as an artifact. (inputs.upload defaults to
+  # false on push, so pushes never touch the store. Manual dispatch with
+  # upload=true lights up once these workflows reach the default branch.)
+  push:
+    branches: [ng] # promotion: switch to [main] at cutover
+    paths:
+      - apps/extension/**
+      - .github/workflows/store-submit.yml
   workflow_dispatch:
     inputs:
       browser:
