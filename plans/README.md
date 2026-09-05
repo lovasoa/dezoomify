@@ -7,8 +7,8 @@ active plan is simply a plan file that still has unfinished phases.
 
 ## Active plans
 
-- [`website-deploy.md`](website-deploy.md): GitHub Actions builds the
-  entire website (mirrors, help, wasm glue) into `dist/` and deploys it
-  to Cloudflare Pages with wrangler; no generated website artifacts stay
-  committed and the deployment stops serving repository files. Owner
-  Pages-project migration (WD4) gates the untrack phase (WD5).
+- [`website-deploy.md`](website-deploy.md): one Pages project, one build:
+  the legacy site vendored under `legacy/` serves `/`, the new app
+  serves `/beta`, and a GitHub Actions workflow builds and deploys
+  everything with wrangler. Owner project setup (WD6) gates untracking
+  the generated artifacts (WD7).

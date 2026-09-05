@@ -1,116 +1,113 @@
-# Plan: GitHub Actions builds the website; wrangler deploys to Cloudflare Pages
+# Plan: One Pages project: legacy site at /, new app at /beta
 
 Status: in progress (2026-09-05).
 
 ## Problem
 
-The Cloudflare Pages project deploys the `ng` branch through the Git
-integration with no build step: output directory = repository root, so
-every committed file is publicly served (`/README.md`, `/crates/...`,
-even `/migration-sources/...` return 200 on the branch preview). Because
-Pages serves committed files only, the repository also carries generated
-website artifacts:
-
-- the ten TS→JS mirrors (`src/*.js`, `packages/shared-ui/src/*.js`,
-  `packages/browser-runtime/src/*.js`) from `scripts/sync-web-js.mjs`,
-- the wasm-bindgen glue `wasm/dezoomify-wasm.js` +
-  `wasm/dezoomify-wasm_bg.wasm` (~4.4 MB),
-- the nine `help/*.html` pages from `scripts/build-help.mjs`.
+The Cloudflare Pages project deploys `master` (the legacy dezoomify-web
+app) at production and the `ng` branch (the rewrite) as a preview that
+publicly serves every committed file, including `migration-sources/`.
+Because the git integration serves committed files only, the repository
+also carries generated website artifacts (TS→JS mirrors, wasm-bindgen
+glue, generated help pages) that must be regenerated on every change.
 
 ## Decision (owner, 2026-09-05)
 
-GitHub Actions compiles and generates everything at deploy time and
-uploads the site to Cloudflare Pages with `wrangler pages deploy`
-(Direct Upload); the repository commits no generated website artifacts.
-Rationale over a Cloudflare build command: cargo/wasm builds get Actions
-caching (`Swatinem/rust-cache`), deploys can be gated on the existing
-deterministic CI, and the push-heavy `ng` workflow does not burn
-uncached Pages build minutes. `scripts/build-site.mjs` is the single
-runner-agnostic builder: JS mirrors, help pages, wasm glue (release,
-`wasm32-unknown-unknown`), and the `dist/` tree (pages, walked browser
-import graph, styles, wasm glue, `_routes.json` limiting Function
-invocation to `/api/proxy`).
+One Cloudflare Pages project and one build process. The repository gains
+a `legacy/` folder: the legacy site vendored from `master` with its git
+history (git subtree), copied verbatim to `dist/`. The new app builds to
+`dist/beta`. A GitHub Actions workflow (already landed: build → deploy →
+verify) uploads `dist/` to a new Direct Upload Pages project with
+wrangler. The old git-integrated project keeps serving production until
+the cutover, so nothing breaks while the new version is iterated on:
+users reach the new app at `/beta` on the same domain, and the legacy
+app's popup invites them to try it and report issues on GitHub.
 
 Kept committed by decision: `packages/protocol-ts/src/generated.ts` and
 `generated/*.json` (versioned contract/input artifacts, drift-checked,
 never deployed).
 
-One-way door, accepted: a Git-integrated Pages project can never switch
-to Direct Upload. The old project is deleted and recreated as a
-wrangler-deployed project (the `dezoomify` subdomain is reclaimed by
-recreating with the same name; the custom domain is moved to the new
-project). `functions/` stays at the repository root; wrangler compiles
-it on `pages deploy`; only `/api/proxy` is a route.
+Constraints:
 
-Secrets (GitHub, set by the owner): `CLOUDFLARE_API_TOKEN` (scoped
-Account → Pages → Edit) and `CLOUDFLARE_ACCOUNT_ID`. The workflow fails
-closed when they are absent.
+- The legacy site must stay byte-identical in behavior: `legacy/` is
+  copied verbatim; its `functions/proxy.js` (GET `/proxy?url=…`) keeps
+  serving the legacy app's proxy route.
+- The new app keeps calling the same-origin `/api/proxy`; absolute
+  paths work unchanged under `/beta`.
+- One-way door, accepted: the old git-integrated project is eventually
+  deleted and replaced by the wrangler-deployed project; the custom
+  domain moves at cutover.
 
 ## Phases
 
-### WD1: Site assembly pipeline (additive)
+### WD1 (done) — Site assembly pipeline
 
-`scripts/build-site.mjs` (mirrors + help + glue + dist/ assembly).
-`cargo xtask build web` calls it. Nothing is untracked yet, so every
-deploy and CI lane stays green.
+`scripts/build-site.mjs`: single runner-agnostic builder. `cargo xtask
+build web` calls it.
 
-Acceptance: `cargo xtask build web` produces a complete `dist/` with
-`_routes.json`; `cargo xtask test web` passes.
+### WD2 (done) — E2E serves the deployed tree
 
-### WD2: E2E serves the deployed tree
+Playwright builds via `scripts/build-site.mjs` and serves `dist/`
+(amended to `/beta/` by WD5).
 
-The Playwright E2E setup builds via `scripts/build-site.mjs` and serves
-`dist/` (was: the repository root), so E2E exercises exactly what the
-deploy workflow uploads.
+### WD3 (done) — Deploy workflow
 
-Acceptance: `cargo xtask test web` (E2E included) passes against `dist/`.
+`website-deploy.yml`: pinned toolchain, rust-cache, wasm-bindgen-cli at
+the Cargo.lock version, build, `wrangler pages deploy`, live
+verification. Deploys are skipped (warning) while the Cloudflare secrets
+are absent.
 
-### WD3: Deploy workflow
+### WD4 — Vendor the legacy site as `legacy/`
 
-`website-deploy.yml` becomes build → deploy → verify: pinned toolchain +
-`Swatinem/rust-cache`, `wasm-bindgen-cli` at the exact `Cargo.lock`
-version via `taiki-e/install-action`, `node scripts/build-site.mjs`,
-`wrangler pages deploy dist --branch <ref>` (branch preview alias stays
-`ng.dezoomify.pages.dev`), then the existing live verification loop plus
-new exposure checks (repository files must not be served).
+`git subtree add --prefix=legacy origin/master` (history preserved; the
+prose-style gate skips the verbatim tree, like `migration-sources/`).
+The legacy app's sources live on from here: legacy fixes land in
+`legacy/` on `ng` (or upstream on `master`, then `git subtree pull`).
 
-Acceptance: workflow deploys and verification passes on the branch
-preview.
+### WD5 — Single-site layout
 
-### WD4: Pages project migration (owner action, between pushes)
+`dist/` = the legacy site (verbatim copy of the servable `legacy/`
+files: pages, `zoommanager.js`, `dezoomers/`, assets, `404.html`) plus
+the new app under `dist/beta/`. The pure proxy modules move out of
+`functions/` to `src/server/` (they were phantom routes anyway), making
+room for the legacy `functions/proxy.js` route via a one-line re-export
+shim; `_routes.json` includes `/proxy` and `/api/proxy`. E2E runs
+against `/beta/`. Verified locally with `wrangler pages dev`.
 
-Owner deletes the Git-integrated project and recreates `dezoomify` as a
-Direct Upload project (`wrangler pages project create dezoomify
---production-branch main`), moves the custom domain, and sets the two
-GitHub secrets. Must happen before WD5: untracking before the migration
-would leave the old project deploying a broken site (it serves committed
-files only), and the new workflow cannot deploy until the project and
-secrets exist.
+### WD6 — New Pages project (owner action)
 
-### WD5: Untrack the generated artifacts
+Owner creates one Direct Upload project (`dezoomify-ng`, production
+branch `ng`) and sets the `CLOUDFLARE_API_TOKEN` /
+`CLOUDFLARE_ACCOUNT_ID` GitHub secrets; the workflow then deploys
+legacy + beta to `dezoomify-ng.pages.dev` on every `ng` push and
+verifies it live. The owner also disables non-production preview
+deployments on the OLD project, so `ng.dezoomify.pages.dev` stops
+mirroring repository files (this unblocks WD7). Cutover (later,
+explicitly decided): move the custom domain to the new project, then
+delete the old project.
 
-`git rm` the mirrors, wasm glue, and `help/`; extend `.gitignore`;
-`cargo xtask test web` and the root `pnpm test` regenerate mirrors + help
-before running node tests; `cargo xtask check` drops the now-meaningless
+### WD7 — Untrack the generated artifacts
+
+`git rm` the mirrors, wasm glue, and generated `help/`; extend
+`.gitignore`; `cargo xtask test web` and the root `pnpm test` regenerate
+mirrors + help before running node tests; `cargo xtask check` drops the
 mirror drift gate; the help freshness test becomes a determinism check.
 
-Acceptance: fresh checkout passes `cargo xtask ci local` (web lane
-generates everything it needs); `git status` stays clean after a build.
+### WD8 — Beta invitation popup + documentation
 
-### WD6: Documentation
-
-`docs/development.md` (build/deploy contract), `docs/user/README.md`
-(help generation), `AGENTS.md` current-state line, this plan's status.
-On completion the plan file is removed per repository convention.
+Replace the legacy popup's stale content with an invitation to try
+`/beta` and report issues on GitHub (owner reviews the wording). Docs:
+`docs/development.md` (build/deploy contract), `docs/user/README.md`,
+`AGENTS.md` current state. Plan file removed on completion.
 
 ## Risks
 
-- The `dezoomify.pages.dev` subdomain is released while the old project
-  is deleted and the new one created; the custom domain is canonical, so
-  the window only affects the pages.dev alias.
-- Wrangler's default `_routes.json` generation: the build provides an
-  explicit one in `dist/`; if wrangler ever overrode it with `/*`, the
-  site still works (functions fall through to static assets), just with
-  Function invocations on every request.
-- `wasm-bindgen-cli` version drift vs `Cargo.lock`: the workflow derives
-  the version from `Cargo.lock`, so the two cannot diverge silently.
+- Cross-directory imports from `functions/` (`../../src/server/*`,
+  `../legacy/functions/proxy.js`): validated locally with
+  `wrangler pages dev` before landing; fallback is assembling the
+  functions tree at build time.
+- Legacy divergence: `legacy/` is the deployed copy from WD4 on;
+  `master` is frozen for deployment purposes.
+- The `dezoomify.pages.dev` subdomain stays with the old project until
+  cutover; the new project's canonical address is its custom domain
+  after cutover.
