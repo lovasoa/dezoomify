@@ -1,6 +1,6 @@
 # Plan: Real webapp + CLI completion (post-migration)
 
-Status: active (accepted by owner 2026-09-05).
+Status: complete (all phases C1-C7 done 2026-09-05).
 
 The migration phases 00–15 (see `docs/migration/gates.md`) completed their
 declared scope, but that scope stopped at honest scaffolds for the two primary
@@ -134,13 +134,19 @@ test all` passes; `cargo xtask test live --public` passes on all alive sites.
 
 | phase | commands | result | exceptions closed |
 |---|---|---|---|
-| C1 | `cargo xtask test native` | done 2026-09-05 | E03 (partial) |
-| C2 | `cargo xtask test native`, `cargo xtask test scenario` | done 2026-09-05 | — |
-| C3 | pending | not started | E03 (full) |
-| C4 | `cargo xtask test wasm --transcripts` | done 2026-09-05 | E01 |
-| C5 | pending | not started | E02 (web) |
-| C6 | pending | not started | — |
-| C7 | pending | not started | E01, E02, E03 closed |
+| C1 | `cargo xtask test native` (loopback socket egress tests) | done 2026-09-05 | E03 (partial) |
+| C2 | `cargo xtask test native`, `cargo xtask test scenario` (real digests pinned) | done 2026-09-05 | — |
+| C3 | `cargo xtask test live --public` (real CLI, 31/31 alive targets) | done 2026-09-05 | E03 (full, closed) |
+| C4 | `cargo xtask test wasm --transcripts` (engine-driven ids + progress/catalog) | done 2026-09-05 | E01 (closed) |
+| C5 | `cargo xtask test web` (unit + Playwright E2E: real save, verified pixels) | done 2026-09-05 | E02 (web, narrowed) |
+| C6 | `cargo xtask test live --webapp` (legacy URL list, diagnostic) | done 2026-09-05 | — |
+| C7 | `cargo xtask test all` green; exceptions E01/E03 closed, E02 narrowed | done 2026-09-05 | E01, E02, E03 closed |
+
+Verification record (2026-09-05): `cargo xtask test all` passed (fast
+deterministic aggregate incl. legacy-web harness); `cargo xtask test live
+--public` passed 31 alive targets with 3 documented http-only policy rows
+(L60, L61, L62); live-webapp diagnostic run executed against the legacy
+dezoomify-web URL list.
 
 ## Rollback boundary
 

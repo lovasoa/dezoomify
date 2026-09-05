@@ -1,13 +1,14 @@
-# Dezoomify NG (preview scaffold)
+# Dezoomify NG (next-generation rewrite)
 
-High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more)
-are the goal; this branch is a preview scaffold, not a working release.
+High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
+The website and CLI genuinely discover, download, assemble, and save zoomable
+images; desktop packaging remains tracked by E04.
 
-- Website preview (repository root, deployed from this branch): direct-first
-  metadata fetch with classifier-gated negative handling. Full tile download
-  and save are not wired yet — positives stop at an honest preview message.
-- Extension (`apps/extension/`): explicit-action scan scaffolding with unit
-  coverage; no end-to-end browser proof here.
+- Website (repository root, deployed from this branch): worker-hosted wasm
+  core discovery, direct-first transport with automatic eligible metadata
+  proxy fallback, canvas assembly, and real save (Chromium E2E covered).
+- Extension (`apps/extension/`): explicit-action scan with unit coverage;
+  no end-to-end browser proof here.
 - Desktop (`apps/desktop/`): lean Tauri shell (logic + config only, no window
   or installer).
 - CLI (`apps/cli/`): real download pipeline through the native runtime —

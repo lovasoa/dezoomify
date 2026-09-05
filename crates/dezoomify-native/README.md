@@ -1,14 +1,15 @@
-# dezoomify-native (policy scaffold, no I/O yet)
+# dezoomify-native (native effect runtime)
 
-Policy bookkeeping outside browsers: auth/header scope, redirect header
-stripping, bounded scheduler counters, cache helpers, output validation, and
-progress counters — with credentials redacted from every error, log, and
-snapshot. No HTTP client, TLS, image decoding/encoding, or file output lives
-here yet; callers get bookkeeping only. Powers CLI/desktop scaffolds, which
-fail closed until the pipeline lands.
+Real native egress and output: a rustls-based HTTP client with per-redirect
+header rebuild, size/time limits and bounded retries; the full download
+pipeline (core discovery -> tile plan incl. generic probe resolution ->
+concurrent bounded download -> decode/assemble -> PNG encode -> atomic write
+-> real sha256); plus auth/header scope (credentials redacted from every
+error, log, and snapshot), bounded scheduler counters, cache helpers, and
+output validation.
 
 ```sh
-cargo xtask test native     # runtime suites
-cargo xtask test scenario   # end-to-end scenarios + CLI snapshots
+cargo xtask test native     # runtime + CLI suites, loopback egress tests
+cargo xtask test scenario   # fixture-server scenarios pinning real digests
 cargo xtask build cli       # the `dezoomify` executable
 ```

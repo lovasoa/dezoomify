@@ -1,12 +1,13 @@
 # Plans
 
-## Active plan
+## Completed plans
 
 - [`webapp-cli-completion.md`](webapp-cli-completion.md) — post-migration
-  phases C1–C7: replace the remaining stubs (native HTTP egress, CLI download
-  pipeline, webapp tile download + save, WASM job delegation, browser worker,
-  browser E2E) and port the legacy live suites to run the real apps. End
-  state: all webapp and CLI tests pass while exercising real code.
+  phases C1–C7 (completed 2026-09-05): native HTTP egress, CLI download
+  pipeline, WASM job delegation, webapp real pipeline + browser E2E, and the
+  legacy live suites ported to run the real apps. All webapp and CLI tests
+  pass while exercising real code; exceptions E01/E03 closed and E02
+  narrowed (see `docs/migration/exceptions.md`).
 
 ## Migration archive
 

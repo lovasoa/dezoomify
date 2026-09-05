@@ -52,7 +52,7 @@ sites.
 | Target | Output |
 |---|---|
 | `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
-| `web` | stub validation only (sources + tests); no bundle emitted |
+| `web` | real WASM artifact plus browser glue under `wasm/` (requires `wasm-bindgen-cli` matching the crate version) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
 | `desktop` | stub validation only (logic + config); no installer or bundle produced, including with `--unsigned-test` |
 | `extension` | stub validation only (manifests); no ZIP packaged (use `apps/extension/scripts/package-store.sh` for a real package) |

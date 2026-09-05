@@ -202,6 +202,18 @@ const TARGETS: &[LiveTarget] = &[
         accept_invalid_certs: false,
         status: "alive",
     },
+    // lovasoa/dezoomify#772: National Library of New Zealand. Alive for real
+    // browsers but fronted by an Incapsula JS challenge, so the CLI receives
+    // the challenge HTML instead of IIP metadata. Kept as a documented
+    // diagnostic; failure does not fail the run.
+    LiveTarget {
+        name: "iipimage_natlib",
+        inventory_id: "L63",
+        url: "https://ndhadeliver.natlib.govt.nz/iipsrv?FIF=2013/04/19/ac_3/V1-FL16627598.jp2",
+        headers: &[],
+        accept_invalid_certs: false,
+        status: "dead",
+    },
     LiveTarget {
         name: "custom_yaml",
         inventory_id: "L52",
