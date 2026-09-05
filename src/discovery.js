@@ -290,7 +290,7 @@ export function isZoomableContent(text) {
 // the only fix. Keep both free of jargon (no "HTTP 429", "upstream", "proxy").
 export const RATE_LIMITED_BY_SITE_MESSAGE =
   "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened. " +
-  "The browser extension and the desktop app download from your own internet connection instead of our server, so they are not affected by this limit — try one of them below, or try again later.";
+  "The browser extension and the desktop app download from your own internet connection instead of our server, so they are not affected by this limit: try one of them below, or try again later.";
 export const SITE_BUSY_MESSAGE =
   "The website hosting this image is receiving too many requests right now. Wait a few minutes and try again.";
 
