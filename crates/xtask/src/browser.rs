@@ -191,11 +191,15 @@ pub fn sync_web_js(check: bool) -> Result<(), String> {
 /// Build the wasm adapter and generate the browser glue into `wasm/`.
 fn build_wasm_glue() -> Result<(), String> {
     let root = super::repo_root();
+    // Release profile: the glue under wasm/ is committed and deployed
+    // (Cloudflare Pages serves committed files), so it must be the same
+    // artifact every generator produces and small enough for real users.
     let status = Command::new("cargo")
         .args([
             "build",
             "-p",
             "dezoomify-wasm",
+            "--release",
             "--target",
             "wasm32-unknown-unknown",
         ])
@@ -205,7 +209,7 @@ fn build_wasm_glue() -> Result<(), String> {
     if !status.success() {
         return Err("cargo build dezoomify-wasm (wasm32) failed".to_string());
     }
-    let wasm = root.join("target/wasm32-unknown-unknown/debug/dezoomify_wasm.wasm");
+    let wasm = root.join("target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm");
     if !wasm.exists() {
         return Err("wasm artifact missing after build".to_string());
     }

@@ -36,6 +36,22 @@ export function createDiscoveryClient(deps                     )                
   let currentLevel = 0;
   let disposed = false;
 
+  // A worker that never starts (script load failure, corrupted content) would
+  // otherwise leave the pending operation unsettled forever. Surface it as a
+  // structured failure instead.
+  worker.onerror = (ev                      ) => {
+    const detail = typeof ev?.message === "string" ? ev.message : "";
+    rejectPending(
+      failure(
+        "WORKER_FAILED",
+        detail
+          ? `The discovery engine failed to start: ${detail}`
+          : "The discovery engine failed to start.",
+        true,
+      ),
+    );
+  };
+
   worker.onmessage = (ev                   ) => {
     const raw = ev.data                                                ;
     if (raw === null || typeof raw !== "object" || typeof raw.type !== "string") return;

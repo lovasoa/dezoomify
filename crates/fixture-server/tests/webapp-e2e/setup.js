@@ -16,9 +16,11 @@ async function globalSetup() {
         "matching crates/dezoomify-wasm's wasm-bindgen version",
     );
   }
+  // Release profile: matches `cargo xtask build web` so the regenerated glue
+  // is byte-identical to the committed artifact served by Cloudflare Pages.
   const build = spawnSync(
     "cargo",
-    ["build", "-p", "dezoomify-wasm", "--target", "wasm32-unknown-unknown"],
+    ["build", "-p", "dezoomify-wasm", "--release", "--target", "wasm32-unknown-unknown"],
     { cwd: root, stdio: "inherit" },
   );
   if (build.status !== 0) throw new Error("failed to build dezoomify-wasm");
@@ -30,7 +32,7 @@ async function globalSetup() {
       "--target", "web",
       "--out-dir", outDir,
       "--out-name", "dezoomify-wasm",
-      path.join(root, "target", "wasm32-unknown-unknown", "debug", "dezoomify_wasm.wasm"),
+      path.join(root, "target", "wasm32-unknown-unknown", "release", "dezoomify_wasm.wasm"),
     ],
     { cwd: root, stdio: "inherit" },
   );

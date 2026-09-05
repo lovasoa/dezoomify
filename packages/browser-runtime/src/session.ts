@@ -21,6 +21,8 @@ export interface WorkerLike {
   postMessage(msg: unknown, transfer?: ArrayBuffer[]): void;
   terminate(): void;
   onmessage: ((ev: { data: unknown }) => void) | null;
+  /** Fired when the worker script itself fails to load or throws at startup. */
+  onerror?: ((ev: { message?: string }) => void) | null;
 }
 
 export interface CatalogLevel {
@@ -103,6 +105,22 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
   let currentImage = 0;
   let currentLevel = 0;
   let disposed = false;
+
+  // A worker that never starts (script load failure, corrupted content) would
+  // otherwise leave the pending operation unsettled forever. Surface it as a
+  // structured failure instead.
+  worker.onerror = (ev: { message?: string }) => {
+    const detail = typeof ev?.message === "string" ? ev.message : "";
+    rejectPending(
+      failure(
+        "WORKER_FAILED",
+        detail
+          ? `The discovery engine failed to start: ${detail}`
+          : "The discovery engine failed to start.",
+        true,
+      ),
+    );
+  };
 
   worker.onmessage = (ev: { data: unknown }) => {
     const raw = ev.data as { type?: unknown } & Record<string, unknown>;

@@ -216,3 +216,44 @@ test("dispose rejects pending operations and stops the worker", async () => {
   await assert.rejects(() => pending, (error) => error.code === "DISPOSED");
   assert.equal(worker.terminated, true);
 });
+
+test("a worker that never starts rejects the pending job instead of hanging", async () => {
+  // Real breakage mode: the worker script itself fails to load (missing or
+  // corrupted deploy). The browser fires `onerror` and no message ever
+  // arrives; the client must surface a structured failure, never spin.
+  const worker = loopbackWorker(() => {});
+  const client = createDiscoveryClient({
+    worker,
+    fetchMetadata: async () => ({ bytes: new ArrayBuffer(1) }),
+    fetchTile: async () => ({ bytes: new ArrayBuffer(1) }),
+    probeSize: async () => ({ ok: false, width: 0, height: 0 }),
+  });
+  const pending = client.start("https://site.test/page.html");
+  assert.equal(typeof worker.onerror, "function");
+  worker.onerror({ message: "error loading module script" });
+  await assert.rejects(
+    () => pending,
+    (error) =>
+      error.code === "WORKER_FAILED" &&
+      error.retryable === true &&
+      error.message.includes("failed to start"),
+  );
+});
+
+test("a worker onerror without a pending operation is ignored", async () => {
+  const worker = loopbackWorker((msg, respond) => {
+    if (msg.type === "start") {
+      respond({ type: "catalog", catalog: { images: [] } });
+    }
+  });
+  const client = createDiscoveryClient({
+    worker,
+    fetchMetadata: async () => ({ bytes: new ArrayBuffer(1) }),
+    fetchTile: async () => ({ bytes: new ArrayBuffer(1) }),
+    probeSize: async () => ({ ok: false, width: 0, height: 0 }),
+  });
+  worker.onerror({ message: "late noise" });
+  const catalog = await client.start("https://site.test/x");
+  assert.deepEqual(catalog.images, []);
+  client.dispose();
+});

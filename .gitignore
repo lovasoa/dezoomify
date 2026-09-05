@@ -17,4 +17,9 @@ client_secret_*.json
 *client-secret*.json
 *.p12
 *.pfx
-wasm/
+# Generated wasm glue. The two runtime files are committed: Cloudflare Pages
+# serves committed files only, and the site's worker imports the glue from
+# /wasm/. Regenerate with `cargo xtask build web`.
+wasm/*
+!wasm/dezoomify-wasm.js
+!wasm/dezoomify-wasm_bg.wasm

@@ -25,6 +25,14 @@ jobs:
             apex=$(curl -sS -o /tmp/apex.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/" || true)
             main_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/src/main.js" || true)
             discovery_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/src/discovery.js" || true)
+            # Wasm glue must be served as real JS/wasm. A 200 text/html response
+            # is the SPA fallback masking a missing asset: Firefox then fails
+            # the worker with NS_ERROR_CORRUPTED_CONTENT and the site spins
+            # in "Finding the zoomable image..." forever.
+            wasm_js=$(curl -sS -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 \
+              "https://${{ env.SITE_HOST }}/wasm/dezoomify-wasm.js" || true)
+            wasm_bin=$(curl -sS -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 \
+              "https://${{ env.SITE_HOST }}/wasm/dezoomify-wasm_bg.wasm" || true)
             # Metadata proxy function must be bound: a blocked loopback target is
             # answered by the function itself (403), not static-asset 405.
             proxy=$(curl -sS -o /tmp/proxy.json -w "%{http_code}" --max-time 20 \
@@ -37,14 +45,16 @@ jobs:
             if [ "$apex" = "200" ] \
               && [ "$main_js" = "200" ] && [ "$discovery_js" = "200" ] \
               && [ "$proxy" = "403" ] \
+              && [ "$wasm_js" = "200 application/javascript" ] \
+              && [ "$wasm_bin" = "200 application/wasm" ] \
               && grep -q "Dezoomify" /tmp/apex.html \
               && grep -q "dz-url-input\|id=\"app\"" /tmp/apex.html \
               && grep -q "src/main.js" /tmp/apex.html \
               && ! grep -q "14 of 28" /tmp/apex.html; then
-              echo "preview live: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy"
+              echo "preview live: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy wasm_js=$wasm_js wasm_bin=$wasm_bin"
               exit 0
             fi
-            echo "attempt $i: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy; retrying in 30s"
+            echo "attempt $i: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy wasm_js=$wasm_js wasm_bin=$wasm_bin; retrying in 30s"
             sleep 30
           done
           echo "branch preview did not serve expected content in time"
