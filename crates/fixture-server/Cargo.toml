@@ -18,7 +18,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hmac = "0.12"
-sha1 = "0.10"
+sha1 = "0.11"
 aes = "0.8"
 cbc = "0.1"
 regex = "1"
