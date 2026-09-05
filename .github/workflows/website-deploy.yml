@@ -98,8 +98,10 @@ jobs:
               "https://${{ env.SITE_HOST }}/api/proxy" || true)
             legacy_proxy=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 \
               "https://${{ env.SITE_HOST }}/proxy" || true)
+            # Pages canonicalizes .../index.html to the directory form (308),
+            # so the help gate uses /beta/help/ directly.
             help=$(curl -sS -o /tmp/help.html -w "%{http_code}" --max-time 20 \
-              "https://${{ env.SITE_HOST }}/beta/help/index.html" || true)
+              "https://${{ env.SITE_HOST }}/beta/help/" || true)
             # Exposure gate: the deployment must serve only the assembled
             # dist/ tree. Repository files (README, crates) must not appear;
             # match on content, not status.
