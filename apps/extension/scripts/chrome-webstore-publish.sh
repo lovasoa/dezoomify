@@ -37,18 +37,45 @@ cmd_check() {
 }
 
 cmd_authorize() {
+  # Loopback flow (Google retired the oob flow for new clients: oob yields
+  # Error 400 invalid_request). Any 127.0.0.1 port is accepted without
+  # pre-registration; the same redirect_uri must be used at exchange time.
+  port="${CHROME_WS_LOOPBACK_PORT:-8085}"
+  redirect="http://127.0.0.1:${port}/"
   client_id="$(client_field client_id)"
   [ -n "$client_id" ] || { echo "client JSON lacks client_id"; return 1; }
-  echo "1. Open this consent URL in your browser:"
-  echo "   https://accounts.google.com/o/oauth2/auth?client_id=${client_id}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&scope=https://www.googleapis.com/auth/chromewebstore&response_type=code&access_type=offline"
-  printf '2. Paste the authorization code: '
+  echo "1. Open this consent URL in your browser (owner account):"
+  echo "   https://accounts.google.com/o/oauth2/auth?client_id=${client_id}&redirect_uri=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$redirect")&scope=https://www.googleapis.com/auth/chromewebstore&response_type=code&access_type=offline&prompt=consent"
+  echo "   (If Google warns the app is unverified, Advanced -> continue: consent by the owner account is allowed.)"
+  echo "2. After Allow, your browser lands on $redirect"
+  echo "   If nothing listens there, copy the code= value from the address bar."
+  code_file="$(mktemp)"
+  python3 - "$port" "$code_file" <<'EOF' &
+import http.server, sys, urllib.parse
+port, dest = int(sys.argv[1]), sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if "code" in q:
+            open(dest, "w").write(q["code"][0])
+        self.send_response(200); self.end_headers()
+        self.wfile.write(b"Code received. You can close this tab and return to the terminal.")
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", port), H).handle_request()
+EOF
+  server_pid=$!
+  printf '3. Paste the authorization code (empty if the local listener captured it): '
   read -r code
+  wait "$server_pid" 2>/dev/null || true
+  if [ -z "$code" ] && [ -s "$code_file" ]; then code="$(cat "$code_file")"; fi
+  rm -f "$code_file"
+  [ -n "$code" ] || { echo "no code received"; return 1; }
   client_secret="$(client_field client_secret)"
   resp="$(curl -sS --fail --proto '=https' --max-time 30 -X POST "$TOKEN_URL" \
     -d "code=${code}" \
     -d "client_id=${client_id}" \
     -d "client_secret=${client_secret}" \
-    -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob" \
+    -d "redirect_uri=${redirect}" \
     -d "grant_type=authorization_code")"
   unset client_secret code
   refresh="$(printf '%s' "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("refresh_token",""))')"
