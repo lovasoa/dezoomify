@@ -1,8 +1,0 @@
-[cutover]
-version = "1.0.0"
-channel = "test"
-source_commit = "workspace"
-protocol_range = "1.0"
-
-[artifacts]
-note = "test-channel candidate only; no production promotion in this environment"

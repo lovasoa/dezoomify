@@ -38,11 +38,15 @@ const STRIPPED_INBOUND = new Set([
   ...HOP_BY_HOP,
 ]);
 
+// Discovery reads both structured metadata (JSON/XML/YAML manifests) and
+// viewer HTML pages (a Google Arts & Culture asset page, a krpano embed, an
+// OpenSeadragon page). Tiles stay excluded by their own image/* content type.
 const ALLOWED_METADATA_TYPES = [
   "application/json",
   "application/xml",
   "text/xml",
   "text/plain",
+  "text/html",
 ];
 
 function parseNumericPart(part: string): number | null {

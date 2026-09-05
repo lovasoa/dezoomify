@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { onRequestPost, onRequestOptions } from "../functions/api/proxy.ts";
+import { handleProxyRequest } from "../functions/proxy.ts";
 
 const SITE_URL = "https://ng.dezoomify.pages.dev/api/proxy";
 
@@ -122,15 +123,91 @@ test("tile-like image content type -> 415 (metadata only)", async (t) => {
   assert.equal(res.status, 415);
 });
 
-test("non-JSON upstream response -> 415", async (t) => {
+test("viewer HTML page (e.g. a Google Arts asset page) is relayed as metadata", async (t) => {
   mockUpstream(
-    () => ({ status: 200, headers: { "content-type": "text/html" }, body: "<html>" }),
+    () => ({
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: "<!doctype html><html><body>asset page</body></html>",
+    }),
     t,
   );
   const res = await onRequestPost({
-    request: postRequest('{"targetUrl":"https://public.test/page","protocolVersion":1}'),
+    request: postRequest('{"targetUrl":"https://public.test/asset","protocolVersion":1}'),
+  });
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /asset page/);
+  assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+});
+
+test("binary non-metadata upstream response -> 415", async (t) => {
+  mockUpstream(
+    () => ({ status: 200, headers: { "content-type": "application/octet-stream" }, body: "\x00" }),
+    t,
+  );
+  const res = await onRequestPost({
+    request: postRequest('{"targetUrl":"https://public.test/blob","protocolVersion":1}'),
   });
   assert.equal(res.status, 415);
+});
+
+test("transient upstream 429 is retried once and succeeds", async (t) => {
+  let calls = 0;
+  const upstream = t.mock.method(globalThis, "fetch", () => {
+    calls += 1;
+    if (calls === 1) {
+      return Promise.resolve({
+        status: 429,
+        headers: { get: () => null },
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+      });
+    }
+    return Promise.resolve(
+      new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } }),
+    );
+  });
+  const result = await handleProxyRequest(
+    {
+      method: "POST",
+      targetUrl: "https://public.test/busy.json",
+      protocolVersion: 1,
+      origin: "https://ng.dezoomify.pages.dev",
+    },
+    {
+      fetchUpstream: (url, init) => upstream(url, init),
+      websiteOrigin: "https://ng.dezoomify.pages.dev",
+      rateLimitRetryDelayMs: 1,
+    },
+  );
+  assert.equal(result.status, 200);
+  assert.equal(result.code, undefined);
+  assert.equal(upstream.mock.callCount(), 2, "exactly one retry after the 429");
+});
+
+test("persistent upstream 429 fails fast after a single retry", async (t) => {
+  const upstream = t.mock.method(globalThis, "fetch", () =>
+    Promise.resolve({
+      status: 429,
+      headers: { get: () => null },
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+    }),
+  );
+  const result = await handleProxyRequest(
+    {
+      method: "POST",
+      targetUrl: "https://public.test/busy.json",
+      protocolVersion: 1,
+      origin: "https://ng.dezoomify.pages.dev",
+    },
+    {
+      fetchUpstream: (url, init) => upstream(url, init),
+      websiteOrigin: "https://ng.dezoomify.pages.dev",
+      rateLimitRetryDelayMs: 1,
+    },
+  );
+  assert.equal(result.status, 429);
+  assert.equal(result.code, "PROXY_RATE_LIMITED");
+  assert.equal(upstream.mock.callCount(), 2, "no unbounded retry loop");
 });
 
 test("OPTIONS preflight: same origin allowed, cross origin refused", async (t) => {

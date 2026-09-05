@@ -33,7 +33,17 @@ export interface ProxyRelayDeps {
   maxRedirects?: number;
   signal?: AbortSignal;
   resolveHost?: (host: string) => string[] | null;
+  /** Test seam: delay before the single 429 retry (production default below). */
+  rateLimitRetryDelayMs?: number;
 }
+
+/**
+ * Busy sites answer the first request with a token-bucket 429 and admit the
+ * retry moments later; a single bounded retry converts that transient
+ * throttle into a success. A persistent throttle still fails fast with
+ * PROXY_RATE_LIMITED after exactly one retry.
+ */
+export const RATE_LIMIT_RETRY_DELAY_MS = 750;
 
 export interface ProxyRelayResult {
   status: number;
@@ -50,6 +60,24 @@ function headerCase(headers: Record<string, string>, name: string): string | nul
   return null;
 }
 
+function delayBeforeRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    if (signal) {
+      const abort = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      if (signal.aborted) {
+        clearTimeout(timer);
+        resolve();
+        return;
+      }
+      signal.addEventListener("abort", abort, { once: true });
+    }
+  });
+}
+
 export async function handleProxyRequest(
   req: IncomingProxyRequest,
   deps: ProxyRelayDeps,
@@ -57,6 +85,7 @@ export async function handleProxyRequest(
   const requestId = createProxyRequestId();
   const maxBytes = deps.maxBytes ?? PROXY_MAX_BYTES;
   const maxRedirects = deps.maxRedirects ?? PROXY_MAX_REDIRECTS;
+  const retryDelayMs = deps.rateLimitRetryDelayMs ?? RATE_LIMIT_RETRY_DELAY_MS;
   const cors = buildProxyCorsHeaders(deps.websiteOrigin, req.origin);
   const baseHeaders: Record<string, string> = {
     ...cors,
@@ -94,14 +123,23 @@ export async function handleProxyRequest(
       headers: { get(name: string): string | null };
       arrayBuffer(): Promise<ArrayBuffer>;
     };
-    try {
-      // Upstream is always GET (HEAD validated as allowed but relay uses GET).
-      if (!validateUpstreamMethod("GET")) {
-        return { status: 500, headers: baseHeaders, code: "PROXY_POLICY_DENIED", requestId };
+    let rateLimitAttempts = 0;
+    for (;;) {
+      try {
+        // Upstream is always GET (HEAD validated as allowed but relay uses GET).
+        if (!validateUpstreamMethod("GET")) {
+          return { status: 500, headers: baseHeaders, code: "PROXY_POLICY_DENIED", requestId };
+        }
+        res = await deps.fetchUpstream(current, { method: "GET", headers: upstreamHeaders });
+      } catch {
+        return { status: 502, headers: baseHeaders, code: "TRANSPORT_NETWORK_ERROR", requestId };
       }
-      res = await deps.fetchUpstream(current, { method: "GET", headers: upstreamHeaders });
-    } catch {
-      return { status: 502, headers: baseHeaders, code: "TRANSPORT_NETWORK_ERROR", requestId };
+      if (res.status !== 429 || rateLimitAttempts >= 1) break;
+      rateLimitAttempts += 1;
+      await delayBeforeRetry(retryDelayMs, deps.signal);
+      if (deps.signal?.aborted) {
+        return { status: 499, headers: baseHeaders, code: "TRANSPORT_CANCELLED", requestId };
+      }
     }
     // Redirect handling with per-hop revalidation.
     if (res.status >= 300 && res.status <= 399) {
