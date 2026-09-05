@@ -21,13 +21,19 @@ import { stripTypeScriptTypes } from "node:module";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 // (ts, js) pairs: the js mirror is served to browsers, the ts is tested.
+// This list is exactly the browser-served module graph (index.html ->
+// src/main.js -> ...); node-only modules (caches, surfaces, save helpers)
+// stay TypeScript-only and are never shipped.
 const PAIRS = [
   ["src/discovery.ts", "src/discovery.js"],
   ["src/hash.ts", "src/hash.js"],
   ["src/main.ts", "src/main.js"],
+  ["src/webIntegration.ts", "src/webIntegration.js"],
+  ["src/proxyTransport.ts", "src/proxyTransport.js"],
   ["packages/shared-ui/src/components.ts", "packages/shared-ui/src/components.js"],
   ["packages/shared-ui/src/controller.ts", "packages/shared-ui/src/controller.js"],
   ["packages/shared-ui/src/view.ts", "packages/shared-ui/src/view.js"],
+  ["packages/browser-runtime/src/types.ts", "packages/browser-runtime/src/types.js"],
   ["packages/browser-runtime/src/session.ts", "packages/browser-runtime/src/session.js"],
 ];
 

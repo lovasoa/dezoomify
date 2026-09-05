@@ -13,6 +13,8 @@ import {
   noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
+import { isProxyEligible } from "./webIntegration.ts";
+import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 import {
   createDiscoveryClient,
   failure,
@@ -25,6 +27,8 @@ let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
 let currentSeq = 0;
 let activeTransport: string | null = null;
+/** User opt-out for the metadata CORS proxy (UI toggle; default allows fallback). */
+let proxyOptOut = false;
 let client: DiscoveryClient | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
@@ -218,49 +222,6 @@ function isAllowedSourceUrl(urlString: string): boolean {
   }
 }
 
-function isPrivateOrLocalHostname(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  if (h === "localhost" || h === "localhost." || h.endsWith(".localhost")) return true;
-  if (h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".lan")) return true;
-  if (h === "127.0.0.1" || h.startsWith("127.") || h === "10.0.0.1") return true;
-  if (h.startsWith("10.") || h.startsWith("192.168.") || h.startsWith("169.254.")) return true;
-  if (h === "::1" || h === "[::1]") return true;
-  const m = h.match(/^172\.(\d+)\./);
-  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
-  return false;
-}
-
-function hasSignedQuery(urlString: string): boolean {
-  try {
-    const u = new URL(urlString);
-    for (const k of u.searchParams.keys()) {
-      const l = k.toLowerCase();
-      if (
-        l === "token" || l === "signature" || l === "sig" || l === "auth" ||
-        l === "key" || l === "session" || l === "sid" || l === "ticket" ||
-        l === "secret" || l === "password"
-      ) return true;
-    }
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-function isProxyEligible(urlString: string): boolean {
-  let u: URL;
-  try {
-    u = new URL(urlString);
-  } catch {
-    return false;
-  }
-  if (u.username !== "" || u.password !== "") return false;
-  if (hasSignedQuery(urlString)) return false;
-  if (isPrivateOrLocalHostname(u.hostname)) return false;
-  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  return true;
-}
-
 interface DirectOutcome {
   outcome: "readable" | "http-error" | "network-error" | "cancelled";
   finalUrl?: string;
@@ -305,34 +266,32 @@ function shortUrl(url: string): string {
   }
 }
 
+// Shared metadata-proxy client (single policy implementation; the inline
+// duplicate is gone). Pre-checks credential-bearing targets, cancellation,
+// and the response-size budget; status codes map to stable machine-readable
+// codes. Request timing instrumentation stays here so the live job view
+// keeps counting proxy attempts.
+const proxyTransport = createProxyTransport(
+  (input: string, init?: Record<string, unknown>) =>
+    fetch(input, init as RequestInit).then((res) => ({
+      status: res.status,
+      headers: res.headers,
+      arrayBuffer: () => res.arrayBuffer(),
+    })),
+  { protocolVersion: 1, maxBytes: PROXY_METADATA_MAX_BYTES },
+);
+
 async function fetchViaProxy(targetUrl: string, signal?: AbortSignal): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string }> {
   const reqId = noteRequestStart("proxy");
   const combined = timeoutSignal(signal);
   try {
-    const res = await fetch("/api/proxy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetUrl, protocolVersion: 1 }),
-      signal: combined.signal,
-      credentials: "omit",
-    });
+    const res = await proxyTransport.fetchViaProxy(targetUrl, { signal: combined.signal });
     if (!res.ok) {
-      // Surface the proxy's machine-readable error code (e.g. PROXY_RATE_LIMITED
-      // means the upstream site throttled our server) instead of collapsing
-      // every failure into one generic code.
       noteRequestEnd(reqId, false);
-      let code = "PROXY_ERROR";
-      try {
-        const body = (await res.json()) as { code?: unknown };
-        if (body && typeof body.code === "string") code = body.code;
-      } catch {
-        // Unreadable body keeps the generic code.
-      }
-      return { ok: false, status: res.status, code };
+      return { ok: false, status: res.status, code: res.code ?? "PROXY_ERROR" };
     }
-    const bytes = await res.arrayBuffer();
     noteRequestEnd(reqId, true);
-    return { ok: true, status: 200, bytes };
+    return { ok: true, status: res.status, bytes: res.bytes };
   } catch (e) {
     noteRequestEnd(reqId, false);
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
@@ -365,7 +324,10 @@ async function fetchMetadataFor(
   let bytes: ArrayBuffer | null = null;
   if (direct.outcome === "readable" && direct.bytes) {
     bytes = direct.bytes;
-  } else if (direct.outcome === "network-error" && isProxyEligible(url)) {
+  } else if (
+    direct.outcome === "network-error" &&
+    isProxyEligible({ url, kind: "metadata", headers }, { proxyOptOut }).eligible
+  ) {
     activeTransport = PROXY_LABEL;
     via = "proxy";
     const proxied = await fetchViaProxy(url);

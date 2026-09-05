@@ -1,8 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createWebIntegration, isProxyEligible } from "../src/webIntegration.ts";
 import { createProxyTransport } from "../src/proxyTransport.ts";
 import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/types.ts";
+
+const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function directOk() {
   return {
@@ -163,4 +168,55 @@ test("handoff suggestions come from capabilities; ordinary display always offere
   assert.deepEqual(web.getHandoffSuggestions(), ["ordinary-image-display"]);
   const web2 = createWebIntegration({ direct: directOk(), proxy: proxyOk(), capabilities: { extensionAvailable: true, nativeAvailable: true } });
   assert.deepEqual(web2.getHandoffSuggestions(), ["ordinary-image-display", "extension", "native"]);
+});
+
+test("shipped webapp uses the shared proxy policy (no inline duplicate)", () => {
+  const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
+  for (const dup of [
+    "function isProxyEligible(",
+    "function hasSignedQuery(",
+    "function isPrivateOrLocalHostname(",
+    '"/api/proxy"',
+  ]) {
+    assert.ok(!mainTs.includes(dup), `src/main.ts must not carry the inline duplicate ${dup}`);
+  }
+  assert.ok(mainTs.includes('from "./webIntegration.ts"'), "main.ts must import the shared eligibility policy");
+  assert.ok(mainTs.includes('from "./proxyTransport.ts"'), "main.ts must import the shared proxy transport");
+  assert.ok(mainTs.includes("isProxyEligible({"), "main.ts must call the shared policy with a request object");
+  const mainJs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.js"), "utf8");
+  assert.ok(mainJs.includes("./webIntegration.js"), "generated main.js must import the shared policy mirror");
+  assert.ok(mainJs.includes("./proxyTransport.js"), "generated main.js must import the shared transport mirror");
+});
+
+test("served browser import graph resolves to committed files", () => {
+  const roots = ["src/main.js", "src/worker.js"];
+  const seen = new Set();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const rel = queue.pop();
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    // wasm/ holds ignored build artifacts (verified by `cargo xtask build web`).
+    if (rel.startsWith("wasm/")) continue;
+    const text = fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
+    const specifiers = [
+      ...text.matchAll(/(?:import|export)[^'"]*?from\s*["'](\.[^"']+)["']/g),
+      ...text.matchAll(/import\(\s*["'](\.[^"']+)["']\s*\)/g),
+    ].map((m) => m[1]);
+    for (const spec of specifiers) {
+      assert.ok(
+        spec.endsWith(".js"),
+        `${rel} imports non-JS specifier ${spec} (browsers need generated .js mirrors)`,
+      );
+      queue.push(path.normalize(path.join(path.dirname(rel), spec)));
+    }
+  }
+  for (const expected of [
+    "src/webIntegration.js",
+    "src/proxyTransport.js",
+    "packages/browser-runtime/src/types.js",
+    "packages/browser-runtime/src/session.js",
+  ]) {
+    assert.ok(seen.has(expected), `browser graph must include ${expected}`);
+  }
 });

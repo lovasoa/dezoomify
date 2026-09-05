@@ -1,3 +1,7 @@
+// GENERATED from src/proxyTransport.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: src/proxyTransport.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // Browser-side proxy client: POST same-origin /api/proxy, credentials omit.
 //
 // The response-size cap mirrors the server limit (`PROXY_MAX_BYTES` in
@@ -5,32 +9,13 @@
 // guard only fails closed early instead of buffering an over-budget body.
 export const PROXY_METADATA_MAX_BYTES = 2 * 1024 * 1024;
 
-export interface ProxyFetchResult {
-  ok: boolean;
-  status: number;
-  code?: string;
-  bytes?: ArrayBuffer;
-  contentType?: string;
-}
-
-export type ProxyFetchImpl = (
-  input: string,
-  init?: Record<string, unknown>,
-) => Promise<{
-  status: number;
-  headers?: unknown;
-  json?: () => Promise<unknown>;
-  arrayBuffer(): Promise<ArrayBuffer>;
-}>;
-
-function safeHeaders(input: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
+function safeHeaders(input         )                         {
+  const out                         = {};
   if (!input) return out;
   try {
-    const h = input as {
-      get?: (k: string) => string | null;
-      forEach?: (cb: (v: string, k: string) => void) => void;
-    };
+    const h = input
+
+     ;
     if (typeof h.get === "function") {
       for (const k of ["content-type", "content-length"]) {
         const v = h.get(k);
@@ -39,7 +24,7 @@ function safeHeaders(input: unknown): Record<string, string> {
       return out;
     }
     if (typeof h.forEach === "function") {
-      h.forEach((v: string, k: string) => {
+      h.forEach((v        , k        ) => {
         out[String(k).toLowerCase()] = String(v);
       });
       return out;
@@ -51,22 +36,19 @@ function safeHeaders(input: unknown): Record<string, string> {
 }
 
 export function createProxyTransport(
-  fetchImpl: ProxyFetchImpl,
-  opts: { protocolVersion: number; maxBytes: number; proxyPath?: string },
-): {
-  fetchViaProxy(
-    targetUrl: string,
-    callOpts?: { signal?: AbortSignal },
-  ): Promise<ProxyFetchResult>;
-} {
+  fetchImpl                ,
+  opts                                                                   ,
+)
+
+  {
   const proxyPath = opts.proxyPath ?? "/api/proxy";
 
   async function fetchViaProxy(
-    targetUrl: string,
-    callOpts?: { signal?: AbortSignal },
-  ): Promise<ProxyFetchResult> {
+    targetUrl        ,
+    callOpts                           ,
+  )                            {
     // Reject credential-bearing targets before any proxy request.
-    let parsed: URL;
+    let parsed     ;
     try {
       parsed = new URL(targetUrl);
     } catch {
@@ -78,11 +60,9 @@ export function createProxyTransport(
     if (callOpts?.signal?.aborted) {
       return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     }
-    let response: {
-      status: number;
-      headers?: unknown;
-      arrayBuffer(): Promise<ArrayBuffer>;
-    };
+    let response
+
+     ;
     try {
       response = await fetchImpl(proxyPath, {
         method: "POST",
@@ -92,7 +72,7 @@ export function createProxyTransport(
         // Only target URL + protocol version; no cookies/auth/referrer/user headers.
         body: JSON.stringify({ targetUrl, protocolVersion: opts.protocolVersion }),
       });
-    } catch (err: unknown) {
+    } catch (err         ) {
       if (callOpts?.signal?.aborted) {
         return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
       }
@@ -108,7 +88,7 @@ export function createProxyTransport(
     if (Number.isFinite(declared) && declared > opts.maxBytes) {
       return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED" };
     }
-    let bytes: ArrayBuffer;
+    let bytes             ;
     try {
       bytes = await response.arrayBuffer();
     } catch {
