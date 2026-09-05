@@ -10,7 +10,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId, resolve_relative,
+    LevelDescriptor, Request, StableId, resolve_relative, resolve_url_template,
 };
 use crate::web_page::decode_html_entities;
 
@@ -263,7 +263,7 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     let first_tile = number(layer, "starttile")?;
     let columns = number(layer, "cols")?;
     let filepath = view.get("filepath").and_then(Value::as_str);
-    let template = resolve_template(url, config)
+    let template = resolve_url_template(url, config)
         .replace("{file}", filepath.unwrap_or("image"))
         .replace("{extension}", "jpg");
     let template: Arc<str> = template.into();
@@ -295,14 +295,6 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
 fn image_title(filepath: &str) -> Option<String> {
     let file = filepath.rsplit(['/', '\\']).next()?;
     (!file.is_empty()).then(|| file.to_owned())
-}
-
-fn resolve_template(base: &str, template: &str) -> String {
-    resolve_relative(base, &template.replace('{', "%7B").replace('}', "%7D"))
-        .replace("%7B", "{")
-        .replace("%7b", "{")
-        .replace("%7D", "}")
-        .replace("%7d", "}")
 }
 
 fn number(value: &Value, name: &str) -> Result<u32, DiscoveryError> {

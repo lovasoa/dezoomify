@@ -8,7 +8,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId,
+    ImageDescriptor, LevelDescriptor, Request, StableId, floor_index,
 };
 
 pub const SPEC: DezoomerSpec = DezoomerSpec::new(
@@ -182,10 +182,10 @@ fn build_levels(
                 ));
             }
             let span = f64::from(tile_width) * lod.resolution;
-            let min_column = floor_index((xmin - origin_x) / span)?;
-            let max_column = floor_index((xmax - origin_x) / span)?;
-            let min_row = floor_index((origin_y - ymax) / span)?;
-            let max_row = floor_index((origin_y - ymin) / span)?;
+            let min_column = floor_index((xmin - origin_x) / span, "ArcGIS")?;
+            let max_column = floor_index((xmax - origin_x) / span, "ArcGIS")?;
+            let min_row = floor_index((origin_y - ymax) / span, "ArcGIS")?;
+            let max_row = floor_index((origin_y - ymin) / span, "ArcGIS")?;
             let columns = count_between(min_column, max_column)?;
             let rows = count_between(min_row, max_row)?;
             let width = columns
@@ -245,16 +245,6 @@ fn canonical_wkid(id: i64) -> i64 {
         3857 | 102_100 | 102_113 | 900_913 | 3785 => 3857,
         _ => id,
     }
-}
-
-fn floor_index(value: f64) -> Result<i64, DiscoveryError> {
-    let value = value.floor();
-    value
-        .is_finite()
-        .then(|| value.to_string().parse::<i64>())
-        .transpose()
-        .map_err(|_| DiscoveryError::Session("ArcGIS tile coordinate is out of range".into()))?
-        .ok_or_else(|| DiscoveryError::Session("ArcGIS tile coordinate is out of range".into()))
 }
 
 fn count_between(minimum: i64, maximum: i64) -> Result<u64, DiscoveryError> {

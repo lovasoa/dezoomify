@@ -8,7 +8,7 @@ use quick_xml::reader::Reader;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId, resolve_relative,
+    ImageDescriptor, LevelDescriptor, Request, StableId, floor_index, resolve_url_template,
 };
 
 const RADIUS: f64 = 6_378_137.0;
@@ -342,21 +342,13 @@ fn context_for_layer(
     let (matrix_set, link) = selected;
     Ok(WmtsContext {
         layer_name,
-        template: resolve_template(url, &template).into(),
+        template: resolve_url_template(url, &template).into(),
         matrix_set_name: matrix_set.identifier.clone(),
         style,
         bounds: projected_bounds,
         matrices: matrix_set.matrices.clone(),
         limits: link.map_or_else(Vec::new, |link| link.limits.clone()),
     })
-}
-
-fn resolve_template(base: &str, template: &str) -> String {
-    resolve_relative(base, template)
-        .replace("%7B", "{")
-        .replace("%7b", "{")
-        .replace("%7D", "}")
-        .replace("%7d", "}")
 }
 
 fn parse_layer_bounds(layer: &XmlElement) -> Result<Option<LayerBounds>, DiscoveryError> {
@@ -579,10 +571,12 @@ fn tile_ranges(
         // as-is and are NOT clamped to MatrixWidth/MatrixHeight. Negative
         // indices are floored at zero (grids cannot enumerate them); ranges
         // above the matrix size are kept, matching web tile URL generation.
-        let minimum_column = floor_index((bounds.left - matrix.top_left.0) / x_span)?.max(0);
-        let maximum_column = floor_index((bounds.right - matrix.top_left.0) / x_span)?.max(0);
-        let minimum_row = floor_index((matrix.top_left.1 - bounds.top) / y_span)?.max(0);
-        let maximum_row = floor_index((matrix.top_left.1 - bounds.bottom) / y_span)?.max(0);
+        let minimum_column =
+            floor_index((bounds.left - matrix.top_left.0) / x_span, "WMTS")?.max(0);
+        let maximum_column =
+            floor_index((bounds.right - matrix.top_left.0) / x_span, "WMTS")?.max(0);
+        let minimum_row = floor_index((matrix.top_left.1 - bounds.top) / y_span, "WMTS")?.max(0);
+        let maximum_row = floor_index((matrix.top_left.1 - bounds.bottom) / y_span, "WMTS")?.max(0);
         columns = (
             u32::try_from(minimum_column).map_err(|_| out_of_range())?,
             u32::try_from(maximum_column).map_err(|_| out_of_range())?,
@@ -752,19 +746,6 @@ fn nonnegative_integer(text: &str, label: &str) -> Result<u32, DiscoveryError> {
         .parse::<u64>()
         .map_err(|_| DiscoveryError::Session(format!("invalid WMTS {label}")))?;
     u32::try_from(value).map_err(|_| DiscoveryError::Session(format!("invalid WMTS {label}")))
-}
-
-fn floor_index(value: f64) -> Result<i64, DiscoveryError> {
-    let value = value.floor();
-    if !value.is_finite() {
-        return Err(DiscoveryError::Session(
-            "WMTS tile coordinate is out of range".into(),
-        ));
-    }
-    value
-        .to_string()
-        .parse::<i64>()
-        .map_err(|_| DiscoveryError::Session("WMTS tile coordinate is out of range".into()))
 }
 
 fn count_between(minimum: u32, maximum: u32) -> Result<u32, DiscoveryError> {

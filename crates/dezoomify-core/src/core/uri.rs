@@ -35,6 +35,26 @@ pub fn resolve_relative(base: &str, reference: &str) -> String {
     }
 }
 
+/// Resolve a tile URL template against `base`, preserving `{placeholder}`
+/// holes verbatim.
+#[must_use]
+pub fn resolve_url_template(base: &str, template: &str) -> String {
+    resolve_relative(base, &template.replace('{', "%7B").replace('}', "%7D"))
+        .replace("%7B", "{")
+        .replace("%7b", "{")
+        .replace("%7D", "}")
+        .replace("%7d", "}")
+}
+
+/// File-name-derived image title: last path segment with its extension
+/// stripped, or `None` when nothing meaningful remains.
+#[must_use]
+pub fn image_title(path: &str) -> Option<String> {
+    let file = path.rsplit('/').next()?;
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    (!stem.is_empty()).then(|| stem.to_owned())
+}
+
 /// Redact credential-bearing parts of a URI for logs, errors, and
 /// diagnostics. Strips userinfo and replaces sensitive query values
 /// (`apikey`, `token`, `auth`, `session`, `signature`, `secret`, `password`,

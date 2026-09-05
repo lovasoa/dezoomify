@@ -8,7 +8,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId,
+    ImageDescriptor, LevelDescriptor, Request, StableId, image_title,
 };
 
 static SERVER_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -96,12 +96,6 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         levels,
         ..Default::default()
     })]))
-}
-
-fn image_title(item: &str) -> Option<String> {
-    let file = item.rsplit('/').next()?;
-    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
-    (!stem.is_empty()).then(|| stem.to_owned())
 }
 
 fn build_levels(

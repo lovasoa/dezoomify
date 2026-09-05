@@ -11,7 +11,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId,
+    LevelDescriptor, Request, StableId, image_title,
 };
 
 static LAYER_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -157,12 +157,6 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         levels: vec![LevelDescriptor::new(source)],
         ..Default::default()
     })]))
-}
-
-fn image_title(path: &str) -> Option<String> {
-    let file = path.rsplit('/').next()?;
-    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
-    (!stem.is_empty()).then(|| stem.to_owned())
 }
 
 #[derive(Debug, Deserialize)]

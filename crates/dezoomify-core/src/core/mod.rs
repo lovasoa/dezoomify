@@ -21,6 +21,7 @@ pub use discovery::{
 };
 #[cfg(test)]
 pub use discovery::{RequestId, ResourceResponse};
+pub(crate) use model::floor_index;
 pub use model::{
     CatalogEntry, DeferredImage, ImageCatalog, ImageDescriptor, LevelDescriptor, ProcessingRecipe,
     Request, StableId, TileId, TileRole, TileSpec,
@@ -31,4 +32,4 @@ pub use tile_plan::{
     Grid, GridCoord, GridRequests, GridTile, Positioned, PositionedTile, TileSource,
     TileSourceError,
 };
-pub use uri::{origin_only, redact_uri, resolve_relative};
+pub use uri::{image_title, origin_only, redact_uri, resolve_relative, resolve_url_template};

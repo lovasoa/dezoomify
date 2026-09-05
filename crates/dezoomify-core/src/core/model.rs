@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::Vec2d;
 
+use super::discovery::DiscoveryError;
 use super::tile_plan::TileSource;
 
 /// A deterministic identifier within one discovery/planning operation.
@@ -239,6 +240,21 @@ impl fmt::Display for CatalogError {
 }
 
 impl std::error::Error for CatalogError {}
+
+/// Floor a fractional tile coordinate, rejecting non-finite or out-of-range
+/// values. `format` names the site format in the error message.
+pub(crate) fn floor_index(value: f64, format: &str) -> Result<i64, DiscoveryError> {
+    let value = value.floor();
+    if !value.is_finite() {
+        return Err(DiscoveryError::Session(format!(
+            "{format} tile coordinate is out of range"
+        )));
+    }
+    value
+        .to_string()
+        .parse::<i64>()
+        .map_err(|_| DiscoveryError::Session(format!("{format} tile coordinate is out of range")))
+}
 
 impl ImageCatalog {
     #[must_use]

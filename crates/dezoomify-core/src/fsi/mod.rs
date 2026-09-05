@@ -8,7 +8,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId, resolve_relative,
+    LevelDescriptor, Request, StableId, image_title, resolve_relative,
 };
 
 static SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -132,12 +132,6 @@ fn number(regex: &Regex, bytes: &[u8], name: &str) -> Result<u32, DiscoveryError
         .and_then(|value| value.as_str().parse().ok())
         .filter(|number| *number > 0)
         .ok_or_else(|| DiscoveryError::Session(format!("FSI metadata has invalid {name}")))
-}
-
-fn image_title(source: &str) -> Option<String> {
-    let file = source.rsplit('/').next()?;
-    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
-    (!stem.is_empty()).then(|| stem.to_owned())
 }
 
 fn ratio(numerator: u32, denominator: u32) -> f64 {
