@@ -70,34 +70,82 @@ export function openModal(title, subtitle, contentHtml) {
   document.body.appendChild(backdrop);
 }
 
+function detectPlatform() {
+  if (typeof navigator === "undefined") {
+    return { name: "All Platforms", file: "latest releases", label: "Download Native App" };
+  }
+  const ua = (navigator.userAgent || "").toLowerCase();
+  const platform = (navigator.platform || "").toLowerCase();
+  if (ua.includes("win") || platform.includes("win")) {
+    return { name: "Windows", file: ".msi / .exe", label: "Download for Windows" };
+  }
+  if (ua.includes("mac") || platform.includes("mac")) {
+    return { name: "macOS", file: ".dmg", label: "Download for macOS" };
+  }
+  if (ua.includes("linux") || platform.includes("linux")) {
+    return { name: "Linux", file: ".AppImage / .deb", label: "Download for Linux" };
+  }
+  return { name: "All Platforms", file: "latest releases", label: "Download Native App" };
+}
+
 export function showDesktopAppGuidance() {
+  const p = detectPlatform();
   openModal(
     "Dezoomify Desktop App",
-    "High-performance native processing for gigapixel museum artworks and local scans",
+    "High-performance native application for gigapixel museum artworks and local scans",
     `
+      <div class="dz-modal-download-box">
+        <a class="dz-btn-download-primary" href="https://github.com/lovasoa/dezoomify/releases/latest" target="_blank" rel="noopener">
+          <span>${p.label}</span>
+          <span style="font-size: 0.82rem; font-weight: 400; opacity: 0.85;">(${p.file} from GitHub Releases)</span>
+        </a>
+        <div style="margin-top: 0.65rem; font-size: 0.85rem; color: var(--dz-text-muted);">
+          Also available for Windows, macOS, and Linux on
+          <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">GitHub Releases &rarr;</a>
+        </div>
+      </div>
+
       <div class="dz-modal-section">
         <div class="dz-modal-section-title">Why use the Desktop App?</div>
         <ul class="dz-modal-list">
-          <li><strong>Handles Gigapixel Artworks:</strong> Web browsers enforce strict memory limits (often 2 GB per tab). The Desktop App processes images directly on your computer's RAM with zero canvas size limits.</li>
-          <li><strong>Lossless &amp; Multi-Format Output:</strong> Direct export to uncompressed TIFF, high-quality PNG, or JPEG without browser blob allocation limits.</li>
-          <li><strong>Multi-Threaded Performance:</strong> Downloads and composites tiles in parallel using native CPU concurrency.</li>
+          <li><strong>Handles Gigapixel Artworks:</strong> Web browsers enforce strict memory limits (often 2 GB per tab). The Desktop App runs natively on your machine to assemble arbitrarily large gigapixel images with zero memory ceilings.</li>
+          <li><strong>Lossless &amp; High-Quality Exports:</strong> Direct export to uncompressed TIFF, high-quality PNG, or JPEG without browser blob allocation limits.</li>
+          <li><strong>Multi-Threaded Performance:</strong> Downloads and composites tiles in parallel using native multi-core CPU scheduling.</li>
         </ul>
       </div>
+
       <div class="dz-modal-section">
         <div class="dz-modal-section-title">How to use it</div>
         <div class="dz-modal-steps">
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">1</span>
-            <div>Download the native installer for Windows, macOS, or Linux from our repository releases.</div>
+            <div>Download the native installer for ${p.name} from our GitHub Releases page.</div>
           </div>
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">2</span>
-            <div>Launch Dezoomify on your computer and paste the zoomable image URL.</div>
+            <div>Launch Dezoomify and paste your zoomable image or manifest URL.</div>
           </div>
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">3</span>
-            <div>Select your desired maximum resolution and output folder to save the complete composite image.</div>
+            <div>Select your desired resolution and destination folder to save the complete composite image.</div>
           </div>
+        </div>
+      </div>
+
+      <div class="dz-modal-cli-box">
+        <div class="dz-modal-cli-header">
+          <strong>Need automation or batch processing? Try the Dezoomify CLI</strong>
+        </div>
+        <p class="dz-modal-cli-desc">
+          The CLI provides headless, scriptable downloading ideal for automated pipelines, server environments, or batch downloading hundreds of artworks from lists without a GUI.
+        </p>
+        <div class="dz-modal-cli-links">
+          <a href="https://github.com/lovasoa/dezoomify/releases/latest" target="_blank" rel="noopener" class="dz-btn-secondary" style="height: 32px; font-size: 0.85rem;">
+            Download CLI from GitHub Releases
+          </a>
+          <code style="font-family: var(--dz-font-mono); font-size: 0.82rem; padding: 0.35rem 0.6rem; background: rgba(0,0,0,0.04); border-radius: 4px; border: 1px solid var(--dz-surface-border);">
+            cargo install dezoomify-cli
+          </code>
         </div>
       </div>
     `
@@ -107,30 +155,57 @@ export function showDesktopAppGuidance() {
 export function showExtensionGuidance() {
   openModal(
     "Dezoomify Browser Extension",
-    "Automatic tile discovery for password-protected digital archives and complex viewers",
+    "Automatic viewer discovery for password-protected digital archives and complex pages",
     `
+      <div class="dz-modal-stores">
+        <a href="https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm" target="_blank" rel="noopener" class="dz-btn-store">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <circle cx="12" cy="12" r="4"></circle>
+            <line x1="21.17" y1="8" x2="12" y2="8"></line>
+            <line x1="3.95" y1="6.06" x2="8.54" y2="14"></line>
+            <line x1="10.88" y1="21.94" x2="15.46" y2="14"></line>
+          </svg>
+          <div>
+            <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.8;">Available on</div>
+            <div style="font-weight: 700; font-size: 0.98rem;">Chrome Web Store</div>
+          </div>
+        </a>
+        <a href="https://addons.mozilla.org/en-US/firefox/addon/dezoomify/" target="_blank" rel="noopener" class="dz-btn-store">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12c0-2.5 1-4.8 2.6-6.5C7.2 9 8 13 12 14c0-2 1-3.5 2.5-4.5C13 8 11.5 6 12 2z"></path>
+          </svg>
+          <div>
+            <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.8;">Get for</div>
+            <div style="font-weight: 700; font-size: 0.98rem;">Firefox Add-ons</div>
+          </div>
+        </a>
+      </div>
+
       <div class="dz-modal-section">
         <div class="dz-modal-section-title">Why use the Browser Extension?</div>
         <ul class="dz-modal-list">
-          <li><strong>Password-Protected &amp; Academic Archives:</strong> Many university libraries, museum subscriptions, and archive portals require you to be signed in. Web Dezoomify cannot access your cookies or session, but the extension inspects viewers directly within your active browser tab.</li>
-          <li><strong>Automatic Tile Detection:</strong> No need to inspect HTML source or search for hidden XML manifests. The extension monitors viewer requests in real time as you navigate the page.</li>
-          <li><strong>Private &amp; Secure:</strong> Works locally in your browser with granted active-tab permissions only; no credentials leave your computer.</li>
+          <li><strong>Password-Protected &amp; Academic Archives:</strong> Many university collections, museum subscriptions, and archive portals require you to be signed in. Web Dezoomify cannot access your cookies or session, but the extension inspects viewers directly within your active browser tab.</li>
+          <li><strong>Automatic Viewer Detection:</strong> No need to inspect HTML source or search for hidden XML manifests. The extension observes viewer requests in real time as you navigate the page.</li>
+          <li><strong>Private &amp; Secure:</strong> Operates locally inside your browser with granted active-tab permissions only; no credentials or session tokens ever leave your computer.</li>
         </ul>
       </div>
+
       <div class="dz-modal-section">
         <div class="dz-modal-section-title">How to use it in 3 steps</div>
         <div class="dz-modal-steps">
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">1</span>
-            <div>Add the Dezoomify extension to Chrome, Firefox, or Edge.</div>
+            <div>Install the extension from the Chrome Web Store or Firefox Add-ons.</div>
           </div>
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">2</span>
-            <div>Navigate to the museum or archive page displaying your zoomable image, logging in if needed.</div>
+            <div>Navigate to the museum or library page displaying your artwork, logging in if needed.</div>
           </div>
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">3</span>
-            <div>Click the Dezoomify icon in your browser toolbar to automatically extract and download the full-resolution artwork!</div>
+            <div>Click the Dezoomify icon in your browser toolbar to automatically detect and extract the full-resolution image!</div>
           </div>
         </div>
       </div>
