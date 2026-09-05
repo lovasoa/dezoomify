@@ -1,6 +1,6 @@
 {
   "name": "@dezoomify/extension",
-  "version": "1.1.0",
+  "version": "2.0",
   "private": true,
   "type": "module",
   "description": "Dezoomify NG browser extension (Phase 12): finite active-tab scan, browser-session fetch, consented native handoff.",
