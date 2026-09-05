@@ -5,6 +5,8 @@ import {
   renderSaveGuidance,
   renderProgress,
   renderCompletion,
+  formatElapsed,
+  formatRemaining,
   getDezoomifyLogoSvg,
 } from "./components.js";
 
@@ -232,15 +234,22 @@ export function renderView(container, state, callbacks, ctx = {}) {
   `;
   card.appendChild(header);
 
-  // Body content based on state
+  // Body content based on state. Active job states share one live job view
+  // so the UI never looks stuck: discovering through saving all render the
+  // step, elapsed time, pending requests, and collapsed technical logs.
+  // The long introductory explanation only shows when idle.
   switch (state.status) {
     case "idle":
-    case "discovering":
       renderInputSection(card, state, callbacks, ctx);
       break;
 
+    case "discovering":
+    case "choosing-image":
+    case "choosing-level":
+    case "preflighting":
     case "downloading":
-      renderProgressSection(card, state, callbacks, ctx);
+    case "saving":
+      renderJobSection(card, state, callbacks, ctx);
       break;
 
     case "display-only":
@@ -265,8 +274,24 @@ export function renderView(container, state, callbacks, ctx = {}) {
   }
 }
 
-function renderInputSection(parent, state, callbacks, ctx) {
-  const isBusy = state.status === "discovering";
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function truncateMiddle(value, max = 90) {
+  const s = String(value ?? "");
+  if (s.length <= max) return s;
+  const half = Math.floor((max - 1) / 2);
+  return `${s.slice(0, half)}…${s.slice(s.length - half)}`;
+}
+
+function renderInputSection(parent, _state, callbacks, ctx) {
+  // Idle only: the full explanation lives here and fades away once a job
+  // starts (the job view replaces it instead of stacking below it).
 
   // Description
   const desc = document.createElement("div");
@@ -306,6 +331,7 @@ function renderInputSection(parent, state, callbacks, ctx) {
   // Full-width URL input row
   const wrapper = document.createElement("div");
   wrapper.className = "dz-input-wrapper";
+  const prefilled = escapeHtml(ctx?.initialUrl ?? "");
   wrapper.innerHTML = `
     <input
       type="url"
@@ -313,7 +339,8 @@ function renderInputSection(parent, state, callbacks, ctx) {
       class="dz-input"
       placeholder="URL of the webpage containing your image"
       required
-      ${isBusy ? "disabled" : "autofocus"}
+      autofocus
+      value="${prefilled}"
       aria-label="URL of the webpage containing your zoomable image"
     />
     <button type="button" class="dz-input-clear" id="dz-btn-clear" title="Clear input" aria-label="Clear input">&times;</button>
@@ -322,9 +349,11 @@ function renderInputSection(parent, state, callbacks, ctx) {
   const inputEl = wrapper.querySelector("#dz-url-input");
   const clearBtn = wrapper.querySelector("#dz-btn-clear");
   if (inputEl && clearBtn) {
-    inputEl.addEventListener("input", () => {
+    const syncClear = () => {
       clearBtn.style.display = inputEl.value ? "flex" : "none";
-    });
+    };
+    inputEl.addEventListener("input", syncClear);
+    syncClear();
     clearBtn.addEventListener("click", () => {
       inputEl.value = "";
       clearBtn.style.display = "none";
@@ -381,57 +410,132 @@ function renderInputSection(parent, state, callbacks, ctx) {
   const submitBtn = document.createElement("button");
   submitBtn.type = "submit";
   submitBtn.className = "dz-btn-tactile";
-  submitBtn.disabled = isBusy;
-  submitBtn.innerHTML = isBusy
-    ? `<span>Finding image...</span>`
-    : `<span>Dezoomify !</span>`;
+  submitBtn.innerHTML = `<span>Dezoomify !</span>`;
   btnRow.appendChild(submitBtn);
   form.appendChild(btnRow);
 
-  // If discovering, show active indicator
-  if (isBusy) {
-    const searching = document.createElement("div");
-    searching.className = "dz-progress-section";
-    searching.innerHTML = `
-      <div class="dz-progress-header">
-        <span class="dz-progress-status">Analyzing page and finding image levels...</span>
-        ${state.transport ? `<span class="dz-transport-badge">${renderTransportLabel(state.transport)}</span>` : ""}
-      </div>
-      <div class="dz-progress-controls">
-        <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel</button>
-      </div>
-    `;
-    searching.querySelector("#dz-btn-cancel")?.addEventListener("click", () => callbacks.onCancel());
-    form.appendChild(searching);
-  }
+  const shareHint = document.createElement("p");
+  shareHint.className = "dz-share-hint";
+  shareHint.textContent = "A shareable link appears in the address bar once you start — send it to reopen the same image.";
+  form.appendChild(shareHint);
 
   parent.appendChild(form);
 }
 
-function renderProgressSection(parent, state, callbacks, ctx) {
+function defaultStepFor(status) {
+  switch (status) {
+    case "discovering":
+      return "Finding the zoomable image…";
+    case "choosing-image":
+      return "Image found — picking the best one…";
+    case "choosing-level":
+      return "Choosing the highest resolution…";
+    case "preflighting":
+      return "Checking the image size…";
+    case "downloading":
+      return "Downloading image tiles…";
+    case "saving":
+      return "Assembling the final picture…";
+    default:
+      return "Working…";
+  }
+}
+
+/**
+ * Live job view. Replaces the idle explanation (which fades away via
+ * `.dz-job-section` animation) with a calm hierarchy:
+ *  1. step + progress (always),
+ *  2. elapsed / pending requests (only once meaningful, > ~2 s),
+ *  3. reassurance when stalled (> ~10 s without progress),
+ *  4. collapsed technical logs (on demand).
+ */
+function renderJobSection(parent, state, callbacks, ctx = {}) {
+  const activity = ctx?.jobActivity ?? {};
   const current = ctx?.currentProgress?.current ?? 0;
   const total = ctx?.currentProgress?.total ?? 0;
-  const pct = total > 0 ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
+  const determinate = total > 0;
+  const pct = determinate ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
   const transport = state.transport ? renderTransportLabel(state.transport) : "Direct from your browser";
+  const step = activity.stepLabel || ctx?.currentProgress?.message || defaultStepFor(state.status);
+  const now = activity.now ?? Date.now();
+  const startedAt = activity.startedAt ?? now;
+  const elapsedMs = Math.max(0, now - startedAt);
+  const elapsed = formatElapsed(elapsedMs);
+  const pending = activity.pendingRequests ?? 0;
+  const completed = activity.completedRequests ?? 0;
+  const failed = activity.failedRequests ?? 0;
+  const longestPending = activity.longestPendingMs ?? 0;
+  const timeoutMs = activity.timeoutMs ?? 30000;
+  const lastProgressAt = activity.lastProgressAt ?? startedAt;
+  const stalledMs = Math.max(0, now - lastProgressAt);
+  const showPending = pending > 0 && (elapsedMs >= 2000 || longestPending >= 2000);
+  const showStalled = stalledMs >= 10000 && state.status !== "saving";
+  const sourceUrl = activity.url ? truncateMiddle(activity.url, 90) : "";
 
   const sec = document.createElement("div");
-  sec.className = "dz-progress-section";
+  sec.className = "dz-job-section dz-fade-in";
+  sec.setAttribute("role", "status");
+  sec.setAttribute("aria-live", "polite");
   sec.innerHTML = `
+    ${sourceUrl ? `<p class="dz-source-line" title="${escapeHtml(activity.url ?? "")}">Working on <span class="dz-source-url">${escapeHtml(sourceUrl)}</span></p>` : ""}
     <div class="dz-progress-header">
-      <span class="dz-progress-status">${ctx?.currentProgress?.message ?? renderProgress(current, total)}</span>
-      <span class="dz-progress-percent">${pct}%</span>
+      <span class="dz-progress-status"><span class="dz-pulse" aria-hidden="true"></span>${escapeHtml(step)}</span>
+      ${determinate ? `<span class="dz-progress-percent">${pct}%</span>` : elapsed ? `<span class="dz-progress-percent dz-elapsed">${escapeHtml(elapsed)}</span>` : ""}
     </div>
-    <div class="dz-progress-track" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
-      <div class="dz-progress-bar" style="width: ${pct}%"></div>
+    <div class="dz-progress-track${determinate ? "" : " dz-indeterminate"}" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(step)}">
+      <div class="dz-progress-bar" style="width: ${determinate ? pct : 35}%"></div>
     </div>
+    ${determinate ? `<p class="dz-tile-counts">${current} of ${total} tiles${elapsed ? ` · ${escapeHtml(elapsed)} elapsed` : ""}</p>` : elapsed ? `<p class="dz-tile-counts">${escapeHtml(elapsed)} elapsed</p>` : ""}
+    ${showPending ? `
+      <div class="dz-pending-line">
+        <span>${pending} request${pending === 1 ? "" : "s"} in flight${completed > 0 ? ` · ${completed} done` : ""}${failed > 0 ? ` · ${failed} failed, retrying` : ""}</span>
+        <span class="dz-pending-time">${formatElapsed(longestPending)} waiting · ${formatRemaining(longestPending, timeoutMs)}</span>
+      </div>
+      <div class="dz-remaining-track" aria-hidden="true">
+        <div class="dz-remaining-bar" style="width: ${Math.max(0, Math.min(100, Math.round((longestPending / timeoutMs) * 100)))}%"></div>
+      </div>
+    ` : ""}
+    ${showStalled ? `<p class="dz-reassure">Still working — the museum server is slow to answer. You can wait, or cancel and try again later.</p>` : ""}
+    ${activity.detail ? `<p class="dz-job-detail">${escapeHtml(activity.detail)}</p>` : ""}
     <div class="dz-progress-controls">
       <span class="dz-transport-badge">${transport}</span>
-      <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel download</button>
+      <span class="dz-job-actions">
+        ${callbacks.onCopyShareLink ? `<button type="button" class="dz-btn-secondary" id="dz-btn-share">Copy shareable link</button>` : ""}
+        <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel</button>
+      </span>
     </div>
+    <details class="dz-details">
+      <summary class="dz-summary">
+        <span>Technical details &amp; logs</span>
+        <svg class="dz-summary-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </summary>
+      <div class="dz-diagnostics">${escapeHtml(diagnosticsText(state, ctx, elapsedMs, timeoutMs))}</div>
+      ${activity.log && activity.log.length > 0 ? `<div class="dz-diagnostics dz-log">${activity.log.slice(-20).map((l) => escapeHtml(l)).join("\n")}</div>` : ""}
+    </details>
   `;
 
   sec.querySelector("#dz-btn-cancel")?.addEventListener("click", () => callbacks.onCancel());
+  sec.querySelector("#dz-btn-share")?.addEventListener("click", () => callbacks.onCopyShareLink?.());
   parent.appendChild(sec);
+}
+
+function diagnosticsText(state, ctx = {}, elapsedMs, timeoutMs) {
+  const a = ctx?.jobActivity ?? {};
+  const p = ctx?.currentProgress;
+  const lines = [
+    `Status: ${state.status}`,
+    `Transport: ${state.transport ?? "direct"}`,
+    `Elapsed: ${Math.round((elapsedMs ?? 0) / 1000)} s`,
+    `Per-request timeout: ${Math.round((timeoutMs ?? a.timeoutMs ?? 30000) / 1000)} s`,
+    `Requests: ${a.pendingRequests ?? 0} pending, ${a.completedRequests ?? 0} done, ${a.failedRequests ?? 0} failed`,
+  ];
+  if (p) lines.push(`Tiles: ${p.current} of ${p.total}`);
+  if (a.url) lines.push(`Source: ${a.url}`);
+  return lines.join("\n");
+}
+
+function renderProgressSection(parent, state, callbacks, ctx) {
+  renderJobSection(parent, state, callbacks, ctx);
 }
 
 function renderDisplayOnlySection(parent, _state, callbacks, ctx) {
@@ -500,11 +604,13 @@ function renderCompletedSection(parent, _state, callbacks, ctx) {
         </svg>
         Save image
       </button>` : ""}
+      ${callbacks.onCopyShareLink ? `<button type="button" class="dz-btn-secondary" id="dz-btn-share">Copy shareable link</button>` : ""}
       <button type="button" class="dz-btn-secondary" id="dz-btn-another">Dezoomify another image</button>
     </div>
   `;
 
   section.querySelector("#dz-btn-save")?.addEventListener("click", () => callbacks.onSave());
+  section.querySelector("#dz-btn-share")?.addEventListener("click", () => callbacks.onCopyShareLink?.());
   section.querySelector("#dz-btn-another")?.addEventListener("click", () => callbacks.onReset());
   parent.appendChild(section);
 }

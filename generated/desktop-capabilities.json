@@ -1,7 +1,7 @@
 {
   "app": "desktop",
   "bundle": {
-    "identifier": "com.dezoomify.app",
+    "identifier": "dev.ophir.dezoomify",
     "protocolScheme": "dezoomify"
   },
   "commands": [
@@ -31,7 +31,7 @@
   "fingerprint": "b4bad92b24615c58",
   "generator": "phase-11 lean shell (canonical: crates/dezoomify-protocol/src/dto.rs)",
   "nativeHost": {
-    "name": "com.dezoomify.native_host"
+    "name": "dev.ophir.dezoomify.native_host"
   },
   "protocol": {
     "max": "1.0",

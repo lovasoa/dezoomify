@@ -40,6 +40,30 @@ test("happy path: relays metadata JSON with CORS and content-type", async (t) =>
   assert.equal(res.headers.get("access-control-allow-origin"), "https://ng.dezoomify.pages.dev");
   assert.equal(res.headers.get("cache-control"), "no-store");
   assert.equal(calls.mock.calls[0].arguments[1].method, "GET");
+  // The function must never let fetch follow redirects itself: the relay
+  // revalidates every hop against the SSRF policy (see next test).
+  assert.equal(calls.mock.calls[0].arguments[1].redirect, "manual");
+});
+
+test("redirect hops are revalidated by the relay, not followed by fetch", async (t) => {
+  let fetchCalls = 0;
+  const calls = mockUpstream(
+    (url) => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        return { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data" } };
+      }
+      return { status: 200, headers: { "content-type": "application/json" }, body: "{}" };
+    },
+    t,
+  );
+  const res = await onRequestPost({
+    request: postRequest('{"targetUrl":"https://public.test/redirect.json","protocolVersion":1}'),
+  });
+  assert.equal(res.status, 403);
+  // The private redirect target was never fetched.
+  assert.equal(fetchCalls, 1);
+  assert.equal(calls.mock.calls[0].arguments[1].redirect, "manual");
 });
 
 test("cross-origin request gets no CORS grant (browser blocks read)", async (t) => {

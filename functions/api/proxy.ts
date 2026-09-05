@@ -54,10 +54,14 @@ export async function onRequestPost(context: { request: Request }): Promise<Resp
       origin: request.headers.get("origin") ?? undefined,
     },
     {
+      // redirect: "manual" is required so every 3xx hop surfaces back through
+      // handleProxyRequest's validateProxyTarget revalidation; the default
+      // "follow" would consume redirects inside fetch and bypass the SSRF check.
       fetchUpstream: (url, init) =>
         fetch(url, {
           method: init.method,
           headers: init.headers,
+          redirect: "manual",
           signal: init.signal ?? request.signal,
         }),
       websiteOrigin,

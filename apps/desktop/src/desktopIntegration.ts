@@ -9,8 +9,8 @@
 export const PROTOCOL_MIN = "1.0" as const;
 export const PROTOCOL_MAX = "1.0" as const;
 export const PROTOCOL_VERSION = "1.0" as const;
-export const NATIVE_HOST_NAME = "com.dezoomify.native_host" as const;
-export const APP_IDENTIFIER = "com.dezoomify.app" as const;
+export const NATIVE_HOST_NAME = "dev.ophir.dezoomify.native_host" as const;
+export const APP_IDENTIFIER = "dev.ophir.dezoomify" as const;
 
 export const NATIVE_ENCODERS = ["png", "jpeg", "tiff"] as const;
 export type NativeEncoder = (typeof NATIVE_ENCODERS)[number];

@@ -33,7 +33,7 @@
     "shortDescription": "Dezoomify desktop",
     "targets": "all"
   },
-  "identifier": "com.dezoomify.app",
+  "identifier": "dev.ophir.dezoomify",
   "productName": "Dezoomify",
   "version": "0.1.0"
 }

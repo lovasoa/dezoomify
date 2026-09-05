@@ -18,9 +18,9 @@ pub const PROTOCOL_VERSION: &str = "1.0";
 /// Deterministic fingerprint of the canonical protocol DTO source.
 pub const DTO_FINGERPRINT: &str = "b4bad92b24615c58";
 /// Native Messaging host name shared by manifests and capabilities.
-pub const NATIVE_HOST_NAME: &str = "com.dezoomify.native_host";
+pub const NATIVE_HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 /// Application bundle identifier.
-pub const APP_IDENTIFIER: &str = "com.dezoomify.app";
+pub const APP_IDENTIFIER: &str = "dev.ophir.dezoomify";
 /// Desktop app version.
 pub const APP_VERSION: &str = "0.1.0";
 /// Deep-link protocol scheme.

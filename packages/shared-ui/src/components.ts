@@ -33,6 +33,23 @@ export function renderCompletion(width: number, height: number, mime: string): s
   return `Finished. Your picture is ${width} by ${height} pixels (${mime}).`;
 }
 
+/** Short human elapsed time: "3 s", "1 min 5 s". Empty for sub-second noise. */
+export function formatElapsed(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 2000) return "";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  const rest = s % 60;
+  return rest === 0 ? `${m} min` : `${m} min ${rest} s`;
+}
+
+/** Remaining time against the per-request timeout, for pending requests. */
+export function formatRemaining(elapsedMs: number, timeoutMs: number): string {
+  const remaining = Math.max(0, timeoutMs - elapsedMs);
+  const s = Math.ceil(remaining / 1000);
+  return `${s} s left`;
+}
+
 /**
  * Authentic Dezoomify logo SVG: sapphire blue magnifying glass (#3c7bff)
  * with internal coral-salmon tile quadrants (#ff8080).

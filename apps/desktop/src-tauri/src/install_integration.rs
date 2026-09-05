@@ -8,7 +8,7 @@
 // destinations stay isolated under test profiles. No wildcards are emitted.
 
 /// Native host name shared with capabilities and installer templates.
-pub const NATIVE_HOST_NAME: &str = "com.dezoomify.native_host";
+pub const NATIVE_HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 /// Release Chromium extension id (exact, no wildcards).
 /// This is the EXISTING Chrome Web Store listing for Dezoomify; store updates
 /// reuse this public id, never a new item. Reviewed in release/config.toml.
@@ -30,7 +30,7 @@ pub fn windows_native_host_key() -> String {
 
 /// macOS protocol handler plist destination for one home directory.
 pub fn macos_protocol_plist_path(home: &str) -> String {
-    format!("{home}/Library/Preferences/com.dezoomify.app.plist")
+    format!("{home}/Library/Preferences/dev.ophir.dezoomify.plist")
 }
 
 /// macOS Chromium manifest destination for one home directory.

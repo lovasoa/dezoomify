@@ -645,6 +645,139 @@ abbr[title] {
   margin-top: 0.5rem;
 }
 
+/* Live job view: replaces the idle explanation (which fades away). */
+.dz-job-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.25rem 0 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.dz-fade-in {
+  animation: dzJobIn 0.35s ease-out;
+}
+
+@keyframes dzJobIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dz-fade-in { animation: none; }
+  .dz-pulse { animation: none !important; }
+  .dz-indeterminate .dz-progress-bar { animation: none !important; }
+}
+
+.dz-source-line {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--dz-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dz-source-url {
+  font-family: var(--dz-font-mono);
+  font-size: 0.82rem;
+  color: var(--dz-text-secondary);
+}
+
+.dz-pulse {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: var(--dz-radius);
+  background: var(--dz-link-color);
+  margin-right: 0.55rem;
+  vertical-align: baseline;
+  animation: dzPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes dzPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.dz-indeterminate .dz-progress-bar {
+  animation: dzSlide 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes dzSlide {
+  from { margin-left: 0; }
+  to { margin-left: calc(100% - 35%); }
+}
+
+.dz-tile-counts {
+  margin: 0;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--dz-text-secondary);
+}
+
+.dz-pending-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.88rem;
+  color: var(--dz-text-secondary);
+  margin: 0.35rem 0 0;
+}
+
+.dz-pending-time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dz-remaining-track {
+  width: 100%;
+  height: 4px;
+  background: var(--dz-progress-track);
+  border-radius: var(--dz-radius);
+  overflow: hidden;
+}
+
+.dz-remaining-bar {
+  height: 100%;
+  background: var(--dz-text-muted);
+  border-radius: var(--dz-radius);
+  transition: width 0.5s linear;
+}
+
+.dz-reassure {
+  margin: 0.35rem 0 0;
+  font-size: 0.92rem;
+  color: var(--dz-text-secondary);
+  border-top: 1px solid var(--dz-surface-border);
+  padding-top: 0.7rem;
+}
+
+.dz-job-detail {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--dz-text-muted);
+}
+
+.dz-job-actions {
+  display: inline-flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.dz-share-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--dz-text-muted);
+  text-align: center;
+}
+
+.dz-log {
+  margin-top: 0.5rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
 /* Transport Indicator Tag (Architectural, Not a Pill) */
 .dz-transport-badge {
   display: inline-flex;

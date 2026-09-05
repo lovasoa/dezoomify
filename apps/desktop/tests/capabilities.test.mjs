@@ -58,7 +58,7 @@ const EXPECTED_CHANNELS = [
   "dezoomify://deep-link-pending",
 ];
 const EXPECTED_ENCODERS = ["png", "jpeg", "tiff"];
-const NATIVE_HOST = "com.dezoomify.native_host";
+const NATIVE_HOST = "dev.ophir.dezoomify.native_host";
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
 
@@ -115,7 +115,7 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
   const lib = readText("../src-tauri/src/lib.rs");
   const integration = readText("../src/desktopIntegration.ts");
   // The bundle identifier and deep-link scheme live in the tauri config.
-  assert.equal(tauriConf.identifier, "com.dezoomify.app");
+  assert.equal(tauriConf.identifier, "dev.ophir.dezoomify");
   assert.deepEqual(DESKTOP_META.deepLink.schemes, ["dezoomify"]);
   for (const doc of [DESKTOP_META, desktopCap]) {
     const x = xdezoomify(doc);

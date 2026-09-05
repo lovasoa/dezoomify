@@ -43,7 +43,7 @@
     ],
     "fingerprint": "b4bad92b24615c58",
     "nativeHost": {
-      "name": "com.dezoomify.native_host"
+      "name": "dev.ophir.dezoomify.native_host"
     },
     "protocol": {
       "max": "1.0",

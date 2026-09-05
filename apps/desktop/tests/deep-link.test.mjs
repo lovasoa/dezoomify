@@ -342,5 +342,5 @@ test("desktop metadata registers dezoomify protocol scheme", () => {
   const meta = JSON.parse(readText("../src-tauri/dezoomify.json"));
   const schemes = meta?.deepLink?.schemes ?? [];
   assert.ok(schemes.includes("dezoomify"), "protocol scheme dezoomify");
-  assert.equal(conf.identifier, "com.dezoomify.app");
+  assert.equal(conf.identifier, "dev.ophir.dezoomify");
 });

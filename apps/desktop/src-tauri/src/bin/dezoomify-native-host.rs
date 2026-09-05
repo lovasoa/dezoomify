@@ -8,7 +8,7 @@
 
 use std::io::{Read, Write};
 
-pub const HOST_NAME: &str = "com.dezoomify.native_host";
+pub const HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 pub const HOST_VERSION: &str = "0.1.0";
 pub const HOST_PROTOCOL: &str = "1.0";
 
