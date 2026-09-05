@@ -325,13 +325,136 @@ mod tests {
 
     #[test]
     fn n_minus_2_and_future_rejected() {
+        for version in ["0", "3", "99"] {
+            assert!(
+                matches!(
+                    parse_deep_link(&link(version, "https%3A%2F%2Fexample.com%2Fitem")),
+                    Err(DeepLinkError::UnsupportedVersion(_))
+                ),
+                "version {version} must be rejected"
+            );
+        }
+        // Dotted and non-integer versions are also rejected.
+        for version in ["1.0", "abc", "-1"] {
+            assert!(
+                matches!(
+                    parse_deep_link(&link(version, "https%3A%2F%2Fexample.com%2Fitem")),
+                    Err(DeepLinkError::UnsupportedVersion(_))
+                ),
+                "version {version:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_fields_rejected() {
+        for url in [
+            "dezoomify://open?v=2&v=2&src=https%3A%2F%2Fexample.com%2Fx".to_string(),
+            format!(
+                "dezoomify://open?v=2&src={}&src={}",
+                "https%3A%2F%2Fexample.com%2Fx",
+                "https%3A%2F%2Fexample.com%2Fy"
+            ),
+        ] {
+            assert!(
+                matches!(
+                    parse_deep_link(&url),
+                    Err(DeepLinkError::DuplicateField(_))
+                ),
+                "{url} must be rejected as duplicate"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_and_missing_fields_rejected() {
+        let unknown = "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx&extra=1";
         assert!(matches!(
-            parse_deep_link(&link("0", "https%3A%2F%2Fexample.com%2Fitem")),
-            Err(DeepLinkError::UnsupportedVersion(_))
+            parse_deep_link(unknown),
+            Err(DeepLinkError::UnknownField(_))
         ));
+        let missing_src = "dezoomify://open?v=2";
         assert!(matches!(
-            parse_deep_link(&link("3", "https%3A%2F%2Fexample.com%2Fitem")),
-            Err(DeepLinkError::UnsupportedVersion(_))
+            parse_deep_link(missing_src),
+            Err(DeepLinkError::MissingField("src"))
+        ));
+        let empty_query = "dezoomify://open";
+        assert!(matches!(
+            parse_deep_link(empty_query),
+            Err(DeepLinkError::MissingField("v"))
+        ));
+    }
+
+    #[test]
+    fn smuggled_source_query_secrets_rejected() {
+        for smuggled in ["cookie=abc", "token=abc", "session=abc", "apikey=abc"] {
+            let url = link("2", &format!("https%3A%2F%2Fexample.com%2Fx%3F{smuggled}"));
+            assert!(
+                matches!(parse_deep_link(&url), Err(DeepLinkError::SecretForbidden(_))),
+                "smuggled {smuggled} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn truncated_percent_escapes_rejected() {
+        for bad in [
+            link("2", "https%3A%2F%2Fexample.com%2F%2"),
+            link("2", "https%3A%2F%2Fexample.com%2F%"),
+            link("2", "https%3A%2F%2Fexample.com%2F%ZZ"),
+        ] {
+            assert!(
+                matches!(parse_deep_link(&bad), Err(DeepLinkError::MalformedEncoding(_))),
+                "{bad} must be rejected as malformed"
+            );
+        }
+    }
+
+    #[test]
+    fn source_url_rules_are_enforced() {
+        // Fragments never carry job input.
+        let fragment = link("2", "https%3A%2F%2Fexample.com%2Fitem%23frag");
+        assert_eq!(
+            parse_deep_link(&fragment).unwrap().source_url,
+            "https://example.com/item#frag"
+        );
+        // '+' decodes to a space, like form encoding.
+        let plus = link("2", "https%3A%2F%2Fexample.com%2Fa+b");
+        assert_eq!(
+            parse_deep_link(&plus).unwrap().source_url,
+            "https://example.com/a b"
+        );
+        // Non-http(s) source schemes are rejected.
+        let ftp = link("2", "ftp%3A%2F%2Fexample.com%2Fx");
+        assert!(matches!(
+            parse_deep_link(&ftp),
+            Err(DeepLinkError::InvalidSource(_))
+        ));
+        // src beyond the per-field bound is rejected after decoding.
+        let big = link("2", &format!("https%3A%2F%2Fexample.com%2F{}", "a".repeat(1100)));
+        assert!(matches!(
+            parse_deep_link(&big),
+            Err(DeepLinkError::InvalidSource(_))
+        ));
+    }
+
+    #[test]
+    fn hint_rules_are_enforced() {
+        let base = "https%3A%2F%2Fexample.com%2Fitem";
+        let with_hint = format!("dezoomify://open?v=2&src={base}&hint=Zoomify");
+        let parsed = parse_deep_link(&with_hint).unwrap();
+        assert_eq!(parsed.hint.as_deref(), Some("Zoomify"));
+        let empty_hint = format!("dezoomify://open?v=2&src={base}&hint=");
+        assert_eq!(parse_deep_link(&empty_hint).unwrap().hint, None);
+        let nul_hint = format!("dezoomify://open?v=2&src={base}&hint=a%00b");
+        assert!(matches!(
+            parse_deep_link(&nul_hint),
+            Err(DeepLinkError::InvalidSource(_))
+        ));
+        let long_hint = format!("dezoomify://open?v=2&src={base}&hint={}", "h".repeat(300));
+        assert!(matches!(
+            parse_deep_link(&long_hint),
+            Err(DeepLinkError::InvalidSource(_))
         ));
     }
 

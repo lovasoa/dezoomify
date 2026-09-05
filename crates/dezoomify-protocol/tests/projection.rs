@@ -1,13 +1,12 @@
-//! Core-projection shape tests: representative catalogs project into stable
-//! protocol DTOs with preserved order, IDs, dimensions, and optionality.
-//! Production conversion lives in `dezoomify-job` (phase 06); this test pins
-//! the DTO shapes without depending on `dezoomify-core` (protocol stays
-//! independent of core internals per AGENTS.md).
+//! Protocol DTO shape test: a representative catalog encodes to canonical
+//! bytes and decodes back unchanged. This pins the wire shape (field names,
+//! ordering stability through the codec, exact dimensions). The core→DTO
+//! projection itself is not implemented yet, so it is not tested here.
 
 use dezoomify_protocol::dto::*;
 
 #[test]
-fn representative_catalog_projects_with_order_and_ids() {
+fn representative_catalog_shape_round_trips_canonically() {
     // Representative two-image catalog: stable IDs, preserved order,
     // ready vs deferred entries, exact dimensions.
     let catalog = CatalogDto {
@@ -40,11 +39,13 @@ fn representative_catalog_projects_with_order_and_ids() {
             },
         ],
     };
-    assert_eq!(catalog.images.len(), 2);
-    assert_eq!(catalog.images[0].id.as_str(), "img:cover");
-    assert_eq!(catalog.images[1].readiness, Readiness::Deferred);
-    // Canonical bytes are stable and numeric conversions are exact.
+    // Canonical bytes are stable and the round trip is lossless.
     let bytes = dezoomify_protocol::codec::encode(&catalog).unwrap();
     let back: CatalogDto = dezoomify_protocol::codec::decode(&bytes).unwrap();
     assert_eq!(back, catalog);
+    let again = dezoomify_protocol::codec::encode(&back).unwrap();
+    assert_eq!(
+        again, bytes,
+        "encoding must be canonical across round trips"
+    );
 }

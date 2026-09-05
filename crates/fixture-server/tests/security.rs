@@ -29,12 +29,47 @@ async fn traversal_in_original_url_is_rejected() {
 
 #[tokio::test]
 async fn static_traversal_is_forbidden() {
-    let srv = TestServer::start().await;
-    // axum normalizes dot-segments before routing; a non-static root 404s.
-    let res = reqwest::get(format!("{}/..%2f..%2fetc%2fpasswd", srv.base))
+    let (srv, dir) = TestServer::start_with_static_dir().await;
+    // Legitimate static files are served: the guard is active, not just
+    // blanket-404ing a missing static root.
+    let res = reqwest::get(format!("{}/secret.txt", srv.base))
         .await
         .expect("get");
-    assert!(res.status() == 404 || res.status() == 403);
+    assert_eq!(res.status(), 200, "plain static file must be served");
+    assert_eq!(res.bytes().await.expect("body").as_ref(), b"static-canary");
+    let res = reqwest::get(format!("{}/sub/page.html", srv.base))
+        .await
+        .expect("get");
+    assert_eq!(res.status(), 200, "nested static file must be served");
+    let res = reqwest::get(format!("{}/", srv.base)).await.expect("get");
+    assert_eq!(res.status(), 200, "static root must serve index.html");
+    assert!(String::from_utf8_lossy(&res.bytes().await.expect("body")).contains("static-index"));
+
+    // Hostile raw-socket requests: dot segments must never escape the static
+    // root, in literal or percent-encoded form. Raw sockets avoid the HTTP
+    // client resolving dot segments before the request leaves.
+    for path in [
+        "/sub/../secret.txt",
+        "/sub/%2e%2e/secret.txt",
+        "/%2e%2e/%2e%2e/etc/passwd",
+        "/sub/..%2f..%2fsecret.txt",
+        "/..%2f..%2fetc%2fpasswd",
+    ] {
+        let (status, body) = srv.raw_get(path).await;
+        assert_eq!(status, 403, "dot-segment escape {path} must be forbidden");
+        assert!(
+            !body.contains("static-canary"),
+            "dot-segment escape {path} leaked a file outside the static root"
+        );
+    }
+    // A symlink escaping the root is rejected by the canonical-prefix guard.
+    #[cfg(unix)]
+    {
+        let (status, body) = srv.raw_get("/escape.txt").await;
+        assert_eq!(status, 403, "symlink escape must be forbidden");
+        assert!(!body.contains("static-canary"));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]

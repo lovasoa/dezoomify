@@ -7,7 +7,7 @@ active plan is simply a plan file that still has unfinished phases.
 
 ## Completed plans
 
-- [`website-deploy.md`](website-deploy.md) — one Pages project (the
+- [`website-deploy.md`](website-deploy.md): one Pages project (the
   original `dezoomify`), one build (GitHub Actions → `dist/` via
   `scripts/build-site.mjs`, uploaded with wrangler), one branch
   (`master`): legacy at `/`, new app at `/beta`, nothing generated

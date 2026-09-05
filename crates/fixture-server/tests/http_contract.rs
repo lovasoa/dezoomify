@@ -1,6 +1,8 @@
 //! HTTP contract tests: exact method/status/headers/body, HEAD semantics,
 //! templating, generators, Arts signing, traversal rejection, and deterministic
-//! startup. Ephemeral loopback ports only; no sleeps for readiness.
+//! startup. Ephemeral loopback ports only; in-process servers need no
+//! readiness sleep (the bound address implies listening); the one spawned
+//! subprocess test polls its address file with a bounded budget.
 
 mod common;
 
@@ -222,6 +224,11 @@ async fn startup_writes_address_after_listening() {
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+    assert!(
+        !bound.is_empty(),
+        "address file was never written within the poll budget; the server \
+         likely failed to start"
+    );
     assert!(bound.starts_with("127.0.0.1:"), "loopback address file");
     // Address file implies readiness: connect immediately with no extra sleep.
     let res = reqwest::get(format!(

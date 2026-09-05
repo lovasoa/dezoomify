@@ -143,7 +143,7 @@ test("event channels match and forbid tile bytes", () => {
   assert.deepEqual(sorted(fromEvents), sorted(EXPECTED_CHANNELS));
   assert.deepEqual(sorted(fromIntegration), sorted(EXPECTED_CHANNELS));
   assert.ok(eventsTs.includes("assertNoTileBytes"), "redaction helper");
-  assert.ok(eventsTs.includes("tilebytes") || eventsTs.includes("pixels"), "tile-byte guard");
+  assert.ok(eventsTs.includes("FORBIDDEN_IPC_KEYS"), "forbidden-IPC-key set backs the guard");
   for (const rel of ["../src-tauri/tauri.conf.json", "../src-tauri/capabilities/generated.json", "../../../generated/desktop-capabilities.json"]) {
     const raw = readText(rel);
     assert.ok(!raw.includes("tileBytes") && !raw.includes("tile_bytes"), `${rel} must not carry tile bytes`);
@@ -196,7 +196,10 @@ test("desktop typescript stays host-neutral (no web/extension imports)", () => {
     assert.ok(!/from\s+["'][^"']*browser-runtime/.test(src), `${rel} must not import browser runtime`);
     assert.ok(!/import\s*\(\s*["'][^"']*apps\/(web|extension)/.test(src), `${rel} no dynamic web import`);
     assert.ok(!src.includes("webIntegration.ts"), `${rel} no web integration import`);
-    assert.ok(!src.match(/^\s*import .*browser-session fetch/m), `${rel} no privileged fetch`);
+    // The desktop TS layer performs no I/O of its own: it never calls
+    // fetch/XHR (host effects belong to the native runtime).
+    assert.ok(!/\bfetch\s*\(/.test(src), `${rel} must not fetch directly`);
+    assert.ok(!src.includes("XMLHttpRequest"), `${rel} must not use XHR`);
   }
   const cargo = readText("../src-tauri/Cargo.toml");
   assert.ok(cargo.includes("[workspace]"), "standalone manifest detaches workspace");

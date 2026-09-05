@@ -62,14 +62,7 @@ fn error_text_redaction() {
 #[test]
 fn every_variant_round_trips_canonically() {
     let job = job_id();
-    let commands = vec![
-        JobCommand::Start {
-            job: job.clone(),
-            input_url: "https://example.com/item".into(),
-        },
-        JobCommand::Cancel { job: job.clone() },
-    ];
-    for command in commands {
+    for command in all_commands(&job) {
         let envelope =
             ControlEnvelope::new(dezoomify_protocol::dto::ControlBody::Command(command)).unwrap();
         let bytes = codec::encode(&envelope).unwrap();
@@ -77,6 +70,213 @@ fn every_variant_round_trips_canonically() {
         let back: ControlEnvelope = codec::decode(&bytes).unwrap();
         assert_eq!(codec::encode(&back).unwrap(), bytes);
     }
+    for event in all_events(&job) {
+        let envelope =
+            ControlEnvelope::new(dezoomify_protocol::dto::ControlBody::Event(event)).unwrap();
+        let bytes = codec::encode(&envelope).unwrap();
+        assert!(bytes.ends_with(b"\n"));
+        let back: ControlEnvelope = codec::decode(&bytes).unwrap();
+        assert_eq!(codec::encode(&back).unwrap(), bytes);
+    }
+}
+
+// Exhaustive matches: adding a variant without a round-trip vector is a
+// compile error, so "every variant" stays true as the protocol grows.
+fn all_commands(job: &JobId) -> Vec<JobCommand> {
+    let commands = vec![
+        JobCommand::Start {
+            job: job.clone(),
+            input_url: "https://example.com/item".into(),
+        },
+        JobCommand::ProvideResource {
+            job: job.clone(),
+            request: "req:1".parse().unwrap(),
+            buffer: BufferHandle {
+                id: "buf:1".parse().unwrap(),
+                generation: 1,
+                length: 16,
+                checksum: None,
+            },
+        },
+        JobCommand::ProvideFetchFailure {
+            job: job.clone(),
+            request: "req:1".parse().unwrap(),
+            error: ErrorDto::new("fetch.failed", ErrorPhase::Acquisition, "gone"),
+        },
+        JobCommand::SelectImage {
+            job: job.clone(),
+            image: "img:1".parse().unwrap(),
+        },
+        JobCommand::SelectLevel {
+            job: job.clone(),
+            level: "lvl:1".parse().unwrap(),
+        },
+        JobCommand::ProvideDecodeOutcome {
+            job: job.clone(),
+            tile: "tile:1".parse().unwrap(),
+            ok: true,
+        },
+        JobCommand::ProvideProcessOutcome {
+            job: job.clone(),
+            tile: "tile:1".parse().unwrap(),
+            ok: true,
+        },
+        JobCommand::ProvideWriteOutcome {
+            job: job.clone(),
+            tile: "tile:1".parse().unwrap(),
+            ok: true,
+        },
+        JobCommand::ProvideEncodeOutcome {
+            job: job.clone(),
+            ok: true,
+        },
+        JobCommand::ProvideFinalizeOutcome {
+            job: job.clone(),
+            output: "out:1".parse().unwrap(),
+            ok: true,
+        },
+        JobCommand::ProvidePublicationOutcome {
+            job: job.clone(),
+            output: "out:1".parse().unwrap(),
+            ok: true,
+        },
+        JobCommand::RetryReady {
+            job: job.clone(),
+            attempt: "att:1".parse().unwrap(),
+        },
+        JobCommand::PartialChoice {
+            job: job.clone(),
+            recovery: "rec:1".parse().unwrap(),
+            keep_partial: true,
+        },
+        JobCommand::DestinationResponse {
+            job: job.clone(),
+            destination: "dst:1".parse().unwrap(),
+            granted: true,
+        },
+        JobCommand::Cancel { job: job.clone() },
+    ];
+    for command in &commands {
+        match command {
+            JobCommand::Start { .. }
+            | JobCommand::ProvideResource { .. }
+            | JobCommand::ProvideFetchFailure { .. }
+            | JobCommand::SelectImage { .. }
+            | JobCommand::SelectLevel { .. }
+            | JobCommand::ProvideDecodeOutcome { .. }
+            | JobCommand::ProvideProcessOutcome { .. }
+            | JobCommand::ProvideWriteOutcome { .. }
+            | JobCommand::ProvideEncodeOutcome { .. }
+            | JobCommand::ProvideFinalizeOutcome { .. }
+            | JobCommand::ProvidePublicationOutcome { .. }
+            | JobCommand::RetryReady { .. }
+            | JobCommand::PartialChoice { .. }
+            | JobCommand::DestinationResponse { .. }
+            | JobCommand::Cancel { .. } => {}
+        }
+    }
+    commands
+}
+
+fn all_events(job: &JobId) -> Vec<JobEvent> {
+    let scan = ScanId::new("scan:1").unwrap();
+    let candidate = CandidateDto {
+        id: "cand:1".parse().unwrap(),
+        url: "https://example.com/item".into(),
+        format_hint: "Zoomify".into(),
+        confidence: 90,
+        reason: "fixture".into(),
+        dedup_key: "d1".into(),
+        source_frame: "main".into(),
+    };
+    let catalog = CatalogDto {
+        images: vec![ImageDto {
+            id: "img:1".parse().unwrap(),
+            label: "One".into(),
+            format: "Zoomify".into(),
+            width: 256,
+            height: 256,
+            readiness: Readiness::Ready,
+            source_kind: "fixed-grid".into(),
+            levels: vec![LevelDto {
+                id: "lvl:1".parse().unwrap(),
+                width: 256,
+                height: 256,
+                tile_width: 256,
+                tile_height: 256,
+            }],
+        }],
+    };
+    let events = vec![
+        JobEvent::ScanSnapshot {
+            job: job.clone(),
+            snapshot: ScanSnapshot {
+                scan: scan.clone(),
+                candidates: vec![candidate],
+                complete: true,
+            },
+        },
+        JobEvent::JobState {
+            job: job.clone(),
+            state: "downloading".into(),
+        },
+        JobEvent::Catalog {
+            job: job.clone(),
+            catalog,
+        },
+        JobEvent::Progress {
+            job: job.clone(),
+            acquired: 3,
+            total: 4,
+        },
+        JobEvent::Warning {
+            job: job.clone(),
+            error: ErrorDto::new("w.x", ErrorPhase::Discovery, "w"),
+        },
+        JobEvent::RecoveryRequest {
+            job: job.clone(),
+            recovery: "rec:1".parse().unwrap(),
+            actions: vec![RecoveryAction {
+                id: "retry".into(),
+                kind: RecoveryKind::Retry,
+                scope: "tile".into(),
+                rationale: "transient".into(),
+            }],
+        },
+        JobEvent::OutputReady {
+            job: job.clone(),
+            output: "out:1".parse().unwrap(),
+        },
+        JobEvent::Completed {
+            job: job.clone(),
+            output: "out:1".parse().unwrap(),
+        },
+        JobEvent::PartialCompleted {
+            job: job.clone(),
+            output: "out:1".parse().unwrap(),
+        },
+        JobEvent::Failed {
+            job: job.clone(),
+            error: ErrorDto::new("fetch.failed", ErrorPhase::Acquisition, "gone"),
+        },
+        JobEvent::Cancelled { job: job.clone() },
+    ];
+    for event in &events {
+        match event {
+            JobEvent::ScanSnapshot { .. }
+            | JobEvent::JobState { .. }
+            | JobEvent::Catalog { .. }
+            | JobEvent::Progress { .. }
+            | JobEvent::Warning { .. }
+            | JobEvent::RecoveryRequest { .. }
+            | JobEvent::OutputReady { .. }
+            | JobEvent::Completed { .. }
+            | JobEvent::PartialCompleted { .. }
+            | JobEvent::Failed { .. }
+            | JobEvent::Cancelled { .. } => {}
+        }
+    }
+    events
 }
 
 #[test]

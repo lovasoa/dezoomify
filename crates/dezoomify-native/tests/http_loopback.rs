@@ -104,6 +104,56 @@ fn rejects_redirect_beyond_limit() {
 }
 
 #[test]
+fn allows_exactly_max_redirects() {
+    // Two hops with max_redirects = 2: exactly at the limit must succeed.
+    let (port, server) = serve(vec![
+        response("HTTP/1.1 302 Found", &[("location", "/one")], b""),
+        response("HTTP/1.1 302 Found", &[("location", "/two")], b""),
+        response(
+            "HTTP/1.1 200 OK",
+            &[("content-type", "text/plain")],
+            b"landed",
+        ),
+    ]);
+    let mut wide = limits();
+    wide.max_redirects = 2;
+    let outcome = fetch(
+        &format!("http://127.0.0.1:{port}/start"),
+        &BTreeMap::new(),
+        None,
+        None,
+        &wide,
+    )
+    .expect("exactly N redirects must be followed");
+    assert_eq!(outcome.status, 200);
+    assert_eq!(outcome.body, b"landed");
+    assert!(outcome.final_uri.ends_with("/two"));
+    server.join().expect("server");
+}
+
+#[test]
+fn rejects_redirect_when_limit_is_exceeded_by_one() {
+    // Two hops with max_redirects = 1: the second redirect must be refused,
+    // so a regression allowing one redirect too many cannot pass silently.
+    let (port, server) = serve(vec![
+        response("HTTP/1.1 302 Found", &[("location", "/one")], b""),
+        response("HTTP/1.1 302 Found", &[("location", "/two")], b""),
+    ]);
+    let mut tight = limits();
+    tight.max_redirects = 1;
+    let error = fetch(
+        &format!("http://127.0.0.1:{port}/start"),
+        &BTreeMap::new(),
+        None,
+        None,
+        &tight,
+    )
+    .expect_err("limit+1 redirects must fail");
+    assert_eq!(error.code, "transport.redirect-limit");
+    server.join().expect("server");
+}
+
+#[test]
 fn fails_after_retry_exhaustion() {
     let (port, server) = serve(vec![Vec::new(), Vec::new()]);
     let error = fetch(

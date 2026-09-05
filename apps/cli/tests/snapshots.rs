@@ -23,9 +23,13 @@ fn version_snapshot() {
         .output()
         .expect("run cli");
     assert!(version.status.success());
+    let stdout = String::from_utf8(version.stdout).unwrap();
+    // Shape contract only: `<name> <version>`. The exact number comes from
+    // the package and must not be pinned here (it changes every release).
+    let expected = format!("dezoomify-cli {}\n", env!("CARGO_PKG_VERSION"));
     assert_eq!(
-        String::from_utf8(version.stdout).unwrap(),
-        "dezoomify-cli 1.0.0\n"
+        stdout, expected,
+        "--version must be `dezoomify-cli <pkg version>`"
     );
 }
 

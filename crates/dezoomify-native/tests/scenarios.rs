@@ -85,15 +85,21 @@ fn scheduler_retries_failures_then_gives_up() {
 }
 
 #[test]
-fn cache_keys_exclude_query_and_never_persist_secrets() {
-    assert_eq!(
-        cache::cache_key("https://h/item?token=secret"),
-        cache::cache_key("https://h/item?token=other")
+fn cache_keys_distinguish_resources_and_never_persist_secrets() {
+    // The key digests the full URI: query-addressed resources must never
+    // collide (serving one tile's bytes for another is silent corruption).
+    assert_ne!(
+        cache::cache_key("https://h/tile?x=0&y=0"),
+        cache::cache_key("https://h/tile?x=9&y=9")
+    );
+    assert_ne!(
+        cache::cache_key("https://h/tile"),
+        cache::cache_key("https://h/tile?token=secret")
     );
     let dir = std::env::temp_dir().join(format!("dz-cache-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     // A credential-bearing URL must never leak into the cache path or the
-    // stored artifact: only the query-stripped key and the payload itself.
+    // stored artifact: only the digest key and the payload itself.
     let path = cache::store(&dir, "job1", "https://h/item?token=CANARY", b"bytes").unwrap();
     assert_eq!(
         cache::load(&dir, "job1", "https://h/item?token=CANARY").unwrap(),
@@ -101,25 +107,43 @@ fn cache_keys_exclude_query_and_never_persist_secrets() {
     );
     let path_text = path.to_string_lossy();
     assert!(
-        !path_text.contains("CANARY"),
-        "cache path must exclude the query string: {path_text}"
+        !path_text.contains("CANARY") && !path_text.contains("token"),
+        "cache path must never carry URL text: {path_text}"
     );
     let content = std::fs::read(&path).unwrap();
     assert_eq!(
         content, b"bytes",
         "stored artifact must be the payload only"
     );
+    // Two distinct query-addressed URIs produce two distinct entries, each
+    // loading back its own bytes.
+    let path_b = cache::store(&dir, "job1", "https://h/item?token=CANARY&x=1", b"bytes-b").unwrap();
+    assert_ne!(path, path_b);
+    assert_eq!(
+        cache::load(&dir, "job1", "https://h/item?token=CANARY&x=1").unwrap(),
+        b"bytes-b"
+    );
+    assert_eq!(
+        cache::load(&dir, "job1", "https://h/item?token=CANARY").unwrap(),
+        b"bytes"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn output_refuses_mismatch_and_collision() {
+fn output_refuses_mismatch_without_overwrite_and_replaces_stale_temp() {
     let dir = std::env::temp_dir().join(format!("dz-out-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("out.png");
     assert!(output::validate_destination(&path, &OutputFormat::Jpeg, false).is_err());
+    // A stale temp file left by an interrupted write must not leak into the
+    // next write: the atomic write replaces both the temp and the output.
+    let stale_tmp = path.with_extension("tmp");
+    std::fs::write(&stale_tmp, b"stale-garbage").unwrap();
     output::write_atomic(&path, b"png-bytes").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"png-bytes");
+    assert!(!stale_tmp.exists(), "temp file must be gone after rename");
     assert!(output::validate_destination(&path, &OutputFormat::Png, false).is_err());
     assert!(output::validate_destination(&path, &OutputFormat::Png, true).is_ok());
     let _ = std::fs::remove_dir_all(&dir);

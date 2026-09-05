@@ -37,17 +37,21 @@ test("controller display-only branch + failed stores structured error", () => {
   c.dispatch(next("level-chosen"));
   c.dispatch(next("preflight-display-only"));
   assert.equal(c.getState().status, "display-only");
-  c.reset("s10");
-  seq = 0;
-  c.dispatch({ seq: ++seq, sessionId: "s10", kind: "start-discovery" });
-  c.dispatch({ seq: ++seq, sessionId: "s10", kind: "images-found" });
+
+  // A failure from a mid-job session (downloading) stores the structured error.
+  const d = createController("s10");
+  let dseq = 0;
+  const dnext = (kind, extra = {}) => ({ seq: ++dseq, sessionId: "s10", kind, ...extra });
+  d.dispatch(dnext("start-discovery"));
+  d.dispatch(dnext("images-found"));
+  d.dispatch(dnext("image-chosen"));
+  d.dispatch(dnext("level-chosen"));
+  d.dispatch(dnext("preflight-ok", { transport: "direct" }));
+  assert.equal(d.getState().status, "downloading");
   const err = { code: "TRANSPORT_NETWORK_ERROR", category: "transport", retryable: true, message: "Could not open the picture." };
-  // Need to go through a state that allows fail: discovering allows fail.
-  const c2 = createController("sx");
-  c2.dispatch({ seq: 1, sessionId: "sx", kind: "start-discovery" });
-  assert.ok(c2.dispatch({ seq: 2, sessionId: "sx", kind: "fail", error: err }));
-  assert.equal(c2.getState().status, "failed");
-  assert.deepEqual(c2.getState().error, err);
+  assert.ok(d.dispatch(dnext("fail", { error: err })));
+  assert.equal(d.getState().status, "failed");
+  assert.deepEqual(d.getState().error, err);
 });
 
 test("stale seq and foreign session ignored; illegal transition rejected", () => {
@@ -84,7 +88,7 @@ test("components render transport/save/error/progress plainly", () => {
   assert.equal(renderTransportLabel("direct"), "Direct from your browser");
   assert.equal(renderTransportLabel("proxy"), "Metadata proxy");
   assert.ok(renderSaveGuidance(false).includes("display only"));
-  assert.ok(renderSaveGuidance(true).includes("save"));
+  assert.ok(renderSaveGuidance(true).includes("save this picture"));
   const summary = renderErrorSummary({ code: "X", category: "c", retryable: true, message: "The picture could not be opened." });
   assert.ok(summary.includes("try again"));
   assert.ok(renderProgress(1, 4).includes("1 of 4"));

@@ -38,9 +38,13 @@ test("bounded LRU: byte + entry quotas, eviction, clear", () => {
   assert.equal(c.get("b"), undefined);
   assert.ok(c.get("a") instanceof ArrayBuffer);
   assert.ok(c.get("c") instanceof ArrayBuffer);
-  // Entry quota: adding d evicts oldest.
+  // Entry quota: adding d evicts the least-recently-used entry. After the
+  // byte-quota eviction above the entries are a and c, and a was touched
+  // before c was inserted, so a must go.
   c.set("d", new Uint8Array([1]).buffer);
-  assert.ok(c.entryCount <= 2);
+  assert.equal(c.entryCount, 2);
+  assert.equal(c.get("a"), undefined, "a is least recently used and must be evicted");
+  assert.ok(c.get("d") instanceof ArrayBuffer);
   c.clear();
   assert.equal(c.entryCount, 0);
   assert.equal(c.byteSize, 0);

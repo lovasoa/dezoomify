@@ -5,9 +5,7 @@
 //! their metadata URL or metadata bytes directly.
 
 use dezoomify_core::Vec2d;
-use dezoomify_core::core::discovery::{
-    DiscoveryError, DiscoveryOperation, RequestId, ResourceResponse,
-};
+use dezoomify_core::core::discovery::{DiscoveryError, ResourceResponse};
 use dezoomify_core::core::{
     CatalogEntry, DiscoverableGrid, DiscoverableStep, Grid, ImageCatalog, ImageDescriptor,
     LevelDescriptor, ObservationResult, Registry, TileSource, default_registry,
@@ -833,14 +831,30 @@ fn dezoomer_generic_one_by_one_placeholders_are_missing_tiles() {
 }
 
 #[test]
-fn dezoomer_google_short_url_is_a_supported_input() {
+fn dezoomer_google_short_url_resolves_to_the_google_format() {
+    // Drive a full g.co/arts discovery through the default registry and
+    // prove it resolves to the Google Arts format, not just that some
+    // format requested the input URL.
     let input = "https://g.co/arts/fixture";
-    let registry = default_registry(input);
-    let mut operation: DiscoveryOperation = registry.start(input);
-    let needs = operation.missing_resources().unwrap();
-    assert_eq!(needs.len(), 1);
-    assert_eq!(needs[0].id, RequestId(0));
-    assert_eq!(needs[0].request.uri, input);
+    let mut operation = default_registry(input).start(input);
+    let page = operation.next_priority_need().unwrap().unwrap();
+    operation
+        .provide(ResourceResponse::new(
+            page.id,
+            include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html"),
+        ))
+        .unwrap();
+    let tile_info = operation.next_priority_need().unwrap().unwrap();
+    operation
+        .provide(ResourceResponse::new(
+            tile_info.id,
+            include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/tile_info.xml"),
+        ))
+        .unwrap();
+    assert_eq!(
+        ready_image(operation.finish().unwrap()).format.as_str(),
+        "google_arts_and_culture"
+    );
 }
 
 #[test]
