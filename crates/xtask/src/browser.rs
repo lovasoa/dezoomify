@@ -153,12 +153,29 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
             }
         }
     }
-    build_wasm_glue()?;
-    sync_web_js(false)?;
+    build_site()?;
     run_node(&["--test", "test/*.test.mjs"])?;
     println!(
-        "build web: ok (wasm + browser glue emitted under wasm/; browser JS mirrors regenerated)"
+        "build web: ok (mirrors, help, wasm glue, and dist/ assembled by scripts/build-site.mjs)"
     );
+    Ok(())
+}
+
+/// Build the entire website via `scripts/build-site.mjs`: browser JS
+/// mirrors, help pages, wasm glue, and the deployable `dist/` tree. The
+/// same script runs on Cloudflare Pages at deploy time (scripts/cf-build.sh
+/// is the dashboard build command), so local builds and deployments cannot
+/// diverge.
+fn build_site() -> Result<(), String> {
+    let root = super::repo_root();
+    let status = Command::new("node")
+        .arg("scripts/build-site.mjs")
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to run node scripts/build-site.mjs: {e}"))?;
+    if !status.success() {
+        return Err("site build failed (scripts/build-site.mjs)".to_string());
+    }
     Ok(())
 }
 
@@ -184,61 +201,6 @@ pub fn sync_web_js(check: bool) -> Result<(), String> {
         } else {
             "sync-web-js regeneration failed".to_string()
         });
-    }
-    Ok(())
-}
-
-/// Build the wasm adapter and generate the browser glue into `wasm/`.
-fn build_wasm_glue() -> Result<(), String> {
-    let root = super::repo_root();
-    // Release profile: the glue under wasm/ is committed and deployed
-    // (Cloudflare Pages serves committed files), so it must be the same
-    // artifact every generator produces and small enough for real users.
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "-p",
-            "dezoomify-wasm",
-            "--release",
-            "--target",
-            "wasm32-unknown-unknown",
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to run cargo: {e}"))?;
-    if !status.success() {
-        return Err("cargo build dezoomify-wasm (wasm32) failed".to_string());
-    }
-    let wasm = root.join("target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm");
-    if !wasm.exists() {
-        return Err("wasm artifact missing after build".to_string());
-    }
-    let out_dir = root.join("wasm");
-    std::fs::create_dir_all(&out_dir).map_err(|e| format!("mkdir wasm/: {e}"))?;
-    let status = Command::new("wasm-bindgen")
-        .args([
-            "--target",
-            "web",
-            "--out-dir",
-            out_dir.to_str().expect("utf8 root"),
-            "--out-name",
-            "dezoomify-wasm",
-            wasm.to_str().expect("utf8 wasm"),
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|_| {
-            "wasm-bindgen not found; install wasm-bindgen-cli matching the \
-             crates/dezoomify-wasm wasm-bindgen version (see docs/development.md)"
-                .to_string()
-        })?;
-    if !status.success() {
-        return Err("wasm-bindgen glue generation failed".to_string());
-    }
-    for file in ["dezoomify-wasm.js", "dezoomify-wasm_bg.wasm"] {
-        if !out_dir.join(file).exists() {
-            return Err(format!("wasm glue missing {file}"));
-        }
     }
     Ok(())
 }

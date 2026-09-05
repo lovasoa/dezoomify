@@ -13,9 +13,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "-D",
         "warnings",
     ])?;
-    super::sources::verify(&[])?;
     super::fixtures::verify(&[])?;
-    super::parity::validate(&[])?;
     super::browser::sync_web_js(true)?;
     println!("check: ok");
     Ok(())

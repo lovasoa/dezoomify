@@ -1,5 +1,5 @@
-//! `cargo xtask test native`, `test scenario`, `build cli`,
-//! `parity validate --native`: native runtime + CLI gates.
+//! `cargo xtask test native`, `test scenario`, `build cli`: native runtime +
+//! CLI gates.
 
 use std::process::Command;
 
@@ -64,14 +64,6 @@ pub fn test_scenario(args: &[String]) -> Result<(), String> {
 pub fn build_cli(_args: &[String]) -> Result<(), String> {
     run_cargo(&["build", "-p", "dezoomify-cli"])?;
     println!("build cli: ok");
-    Ok(())
-}
-
-pub fn parity_native() -> Result<(), String> {
-    // Deterministic old/new comparison stub: native scenarios + CLI snapshots.
-    test_native(&[])?;
-    test_scenario(&[])?;
-    println!("parity validate --native: ok (native scenarios + CLI snapshots green)");
     Ok(())
 }
 

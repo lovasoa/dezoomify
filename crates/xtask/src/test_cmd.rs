@@ -1,10 +1,8 @@
 //! `cargo xtask test`: fast deterministic aggregate.
 //! Runs check, workspace unit tests, core, protocol, job, wasm, browser, UI,
-//! web, native, scenario, desktop, extension, and native-messaging suites plus
-//! the legacy-web harness. Named test targets exist only for their owner
-//! phases (core 04, protocol 05, job 06, wasm 07, browser/ui/web 08-09,
-//! native/scenario 10, desktop 11, extension 12). Rejects opt-in live flags;
-//! propagates the first nonzero result with a stable summary.
+//! web, native, scenario, desktop, extension, and native-messaging suites.
+//! Named test targets exist only for their owning layers. Rejects opt-in
+//! live flags; propagates the first nonzero result with a stable summary.
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
@@ -34,12 +32,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Some("ui") => return super::browser::test_ui(&args[1..]),
             Some("web") => return super::browser::test_web(&args[1..]),
             Some("native") => return super::native::test_native(&args[1..]),
-            Some("scenario") => {
-                if args.get(1).map(String::as_str) == Some("--suite") {
-                    return super::cutover::test_scenario_suite(&args[1..]);
-                }
-                return super::native::test_scenario(&args[1..]);
-            }
+            Some("scenario") => return super::native::test_scenario(&args[1..]),
             Some("desktop") => return super::desktop::test_desktop(&args[1..]),
             Some("extension") => return super::extension::test_extension(&args[1..]),
             Some("native-messaging") => {
@@ -84,7 +77,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
     run_step("test-native-messaging", &mut summary, || {
         super::extension::test_native_messaging(&[])
     })?;
-    run_step("legacy-web-harness", &mut summary, legacy_web_harness)?;
     print_summary(&summary);
     println!("test: all fast deterministic suites pass");
     Ok(())
@@ -121,21 +113,4 @@ fn print_summary(summary: &[(&str, bool)]) {
     for (name, ok) in summary {
         println!("  {}: {}", name, if *ok { "pass" } else { "FAIL" });
     }
-}
-
-fn legacy_web_harness() -> Result<(), String> {
-    let root = super::repo_root();
-    let dir = root.join("crates/fixture-server/tests/legacy-web");
-    for cmd in ["npm ci", "npm test"] {
-        let mut parts = cmd.split_whitespace();
-        let status = std::process::Command::new(parts.next().expect("cmd"))
-            .args(parts)
-            .current_dir(&dir)
-            .status()
-            .map_err(|e| format!("harness '{cmd}' failed to run: {e}"))?;
-        if !status.success() {
-            return Err(format!("harness '{cmd}' failed"));
-        }
-    }
-    Ok(())
 }

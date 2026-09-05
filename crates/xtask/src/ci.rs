@@ -50,7 +50,6 @@ fn ci_lane(lane: &str) -> Result<(), String> {
         "extension" => super::extension::test_extension(&[]),
         "protocol" => super::protocol::test_protocol(),
         "security" => {
-            super::parity::validate(&[])?;
             super::protocol::run(&["check".to_string()])?;
             println!("ci security: ok");
             Ok(())
