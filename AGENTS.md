@@ -235,7 +235,14 @@ Preserve Dezoomify's distinctive visual identity and atmospheric parchment aesth
   redirects, headers, cookies, range behavior, opaque and readable responses, failures,
   and timing without contacting third parties.
 - Keep live compatibility tests opt-in and non-blocking. Every behavior relied
-  on by an app must also have deterministic regression coverage.
+  on by an app must also have deterministic regression coverage. Live tests
+  assert real success: every target in a live list must actually pass when run.
+  Never add a target expected to fail, never tolerate, skip-after-attempt, or
+  mask a failing target, and never weaken an assertion to make a live target
+  pass. When a site stops working, remove it from the live target list and
+  record it with the reason in `docs/migration/live-inventory.csv`; re-add it
+  only once it genuinely works again. A dead or bot-blocked site is documented
+  in the issue or inventory, never encoded as a tolerated test failure.
 - Test at the lowest owning layer first, then boundary integration, then the
   affected app. Add parity tests before deleting migrated legacy behavior.
 

@@ -9,9 +9,10 @@
 //! route and only where a legacy target requires it), and bounded (per-fetch
 //! timeout, size caps, width cap, limited redirects). Live failures never
 //! replace deterministic regression coverage or block an ordinary pull
-//! request. Dead or changed sites must be recorded in
-//! `docs/migration/live-inventory.csv` (`status` column), never silently
-//! skipped.
+//! request. Every target in this list must actually pass: there is no
+//! tolerated-failure status. Dead or changed sites are removed from this
+//! list and recorded with the reason in `docs/migration/live-inventory.csv`,
+//! never silently skipped and never fetched with their failure ignored.
 
 use std::process::Command;
 
@@ -27,8 +28,10 @@ struct LiveTarget {
     headers: &'static [(&'static str, &'static str)],
     /// Legacy parity escape hatch, explicitly user-opted per target.
     accept_invalid_certs: bool,
-    /// `alive` targets must produce a real image; `dead`/`http-only` targets
-    /// are documented diagnostics whose failure does not fail the run.
+    /// `alive` targets must produce a real image; `http-only` targets are
+    /// documented policy rows that are never fetched. No other status exists:
+    /// a target expected to fail must be removed from this list and recorded
+    /// in `docs/migration/live-inventory.csv` instead.
     status: &'static str,
 }
 
@@ -202,18 +205,6 @@ const TARGETS: &[LiveTarget] = &[
         accept_invalid_certs: false,
         status: "alive",
     },
-    // lovasoa/dezoomify#772: National Library of New Zealand. Alive for real
-    // browsers but fronted by an Incapsula JS challenge, so the CLI receives
-    // the challenge HTML instead of IIP metadata. Kept as a documented
-    // diagnostic; failure does not fail the run.
-    LiveTarget {
-        name: "iipimage_natlib",
-        inventory_id: "L63",
-        url: "https://ndhadeliver.natlib.govt.nz/iipsrv?FIF=2013/04/19/ac_3/V1-FL16627598.jp2",
-        headers: &[],
-        accept_invalid_certs: false,
-        status: "dead",
-    },
     LiveTarget {
         name: "custom_yaml",
         inventory_id: "L52",
@@ -330,6 +321,13 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
     if args == ["--dry-run", "--fixtures"] {
         // No network: validate the target list against the inventory.
         for target in TARGETS {
+            if target.status != "alive" && target.status != "http-only" {
+                return Err(format!(
+                    "target {} has unknown status '{}' (only 'alive' and 'http-only' exist; \
+                     a target expected to fail must not be in the list)",
+                    target.name, target.status
+                ));
+            }
             if !https_bounded(target.url) && target.status != "http-only" {
                 return Err(format!(
                     "target {} is http but not marked http-only",
@@ -404,7 +402,7 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
     let temp_dir = std::env::temp_dir().join(format!("dezoomify-live-{}", std::process::id()));
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("temp dir: {e}"))?;
 
-    let mut failed_alive: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
     let mut passed = 0usize;
     let mut skipped = 0usize;
     for target in &targets {
@@ -452,31 +450,27 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
                     target.name,
                     truncate(&detail, 220)
                 );
-                if target.status == "alive" {
-                    failed_alive.push(format!("{} [{}]", target.inventory_id, target.name));
-                }
+                failed.push(format!("{} [{}]", target.inventory_id, target.name));
             }
             Err(e) => {
                 println!(
                     "live {} [{}]: FAIL (cli spawn: {e})",
                     target.inventory_id, target.name
                 );
-                if target.status == "alive" {
-                    failed_alive.push(format!("{} [{}]", target.inventory_id, target.name));
-                }
+                failed.push(format!("{} [{}]", target.inventory_id, target.name));
             }
         }
     }
     let _ = std::fs::remove_dir_all(&temp_dir);
     println!(
-        "test live --public: {passed} passed, {skipped} skipped (http-only), {} unexpected failure(s)",
-        failed_alive.len()
+        "test live --public: {passed} passed, {skipped} skipped (http-only), {} failure(s)",
+        failed.len()
     );
-    if !failed_alive.is_empty() {
+    if !failed.is_empty() {
         return Err(format!(
-            "still-alive live targets failed (document them in docs/migration/live-inventory.csv \
-             with status=dead or fix the regression): {}",
-            failed_alive.join(", ")
+            "live targets failed (remove the site from crates/xtask/src/live.rs and record the \
+             failure in docs/migration/live-inventory.csv, or fix the regression): {}",
+            failed.join(", ")
         ));
     }
     Ok(())

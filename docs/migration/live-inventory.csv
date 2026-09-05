@@ -61,4 +61,3 @@ L59,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,NGI ArcGIS,wmts.ngi.b
 L60,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Cartesius basemap,www.cartesius.be,ArcGIS,real CLI downloads a bounded output image,cli-live,manual,unassigned
 L61,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,LizardTech Iserv,cartweb.geography.ua.edu,LizardTech,real CLI downloads a bounded output image,cli-live,manual,unassigned
 L62,migration-sources/dezoomify-rs/tests/live_dezoomers.rs,Uffizi XLimage,uffizicloud.centrica.it,XLimage,real CLI downloads a bounded output image,cli-live,manual,unassigned
-L63,https://github.com/lovasoa/dezoomify/issues/772,National Library NZ,ndhadeliver.natlib.govt.nz,IIPImage,diagnostic only: Incapsula bot challenge blocks CLI (challenge HTML instead of IIP metadata),cli-live,manual,unassigned
