@@ -258,7 +258,7 @@ test("renderView mounts card and updates job section in place without DOM destru
       url: "https://museum.example.org/artwork/1",
       startedAt: Date.now() - 3000,
       stepLabel: "Finding the zoomable image…",
-      detail: "Contacting the museum server…",
+      detail: "Contacting museum.example.org…",
     },
   };
 
@@ -343,6 +343,43 @@ test("renderView mounts card and updates job section in place without DOM destru
   renderView(container, { status: "idle", seq: 4, sessionId: "s1", imageCount: 0, transport: null }, callbacks);
   assert.equal(card.dataset.viewPhase, "idle");
   assert.ok(card.querySelector(".dz-form"), "idle form re-mounted after reset");
+});
+
+test("stalled reassurance names the website being waited on, never a generic server", () => {
+  const container = createMockElement("div");
+  const callbacks = {
+    onSubmitUrl: () => {},
+    onCancel: () => {},
+    onReset: () => {},
+    onSave: () => {},
+  };
+
+  const now = Date.now();
+  const ctx = {
+    jobActivity: {
+      url: "https://artsandculture.google.com/project/1",
+      startedAt: now - 20000,
+      now,
+      lastProgressAt: now - 11000,
+      stepLabel: "Finding the zoomable image…",
+    },
+  };
+
+  renderView(
+    container,
+    { status: "discovering", seq: 1, sessionId: "s1", imageCount: 0, transport: "direct" },
+    callbacks,
+    ctx,
+  );
+  const card = container.querySelector(".dz-card");
+  const reassure = card.querySelector("#dz-job-reassure");
+  assert.ok(reassure, "reassurance shown while stalled");
+  assert.notEqual(reassure.style.display, "none");
+  assert.equal(
+    reassure.textContent,
+    "Still working, artsandculture.google.com is slow to answer. You can wait, or cancel and try again later.",
+  );
+  assert.doesNotMatch(reassure.textContent, /museum/i);
 });
 
 test("failed state updates error details in place without destroying error container", () => {

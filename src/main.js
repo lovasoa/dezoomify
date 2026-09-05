@@ -66,7 +66,7 @@ function resetActivity(url        )       {
     startedAt: now,
     now,
     stepLabel: "Finding the zoomable image…",
-    detail: "Contacting the museum server…",
+    detail: `Contacting ${hostOf(url)}…`,
     pendingRequests: 0,
     completedRequests: 0,
     failedRequests: 0,
@@ -261,6 +261,15 @@ function shortUrl(url        )         {
     return `${u.host}${path}`;
   } catch {
     return String(url).slice(0, 60);
+  }
+}
+
+/** Hostname of a job's website, for plain-language progress messages. */
+function hostOf(url        )         {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "the server";
   }
 }
 
@@ -459,7 +468,7 @@ async function runJob(url        )                {
   resetActivity(url);
   writeHash(url);
   startHeartbeat();
-  setStep("Finding the zoomable image…", "Contacting the museum server…");
+  setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
   controller.dispatch(nextEvent("start-discovery", { transport: "direct" })         );
   update();
   try {

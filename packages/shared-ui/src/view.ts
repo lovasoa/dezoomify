@@ -395,6 +395,15 @@ function truncateMiddle(value: string, max = 90): string {
   return `${s.slice(0, half)}…${s.slice(s.length - half)}`;
 }
 
+/** The website a request is waiting on, for plain-language messages. */
+function hostFromUrl(url: string | undefined): string {
+  try {
+    return new URL(url ?? "").host;
+  } catch {
+    return "the server";
+  }
+}
+
 function updateInputSection(
   card: HTMLElement,
   ctx?: ViewContext,
@@ -606,9 +615,7 @@ function mountJobSection(
         <div class="dz-remaining-bar" id="dz-job-remaining-bar" style="width: 0%;"></div>
       </div>
     </div>
-    <p class="dz-reassure" id="dz-job-reassure" style="display: none;">
-      Still working — the museum server is slow to answer. You can wait, or cancel and try again later.
-    </p>
+    <p class="dz-reassure" id="dz-job-reassure" style="display: none;"></p>
     <p class="dz-job-detail" id="dz-job-detail" style="display: none;"></p>
     <div class="dz-progress-controls">
       <span class="dz-transport-badge" id="dz-job-transport">Direct from your browser</span>
@@ -766,6 +773,10 @@ function updateJobSection(
   const reassureEl = sec.querySelector<HTMLElement>("#dz-job-reassure");
   if (reassureEl) {
     reassureEl.style.display = showStalled ? "" : "none";
+    const reassureText = `Still working, ${hostFromUrl(activity.url)} is slow to answer. You can wait, or cancel and try again later.`;
+    if (reassureEl.textContent !== reassureText) {
+      reassureEl.textContent = reassureText;
+    }
   }
 
   // 7. Detail

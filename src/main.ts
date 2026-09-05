@@ -64,7 +64,7 @@ function resetActivity(url: string): void {
     startedAt: now,
     now,
     stepLabel: "Finding the zoomable image…",
-    detail: "Contacting the museum server…",
+    detail: `Contacting ${hostOf(url)}…`,
     pendingRequests: 0,
     completedRequests: 0,
     failedRequests: 0,
@@ -276,6 +276,15 @@ function shortUrl(url: string): string {
   }
 }
 
+/** Hostname of a job's website, for plain-language progress messages. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "the server";
+  }
+}
+
 // Shared metadata-proxy client (single policy implementation; the inline
 // duplicate is gone). Pre-checks credential-bearing targets, cancellation,
 // and the response-size budget; status codes map to stable machine-readable
@@ -475,7 +484,7 @@ async function runJob(url: string): Promise<void> {
   resetActivity(url);
   writeHash(url);
   startHeartbeat();
-  setStep("Finding the zoomable image…", "Contacting the museum server…");
+  setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
   controller.dispatch(nextEvent("start-discovery", { transport: "direct" }) as never);
   update();
   try {
