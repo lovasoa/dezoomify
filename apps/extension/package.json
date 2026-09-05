@@ -8,7 +8,8 @@
     "test": "node --test tests/unit/*.test.mjs",
     "test:unit": "node --test tests/unit/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "build:manifests": "node ./scripts/generate-manifests.mjs"
+    "build:manifests": "node ./scripts/generate-manifests.mjs",
+    "publish:store": "bash ./scripts/chrome-webstore-publish.sh"
   },
   "engines": {
     "node": ">=22"
