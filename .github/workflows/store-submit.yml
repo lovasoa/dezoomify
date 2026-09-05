@@ -119,7 +119,7 @@ jobs:
           curl -sS --fail --proto '=https' --max-time 120 \
             -H "Authorization: Bearer ${token}" -X PUT -T "$zip" \
             "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}" \
-            | python3 -c 'import json,sys; print("upload:", json.load(sys.stdin).get("uploadState","unknown"))'
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("upload:", d.get("uploadState","unknown")); [print("itemError:", e.get("errorDetail", e.get("error_code","?"))) for e in d.get("itemError", [])]'
       - name: Publish uploaded draft
         if: inputs.browser == 'chromium' && inputs.upload == true && inputs.publish == true
         env:

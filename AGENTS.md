@@ -70,7 +70,12 @@ one.
   abstractions, dependencies, or public API.
 - Keep commits atomic when commits are requested. Never commit, amend, push,
   force-push, rewrite history, or create a pull request without explicit user
-  instruction.
+  instruction, except for the standing authorization below.
+- Standing authorization (owner, 2026-09-05): commit and push freely to the
+  `ng` branch of `lovasoa/dezoomify` as work completes. Never force-push.
+  Never commit to, push to, or rewrite `main` (or any other branch) without a
+  fresh explicit instruction; the `ng` to `main` promotion happens only when
+  the owner declares the work done.
 - Inspect `git status` and the final diff before declaring completion. Never use
   destructive Git commands to clean a working tree.
 
