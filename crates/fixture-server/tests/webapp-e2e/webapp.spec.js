@@ -76,7 +76,7 @@ function decodePngPixels(bytes) {
 }
 
 test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", async ({ page }) => {
-  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
   const input = page.locator("#dz-url-input");
   await expect(input).toBeVisible();
   const url = `${ADDR}/fetch?url=https://fixtures.test/cli/pyramid.dzi`;
@@ -112,7 +112,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
 });
 
 test("webapp fails honestly on a page without a zoomable signal", async ({ page }) => {
-  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
   const input = page.locator("#dz-url-input");
   await expect(input).toBeVisible();
   const url = `${ADDR}/fetch?url=https://fixtures.test/cli/plain.html`;
@@ -139,7 +139,7 @@ test("default job attempts the metadata proxy after direct failure", async ({ pa
       body: JSON.stringify({ code: "PROXY_POLICY_DENIED" }),
     });
   });
-  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(UNREACHABLE_METADATA_URL);
   await page.getByRole("button", { name: /dezoomify/i }).first().click();
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
@@ -185,7 +185,7 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
     },
   );
 
-  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(ARTS_PAGE_URL);
   await page.getByRole("button", { name: /dezoomify/i }).first().click();
 

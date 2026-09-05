@@ -1,19 +1,20 @@
 name: website-deploy
-# GitHub Actions builds the entire website (browser JS mirrors, help pages,
-# wasm glue) into dist/ via scripts/build-site.mjs and deploys it to
-# Cloudflare Pages with wrangler (Direct Upload; see plans/website-deploy.md
-# and docs/development.md). Nothing generated is committed. Until the owner
-# completes the Pages project migration (WD4: wrangler-deployed project +
-# CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID secrets), the deploy and verify
-# steps are skipped with a warning: secrets absent means no deploy, ever.
-# Promotion: switch `branches` to [main] and SITE_HOST to dezoomify.pages.dev.
+# GitHub Actions builds the entire website into dist/ via scripts/
+# build-site.mjs: the legacy site (vendored under legacy/) at / and the new
+# app at /beta. It deploys dist/ to the new Cloudflare Pages project with
+# wrangler (Direct Upload; see plans/website-deploy.md and
+# docs/development.md). Nothing generated is committed. Until the owner sets
+# the CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID secrets (WD6), the deploy
+# and verify steps are skipped with a warning: secrets absent means no
+# deploy, ever. The old git-integrated project keeps serving production
+# until the cutover.
 on:
   push:
     branches: [ng]
   workflow_dispatch: {}
 env:
-  SITE_HOST: ng.dezoomify.pages.dev
-  CLOUDFLARE_PROJECT: dezoomify
+  SITE_HOST: dezoomify-ng.pages.dev
+  CLOUDFLARE_PROJECT: dezoomify-ng
 permissions:
   contents: read
 concurrency:
@@ -67,59 +68,65 @@ jobs:
             --branch "${{ github.ref_name }}" \
             --commit-hash "${{ github.sha }}" \
             --commit-message "deploy ${{ github.sha }}"
-      - name: Verify the deployment serves the site and no repository files
+      - name: Verify the deployment serves both apps and no repository files
         if: steps.creds.outputs.ready == 'true'
         run: |
           set -u
           for i in $(seq 1 24); do
-            apex=$(curl -sS -o /tmp/apex.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/" || true)
-            main_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/src/main.js" || true)
-            discovery_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/src/discovery.js" || true)
+            # / is the legacy site: the dezoomify-web app, served verbatim.
+            legacy=$(curl -sS -o /tmp/legacy.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/" || true)
+            # /beta/ is the new app: honest gate on HTTP 200 plus real app
+            # markers (input, entry), not just the word Dezoomify.
+            beta=$(curl -sS -o /tmp/beta.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/" || true)
+            main_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/src/main.js" || true)
+            discovery_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/src/discovery.js" || true)
             # Wasm glue must be served as real JS/wasm. A 200 text/html response
-            # is the SPA fallback masking a missing asset: Firefox then fails
-            # the worker with NS_ERROR_CORRUPTED_CONTENT and the site spins
-            # in "Finding the zoomable image..." forever.
+            # masks a missing asset: Firefox then fails the worker with
+            # NS_ERROR_CORRUPTED_CONTENT and the site spins in "Finding the
+            # zoomable image..." forever.
             wasm_js=$(curl -sS -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 \
-              "https://${{ env.SITE_HOST }}/wasm/dezoomify-wasm.js" || true)
+              "https://${{ env.SITE_HOST }}/beta/wasm/dezoomify-wasm.js" || true)
             wasm_bin=$(curl -sS -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 \
-              "https://${{ env.SITE_HOST }}/wasm/dezoomify-wasm_bg.wasm" || true)
-            # Metadata proxy function must be bound: a blocked loopback target is
-            # answered by the function itself (403), not static-asset 405.
+              "https://${{ env.SITE_HOST }}/beta/wasm/dezoomify-wasm_bg.wasm" || true)
+            # Both proxy functions must be bound: the new app's metadata relay
+            # answers a blocked loopback target itself (403), and the legacy
+            # proxy answers a missing url parameter itself (400); a static
+            # 405 or a 200 HTML fallback means the route is not live.
             proxy=$(curl -sS -o /tmp/proxy.json -w "%{http_code}" --max-time 20 \
               -H 'Content-Type: application/json' \
               -d '{"targetUrl":"http://127.0.0.1/x.json","protocolVersion":1}' \
               "https://${{ env.SITE_HOST }}/api/proxy" || true)
-            # Honest gate: HTTP 200 plus real app markers (input, entry,
-            # classifier), not just the word Dezoomify. Rejects error pages,
-            # stale bundles, and placeholder shells.
+            legacy_proxy=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 \
+              "https://${{ env.SITE_HOST }}/proxy" || true)
             help=$(curl -sS -o /tmp/help.html -w "%{http_code}" --max-time 20 \
-              "https://${{ env.SITE_HOST }}/help/index.html" || true)
+              "https://${{ env.SITE_HOST }}/beta/help/index.html" || true)
             # Exposure gate: the deployment must serve only the assembled
             # dist/ tree. Repository files (README, crates) must not appear;
-            # with SPA fallback they would be 200 text/html, so match on
-            # content, not status.
+            # match on content, not status.
             readme=$(curl -sS --max-time 20 "https://${{ env.SITE_HOST }}/README.md" || true)
             cargo_toml_ct=$(curl -sS -o /dev/null -w "%{content_type}" --max-time 20 \
               "https://${{ env.SITE_HOST }}/crates/dezoomify-wasm/Cargo.toml" || true)
             repo_files_served=0
             if grep -q "next-generation rewrite" <<<"$readme"; then repo_files_served=1; fi
             if [ "$cargo_toml_ct" = "application/toml" ]; then repo_files_served=1; fi
-            if [ "$apex" = "200" ] \
+            if [ "$legacy" = "200" ] \
+              && grep -q "rendering-canvas" /tmp/legacy.html \
+              && grep -q "zoommanager.js" /tmp/legacy.html \
+              && [ "$beta" = "200" ] \
+              && grep -q "dz-url-input\|id=\"app\"" /tmp/beta.html \
+              && grep -q "src/main.js" /tmp/beta.html \
               && [ "$main_js" = "200" ] && [ "$discovery_js" = "200" ] \
-              && [ "$proxy" = "403" ] \
+              && [ "$proxy" = "403" ] && [ "$legacy_proxy" = "400" ] \
               && [ "$wasm_js" = "200 application/javascript" ] \
               && [ "$wasm_bin" = "200 application/wasm" ] \
               && [ "$help" = "200" ] && grep -q "dz-help-topics" /tmp/help.html \
               && [ "$repo_files_served" = "0" ] \
-              && grep -q "Dezoomify" /tmp/apex.html \
-              && grep -q "dz-url-input\|id=\"app\"" /tmp/apex.html \
-              && grep -q "src/main.js" /tmp/apex.html \
-              && ! grep -q "14 of 28" /tmp/apex.html; then
-              echo "preview live: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served"
+              && ! grep -q "14 of 28" /tmp/beta.html; then
+              echo "deployment live: legacy=$legacy beta=$beta main.js=$main_js discovery.js=$discovery_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served"
               exit 0
             fi
-            echo "attempt $i: apex=$apex main.js=$main_js discovery.js=$discovery_js proxy=$proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served; retrying in 30s"
+            echo "attempt $i: legacy=$legacy beta=$beta main.js=$main_js discovery.js=$discovery_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served; retrying in 30s"
             sleep 30
           done
-          echo "branch preview did not serve expected content in time"
+          echo "deployment did not serve expected content in time"
           exit 1

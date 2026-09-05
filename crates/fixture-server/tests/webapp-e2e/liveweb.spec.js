@@ -90,7 +90,7 @@ for (const [id, url] of TARGETS) {
         if (response.status() < 400) siteOkResponses += 1;
       }
     });
-    await page.goto(ADDR + "/", { waitUntil: "domcontentloaded" });
+    await page.goto(ADDR + "/beta/", { waitUntil: "domcontentloaded" });
     const input = page.locator("#dz-url-input");
     await expect(input).toBeVisible();
     await input.fill(url);

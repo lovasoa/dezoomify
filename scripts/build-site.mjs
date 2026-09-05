@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Single website builder: regenerates every derived artifact (browser JS
-// mirrors, help pages, wasm glue) and assembles the deployable tree under
-// dist/. The website-deploy workflow runs this on GitHub Actions and
-// uploads dist/ to Cloudflare Pages with wrangler; `cargo xtask build web`
-// runs the same script locally. Nothing under dist/ is committed.
-// See plans/website-deploy.md for the deployment contract.
+// mirrors, help pages, wasm glue) and assembles one deployable tree under
+// dist/: the legacy site (vendored under legacy/, copied verbatim) serves /,
+// and the new app serves /beta. The website-deploy workflow runs this on
+// GitHub Actions and uploads dist/ to Cloudflare Pages with wrangler;
+// `cargo xtask build web` runs the same script locally. Nothing under dist/
+// is committed. See plans/website-deploy.md for the deployment contract.
 //
 // Usage:
 //   node scripts/build-site.mjs            # full build (mirrors, help,
@@ -20,15 +21,33 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DIST = path.join(ROOT, "dist");
+const BETA = "beta";
 
-// HTML entries copied verbatim; every local asset they reference
-// (stylesheets, favicons) is resolved and copied relative to them.
+// The legacy site serves / verbatim from legacy/ (vendored from master).
+// These entries are the legacy repo's dev tooling, never served; everything
+// else in legacy/ is copied byte-identical. legacy/functions/proxy.js is
+// bound at /proxy by the functions/proxy.js re-export shim, not by dist/.
+const LEGACY_EXCLUDE = new Set([
+  ".github",
+  ".gitignore",
+  "AGENTS.md",
+  "README.md",
+  "LICENSE",
+  "functions",
+  "node-app",
+  "tests",
+]);
+
+// New-app HTML entries copied verbatim under dist/beta/; every local asset
+// they reference (stylesheets, favicons) is resolved and copied relative to
+// them.
 const HTML_ENTRIES = ["index.html", "privacy.html", "terms.html"];
 
-// The only Cloudflare Pages Function route is /api/proxy (functions/api/
-// proxy.ts); functions/proxy.ts and functions/security.ts are pure modules.
+// Function routes: the new app's metadata relay at /api/proxy
+// (functions/api/proxy.ts) and the legacy site's proxy at /proxy
+// (functions/proxy.js re-exporting legacy/functions/proxy.js).
 // _routes.json in the output directory keeps every other path static-only.
-const ROUTES = { version: 1, include: ["/api/proxy"], exclude: [] };
+const ROUTES = { version: 1, include: ["/api/proxy", "/proxy"], exclude: [] };
 
 function run(cmd, args, opts = {}) {
   const res = spawnSync(cmd, args, { stdio: "inherit", cwd: ROOT, ...opts });
@@ -77,14 +96,32 @@ function browserGraph(entryScripts) {
   return [...seen];
 }
 
-function copy(rel) {
+function copy(rel, prefix = "") {
   const src = path.join(ROOT, rel);
   if (!fs.existsSync(src)) {
     throw new Error(`site asset missing: ${rel} (run with the wasm build, or fix the reference)`);
   }
-  const dest = path.join(DIST, rel);
+  const dest = path.join(DIST, prefix, rel);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
+}
+
+// Copy a whole source tree into dist/ (destRel drops the source prefix).
+function copyTree(srcRel, destRel) {
+  fs.cpSync(path.join(ROOT, srcRel), path.join(DIST, destRel), { recursive: true });
+}
+
+// The legacy site serves /: everything in legacy/ except dev tooling,
+// copied byte-identical (plans/website-deploy.md WD5).
+function copyLegacy() {
+  const legacyRoot = path.join(ROOT, "legacy");
+  if (!fs.existsSync(path.join(legacyRoot, "functions", "proxy.js"))) {
+    throw new Error("legacy/functions/proxy.js is missing (the /proxy route depends on it)");
+  }
+  for (const entry of fs.readdirSync(legacyRoot, { withFileTypes: true })) {
+    if (LEGACY_EXCLUDE.has(entry.name)) continue;
+    copyTree(path.join("legacy", entry.name), entry.name);
+  }
 }
 
 function main() {
@@ -102,7 +139,8 @@ function main() {
     if (bindgen.status !== 0) {
       throw new Error(
         "wasm-bindgen is required (install wasm-bindgen-cli matching the " +
-          "wasm-bindgen version in Cargo.lock; scripts/cf-build.sh does this on Cloudflare)",
+          "wasm-bindgen version in Cargo.lock; the website-deploy workflow " +
+          "does this via taiki-e/install-action)",
       );
     }
     run("cargo", [
@@ -124,9 +162,11 @@ function main() {
     ]);
   }
 
-  // 4. Assemble dist/: pages, their assets, the browser module graph,
-  //    the wasm glue, and the Functions routing manifest.
+  // 4. Assemble dist/: the legacy site at / (verbatim), the new app under
+  //    dist/beta/ (pages, assets, browser module graph, wasm glue), and the
+  //    Functions routing manifest.
   fs.rmSync(DIST, { recursive: true, force: true });
+  copyLegacy();
   const helpPages = fs
     .readdirSync(path.join(ROOT, "help"))
     .filter((f) => f.endsWith(".html"))
@@ -139,7 +179,7 @@ function main() {
   const entryScripts = ["src/main.js", "src/worker.js"];
   const graph = browserGraph(entryScripts);
   for (const rel of [...entries, ...assets, ...graph, "wasm/dezoomify-wasm_bg.wasm"]) {
-    copy(rel);
+    copy(rel, BETA);
   }
   fs.writeFileSync(
     path.join(DIST, "_routes.json"),
@@ -149,11 +189,15 @@ function main() {
   // 5. Sanity: the served tree must contain the deployed contract's keys.
   for (const must of [
     "index.html",
-    "src/main.js",
-    "src/worker.js",
-    "wasm/dezoomify-wasm.js",
-    "wasm/dezoomify-wasm_bg.wasm",
-    "help/index.html",
+    "404.html",
+    "zoommanager.js",
+    path.join("dezoomers", "zoomify.js"),
+    path.join(BETA, "index.html"),
+    path.join(BETA, "src", "main.js"),
+    path.join(BETA, "src", "worker.js"),
+    path.join(BETA, "wasm", "dezoomify-wasm.js"),
+    path.join(BETA, "wasm", "dezoomify-wasm_bg.wasm"),
+    path.join(BETA, "help", "index.html"),
     "_routes.json",
   ]) {
     if (!fs.existsSync(path.join(DIST, must))) {
@@ -162,7 +206,10 @@ function main() {
   }
   const count = spawnSync("find", [DIST, "-type", "f"], { encoding: "utf8" });
   const files = count.stdout.trim().split("\n").length;
-  console.log(`build-site: dist/ assembled (${files} files; entry scripts: ${entryScripts.join(", ")})`);
+  console.log(
+    `build-site: dist/ assembled (${files} files; legacy at /, new app at /${BETA}; ` +
+      `entry scripts: ${entryScripts.map((s) => `${BETA}/${s}`).join(", ")})`,
+  );
 }
 
 main();

@@ -23,3 +23,6 @@ client_secret_*.json
 wasm/*
 !wasm/dezoomify-wasm.js
 !wasm/dezoomify-wasm_bg.wasm
+
+# wrangler local state (wrangler pages dev)
+/.wrangler/
