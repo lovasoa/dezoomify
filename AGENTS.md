@@ -317,6 +317,30 @@ migration-source commands above remain authoritative in the meantime.
 - Keep commands executable from the stated directory and distinguish
   deterministic checks from live/network-dependent checks.
 
+### User documentation (when and how)
+
+- `docs/user/` is the single source of truth for everything users read. Never
+  duplicate its content in READMEs, wikis, app listings, or external sites;
+  link to it instead. Never link users to legacy doc sites (the old GitHub
+  wiki, `dezoomify-rs.ophir.dev`, `lovasoa.github.io`, `ophir.alwaysdata.net`).
+- Add or edit user documentation when: a user-visible behavior, limitation, or
+  app boundary changes; a new app or capability ships; a support question
+  appears more than once; an error message gains a recovery path worth
+  explaining. Skip it for internal refactors with no user-visible change.
+- Write for Dezoomify's users (historians, researchers, archivists, artists):
+  plain language, no mechanism vocabulary (transports, headers, policies);
+  name user actions and outcomes; state platform limits as facts about the
+  app, precisely and without blame; layer answers so the common case is
+  first and every problem ends with at least one concrete next step.
+- Pages are plain markdown with a `# <stem>` marker line, listed in
+  `docs/user/README.md`, and published to `/help/` by
+  `node scripts/build-help.mjs`. The generated `help/` output is committed;
+  never hand-edit it. `test/help-page.test.mjs` fails on drift, broken
+  anchors, and legacy links.
+- Treat page filenames and heading text as addresses: apps and error
+  messages deep-link to `help/<page>.html#<heading-slug>`, so update every
+  reference in the same change you rename a page or heading.
+
 ## Safe Completion
 
 A change is safely complete only when it stays within assigned files and the

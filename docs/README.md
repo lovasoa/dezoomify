@@ -4,6 +4,9 @@ dezoomify-ng discovers zoomable images, lets a user choose an image and level, d
 
 ## Guides
 
+- [User documentation](user/README.md): the plain-language guide for people
+  using Dezoomify, published to `/help/`; the single source of truth for all
+  user-facing copy.
 - [Product](product.md): users, workflows, and product boundaries.
 - [Architecture](architecture.md): monorepo components and dependency rules.
 - [Job engine](job-engine.md): deterministic job state, effects, and policies.
