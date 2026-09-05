@@ -5,7 +5,7 @@
 // Browser-side proxy client: POST same-origin /api/proxy, credentials omit.
 //
 // The response-size cap mirrors the server limit (`PROXY_MAX_BYTES` in
-// `functions/security.ts`): the server stays authoritative, this browser-side
+// `src/server/security.ts`): the server stays authoritative, this browser-side
 // guard only fails closed early instead of buffering an over-budget body.
 export const PROXY_METADATA_MAX_BYTES = 2 * 1024 * 1024;
 
