@@ -1,9 +1,10 @@
 // Web application entry point: wire shared controller and modern view to web integration.
 import { createController } from "../../../packages/shared-ui/src/controller.ts";
-import { renderView } from "../../../packages/shared-ui/src/view.ts";
+import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../../../packages/shared-ui/src/view.ts";
 import type { ViewContext } from "../../../packages/shared-ui/src/view.ts";
 import { createWebIntegration } from "./webIntegration.ts";
 import { loadWebConfig, isAllowedSourceUrl } from "./config.ts";
+import { classifyDiscovery } from "./discovery.ts";
 
 const config = loadWebConfig({
   WEBSITE_ORIGIN: typeof window !== "undefined" ? window.location.origin : "https://dezoomify.ophir.dev",
@@ -115,18 +116,44 @@ function update() {
         controller.dispatch(nextEvent("start-discovery") as any);
         update();
 
-        // Perform discovery
+        // Perform discovery: fetch one metadata resource, then gate every
+        // later transition on the classifier. Generic pages without any
+        // zoomable signal must fail here and never show tile progress.
         integration
           .fetchMetadata({ url, kind: "metadata" })
           .then((res) => {
-            controller.dispatch(nextEvent("images-found", { imageCount: 1, transport: res.via }) as any);
+            const verdict = classifyDiscovery(url, res as { via: string; result: unknown });
+            if (!verdict.found) {
+              if (verdict.cancelled) {
+                controller.dispatch(nextEvent("cancel") as any);
+                update();
+                return;
+              }
+              controller.dispatch(
+                nextEvent("fail", {
+                  error: verdict.error ?? {
+                    code: "NO_IMAGE_FOUND",
+                    category: "discovery",
+                    retryable: false,
+                    message: "No zoomable image was found at this address.",
+                    transport: (res as { via?: string }).via ?? "direct",
+                    phase: "discovery",
+                  },
+                }) as any,
+              );
+              update();
+              return;
+            }
+            const via = verdict.via ?? (res as { via: string }).via;
+            controller.dispatch(nextEvent("images-found", { imageCount: 1, transport: via }) as any);
             controller.dispatch(nextEvent("image-chosen") as any);
             controller.dispatch(nextEvent("level-chosen") as any);
-            controller.dispatch(nextEvent("preflight-ok", { transport: res.via }) as any);
+            controller.dispatch(nextEvent("preflight-ok", { transport: via }) as any);
             viewCtx.currentProgress = { current: 1, total: 1, message: "Reading image tiles..." };
             update();
 
-            // Simulate completion for the interface
+            // TODO: replace this placeholder completion with the real tile
+            // plan/download once the browser runtime drives core discovery.
             setTimeout(() => {
               controller.dispatch(nextEvent("save-start") as any);
               controller.dispatch(nextEvent("save-done") as any);
@@ -175,6 +202,8 @@ function update() {
 }
 
 if (appContainer) {
+  document.getElementById("dz-nav-btn-extension")?.addEventListener("click", () => showExtensionGuidance());
+  document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
   update();
 }
 
