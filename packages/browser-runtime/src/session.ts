@@ -105,7 +105,9 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
   let disposed = false;
 
   worker.onmessage = (ev: { data: unknown }) => {
-    const msg = ev.data as Record<string, unknown> & { type: string };
+    const raw = ev.data as { type?: unknown } & Record<string, unknown>;
+    if (raw === null || typeof raw !== "object" || typeof raw.type !== "string") return;
+    const msg = raw as Record<string, unknown> & { type: string };
     switch (msg.type) {
       case "need": {
         const id = msg.id as number;
@@ -131,10 +133,10 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
         return;
       }
       case "catalog":
-        settle(pendingKind === "start" ? pending : null, msg.catalog as WebCatalog);
+        settle("start", msg.catalog as WebCatalog);
         return;
       case "plan":
-        settle(pendingKind === "plan" ? pending : null, {
+        settle("plan", {
           canvas: msg.canvas as { x: number; y: number } | undefined,
           tiles: (msg.tiles ?? []) as PlanTile[],
         });
@@ -167,7 +169,7 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
         return;
       }
       case "processed":
-        settle(pendingKind === "process" ? pending : null, msg.bytes as ArrayBuffer);
+        settle("process", msg.bytes as ArrayBuffer);
         return;
       case "error": {
         const code = (msg.code as string) || "DISCOVERY_FAILED";
@@ -184,13 +186,14 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
     }
   };
 
-  function settle(kind: Pending | null, value: unknown): void {
+  function settle(kind: "start" | "plan" | "process", value: unknown): void {
+    // A message for another operation must never cancel the pending one:
+    // ignore kind mismatches without clearing pending state.
+    if (pendingKind !== kind || !pending) return;
     const current = pending;
     pending = null;
     pendingKind = null;
-    if (kind && current === kind) {
-      (current.resolve as (v: unknown) => void)(value);
-    }
+    (current.resolve as (v: unknown) => void)(value);
   }
 
   function rejectPending(error: unknown): void {

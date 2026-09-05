@@ -9,8 +9,8 @@
 // produce a structured NO_IMAGE_FOUND failure, never fake tile counts.
 //
 // Keep this file erasable-syntax-only so node type-stripping can import it
-// directly in tests, and mirror any change into `./discovery.js` for the
-// browser bundle served without a build step.
+// directly in tests. The browser `./discovery.js` mirror is generated from
+// this file by `scripts/sync-web-js.mjs`; never edit the `.js` by hand.
 
 export interface DiscoveryStructuredError {
   code: string;

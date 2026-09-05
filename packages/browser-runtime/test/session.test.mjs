@@ -159,6 +159,50 @@ test("a second operation is rejected while one is pending", async () => {
   await assert.rejects(() => first, (error) => error.code === "DISPOSED");
 });
 
+test("malformed worker messages are ignored, never thrown", async () => {
+  const worker = loopbackWorker((msg, respond) => {
+    if (msg.type === "start") {
+      respond(null);
+      respond({ notype: true });
+      respond({ type: 42 });
+      respond({ type: "catalog", catalog: { images: [] } });
+      return;
+    }
+  });
+  const client = createDiscoveryClient({
+    worker,
+    fetchMetadata: async () => ({ bytes: new ArrayBuffer(1) }),
+    fetchTile: async () => ({ bytes: new ArrayBuffer(1) }),
+    probeSize: async () => ({ ok: false, width: 0, height: 0 }),
+  });
+  const catalog = await client.start("https://site.test/x");
+  assert.deepEqual(catalog.images, []);
+  client.dispose();
+});
+
+test("a stray catalog during a pending plan does not cancel the plan", async () => {
+  const worker = loopbackWorker((msg, respond) => {
+    if (msg.type === "plan") {
+      respond({ type: "catalog", catalog: { images: [] } });
+      respond({
+        type: "plan",
+        canvas: { x: 256, y: 256 },
+        tiles: [],
+      });
+      return;
+    }
+  });
+  const client = createDiscoveryClient({
+    worker,
+    fetchMetadata: async () => ({ bytes: new ArrayBuffer(1) }),
+    fetchTile: async () => ({ bytes: new ArrayBuffer(1) }),
+    probeSize: async () => ({ ok: false, width: 0, height: 0 }),
+  });
+  const plan = await client.plan(0, 0);
+  assert.equal(plan.canvas.x, 256);
+  client.dispose();
+});
+
 test("dispose rejects pending operations and stops the worker", async () => {
   const worker = loopbackWorker(() => {});
   const client = createDiscoveryClient({

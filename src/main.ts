@@ -1,4 +1,5 @@
-// Web application entry point (typed twin of main.js; keep both in sync).
+// Web application entry point (single source of truth; `./main.js` is
+// generated from this file by `scripts/sync-web-js.mjs`, never hand-edited).
 // Real pipeline: worker-hosted wasm core discovery -> direct-first transport
 // with automatic eligible metadata-proxy fallback -> tile download -> canvas
 // assembly -> real PNG save. Nothing here fabricates progress or completion.

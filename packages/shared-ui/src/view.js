@@ -1,4 +1,10 @@
-// Modern accessible Shared UI view renderer (Vanilla JS for browser & tests).
+// GENERATED from packages/shared-ui/src/view.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/shared-ui/src/view.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
+// Modern accessible Shared UI view renderer.
+// Binds host-neutral DOM components to the shared controller and app integration.
+
 import { renderAppChoice } from "./controller.js";
 import {
   renderTransportLabel,
@@ -30,7 +36,7 @@ export const ALL_DEZOOMERS = [
   { id: "pnav", name: "pnav", description: "pnav image viewer" },
 ];
 
-export function openModal(title, subtitle, contentHtml) {
+export function openModal(title        , subtitle        , contentHtml        )       {
   if (typeof document === "undefined") return;
   document.querySelector(".dz-modal-backdrop")?.remove();
 
@@ -57,7 +63,7 @@ export function openModal(title, subtitle, contentHtml) {
     document.removeEventListener("keydown", onKeyDown);
   };
 
-  const onKeyDown = (e) => {
+  const onKeyDown = (e               ) => {
     if (e.key === "Escape") close();
   };
 
@@ -72,7 +78,7 @@ export function openModal(title, subtitle, contentHtml) {
   document.body.appendChild(backdrop);
 }
 
-function detectPlatform() {
+function detectPlatform()                                                {
   if (typeof navigator === "undefined") {
     return { name: "All Platforms", file: "latest releases", label: "Download Native App" };
   }
@@ -90,7 +96,7 @@ function detectPlatform() {
   return { name: "All Platforms", file: "latest releases", label: "Download Native App" };
 }
 
-export function showDesktopAppGuidance() {
+export function showDesktopAppGuidance()       {
   const p = detectPlatform();
   openModal(
     "Dezoomify Desktop App",
@@ -154,7 +160,7 @@ export function showDesktopAppGuidance() {
   );
 }
 
-export function showExtensionGuidance() {
+export function showExtensionGuidance()       {
   openModal(
     "Dezoomify Browser Extension",
     "Automatic viewer discovery for password-protected digital archives and complex pages",
@@ -215,7 +221,12 @@ export function showExtensionGuidance() {
   );
 }
 
-export function renderView(container, state, callbacks, ctx = {}) {
+export function renderView(
+  container             ,
+  state                 ,
+  callbacks               ,
+  ctx              ,
+)       {
   container.innerHTML = "";
 
   // Main status card
@@ -274,7 +285,7 @@ export function renderView(container, state, callbacks, ctx = {}) {
   }
 }
 
-function escapeHtml(value) {
+function escapeHtml(value        )         {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -282,14 +293,19 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function truncateMiddle(value, max = 90) {
+function truncateMiddle(value        , max = 90)         {
   const s = String(value ?? "");
   if (s.length <= max) return s;
   const half = Math.floor((max - 1) / 2);
   return `${s.slice(0, half)}…${s.slice(s.length - half)}`;
 }
 
-function renderInputSection(parent, _state, callbacks, ctx) {
+function renderInputSection(
+  parent             ,
+  _state                 ,
+  callbacks               ,
+  ctx              ,
+)       {
   // Idle only: the full explanation lives here and fades away once a job
   // starts (the job view replaces it instead of stacking below it).
 
@@ -318,8 +334,8 @@ function renderInputSection(parent, _state, callbacks, ctx) {
   form.className = "dz-form";
   form.onsubmit = (e) => {
     e.preventDefault();
-    const input = form.querySelector("#dz-url-input");
-    const selectedFormat = form.querySelector("input[name='dz-format']:checked");
+    const input = form.querySelector                  ("#dz-url-input");
+    const selectedFormat = form.querySelector                  ("input[name='dz-format']:checked");
     const url = input?.value.trim() ?? "";
     if (!url) {
       input?.focus();
@@ -346,8 +362,8 @@ function renderInputSection(parent, _state, callbacks, ctx) {
     <button type="button" class="dz-input-clear" id="dz-btn-clear" title="Clear input" aria-label="Clear input">&times;</button>
   `;
 
-  const inputEl = wrapper.querySelector("#dz-url-input");
-  const clearBtn = wrapper.querySelector("#dz-btn-clear");
+  const inputEl = wrapper.querySelector                  ("#dz-url-input");
+  const clearBtn = wrapper.querySelector                   ("#dz-btn-clear");
   if (inputEl && clearBtn) {
     const syncClear = () => {
       clearBtn.style.display = inputEl.value ? "flex" : "none";
@@ -422,7 +438,7 @@ function renderInputSection(parent, _state, callbacks, ctx) {
   parent.appendChild(form);
 }
 
-function defaultStepFor(status) {
+function defaultStepFor(status                           )         {
   switch (status) {
     case "discovering":
       return "Finding the zoomable image…";
@@ -449,7 +465,12 @@ function defaultStepFor(status) {
  *  3. reassurance when stalled (> ~10 s without progress),
  *  4. collapsed technical logs (on demand).
  */
-function renderJobSection(parent, state, callbacks, ctx = {}) {
+function renderJobSection(
+  parent             ,
+  state                 ,
+  callbacks               ,
+  ctx              ,
+)       {
   const activity = ctx?.jobActivity ?? {};
   const current = ctx?.currentProgress?.current ?? 0;
   const total = ctx?.currentProgress?.total ?? 0;
@@ -468,6 +489,8 @@ function renderJobSection(parent, state, callbacks, ctx = {}) {
   const timeoutMs = activity.timeoutMs ?? 30000;
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
   const stalledMs = Math.max(0, now - lastProgressAt);
+  // Progressive disclosure thresholds: stay quiet for fast requests, speak
+  // up once the user could plausibly wonder what is happening.
   const showPending = pending > 0 && (elapsedMs >= 2000 || longestPending >= 2000);
   const showStalled = stalledMs >= 10000 && state.status !== "saving";
   const sourceUrl = activity.url ? truncateMiddle(activity.url, 90) : "";
@@ -519,7 +542,12 @@ function renderJobSection(parent, state, callbacks, ctx = {}) {
   parent.appendChild(sec);
 }
 
-function diagnosticsText(state, ctx = {}, elapsedMs, timeoutMs) {
+function diagnosticsText(
+  state                 ,
+  ctx              ,
+  elapsedMs         ,
+  timeoutMs         ,
+)         {
   const a = ctx?.jobActivity ?? {};
   const p = ctx?.currentProgress;
   const lines = [
@@ -534,11 +562,21 @@ function diagnosticsText(state, ctx = {}, elapsedMs, timeoutMs) {
   return lines.join("\n");
 }
 
-function renderProgressSection(parent, state, callbacks, ctx) {
+function renderProgressSection(
+  parent             ,
+  state                 ,
+  callbacks               ,
+  ctx              ,
+)       {
   renderJobSection(parent, state, callbacks, ctx);
 }
 
-function renderDisplayOnlySection(parent, _state, callbacks, ctx) {
+function renderDisplayOnlySection(
+  parent             ,
+  _state                 ,
+  callbacks               ,
+  ctx              ,
+)       {
   const guidance = renderSaveGuidance(false);
   const section = document.createElement("div");
   section.className = "dz-notice-section";
@@ -575,7 +613,12 @@ function renderDisplayOnlySection(parent, _state, callbacks, ctx) {
   parent.appendChild(section);
 }
 
-function renderCompletedSection(parent, _state, callbacks, ctx) {
+function renderCompletedSection(
+  parent             ,
+  _state                 ,
+  callbacks               ,
+  ctx              ,
+)       {
   const info = ctx?.completedInfo;
   const isClean = ctx?.originClean ?? true;
   const summary = info ? renderCompletion(info.width, info.height, info.mime) : "Your image is ready.";
@@ -615,8 +658,13 @@ function renderCompletedSection(parent, _state, callbacks, ctx) {
   parent.appendChild(section);
 }
 
-function renderFailedSection(parent, state, callbacks, _ctx) {
-  const error = state.error ?? {
+function renderFailedSection(
+  parent             ,
+  state                 ,
+  callbacks               ,
+  _ctx              ,
+)       {
+  const error                  = state.error ?? {
     code: "UNKNOWN",
     category: "unknown",
     retryable: true,
@@ -688,7 +736,12 @@ function renderFailedSection(parent, state, callbacks, _ctx) {
   parent.appendChild(section);
 }
 
-function renderCancelledSection(parent, _state, callbacks, _ctx) {
+function renderCancelledSection(
+  parent             ,
+  _state                 ,
+  callbacks               ,
+  _ctx              ,
+)       {
   const section = document.createElement("div");
   section.className = "dz-notice-section";
   section.innerHTML = `
@@ -702,7 +755,12 @@ function renderCancelledSection(parent, _state, callbacks, _ctx) {
   parent.appendChild(section);
 }
 
-function renderGenericState(parent, state, callbacks, _ctx) {
+function renderGenericState(
+  parent             ,
+  state                 ,
+  callbacks               ,
+  _ctx              ,
+)       {
   const div = document.createElement("div");
   div.style.padding = "1rem 0";
   div.innerHTML = `

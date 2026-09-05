@@ -1,6 +1,10 @@
+// GENERATED from packages/shared-ui/src/controller.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/shared-ui/src/controller.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // Shared UI controller: explicit reducer, stale-seq guard, structured errors.
 
-const TRANSITIONS = {
+const TRANSITIONS                                                                   = {
   idle: { "start-discovery": "discovering" },
   discovering: {
     "images-found": "choosing-image",
@@ -37,8 +41,10 @@ const TRANSITIONS = {
   failed: { reset: "idle", "start-discovery": "discovering" },
 };
 
-export function createController(sessionId) {
-  let state = {
+export function createController(sessionId        )
+
+  {
+  let state                  = {
     status: "idle",
     seq: 0,
     sessionId,
@@ -46,8 +52,10 @@ export function createController(sessionId) {
     transport: null,
   };
 
-  function dispatch(ev) {
+  function dispatch(ev                 )          {
+    // Ignore events from another session.
     if (ev.sessionId !== state.sessionId) return false;
+    // Ignore stale sequence numbers.
     if (ev.seq <= state.seq) return false;
     const next = TRANSITIONS[state.status]?.[ev.kind];
     if (next === undefined) return false;
@@ -62,7 +70,7 @@ export function createController(sessionId) {
     return true;
   }
 
-  function reset(newSessionId) {
+  function reset(newSessionId         )       {
     state = {
       status: "idle",
       seq: 0,
@@ -72,15 +80,19 @@ export function createController(sessionId) {
     };
   }
 
-  function getState() {
+  function getState()                  {
     return { ...state };
   }
 
   return { getState, dispatch, reset };
 }
 
-export function renderAppChoice(cap = {}) {
-  const lines = [];
+/**
+ * Plain-language app-choice guidance rendered from capabilities.
+ * No jargon: avoid technical terms so tests can assert absence.
+ */
+export function renderAppChoice(cap                 )         {
+  const lines           = [];
   lines.push("Best next step:");
   if (cap.nativeAvailable) {
     lines.push(
@@ -92,7 +104,7 @@ export function renderAppChoice(cap = {}) {
     );
   } else if (cap.browserCanSave === false) {
     lines.push(
-      "This preview can only be viewed here. To keep a copy, try the desktop app on your computer.",
+      "This preview can only be viewed here. To keep a full copy, try the desktop app on your computer.",
     );
   } else {
     lines.push("You can continue in this browser. No extra steps are needed.");

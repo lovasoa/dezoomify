@@ -1,8 +1,26 @@
-// Website discovery classifier (browser ES module mirror of ./discovery.ts).
-// Keep the two files byte-equivalent in logic; this file drops types so the
-// live site served without a build step behaves exactly like the tested TS.
+// GENERATED from src/discovery.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: src/discovery.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
 
-const STRONG_CONTENT_MARKERS = [
+// Website discovery classifier: decide whether fetched metadata bytes look
+// like a zoomable image source, or whether the job must fail without any
+// tile progress.
+//
+// Pure and host-neutral: no fetch, DOM, or storage. The browser entry
+// (`main.ts` / `main.js`) fetches one metadata resource via the
+// direct-first web integration, then gates every later transition on this
+// classifier. In particular a generic article page (no zoom viewer) must
+// produce a structured NO_IMAGE_FOUND failure, never fake tile counts.
+//
+// Keep this file erasable-syntax-only so node type-stripping can import it
+// directly in tests. The browser `./discovery.js` mirror is generated from
+// this file by `scripts/sync-web-js.mjs`; never edit the `.js` by hand.
+
+// Strong content signals. Each entry is a lowercased substring that is
+// specific enough to not appear on generic article pages. Weak words such as
+// "manifest", "width", or "@context" alone are deliberately absent: many
+// ordinary pages embed a PWA manifest link or JSON-LD schema.org blocks.
+const STRONG_CONTENT_MARKERS                    = [
   ".dzi",
   "_files/",
   "imageproperties.xml",
@@ -52,7 +70,7 @@ const STRONG_CONTENT_MARKERS = [
   "image_api",
 ];
 
-const XML_MARKERS = [
+const XML_MARKERS                    = [
   "imageproperties",
   "dzi:image",
   "<image",
@@ -64,7 +82,7 @@ const XML_MARKERS = [
   "<tilemap",
 ];
 
-function toUint8(bytes) {
+function toUint8(bytes         )                    {
   if (bytes instanceof Uint8Array) return bytes;
   if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
   if (typeof SharedArrayBuffer !== "undefined" && bytes instanceof SharedArrayBuffer) {
@@ -72,19 +90,21 @@ function toUint8(bytes) {
   }
   if (Array.isArray(bytes)) {
     try {
-      return Uint8Array.from(bytes);
+      return Uint8Array.from(bytes            );
     } catch {
       return null;
     }
   }
+  // Node Buffer is a Uint8Array subclass, already handled above.
+  // ArrayBuffer views (DataView) expose .buffer.
   if (
     bytes !== null &&
     typeof bytes === "object" &&
-    "buffer" in bytes &&
-    "byteLength" in bytes
+    "buffer" in (bytes                           ) &&
+    "byteLength" in (bytes                           )
   ) {
     try {
-      const view = bytes;
+      const view = bytes                                                                     ;
       if (view.buffer instanceof ArrayBuffer) {
         const off = typeof view.byteOffset === "number" ? view.byteOffset : 0;
         const len = typeof view.byteLength === "number" ? view.byteLength : view.buffer.byteLength - off;
@@ -97,7 +117,7 @@ function toUint8(bytes) {
   return null;
 }
 
-export function bytesToTextPreview(input, maxBytes = 256 * 1024) {
+export function bytesToTextPreview(input         , maxBytes = 256 * 1024)         {
   const bytes = toUint8(input);
   if (!bytes || bytes.length === 0) return "";
   const slice = bytes.length > maxBytes ? bytes.subarray(0, maxBytes) : bytes;
@@ -106,24 +126,24 @@ export function bytesToTextPreview(input, maxBytes = 256 * 1024) {
       return new TextDecoder("utf-8", { fatal: false }).decode(slice);
     }
   } catch {
-    // fall through
+    // fall through to manual latin1 fallback
   }
   let out = "";
   const n = Math.min(slice.length, 65536);
-  for (let i = 0; i < n; i++) out += String.fromCharCode(slice[i]);
+  for (let i = 0; i < n; i++) out += String.fromCharCode(slice[i]          );
   return out;
 }
 
-export function textToBytes(text) {
+export function textToBytes(text        )              {
   if (typeof TextEncoder !== "undefined") {
-    return new TextEncoder().encode(text).buffer;
+    return new TextEncoder().encode(text).buffer               ;
   }
   const arr = new Uint8Array(text.length);
   for (let i = 0; i < text.length; i++) arr[i] = text.charCodeAt(i) & 0xff;
   return arr.buffer;
 }
 
-export function hasZoomableUrlHint(url) {
+export function hasZoomableUrlHint(url        )          {
   const lower = String(url ?? "").toLowerCase();
   if (!lower) return false;
   return (
@@ -154,24 +174,25 @@ export function hasZoomableUrlHint(url) {
   );
 }
 
-function lowerHas(haystack, needle) {
+function lowerHas(haystack        , needle        )          {
   return haystack.includes(needle);
 }
 
-export function looksLikeZoomableJson(text) {
+export function looksLikeZoomableJson(text        )          {
   const trimmed = text.trim();
   if (trimmed.length === 0) return false;
   const first = trimmed[0];
   if (first !== "{" && first !== "[") return false;
-  let parsed;
+  let parsed         ;
   try {
     parsed = JSON.parse(trimmed.slice(0, 512 * 1024));
   } catch {
     return false;
   }
-  const seen = [];
-  const stack = [parsed];
+  const seen           = [];
+  const stack            = [parsed];
   let depth = 0;
+  // Shallow walk: collect up to 200 string keys/values without recursion blowup.
   while (stack.length > 0 && depth < 500) {
     depth++;
     const node = stack.pop();
@@ -187,7 +208,7 @@ export function looksLikeZoomableJson(text) {
       continue;
     }
     if (typeof node === "object") {
-      const obj = node;
+      const obj = node                           ;
       const keys = Object.keys(obj);
       for (const k of keys) {
         const lk = k.toLowerCase();
@@ -206,15 +227,19 @@ export function looksLikeZoomableJson(text) {
         }
         if (stack.length < 200) stack.push(obj[k]);
       }
+      // IIIF image-service shape: id + dimensions + tiles/profile.
       const hasId = "id" in obj || "@id" in obj;
       const hasDims = "width" in obj && "height" in obj;
       const hasTiles = "tiles" in obj || "tile" in obj || "profile" in obj;
       if ((hasId && hasDims && hasTiles) || (hasDims && hasTiles && seen.join(" ").includes("iiif"))) {
         return true;
       }
+      // IIIF presentation shape: sequences/items with canvases.
       if ("sequences" in obj || "items" in obj || "manifest" in obj) {
         const blob = JSON.stringify(obj).toLowerCase().slice(0, 8192);
         if (blob.includes("iiif") || blob.includes("canvas") || blob.includes("sequences")) {
+          // Require an iiif signal, not just any "items" array (PWA manifests
+          // also have unrelated structures but never iiif/canvas).
           if (blob.includes("iiif") || (blob.includes("canvas") && blob.includes("@"))) {
             return true;
           }
@@ -227,15 +252,20 @@ export function looksLikeZoomableJson(text) {
   return false;
 }
 
-export function looksLikeZoomableXml(text) {
+export function looksLikeZoomableXml(text        )          {
   const lower = text.toLowerCase();
   if (lower.length === 0) return false;
+  // Require an XML-looking document, not just a stray word in HTML prose.
   const looksXml = lower.includes("<?xml") || lower.trimStart().startsWith("<");
   if (!looksXml) {
+    // HTML pages embedding a viewer still count via the marker path below,
+    // but plain prose mentioning "image" must not count.
     return false;
   }
   for (const m of XML_MARKERS) {
     if (lowerHas(lower, m)) {
+      // DZI needs structural confirmation, not just "<image" (which every
+      // SVG-bearing page contains). Require tilesize/overlap/format clues.
       if (m === "<image") {
         if (lower.includes("tilesize") || lower.includes("overlap") || lower.includes("dzi")) return true;
         continue;
@@ -246,11 +276,15 @@ export function looksLikeZoomableXml(text) {
   return false;
 }
 
-export function hasZoomableContentMarker(text) {
+export function hasZoomableContentMarker(text        )          {
   const lower = text.toLowerCase();
   if (!lower) return false;
   for (const m of STRONG_CONTENT_MARKERS) {
     if (lowerHas(lower, m)) {
+      // Guard the two most generic markers against prose false positives:
+      // "iiif" and "zoomify" must appear as viewer/config signals, not as a
+      // passing mention. Practically every real embed pairs them with a
+      // second signal (tiles, dzi, info.json, viewer, script, config).
       if (m === "iiif" || m === "zoomify") {
         const companion =
           lower.includes(".dzi") ||
@@ -267,6 +301,7 @@ export function hasZoomableContentMarker(text) {
         if (!companion) continue;
       }
       if (m === "viewer") {
+        // "viewer" alone is far too generic; only reachable via companions.
         continue;
       }
       return true;
@@ -275,7 +310,7 @@ export function hasZoomableContentMarker(text) {
   return false;
 }
 
-export function isZoomableContent(text) {
+export function isZoomableContent(text        )          {
   if (!text || text.length === 0) return false;
   if (looksLikeZoomableJson(text)) return true;
   if (looksLikeZoomableXml(text)) return true;
@@ -294,7 +329,7 @@ export const RATE_LIMITED_BY_SITE_MESSAGE =
 export const SITE_BUSY_MESSAGE =
   "The website hosting this image is receiving too many requests right now. Wait a few minutes and try again.";
 
-export function noImageFoundError(via) {
+export function noImageFoundError(via         )                           {
   return {
     code: "NO_IMAGE_FOUND",
     category: "discovery",
@@ -306,7 +341,7 @@ export function noImageFoundError(via) {
   };
 }
 
-function httpErrorFor(status, via) {
+function httpErrorFor(status        , via        )                           {
   if (status === 404) {
     return {
       code: "TRANSPORT_HTTP_ERROR",
@@ -357,9 +392,18 @@ function httpErrorFor(status, via) {
   };
 }
 
-export function classifyDiscovery(_url, fetchOutput) {
-  const via = typeof fetchOutput?.via === "string" ? fetchOutput.via : "direct";
-  const result = fetchOutput?.result;
+/**
+ * Classify one fetched metadata payload. `fetchOutput` mirrors the shape
+ * returned by `createWebIntegration().fetchMetadata`: `{ via, result }`
+ * where `result` is either a direct `TileResponse` (`outcome` field) or a
+ * proxy result (`ok` field).
+ */
+export function classifyDiscovery(
+  _url        ,
+  fetchOutput                                    ,
+)                   {
+  const via = typeof fetchOutput?.via === "string" ? (fetchOutput.via          ) : "direct";
+  const result = fetchOutput?.result                                       ;
   if (!result || typeof result !== "object") {
     return {
       found: false,
@@ -375,10 +419,11 @@ export function classifyDiscovery(_url, fetchOutput) {
     };
   }
 
+  // Proxy-shaped result: { ok, status, code?, bytes?, contentType? }.
   if ("ok" in result) {
-    const ok = result["ok"];
-    const status = typeof result["status"] === "number" ? result["status"] : 0;
-    const code = typeof result["code"] === "string" ? result["code"] : "";
+    const ok = result["ok"]           ;
+    const status = typeof result["status"] === "number" ? (result["status"]          ) : 0;
+    const code = typeof result["code"] === "string" ? (result["code"]          ) : "";
     if (!ok) {
       if (code === "TRANSPORT_CANCELLED") return { found: false, via, cancelled: true };
       if (code === "PROXY_RATE_LIMITED") {
@@ -439,17 +484,19 @@ export function classifyDiscovery(_url, fetchOutput) {
         },
       };
     }
-    const bytes = result["bytes"];
-    const contentType = typeof result["contentType"] === "string" ? result["contentType"] : undefined;
+    const bytes = result["bytes"]           ;
+    const contentType =
+      typeof result["contentType"] === "string" ? (result["contentType"]          ) : undefined;
     return classifyReadableBytes(bytes, { via, contentType });
   }
 
-  const outcome = result["outcome"];
+  // Direct-shaped result: { outcome, ... }.
+  const outcome = result["outcome"]                      ;
   switch (outcome) {
     case "readable": {
-      const bytes = result["bytes"];
-      const headers = result["headers"] ?? undefined;
-      let contentType;
+      const bytes = result["bytes"]           ;
+      const headers = (result["headers"]                                      ) ?? undefined;
+      let contentType                    ;
       if (headers) {
         for (const k of Object.keys(headers)) {
           if (k.toLowerCase() === "content-type") {
@@ -461,7 +508,7 @@ export function classifyDiscovery(_url, fetchOutput) {
       return classifyReadableBytes(bytes, { via, contentType });
     }
     case "http-error": {
-      const status = typeof result["status"] === "number" ? result["status"] : 0;
+      const status = typeof result["status"] === "number" ? (result["status"]          ) : 0;
       return { found: false, via, error: httpErrorFor(status, via) };
     }
     case "network-error": {
@@ -495,6 +542,7 @@ export function classifyDiscovery(_url, fetchOutput) {
       };
     }
     case "ordinary-image-allowed":
+      // Ordinary display without readable bytes can never back a save.
       return { found: false, via, error: noImageFoundError(via) };
     default:
       return {
@@ -512,7 +560,15 @@ export function classifyDiscovery(_url, fetchOutput) {
   }
 }
 
-export function classifyReadableBytes(bytes, opts) {
+/**
+ * Classify already-fetched readable bytes. Image binaries, empty bodies, and
+ * generic HTML/text without any zoomable signal are all negative: they yield
+ * NO_IMAGE_FOUND rather than any tile progress.
+ */
+export function classifyReadableBytes(
+  bytes         ,
+  opts                                         ,
+)                   {
   const via = opts?.via ?? "direct";
   const contentType = (opts?.contentType ?? "").toLowerCase();
   if (contentType.startsWith("image/")) {
@@ -522,6 +578,7 @@ export function classifyReadableBytes(bytes, opts) {
   if (!u8 || u8.length === 0) {
     return { found: false, via, error: noImageFoundError(via) };
   }
+  // Cap the decode: markers always appear early in metadata/HTML.
   const text = bytesToTextPreview(u8, 256 * 1024);
   if (text.length === 0) {
     return { found: false, via, error: noImageFoundError(via) };

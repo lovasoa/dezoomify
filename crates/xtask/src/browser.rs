@@ -155,8 +155,37 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
         }
     }
     build_wasm_glue()?;
+    sync_web_js(false)?;
     run_node(&["--test", "test/*.test.mjs"])?;
-    println!("build web: ok (wasm + browser glue emitted under wasm/)");
+    println!(
+        "build web: ok (wasm + browser glue emitted under wasm/; browser JS mirrors regenerated)"
+    );
+    Ok(())
+}
+
+/// Regenerate (`check == false`) or verify (`check == true`) the browser JS
+/// mirrors from their TypeScript sources via `scripts/sync-web-js.mjs`.
+/// The `.ts` files are the single source of truth; the served `.js` files
+/// are generated artifacts that must never be hand-edited.
+pub fn sync_web_js(check: bool) -> Result<(), String> {
+    let root = super::repo_root();
+    let mut cmd = Command::new("node");
+    cmd.env("NODE_NO_WARNINGS", "1");
+    cmd.arg("scripts/sync-web-js.mjs");
+    if check {
+        cmd.arg("--check");
+    }
+    cmd.current_dir(&root);
+    let status = cmd
+        .status()
+        .map_err(|e| format!("failed to run node scripts/sync-web-js.mjs: {e}"))?;
+    if !status.success() {
+        return Err(if check {
+            "browser JS mirrors drifted from TypeScript sources (run `node scripts/sync-web-js.mjs`)".to_string()
+        } else {
+            "sync-web-js regeneration failed".to_string()
+        });
+    }
     Ok(())
 }
 

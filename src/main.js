@@ -1,44 +1,53 @@
-// Web application entry point (browser ES module, no build step).
+// GENERATED from src/main.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: src/main.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
+// Web application entry point (single source of truth; `./main.js` is
+// generated from this file by `scripts/sync-web-js.mjs`, never hand-edited).
 // Real pipeline: worker-hosted wasm core discovery -> direct-first transport
 // with automatic eligible metadata-proxy fallback -> tile download -> canvas
 // assembly -> real PNG save. Nothing here fabricates progress or completion.
 import { createController } from "../packages/shared-ui/src/controller.js";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.js";
+
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
   SITE_BUSY_MESSAGE,
-  classifyDiscovery,
   classifyReadableBytes,
   noImageFoundError,
 } from "./discovery.js";
-import { createDiscoveryClient } from "../packages/browser-runtime/src/session.js";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.js";
+import {
+  createDiscoveryClient,
+  failure,
+
+} from "../packages/browser-runtime/src/session.js";
 
 let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
 let currentSeq = 0;
-let activeTransport = null;
-let client = null;
+let activeTransport                = null;
+let client                         = null;
 let jobToken = 0;
-let resultBlobUrl = null;
+let resultBlobUrl                = null;
 
 /** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
 let requestSeq = 0;
-const pendingStarts = new Map();
+const pendingStarts = new Map                                              ();
 let completedRequests = 0;
 let failedRequests = 0;
-let heartbeatTimer = null;
+let heartbeatTimer                                        = null;
 let suppressHashWrite = false;
 
-function activity() {
+function activity()                                          {
   if (!viewCtx.jobActivity) viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
-  return viewCtx.jobActivity;
+  return viewCtx.jobActivity                                           ;
 }
 
-function resetActivity(url) {
+function resetActivity(url        )       {
   pendingStarts.clear();
   completedRequests = 0;
   failedRequests = 0;
@@ -59,11 +68,11 @@ function resetActivity(url) {
   };
 }
 
-function touchProgress() {
+function touchProgress()       {
   activity().lastProgressAt = Date.now();
 }
 
-function setStep(label, detail) {
+function setStep(label        , detail         )       {
   const a = activity();
   a.stepLabel = label;
   if (detail !== undefined) a.detail = detail;
@@ -71,7 +80,7 @@ function setStep(label, detail) {
   update();
 }
 
-function pushLog(line) {
+function pushLog(line        )       {
   const a = activity();
   if (!a.log) a.log = [];
   const elapsed = a.startedAt ? Math.round((Date.now() - a.startedAt) / 1000) : 0;
@@ -79,7 +88,7 @@ function pushLog(line) {
   if (a.log.length > 60) a.log.splice(0, a.log.length - 60);
 }
 
-function noteRequestStart(label) {
+function noteRequestStart(label        )         {
   const id = ++requestSeq;
   pendingStarts.set(id, { startedAt: Date.now(), label });
   const a = activity();
@@ -88,7 +97,7 @@ function noteRequestStart(label) {
   return id;
 }
 
-function noteRequestEnd(id, ok) {
+function noteRequestEnd(id        , ok         )       {
   pendingStarts.delete(id);
   if (ok) completedRequests += 1;
   else failedRequests += 1;
@@ -100,7 +109,7 @@ function noteRequestEnd(id, ok) {
   touchProgress();
 }
 
-function refreshLongestPending() {
+function refreshLongestPending()       {
   const a = activity();
   const now = Date.now();
   a.now = now;
@@ -111,18 +120,23 @@ function refreshLongestPending() {
   a.longestPendingMs = longest;
 }
 
-function startHeartbeat() {
+function startHeartbeat()       {
   stopHeartbeat();
   heartbeatTimer = setInterval(() => {
     refreshLongestPending();
     update();
   }, 500);
-  if (heartbeatTimer && typeof heartbeatTimer.unref === "function") {
-    try { heartbeatTimer.unref(); } catch { /* browser timers lack unref */ }
+  const t = heartbeatTimer                                     ;
+  if (t && typeof t.unref === "function") {
+    try {
+      t.unref();
+    } catch {
+      // browser timers lack unref
+    }
   }
 }
 
-function stopHeartbeat() {
+function stopHeartbeat()       {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
@@ -133,24 +147,27 @@ function stopHeartbeat() {
  * Combine a caller signal with the 30 s per-request timeout.
  * Uses AbortSignal.any/timeout when available, manual wiring otherwise.
  */
-function timeoutSignal(parentSignal, ms = REQUEST_TIMEOUT_MS) {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    const timeout = AbortSignal.timeout(ms);
-    if (parentSignal && typeof AbortSignal.any === "function") {
-      return { signal: AbortSignal.any([parentSignal, timeout]), cleanup() {} };
+function timeoutSignal(parentSignal              , ms         = REQUEST_TIMEOUT_MS)                  {
+  const AS = AbortSignal
+
+   ;
+  if (typeof AbortSignal !== "undefined" && typeof AS.timeout === "function") {
+    const timeout = (AS.timeout                               )(ms);
+    if (parentSignal && typeof AS.any === "function") {
+      return { signal: (AS.any                                     )([parentSignal, timeout]), cleanup() {} };
     }
     if (!parentSignal) return { signal: timeout, cleanup() {} };
   }
   const ctrl = new AbortController();
-  let timer = null;
-  let onAbort = null;
+  let timer                                       = null;
+  let onAbort                      = null;
   const cleanup = () => {
     if (timer) clearTimeout(timer);
     timer = null;
     if (parentSignal && onAbort) parentSignal.removeEventListener("abort", onAbort);
   };
   if (parentSignal?.aborted) {
-    ctrl.abort(parentSignal.reason);
+    ctrl.abort((parentSignal                                      ).reason);
     return { signal: ctrl.signal, cleanup() {}, timedOut: () => false };
   }
   let timedOut = false;
@@ -166,7 +183,7 @@ function timeoutSignal(parentSignal, ms = REQUEST_TIMEOUT_MS) {
     onAbort = () => {
       cleanup();
       try {
-        ctrl.abort(parentSignal.reason);
+        ctrl.abort((parentSignal                                      ).reason);
       } catch {
         ctrl.abort();
       }
@@ -176,12 +193,12 @@ function timeoutSignal(parentSignal, ms = REQUEST_TIMEOUT_MS) {
   return { signal: ctrl.signal, cleanup, timedOut: () => timedOut };
 }
 
-function nextEvent(kind, extra = {}) {
+function nextEvent(kind        , extra                          = {}) {
   currentSeq++;
   return { seq: currentSeq, sessionId, kind, ...extra };
 }
 
-function isAllowedSourceUrl(urlString) {
+function isAllowedSourceUrl(urlString        )          {
   try {
     const u = new URL(urlString);
     if (u.protocol !== "https:" && u.protocol !== "http:") return false;
@@ -196,7 +213,7 @@ function isAllowedSourceUrl(urlString) {
   }
 }
 
-function isPrivateOrLocalHostname(hostname) {
+function isPrivateOrLocalHostname(hostname        )          {
   const h = hostname.toLowerCase();
   if (h === "localhost" || h === "localhost." || h.endsWith(".localhost")) return true;
   if (h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".lan")) return true;
@@ -208,7 +225,7 @@ function isPrivateOrLocalHostname(hostname) {
   return false;
 }
 
-function hasSignedQuery(urlString) {
+function hasSignedQuery(urlString        )          {
   try {
     const u = new URL(urlString);
     for (const k of u.searchParams.keys()) {
@@ -225,8 +242,8 @@ function hasSignedQuery(urlString) {
   }
 }
 
-function isProxyEligible(urlString) {
-  let u;
+function isProxyEligible(urlString        )          {
+  let u     ;
   try {
     u = new URL(urlString);
   } catch {
@@ -239,34 +256,34 @@ function isProxyEligible(urlString) {
   return true;
 }
 
-async function fetchDirect(url, headers, signal) {
+async function fetchDirect(url        , headers                         , signal              )                         {
   const reqId = noteRequestStart("direct");
   const combined = timeoutSignal(signal);
   try {
     const res = await fetch(url, { headers, signal: combined.signal, credentials: "omit" });
     if (!res.ok) {
       noteRequestEnd(reqId, false);
-      return { outcome: "http-error", finalUrl: res.url, status: res.status, headers: {} };
+      return { outcome: "http-error", finalUrl: res.url, status: res.status };
     }
     const bytes = await res.arrayBuffer();
     noteRequestEnd(reqId, true);
-    return { outcome: "readable", finalUrl: res.url, status: res.status, headers: {}, bytes };
+    return { outcome: "readable", finalUrl: res.url, status: res.status, bytes };
   } catch (e) {
     noteRequestEnd(reqId, false);
-    if (signal?.aborted) return { outcome: "cancelled", reason: "aborted" };
-    const name = e && e.name;
+    if (signal?.aborted) return { outcome: "cancelled" };
+    const name = (e                     )?.name;
     if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
       pushLog(`Request timed out after 30 s: ${shortUrl(url)}`);
-      return { outcome: "network-error", reason: "timeout after 30s" };
+      return { outcome: "network-error" };
     }
-    return { outcome: "network-error", reason: String((e && e.message) || e) };
+    return { outcome: "network-error" };
   } finally {
     combined.cleanup();
     update();
   }
 }
 
-function shortUrl(url) {
+function shortUrl(url        )         {
   try {
     const u = new URL(url);
     const path = u.pathname.length > 40 ? `…${u.pathname.slice(-39)}` : u.pathname;
@@ -276,7 +293,7 @@ function shortUrl(url) {
   }
 }
 
-async function fetchViaProxy(targetUrl, signal) {
+async function fetchViaProxy(targetUrl        , signal              )                                                                               {
   const reqId = noteRequestStart("proxy");
   const combined = timeoutSignal(signal);
   try {
@@ -294,7 +311,7 @@ async function fetchViaProxy(targetUrl, signal) {
       noteRequestEnd(reqId, false);
       let code = "PROXY_ERROR";
       try {
-        const body = await res.json();
+        const body = (await res.json())                      ;
         if (body && typeof body.code === "string") code = body.code;
       } catch {
         // Unreadable body keeps the generic code.
@@ -303,11 +320,11 @@ async function fetchViaProxy(targetUrl, signal) {
     }
     const bytes = await res.arrayBuffer();
     noteRequestEnd(reqId, true);
-    return { ok: true, status: 200, bytes, contentType: res.headers.get("content-type") || undefined };
+    return { ok: true, status: 200, bytes };
   } catch (e) {
     noteRequestEnd(reqId, false);
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-    if ((e && e.name === "TimeoutError") || (combined.timedOut && combined.timedOut())) {
+    if (((e                     )?.name === "TimeoutError") || (combined.timedOut && combined.timedOut())) {
       pushLog("Metadata proxy request timed out after 30 s.");
       return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
     }
@@ -326,68 +343,56 @@ const PROXY_LABEL = "Metadata proxy";
  * metadata proxy after a classified network failure. The zoomable-content
  * classifier gates every success: generic pages fail with NO_IMAGE_FOUND.
  */
-async function fetchMetadataFor(url, headers) {
+async function fetchMetadataFor(
+  url        ,
+  headers                        ,
+)                                                                  {
   activeTransport = DIRECT_LABEL;
   const direct = await fetchDirect(url, headers);
   let via = "direct";
-  let bytes = null;
-  if (direct.outcome === "readable") {
+  let bytes                     = null;
+  if (direct.outcome === "readable" && direct.bytes) {
     bytes = direct.bytes;
   } else if (direct.outcome === "network-error" && isProxyEligible(url)) {
     activeTransport = PROXY_LABEL;
     via = "proxy";
     const proxied = await fetchViaProxy(url);
-    if (!proxied.ok) {
+    if (!proxied.ok || !proxied.bytes) {
       if (proxied.code === "PROXY_RATE_LIMITED") {
-        throw Object.assign(new Error(RATE_LIMITED_BY_SITE_MESSAGE), {
-          code: "UPSTREAM_RATE_LIMITED",
-          retryable: true,
-        });
+        throw failure("UPSTREAM_RATE_LIMITED", RATE_LIMITED_BY_SITE_MESSAGE, true);
       }
-      throw Object.assign(
-        new Error("The metadata proxy could not fetch this address."),
-        { code: "PROXY_ERROR" },
-      );
+      throw failure("PROXY_ERROR", "The metadata proxy could not fetch this address.", false);
     }
     bytes = proxied.bytes;
   } else if (direct.outcome === "http-error") {
     if (direct.status === 429) {
       // A direct fetch uses the user's own connection, so this throttle is on
       // their IP, not on our server; the fix is waiting, not another app.
-      throw Object.assign(new Error(SITE_BUSY_MESSAGE), {
-        code: "UPSTREAM_RATE_LIMITED",
-        retryable: true,
-      });
+      throw failure("UPSTREAM_RATE_LIMITED", SITE_BUSY_MESSAGE, true);
     }
-    throw Object.assign(new Error(`The server answered HTTP ${direct.status}.`), {
-      code: "DISCOVERY_HTTP_ERROR",
-    });
+    throw failure("DISCOVERY_HTTP_ERROR", `The server answered HTTP ${direct.status}.`, false);
   } else {
-    throw Object.assign(new Error("Could not fetch this address."), {
-      code: "DISCOVERY_FAILED",
-    });
+    throw failure("DISCOVERY_FAILED", "Could not fetch this address.");
   }
   const verdict = classifyReadableBytes(bytes, { via });
   if (!verdict.found) {
-    throw Object.assign(new Error(noImageFoundError(via).message), {
-      code: "NO_IMAGE_FOUND",
-      retryable: false,
-    });
+    throw failure("NO_IMAGE_FOUND", noImageFoundError(via).message, false);
   }
-  return { bytes, finalUri: direct.outcome === "readable" ? direct.finalUrl : undefined, via };
+  return { bytes, finalUri: direct.finalUrl, via };
 }
 
-async function fetchTileFor(url, headers) {
+async function fetchTileFor(url        , headers                        )                                  {
   const direct = await fetchDirect(url, headers);
-  if (direct.outcome !== "readable") {
-    throw Object.assign(new Error(`Tile request failed (HTTP ${direct.status ?? "network"}).`), {
-      code: "TILE_FAILED",
-    });
+  if (direct.outcome !== "readable" || !direct.bytes) {
+    throw failure("TILE_FAILED", `Tile request failed (HTTP ${direct.status ?? "network"}).`);
   }
   return { bytes: direct.bytes };
 }
 
-async function probeSizeFor(url, headers) {
+async function probeSizeFor(
+  url        ,
+  headers                        ,
+)                                                          {
   try {
     const { bytes } = await fetchTileFor(url, headers);
     const bitmap = await createImageBitmap(new Blob([bytes]));
@@ -399,20 +404,18 @@ async function probeSizeFor(url, headers) {
   }
 }
 
-function disposeClient() {
-  if (client) {
-    client.dispose();
-    client = null;
-  }
+function disposeClient()       {
+  client?.dispose();
+  client = null;
 }
 
-function reportProgress(current, total, message) {
+function reportProgress(current        , total        , message        )       {
   viewCtx.currentProgress = { current, total, message };
   touchProgress();
   update();
 }
 
-function writeHash(url) {
+function writeHash(url        )       {
   if (suppressHashWrite || typeof window === "undefined" || !window.location) return;
   try {
     // Legacy contract: the hash body IS the target URL (`#https://…`).
@@ -422,7 +425,7 @@ function writeHash(url) {
   }
 }
 
-function clearHash() {
+function clearHash()       {
   if (typeof window === "undefined") return;
   try {
     if (window.history && typeof window.history.replaceState === "function") {
@@ -436,7 +439,7 @@ function clearHash() {
   }
 }
 
-function makeClient() {
+function makeClient()                  {
   disposeClient();
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   return createDiscoveryClient({
@@ -448,21 +451,21 @@ function makeClient() {
 }
 
 /** Largest declared level wins; undeclared sizes keep the last level. */
-function pickLevel(image) {
-  let best = null;
+function pickLevel(image                                                                            )              {
+  let best                     = null;
   let bestArea = -1;
   for (const level of image.levels) {
     const size = level.imageSize;
     const area = size ? size.x * size.y : -1;
     if (area >= bestArea) {
-      best = level;
+      best = { index: level.index };
       bestArea = area;
     }
   }
   return best ?? { index: 0 };
 }
 
-async function drawTile(client2, ctx2d, tile) {
+async function drawTile(client2                 , ctx2d                          , tile          )                {
   let { bytes } = await fetchTileFor(tile.uri, tile.headers ?? {});
   if (tile.processing && tile.processing !== "none") {
     bytes = await client2.process(tile.processing, bytes);
@@ -479,62 +482,61 @@ async function drawTile(client2, ctx2d, tile) {
   }
 }
 
-async function runJob(url) {
+async function runJob(url        )                {
   const token = ++jobToken;
   resetActivity(url);
   writeHash(url);
   startHeartbeat();
   setStep("Finding the zoomable image…", "Contacting the museum server…");
-  controller.dispatch(nextEvent("start-discovery", { transport: "direct" }));
+  controller.dispatch(nextEvent("start-discovery", { transport: "direct" })         );
   update();
   try {
     client = makeClient();
     pushLog(`Starting discovery for ${shortUrl(url)}`);
-    const catalog = await client.start(url);
+    const catalog             = await client.start(url);
     if (token !== jobToken) return;
     pushLog(`Found ${catalog.images.length} image${catalog.images.length === 1 ? "" : "s"}`);
     const image = catalog.images[0];
     const via = activeTransport === PROXY_LABEL ? "proxy" : "direct";
     controller.dispatch(
-      nextEvent("images-found", { imageCount: catalog.images.length, transport: via }),
+      nextEvent("images-found", { imageCount: catalog.images.length, transport: via })         ,
     );
     setStep("Image found — picking the best one…");
-    controller.dispatch(nextEvent("image-chosen"));
+    controller.dispatch(nextEvent("image-chosen")         );
     const level = pickLevel(image);
     setStep("Choosing the highest resolution…");
-    controller.dispatch(nextEvent("level-chosen"));
+    controller.dispatch(nextEvent("level-chosen")         );
     setStep("Checking the image size…");
-    controller.dispatch(nextEvent("preflight-ok", { transport: via }));
+    controller.dispatch(nextEvent("preflight-ok", { transport: via })         );
     update();
 
     const plan = await client.plan(image.id, level.index);
     if (token !== jobToken) return;
     pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
-    const canvas = document.getElementById("rendering-canvas");
-    if (!canvas) throw Object.assign(new Error("no rendering canvas"), { code: "WORKER_FAILED" });
+    const canvas = document.getElementById("rendering-canvas")                            ;
+    if (!canvas) throw failure("WORKER_FAILED", "no rendering canvas", false);
     const width = plan.canvas ? plan.canvas.x : 0;
     const height = plan.canvas ? plan.canvas.y : 0;
     if (!(width > 0 && height > 0 && width * height <= 268435456)) {
-      throw Object.assign(new Error("The image size could not be determined."), {
-        code: "PLAN_INVALID",
-      });
+      throw failure("PLAN_INVALID", "The image size could not be determined.", false);
     }
     canvas.width = width;
     canvas.height = height;
-    const ctx2d = canvas.getContext("2d");
+    const ctx2d = canvas.getContext("2d")                            ;
     ctx2d.clearRect(0, 0, width, height);
 
     const total = plan.tiles.length;
     setStep("Downloading image tiles…", `${total} tiles at full resolution`);
     reportProgress(0, total, `Downloading ${total} tiles…`);
     let done = 0;
-    let failed = null;
+    let failed          = null;
     const queue = [...plan.tiles];
-    async function tileWorker() {
+    const tileWorker = async ()                => {
       while (queue.length && !failed) {
         const tile = queue.shift();
+        if (!tile) return;
         try {
-          await drawTile(client, ctx2d, tile);
+          await drawTile(client                   , ctx2d, tile);
         } catch (error) {
           failed = error;
           return;
@@ -543,17 +545,15 @@ async function runJob(url) {
         done += 1;
         reportProgress(done, total, `Downloading ${total} tiles…`);
       }
-    }
-    await Promise.all(
-      Array.from({ length: Math.min(4, Math.max(1, total)) }, tileWorker),
-    );
+    };
+    await Promise.all(Array.from({ length: Math.min(4, Math.max(1, total)) }, tileWorker));
     if (failed) throw failed;
     if (token !== jobToken) return;
 
-    controller.dispatch(nextEvent("save-start"));
+    controller.dispatch(nextEvent("save-start")         );
     setStep("Assembling the final picture…", "Encoding PNG in your browser");
     reportProgress(total, total, "Encoding PNG…");
-    const blob = await new Promise((resolve, reject) => {
+    const blob = await new Promise      ((resolve, reject) => {
       canvas.toBlob(
         (b) => (b ? resolve(b) : reject(new Error("PNG encoding failed"))),
         "image/png",
@@ -569,24 +569,24 @@ async function runJob(url) {
     };
     viewCtx.originClean = true;
     pushLog(`Done: ${width}×${height} PNG (${total} tiles)`);
-    controller.dispatch(nextEvent("save-done"));
+    controller.dispatch(nextEvent("save-done")         );
     update();
   } catch (error) {
     if (token !== jobToken) return;
-    const code = (error && error.code) || "DISCOVERY_FAILED";
-    pushLog(`Failed (${code}): ${(error && error.message) || "unknown error"}`);
+    const code = (error                     )?.code || "DISCOVERY_FAILED";
+    pushLog(`Failed (${code}): ${((error         )?.message) || "unknown error"}`);
     controller.dispatch(
       nextEvent("fail", {
         error: {
           code,
           category: code === "NO_IMAGE_FOUND" ? "discovery" : "transport",
-          retryable: error?.retryable ?? code !== "NO_IMAGE_FOUND",
+          retryable: (error                           )?.retryable ?? code !== "NO_IMAGE_FOUND",
           message:
-            (error && error.message) || "Could not download this zoomable image.",
+            (error         )?.message || "Could not download this zoomable image.",
           transport: activeTransport ?? "direct",
           phase: code === "NO_IMAGE_FOUND" ? "discovery" : "acquisition",
         },
-      }),
+      })         ,
     );
     update();
   } finally {
@@ -600,7 +600,7 @@ async function runJob(url) {
 
 const appContainer = typeof document !== "undefined" ? document.getElementById("app") : null;
 
-let viewCtx = {
+let viewCtx              = {
   capabilities: {
     extensionAvailable: false,
     nativeAvailable: false,
@@ -610,14 +610,14 @@ let viewCtx = {
   initialUrl: undefined,
 };
 
-export function update() {
+function update()       {
   if (!appContainer) return;
   // Preserve open <details> across heartbeat re-renders so the collapsed
   // technical logs don't snap shut while elapsed time ticks.
-  const openDetails = [];
+  const openDetails           = [];
   try {
     appContainer.querySelectorAll("details").forEach((d, i) => {
-      if (d.open) openDetails.push(i);
+      if ((d                      ).open) openDetails.push(i);
     });
   } catch {
     // Non-fatal: re-render without preservation.
@@ -631,7 +631,7 @@ export function update() {
     appContainer,
     state,
     {
-      onSubmitUrl(url) {
+      onSubmitUrl(url        ) {
         if (!isAllowedSourceUrl(url)) {
           controller.dispatch(
             nextEvent("fail", {
@@ -641,7 +641,7 @@ export function update() {
                 retryable: false,
                 message: "Please enter a valid web address starting with https://",
               },
-            }),
+            })         ,
           );
           update();
           return;
@@ -652,7 +652,7 @@ export function update() {
         jobToken += 1;
         stopHeartbeat();
         disposeClient();
-        controller.dispatch(nextEvent("cancel"));
+        controller.dispatch(nextEvent("cancel")         );
         update();
       },
       onReset() {
@@ -700,7 +700,7 @@ export function update() {
         };
         try {
           if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(href).then(done, done);
+            (navigator.clipboard.writeText(href)                 ).then(done, done);
           } else if (href) {
             const ta = document.createElement("textarea");
             ta.value = href;
@@ -720,14 +720,15 @@ export function update() {
   try {
     const details = appContainer.querySelectorAll("details");
     for (const i of openDetails) {
-      if (details[i]) details[i].open = true;
+      const el = details[i]                                  ;
+      if (el) el.open = true;
     }
   } catch {
     // Non-fatal.
   }
 }
 
-function startFromHash() {
+function startFromHash()       {
   if (typeof window === "undefined") return;
   const raw = parseHash(window.location.hash);
   if (raw && looksLikeUsableUrl(raw) && isAllowedSourceUrl(raw)) {
@@ -760,4 +761,4 @@ if (appContainer) {
   update();
 }
 
-export { controller };
+export { controller, update };

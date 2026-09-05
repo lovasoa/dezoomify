@@ -7,7 +7,8 @@
 // percent-encoded and `#!/` variants so copied links keep working.
 //
 // Keep this file erasable-syntax-only so node type-stripping can import it
-// directly in tests, and mirror any change into `./hash.js`.
+// directly in tests. The browser `./hash.js` mirror is generated from this
+// file by `scripts/sync-web-js.mjs`; never edit the `.js` by hand.
 
 export function parseHash(hash: string | null | undefined): string | null {
   if (hash === null || hash === undefined) return null;
