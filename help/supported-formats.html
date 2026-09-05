@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Every site format Dezoomify understands." />
+    <title>Supported formats — Dezoomify Help</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+    <link rel="alternate icon" type="image/png" href="../favicon.png" />
+    <link rel="stylesheet" href="../src/styles.css" />
+    <link rel="stylesheet" href="../packages/shared-ui/src/styles/theme.css" />
+
+    <style>
+      .dz-help-layout {
+        display: grid;
+        grid-template-columns: 240px minmax(0, 1fr);
+        gap: 2.5rem;
+        align-items: start;
+        max-width: 1120px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      @media (max-width: 820px) {
+        .dz-help-layout { grid-template-columns: 1fr; gap: 1.5rem; }
+      }
+      .dz-help-topics {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        font-size: 0.95rem;
+      }
+      .dz-help-topics li { margin: 0 0 0.55rem 0; }
+      .dz-help-topics a { text-decoration: none; }
+      .dz-help-topics a[aria-current="page"] {
+        color: var(--dz-text-primary);
+        font-weight: 600;
+      }
+      .dz-help-article h1 { font-size: 1.9rem; margin: 0 0 1.2rem 0; }
+      .dz-help-article h2 { font-size: 1.3rem; margin: 2.2rem 0 0.7rem 0; }
+      .dz-help-article h3 { font-size: 1.1rem; margin: 1.6rem 0 0.5rem 0; }
+      .dz-help-article p, .dz-help-article li { line-height: 1.65; }
+      .dz-help-article ul, .dz-help-article ol { padding-left: 1.4rem; margin: 0.6rem 0; }
+      .dz-help-article li { margin: 0.35rem 0; }
+      .dz-help-article table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1rem 0;
+        font-size: 0.92rem;
+      }
+      .dz-help-article th, .dz-help-article td {
+        border: 1px solid var(--dz-surface-border);
+        padding: 0.45rem 0.7rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .dz-help-article th { background: rgba(161, 151, 151, 0.08); }
+      .dz-help-article pre {
+        background: rgba(161, 151, 151, 0.1);
+        border: 1px solid var(--dz-surface-border);
+        border-radius: var(--dz-radius);
+        padding: 0.8rem 1rem;
+        overflow-x: auto;
+        font-size: 0.88rem;
+      }
+      .dz-help-article blockquote {
+        margin: 1rem 0;
+        padding: 0.2rem 0 0.2rem 1rem;
+        border-left: 3px solid var(--dz-surface-border);
+        color: var(--dz-text-secondary);
+      }
+      .dz-help-article code {
+        font-family: var(--dz-font-mono);
+        font-size: 0.88em;
+        background: rgba(161, 151, 151, 0.12);
+        border-radius: 3px;
+        padding: 0.1em 0.35em;
+      }
+      .dz-help-article pre code { background: none; padding: 0; }
+      .dz-help-index-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1.4rem 2.4rem;
+        margin-top: 1.6rem;
+      }
+      .dz-help-index-item-title { font-weight: 600; margin: 0 0 0.25rem 0; }
+      .dz-help-index-item-title a { text-decoration: none; }
+      .dz-help-index-item-desc { margin: 0; color: var(--dz-text-secondary); }
+    </style>
+  </head>
+  <body>
+    <header class="dz-nav">
+      <a href="../index.html" class="dz-brand" title="Online zoomable image download">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 355 355" width="20" height="20" aria-hidden="true" style="vertical-align: middle;">
+          <path fill="#ff8080" d="m 154.32,21.09 v 100.89 h 108.07 C 256.62,85.76 234.66,54.13 202.73,36.06 187.84,27.7 171.34,22.59 154.32,21.09 Z m -30,0.9 C 88.2,27.78 56.66,49.67 38.6,81.48 31.5,94.03 26.72,107.75 24.46,121.99 h 99.86 z M 23.55,151.99 c 3.58,39.19 26.07,74.17 60.24,93.69 l 0.57,0.32 c 12.4,6.94 25.93,11.62 39.96,13.85 V 151.99 Z"/>
+          <path fill="#3c7bff" d="M 140.35,8.62 C 56.27,8.37 -10.24,100.62 17.73,180.42 38.06,255.26 129.99,294.54 198.59,262.98 225.22,289.49 251.61,316.24 278.38,342.59 290.08,352.82 307.74,347.85 316.36,336.21 325.53,327.02 338.33,317.14 334.74,302.34 331.19,288.67 318.02,281.07 309.24,270.84 290.84,252.44 272.44,234.04 254.04,215.64 305.83,145.35 264.78,33.62 179.82,13.54 168.29,10.33 156.32,8.7 144.36,8.71 143.02,8.65 141.68,8.63 140.35,8.62 Z m 9.36,16.85 a 115.05,115.05 0 0 1 51.43,14.79 115.05,115.05 0 0 1 43.58,156.65 115.05,115.05 0 0 1 -156.59,43.79 l -0.54,-0.31 A 115.05,115.05 0 0 1 44.43,83.63 115.05,115.05 0 0 1 149.71,25.47 Z"/>
+        </svg>
+        <span>Dezoomify</span>
+      </a>
+      <nav class="dz-nav-links" aria-label="Main Navigation">
+        <a href="../index.html" class="dz-nav-link">Dezoomify</a>
+        <a href="index.html" class="dz-nav-link help-link" aria-current="page" title="Help &amp; documentation">Help</a>
+        <a href="https://github.com/sponsors/lovasoa/" class="dz-nav-link donate" target="_blank" rel="noopener" title="Support hosting costs">Donate</a>
+      </nav>
+    </header>
+
+    <main class="dz-main">
+      <div class="dz-card">
+        <div class="dz-help-layout">
+          <nav class="dz-help-nav" aria-label="Help topics">
+            
+              <ul class="dz-help-topics">
+                <li><a href="start-here.html">Start here</a></li>
+                <li><a href="website.html">The Dezoomify website</a></li>
+                <li><a href="browser-extension.html">Browser extension</a></li>
+                <li><a href="desktop-app.html">Desktop app</a></li>
+                <li><a href="command-line.html">Command-line tool</a></li>
+                <li><a href="finding-the-image-address.html">Finding the image address</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                <li><a href="supported-formats.html" aria-current="page">Supported formats</a></li>
+              </ul>
+            
+          </nav>
+          <article class="dz-help-article">
+<h1 id="supported-formats">Supported formats</h1>
+<p>Zoomable image viewers are built from a handful of underlying formats. Dezoomify understands the ones below, and picks the right one automatically from the address you give it — you normally never need to choose. The list matters when automatic selection fails or when you want to check whether a site can be supported at all.</p>
+<p>Most of these formats are named after the software that serves them. To use one by hand, paste the address of the page *or* of the small description file listed below; see <a href="finding-the-image-address.html">finding the image address</a> for how to find that file.</p>
+<table><thead><tr><th>Format</th><th>Used by</th><th>What you can paste</th></tr></thead><tbody>
+<tr><td>Zoomify</td><td>Many museums and libraries</td><td>The viewer page, <code>ImageProperties.xml</code>, or any tile address</td></tr>
+<tr><td>Deep Zoom (Seadragon)</td><td>Microsoft-style viewers, many digital libraries</td><td>The viewer page or the <code>.dzi</code> file</td></tr>
+<tr><td>IIIF</td><td>Widely used by national and university libraries</td><td>A viewer page, an <code>info.json</code> file, or a presentation manifest for whole books</td></tr>
+<tr><td>Arts &amp; Culture</td><td>Google Arts &amp; Culture</td><td>The artwork page</td></tr>
+<tr><td>IIPImage</td><td>Image servers recognizable by <code>FIF=</code> in addresses</td><td>Any address containing <code>FIF=</code></td></tr>
+<tr><td>TopViewer (Memorix)</td><td>Dutch archive portals</td><td>The viewer page or a media metadata address</td></tr>
+<tr><td>krpano</td><td>Panoramas and virtual tours</td><td>The viewer page or the tour's XML file</td></tr>
+<tr><td>FSI Viewer</td><td>Neptune Labs image servers</td><td>The viewer page or the server metadata address</td></tr>
+<tr><td>LizardTech ImageServer</td><td>ImageServer services</td><td>A <code>calcrgn</code> metadata address</td></tr>
+<tr><td>Visual Library Server (VLS)</td><td>Semantics-based library portals</td><td>A <code>zoom</code>, <code>pageview</code>, or <code>thumbview</code> page</td></tr>
+<tr><td>XLimage</td><td>Italian image servers</td><td>An <code>.imgf</code> or <code>.imgi</code> metadata address</td></tr>
+<tr><td>Hungaricana</td><td>Hungarian Cultural Heritage Portal</td><td>A gallery page</td></tr>
+<tr><td>ArcGIS MapServer</td><td>Cached map services</td><td>The MapServer address</td></tr>
+<tr><td>WMTS</td><td>Geographic map tile services</td><td>The capabilities document address</td></tr>
+<tr><td>pnav</td><td>Crop-based image services</td><td>An entity page</td></tr>
+<tr><td>Generic</td><td>Any site whose tile addresses follow a simple pattern</td><td>A tile address with the two coordinates replaced by <code>--</code></td></tr>
+</tbody></table>
+<h2 id="generic">Generic</h2>
+<p>The generic format is the fallback when no named format matches. It needs tile addresses that differ only by two numbers — the column and the row of each piece. Paste one tile's address with both numbers replaced by <code>--</code>, as described in <a href="finding-the-image-address.html#last-resort-describing-the-tile-pattern">finding the image address</a>.</p>
+<h2 id="is-my-site-supported">Is my site supported?</h2>
+<p>The fastest check is to try it. If it fails, the <a href="troubleshooting.html">troubleshooting guide</a> and <a href="finding-the-image-address.html">finding the image address</a> cover the common cases. Sites that need a brand-new recipe can be requested by <a href="https://github.com/lovasoa/dezoomify/issues" target="_blank" rel="noopener">opening an issue</a>.</p>
+          </article>
+        </div>
+      </div>
+    </main>
+
+    <footer class="dz-site-footer dz-footer">
+      <div class="dz-footer-links">
+        <a href="../index.html">Dezoomify</a>
+        <a href="../privacy.html">Privacy</a>
+        <a href="../terms.html">Terms</a>
+        <a href="https://github.com/lovasoa/dezoomify" target="_blank" rel="noopener">Open Source (GPL)</a>
+        <a href="https://github.com/sponsors/lovasoa/" target="_blank" rel="noopener">Donate</a>
+      </div>
+    </footer>
+  </body>
+</html>
