@@ -51,7 +51,9 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
         if !ok {
             return Err(format!("unknown scenario '{id}'"));
         }
-        println!("test browser --scenario {id}: ok");
+        // Honest scope: scenario existence/shape only; the deterministic unit
+        // matrix below does not execute the named scenario end-to-end.
+        println!("test browser --scenario {id}: stub-ok (scenario exists; unit matrix only)");
     }
     if build_only {
         return build_only_check();
@@ -105,12 +107,14 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
         }
     }
     run_node(&["--test", "apps/web/test/*.test.mjs"])?;
-    println!("build web: ok");
+    println!("build web: stub-ok (sources + tests only; no bundle emitted)");
     Ok(())
 }
 
 pub fn dev(target: &str) -> Result<(), String> {
-    println!("dev {target}: sources verified; start a loopback dev server per docs/development.md (browser E2E requires installed browsers)");
+    println!(
+        "dev {target}: stub-ok (sources present; no dev server started; see docs/development.md)"
+    );
     Ok(())
 }
 

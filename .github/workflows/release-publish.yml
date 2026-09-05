@@ -13,4 +13,6 @@ jobs:
     environment: release-publish
     timeout-minutes: 60
     steps:
-      - run: echo "publish verified signed artifacts (draft first, promotion separate)"
+      # Honest stub: publishing is not wired; fail closed instead of
+      # green-checking an echo as if artifacts were published.
+      - run: echo "STUB: release publishing not implemented; no artifacts published" && exit 1

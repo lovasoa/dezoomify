@@ -72,7 +72,8 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
 pub fn release(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("plan") => {
-            println!("release plan: ok (test channel 1.0.0; protocol 1.0; targets cli-linux, desktop-windows)");
+            // Honest stub: no plan file is written; test-channel values only.
+            println!("release plan: stub-ok (no file written; test channel 1.0.0; protocol 1.0)");
             Ok(())
         }
         Some("build") => {
@@ -126,7 +127,8 @@ fn release_verify(args: &[String]) -> Result<(), String> {
             return Err(format!("missing release file {path}"));
         }
     }
-    println!("release verify --plan {plan} --artifacts {artifacts}: ok");
+    // Honest scope: existence only; no signature/hash/capability verification.
+    println!("release verify --plan {plan} --artifacts {artifacts}: stub-ok (existence only)");
     Ok(())
 }
 

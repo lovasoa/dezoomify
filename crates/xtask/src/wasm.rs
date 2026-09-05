@@ -95,7 +95,7 @@ fn transcripts_only() -> Result<(), String> {
 
 fn browser_focus(name: &str) -> Result<(), String> {
     run_node_harness()?;
-    println!("test wasm --browser {name}: ok (node harness shape)");
+    println!("test wasm --browser {name}: stub-ok (node harness shape; no headless browser)");
     Ok(())
 }
 

@@ -40,7 +40,7 @@ pub fn test_scenario_suite(args: &[String]) -> Result<(), String> {
     match suite.as_str() {
         "cutover-compatibility" | "postcutover" => {
             super::native::test_scenario(&[])?;
-            println!("test scenario --suite {suite}: ok");
+            println!("test scenario --suite {suite}: stub-ok (native corpus only; no packaged artifacts)");
             Ok(())
         }
         other => Err(format!("unknown scenario suite '{other}'")),
@@ -97,15 +97,15 @@ pub fn ci_lane(name: &str, extra: &[String]) -> Result<(), String> {
             if state != "fixtures" && state != "production" {
                 return Err(format!("unknown snapshot state '{state}'"));
             }
-            println!("ci postcutover-snapshot --state {state}: ok (redacted)");
+            println!("ci postcutover-snapshot --state {state}: stub-ok (no snapshot written; redaction not scanned)");
             Ok(())
         }
         "postcutover-validation" => {
-            println!("ci postcutover-validation: ok");
+            println!("ci postcutover-validation: stub-ok (no production checks)");
             Ok(())
         }
         "postcutover-cleanup-gate" => {
-            println!("ci postcutover-cleanup-gate: ok");
+            println!("ci postcutover-cleanup-gate: stub-ok (no cleanup verified)");
             Ok(())
         }
         other => Err(format!("unknown ci lane '{other}'")),

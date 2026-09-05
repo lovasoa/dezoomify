@@ -12,4 +12,6 @@ jobs:
     environment: release-signing
     timeout-minutes: 60
     steps:
-      - run: echo "sign digest-verified artifacts only (protected environment)"
+      # Honest stub: signing is not wired; fail closed instead of green-checking
+      # an echo as if artifacts were signed.
+      - run: echo "STUB: release signing not implemented; no artifacts signed" && exit 1
