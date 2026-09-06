@@ -19,9 +19,9 @@ use crate::error::NativeError;
 use crate::http::{fetch, FetchLimits, UserHeaders};
 use crate::output::{validate_destination, OutputFormat};
 
-/// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: visually
-/// transparent for scanned artwork at a fraction of PNG bytes.
-pub const JPEG_QUALITY: u8 = 92;
+/// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
+/// minus the default compression 5, matching the reference default.
+pub const JPEG_QUALITY: u8 = 95;
 
 /// JPEG (ISO 10918-1) caps both dimensions at 65535 px; larger canvases must
 /// use PNG, TIFF, or `iiif-dir`.
@@ -66,8 +66,14 @@ pub struct PipelineConfig {
     /// transient encode buffers). Default 8 GiB: jobs needing more fail with
     /// typed `output.canvas-limit` before any allocation.
     pub max_canvas_bytes: u64,
-    /// JPEG quality for `.jpg` output and `iiif-dir` tiles (default 92).
-    pub jpeg_quality: u8,
+    /// Output compression, 0 is less, 100 is more (reference `--compression`,
+    /// default 5). JPEG quality is `100 - compression` (see
+    /// [`PipelineConfig::jpeg_quality`]); PNG deflate tiers map below (see
+    /// [`PipelineConfig::png_compression`]). TIFF output is a lossless
+    /// single-image re-encode, so no quality applies there (the reference
+    /// inner-JPEG quality only exists on its passthrough path, which native
+    /// documents as a gap instead of reimplementing).
+    pub compression: u8,
     /// Tile resume cache: when set, each successfully fetched tile body is
     /// stored under `<cache_dir>/<job>/<key>` (see [`crate::cache`]) and a
     /// later run of the same job skips the fetch when the stored bytes still
@@ -114,7 +120,7 @@ impl Default for PipelineConfig {
             retry_delay: Duration::from_secs(2),
             min_interval: Duration::ZERO,
             max_canvas_bytes: 8 << 30,
-            jpeg_quality: JPEG_QUALITY,
+            compression: 5,
             cache_dir: None,
             max_width: None,
             max_height: None,
@@ -124,6 +130,36 @@ impl Default for PipelineConfig {
             partial_policy: PartialPolicy::Fail,
             cancel_flag: Arc::new(AtomicBool::new(false)),
         }
+    }
+}
+
+impl PipelineConfig {
+    /// Effective JPEG quality for `.jpg` output and `iiif-dir` tiles:
+    /// `100 - compression` (reference `encoder/mod.rs:60`; default 5 maps
+    /// to [`JPEG_QUALITY`]).
+    #[must_use]
+    pub fn jpeg_quality(&self) -> u8 {
+        100u8.saturating_sub(self.compression)
+    }
+
+    /// PNG deflate tier from `--compression` (reference
+    /// `png_encoder.rs:30-34`): 0-19 fast, 20-60 balanced, above high.
+    /// The default compression 5 selects fast, matching the previous
+    /// fixed encoder byte for byte.
+    #[must_use]
+    pub(crate) fn png_compression(&self) -> image::codecs::png::CompressionType {
+        png_compression_for(self.compression)
+    }
+}
+
+/// PNG deflate tier for a `--compression` value (reference
+/// `png_encoder.rs:30-34`).
+pub(crate) fn png_compression_for(compression: u8) -> image::codecs::png::CompressionType {
+    use image::codecs::png::CompressionType;
+    match compression {
+        0..=19 => CompressionType::Fast,
+        20..=60 => CompressionType::Default,
+        _ => CompressionType::Best,
     }
 }
 
@@ -291,9 +327,21 @@ pub(crate) fn blit_onto(
     );
 }
 
-pub(crate) fn encode_png(image: &image::RgbaImage) -> Result<Vec<u8>, NativeError> {
+/// Encode the assembled canvas as PNG at the configured deflate tier.
+/// The default tier is fast, matching the previous fixed encoder byte for
+/// byte; higher `--compression` values trade smaller files for slower
+/// encodes (reference `png_encoder.rs:30-34`).
+pub(crate) fn encode_png(
+    image: &image::RgbaImage,
+    compression: image::codecs::png::CompressionType,
+) -> Result<Vec<u8>, NativeError> {
+    use image::codecs::png::FilterType;
     let mut bytes = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+    let encoder = image::codecs::png::PngEncoder::new_with_quality(
+        &mut bytes,
+        compression,
+        FilterType::Adaptive,
+    );
     image::ImageEncoder::write_image(
         encoder,
         image.as_raw(),
@@ -521,5 +569,27 @@ mod tests {
             retry_wait(Duration::from_secs(2), 10, 20, 3),
             first.checked_mul(4).unwrap()
         );
+    }
+
+    #[test]
+    fn compression_maps_to_jpeg_quality_and_png_tiers() {
+        use image::codecs::png::CompressionType;
+        let config = PipelineConfig {
+            compression: 5,
+            ..Default::default()
+        };
+        assert_eq!(config.jpeg_quality(), 95);
+        assert_eq!(config.jpeg_quality(), JPEG_QUALITY);
+        assert_eq!(png_compression_for(0), CompressionType::Fast);
+        assert_eq!(png_compression_for(19), CompressionType::Fast);
+        assert_eq!(png_compression_for(20), CompressionType::Default);
+        assert_eq!(png_compression_for(60), CompressionType::Default);
+        assert_eq!(png_compression_for(61), CompressionType::Best);
+        assert_eq!(png_compression_for(100), CompressionType::Best);
+        let max = PipelineConfig {
+            compression: 100,
+            ..Default::default()
+        };
+        assert_eq!(max.jpeg_quality(), 0);
     }
 }

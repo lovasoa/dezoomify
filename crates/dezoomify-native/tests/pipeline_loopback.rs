@@ -442,7 +442,7 @@ fn jpg_output_decodes_at_full_size() {
     assert_eq!(outcome.output_hash, sha256_of_file(&output));
     assert_eq!(
         outcome.output_hash,
-        "sha256:474715c2ea1a569aab318058cb49002b800c09c223fcb20288edb75a30946349",
+        "sha256:d33f06c199f90b0cfaa281066f4bcf98423a24ce29dabf7ae227e2f27f6bc1e7",
         "jpeg bytes are deterministic; pin the golden"
     );
 }
@@ -527,7 +527,7 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
     }
     assert_eq!(
         outcome.output_hash,
-        "sha256:4a18d893a4a85c7ebc5ecb23f03564e90123af3b5abca540b9546ba0e9a1c3a3",
+        "sha256:4946ce2c70847aeab5b3829d891b1970df896e9c984fdd44cdf6fb2095bc8be0",
         "iiif-dir bytes are deterministic; pin the golden"
     );
 }

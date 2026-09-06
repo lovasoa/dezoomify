@@ -34,8 +34,8 @@
 //! * `decode-pixels`/`open-encoder`/`finalize-encoder` → acknowledged from
 //!   the tiles already decoded during acquisition (encoders run one-shot).
 //! * `publish-output` → canvas-limit check, assemble with [`blit_onto`],
-//!   encode per the inferred [`OutputFormat`] (PNG, JPEG at quality 92,
-//!   TIFF, or an `iiif-dir` tile tree), atomic write, real [`sha256_hex`]
+//!   encode per the inferred [`OutputFormat`] (PNG at the configured deflate
+//!   tier, JPEG at quality `100 - compression`, TIFF, or an `iiif-dir` tile
 //!   digest (over the file bytes, or over `info.json` plus tile bytes in
 //!   sorted path order for directories).
 //! * `release-bytes`/`cancel-work` → drop decoded buffers; no output is
@@ -1087,7 +1087,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
     }
     let output_hash = match attempt.format {
         OutputFormat::Png => {
-            let encoded = encode_png(&target)?;
+            let encoded = encode_png(&target, attempt.config.png_compression())?;
             attempt.emit(
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
@@ -1096,7 +1096,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Jpeg => {
-            let encoded = encode_jpeg(&target, attempt.config.jpeg_quality)?;
+            let encoded = encode_jpeg(&target, attempt.config.jpeg_quality())?;
             attempt.emit(
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
@@ -1119,7 +1119,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("image");
-            let (info_json, tiles) = render_iiif_dir(&target, id, attempt.config.jpeg_quality)?;
+            let (info_json, tiles) = render_iiif_dir(&target, id, attempt.config.jpeg_quality())?;
             attempt.emit(
                 "encoding",
                 BTreeMap::from([
