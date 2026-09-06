@@ -553,6 +553,7 @@ impl CapabilitiesDto {
             encoders: vec!["png".into(), "jpeg".into(), "tiff".into()],
             destination_modes: vec!["file".into(), "iiif-dir".into()],
             storage_modes: vec!["cache".into()],
+            max_concurrency: 16,
             bulk_supported: false,
             handoff_supported: true,
             ..Self::browser_baseline()
