@@ -33,7 +33,8 @@ its image, remove the resume folder and start fresh.
 ## Install
 
 Build the app locally with `cargo xtask build desktop`, which produces an
-unsigned `.deb` under `target/release/bundle/deb/` (no paid signing).
+unsigned installer for the matching host under `target/release/bundle/`
+(Linux `.deb`, Windows `.msi`/`.exe`, macOS `.dmg`; no paid Apple/Azure signing).
 Published installers will appear on the
 [releases page](https://github.com/lovasoa/dezoomify/releases) once a
 release build recipe lands. Meanwhile, you can also use the
