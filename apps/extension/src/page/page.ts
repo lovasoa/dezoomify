@@ -16,10 +16,16 @@
  *
  * Module document: imports the staged `scan.js`/`candidates.js` and the wasm
  * glue. Every failure is logged into the visible log (the E2E asserts on it).
+ *
+ * Job sections mirror shared-ui `view.ts` geometry with the same `dz-*` class
+ * names (job/progress, completed, failed) styled by the theme block in
+ * `page.html`: a concise result first, the full log layered in `<details>`,
+ * with cancel/retry and partial-tile saves. Scan, fetch, candidate, and
+ * save-name logic below is unchanged.
  */
 
 import { createScanner, isPrivilegedUrl } from "./scan.js";
-import { validateCandidateUrl } from "./candidates.js";
+import { validateCandidateUrl, redactUrlForLabel } from "./candidates.js";
 import { createSessionFetcher, originOf } from "./fetch.js";
 import { requestNativeHandoff, NATIVE_HOST_NAME } from "./nativeHandoff.js";
 import init, * as wasm from "../wasm/dezoomify-wasm.js";
@@ -37,8 +43,193 @@ const log = (line) => {
 const fail = (code, detail) => {
   log("FAILED " + code + (detail ? ": " + detail : ""));
   if (detail && detail.stack) log(detail.stack);
-  document.body.dataset.outcome = "failed";
+  setOutcome("failed");
+  const short = typeof detail === "string" && detail.length > 0 ? detail.split("\n")[0] : String(code);
+  showFailedSection(short, () => {
+    if (uiState.lastTabId !== null) run(uiState.lastTabId);
+  });
 };
+
+// --- Shared-UI-aligned job sections (no bundler) ---
+//
+// The page ships verbatim with no bundler, so shared-ui `renderView` cannot
+// be imported here. These helpers replicate its geometry with the same
+// `dz-*` class names styled by the theme block in `page.html`: one `.dz-card`
+// hosting the job (progress), completed, and failed sections, with layered
+// diagnostics (concise result first, full log in `<details>`). All strings
+// reach the DOM via `textContent`, never markup. Scan, fetch, candidate
+// ranking, and save naming are unchanged.
+
+const uiState = { cancelRequested: false, lastTabId: null };
+
+function uiEl(id) {
+  return document.getElementById(id);
+}
+
+function setOutcome(value) {
+  if (value === null || value === undefined) {
+    delete document.body.dataset.outcome;
+  } else {
+    document.body.dataset.outcome = value;
+  }
+}
+
+function setStep(text) {
+  const step = uiEl("dz-step");
+  if (step && step.textContent !== text) step.textContent = text;
+  const track = uiEl("dz-track");
+  if (track) track.setAttribute("aria-label", text);
+}
+
+function setProgress(current, total) {
+  const determinate = Number.isFinite(current) && Number.isFinite(total) && total > 0;
+  const pct = determinate ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
+  const track = uiEl("dz-track");
+  const bar = uiEl("dz-bar");
+  const percent = uiEl("dz-percent");
+  const counts = uiEl("dz-counts");
+  if (track) {
+    track.setAttribute("aria-valuenow", String(pct));
+    if (determinate) track.classList.remove("dz-indeterminate");
+    else track.classList.add("dz-indeterminate");
+  }
+  if (bar) bar.style.width = determinate ? pct + "%" : "35%";
+  if (percent) {
+    const text = determinate ? pct + "%" : "";
+    if (percent.textContent !== text) percent.textContent = text;
+  }
+  if (counts) {
+    const text = determinate ? current + " of " + total + " tiles" : "";
+    if (counts.textContent !== text) counts.textContent = text;
+  }
+}
+
+function setSource(url) {
+  const line = uiEl("dz-source");
+  const urlEl = uiEl("dz-source-url");
+  if (!line || !urlEl) return;
+  if (typeof url === "string" && url) {
+    let label = url;
+    try {
+      label = redactUrlForLabel(url);
+    } catch {
+      label = url;
+    }
+    if (urlEl.textContent !== label) urlEl.textContent = label;
+    line.title = url;
+    line.hidden = false;
+  } else {
+    line.hidden = true;
+  }
+}
+
+function setDiagnostics(lines) {
+  const diag = uiEl("dz-diag");
+  if (!diag) return;
+  const text = lines.join("\n");
+  if (diag.textContent !== text) diag.textContent = text;
+}
+
+function clearResult() {
+  const box = uiEl("dz-result");
+  if (box) {
+    box.replaceChildren();
+    box.hidden = true;
+  }
+}
+
+function pageActionButton(label, primary, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = primary ? "dz-btn-tactile" : "dz-btn-secondary";
+  b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function showCompletedSection(info) {
+  const box = uiEl("dz-result");
+  if (!box) return;
+  box.replaceChildren();
+  const partial = info.failedTiles > 0;
+  const sec = document.createElement("div");
+  sec.className = "dz-view-body dz-completed-section";
+  const header = document.createElement("div");
+  header.className = "dz-completed-header";
+  const titles = document.createElement("div");
+  const title = document.createElement("h2");
+  title.className = "dz-completed-title";
+  title.textContent = partial ? "Save complete with gaps" : "Save complete!";
+  const summary = document.createElement("p");
+  summary.className = "dz-completed-summary";
+  summary.textContent = partial
+    ? "Saved " + info.savedName + " (" + info.width + "x" + info.height + ", " +
+      (info.totalTiles - info.failedTiles) + " of " + info.totalTiles + " tiles; " +
+      info.failedTiles + " tile(s) missing)."
+    : "Saved " + info.savedName + " (" + info.width + "x" + info.height + ").";
+  titles.append(title, summary);
+  header.append(titles);
+  const actions = document.createElement("div");
+  actions.className = "dz-actions-row";
+  actions.append(pageActionButton("Scan again", false, info.onAgain));
+  sec.append(header, actions);
+  box.append(sec);
+  box.hidden = false;
+}
+
+function showFailedSection(message, onRetry) {
+  const box = uiEl("dz-result");
+  if (!box) return;
+  box.replaceChildren();
+  const sec = document.createElement("div");
+  sec.className = "dz-view-body dz-error-section";
+  const header = document.createElement("div");
+  header.className = "dz-error-header";
+  const titles = document.createElement("div");
+  const title = document.createElement("h2");
+  title.className = "dz-error-title";
+  title.textContent = "Could not dezoomify image";
+  const msg = document.createElement("p");
+  msg.className = "dz-error-message";
+  msg.textContent = message;
+  titles.append(title, msg);
+  header.append(titles);
+  const hint = document.createElement("p");
+  hint.className = "dz-notice-guidance";
+  hint.textContent = "Full technical output is kept below under Technical details & logs.";
+  const actions = document.createElement("div");
+  actions.className = "dz-actions-row";
+  actions.append(pageActionButton("Try again", true, onRetry));
+  sec.append(header, hint, actions);
+  box.append(sec);
+  box.hidden = false;
+}
+
+function showCancelledSection(onAgain) {
+  const box = uiEl("dz-result");
+  if (!box) return;
+  box.replaceChildren();
+  const sec = document.createElement("div");
+  sec.className = "dz-view-body dz-notice-section";
+  const title = document.createElement("h2");
+  title.className = "dz-notice-title";
+  title.textContent = "Save cancelled";
+  const msg = document.createElement("p");
+  msg.className = "dz-notice-message";
+  msg.textContent = "The image save was stopped. Nothing was saved.";
+  const actions = document.createElement("div");
+  actions.className = "dz-actions-row";
+  actions.append(pageActionButton("Scan again", false, onAgain));
+  sec.append(title, msg, actions);
+  box.append(sec);
+  box.hidden = false;
+}
+
+function throwIfCancelled() {
+  if (uiState.cancelRequested) {
+    throw Object.assign(new Error("cancelled by user"), { code: "cancelled" });
+  }
+}
 
 function pickedUrlFor(tab) {
   // url is visible when activeTab covers the tab or host permissions grant it;
@@ -94,6 +285,10 @@ async function runScan(tabId) {
 
   await scanner.startScan();
   while (scanner.getState() !== "stopped") {
+    if (uiState.cancelRequested) {
+      scanner.dispose("cancelled");
+      throw Object.assign(new Error("cancelled by user"), { code: "cancelled" });
+    }
     await new Promise((r) => setTimeout(r, 200));
   }
   const snap = scanner.getSnapshot();
@@ -159,6 +354,7 @@ async function discover(sourceUrl, tabOrigin) {
   const session = new DiscoverySession(sourceUrl);
   const fetcher = makeTabFetcher(tabOrigin);
   for (;;) {
+    throwIfCancelled();
     const raw = session.nextNeed();
     if (!raw || raw === "null") break;
     const need = JSON.parse(raw);
@@ -206,6 +402,7 @@ async function planLevel(session, image, tabOrigin) {
   const fetcher = makeTabFetcher(tabOrigin);
   let guard = 0;
   while (plan.kind === "probe" && guard++ < 5) {
+    throwIfCancelled();
     const out = await fetcher.fetchResource(plan.uri, { userIntent: true });
     const bmp = await createImageBitmap(new Blob([out.bytes]));
     plan = JSON.parse(session.probeSubmit(image.id, level.index, bmp.width > 0, bmp.width, bmp.height));
@@ -220,11 +417,30 @@ async function assemble(session, plan, tabOrigin) {
   const ctx = canvas.getContext("2d");
   const fetcher = makeTabFetcher(tabOrigin);
   let done = 0;
+  let failedTiles = 0;
+  setProgress(0, plan.tiles.length);
   for (const tile of plan.tiles) {
-    const out = await fetcher.fetchResource(tile.uri, { userIntent: true });
-    let bytes = out.bytes;
-    if (tile.processing) bytes = session.applyProcessing(tile.processing, bytes);
-    const bmp = await createImageBitmap(new Blob([bytes]));
+    throwIfCancelled();
+    let bytes = null;
+    let bmp = null;
+    try {
+      const out = await fetcher.fetchResource(tile.uri, { userIntent: true });
+      bytes = out.bytes;
+      if (tile.processing) bytes = session.applyProcessing(tile.processing, bytes);
+      bmp = await createImageBitmap(new Blob([bytes]));
+    } catch (e) {
+      // Partial save: one bad tile must not lose the rest of the image.
+      // The placement read below stays fatal so a tainted canvas still
+      // fails fast instead of saving blank output.
+      failedTiles += 1;
+      log(
+        "tile failed at " + tile.x + "," + tile.y +
+          " (" + (done + failedTiles) + "/" + plan.tiles.length + "): " +
+          ((e && e.message) || e) + " (continuing)",
+      );
+      setProgress(done + failedTiles, plan.tiles.length);
+      continue;
+    }
     // Trust the plan for placement so a mis-sized decode never leaves a seam:
     // log the mismatch and scale the decoded bytes to the planned extent.
     const planW = tile.w ?? bmp.width;
@@ -236,10 +452,18 @@ async function assemble(session, plan, tabOrigin) {
       ctx.drawImage(bmp, 0, 0, bmp.width, bmp.height, tile.x, tile.y, planW, planH);
     }
     const sample = ctx.getImageData(tile.x + 5, tile.y + 5, 1, 1).data;
-    log("tile " + ++done + "/" + plan.tiles.length + " at " + tile.x + "," + tile.y + " bmp " + bmp.width + "px sample " + [...sample].join(","));
+    done += 1;
+    setProgress(done + failedTiles, plan.tiles.length);
+    log("tile " + (done + failedTiles) + "/" + plan.tiles.length + " at " + tile.x + "," + tile.y + " bmp " + bmp.width + "px sample " + [...sample].join(","));
+  }
+  if (done === 0) {
+    throw Object.assign(new Error("all " + plan.tiles.length + " tiles failed"), { code: "tile-failed" });
+  }
+  if (failedTiles > 0) {
+    log("partial: saved " + done + " of " + plan.tiles.length + " tiles (" + failedTiles + " missing)");
   }
   const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
-  return blob;
+  return { blob, done, failedTiles, total: plan.tiles.length };
 }
 
 // Shared save name (todo 4.6): canonical logic lives in
@@ -297,8 +521,29 @@ function rankUrls(urls) {
 }
 
 async function run(tabId) {
+  uiState.lastTabId = tabId;
+  uiState.cancelRequested = false;
+  clearResult();
+  setOutcome(null);
+  const job = uiEl("dz-job");
+  if (job) job.hidden = false;
+  const cancelBtn = uiEl("dz-cancel");
+  if (cancelBtn) {
+    cancelBtn.hidden = false;
+    cancelBtn.disabled = false;
+    cancelBtn.onclick = () => {
+      uiState.cancelRequested = true;
+      cancelBtn.disabled = true;
+      setStep("Cancelling…");
+    };
+  }
+  setSource("");
+  setProgress(NaN, 0);
   try {
+    setStep("Scanning page…");
+    setDiagnostics(["Phase: scan", "Tiles: —"]);
     const urls = await runScan(tabId);
+    throwIfCancelled();
     if (urls.length === 0) {
       throw Object.assign(new Error("no zoomable candidate observed"), { code: "no-candidate" });
     }
@@ -312,9 +557,12 @@ async function run(tabId) {
     await init();
     const ranked = rankUrls(urls);
     log("ranked " + ranked.length + " candidates");
+    setDiagnostics(["Phase: discovery", "Candidates: " + ranked.length]);
     let found = null;
     for (let i = 0; i < ranked.length; i++) {
+      throwIfCancelled();
       const candidate = ranked[i];
+      setStep("Finding the zoomable image (" + (i + 1) + "/" + ranked.length + ")…");
       log("trying " + (i + 1) + "/" + ranked.length + (candidate.format ? " (" + candidate.format + ")" : ""));
       try {
         const result = await discover(candidate.url, tabOrigin);
@@ -324,6 +572,7 @@ async function run(tabId) {
         }
         log("candidate has no image: " + candidate.url);
       } catch (e) {
+        throwIfCancelled();
         log("candidate failed: " + candidate.url + ": " + (e && e.message ? e.message : String(e)));
       }
     }
@@ -332,19 +581,61 @@ async function run(tabId) {
     }
     const { session, catalog } = found;
     log("source: " + found.source);
+    setSource(found.source);
     const image = catalog.images[0];
     if (!image) throw Object.assign(new Error("catalog has no image"), { code: "no-image" });
     log("image: " + (image.title || image.format));
     offerNativeHandoff(found.source);
 
+    setStep("Choosing the highest resolution…");
     const plan = await planLevel(session, image, tabOrigin);
+    throwIfCancelled();
     log("plan: " + plan.tiles.length + " tiles, canvas " + plan.canvas.x + "x" + plan.canvas.y);
-    const blob = await assemble(session, plan, tabOrigin);
-    const savedName = save(blob, plan.canvas.x, plan.canvas.y);
+    setDiagnostics([
+      "Phase: tiles",
+      "Tiles: " + plan.tiles.length,
+      "Canvas: " + plan.canvas.x + "x" + plan.canvas.y,
+    ]);
+    setStep("Saving image tiles…");
+    const result = await assemble(session, plan, tabOrigin);
+    throwIfCancelled();
+    setStep("Assembling the final picture…");
+    setDiagnostics([
+      "Phase: saving",
+      "Tiles: " + result.done + " of " + result.total,
+      "Canvas: " + plan.canvas.x + "x" + plan.canvas.y,
+    ]);
+    const savedName = save(result.blob, plan.canvas.x, plan.canvas.y);
     log("saved " + savedName);
-    document.body.dataset.outcome = "saved";
+    setProgress(result.total, result.total);
+    setStep("Done");
+    setOutcome("saved");
+    showCompletedSection({
+      width: plan.canvas.x,
+      height: plan.canvas.y,
+      savedName,
+      failedTiles: result.failedTiles,
+      totalTiles: result.total,
+      onAgain: () => run(tabId),
+    });
   } catch (e) {
-    fail(e.code || "job-failed", e.message + "\n" + (e.stack || ""));
+    if ((e && e.code) === "cancelled" || uiState.cancelRequested) {
+      log("cancelled by user");
+      setOutcome("cancelled");
+      setStep("Cancelled");
+      setDiagnostics(["Phase: cancelled"]);
+      showCancelledSection(() => run(tabId));
+    } else {
+      setDiagnostics(["Phase: failed", "Code: " + ((e && e.code) || "job-failed")]);
+      fail(e.code || "job-failed", e.message + "\n" + (e.stack || ""));
+    }
+  } finally {
+    const doneBtn = uiEl("dz-cancel");
+    if (doneBtn) {
+      doneBtn.hidden = true;
+      doneBtn.disabled = false;
+      doneBtn.onclick = null;
+    }
   }
 }
 
@@ -615,6 +906,9 @@ async function render() {
       // Keep the generic label; run() reports a vanished tab on click.
     }
     tabsEl.replaceChildren(tabButton(boundId, label));
+    const job = uiEl("dz-job");
+    if (job) job.hidden = false;
+    setStep("Ready to scan");
     return;
   }
   // Unbound first-run / manual open: guidance only, zero tabs API calls.

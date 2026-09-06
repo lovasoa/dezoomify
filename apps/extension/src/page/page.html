@@ -2,12 +2,289 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Dezoomify</title>
+    <!--
+      Shared-UI theme subset (retry-only, no bundler): the extension page
+      ships verbatim as ES modules, so shared-ui `renderView`/`theme.css`
+      cannot be imported. This block mirrors the `dz-*` geometry from
+      `packages/shared-ui/src/styles/theme.css` (same variable names, same
+      class names, same 4px architectural radius, no pills) so a future
+      renderView mount is a drop-in. Scan/fetch/candidate logic is untouched.
+    -->
+    <style>
+      :root {
+        --dz-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --dz-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        --dz-page-bg: #fcfeff;
+        --dz-surface-gradient: linear-gradient(180deg, #f7eded 0%, #f7eeee 100%);
+        --dz-surface-border: #a19797;
+        --dz-surface-shadow: 0 4px 20px rgba(130, 115, 110, 0.12), 0 1px 3px rgba(0, 0, 0, 0.05);
+        --dz-text-primary: #1c1917;
+        --dz-text-secondary: #44403c;
+        --dz-text-muted: #78716c;
+        --dz-link-color: #1d4ed8;
+        --dz-link-hover: #0284c7;
+        --dz-btn-gradient: linear-gradient(180deg, #fffafa 0%, #dfd8d8 100%);
+        --dz-btn-border: #8c8080;
+        --dz-btn-hover-gradient: linear-gradient(180deg, #ffffff 0%, #d4cccc 100%);
+        --dz-btn-hover-border: #736767;
+        --dz-btn-text: #1c1917;
+        --dz-accent-blue: #3c7bff;
+        --dz-focus-ring: 0 0 0 2px rgba(60, 123, 255, 0.35);
+        --dz-progress-bar: linear-gradient(90deg, #3c7bff, #1d4ed8);
+        --dz-progress-track: rgba(161, 151, 151, 0.22);
+        --dz-error-text: #991b1b;
+        --dz-error-accent: #c2410c;
+        --dz-success-text: #166534;
+        --dz-success-accent: #15803d;
+        --dz-notice-text: #92400e;
+        --dz-notice-accent: #d97706;
+        --dz-radius: 4px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dz-page-bg: #181615;
+          --dz-surface-gradient: linear-gradient(180deg, #252220 0%, #1e1c1a 100%);
+          --dz-surface-border: #3f3935;
+          --dz-surface-shadow: 0 6px 28px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
+          --dz-text-primary: #ece5dd;
+          --dz-text-secondary: #b8ada2;
+          --dz-text-muted: #82776e;
+          --dz-link-color: #acaf50;
+          --dz-link-hover: #c3c76f;
+          --dz-btn-gradient: linear-gradient(180deg, #332e2a 0%, #25211e 100%);
+          --dz-btn-border: #4d453f;
+          --dz-btn-hover-gradient: linear-gradient(180deg, #3d3732 0%, #2c2825 100%);
+          --dz-btn-hover-border: #635850;
+          --dz-btn-text: #ece5dd;
+          --dz-accent-blue: #7fa9ec;
+          --dz-focus-ring: 0 0 0 2px rgba(127, 169, 236, 0.4);
+          --dz-progress-bar: linear-gradient(90deg, #acaf50, #8a8e3e);
+          --dz-progress-track: rgba(63, 57, 53, 0.5);
+          --dz-error-text: #f09595;
+          --dz-error-accent: #e07a7a;
+          --dz-success-text: #86efac;
+          --dz-success-accent: #4ade80;
+          --dz-notice-text: #ccd185;
+          --dz-notice-accent: #acaf50;
+        }
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html { height: 100%; margin: 0; padding: 0; }
+      body {
+        min-height: 100%;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        background-color: var(--dz-page-bg);
+        color: var(--dz-text-primary);
+        font-family: var(--dz-font-sans);
+        font-size: 15px;
+        line-height: 1.6;
+      }
+      [hidden] { display: none !important; }
+      .dz-main {
+        flex: 1 0 auto;
+        width: min(92%, 960px);
+        margin: 2.5rem auto 3rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .dz-card {
+        background: var(--dz-surface-gradient);
+        border: 1px solid var(--dz-surface-border);
+        border-radius: var(--dz-radius);
+        box-shadow: var(--dz-surface-shadow);
+        padding: 2.5rem 3rem 2.25rem;
+        color: var(--dz-text-primary);
+      }
+      .dz-header { text-align: center; margin-bottom: 1.5rem; }
+      .dz-title {
+        margin: 0;
+        font-size: 2.1rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6rem;
+      }
+      #tabs { margin-bottom: 0.5rem; }
+      #tabs p { color: var(--dz-text-secondary); }
+      #tabs button {
+        min-height: 38px;
+        padding: 0.45rem 1.15rem;
+        font-family: inherit;
+        font-size: 0.92rem;
+        font-weight: 500;
+        color: var(--dz-btn-text);
+        background: var(--dz-btn-gradient);
+        border: 1px solid var(--dz-btn-border);
+        border-radius: var(--dz-radius);
+        cursor: pointer;
+      }
+      #tabs button:hover { background: var(--dz-btn-hover-gradient); border-color: var(--dz-btn-hover-border); }
+      #tabs button:disabled { opacity: 0.6; cursor: not-allowed; }
+      #tabs button:focus-visible { outline: none; box-shadow: var(--dz-focus-ring); }
+      .dz-job-section { display: flex; flex-direction: column; gap: 0.85rem; padding: 1.25rem 0 0.5rem; width: 100%; min-width: 0; }
+      .dz-source-line {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--dz-text-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
+      }
+      .dz-source-url { font-family: var(--dz-font-mono); font-size: 0.82rem; color: var(--dz-text-secondary); }
+      .dz-progress-header { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; font-size: 1.05rem; width: 100%; min-width: 0; }
+      .dz-progress-status { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: baseline; gap: 0.55rem; flex: 1 1 auto; }
+      .dz-progress-step-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dz-progress-percent { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--dz-link-color); flex-shrink: 0; white-space: nowrap; min-width: 2.2rem; text-align: right; }
+      .dz-progress-track { width: 100%; height: 7px; background: var(--dz-progress-track); border-radius: var(--dz-radius); overflow: hidden; }
+      .dz-progress-bar { height: 100%; background: var(--dz-progress-bar); border-radius: var(--dz-radius); transition: width 0.25s ease; }
+      .dz-pulse { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: var(--dz-radius); background: var(--dz-link-color); margin-right: 0.55rem; flex-shrink: 0; animation: dzPulse 1.6s ease-in-out infinite; }
+      @keyframes dzPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+      .dz-indeterminate .dz-progress-bar { animation: dzSlide 1.4s ease-in-out infinite alternate; }
+      @keyframes dzSlide { from { margin-left: 0; } to { margin-left: calc(100% - 35%); } }
+      @media (prefers-reduced-motion: reduce) {
+        .dz-pulse { animation: none !important; }
+        .dz-indeterminate .dz-progress-bar { animation: none !important; }
+      }
+      .dz-tile-counts { margin: 0; font-size: 0.88rem; font-variant-numeric: tabular-nums; color: var(--dz-text-secondary); min-height: 1.35em; }
+      .dz-progress-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.75rem; width: 100%; }
+      .dz-transport-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.65rem;
+        font-size: 0.82rem;
+        font-weight: 500;
+        border-radius: var(--dz-radius);
+        background: rgba(0, 0, 0, 0.03);
+        color: var(--dz-text-secondary);
+        border: 1px solid var(--dz-surface-border);
+        white-space: nowrap;
+      }
+      @media (prefers-color-scheme: dark) { .dz-transport-badge { background: rgba(255, 255, 255, 0.04); } }
+      .dz-job-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; justify-content: flex-end; flex: 1 1 auto; }
+      .dz-btn-tactile {
+        min-width: 200px;
+        min-height: 46px;
+        padding: 0.55rem 2rem;
+        font-family: inherit;
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--dz-btn-text);
+        background: var(--dz-btn-gradient);
+        border: 1px solid var(--dz-btn-border);
+        border-radius: var(--dz-radius);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+      .dz-btn-tactile:hover { background: var(--dz-btn-hover-gradient); border-color: var(--dz-btn-hover-border); }
+      .dz-btn-tactile:focus-visible { outline: none; box-shadow: var(--dz-focus-ring); }
+      .dz-btn-tactile:disabled { opacity: 0.6; cursor: not-allowed; }
+      .dz-btn-secondary {
+        min-height: 38px;
+        padding: 0.45rem 1.15rem;
+        font-family: inherit;
+        font-size: 0.92rem;
+        font-weight: 500;
+        color: var(--dz-text-primary);
+        background: var(--dz-btn-gradient);
+        border: 1px solid var(--dz-btn-border);
+        border-radius: var(--dz-radius);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .dz-btn-secondary:hover { background: var(--dz-btn-hover-gradient); border-color: var(--dz-btn-hover-border); }
+      .dz-btn-secondary:focus-visible { outline: none; box-shadow: var(--dz-focus-ring); }
+      .dz-btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+      .dz-actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.85rem; margin-top: 1.75rem; }
+      .dz-error-section { display: flex; flex-direction: column; padding: 0.5rem 0 0; }
+      .dz-error-header { display: flex; align-items: flex-start; gap: 1.15rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--dz-surface-border); }
+      .dz-error-title { margin: 0 0 0.4rem; font-size: 1.35rem; font-weight: 600; color: var(--dz-error-text); }
+      .dz-error-message { margin: 0; font-size: 1.02rem; color: var(--dz-text-secondary); line-height: 1.6; }
+      .dz-completed-section { display: flex; flex-direction: column; padding: 0.5rem 0 0; }
+      .dz-completed-header { display: flex; align-items: flex-start; gap: 1.15rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--dz-surface-border); }
+      .dz-completed-title { margin: 0 0 0.35rem; font-size: 1.35rem; font-weight: 700; color: var(--dz-success-text); }
+      .dz-completed-summary { margin: 0; font-size: 1.02rem; color: var(--dz-text-primary); }
+      .dz-notice-section { display: flex; flex-direction: column; padding: 0.5rem 0 0; }
+      .dz-notice-title { margin: 0 0 0.4rem; font-size: 1.35rem; font-weight: 600; color: var(--dz-notice-accent); }
+      .dz-notice-message { margin: 0; font-size: 1.02rem; color: var(--dz-text-primary); line-height: 1.6; }
+      .dz-notice-guidance { font-size: 0.95rem; line-height: 1.65; color: var(--dz-text-secondary); margin: 1.25rem 0 0.5rem; }
+      .dz-details { border: none; border-top: 1px solid var(--dz-surface-border); background: transparent; margin-top: 1.25rem; padding-top: 0.25rem; }
+      .dz-summary { padding: 0.65rem 0; font-size: 0.88rem; font-weight: 500; color: var(--dz-text-muted); cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; }
+      .dz-summary:hover { color: var(--dz-text-primary); }
+      .dz-diagnostics {
+        font-family: var(--dz-font-mono);
+        font-size: 0.84rem;
+        line-height: 1.6;
+        padding: 0.9rem 1.15rem;
+        background: rgba(0, 0, 0, 0.03);
+        border: 1px solid var(--dz-surface-border);
+        border-radius: var(--dz-radius);
+        white-space: pre-wrap;
+        word-break: break-all;
+        color: var(--dz-text-secondary);
+        margin: 0.5rem 0;
+      }
+      @media (prefers-color-scheme: dark) { .dz-diagnostics { background: rgba(255, 255, 255, 0.03); } }
+      .dz-log { max-height: 12rem; overflow-y: auto; }
+      @media (max-width: 768px) {
+        .dz-main { width: min(94%, 960px); margin: 1.25rem auto 2rem; }
+        .dz-card { padding: 1.5rem 1.15rem; overflow: hidden; }
+        .dz-title { font-size: 1.65rem; }
+        .dz-btn-tactile { width: 100%; min-width: 0; }
+      }
+    </style>
   </head>
   <body>
-    <h1>Dezoomify</h1>
-    <div id="tabs"></div>
-    <pre id="log"></pre>
+    <main class="dz-main">
+      <div class="dz-card" id="dz-card">
+        <div class="dz-header">
+          <h1 class="dz-title"><span>Dezoomify</span></h1>
+        </div>
+        <div id="tabs"></div>
+        <div class="dz-view-body dz-job-section" id="dz-job" hidden>
+          <p class="dz-source-line" id="dz-source" hidden>Working on <span class="dz-source-url" id="dz-source-url"></span></p>
+          <div class="dz-progress-header">
+            <span class="dz-progress-status">
+              <span class="dz-pulse" aria-hidden="true"></span>
+              <span class="dz-progress-step-text" id="dz-step">Ready</span>
+            </span>
+            <span class="dz-progress-percent" id="dz-percent"></span>
+          </div>
+          <div class="dz-progress-track dz-indeterminate" id="dz-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Dezoomify progress">
+            <div class="dz-progress-bar" id="dz-bar" style="width: 35%;"></div>
+          </div>
+          <p class="dz-tile-counts" id="dz-counts"></p>
+          <div class="dz-progress-controls">
+            <span class="dz-transport-badge" id="dz-transport">Browser session</span>
+            <div class="dz-job-actions">
+              <button type="button" class="dz-btn-secondary" id="dz-cancel" hidden>Cancel</button>
+            </div>
+          </div>
+        </div>
+        <div class="dz-view-body" id="dz-result" hidden></div>
+        <details class="dz-details" id="dz-logwrap">
+          <summary class="dz-summary"><span>Technical details &amp; logs</span></summary>
+          <div class="dz-diagnostics" id="dz-diag">Status: idle</div>
+          <pre id="log" class="dz-diagnostics dz-log"></pre>
+        </details>
+      </div>
+    </main>
     <script type="module" src="page.js"></script>
   </body>
 </html>
