@@ -305,7 +305,10 @@ const proxyTransport = createProxyTransport(
   { protocolVersion: 1, maxBytes: PROXY_METADATA_MAX_BYTES },
 );
 
-async function fetchViaProxy(targetUrl: string, signal?: AbortSignal): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string }> {
+async function fetchViaProxy(
+  targetUrl: string,
+  signal?: AbortSignal,
+): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; finalUrl?: string }> {
   const reqId = noteRequestStart("proxy");
   const combined = timeoutSignal(signal);
   try {
@@ -315,7 +318,17 @@ async function fetchViaProxy(targetUrl: string, signal?: AbortSignal): Promise<{
       return { ok: false, status: res.status, code: res.code ?? "PROXY_ERROR" };
     }
     noteRequestEnd(reqId, true);
-    return { ok: true, status: res.status, bytes: res.bytes };
+    // The relay follows upstream redirects internally; surface the
+    // post-redirect URL when the transport provides it, otherwise fall back
+    // to the requested URL downstream. Never leave the base empty: an empty
+    // final URI makes relative tile URLs (e.g. krpano
+    // galleria_04.tiles/mres_d/...) resolve against the app page (/beta/)
+    // and 404.
+    const upstream = typeof (res as { finalUrl?: unknown }).finalUrl === "string" &&
+        ((res as { finalUrl?: string }).finalUrl as string) !== ""
+      ? ((res as { finalUrl?: string }).finalUrl as string)
+      : targetUrl;
+    return { ok: true, status: res.status, bytes: res.bytes, finalUrl: upstream };
   } catch (e) {
     noteRequestEnd(reqId, false);
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
@@ -352,8 +365,15 @@ async function fetchMetadataFor(
   const direct = await fetchDirect(url, headers, undefined, DIRECT_METADATA_TIMEOUT_MS);
   let via = "direct";
   let bytes: ArrayBuffer | null = null;
+  // Post-redirect base for relative tile URLs. Direct fetches report
+  // res.url; proxied fetches must fall back to the requested URL (the relay
+  // follows redirects internally without exposing the upstream final URL).
+  // Leaving this empty reproduces the krpano regression where
+  // galleria_04.tiles/* resolved against /beta/ and every tile 404'd.
+  let finalUri: string = url;
   if (direct.outcome === "readable" && direct.bytes) {
     bytes = direct.bytes;
+    if (typeof direct.finalUrl === "string" && direct.finalUrl !== "") finalUri = direct.finalUrl;
   } else if (
     direct.outcome === "network-error" &&
     isProxyEligible({ url, kind: "metadata", headers }).eligible
@@ -380,6 +400,7 @@ async function fetchMetadataFor(
       );
     }
     bytes = proxied.bytes;
+    if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "") finalUri = proxied.finalUrl;
   } else if (direct.outcome === "http-error") {
     if (direct.status === 429) {
       // A direct fetch uses the user's own connection, so this throttle is on
@@ -418,7 +439,7 @@ async function fetchMetadataFor(
       `content classifier: no zoomable-image content in ${bytes.byteLength} bytes (${via}) from ${target}`,
     );
   }
-  return { bytes, finalUri: direct.finalUrl, via };
+  return { bytes, finalUri, via };
 }
 
 async function fetchTileFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }> {

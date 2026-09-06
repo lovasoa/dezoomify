@@ -78,6 +78,20 @@ for (const [id, url] of TARGETS) {
     let siteRequests = 0;
     let siteOkResponses = 0;
     let firstTileUrl = null;
+    // Tile-level accounting: a metadata 200 alone must never turn the target
+    // green. At least one planned tile (a non-input request to the site
+    // origin) must return 2xx/3xx. Tile 404s on the site origin, or tile-like
+    // 404s against the app itself (the krpano regression where relative
+    // galleria_04.tiles/* resolved against /beta/), fail the target outright.
+    const tileUrls = [];
+    const tileOkUrls = [];
+    const tileFailedUrls = [];
+    const appOriginTile404s = [];
+    const isTileLike = (target) =>
+      /\.(jpg|jpeg|png|webp|tif|tiff|dzi|xml)(\?|#|$)/i.test(target) ||
+      target.includes(".tiles/") ||
+      target.includes("/tiles/") ||
+      target.includes("tile");
     page.on("request", (request) => {
       const target = request.url();
       if (target.startsWith(origin) && !target.startsWith(ADDR)) {
@@ -85,11 +99,24 @@ for (const [id, url] of TARGETS) {
         if (target !== url && firstTileUrl === null) {
           firstTileUrl = target;
         }
+        if (target !== url) tileUrls.push(target);
+      } else if (target.startsWith(ADDR) && isTileLike(target)) {
+        // Wrong-base tiles (relative metadata URLs resolved against the app
+        // page) surface here as /beta/*.tiles/* 404s; record for the verdict.
+        tileUrls.push(target);
       }
     });
     page.on("response", (response) => {
-      if (response.url().startsWith(origin) && !response.url().startsWith(ADDR)) {
-        if (response.status() < 400) siteOkResponses += 1;
+      const target = response.url();
+      const status = response.status();
+      if (target.startsWith(origin) && !target.startsWith(ADDR)) {
+        if (status < 400) siteOkResponses += 1;
+        if (target !== url) {
+          if (status < 400) tileOkUrls.push(`${status} ${target}`);
+          else tileFailedUrls.push(`${status} ${target}`);
+        }
+      } else if (target.startsWith(ADDR) && status >= 400 && isTileLike(target)) {
+        appOriginTile404s.push(`${status} ${target}`);
       }
     });
     await page.goto(ADDR + "/beta/", { waitUntil: "domcontentloaded" });
@@ -98,14 +125,19 @@ for (const [id, url] of TARGETS) {
     await input.fill(url);
     await page.getByRole("button", { name: /dezoomify/i }).first().click();
 
-    // Bounded observation: a real tile request (the app planned tiles from
-    // real, auto-selected metadata) or an honest terminal state.
+    // Bounded observation: wait for at least one readable tile (the app
+    // planned tiles from real, auto-selected metadata and fetched one), or
+    // an honest terminal state. Breaking on the first tile *request* alone
+    // hid the krpano regression where every tile 404'd against /beta/.
     const deadline = Date.now() + PER_TARGET_MS;
     let errorState = null;
     while (Date.now() < deadline) {
-      if (firstTileUrl !== null) break;
+      if (tileOkUrls.length >= 1) break;
+      if (tileFailedUrls.length >= 1 || appOriginTile404s.length >= 1) break;
       const state = await page.locator("#app").innerText().catch(() => "");
-      const failed = state.match(/Could not dezoomify|No zoomable image/i);
+      const failed = state.match(
+        /Could not dezoomify|No zoomable image|could not be saved|Part of the image|TILE_FAILED/i,
+      );
       if (failed) {
         errorState = failed[0];
         break;
@@ -118,10 +150,27 @@ for (const [id, url] of TARGETS) {
     if (await cancel.isVisible().catch(() => false)) {
       await cancel.click().catch(() => {});
     }
-    console.log(`live web ${id}: site_requests=${siteRequests} first_tile=${firstTileUrl ?? "none"}`);
-    if (errorState !== null && firstTileUrl === null) {
+    console.log(
+      `live web ${id}: site_requests=${siteRequests} tiles=${tileUrls.length} tile_ok=${tileOkUrls.length} ` +
+        `tile_fail=${tileFailedUrls.length} app404=${appOriginTile404s.length} first_tile=${firstTileUrl ?? "none"}`,
+    );
+    if (appOriginTile404s.length >= 1) {
       throw new Error(
-        `${url}: the webapp reported "${errorState}" without ever planning a tile; ` +
+        `${url}: planned tile URLs resolved against the app instead of the site ` +
+          `(relative base lost, e.g. krpano galleria_04.tiles/* under /beta/): ${appOriginTile404s[0]}; ` +
+          "fix the metadata finalUri propagation",
+      );
+    }
+    if (tileFailedUrls.length >= 1 && tileOkUrls.length === 0) {
+      throw new Error(
+        `${url}: planned tile fetches failed (${tileFailedUrls[0]}); ` +
+          "the target is broken for the new webapp; remove it from the live target list " +
+          "with the reason in the commit message",
+      );
+    }
+    if (errorState !== null && tileOkUrls.length === 0) {
+      throw new Error(
+        `${url}: the webapp reported "${errorState}" without ever fetching a readable tile; ` +
           "the target is broken for the new webapp; remove it from the live target list " +
           "with the reason in the commit message",
       );
@@ -130,6 +179,15 @@ for (const [id, url] of TARGETS) {
     expect(
       siteOkResponses,
       `${id}: the app must get at least one readable (2xx/3xx) response from the site`,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      tileUrls.length,
+      `${id}: the app must plan at least one tile (a non-metadata request to the site)`,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      tileOkUrls.length,
+      `${id}: at least one planned tile must be readable (2xx/3xx); ` +
+        `failures: ${tileFailedUrls.slice(0, 3).join("; ") || "none"}`,
     ).toBeGreaterThanOrEqual(1);
   });
 }

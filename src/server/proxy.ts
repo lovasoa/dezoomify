@@ -45,12 +45,16 @@ export interface ProxyRelayDeps {
  */
 export const RATE_LIMIT_RETRY_DELAY_MS = 750;
 
+export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
+
 export interface ProxyRelayResult {
   status: number;
   headers: Record<string, string>;
   body?: ArrayBuffer;
   code?: string;
   requestId: string;
+  /** Post-redirect upstream URL the body was read from (success only). */
+  upstreamUrl?: string;
 }
 
 function headerCase(headers: Record<string, string>, name: string): string | null {
@@ -187,7 +191,11 @@ export async function handleProxyRequest(
     const outHeaders: Record<string, string> = {
       ...baseHeaders,
       "content-type": contentType ?? "application/octet-stream",
+      // Post-redirect base for relative tile URLs. Browsers can only read
+      // this when it is CORS-exposed (see buildProxyCorsHeaders).
+      [PROXY_UPSTREAM_URL_HEADER]: current,
+      "access-control-expose-headers": PROXY_UPSTREAM_URL_HEADER,
     };
-    return { status: 200, headers: outHeaders, body, requestId };
+    return { status: 200, headers: outHeaders, body, requestId, upstreamUrl: current };
   }
 }

@@ -210,6 +210,24 @@ test("persistent upstream 429 fails fast after a single retry", async (t) => {
   assert.equal(upstream.mock.callCount(), 2, "no unbounded retry loop");
 });
 
+test("relay exposes the post-redirect upstream URL for relative tile bases", async (t) => {
+  mockUpstream(
+    () => ({ status: 200, headers: { "content-type": "application/xml" }, body: "<krpano/>" }),
+    t,
+  );
+  const res = await onRequestPost({
+    request: postRequest('{"targetUrl":"https://public.test/galleria_04.xml","protocolVersion":1}', {
+      origin: "https://dezoomify.ophir.dev",
+    }),
+  });
+  assert.equal(res.status, 200);
+  // Relative tile URLs (krpano galleria_04.tiles/*) resolve against this;
+  // without it the app fell back to an empty base and fetched /beta/* 404s.
+  assert.equal(res.headers.get("x-proxy-upstream-url"), "https://public.test/galleria_04.xml");
+  const exposed = res.headers.get("access-control-expose-headers") ?? "";
+  assert.match(exposed.toLowerCase(), /x-proxy-upstream-url/);
+});
+
 test("OPTIONS preflight: same origin allowed, cross origin refused", async (t) => {
   const ok = await onRequestOptions({
     request: new Request(SITE_URL, {

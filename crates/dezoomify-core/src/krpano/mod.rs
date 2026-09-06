@@ -582,6 +582,41 @@ mod tests {
     }
 
     #[test]
+    fn proxied_krpano_without_redirect_keeps_the_site_tile_base() {
+        // Regression: https://krpano.com/panos/andreabiffi/galleria_04.xml
+        // fetched through the metadata proxy arrived with an empty final URI,
+        // so relative galleria_04.tiles/* URLs resolved against the app page
+        // (/beta/) and every tile 404'd. The core must fall back to the
+        // request URI, keeping tiles on krpano.com.
+        let xml = br#"<krpano version="1.16">
+            <image type="CUBE" multires="true" tilesize="512" progressive="false">
+                <level tiledimagewidth="955" tiledimageheight="955">
+                    <cube url="galleria_04.tiles/mres_%s/l2/%v/l2_%s_%v_%h.jpg" />
+                </level>
+            </image>
+        </krpano>"#;
+        for with_empty in [false, true] {
+            let mut registry = crate::core::Registry::new();
+            registry.register(SPEC);
+            let uri = "https://krpano.com/panos/andreabiffi/galleria_04.xml";
+            let mut operation = registry.start(uri);
+            let need = operation.missing_resources().unwrap().pop().unwrap();
+            let mut response = ResourceResponse::new(need.id, xml.to_vec());
+            if with_empty {
+                response = response.with_final_uri("");
+            }
+            operation.provide(response).unwrap();
+            let catalog = operation.finish().unwrap();
+            let image = self::image(catalog);
+            let (tile_uri, _) = tile_requests(&image.levels[0], 1).pop().unwrap();
+            assert!(
+                tile_uri.starts_with("https://krpano.com/panos/andreabiffi/galleria_04.tiles/"),
+                "tile base must stay on the site, got {tile_uri}"
+            );
+        }
+    }
+
+    #[test]
     fn test_cube() {
         let image = image(catalog_from_xml(
             "http://test.com",

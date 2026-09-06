@@ -150,10 +150,13 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
         deps
           .fetchMetadata(uri, headers)
           .then(({ bytes, finalUri }) => {
-            worker.postMessage(
-              { type: "provide", id, bytes, finalUri: finalUri ?? "" },
-              [bytes],
-            );
+            // Preserve a missing redirect URL as undefined: the wasm adapter
+            // collapses empty strings to None so the core falls back to the
+            // request URI. Coercing to "" here used to produce relative tile
+            // URLs resolved against the app page (e.g. krpano
+            // galleria_04.tiles/* fetched from /beta/).
+            const clean = typeof finalUri === "string" && finalUri !== "" ? finalUri : uri;
+            worker.postMessage({ type: "provide", id, bytes, finalUri: clean }, [bytes]);
           })
           .catch((error: unknown) => {
             const structured = error as { code?: string; message?: string; technical?: string };

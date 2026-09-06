@@ -325,9 +325,24 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
                     && output.metadata().map(|m| m.len() > 0).unwrap_or(false) =>
             {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                let (format, width, height) = parse_completed(&stdout);
-                println!("{} : {format} : {width}x{height}", target.url);
-                passed += 1;
+                let (format, width, height, tile_count) = parse_completed(&stdout);
+                // A zero-size catalog or an empty tile plan must never go
+                // green: a successful exit with no readable tiles is a broken
+                // target, not a pass (krpano-style relative-URL regressions
+                // must fail here as well as in the webapp suite).
+                if width == 0 || height == 0 || tile_count == 0 || format == "unknown" {
+                    println!(
+                        "{} : incomplete completion (format={format} {width}x{height} tiles={tile_count})",
+                        target.url
+                    );
+                    failed.push(target.name.to_string());
+                } else {
+                    println!(
+                        "{} : {format} : {width}x{height} ({tile_count} tiles)",
+                        target.url
+                    );
+                    passed += 1;
+                }
             }
             Ok(out) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
@@ -407,10 +422,11 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
-/// Extract the detected format and image dimensions from the CLI `--json`
-/// completion record. Falls back to `unknown`/`0x0` when the record is
-/// missing so a successful download still prints one stable line.
-fn parse_completed(stdout: &str) -> (String, u64, u64) {
+/// Extract the detected format, image dimensions, and tile count from the CLI
+/// `--json` completion record. Falls back to `unknown`/`0x0`/0 tiles when the
+/// record is missing so a broken download still prints one stable line and
+/// fails the completeness check at the call site.
+fn parse_completed(stdout: &str) -> (String, u64, u64, u64) {
     for line in stdout.lines().rev() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -432,9 +448,13 @@ fn parse_completed(stdout: &str) -> (String, u64, u64) {
             .get("height")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
-        return (format, width, height);
+        let tile_count = value
+            .get("tileCount")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        return (format, width, height, tile_count);
     }
-    ("unknown".to_string(), 0, 0)
+    ("unknown".to_string(), 0, 0, 0)
 }
 
 /// Last non-empty stderr line without the `error: ` prefix.
@@ -473,7 +493,7 @@ mod tests {
             \"format\":\"zoomify\",\"width\":1200,\"height\":800,\"tileCount\":4}";
         assert_eq!(
             super::parse_completed(stdout),
-            ("zoomify".to_string(), 1200, 800)
+            ("zoomify".to_string(), 1200, 800, 4)
         );
     }
 
@@ -481,7 +501,22 @@ mod tests {
     fn completed_falls_back_without_a_record() {
         assert_eq!(
             super::parse_completed("{\"kind\":\"started\"}\nnot json"),
-            ("unknown".to_string(), 0, 0)
+            ("unknown".to_string(), 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn zero_tiles_are_incomplete() {
+        let (format, width, height, tiles) = super::parse_completed(
+            "{\"kind\":\"completed\",\"format\":\"krpano\",\"width\":955,\"height\":955,\"tileCount\":0}",
+        );
+        assert_eq!(
+            (format.as_str(), width, height, tiles),
+            ("krpano", 955, 955, 0)
+        );
+        assert!(
+            width == 0 || height == 0 || tiles == 0 || format == "unknown",
+            "zero-tile completions must fail the live completeness gate"
         );
     }
 

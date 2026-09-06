@@ -152,6 +152,38 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
   assert.equal(cancelled.code, "TRANSPORT_CANCELLED");
 });
 
+test("proxyTransport surfaces the upstream URL so proxied metadata keeps its tile base", async () => {
+  const fetchImpl = async () => ({
+    status: 200,
+    headers: {
+      get: (k) => {
+        const l = k.toLowerCase();
+        if (l === "content-type") return "application/xml";
+        if (l === "x-proxy-upstream-url") return "https://public.test/galleria_04.xml";
+        return null;
+      },
+    },
+    async arrayBuffer() {
+      return new Uint8Array([1]).buffer;
+    },
+  });
+  const pt = createProxyTransport(fetchImpl, { protocolVersion: 1, maxBytes: 1024 });
+  const r = await pt.fetchViaProxy("https://public.test/galleria_04.xml");
+  assert.equal(r.ok, true);
+  assert.equal(r.finalUrl, "https://public.test/galleria_04.xml");
+  // Missing header: no finalUrl, callers fall back to the requested URL.
+  const bare = createProxyTransport(async () => ({
+    status: 200,
+    headers: { get: () => null },
+    async arrayBuffer() {
+      return new Uint8Array([1]).buffer;
+    },
+  }), { protocolVersion: 1, maxBytes: 1024 });
+  const r2 = await bare.fetchViaProxy("https://public.test/galleria_04.xml");
+  assert.equal(r2.ok, true);
+  assert.equal(r2.finalUrl, undefined);
+});
+
 test("handoff suggestions come from capabilities; ordinary display always offered", () => {
   const web = createWebIntegration({ direct: directOk(), proxy: proxyOk(), capabilities: {} });
   assert.deepEqual(web.getHandoffSuggestions(), ["ordinary-image-display"]);

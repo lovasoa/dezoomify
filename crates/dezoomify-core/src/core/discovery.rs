@@ -33,10 +33,15 @@ impl ResourceResponse {
         }
     }
 
-    /// Set the URI reached after the host followed redirects.
+    /// Set the URI reached after the host followed redirects. Empty values
+    /// are ignored so relative tile URLs keep resolving against the request
+    /// URI instead of collapsing to a page-relative path.
     #[must_use]
     pub fn with_final_uri(mut self, uri: impl Into<String>) -> Self {
-        self.final_uri = Some(uri.into());
+        let uri = uri.into();
+        if !uri.is_empty() {
+            self.final_uri = Some(uri);
+        }
         self
     }
 }
@@ -114,7 +119,11 @@ impl<'a> DiscoveryContext<'a> {
                 ResourceOutcome::Response(response) => Some(DiscoveryResource {
                     request: &record.request,
                     bytes: &response.bytes,
-                    final_uri: response.final_uri.as_deref().unwrap_or(&record.request.uri),
+                    final_uri: response
+                        .final_uri
+                        .as_deref()
+                        .filter(|uri| !uri.is_empty())
+                        .unwrap_or(&record.request.uri),
                 }),
                 ResourceOutcome::Failure(_) => None,
             })
@@ -580,7 +589,11 @@ impl DiscoveryOperation {
                 DiscoveryResource {
                     request,
                     bytes: &response.bytes,
-                    final_uri: response.final_uri.as_deref().unwrap_or(&request.uri),
+                    final_uri: response
+                        .final_uri
+                        .as_deref()
+                        .filter(|uri| !uri.is_empty())
+                        .unwrap_or(&request.uri),
                 },
                 "resource did not match any discovery route",
             ),
@@ -720,6 +733,34 @@ mod tests {
             image.title.as_deref(),
             Some("https://cdn.example.test/info.xml")
         );
+    }
+
+    #[test]
+    fn empty_final_uri_falls_back_to_the_request_uri() {
+        // Regression: proxied metadata once arrived with an empty final URI,
+        // so relative tile URLs (krpano galleria_04.tiles/*) resolved against
+        // the app page (/beta/) and every tile 404'd. Empty values must
+        // collapse to the request URI at every layer.
+        for with_empty in [false, true] {
+            let mut registry = Registry::new();
+            registry.register(DezoomerSpec::new("final-uri", FINAL_URI));
+            let mut operation = registry.start("https://example.test/redirect");
+            let need = operation.missing_resources().unwrap().pop().unwrap();
+            let mut response = ResourceResponse::new(need.id, b"metadata");
+            if with_empty {
+                response = response.with_final_uri("");
+            }
+            operation.provide(response).unwrap();
+            let catalog = operation.finish().unwrap();
+            let [CatalogEntry::Ready(image)] = catalog.entries() else {
+                panic!("expected one ready image")
+            };
+            assert_eq!(
+                image.title.as_deref(),
+                Some("https://example.test/redirect"),
+                "empty final URIs must fall back to the request URI"
+            );
+        }
     }
 
     fn text_catalog(

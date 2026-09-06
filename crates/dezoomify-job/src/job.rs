@@ -449,8 +449,10 @@ impl Job {
                 ResourceResponse::new(dezoomify_core::core::discovery::RequestId(core_id), bytes);
             // Relative tile URLs resolve against the post-redirect URL the
             // host actually read; without it the core falls back to the
-            // request URI it asked for.
-            let response = match final_uri {
+            // request URI it asked for. Empty values collapse to missing so
+            // a proxied fetch without a redirect URL never produces
+            // page-relative tile URLs.
+            let response = match final_uri.filter(|uri| !uri.is_empty()) {
                 Some(uri) => response.with_final_uri(uri),
                 None => response,
             };

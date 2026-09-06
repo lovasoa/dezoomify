@@ -252,7 +252,8 @@ pub mod wasm_api {
         }
 
         /// Provide fetched bytes for one outstanding need (`final_uri` may be
-        /// empty when no redirect happened).
+        /// empty when no redirect happened; empty collapses to `None` so the
+        /// core falls back to the request URI for relative tile URLs).
         #[wasm_bindgen(js_name = "provide")]
         pub fn provide(
             &mut self,
@@ -260,8 +261,9 @@ pub mod wasm_api {
             bytes: &[u8],
             final_uri: String,
         ) -> Result<(), JsValue> {
+            let final_uri = (!final_uri.is_empty()).then_some(final_uri);
             self.inner
-                .provide(request_id, bytes.to_vec(), Some(final_uri))
+                .provide(request_id, bytes.to_vec(), final_uri)
                 .map_err(js_error)
         }
 

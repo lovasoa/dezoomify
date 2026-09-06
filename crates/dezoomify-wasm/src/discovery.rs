@@ -151,7 +151,7 @@ impl DiscoverySession {
             dezoomify_core::core::discovery::RequestId(request_id),
             bytes,
         );
-        if let Some(uri) = final_uri {
+        if let Some(uri) = final_uri.filter(|uri| !uri.is_empty()) {
             response = response.with_final_uri(uri);
         }
         operation.provide(response).map_err(discovery_error)?;

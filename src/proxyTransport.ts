@@ -5,12 +5,16 @@
 // guard only fails closed early instead of buffering an over-budget body.
 export const PROXY_METADATA_MAX_BYTES = 2 * 1024 * 1024;
 
+export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
+
 export interface ProxyFetchResult {
   ok: boolean;
   status: number;
   code?: string;
   bytes?: ArrayBuffer;
   contentType?: string;
+  /** Post-redirect upstream URL reported by the relay (success only). */
+  finalUrl?: string;
 }
 
 export type ProxyFetchImpl = (
@@ -32,7 +36,7 @@ function safeHeaders(input: unknown): Record<string, string> {
       forEach?: (cb: (v: string, k: string) => void) => void;
     };
     if (typeof h.get === "function") {
-      for (const k of ["content-type", "content-length"]) {
+      for (const k of ["content-type", "content-length", PROXY_UPSTREAM_URL_HEADER]) {
         const v = h.get(k);
         if (v !== null && v !== undefined) out[k] = String(v);
       }
@@ -125,11 +129,13 @@ export function createProxyTransport(
     if (response.status < 200 || response.status > 299) {
       return { ok: false, status: response.status, code: "TRANSPORT_HTTP_ERROR" };
     }
+    const upstream = headers[PROXY_UPSTREAM_URL_HEADER];
     return {
       ok: true,
       status: response.status,
       bytes,
       contentType: headers["content-type"],
+      ...(typeof upstream === "string" && upstream !== "" ? { finalUrl: upstream } : {}),
     };
   }
 

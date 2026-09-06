@@ -56,6 +56,34 @@ test("start routes needs through fetchMetadata and resolves the catalog", async 
   assert.equal(worker.terminated, true);
 });
 
+test("missing finalUri falls back to the request URI so relative tiles keep their base", async () => {
+  let provided = null;
+  const worker = loopbackWorker((msg, respond) => {
+    if (msg.type === "start") {
+      respond({ type: "need", id: 0, uri: "https://site.test/galleria_04.xml", headers: {} });
+      return;
+    }
+    if (msg.type === "provide") {
+      provided = msg;
+      respond({ type: "catalog", catalog: { images: [] } });
+      return;
+    }
+  });
+  const client = createDiscoveryClient({
+    worker,
+    // Proxied metadata without a redirect URL (the krpano regression):
+    // no finalUri at all, and empty-string variants, must both resolve
+    // against the requested URL rather than "" (which produced
+    // /beta/galleria_04.tiles/* 404s).
+    fetchMetadata: async () => ({ bytes: new ArrayBuffer(4) }),
+    fetchTile: async () => ({ bytes: new ArrayBuffer(0) }),
+    probeSize: async () => ({ ok: false, width: 0, height: 0 }),
+  });
+  await client.start("https://site.test/galleria_04.xml");
+  assert.equal(provided.finalUri, "https://site.test/galleria_04.xml");
+  client.dispose();
+});
+
 test("plan drives probe rounds until the plan resolves", async () => {
   let probes = 0;
   const worker = loopbackWorker((msg, respond) => {

@@ -128,7 +128,16 @@ async function handle(msg) {
     case "provide": {
       if (!session) throw Object.assign(new Error("no discovery session"), { code: "WORKER_FAILED" });
       try {
-        session.provide(msg.id, new Uint8Array(msg.bytes), msg.finalUri || "");
+        // Empty redirect URLs collapse to the request URI downstream; never
+        // forward "" as a base for relative tile URLs (krpano regression:
+        // galleria_04.tiles/* resolved against /beta/ and 404'd).
+        const finalUri =
+          typeof msg.finalUri === "string" && msg.finalUri !== "" ? msg.finalUri : undefined;
+        session.provide(
+          msg.id,
+          new Uint8Array(msg.bytes),
+          typeof finalUri === "string" ? finalUri : "",
+        );
         lastFailure = null;
       } catch (error) {
         postDiscoveryFailure(error);
