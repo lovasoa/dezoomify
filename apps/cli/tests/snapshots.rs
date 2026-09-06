@@ -121,6 +121,7 @@ fn ported_flags_are_known() {
         &["--max-height", "800"],
         &["-h", "800"],
         &["--zoom-level", "0"],
+        &["--image-index", "0"],
         &["--parallelism", "8"],
         &["-n", "8"],
         &["--retry-delay", "2s"],

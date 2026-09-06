@@ -163,7 +163,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
                 max_width = Some(width);
             }
-            "--max-height" => {
+            "--max-height" | "-h" => {
                 let raw = take_value(args, &mut i, inline_value, "--max-height")?;
                 let height: u32 = raw
                     .parse()
@@ -172,37 +172,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     return Err("--max-height must be positive".to_string());
                 }
                 max_height = Some(height);
-            }
-            "-h" => {
-                // Old `-h` was `--max-height`; new bare `-h` is help.
-                // `-h <px>` (or `-h<px>`) sets the height cap, bare `-h`
-                // shows help. Documented in help and user docs.
-                if let Some(inline) = inline_value {
-                    if inline.is_empty() {
-                        return Err("missing value for --max-height".to_string());
-                    }
-                    let height: u32 = inline
-                        .parse()
-                        .map_err(|_| format!("invalid --max-height value: {inline}"))?;
-                    if height == 0 {
-                        return Err("--max-height must be positive".to_string());
-                    }
-                    max_height = Some(height);
-                } else if let Some(next) = args.get(i + 1) {
-                    let trimmed = next.trim();
-                    if let Ok(height) = trimmed.parse::<u32>() {
-                        if height > 0 {
-                            i += 1;
-                            max_height = Some(height);
-                        } else {
-                            return Err("--max-height must be positive".to_string());
-                        }
-                    } else {
-                        return Err(help());
-                    }
-                } else {
-                    return Err(help());
-                }
             }
             "--zoom-level" => {
                 let raw = take_value(args, &mut i, inline_value, "--zoom-level")?;
@@ -475,9 +444,9 @@ fn help() -> String {
         "  -d, --dezoomer <name>       format to use, or auto to detect (default auto)",
         "  -l, --largest               select the largest level (highest resolution)",
         "  -w, --max-width <px>        largest level whose width fits (positive integer)",
-        "  --max-height <px>           largest level whose height fits (positive integer)",
-        "                              (-h <px> also sets height; bare -h shows help)",
+        "  -h, --max-height <px>       largest level whose height fits (positive integer)",
         "  --zoom-level <n>            select level by index, 0 is smallest, too large uses last",
+        "  --image-index <n>           select image by index, 0 is first, too large uses last",
         "  -n, --parallelism <n>       max concurrent tile downloads (default 16)",
         "  -r, --retries <n>           tile retry budget, 0 means no retries (default 3)",
         "  --retry-delay <duration>    delay before first retry, then doubling (default 2s)",
@@ -494,7 +463,7 @@ fn help() -> String {
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
         "                              or IIIF collection manifest URL; saves one output per entry",
         "  --outfile <file>            explicit output file, or bulk base name (bulk_1.ext, …)",
-        "  -h, --help, -?              show this help (use -h <px> or --max-height for height cap)",
+        "  -?, --help                  show this help",
         "  -V, --version               show version",
     ]
     .join("\n")
@@ -760,9 +729,12 @@ mod tests {
     }
 
     #[test]
-    fn bare_dash_h_is_help() {
-        let err = parse(&["-h".to_string()]).expect_err("bare -h is help");
-        assert!(err.starts_with("usage:"), "help text: {err}");
+    fn bare_dash_h_needs_a_value() {
+        let err = parse(&["-h".to_string()]).expect_err("bare -h needs a value");
+        assert!(
+            err.contains("missing value for --max-height"),
+            "height value required: {err}"
+        );
     }
 
     #[test]

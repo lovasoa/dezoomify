@@ -12,15 +12,15 @@ cargo xtask build cli
 
 Run `./target/debug/dezoomify-cli --help` for the full list: `--overwrite`,
 `--json`, `-d/--dezoomer <name>` (default auto), `-l/--largest`,
-`-w/--max-width <px>`, `--max-height <px>` (`-h <px>` sets height; bare
-`-h` shows help), `--zoom-level <n>`, `-n/--parallelism <n>` (default 16),
+`-w/--max-width <px>`, `-h/--max-height <px>`, `--zoom-level <n>`,
+`--image-index <n>`, `-n/--parallelism <n>` (default 16),
 `-r/--retries <n>` (default 3, 0 allowed), `--retry-delay <duration>`
 (default 2s), `--compression <0-100>` (default 5),
 `--max-idle-per-host <n>` (default 32), `--accept-invalid-certs`,
 `-H/--header "Name: value"`, `-i/--min-interval <duration>` (default 0),
 `--timeout <duration>` (default 30s), `--connect-timeout <duration>`
 (default 6s), `--logging <level>` (default info), `-c/--tile-cache <dir>`,
-`--bulk <file-or-url>`, `--outfile <file>`, `-h/--help/-?`, `-V/--version`.
+`--bulk <file-or-url>`, `--outfile <file>`, `-?/--help`, `-V/--version`.
 
 Each single run saves one job to one output file (PNG, JPEG, TIFF, or IIIF
 folder by extension). When the output is omitted it auto-names from the

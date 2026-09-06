@@ -36,7 +36,7 @@ ignores caps).
 | Let the tool detect the format, or force one | `-d, --dezoomer auto` (default; named formats fall back to auto-detect) |
 | Always take the highest resolution | `-l, --largest` (implied in bulk mode without level caps) |
 | Cap the resolution (e.g. 4000 pixels wide) | `-w, --max-width 4000` |
-| Cap the height | `--max-height 800` (or `-h 800`; bare `-h` shows help, as does `--help` and `-?`) |
+| Cap the height | `-h, --max-height 800` |
 | Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
 | Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
 | Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries, emulated with no refetch) |
@@ -53,7 +53,7 @@ ignores caps).
 | Overwrite an existing file | `--overwrite` |
 | Print machine-readable records | `--json` |
 
-Run `dezoomify --help` for the full list. `-V` shows the version.
+Run `dezoomify --help` (`-?` is an alias) for the full list. `-V` shows the version.
 
 ## Saving many images
 

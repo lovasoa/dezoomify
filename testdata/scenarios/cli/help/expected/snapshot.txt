@@ -7,9 +7,9 @@ options:
   -d, --dezoomer <name>       format to use, or auto to detect (default auto)
   -l, --largest               select the largest level (highest resolution)
   -w, --max-width <px>        largest level whose width fits (positive integer)
-  --max-height <px>           largest level whose height fits (positive integer)
-                              (-h <px> also sets height; bare -h shows help)
+  -h, --max-height <px>       largest level whose height fits (positive integer)
   --zoom-level <n>            select level by index, 0 is smallest, too large uses last
+  --image-index <n>           select image by index, 0 is first, too large uses last
   -n, --parallelism <n>       max concurrent tile downloads (default 16)
   -r, --retries <n>           tile retry budget, 0 means no retries (default 3)
   --retry-delay <duration>    delay before first retry, then doubling (default 2s)
@@ -26,5 +26,5 @@ options:
   --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)
                               or IIIF collection manifest URL; saves one output per entry
   --outfile <file>            explicit output file, or bulk base name (bulk_1.ext, …)
-  -h, --help, -?              show this help (use -h <px> or --max-height for height cap)
+  -?, --help                  show this help
   -V, --version               show version
