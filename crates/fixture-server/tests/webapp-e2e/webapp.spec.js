@@ -246,7 +246,7 @@ test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ 
   await page.getByRole("button", { name: /dezoomify/i }).first().click();
 
   await expect(page.locator(".dz-notice-section")).toBeVisible({ timeout: 60000 });
-  await expect(page.getByText(/Display-Only Preview/)).toBeVisible();
+  await expect(page.getByText(/Image downloaded/)).toBeVisible();
   await expect(page.getByText(/right-click/i)).toBeVisible();
   await expect(page.locator(".dz-error-section")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save image" })).toHaveCount(0);
