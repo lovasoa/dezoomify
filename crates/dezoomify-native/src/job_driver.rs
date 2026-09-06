@@ -312,7 +312,7 @@ struct Attempt<'a> {
     /// Plan-order tile ids (first-seen order matches plan order).
     order: Vec<String>,
     geoms: HashMap<String, TileGeom>,
-    decoded: HashMap<String, image::RgbaImage>,
+    decoded: HashMap<String, crate::pipeline::DecodedTile>,
     /// Tiles acquired overall (never cleared by `release-bytes`, unlike
     /// the pixel buffers above).
     acquired: usize,
@@ -938,7 +938,7 @@ fn acquire_tiles(
             skip_fetch,
         });
     }
-    let mut outcomes: Vec<(String, bool, Option<image::RgbaImage>)> =
+    let mut outcomes: Vec<(String, bool, Option<crate::pipeline::DecodedTile>)> =
         Vec::with_capacity(tiles.len());
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(tiles.len());
@@ -1041,11 +1041,11 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
     let mut height = declared.map_or(1u32, |size| size.y.max(1));
     if declared.is_none() {
         for (tile, geom) in &attempt.geoms {
-            let Some(image) = attempt.decoded.get(tile) else {
+            let Some(decoded) = attempt.decoded.get(tile) else {
                 continue;
             };
-            width = width.max(geom.destination.x.saturating_add(image.width()));
-            height = height.max(geom.destination.y.saturating_add(image.height()));
+            width = width.max(geom.destination.x.saturating_add(decoded.image.width()));
+            height = height.max(geom.destination.y.saturating_add(decoded.image.height()));
         }
     }
     // Explicit memory check before allocating: the canvas holds 4 bytes per
@@ -1073,9 +1073,23 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
         ));
     }
     let partial = attempt.decoded.len() != attempt.order.len();
+    // First-seen output metadata in plan order, mirroring the reference
+    // first-tile capture (`canvas.rs:69-76`, `png_encoder.rs:97-119`): the
+    // reference winner is completion order, which is nondeterministic under
+    // concurrency, so plan order is the honest deterministic rule.
+    let icc_profile = attempt
+        .order
+        .iter()
+        .filter_map(|tile| attempt.decoded.get(tile))
+        .find_map(|decoded| decoded.icc_profile.as_deref());
+    let exif_metadata = attempt
+        .order
+        .iter()
+        .filter_map(|tile| attempt.decoded.get(tile))
+        .find_map(|decoded| decoded.exif_metadata.as_deref());
     let mut target = image::RgbaImage::new(width, height);
     for tile in &attempt.order {
-        let Some(image) = attempt.decoded.get(tile) else {
+        let Some(decoded) = attempt.decoded.get(tile) else {
             // Kept-partial hole: the blank canvas shows through.
             continue;
         };
@@ -1083,11 +1097,16 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             destination: Vec2d::default(),
             extent: None,
         });
-        blit_onto(&mut target, geom.destination, geom.extent, image);
+        blit_onto(&mut target, geom.destination, geom.extent, &decoded.image);
     }
     let output_hash = match attempt.format {
         OutputFormat::Png => {
-            let encoded = encode_png(&target, attempt.config.png_compression())?;
+            let encoded = encode_png(
+                &target,
+                attempt.config.png_compression(),
+                icc_profile,
+                exif_metadata,
+            )?;
             attempt.emit(
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
@@ -1096,7 +1115,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Jpeg => {
-            let encoded = encode_jpeg(&target, attempt.config.jpeg_quality())?;
+            let encoded = encode_jpeg(&target, attempt.config.jpeg_quality(), icc_profile)?;
             attempt.emit(
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
@@ -1105,7 +1124,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Tiff => {
-            let encoded = encode_tiff(&target)?;
+            let encoded = encode_tiff(&target, icc_profile)?;
             attempt.emit(
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),

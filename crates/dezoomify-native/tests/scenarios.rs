@@ -245,7 +245,7 @@ fn jpeg_and_tiff_encode_and_decode_round_trip() {
     for (x, y, pixel) in image.enumerate_pixels_mut() {
         *pixel = image::Rgba([(x * 16) as u8, (y * 16) as u8, 128, 255]);
     }
-    let jpeg = encode_jpeg(&image, JPEG_QUALITY).expect("jpeg encodes");
+    let jpeg = encode_jpeg(&image, JPEG_QUALITY, None).expect("jpeg encodes");
     assert!(
         jpeg.starts_with(&[0xFF, 0xD8, 0xFF]),
         "jpeg output carries the SOI marker"
@@ -254,7 +254,7 @@ fn jpeg_and_tiff_encode_and_decode_round_trip() {
         .expect("jpeg decodes")
         .to_rgba8();
     assert_eq!((decoded.width(), decoded.height()), (16, 16));
-    let tiff = encode_tiff(&image).expect("tiff encodes");
+    let tiff = encode_tiff(&image, None).expect("tiff encodes");
     let decoded = image::load_from_memory(&tiff)
         .expect("tiff decodes")
         .to_rgba8();
@@ -283,6 +283,6 @@ fn jpeg_rejects_canvases_beyond_its_side_limit() {
     // A 1x1 stand-in cannot allocate gigapixels; assert the guard directly
     // through the dimension check on a wide image instead.
     let wide = image::RgbaImage::new(65_536, 1);
-    let error = encode_jpeg(&wide, 92).expect_err("jpeg side limit applies");
+    let error = encode_jpeg(&wide, 92, None).expect_err("jpeg side limit applies");
     assert_eq!(error.code, "output.encode-failed");
 }

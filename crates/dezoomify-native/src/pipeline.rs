@@ -228,6 +228,40 @@ pub(crate) fn merge_headers(request: &Request) -> BTreeMap<String, String> {
 /// entries hold response bodies only, never headers or cookies. A corrupt
 /// entry quietly falls back to a fresh fetch, and a failed store never fails
 /// the tile: the cache stays best-effort.
+///
+/// The decoded tile carries the first-seen ICC profile and EXIF metadata
+/// alongside the pixels (reference `tile.rs:186-219`); metadata extraction
+/// failures fall back to `None` while decode failures fail the tile.
+pub(crate) struct DecodedTile {
+    pub image: image::RgbaImage,
+    pub icc_profile: Option<Vec<u8>>,
+    pub exif_metadata: Option<Vec<u8>>,
+}
+
+/// Decode image bytes while preserving the available ICC profile and EXIF
+/// metadata, mirroring `load_image_with_metadata` in the reference.
+pub(crate) struct ImageWithMetadata {
+    pub image: image::DynamicImage,
+    pub icc_profile: Option<Vec<u8>>,
+    pub exif_metadata: Option<Vec<u8>>,
+}
+
+pub(crate) fn load_image_with_metadata(
+    bytes: &[u8],
+) -> Result<ImageWithMetadata, image::ImageError> {
+    use image::ImageDecoder as _;
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
+    let mut decoder = reader.into_decoder()?;
+    let icc_profile = decoder.icc_profile().unwrap_or(None);
+    let exif_metadata = decoder.exif_metadata().unwrap_or(None);
+    let image = image::DynamicImage::from_decoder(decoder)?;
+    Ok(ImageWithMetadata {
+        image,
+        icc_profile,
+        exif_metadata,
+    })
+}
+
 pub(crate) fn fetch_and_decode_cached(
     uri: &str,
     headers: &BTreeMap<String, String>,
@@ -235,11 +269,15 @@ pub(crate) fn fetch_and_decode_cached(
     config: &PipelineConfig,
     user: &UserHeaders,
     cache: Option<(&std::path::Path, &str)>,
-) -> Result<image::RgbaImage, NativeError> {
+) -> Result<DecodedTile, NativeError> {
     if let Some((dir, namespace)) = cache {
         if let Some(bytes) = crate::cache::load(dir, namespace, uri) {
-            if let Ok(decoded) = image::load_from_memory(&bytes) {
-                return Ok(decoded.to_rgba8());
+            if let Ok(loaded) = load_image_with_metadata(&bytes) {
+                return Ok(DecodedTile {
+                    image: loaded.image.to_rgba8(),
+                    icc_profile: loaded.icc_profile,
+                    exif_metadata: loaded.exif_metadata,
+                });
             }
         }
     }
@@ -257,9 +295,13 @@ pub(crate) fn fetch_and_decode_cached(
     if let Some((dir, namespace)) = cache {
         let _ = crate::cache::store(dir, namespace, uri, &bytes);
     }
-    let decoded = image::load_from_memory(&bytes)
+    let loaded = load_image_with_metadata(&bytes)
         .map_err(|e| NativeError::new("tile.decode-failed", format!("tile decode failed: {e}")))?;
-    Ok(decoded.to_rgba8())
+    Ok(DecodedTile {
+        image: loaded.image.to_rgba8(),
+        icc_profile: loaded.icc_profile,
+        exif_metadata: loaded.exif_metadata,
+    })
 }
 
 pub(crate) struct ProbeRead {
@@ -330,18 +372,29 @@ pub(crate) fn blit_onto(
 /// Encode the assembled canvas as PNG at the configured deflate tier.
 /// The default tier is fast, matching the previous fixed encoder byte for
 /// byte; higher `--compression` values trade smaller files for slower
-/// encodes (reference `png_encoder.rs:30-34`).
+/// encodes (reference `png_encoder.rs:30-34`). The first tile's ICC profile
+/// and EXIF metadata ride in the header when present (reference
+/// `png_encoder.rs:45-117`); tiles without metadata encode identically to
+/// before.
 pub(crate) fn encode_png(
     image: &image::RgbaImage,
     compression: image::codecs::png::CompressionType,
+    icc_profile: Option<&[u8]>,
+    exif_metadata: Option<&[u8]>,
 ) -> Result<Vec<u8>, NativeError> {
     use image::codecs::png::FilterType;
     let mut bytes = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new_with_quality(
+    let mut encoder = image::codecs::png::PngEncoder::new_with_quality(
         &mut bytes,
         compression,
         FilterType::Adaptive,
     );
+    if let Some(profile) = icc_profile {
+        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+    }
+    if let Some(exif) = exif_metadata {
+        let _ = image::ImageEncoder::set_exif_metadata(&mut encoder, exif.to_vec());
+    }
     image::ImageEncoder::write_image(
         encoder,
         image.as_raw(),
@@ -356,8 +409,15 @@ pub(crate) fn encode_png(
 /// Encode the assembled canvas as JPEG at `quality` (native default
 /// [`JPEG_QUALITY`]). Sides beyond [`JPEG_MAX_SIDE`] fail with typed
 /// `output.encode-failed`: JPEG cannot address them. JPEG carries no alpha,
-/// so transparent canvas regions (kept-partial holes) save as black.
-pub fn encode_jpeg(image: &image::RgbaImage, quality: u8) -> Result<Vec<u8>, NativeError> {
+/// so transparent canvas regions (kept-partial holes) save as black. The
+/// first tile's ICC profile is embedded when present (reference
+/// `canvas.rs:124-137`); EXIF is not written to JPEG output, matching the
+/// reference canvas writer.
+pub fn encode_jpeg(
+    image: &image::RgbaImage,
+    quality: u8,
+    icc_profile: Option<&[u8]>,
+) -> Result<Vec<u8>, NativeError> {
     if image.width() > JPEG_MAX_SIDE || image.height() > JPEG_MAX_SIDE {
         return Err(NativeError::new(
             "output.encode-failed",
@@ -369,7 +429,10 @@ pub fn encode_jpeg(image: &image::RgbaImage, quality: u8) -> Result<Vec<u8>, Nat
         ));
     }
     let mut bytes = Vec::new();
-    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality);
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality);
+    if let Some(profile) = icc_profile {
+        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+    }
     let rgb = image::RgbImage::from_fn(image.width(), image.height(), |x, y| {
         let pixel = image.get_pixel(x, y);
         image::Rgb([pixel[0], pixel[1], pixel[2]])
@@ -385,10 +448,19 @@ pub fn encode_jpeg(image: &image::RgbaImage, quality: u8) -> Result<Vec<u8>, Nat
     Ok(bytes)
 }
 
-/// Encode the assembled canvas as TIFF (lossless, no side limit).
-pub fn encode_tiff(image: &image::RgbaImage) -> Result<Vec<u8>, NativeError> {
+/// Encode the assembled canvas as TIFF (lossless, no side limit). The first
+/// tile's ICC profile is embedded when present; the reference inner-JPEG
+/// quality only exists on its passthrough path, which native documents as
+/// a gap instead of reimplementing.
+pub fn encode_tiff(
+    image: &image::RgbaImage,
+    icc_profile: Option<&[u8]>,
+) -> Result<Vec<u8>, NativeError> {
     let mut cursor = std::io::Cursor::new(Vec::new());
-    let encoder = image::codecs::tiff::TiffEncoder::new(&mut cursor);
+    let mut encoder = image::codecs::tiff::TiffEncoder::new(&mut cursor);
+    if let Some(profile) = icc_profile {
+        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+    }
     image::ImageEncoder::write_image(
         encoder,
         image.as_raw(),
@@ -445,7 +517,8 @@ pub(crate) fn iiif_info_json(id: &str, width: u32, height: u32) -> Vec<u8> {
 /// plus JPEG tiles, each stored at its real IIIF request path
 /// (`{x},{y},{w},{h}/{tw},/0/default.jpg`, size-by-width) with one
 /// `full/max/0/default.jpg` overview. Files arrive sorted by relative path
-/// for a deterministic digest; tiles encode at `jpeg_quality`.
+/// for a deterministic digest; tiles encode at `jpeg_quality` without
+/// embedded profiles (retiled output, matching the reference tile saver).
 pub(crate) fn render_iiif_dir(
     image: &image::RgbaImage,
     id: &str,
@@ -477,7 +550,7 @@ pub(crate) fn render_iiif_dir(
                 let tw = (down_w - tx).min(IIIF_TILE_WIDTH);
                 let th = (down_h - ty).min(IIIF_TILE_WIDTH);
                 let tile = image::imageops::crop_imm(view, tx, ty, tw, th).to_image();
-                let bytes = encode_jpeg(&tile, jpeg_quality)?;
+                let bytes = encode_jpeg(&tile, jpeg_quality, None)?;
                 let relative = format!(
                     "{},{},{},{}/{},/0/default.jpg",
                     u64::from(tx) * u64::from(scale),
@@ -492,7 +565,7 @@ pub(crate) fn render_iiif_dir(
     }
     files.push((
         "full/max/0/default.jpg".to_string(),
-        encode_jpeg(image, jpeg_quality)?,
+        encode_jpeg(image, jpeg_quality, None)?,
     ));
     files.sort_by(|a, b| a.0.cmp(&b.0));
     Ok((iiif_info_json(id, width, height), files))
@@ -591,5 +664,45 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(max.jpeg_quality(), 0);
+    }
+
+    #[test]
+    fn tile_metadata_survives_decode_and_reencode() {
+        use image::codecs::png::CompressionType;
+        let icc = vec![
+            0x00, 0x00, 0x02, 0x0C, 0x61, 0x64, 0x73, 0x70, 0x00, 0x00, 0x00, 0x00, 0x6D, 0x6E,
+            0x74, 0x72, 0x52, 0x47, 0x42, 0x20,
+        ];
+        let exif = vec![0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x4D, 0x4D, 0x00, 0x2A];
+        // A PNG carrying both blocks decodes with its metadata attached.
+        let mut tagged = Vec::new();
+        {
+            use image::ImageEncoder as _;
+            let mut encoder = image::codecs::png::PngEncoder::new(&mut tagged);
+            encoder.set_icc_profile(icc.clone()).unwrap();
+            encoder.set_exif_metadata(exif.clone()).unwrap();
+            encoder
+                .write_image(&[255, 0, 0, 255], 1, 1, image::ExtendedColorType::Rgba8)
+                .unwrap();
+        }
+        let loaded = load_image_with_metadata(&tagged).expect("decodes");
+        assert_eq!(loaded.image.width(), 1);
+        assert_eq!(loaded.icc_profile.as_deref(), Some(icc.as_slice()));
+        assert_eq!(loaded.exif_metadata.as_deref(), Some(exif.as_slice()));
+        // Re-encoding through the pipeline encoders preserves the blocks.
+        let rgba = loaded.image.to_rgba8();
+        let png =
+            encode_png(&rgba, CompressionType::Fast, Some(&icc), Some(&exif)).expect("png encodes");
+        let png_back = load_image_with_metadata(&png).expect("png decodes");
+        assert_eq!(png_back.icc_profile.as_deref(), Some(icc.as_slice()));
+        assert_eq!(png_back.exif_metadata.as_deref(), Some(exif.as_slice()));
+        let jpeg = encode_jpeg(&rgba, 95, Some(&icc)).expect("jpeg encodes");
+        let jpeg_back = load_image_with_metadata(&jpeg).expect("jpeg decodes");
+        assert_eq!(jpeg_back.icc_profile.as_deref(), Some(icc.as_slice()));
+        // No metadata in, no metadata out: byte-identical to the plain path.
+        let plain_png = encode_png(&rgba, CompressionType::Fast, None, None).expect("png encodes");
+        let plain_back = load_image_with_metadata(&plain_png).expect("decodes");
+        assert_eq!(plain_back.icc_profile, None);
+        assert_eq!(plain_back.exif_metadata, None);
     }
 }
