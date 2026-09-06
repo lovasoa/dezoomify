@@ -97,14 +97,6 @@ Use these terms consistently in docs, plans, code, and user-facing copy.
 | format | A site-format implementation. Never "dezoomer". |
 | scenario / fixture / golden / transcript | Deterministic test units under `testdata/scenarios`. Never "case". |
 
-## Plans
-
-Multi-step work runs through a plan in [`plans/`](plans/); never start
-multi-phase changes without an accepted plan, and never execute later phases
-early. Plan status lives in [`plans/README.md`](plans/README.md). When a
-plan's work lands, remove the plan file. Completed work is never narrated
-in docs or READMEs; git history is the record.
-
 ## Git
 
 - Single-branch repository (owner, 2026-09-05): `master` holds both the
@@ -125,4 +117,4 @@ in docs or READMEs; git history is the record.
 
 When commands, boundaries, vocabulary, or reference docs change, update this
 file in the same change. This file contains rules and links only, never
-status narration, which belongs in `plans/README.md` and the root `README.md`.
+status narration, which belongs in the root `README.md`.
