@@ -46,9 +46,10 @@ computer:
   [desktop app](./desktop-app.md) can introduce itself as coming from the
   site's own viewer.
 - **Viewing without saving.** Some sites show their pieces without letting
-  the browser keep a copy. The website then shows the assembled picture for
-  viewing only: right-click it where your browser supports it, or use the
-  [desktop app](./desktop-app.md) for the full-size image.
+  the browser read the image data directly. The website then shows the
+  assembled picture below: right-click it and choose *Save image as…* to
+  keep a copy as a file. For a save that happens automatically, in the
+  format you choose, use the [desktop app](./desktop-app.md).
 - **Colors may shift.** The browser save does not keep the original color
   profile (ICC) or photo metadata (EXIF). The desktop app preserves the
   first tile's color profile for exact colors.
