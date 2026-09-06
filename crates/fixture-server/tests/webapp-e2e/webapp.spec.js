@@ -215,3 +215,36 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
     "the asset page must have been fetched through the metadata proxy",
   );
 });
+
+// Tile host without a CORS grant (the krpano galleria case): readable
+// fetch() calls for tiles fail, while plain <img> loads succeed. The app
+// must paint the tiles as ordinary display and finish display-only:
+// visible picture with right-click guidance, no TILE_FAILED, no save.
+test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ page }) => {
+  // The DZI tile base derives from the fetched metadata URL, so tile
+  // fetches are same-origin /fetch URLs here; matching on the tile path
+  // (not the host) aborts exactly the readable tile fetches while plain
+  // <img> loads for the same URLs succeed.
+  await page.route(
+    (url) => url.href.includes("pyramid_files"),
+    async (route) => {
+      if (route.request().resourceType() === "image") await route.continue();
+      else await route.abort();
+    },
+  );
+  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  const url = `${ADDR}/fetch?url=https://fixtures.test/cli/pyramid.dzi`;
+  await page.locator("#dz-url-input").fill(url);
+  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+
+  await expect(page.locator(".dz-notice-section")).toBeVisible({ timeout: 60000 });
+  await expect(page.getByText(/Display-Only Preview/)).toBeVisible();
+  await expect(page.getByText(/right-click/i)).toBeVisible();
+  await expect(page.locator(".dz-error-section")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save image" })).toHaveCount(0);
+  const canvas = page.locator("#rendering-canvas");
+  await expect(canvas).toBeVisible();
+  const size = await canvas.evaluate((el) => ({ width: el.width, height: el.height }));
+  assert.equal(size.width, 512, "displayed image width");
+  assert.equal(size.height, 512, "displayed image height");
+});

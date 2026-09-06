@@ -5,6 +5,9 @@ dezoomify treats source websites, image metadata, tiles, handoff payloads, and o
 ## Trust boundaries
 
 - The website runs under normal browser origin rules.
+- The website page policy permits cross-origin images for ordinary tile
+  display; displayed cross-origin tiles taint the canvas, which stays
+  unreadable to scripts, so no pixel data leaves the page that way.
 - The metadata CORS proxy is a restricted metadata fetcher for eligible public, non-credential metadata requests, not a trusted credential endpoint and never a tile relay.
 - The extension background worker has elevated browser access but accepts requests only from its own authenticated extension contexts.
 - Native apps can access the network and filesystem, so they validate protocol input and require user-selected local destinations.
