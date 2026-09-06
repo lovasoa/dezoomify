@@ -14,7 +14,7 @@ Install it from the
 (works with Chrome, Edge, Brave, and other Chromium-based browsers). A
 Firefox version is on its way.
 
-## Download an image
+## Save an image
 
 1. Open the page that shows the zoomable image.
 2. Press the Dezoomify magnifying-glass button in the browser toolbar.
@@ -23,7 +23,7 @@ Firefox version is on its way.
    never for all your browsing.
 4. Reload the page or zoom into the image once. A small badge shows how many
    images were found.
-5. Press the button again, pick the image, and download it, or send the job
+5. Press the button again, pick the image, and save it, or send the job
    to the desktop app if the image is very large.
 
 ## What the extension does with your data

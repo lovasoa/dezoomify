@@ -50,12 +50,12 @@ them. Nothing on the website can bypass that browser limit. Use the
 [browser extension](./browser-extension.md) (it saves through a different,
 cleaner route) or the [desktop app](./desktop-app.md).
 
-## The download stopped partway
+## The save stopped partway
 
 Small network interruptions are retried automatically. If the job stops
 anyway, run it again, and on the desktop app use a resume folder
-(`--tile-cache`) so already-downloaded pieces are kept:
-see [resuming an interrupted download](./desktop-app.md#resuming-an-interrupted-download).
+(`--tile-cache`) so already-saved pieces are kept:
+see [resuming an interrupted save](./desktop-app.md#resuming-an-interrupted-save).
 
 ## The site only works without encryption
 

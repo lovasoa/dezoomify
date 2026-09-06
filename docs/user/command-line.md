@@ -3,10 +3,10 @@
 # Command-line tool
 
 The desktop app is also a command-line tool. It is the right choice for
-scripts, for downloading many images in one go, and for automating regular
+scripts, for saving many images in one go, and for automating regular
 jobs. All the desktop app's abilities are available, including
 [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors) and
-[resuming](./desktop-app.md#resuming-an-interrupted-download).
+[resuming](./desktop-app.md#resuming-an-interrupted-save).
 
 ## Basic use
 
@@ -29,12 +29,12 @@ to choose from.
 | Retry more often on an unreliable server | `--retries 5` |
 | Go slower to stay gentle with the server | `--min-interval 200ms` |
 | Look like you come from the site's viewer | `--header "Referer: <viewer page>"` |
-| Keep downloaded pieces to resume later | `--tile-cache my-folder` |
+| Keep saved pieces to resume later | `--tile-cache my-folder` |
 | Turn off address checking for odd servers | `--accept-invalid-certs` (careful: this disables protection against impostor servers) |
 
 Run `dezoomify --help` for the full list.
 
-## Downloading many images
+## Saving many images
 
 Put the addresses in a text file, one per line, with an optional title after
 each one:
@@ -54,7 +54,7 @@ dezoomify --bulk my-collection.txt --outfile collection.jpg
 
 This saves `collection_1.jpg`, `collection_2.jpg`, and so on. A failed image
 does not stop the rest; a summary is printed at the end. You can also pass a
-single IIIF collection manifest address to `--bulk` to download all the
+single IIIF collection manifest address to `--bulk` to save all the
 images it lists, named after their titles.
 
 ## Next steps

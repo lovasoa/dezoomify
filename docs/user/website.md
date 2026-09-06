@@ -6,12 +6,12 @@ The website needs no installation: it runs in your browser at
 [dezoomify.ophir.dev](https://dezoomify.ophir.dev/) (this page you are
 reading is part of it).
 
-## Download an image
+## Save an image
 
 1. Open the page that shows the zoomable image in a tab of your browser.
 2. Copy its address from the address bar.
 3. Paste it into the Dezoomify website and press **Dezoomify !**.
-4. Wait. Dezoomify identifies the image format, downloads every piece of the
+4. Wait. Dezoomify identifies the image format, saves every piece of the
    picture, and assembles them. Large images take a while; the progress
    counter tells you how far along you are.
 5. When the picture appears, use the **Save** button (or right-click the

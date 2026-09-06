@@ -5,7 +5,7 @@ outward to hosts:
 
 - [`dezoomify-core/`](dezoomify-core/): pure image discovery (no I/O).
 - [`dezoomify-protocol/`](dezoomify-protocol/): the versioned wire contract.
-- [`dezoomify-job/`](dezoomify-job/): portable download state machine.
+- [`dezoomify-job/`](dezoomify-job/): portable job state machine.
 - [`dezoomify-native/`](dezoomify-native/): native HTTP, cache, codecs.
 - [`dezoomify-wasm/`](dezoomify-wasm/): browser adapter for core/job.
 - [`fixture-server/`](fixture-server/): deterministic local test server.

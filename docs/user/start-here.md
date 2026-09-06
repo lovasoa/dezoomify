@@ -26,7 +26,7 @@ Choose a different app when:
   manuscript). A browser tab can run out of room for very large pictures.
   The [desktop app](./desktop-app.md) runs on your computer without those
   limits and can also save in more file formats.
-- **You want to download many images at once, or from scripts.** The
+- **You want to save many images at once, or from scripts.** The
   [command-line tool](./command-line.md) does that.
 
 Not sure which one applies? Try the website first: it tells you clearly when
@@ -44,7 +44,7 @@ it cannot finish a job, and suggests the app that can.
 
 ## Next steps
 
-- [Download your first image from the website](./website.md)
+- [Save your first image from the website](./website.md)
 - [Install the browser extension](./browser-extension.md)
 - [Install the desktop app](./desktop-app.md)
 - [Supported websites and image formats](./supported-formats.md)

@@ -13,20 +13,20 @@ without a browser's limits. Use it when:
 - you need a **specific file format**: the website saves PNG; the desktop
   app saves PNG, JPEG, TIFF, and more, including a local zoomable copy for
   gigantic pictures;
-- a download **got interrupted**: with the resume option, already-fetched
+- a save **got interrupted**: with the resume option, already-fetched
   pieces are kept and the job continues where it stopped.
 
 ## Install
 
 1. Go to the [releases page](https://github.com/lovasoa/dezoomify/releases)
-   and download the version for your operating system.
+   and save the version for your operating system.
 2. Unpack it and start the program.
 3. Depending on your system, you may need to confirm that you trust the app:
    on macOS, use *System Settings → Privacy & Security → Open Anyway* the
    first time you start it. The app is not professionally signed because
    Dezoomify is a free project without a paid signing certificate.
 
-## Download an image
+## Save an image
 
 Paste the address of the page (or of the image description file) into the
 app and choose where to save the result, exactly like on the
@@ -40,7 +40,7 @@ the job to the desktop app; the extension asks for your consent before
 passing the site's credentials, which stay in memory only.
 
 **Sites that refuse visitors:** some servers only send their image to
-requests that appear to come from the site's own viewer. If the download
+requests that appear to come from the site's own viewer. If the save
 fails with a "forbidden" style error, tell the app which page the image
 belongs to (most image viewers open with such a page) and it will introduce
 itself as coming from there. On the command line, this is the
@@ -62,15 +62,15 @@ browser.
   megapixels or more: regular image viewers struggle with files that large,
   but a zoomable copy stays comfortable to explore.
 
-## Resuming an interrupted download
+## Resuming an interrupted save
 
 Start the app with a resume folder (`--tile-cache <folder>` on the command
-line). Every downloaded piece is kept there; if the download stops, run the
+line). Every saved piece is kept there; if the save stops, run the
 same command again and it picks up where it left off. The folder also
 contains the individual pieces if you prefer to assemble them with other
 tools.
 
 ## Next steps
 
-- [Command-line usage and bulk downloads](./command-line.md)
+- [Command-line usage and bulk saves](./command-line.md)
 - [Troubleshooting](./troubleshooting.md)

@@ -10,8 +10,8 @@ High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
 - Desktop (`apps/desktop/`): real Tauri window with the five capability
   commands, native save dialog, ed25519-verified updater, and installer
   bundling (`cargo xtask build desktop`).
-- CLI (`apps/cli/`): real download pipeline through the native runtime,
-  covering discovery, bounded tile download, assembly, and output writing.
+- CLI (`apps/cli/`): real save pipeline through the native runtime,
+  covering discovery, bounded tile acquisition, assembly, and output writing.
 
 ## Quick start
 
@@ -29,7 +29,7 @@ including `build`, `dev`, `ci`, `release`, `protocol`, and `fixtures`. See
 
 ## Layout
 
-- Repository root: the website, where you paste a URL and download the image.
+- Repository root: the website, where you paste a URL and save the image.
 - [`apps/`](apps/): the extension, desktop app, and CLI.
 - [`crates/`](crates/): the Rust engine, with pure discovery core, job state
   machine, versioned protocol, native runtime, WASM adapter, and test tooling.
