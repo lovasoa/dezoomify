@@ -88,11 +88,9 @@ fn no_args_prints_help_without_prompting() {
 }
 
 #[test]
-fn removed_flags_stay_unknown() {
-    // The surface is --overwrite/--json/--max-width/--accept-invalid-certs/
-    // -H/--header/--image-index/--retries/--min-interval/--tile-cache/
-    // --bulk/--outfile: unrelated selection flags must fail as unknown.
-    for flag in ["--largest", "--zoom-level", "--parallelism"] {
+fn unknown_flags_still_fail() {
+    // Unrelated flags must keep failing as unknown with exit 2.
+    for flag in ["--definitely-unknown", "--nope", "-Z"] {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
             .arg(flag)
             .output()
@@ -106,6 +104,53 @@ fn removed_flags_stay_unknown() {
         assert!(
             stderr.contains(&format!("error: unknown flag {flag}")),
             "stderr must carry `error: unknown flag {flag}`, got: {stderr:?}"
+        );
+    }
+}
+
+#[test]
+fn ported_flags_are_known() {
+    // Ported selection flags must not fail as unknown. Without positionals
+    // they print help (exit 0); without a value they report a missing value
+    // (exit 2) but never `unknown flag`.
+    let help_flags: &[&[&str]] = &[
+        &["--largest"],
+        &["-l"],
+        &["--dezoomer", "auto"],
+        &["-d", "auto"],
+        &["--max-height", "800"],
+        &["-h", "800"],
+        &["--zoom-level", "0"],
+        &["--parallelism", "8"],
+        &["-n", "8"],
+        &["--retry-delay", "2s"],
+        &["--compression", "5"],
+        &["--max-idle-per-host", "32"],
+        &["--timeout", "30s"],
+        &["--connect-timeout", "6s"],
+        &["--logging", "info"],
+        &["-V"],
+        &["-?"],
+        &["-w", "300"],
+        &["-r", "3"],
+        &["-i", "50ms"],
+        &["-c", "cache-dir"],
+    ];
+    for argv in help_flags {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"));
+        for arg in *argv {
+            cmd.arg(arg);
+        }
+        let out = cmd.output().expect("run cli");
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            !stderr.contains("unknown flag"),
+            "{argv:?} must not be unknown, stderr: {stderr:?}"
+        );
+        assert!(
+            !stdout.contains("unknown flag"),
+            "{argv:?} must not be unknown, stdout: {stdout:?}"
         );
     }
 }

@@ -11,19 +11,47 @@ pub struct Args {
     pub output: Option<PathBuf>,
     pub overwrite: bool,
     pub json: bool,
+    /// Format selector, `auto` detects. Named formats need native support.
+    pub dezoomer: String,
+    /// Select the largest level. Maps to uncapped width for native.
+    pub largest: bool,
     pub max_width: Option<u32>,
+    /// Height cap. Parsed here; native selection is width-only (gap).
+    pub max_height: Option<u32>,
+    /// Exact level index, 0 is smallest, out-of-range uses last.
+    /// Parsed here; native selection is automatic (gap).
+    pub zoom_level: Option<usize>,
     pub accept_invalid_certs: bool,
     /// Trusted user headers (`-H "Name: value"` / `--header`), last wins.
     pub headers: BTreeMap<String, String>,
     /// 0-based image selection when several are found. Parsed here; the
     /// native driver currently resolves the first catalog entry (gap).
     pub image_index: Option<usize>,
-    /// Tile retry budget. Overrides the native default of 3.
+    /// Tile retry budget. Overrides the native default of 3. Zero is
+    /// accepted here; the job engine clamps to at least 1 (gap).
     pub retries: u32,
+    /// Delay before the first retry, then doubling. Parsed here;
+    /// the job engine owns retry timing (gap).
+    pub retry_delay: Duration,
+    /// Output compression, 0 is less, 100 is more. Parsed here;
+    /// native encodes JPEG at fixed quality 92 (gap).
+    pub compression: u8,
+    /// Max idle connections per host. Parsed here; native owns pooling (gap).
+    pub max_idle_per_host: usize,
     /// Minimum delay between requests. Parsed here (see `parse_duration`);
     /// per-tile throttling needs native support (gap); bulk runs delay
     /// between images.
     pub min_interval: Duration,
+    /// Max time for one request. Parsed here; native uses 60s (gap).
+    pub timeout: Duration,
+    /// Max time to connect. Parsed here; native uses 15s (gap).
+    pub connect_timeout: Duration,
+    /// Log verbosity, e.g. `info` or `debug`. Parsed here; the CLI reports
+    /// through human lines on stderr plus `--json` on stdout (gap).
+    pub logging: String,
+    /// Degree of parallelism. Parsed here; native runs 6 concurrent
+    /// tile fetches (gap).
+    pub parallelism: usize,
     /// Resume folder wired to native `cache_dir`.
     pub tile_cache: Option<PathBuf>,
     /// Bulk source: local text-list file or URL (including IIIF collection
@@ -38,8 +66,38 @@ impl Args {
     }
 
     #[must_use]
-    pub fn bulk_output_file(&self) -> Option<PathBuf> {
+    pub fn output_file(&self) -> Option<PathBuf> {
         self.output.clone()
+    }
+
+    #[must_use]
+    pub fn bulk_output_file(&self) -> Option<PathBuf> {
+        self.output_file()
+    }
+
+    /// Default `Referer` is the bulk source or input URI when it is http(s),
+    /// mirroring the reference client default. Sent only when the user did
+    /// not pass an explicit `Referer` header.
+    #[must_use]
+    pub fn request_referer(&self) -> Option<&str> {
+        let candidate = if self.is_bulk_mode() {
+            self.bulk.as_deref()
+        } else {
+            self.input.as_deref()
+        };
+        candidate.filter(|uri| uri.starts_with("http://") || uri.starts_with("https://"))
+    }
+
+    /// Largest wins explicitly, or implicitly in bulk mode when no level
+    /// cap was given. Mirrors the reference `should_use_largest`.
+    #[must_use]
+    pub fn should_use_largest(&self) -> bool {
+        self.largest || (self.is_bulk_mode() && !self.has_level_specifying_args())
+    }
+
+    #[must_use]
+    pub fn has_level_specifying_args(&self) -> bool {
+        self.max_width.is_some() || self.max_height.is_some() || self.zoom_level.is_some()
     }
 }
 
@@ -49,17 +107,28 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut outfile_option: Option<PathBuf> = None;
     let mut overwrite = false;
     let mut json = false;
+    let mut dezoomer = "auto".to_string();
+    let mut largest = false;
     let mut max_width = None;
+    let mut max_height = None;
+    let mut zoom_level: Option<usize> = None;
     let mut accept_invalid_certs = false;
     let mut headers: BTreeMap<String, String> = BTreeMap::new();
     let mut image_index: Option<usize> = None;
     let mut retries: u32 = 3;
+    let mut retry_delay = Duration::from_secs(2);
+    let mut compression: u8 = 5;
+    let mut max_idle_per_host: usize = 32;
     let mut min_interval = Duration::ZERO;
+    let mut timeout = Duration::from_secs(30);
+    let mut connect_timeout = Duration::from_secs(6);
+    let mut logging = "info".to_string();
+    let mut parallelism: usize = 16;
     let mut tile_cache: Option<PathBuf> = None;
     let mut bulk: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
-        let (flag, inline_value) = split_inline_value(&args[i]);
+        let (flag, inline_value) = split_flag_value(&args[i]);
         match flag {
             "--overwrite" => {
                 reject_inline_value(flag, inline_value)?;
@@ -73,7 +142,18 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 reject_inline_value(flag, inline_value)?;
                 json = true;
             }
-            "--max-width" => {
+            "--dezoomer" | "-d" => {
+                let raw = take_value(args, &mut i, inline_value, "--dezoomer")?;
+                if raw.is_empty() {
+                    return Err("missing value for --dezoomer".to_string());
+                }
+                dezoomer = raw;
+            }
+            "--largest" | "-l" => {
+                reject_inline_value(flag, inline_value)?;
+                largest = true;
+            }
+            "--max-width" | "-w" => {
                 let raw = take_value(args, &mut i, inline_value, "--max-width")?;
                 let width: u32 = raw
                     .parse()
@@ -83,6 +163,64 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
                 max_width = Some(width);
             }
+            "--max-height" => {
+                let raw = take_value(args, &mut i, inline_value, "--max-height")?;
+                let height: u32 = raw
+                    .parse()
+                    .map_err(|_| format!("invalid --max-height value: {raw}"))?;
+                if height == 0 {
+                    return Err("--max-height must be positive".to_string());
+                }
+                max_height = Some(height);
+            }
+            "-h" => {
+                // Old `-h` was `--max-height`; new bare `-h` is help.
+                // `-h <px>` (or `-h<px>`) sets the height cap, bare `-h`
+                // shows help. Documented in help and user docs.
+                if let Some(inline) = inline_value {
+                    if inline.is_empty() {
+                        return Err("missing value for --max-height".to_string());
+                    }
+                    let height: u32 = inline
+                        .parse()
+                        .map_err(|_| format!("invalid --max-height value: {inline}"))?;
+                    if height == 0 {
+                        return Err("--max-height must be positive".to_string());
+                    }
+                    max_height = Some(height);
+                } else if let Some(next) = args.get(i + 1) {
+                    let trimmed = next.trim();
+                    if let Ok(height) = trimmed.parse::<u32>() {
+                        if height > 0 {
+                            i += 1;
+                            max_height = Some(height);
+                        } else {
+                            return Err("--max-height must be positive".to_string());
+                        }
+                    } else {
+                        return Err(help());
+                    }
+                } else {
+                    return Err(help());
+                }
+            }
+            "--zoom-level" => {
+                let raw = take_value(args, &mut i, inline_value, "--zoom-level")?;
+                let level: usize = raw
+                    .parse()
+                    .map_err(|_| format!("invalid --zoom-level value: {raw}"))?;
+                zoom_level = Some(level);
+            }
+            "--parallelism" | "-n" => {
+                let raw = take_value(args, &mut i, inline_value, "--parallelism")?;
+                let value: usize = raw
+                    .parse()
+                    .map_err(|_| "parallelism must be a positive integer".to_string())?;
+                if value == 0 {
+                    return Err("parallelism must be a positive integer".to_string());
+                }
+                parallelism = value;
+            }
             "--image-index" => {
                 let raw = take_value(args, &mut i, inline_value, "--image-index")?;
                 let index: usize = raw
@@ -90,19 +228,54 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     .map_err(|_| format!("invalid --image-index value: {raw}"))?;
                 image_index = Some(index);
             }
-            "--retries" => {
+            "--retries" | "-r" => {
                 let raw = take_value(args, &mut i, inline_value, "--retries")?;
                 let count: u32 = raw
                     .parse()
                     .map_err(|_| format!("invalid --retries value: {raw}"))?;
                 retries = count;
             }
-            "--min-interval" => {
+            "--retry-delay" => {
+                let raw = take_value(args, &mut i, inline_value, "--retry-delay")?;
+                retry_delay =
+                    parse_duration(&raw).map_err(|e| format!("invalid --retry-delay: {e}"))?;
+            }
+            "--compression" => {
+                let raw = take_value(args, &mut i, inline_value, "--compression")?;
+                let value: u8 = raw
+                    .parse()
+                    .map_err(|_| format!("invalid --compression value: {raw}"))?;
+                compression = value;
+            }
+            "--max-idle-per-host" => {
+                let raw = take_value(args, &mut i, inline_value, "--max-idle-per-host")?;
+                let value: usize = raw
+                    .parse()
+                    .map_err(|_| format!("invalid --max-idle-per-host value: {raw}"))?;
+                max_idle_per_host = value;
+            }
+            "--min-interval" | "-i" => {
                 let raw = take_value(args, &mut i, inline_value, "--min-interval")?;
                 min_interval =
                     parse_duration(&raw).map_err(|e| format!("invalid --min-interval: {e}"))?;
             }
-            "--tile-cache" => {
+            "--timeout" => {
+                let raw = take_value(args, &mut i, inline_value, "--timeout")?;
+                timeout = parse_duration(&raw).map_err(|e| format!("invalid --timeout: {e}"))?;
+            }
+            "--connect-timeout" => {
+                let raw = take_value(args, &mut i, inline_value, "--connect-timeout")?;
+                connect_timeout =
+                    parse_duration(&raw).map_err(|e| format!("invalid --connect-timeout: {e}"))?;
+            }
+            "--logging" => {
+                let raw = take_value(args, &mut i, inline_value, "--logging")?;
+                if raw.is_empty() {
+                    return Err("missing value for --logging".to_string());
+                }
+                logging = raw;
+            }
+            "--tile-cache" | "-c" => {
                 let raw = take_value(args, &mut i, inline_value, "--tile-cache")?;
                 if raw.is_empty() {
                     return Err("missing value for --tile-cache".to_string());
@@ -129,8 +302,10 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
                 bulk = Some(raw);
             }
-            "--help" | "-h" => return Err(help()),
-            "--version" => return Err(format!("dezoomify-cli {}", env!("CARGO_PKG_VERSION"))),
+            "--help" | "-?" => return Err(help()),
+            "--version" | "-V" => {
+                return Err(format!("dezoomify-cli {}", env!("CARGO_PKG_VERSION")));
+            }
             "-H" | "--header" => {
                 let raw = take_value(args, &mut i, inline_value, flag)?;
                 let (name, value) = raw
@@ -168,12 +343,23 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             output,
             overwrite,
             json,
+            dezoomer,
+            largest,
             max_width,
+            max_height,
+            zoom_level,
             accept_invalid_certs,
             headers,
             image_index,
             retries,
+            retry_delay,
+            compression,
+            max_idle_per_host,
             min_interval,
+            timeout,
+            connect_timeout,
+            logging,
+            parallelism,
             tile_cache,
             bulk,
         })
@@ -183,22 +369,46 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             output: Some(output.ok_or_else(help)?),
             overwrite,
             json,
+            dezoomer,
+            largest,
             max_width,
+            max_height,
+            zoom_level,
             accept_invalid_certs,
             headers,
             image_index,
             retries,
+            retry_delay,
+            compression,
+            max_idle_per_host,
             min_interval,
+            timeout,
+            connect_timeout,
+            logging,
+            parallelism,
             tile_cache,
             bulk,
         })
     }
 }
 
-fn split_inline_value(arg: &str) -> (&str, Option<String>) {
+fn split_flag_value(arg: &str) -> (&str, Option<String>) {
     if let Some((flag, value)) = arg.split_once('=') {
         if flag.starts_with("--") && flag.len() > 2 {
             return (flag, Some(value.to_string()));
+        }
+        if flag.len() == 2 && flag.starts_with('-') && !flag.starts_with("--") {
+            return (flag, Some(value.to_string()));
+        }
+    }
+    if arg.len() > 2 && arg.starts_with('-') && !arg.starts_with("--") {
+        let short = &arg[..2];
+        if matches!(short, "-d" | "-w" | "-n" | "-r" | "-i" | "-c" | "-h" | "-H") {
+            let rest = &arg[2..];
+            if !rest.is_empty() {
+                let value = rest.strip_prefix('=').unwrap_or(rest);
+                return (short, Some(value.to_string()));
+            }
         }
     }
     (arg, None)
@@ -287,18 +497,30 @@ fn help() -> String {
         "options:",
         "  --overwrite                 overwrite an existing output file",
         "  --json                      print machine-readable JSON events on stdout",
-        "  --max-width <px>            largest level whose width fits (positive integer)",
-        "  --accept-invalid-certs      accept insecure TLS certificates (insecure)",
+        "  -d, --dezoomer <name>       format to use, or auto to detect (default auto)",
+        "  -l, --largest               select the largest level (highest resolution)",
+        "  -w, --max-width <px>        largest level whose width fits (positive integer)",
+        "  --max-height <px>           largest level whose height fits (positive integer)",
+        "                              (-h <px> also sets height; bare -h shows help)",
+        "  --zoom-level <n>            select level by index, 0 is smallest, too large uses last",
+        "  -n, --parallelism <n>       max concurrent tile downloads (default 16)",
+        "  -r, --retries <n>           tile retry budget, 0 means no retries (default 3)",
+        "  --retry-delay <duration>    delay before first retry, then doubling (default 2s)",
+        "  --compression <0-100>       output compression, 0 is less, 100 is more (default 5)",
         "  -H, --header \"Name: value\"  HTTP header for tile requests (repeatable, last wins)",
-        "  --image-index <n>           pick the nth image when several are found (0-based)",
-        "  --retries <n>               tile retry budget (default 3)",
-        "  --min-interval <duration>   minimum delay between requests, e.g. 50ms, 2s (default 0)",
-        "  --tile-cache <dir>          resume folder reusing downloaded tiles",
+        "  --max-idle-per-host <n>     max idle connections per host (default 32)",
+        "  --accept-invalid-certs      accept insecure TLS certificates (insecure)",
+        "  -i, --min-interval <duration> minimum delay between requests, e.g. 50ms, 2s (default 0)",
+        "                              (bulk paces images; single needs native support)",
+        "  --timeout <duration>        max time for one request (default 30s)",
+        "  --connect-timeout <duration> max time to connect (default 6s)",
+        "  --logging <level>           log verbosity, e.g. info, debug (default info)",
+        "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
         "                              or IIIF collection manifest URL; saves one output per entry",
         "  --outfile <file>            explicit output file, or bulk base name (bulk_1.ext, …)",
-        "  -h, --help                  show this help",
-        "  --version                   show version",
+        "  -h, --help, -?              show this help (use -h <px> or --max-height for height cap)",
+        "  -V, --version               show version",
     ]
     .join("\n")
 }
@@ -478,5 +700,193 @@ mod tests {
             generate_bulk_output_name(std::path::Path::new("out"), 0),
             PathBuf::from("out_1")
         );
+    }
+
+    #[test]
+    fn parses_dezoomer_largest_height_zoom_parallelism() {
+        let args = parse(&[
+            "-d".to_string(),
+            "iiif".to_string(),
+            "-l".to_string(),
+            "--max-height".to_string(),
+            "800".to_string(),
+            "--zoom-level".to_string(),
+            "2".to_string(),
+            "-n".to_string(),
+            "8".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("parse new selection flags");
+        assert_eq!(args.dezoomer, "iiif");
+        assert!(args.largest);
+        assert_eq!(args.max_height, Some(800));
+        assert_eq!(args.zoom_level, Some(2));
+        assert_eq!(args.parallelism, 8);
+        assert!(args.should_use_largest());
+        assert!(args.has_level_specifying_args());
+    }
+
+    #[test]
+    fn short_aliases_match_long_flags() {
+        let short = parse(&[
+            "-w".to_string(),
+            "300".to_string(),
+            "-r".to_string(),
+            "5".to_string(),
+            "-i".to_string(),
+            "50ms".to_string(),
+            "-c".to_string(),
+            "cache-dir".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("short flags");
+        let long = parse(&[
+            "--max-width".to_string(),
+            "300".to_string(),
+            "--retries".to_string(),
+            "5".to_string(),
+            "--min-interval".to_string(),
+            "50ms".to_string(),
+            "--tile-cache".to_string(),
+            "cache-dir".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("long flags");
+        assert_eq!(short.max_width, long.max_width);
+        assert_eq!(short.retries, long.retries);
+        assert_eq!(short.min_interval, long.min_interval);
+        assert_eq!(short.tile_cache, long.tile_cache);
+    }
+
+    #[test]
+    fn dash_h_with_value_sets_max_height() {
+        let args = parse(&[
+            "-h".to_string(),
+            "800".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("parse -h value");
+        assert_eq!(args.max_height, Some(800));
+    }
+
+    #[test]
+    fn dash_h_attached_sets_max_height() {
+        let args = parse(&[
+            "-h800".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("parse -h800");
+        assert_eq!(args.max_height, Some(800));
+    }
+
+    #[test]
+    fn bare_dash_h_is_help() {
+        let err = parse(&["-h".to_string()]).expect_err("bare -h is help");
+        assert!(err.starts_with("usage:"), "help text: {err}");
+    }
+
+    #[test]
+    fn question_mark_is_help_and_v_is_version() {
+        let help = parse(&["-?".to_string()]).expect_err("help");
+        assert!(help.starts_with("usage:"), "help text: {help}");
+        let version = parse(&["-V".to_string()]).expect_err("version");
+        assert!(version.starts_with("dezoomify-cli"), "version: {version}");
+    }
+
+    #[test]
+    fn retries_zero_is_accepted() {
+        let args = parse(&[
+            "--retries".to_string(),
+            "0".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("retries 0 parses");
+        assert_eq!(args.retries, 0);
+    }
+
+    #[test]
+    fn parallelism_rejects_zero() {
+        let err = parse(&[
+            "--parallelism".to_string(),
+            "0".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect_err("parallelism 0 must fail");
+        assert!(
+            err.contains("parallelism must be a positive integer"),
+            "message: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_timing_compression_idle_logging_defaults() {
+        let args = parse(&[
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("defaults");
+        assert_eq!(args.retry_delay, Duration::from_secs(2));
+        assert_eq!(args.compression, 5);
+        assert_eq!(args.max_idle_per_host, 32);
+        assert_eq!(args.timeout, Duration::from_secs(30));
+        assert_eq!(args.connect_timeout, Duration::from_secs(6));
+        assert_eq!(args.logging, "info");
+        assert_eq!(args.parallelism, 16);
+        assert_eq!(args.dezoomer, "auto");
+        assert!(!args.largest);
+        assert_eq!(args.max_height, None);
+        assert_eq!(args.zoom_level, None);
+        let timed = parse(&[
+            "--retry-delay".to_string(),
+            "500ms".to_string(),
+            "--compression".to_string(),
+            "9".to_string(),
+            "--max-idle-per-host".to_string(),
+            "8".to_string(),
+            "--timeout".to_string(),
+            "10s".to_string(),
+            "--connect-timeout".to_string(),
+            "3s".to_string(),
+            "--logging".to_string(),
+            "debug".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("timing flags");
+        assert_eq!(timed.retry_delay, Duration::from_millis(500));
+        assert_eq!(timed.compression, 9);
+        assert_eq!(timed.max_idle_per_host, 8);
+        assert_eq!(timed.timeout, Duration::from_secs(10));
+        assert_eq!(timed.connect_timeout, Duration::from_secs(3));
+        assert_eq!(timed.logging, "debug");
+    }
+
+    #[test]
+    fn request_referer_prefers_http_sources() {
+        let single = parse(&[
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("single");
+        assert_eq!(single.request_referer(), Some("https://example.com/x.dzi"));
+        let bulk = parse(&[
+            "--bulk".to_string(),
+            "https://example.com/manifest.json".to_string(),
+        ])
+        .expect("bulk");
+        assert_eq!(
+            bulk.request_referer(),
+            Some("https://example.com/manifest.json")
+        );
+        let local_bulk =
+            parse(&["--bulk".to_string(), "list.txt".to_string()]).expect("local bulk");
+        assert_eq!(local_bulk.request_referer(), None);
     }
 }

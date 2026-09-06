@@ -120,9 +120,22 @@ fn prompt_line(prompt: &str) -> Option<String> {
 }
 
 fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
+    let mut user_headers = parsed.headers.clone();
+    if let Some(referer) = parsed.request_referer() {
+        if !user_headers.contains_key("referer") {
+            user_headers.insert("referer".to_string(), referer.to_string());
+        }
+    }
+    // `--largest` (or bulk-implied largest) selects the uncapped level,
+    // mirroring the reference `should_use_largest` rule.
+    let max_width = if parsed.should_use_largest() {
+        None
+    } else {
+        parsed.max_width
+    };
     PipelineConfig {
-        user_headers: parsed.headers.clone(),
-        max_width: parsed.max_width,
+        user_headers,
+        max_width,
         max_retries: parsed.retries,
         cache_dir: parsed.tile_cache.clone(),
         fetch: FetchLimits {
@@ -136,6 +149,66 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
 }
 
 fn warn_selection_gaps(parsed: &Args) {
+    if parsed.dezoomer != "auto" {
+        eprintln!(
+            "warning: --dezoomer {} is parsed but named formats need native support; auto-detecting instead",
+            parsed.dezoomer
+        );
+    }
+    if let Some(height) = parsed.max_height {
+        eprintln!(
+            "warning: --max-height {height} is parsed but level selection is width-only in native; ignoring the height cap"
+        );
+    }
+    if let Some(level) = parsed.zoom_level {
+        eprintln!(
+            "warning: --zoom-level {level} is parsed but exact level selection needs native support; saving the automatic level"
+        );
+    }
+    if parsed.parallelism != 16 {
+        eprintln!(
+            "warning: --parallelism {} is parsed but concurrency needs native support; continuing with 6 concurrent tile fetches",
+            parsed.parallelism
+        );
+    }
+    if parsed.retry_delay != std::time::Duration::from_secs(2) {
+        eprintln!(
+            "warning: --retry-delay is parsed but retry timing needs native support; continuing with engine defaults"
+        );
+    }
+    if parsed.compression != 5 {
+        eprintln!(
+            "warning: --compression {} is parsed but quality control needs native support; encoding JPEG at quality 92",
+            parsed.compression
+        );
+    }
+    if parsed.max_idle_per_host != 32 {
+        eprintln!(
+            "warning: --max-idle-per-host {} is parsed but connection pooling needs native support; ignoring",
+            parsed.max_idle_per_host
+        );
+    }
+    if parsed.timeout != std::time::Duration::from_secs(30) {
+        eprintln!(
+            "warning: --timeout is parsed but timeout tuning needs native support; continuing with a 60s timeout"
+        );
+    }
+    if parsed.connect_timeout != std::time::Duration::from_secs(6) {
+        eprintln!(
+            "warning: --connect-timeout is parsed but timeout tuning needs native support; continuing with a 15s connect timeout"
+        );
+    }
+    if parsed.logging != "info" {
+        eprintln!(
+            "warning: --logging {} is parsed but verbosity control needs native support; reporting through human lines plus --json",
+            parsed.logging
+        );
+    }
+    if parsed.retries == 0 {
+        eprintln!(
+            "warning: --retries 0 is parsed but the job engine clamps to at least 1 retry; continuing with 1"
+        );
+    }
     if let Some(index) = parsed.image_index {
         if index != 0 {
             eprintln!(

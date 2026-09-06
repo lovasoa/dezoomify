@@ -26,17 +26,27 @@ that fits `--max-width` when given, else the largest level.
 
 | You want to… | Option |
 |---|---|
-| Cap the resolution (e.g. 4000 pixels wide) | `--max-width 4000` |
+| Let the tool detect the format, or force one | `-d, --dezoomer auto` (default; named formats fall back to auto-detect) |
+| Always take the highest resolution | `-l, --largest` (implied in bulk mode without level caps) |
+| Cap the resolution (e.g. 4000 pixels wide) | `-w, --max-width 4000` |
+| Cap the height | `--max-height 800` (or `-h 800`; bare `-h` shows help, as does `--help` and `-?`) |
+| Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; needs native support) |
 | Pick a specific image when several are found | `--image-index 2` (0-based; the native driver currently resolves the first entry) |
-| Retry more often on an unreliable server | `--retries 5` (default 3) |
-| Go slower to stay gentle with the server | `--min-interval 200ms` (parsed; per-tile throttling needs native support) |
-| Look like you come from the site's viewer | `-H "Referer: <viewer page>"` (`--header` is an alias) |
-| Keep saved pieces to resume later | `--tile-cache my-folder` |
+| Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 is parsed but the engine clamps to at least 1) |
+| Wait before retrying | `--retry-delay 2s` (parsed; timing needs native support) |
+| Tune output compression | `--compression 5` (parsed; native encodes JPEG at quality 92) |
+| Tune the connection pool | `--max-idle-per-host 32` (parsed; pooling needs native support) |
+| Go slower to stay gentle with the server | `-i, --min-interval 200ms` (parsed; per-tile throttling needs native support) |
+| Tune timeouts | `--timeout 30s`, `--connect-timeout 6s` (parsed; native uses 60s and 15s) |
+| Tune logging | `--logging info` (parsed; reporting stays human lines plus `--json`) |
+| Tune concurrency | `-n, --parallelism 16` (parsed; native runs 6 concurrent fetches) |
+| Look like you come from the site's viewer | `-H "Referer: <viewer page>"` (`--header` is an alias; otherwise the http(s) input or bulk source is sent as `Referer`) |
+| Keep saved pieces to resume later | `-c, --tile-cache my-folder` |
 | Turn off address checking for odd servers | `--accept-invalid-certs` (careful: this disables protection against impostor servers) |
 | Overwrite an existing file | `--overwrite` |
 | Print machine-readable records | `--json` |
 
-Run `dezoomify --help` for the full list.
+Run `dezoomify --help` for the full list. `-V` shows the version.
 
 ## Saving many images
 
