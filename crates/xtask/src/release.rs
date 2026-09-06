@@ -78,9 +78,10 @@ struct Capabilities {
     protocol: String,
 }
 
-/// Desktop bundling stays unavailable until the Tauri shell is real
-/// (plan release-pipeline, owner decision 2026-09-05); the inventory entry
-/// in `release/targets.toml` carries `available = false` until then.
+/// Desktop targets mirror the host bundlers in `release/targets.toml`:
+/// Linux deb is available (verified `cargo xtask build desktop` output);
+/// Windows msi/nsis and macOS dmg stay `available = false` until a matching
+/// host with its bundler tools produces them (docs/releases.md).
 fn load_targets() -> Result<Targets, String> {
     parse_toml("release/targets.toml")
 }
@@ -306,6 +307,12 @@ fn read_plan(path: &Path) -> Result<Plan, String> {
 fn expected_artifact_name(target: &str, version: &str) -> Option<String> {
     match target {
         "cli-linux-x86_64" => Some(format!("dezoomify-cli-v{version}-linux-x86_64.tar.gz")),
+        "desktop-linux-x86_64" => Some(format!("dezoomify-desktop-v{version}-linux-x86_64.deb")),
+        "desktop-windows-x86_64" => {
+            Some(format!("dezoomify-desktop-v{version}-windows-x86_64.msi"))
+        }
+        "desktop-macos-aarch64" => Some(format!("dezoomify-desktop-v{version}-macos-aarch64.dmg")),
+        "desktop-macos-x86_64" => Some(format!("dezoomify-desktop-v{version}-macos-x86_64.dmg")),
         "extension-chromium" => Some(format!("dezoomify-chromium-v{version}.zip")),
         "extension-firefox" => Some(format!("dezoomify-firefox-v{version}.zip")),
         _ => None,
@@ -528,7 +535,7 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("target '{target}' is not in the release plan"))?;
     if !entry.available {
         return Err(format!(
-            "target '{target}' is unavailable in this release (desktop bundling is deferred until the Tauri shell is real; see docs/releases.md)"
+            "target '{target}' is unavailable in this release (see release/targets.toml and docs/releases.md)"
         ));
     }
     if plan.commit != git_commit()? {
@@ -551,6 +558,10 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
     }
     match target {
         "cli-linux-x86_64" => build_cli_artifact(&entry.os, &out)?,
+        "desktop-linux-x86_64"
+        | "desktop-windows-x86_64"
+        | "desktop-macos-aarch64"
+        | "desktop-macos-x86_64" => build_desktop_artifact(target, &entry.os, &out)?,
         "extension-chromium" => build_extension_artifact("chromium", &out)?,
         "extension-firefox" => build_extension_artifact("firefox", &out)?,
         other => return Err(format!("target '{other}' has no build recipe")),
@@ -600,6 +611,66 @@ fn build_extension_artifact(browser: &str, out: &Path) -> Result<(), String> {
         browser,
         out.to_string_lossy().as_ref(),
     ])?;
+    Ok(())
+}
+
+/// Desktop release artifact: runs the canonical `cargo xtask build desktop`
+/// pipeline (lean shell, frontend, window shell, icons, host bundler), then
+/// copies the single release installer to `out`. Only the artifact named by
+/// `expected_artifact_name` ships; anything else the bundler leaves on disk
+/// is never listed in SHA256SUMS and never signed.
+fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(), String> {
+    let host_ok = match target_os {
+        "linux" => cfg!(target_os = "linux"),
+        "windows" => cfg!(target_os = "windows"),
+        "macos" => cfg!(target_os = "macos"),
+        _ => false,
+    };
+    if !host_ok {
+        return Err(format!(
+            "target {target} must be built on a {target_os} host (release builds never cross-compile installers)"
+        ));
+    }
+    crate::desktop::build_desktop(&[])?;
+    let (subdir, extension, arch_token): (&str, &str, Option<&str>) = match target {
+        "desktop-linux-x86_64" => ("deb", "deb", None),
+        // The Windows recipe also produces the nsis setup binary alongside
+        // the msi; only the msi is the release artifact.
+        "desktop-windows-x86_64" => ("msi", "msi", None),
+        "desktop-macos-aarch64" => ("dmg", "dmg", Some("aarch64")),
+        "desktop-macos-x86_64" => ("dmg", "dmg", Some("x64")),
+        _ => return Err(format!("target '{target}' has no build recipe")),
+    };
+    let dir = crate::repo_root()
+        .join("target/release/bundle")
+        .join(subdir);
+    let entries = std::fs::read_dir(&dir)
+        .map_err(|e| format!("desktop bundler produced no {}: {e}", dir.display()))?;
+    let mut hits: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !name.ends_with(&format!(".{extension}")) {
+            continue;
+        }
+        if let Some(token) = arch_token {
+            if !name.contains(token) {
+                continue;
+            }
+            if token == "x64" && name.contains("aarch64") {
+                continue;
+            }
+        }
+        hits.push(path);
+    }
+    if hits.len() != 1 {
+        return Err(format!(
+            "desktop bundler left {} .{extension} files in {}; expected exactly one release installer",
+            hits.len(),
+            dir.display()
+        ));
+    }
+    std::fs::copy(&hits[0], out).map_err(|e| format!("copy {}: {e}", hits[0].display()))?;
     Ok(())
 }
 
@@ -1133,14 +1204,22 @@ mod tests {
     }
 
     #[test]
-    fn desktop_target_is_unavailable() {
+    fn desktop_targets_track_bundle_recipes() {
+        // Linux deb is verified (`cargo xtask build desktop` output);
+        // Windows msi/nsis and macOS dmg have no matching host or tools on
+        // this Linux host, so they stay unavailable.
         let plan = plan_from_repo();
-        let desktop = plan
-            .targets
-            .iter()
-            .find(|t| t.name == "desktop-windows-x86_64")
-            .expect("desktop target in inventory");
-        assert!(!desktop.available);
+        let available = |name: &str| {
+            plan.targets
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("{name} in inventory"))
+                .available
+        };
+        assert!(available("desktop-linux-x86_64"));
+        assert!(!available("desktop-windows-x86_64"));
+        assert!(!available("desktop-macos-aarch64"));
+        assert!(!available("desktop-macos-x86_64"));
     }
 
     #[test]

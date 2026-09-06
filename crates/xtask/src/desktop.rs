@@ -5,6 +5,19 @@
 //! compiled when they are present. Bundling runs only without
 //! `--unsigned-test` and only when the bundler prerequisites exist.
 //!
+//! Bundle matrix (built on the matching host, `tauri.conf.json`
+//! `bundle.targets` stays `all` and the CLI selects the host bundle):
+//! Linux builds `deb` via `cargo tauri build --bundles deb` (needs
+//! `dpkg-deb` plus the generated PNG icons); Windows builds `msi`/`nsis`
+//! (needs WebView2 plus WiX for msi and NSIS for nsis plus `icon.ico`);
+//! macOS builds `dmg` (needs the Xcode Command Line Tools plus `icon.icns`).
+//! A target is available only when its recipe and host tools are present;
+//! otherwise bundling fails closed naming the exact prerequisites.
+//! `--unsigned-test` is the no-bundle CI path: lean shell, frontend, and
+//! window shell compile, then it stops before the bundler.
+//!
+//! Order is fixed: lean shell, frontend, window shell, icons, bundler.
+//!
 //! `dezoomify-desktop` is a member of the root workspace and shares the root
 //! `Cargo.lock`; the default features keep it offline-capable.
 
@@ -15,6 +28,13 @@ const WEBKIT_SYSTEM_PACKAGES: &str =
     "libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential";
 
 pub fn build_desktop(args: &[String]) -> Result<(), String> {
+    for arg in args {
+        if arg != "--unsigned-test" {
+            return Err(format!(
+                "unknown build desktop argument '{arg}' (only --unsigned-test exists)"
+            ));
+        }
+    }
     let unsigned_test = args.iter().any(|a| a == "--unsigned-test");
     for rel in [
         "apps/desktop/src-tauri/tauri.conf.json",
@@ -62,6 +82,12 @@ pub fn test_desktop(_args: &[String]) -> Result<(), String> {
     run_cargo(&["test", "-p", DESKTOP_PKG])?;
     run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
+    // Hermetic E2E: loopback fixtures plus the lean driver and frontend
+    // harness (submit -> choose -> request_destination -> save with PNG
+    // verification, deep-link confirm, cancel). No public network, no
+    // webview needed; the full Tauri WebDriver path stays manual (see
+    // apps/desktop/README.md "End-to-end").
+    run_node(&["apps/desktop/tests/e2e.test.mjs"])?;
     println!("test desktop: ok");
     Ok(())
 }
@@ -104,8 +130,9 @@ pub fn dev_desktop() -> Result<(), String> {
         .ok_or_else(|| format!("desktop shell exited with {status}"))
 }
 
-/// Whether the platform webview development packages are available. Only
-/// Linux needs an explicit check; macOS/Windows ship their webviews.
+/// Whether the platform webview development packages are available. Linux
+/// needs the explicit system packages; macOS ships WebKit and Windows ships
+/// WebView2, so no pkg-config check applies there.
 fn tauri_system_ready() -> bool {
     if !cfg!(target_os = "linux") {
         return true;
@@ -117,17 +144,101 @@ fn tauri_system_ready() -> bool {
         .unwrap_or(false)
 }
 
-/// Whether the Linux bundler prerequisites (dpkg for a .deb) are present.
-fn bundler_ready() -> bool {
-    if cfg!(target_os = "linux") {
-        Command::new("dpkg-deb")
-            .arg("--version")
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    } else {
-        true
+/// The bundler set for this host. Linux produces a real `deb`; Windows
+/// documents `msi`/`nsis`; macOS documents `dmg`. Any other host has no
+/// bundle recipe.
+#[cfg(target_os = "linux")]
+fn bundle_targets() -> &'static [&'static str] {
+    &["deb"]
+}
+
+#[cfg(target_os = "windows")]
+fn bundle_targets() -> &'static [&'static str] {
+    &["msi", "nsis"]
+}
+
+#[cfg(target_os = "macos")]
+fn bundle_targets() -> &'static [&'static str] {
+    &["dmg"]
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+fn bundle_targets() -> &'static [&'static str] {
+    &[]
+}
+
+fn has_cmd(cmd: &str, args: &[&str]) -> bool {
+    Command::new(cmd)
+        .args(args)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Fail closed unless the matching host's bundler recipe and tools are
+/// present. Each branch names the exact prerequisites.
+fn check_bundle_prereqs() -> Result<(), String> {
+    if !has_cmd("cargo", &["tauri", "--version"]) {
+        return Err(
+            "desktop bundling needs the Tauri CLI (install with `cargo install tauri-cli --version \"^2\"` or pass --unsigned-test)"
+                .to_string(),
+        );
     }
+    #[cfg(target_os = "linux")]
+    if !has_cmd("dpkg-deb", &["--version"]) {
+        return Err(
+            "desktop bundling needs dpkg-deb (install the dpkg tools, e.g. `sudo apt install dpkg-dev`, or pass --unsigned-test)"
+                .to_string(),
+        );
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let wix = has_cmd("candle", &["-?"]);
+        let nsis = has_cmd("makensis", &["-VERSION"]);
+        let root = super::repo_root();
+        let ico = root.join("apps/desktop/src-tauri/icons/icon.ico");
+        let mut missing: Vec<&str> = Vec::new();
+        if !wix {
+            missing.push("WiX v3 (candle.exe/light.exe for the msi target)");
+        }
+        if !nsis {
+            missing.push("NSIS (makensis for the nsis target)");
+        }
+        if !ico.is_file() {
+            missing
+                .push("apps/desktop/src-tauri/icons/icon.ico (generate with `cargo tauri icon`)");
+        }
+        if !missing.is_empty() {
+            return Err(format!(
+                "desktop bundling on Windows needs WebView2 plus {}; install them or pass --unsigned-test",
+                missing.join(", ")
+            ));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let root = super::repo_root();
+        let icns = root.join("apps/desktop/src-tauri/icons/icon.icns");
+        if !has_cmd("xcrun", &["--version"]) {
+            return Err(
+                "desktop bundling on macOS needs the Xcode Command Line Tools (`xcode-select --install`) or pass --unsigned-test"
+                    .to_string(),
+            );
+        }
+        if !icns.is_file() {
+            return Err(
+                "desktop bundling on macOS needs apps/desktop/src-tauri/icons/icon.icns (generate with `cargo tauri icon`) or pass --unsigned-test"
+                    .to_string(),
+            );
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    return Err(
+        "desktop bundling has no recipe for this host (Linux deb, Windows msi/nsis, macOS dmg only)"
+            .to_string(),
+    );
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    Ok(())
 }
 
 fn build_frontend() -> Result<(), String> {
@@ -136,15 +247,29 @@ fn build_frontend() -> Result<(), String> {
         .current_dir(super::repo_root())
         .status()
         .map_err(|e| format!("failed to run pnpm: {e}"))?;
-    status.success().then_some(()).ok_or_else(|| {
-        "desktop frontend build failed (pnpm --filter ./apps/desktop build)".to_string()
-    })
+    if !status.success() {
+        return Err(
+            "desktop frontend build failed (pnpm --filter ./apps/desktop build)".to_string(),
+        );
+    }
+    // The bundler reads this tree (`tauri.conf.json` frontendDist
+    // `../dist`); fail closed here rather than inside `cargo tauri build`.
+    let index = super::repo_root().join("apps/desktop/dist/index.html");
+    if !index.is_file() {
+        return Err(format!(
+            "desktop frontend build produced no {}",
+            index.display()
+        ));
+    }
+    Ok(())
 }
 
 fn bundle() -> Result<(), String> {
-    if !bundler_ready() {
+    check_bundle_prereqs()?;
+    let targets = bundle_targets();
+    if targets.is_empty() {
         return Err(
-            "desktop bundling needs dpkg-deb (install the dpkg tools or pass --unsigned-test)"
+            "desktop bundling has no recipe for this host (Linux deb, Windows msi/nsis, macOS dmg only)"
                 .to_string(),
         );
     }
@@ -157,8 +282,16 @@ fn bundle() -> Result<(), String> {
     if !status.success() {
         return Err("icon generation failed".to_string());
     }
+    for name in ["icons/32x32.png", "icons/128x128.png"] {
+        let path = super::repo_root().join("apps/desktop/src-tauri").join(name);
+        if !path.is_file() {
+            return Err(format!("icon generation produced no {}", path.display()));
+        }
+    }
+    let mut args = vec!["tauri", "build", "--features", "tauri", "--bundles"];
+    args.extend(targets.iter().copied());
     let status = Command::new("cargo")
-        .args(["tauri", "build", "--features", "tauri", "--bundles", "deb"])
+        .args(&args)
         .current_dir(super::repo_root())
         .status()
         .map_err(|e| format!("failed to run cargo tauri: {e}"))?;
@@ -166,7 +299,7 @@ fn bundle() -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| "desktop bundling failed (cargo tauri build)".to_string())?;
-    println!("build desktop: ok (deb bundle produced)");
+    println!("build desktop: ok ({} bundle produced)", targets.join("/"));
     Ok(())
 }
 
