@@ -32,13 +32,15 @@
 //!   namespace and later runs skip refetching tiles whose bytes still decode.
 //! * `decode-pixels`/`open-encoder`/`finalize-encoder` → acknowledged from
 //!   the tiles already decoded during acquisition (encoders run one-shot).
-//!   Encoded-tile passthrough is intentionally not ported: there is no
-//!   byte-preserving fast path and no source-pyramid multi-level encode;
-//!   every output is a single-image re-encode of decoded pixels.
+//!   Encoded-tile passthrough is intentionally not ported: the engine plans
+//!   one level and reports decoded-tile outcomes only, so no encoded bytes
+//!   or source-pyramid levels ever reach the runtime and the protocol has
+//!   no encoded-tile effect. `.zif` output re-encodes the assembled canvas
+//!   at every pyramid resolution instead (see [`OutputFormat::Zif`]).
 //! * `publish-output` → canvas-limit check, assemble with [`blit_onto`],
 //!   encode per the inferred [`OutputFormat`] (PNG at the configured deflate
-//!   tier, JPEG at quality `100 - compression`, TIFF deflate-compressed at
-//!   the configured level, or an `iiif-dir` tile
+//!   tier, JPEG at quality `100 - compression`, single-image TIFF or ZIF
+//!   pyramid deflate-compressed at the configured level, or an `iiif-dir` tile
 //!   digest (over the file bytes, or over `info.json` plus tile bytes in
 //!   sorted path order for directories).
 //! * `release-bytes`/`cancel-work` → drop decoded buffers; no output is
@@ -49,7 +51,8 @@
 //!
 //! The output format is inferred once from the destination path extension
 //! ([`OutputFormat::infer_from_path`]): `.png`, `.jpg`/`.jpeg`,
-//! `.tif`/`.tiff`/`.zif` (all TIFF bytes; no passthrough), `.iiif` (an
+//! `.tif`/`.tiff` (single deflate-compressed image), `.zif` (a
+//! TIFF-compatible multi-directory pyramid), `.iiif` (an
 //! `iiif-dir` tree at that path), or an extensionless path (or existing
 //! directory) for `iiif-dir`.
 //!
@@ -79,9 +82,9 @@ use crate::error::NativeError;
 use crate::http::{fetch, UserHeaders};
 use crate::output::{validate_destination, write_atomic, write_iiif_dir, OutputFormat};
 use crate::pipeline::{
-    blit_onto, encode_jpeg, encode_png, encode_tiff, fetch_and_decode_cached, merge_headers,
-    probe_tile_bytes, render_iiif_dir, sha256_hex, PartialPolicy, PipelineConfig, PipelineEvent,
-    PipelineOutcome,
+    blit_onto, encode_jpeg, encode_png, encode_tiff, encode_zif_pyramid, fetch_and_decode_cached,
+    merge_headers, probe_tile_bytes, render_iiif_dir, sha256_hex, PartialPolicy, PipelineConfig,
+    PipelineEvent, PipelineOutcome,
 };
 
 /// Deferred-resolution bound: the initial discovery plus this many deferred
@@ -1132,6 +1135,15 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
         }
         OutputFormat::Tiff => {
             let encoded = encode_tiff(&target, attempt.config.compression, icc_profile)?;
+            attempt.emit(
+                "encoding",
+                BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
+            );
+            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            format!("sha256:{}", sha256_hex(&encoded))
+        }
+        OutputFormat::Zif => {
+            let encoded = encode_zif_pyramid(&target, attempt.config.compression, icc_profile)?;
             attempt.emit(
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),

@@ -1,6 +1,7 @@
 //! Output writer: atomic file replacement, format/extension validation,
 //! overwrite policy identical to legacy behavior (refuse without flag).
-//! Single-file formats (PNG, JPEG, TIFF) encode to one file; `iiif-dir`
+//! Single-file formats (PNG, JPEG, TIFF) encode to one file; `zif`
+//! encodes one multi-directory TIFF pyramid file; `iiif-dir`
 //! writes a static tiled directory holding an `info.json` beside JPEG tiles.
 
 use std::path::Path;
@@ -17,6 +18,7 @@ pub enum OutputFormat {
     Png,
     Jpeg,
     Tiff,
+    Zif,
     IiifDir,
 }
 
@@ -28,6 +30,7 @@ impl OutputFormat {
             OutputFormat::Png => "png",
             OutputFormat::Jpeg => "jpeg",
             OutputFormat::Tiff => "tiff",
+            OutputFormat::Zif => "zif",
             OutputFormat::IiifDir => "iiif-dir",
         }
     }
@@ -41,10 +44,14 @@ impl OutputFormat {
     /// Infer the output format from the destination path:
     ///
     /// * `.png` becomes PNG, `.jpg`/`.jpeg` becomes JPEG, `.tif`/`.tiff`
-    ///   becomes TIFF;
-    /// * `.zif` becomes TIFF as well (single-image re-encode; the reference
-    ///   byte-preserving passthrough and source-pyramid multi-level encode
-    ///   are documented gaps, never silent behavior changes);
+    ///   becomes single-image TIFF;
+    /// * `.zif` becomes ZIF: a TIFF-compatible multi-directory pyramid
+    ///   holding the full-resolution canvas plus halved levels (see
+    ///   [`crate::pipeline::encode_zif_pyramid`]). Byte-preserving
+    ///   encoded-tile passthrough cannot cross the job-engine boundary
+    ///   (the engine plans one level and reports decoded-tile outcomes
+    ///   only), so native re-encodes the assembled canvas at every
+    ///   pyramid resolution instead of renaming a single image;
     /// * `.iiif` becomes `iiif-dir` (a directory written at the `.iiif`
     ///   path, mirroring the reference trigger) alongside the native
     ///   extensionless-or-existing-directory `iiif-dir` trigger;
@@ -53,7 +60,7 @@ impl OutputFormat {
     /// * any other extension is a typed error (no output is attempted).
     ///   The reference generic canvas would write whatever `image` infers
     ///   from the extension; native stays fail-closed here because only the
-    ///   PNG/JPEG/TIFF codecs are compiled in and the capability manifest
+    ///   PNG/JPEG/TIFF/ZIF codecs are compiled in and the capability manifest
     ///   promises exactly those encoders.
     ///
     /// Track C consumes this rule for the `--tile-cache`-sibling CLI surface:
@@ -70,7 +77,8 @@ impl OutputFormat {
         match ext.as_str() {
             "png" => Ok(OutputFormat::Png),
             "jpg" | "jpeg" => Ok(OutputFormat::Jpeg),
-            "tif" | "tiff" | "zif" => Ok(OutputFormat::Tiff),
+            "tif" | "tiff" => Ok(OutputFormat::Tiff),
+            "zif" => Ok(OutputFormat::Zif),
             "iiif" => Ok(OutputFormat::IiifDir),
             "" => Ok(OutputFormat::IiifDir),
             other => Err(format!(
@@ -81,8 +89,8 @@ impl OutputFormat {
 }
 
 /// Image extensions that always name a single file, never an `iiif-dir`
-/// directory destination. `.zif` names a single TIFF file; `.iiif` names a
-/// directory and is intentionally absent here.
+/// directory destination. `.zif` names a single multi-directory pyramid
+/// file; `.iiif` names a directory and is intentionally absent here.
 fn is_single_file_extension(path: &Path) -> bool {
     matches!(
         path.extension()
@@ -128,10 +136,16 @@ pub fn validate_destination(
                 return Err("destination is a directory, not a tiff file".to_string());
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !(ext.eq_ignore_ascii_case("tif")
-                || ext.eq_ignore_ascii_case("tiff")
-                || ext.eq_ignore_ascii_case("zif"))
-            {
+            if !(ext.eq_ignore_ascii_case("tif") || ext.eq_ignore_ascii_case("tiff")) {
+                return Err("extension does not match format".to_string());
+            }
+        }
+        OutputFormat::Zif => {
+            if path.is_dir() {
+                return Err("destination is a directory, not a zif file".to_string());
+            }
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !ext.eq_ignore_ascii_case("zif") {
                 return Err("extension does not match format".to_string());
             }
         }

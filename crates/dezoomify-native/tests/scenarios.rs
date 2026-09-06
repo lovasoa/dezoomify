@@ -207,16 +207,17 @@ fn output_format_follows_the_destination_extension() {
         output::OutputFormat::infer_from_path(Path::new("painting.tiff")),
         Ok(output::OutputFormat::Tiff)
     );
-    // `.zif` selects the TIFF encoder (single-image re-encode); `.iiif`
-    // selects an `iiif-dir` tree at that path. Both triggers mirror the
-    // reference extensions while `iiif-dir` keeps working too.
+    // `.zif` selects the ZIF pyramid encoder (TIFF-compatible
+    // multi-directory output); `.iiif` selects an `iiif-dir` tree at that
+    // path. Both triggers mirror the reference extensions while `iiif-dir`
+    // keeps working too.
     assert_eq!(
         output::OutputFormat::infer_from_path(Path::new("painting.zif")),
-        Ok(output::OutputFormat::Tiff)
+        Ok(output::OutputFormat::Zif)
     );
     assert_eq!(
         output::OutputFormat::infer_from_path(Path::new("painting.ZIF")),
-        Ok(output::OutputFormat::Tiff)
+        Ok(output::OutputFormat::Zif)
     );
     assert_eq!(
         output::OutputFormat::infer_from_path(Path::new("painting.iiif")),
@@ -250,10 +251,12 @@ fn output_format_follows_the_destination_extension() {
     std::fs::write(dir.join("info.json"), b"{}").unwrap();
     assert!(output::validate_destination(&dir, &output::OutputFormat::IiifDir, false).is_err());
     assert!(output::validate_destination(&dir, &output::OutputFormat::IiifDir, true).is_ok());
-    // A `.zif` path validates as TIFF; a `.iiif` path validates as a
-    // directory destination and never as a single file.
+    // A `.zif` path validates as ZIF (never as single-image TIFF or PNG);
+    // a `.iiif` path validates as a directory destination and never as a
+    // single file.
     let zif = dir.join("out.zif");
-    assert!(output::validate_destination(&zif, &output::OutputFormat::Tiff, false).is_ok());
+    assert!(output::validate_destination(&zif, &output::OutputFormat::Zif, false).is_ok());
+    assert!(output::validate_destination(&zif, &output::OutputFormat::Tiff, true).is_err());
     assert!(output::validate_destination(&zif, &output::OutputFormat::Png, true).is_err());
     let iiif = dir.join("out.iiif");
     assert!(output::validate_destination(&iiif, &output::OutputFormat::IiifDir, false).is_ok());

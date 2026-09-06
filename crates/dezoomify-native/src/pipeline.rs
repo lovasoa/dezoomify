@@ -479,30 +479,110 @@ pub fn encode_tiff(
     compression: u8,
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, NativeError> {
-    fn failed(error: tiff::TiffError) -> NativeError {
-        NativeError::new(
-            "output.encode-failed",
-            format!("tiff encode failed: {error}"),
-        )
-    }
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor)
-            .map_err(failed)?
+            .map_err(tiff_failed)?
             .with_compression(tiff::encoder::Compression::Deflate(tiff_compression_for(
                 compression,
             )));
-        let mut directory = encoder
-            .new_image::<tiff::encoder::colortype::RGBA8>(image.width(), image.height())
-            .map_err(failed)?;
-        if let Some(profile) = icc_profile {
-            let _ = directory
-                .encoder()
-                .write_tag(tiff::tags::Tag::IccProfile, profile);
-        }
-        directory.write_data(image.as_raw()).map_err(failed)?;
+        write_tiff_directory(&mut encoder, image, icc_profile)?;
     }
     Ok(cursor.into_inner())
+}
+
+/// Smallest pyramid side kept in [`encode_zif_pyramid`]: levels halve until
+/// both sides fit, so every directory is a real downscaled resolution of
+/// the canvas rather than padding.
+pub(crate) const ZIF_PYRAMID_MIN_SIDE: u32 = 256;
+
+/// Pyramid sizes for [`encode_zif_pyramid`]: the full canvas followed by
+/// halved (rounding up) levels until both sides fit in
+/// [`ZIF_PYRAMID_MIN_SIDE`]. A canvas that already fits yields a single
+/// level; larger canvases yield real multi-resolution output.
+pub(crate) fn tiff_pyramid_sizes(width: u32, height: u32) -> Vec<(u32, u32)> {
+    let mut sizes = vec![(width.max(1), height.max(1))];
+    while sizes
+        .last()
+        .is_some_and(|(w, h)| *w > ZIF_PYRAMID_MIN_SIDE || *h > ZIF_PYRAMID_MIN_SIDE)
+    {
+        let (w, h) = sizes.last().copied().unwrap_or((1, 1));
+        sizes.push((w.div_ceil(2).max(1), h.div_ceil(2).max(1)));
+    }
+    sizes
+}
+
+/// Encode the assembled canvas as ZIF: a TIFF-compatible multi-directory
+/// pyramid holding the full-resolution image plus the halved levels from
+/// [`tiff_pyramid_sizes`], each deflate-compressed at the level selected by
+/// `compression` (see [`tiff_compression_for`]) with the first tile's ICC
+/// profile embedded in every directory.
+///
+/// This is the clean equivalent of the reference `ZifTiffEncoder`
+/// passthrough (`zif_tiff_encoder.rs`): byte-preserving encoded-tile
+/// passthrough cannot cross the job-engine boundary (the engine plans one
+/// level and reports only decoded-tile outcomes, so no encoded bytes or
+/// source-pyramid levels ever reach the runtime), and the engine's effects
+/// are fixed by the protocol. Instead of renaming a single image, native
+/// re-encodes the assembled canvas at every pyramid resolution, so `.zif`
+/// output carries real multi-resolution data readable by any TIFF reader
+/// (first directory) and by pyramid-aware readers (all directories).
+pub fn encode_zif_pyramid(
+    image: &image::RgbaImage,
+    compression: u8,
+    icc_profile: Option<&[u8]>,
+) -> Result<Vec<u8>, NativeError> {
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor)
+            .map_err(tiff_failed)?
+            .with_compression(tiff::encoder::Compression::Deflate(tiff_compression_for(
+                compression,
+            )));
+        for (width, height) in tiff_pyramid_sizes(image.width(), image.height()) {
+            let downscaled;
+            let view: &image::RgbaImage = if width == image.width() && height == image.height() {
+                image
+            } else {
+                downscaled = image::imageops::resize(
+                    image,
+                    width,
+                    height,
+                    image::imageops::FilterType::Triangle,
+                );
+                &downscaled
+            };
+            write_tiff_directory(&mut encoder, view, icc_profile)?;
+        }
+    }
+    Ok(cursor.into_inner())
+}
+
+fn tiff_failed(error: tiff::TiffError) -> NativeError {
+    NativeError::new(
+        "output.encode-failed",
+        format!("tiff encode failed: {error}"),
+    )
+}
+
+/// Write one RGBA image as a single directory of an open TIFF encoder,
+/// embedding the ICC profile when present. Shared by the single-image
+/// [`encode_tiff`] and multi-directory [`encode_zif_pyramid`] paths so both
+/// stay byte-consistent per level.
+fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
+    encoder: &mut tiff::encoder::TiffEncoder<W>,
+    image: &image::RgbaImage,
+    icc_profile: Option<&[u8]>,
+) -> Result<(), NativeError> {
+    let mut directory = encoder
+        .new_image::<tiff::encoder::colortype::RGBA8>(image.width(), image.height())
+        .map_err(tiff_failed)?;
+    if let Some(profile) = icc_profile {
+        let _ = directory
+            .encoder()
+            .write_tag(tiff::tags::Tag::IccProfile, profile);
+    }
+    directory.write_data(image.as_raw()).map_err(tiff_failed)
 }
 
 /// Powers of two covering the pyramid: 1 always, then doubling while the
@@ -756,6 +836,61 @@ mod tests {
                 .expect("icc tag present"),
             icc,
         );
+    }
+
+    #[test]
+    fn zif_pyramid_sizes_halve_to_the_minimum_side() {
+        assert_eq!(tiff_pyramid_sizes(16, 16), vec![(16, 16)]);
+        assert_eq!(tiff_pyramid_sizes(256, 256), vec![(256, 256)]);
+        assert_eq!(tiff_pyramid_sizes(512, 512), vec![(512, 512), (256, 256)]);
+        assert_eq!(
+            tiff_pyramid_sizes(1024, 768),
+            vec![(1024, 768), (512, 384), (256, 192)]
+        );
+        // Odd sides round up so no level collapses to zero.
+        assert_eq!(
+            tiff_pyramid_sizes(513, 100),
+            vec![(513, 100), (257, 50), (129, 25)]
+        );
+    }
+
+    #[test]
+    fn zif_pyramid_holds_real_downscaled_levels() {
+        let mut image = image::RgbaImage::new(512, 512);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            *pixel = image::Rgba([(x / 2) as u8, (y / 2) as u8, 128, 255]);
+        }
+        let zif = encode_zif_pyramid(&image, 5, None).expect("zif encodes");
+        assert!(
+            zif.starts_with(&[0x49, 0x49, 0x2A, 0x00]),
+            "zif output is TIFF-compatible"
+        );
+        // Every directory decodes with the advertised dimensions; the first
+        // matches the canvas pixel-exact (lossless deflate).
+        let mut decoder =
+            tiff::decoder::Decoder::new(std::io::Cursor::new(&zif)).expect("zif decodes");
+        let mut level = 0;
+        loop {
+            let (width, height) = decoder.dimensions().expect("level dims");
+            assert_eq!(
+                (width, height),
+                tiff_pyramid_sizes(512, 512)[level],
+                "level {level} carries its own resolution"
+            );
+            if level == 0 {
+                let decoded = image::load_from_memory(&zif)
+                    .expect("first level decodes")
+                    .to_rgba8();
+                assert_eq!(decoded.as_raw(), image.as_raw());
+            }
+            level += 1;
+            if decoder.more_images() {
+                decoder.next_image().expect("next level");
+            } else {
+                break;
+            }
+        }
+        assert_eq!(level, 2, "512px canvas yields two pyramid levels");
     }
 
     #[test]

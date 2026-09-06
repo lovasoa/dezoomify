@@ -1,8 +1,8 @@
 //! Native effect runtime: real HTTP egress (rustls), header/auth scope,
 //! bounded scheduler bookkeeping, tile resume cache (storage `cache`),
 //! output validation, progress
-//! counters, image decode/assemble/encode pipeline (PNG, JPEG, TIFF, and
-//! static `iiif-dir` tile trees), and real output hashing.
+//! counters, image decode/assemble/encode pipeline (PNG, JPEG, TIFF, ZIF
+//! pyramid, and static `iiif-dir` tile trees), and real output hashing.
 #![forbid(unsafe_code)]
 
 pub mod auth;
