@@ -28,7 +28,7 @@ dezoomify discovers zoomable images, lets a user choose an image and level, down
 
 - [`crates/dezoomify-core`](architecture.md#cratesdezoomify-core) and [`crates/dezoomify-job`](job-engine.md) are pure Rust libraries with no network, filesystem, clock, UI, or image-codec access.
 - [`crates/dezoomify-protocol`](protocol.md) is the Rust source for the generated TypeScript bindings and schema and is the only wire contract between the shared UI and a runtime.
-- One shared React [UI](architecture.md#packagesshared-ui) serves the website, desktop app, and extension.
+- One shared [UI](architecture.md#packagesshared-ui) (vanilla TypeScript, no UI framework) serves the website, desktop app, and extension.
 - Browser and native runtimes implement the same capabilities honestly; unsupported operations are reported before a job starts.
 - The website tries credential-free direct browser fetch first, then automatically falls back to the metadata CORS proxy after a classified CORS or network failure (or a direct fetch that does not complete within the 250 ms metadata window) for an eligible public, non-credential metadata request (never tiles); it shows the active transport.
 - Cookies move only from the extension to native after explicit, scoped consent; ordinary handoffs contain no secrets.
