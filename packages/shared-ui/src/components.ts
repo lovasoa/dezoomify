@@ -14,7 +14,7 @@ export function renderSaveGuidance(originClean: boolean): string {
   }
   return (
     "This preview is display only. To keep a copy, right-click the image where " +
-    "your browser supports it. Programmatic save needs readable tile bytes."
+    "your browser supports it. To save the full-size image, use the desktop app."
   );
 }
 

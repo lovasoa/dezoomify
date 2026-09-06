@@ -185,9 +185,9 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
       <div class="dz-modal-section">
         <div class="dz-modal-section-title">Why use the Desktop App?</div>
         <ul class="dz-modal-list">
-          <li><strong>Handles Larger Artworks:</strong> Web browsers enforce strict memory limits (often 2 GB per tab). The Desktop App runs natively on your machine with single-job PNG output to a file, assembling images in memory up to an 8 GiB canvas limit (needing matching free memory).</li>
-          <li><strong>Lossless Output:</strong> Direct PNG output without browser blob allocation limits.</li>
-          <li><strong>Multi-Threaded Performance:</strong> Retrieves and composites tiles in parallel using native multi-core CPU scheduling.</li>
+          <li><strong>Handles Larger Artworks:</strong> A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory (up to its 8 GiB canvas limit, needing matching free memory) and writes the finished output to disk.</li>
+          <li><strong>Saves the Finished Picture:</strong> Each run saves one job to one output file on your computer.</li>
+          <li><strong>When the Website Cannot Finish:</strong> The website stops the job with an error and points to the desktop app for the full-size image.</li>
         </ul>
       </div>
 
@@ -264,9 +264,9 @@ export function showExtensionGuidance(hostDocument: Document): void {
       <div class="dz-modal-section">
         <div class="dz-modal-section-title">Why use the Browser Extension?</div>
         <ul class="dz-modal-list">
-          <li><strong>Password-Protected &amp; Academic Archives:</strong> Many university collections, museum subscriptions, and archive portals require you to be signed in. Web Dezoomify cannot access your cookies or session, but the extension inspects viewers directly within your active browser tab.</li>
-          <li><strong>Automatic Viewer Detection:</strong> No need to inspect HTML source or search for hidden XML manifests. The extension observes viewer requests in real time as you navigate the page.</li>
-          <li><strong>Private &amp; Secure:</strong> Operates locally inside your browser with granted active-tab permissions only; no credentials or session tokens ever leave your computer.</li>
+          <li><strong>Signed-In Pages:</strong> While you look at a zoomable image, it can find the image behind the viewer automatically, including on pages where you are signed in, such as library portals, museum subscriptions, and academic archives.</li>
+          <li><strong>Easy to Use:</strong> Press the Dezoomify button in the browser toolbar and pick the image to save, or send the job to the desktop app if the image is very large.</li>
+          <li><strong>Private:</strong> It only looks at the page you pointed it at, only after you pressed the button. It does not watch your browsing in the background.</li>
         </ul>
       </div>
 
