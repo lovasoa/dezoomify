@@ -43,12 +43,12 @@ function postDiscoveryFailure(error) {
     post({ type: "error", code: failure.code, message: failure.message, detail });
     return;
   }
-  if (detail.includes("no discovery candidate accepted")) {
+  if (engineDetail.includes("no discovery candidate accepted")) {
     post({
       type: "error",
       code: "NO_IMAGE_FOUND",
       message: noImageFoundError().message,
-      detail,
+      detail: engineDetail,
     });
     return;
   }
@@ -56,7 +56,7 @@ function postDiscoveryFailure(error) {
     type: "error",
     code: "DISCOVERY_FAILED",
     message: discoveryFailedError().message,
-    detail,
+    detail: engineDetail,
   });
 }
 
