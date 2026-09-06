@@ -14,4 +14,5 @@ pub mod pipeline;
 pub mod progress;
 pub mod runtime;
 
-pub use runtime::{JobEvent, JobHandle, JobRequest, JobResult, NativeRuntime};
+pub use error::NativeError;
+pub use runtime::{JobEvent, JobEventKind, JobHandle, JobRequest, JobResult, NativeRuntime};

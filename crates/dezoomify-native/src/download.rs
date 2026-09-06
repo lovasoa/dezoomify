@@ -3,6 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::error::NativeError;
+
 #[derive(Clone, Debug)]
 pub struct SchedulerConfig {
     pub max_concurrent: usize,
@@ -42,9 +44,12 @@ impl Scheduler {
         }
     }
 
-    pub fn push(&mut self, tile: String) -> Result<(), String> {
+    pub fn push(&mut self, tile: String) -> Result<(), NativeError> {
         if self.pending.len() + self.in_flight.len() + self.done.len() >= self.config.max_tiles {
-            return Err("tile limit exceeded".to_string());
+            return Err(NativeError::new(
+                "job.resource-limit",
+                "tile limit exceeded",
+            ));
         }
         self.pending.insert(tile);
         Ok(())
@@ -69,10 +74,12 @@ impl Scheduler {
         self.done.insert(tile.to_string());
     }
 
-    pub fn fail(&mut self, tile: &str) -> Result<bool, String> {
+    pub fn fail(&mut self, tile: &str) -> Result<bool, NativeError> {
         self.in_flight.remove(tile);
         let attempts = self.attempts.entry(tile.to_string()).or_insert(0);
-        *attempts = attempts.checked_add(1).ok_or("attempt overflow")?;
+        *attempts = attempts
+            .checked_add(1)
+            .ok_or_else(|| NativeError::new("job.overflow", "attempt overflow"))?;
         if *attempts <= self.config.max_retries {
             self.pending.insert(tile.to_string());
             Ok(true)

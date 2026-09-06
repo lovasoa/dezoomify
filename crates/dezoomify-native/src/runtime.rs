@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::download::{Scheduler, SchedulerConfig};
+use crate::error::NativeError;
 
 /// Redacted job origin: scheme + host (+ port if non-default), never the
 /// path, query, or fragment, which may carry credentials or tokens.
@@ -33,11 +34,61 @@ pub struct JobRequest {
     pub overwrite: bool,
 }
 
+/// Stable native event kinds. Serialized as kebab-case strings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum JobEventKind {
+    Started,
+    Discovery,
+    Downloading,
+    Encoding,
+    Completed,
+    Cancelled,
+    #[serde(untagged)]
+    Other(String),
+}
+
+impl JobEventKind {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Started => "started",
+            Self::Discovery => "discovery",
+            Self::Downloading => "downloading",
+            Self::Encoding => "encoding",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+            Self::Other(other) => other,
+        }
+    }
+}
+
+impl From<&str> for JobEventKind {
+    fn from(value: &str) -> Self {
+        match value {
+            "started" => Self::Started,
+            "discovery" => Self::Discovery,
+            "downloading" => Self::Downloading,
+            "encoding" => Self::Encoding,
+            "completed" => Self::Completed,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Other(value.to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for JobEventKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JobEvent {
     pub job: String,
     pub seq: u64,
-    pub kind: String,
+    #[serde(rename = "kind")]
+    pub kind: JobEventKind,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub detail: BTreeMap<String, String>,
 }
@@ -68,9 +119,9 @@ impl NativeRuntime {
         }
     }
 
-    pub fn start(&self, request: JobRequest) -> Result<JobHandle, String> {
+    pub fn start(&self, request: JobRequest) -> Result<JobHandle, NativeError> {
         if request.input_url.len() > 2048 {
-            return Err("input url too long".to_string());
+            return Err(NativeError::new("job.invalid-id", "input url too long"));
         }
         let id = self.next_job.fetch_add(1, Ordering::SeqCst);
         Ok(JobHandle {
@@ -91,7 +142,7 @@ impl NativeRuntime {
 }
 
 impl JobHandle {
-    pub fn queue_tiles(&mut self, tiles: Vec<String>) -> Result<(), String> {
+    pub fn queue_tiles(&mut self, tiles: Vec<String>) -> Result<(), NativeError> {
         for tile in tiles {
             self.scheduler.push(tile)?;
         }
@@ -108,7 +159,7 @@ impl JobHandle {
         self.events.push(JobEvent {
             job: self.id.clone(),
             seq: self.seq,
-            kind: kind.to_string(),
+            kind: JobEventKind::from(kind),
             detail,
         });
     }

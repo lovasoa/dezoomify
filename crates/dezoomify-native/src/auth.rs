@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 
+use crate::error::NativeError;
+
 #[derive(Clone, Debug)]
 pub struct AuthorizationScope {
     pub scheme: String,
@@ -41,20 +43,32 @@ impl EphemeralAuthorization {
     pub fn new(
         scope: AuthorizationScope,
         cookies: HashMap<String, String>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, NativeError> {
         if cookies.len() > 64 {
-            return Err("too many cookies".to_string());
+            return Err(NativeError::new(
+                "auth.too-many-cookies",
+                "too many cookies",
+            ));
         }
         for (k, v) in &cookies {
             if k.len() > 256 || v.len() > 4096 {
-                return Err("cookie entry too large".to_string());
+                return Err(NativeError::new(
+                    "auth.cookie-too-large",
+                    "cookie entry too large",
+                ));
             }
             if k.contains(['\r', '\n']) || v.contains(['\r', '\n']) {
-                return Err("cookie CR/LF rejected".to_string());
+                return Err(NativeError::new(
+                    "auth.cookie-crlf",
+                    "cookie CR/LF rejected",
+                ));
             }
         }
         if scope.host.contains("..") || scope.path_prefix.contains("..") {
-            return Err("scope traversal rejected".to_string());
+            return Err(NativeError::new(
+                "auth.scope-traversal",
+                "scope traversal rejected",
+            ));
         }
         Ok(Self { scope, cookies })
     }

@@ -27,8 +27,8 @@ fn main() {
         overwrite: parsed.overwrite,
     }) {
         Ok(handle) => handle,
-        Err(message) => {
-            eprintln!("error: {message}");
+        Err(error) => {
+            eprintln!("error: {} ({})", error.message, error.code);
             std::process::exit(1);
         }
     };
@@ -91,7 +91,7 @@ fn print_event(json: bool, event: &JobEvent) {
     if json {
         println!(
             "{}",
-            report::machine_event_detail(&event.job, event.seq, &event.kind, &event.detail)
+            report::machine_event_detail(&event.job, event.seq, event.kind.as_str(), &event.detail)
         );
     } else {
         let detail = event
