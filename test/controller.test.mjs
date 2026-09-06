@@ -87,7 +87,8 @@ test("app-choice guidance is plain language with no jargon", () => {
 test("components render transport/save/error/progress plainly", () => {
   assert.equal(renderTransportLabel("direct"), "Direct from your browser");
   assert.equal(renderTransportLabel("proxy"), "Metadata proxy");
-  assert.ok(renderSaveGuidance(false).includes("display only"));
+  assert.ok(renderSaveGuidance(false).includes("right-click"));
+  assert.ok(renderSaveGuidance(false).includes("Save Image As"));
   assert.ok(renderSaveGuidance(true).includes("save this picture"));
   assert.ok(
     renderSaveGuidance(true).includes("Colors may shift"),
