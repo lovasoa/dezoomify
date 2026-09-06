@@ -119,6 +119,47 @@ for (const [id, url] of TARGETS) {
         appOriginTile404s.push(`${status} ${target}`);
       }
     });
+    // Live metadata proxy relay: the loopback harness serves no /api/proxy
+    // route, so stub the production relay shape at the page layer. The POST
+    // targetUrl is relayed to the real upstream with a GET and the upstream
+    // response is passed through with x-proxy-upstream-url set, mirroring
+    // src/server/proxy.ts so tile-base propagation is exercised live.
+    // Missing or invalid targets get an honest 4xx and upstream errors pass
+    // through; the stub never throws.
+    await page.route("**/api/proxy", async (route) => {
+      let targetUrl = null;
+      try {
+        targetUrl = route.request().postDataJSON()?.targetUrl ?? null;
+      } catch {
+        targetUrl = null;
+      }
+      if (typeof targetUrl !== "string" || !/^https?:\/\//i.test(targetUrl)) {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({ code: "PROXY_POLICY_DENIED" }),
+        });
+        return;
+      }
+      let upstream = null;
+      try {
+        upstream = await route.fetch({ url: targetUrl, method: "GET" });
+      } catch {
+        await route.fulfill({
+          status: 502,
+          contentType: "application/json",
+          body: JSON.stringify({ code: "TRANSPORT_NETWORK_ERROR" }),
+        });
+        return;
+      }
+      let headers = null;
+      try {
+        headers = { ...upstream.headers(), "x-proxy-upstream-url": targetUrl };
+      } catch {
+        headers = { "x-proxy-upstream-url": targetUrl };
+      }
+      await route.fulfill({ response: upstream, headers });
+    });
     await page.goto(ADDR + "/beta/", { waitUntil: "domcontentloaded" });
     const input = page.locator("#dz-url-input");
     await expect(input).toBeVisible();
