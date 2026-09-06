@@ -474,10 +474,9 @@ fn cli_full_flags_produce_golden_output() {
 
 #[test]
 fn cli_fallback_flags_warn_honestly() {
-    // `--dezoomer <named>`, `--logging <non-info>`, and `--retries 0` are
-    // the only remaining fallbacks: each warns, yet the fetch still
-    // succeeds via auto-detect, fixed human/json reporting, and the
-    // no-refetch emulation.
+    // `--dezoomer <named>` and `--retries 0` are now real: validated and
+    // passed through with no warnings. Only `--logging <non-info>` still
+    // warns until real levels land.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-fallback-warnings");
@@ -501,16 +500,16 @@ fn cli_fallback_flags_warn_honestly() {
     );
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("--dezoomer iiif") && stderr.contains("auto-detecting instead"),
-        "dezoomer fallback warns: {stderr}"
+        !stderr.contains("auto-detecting instead"),
+        "dezoomer no longer warns: {stderr}"
+    );
+    assert!(
+        !stderr.contains("no refetch"),
+        "retries 0 no longer warns: {stderr}"
     );
     assert!(
         stderr.contains("--logging debug") && stderr.contains("human lines on stderr"),
-        "logging fallback warns with human/json mapping: {stderr}"
-    );
-    assert!(
-        stderr.contains("--retries 0") && stderr.contains("no refetch"),
-        "retries 0 warns with no-refetch emulation: {stderr}"
+        "logging still warns with human/json mapping: {stderr}"
     );
     let golden: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
@@ -525,6 +524,29 @@ fn cli_fallback_flags_warn_honestly() {
         .and_then(serde_json::Value::as_str)
         .expect("golden outputHash");
     assert_eq!(sha256_of_file(&output), expected_hash);
+}
+
+#[test]
+fn cli_unknown_dezoomer_fails_with_typed_error() {
+    let out_dir = temp_dir("e2e-unknown-dezoomer");
+    let output = out_dir.join("out.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--dezoomer")
+        .arg("nope")
+        .arg("https://fixtures.test/cli/pyramid.dzi")
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert_eq!(run.status.code(), Some(2), "unknown dezoomer must exit 2");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("unknown dezoomer 'nope'"),
+        "typed error: {stderr}"
+    );
+    assert!(
+        String::from_utf8_lossy(&run.stdout).is_empty(),
+        "arg error must not pollute stdout"
+    );
 }
 
 #[test]

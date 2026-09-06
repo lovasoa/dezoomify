@@ -239,6 +239,9 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     // `--largest` (or bulk-implied largest) selects the uncapped level,
     // mirroring the reference `should_use_largest` rule. The `largest` flag
     // itself is also passed through so size caps are ignored natively.
+    // `--dezoomer` has no native selector field (`PipelineConfig` and the job
+    // engine auto-detect); it is validated CLI-side against the known format
+    // list and `max_retries` (including 0) is passed through unchanged.
     let max_width = if parsed.should_use_largest() {
         None
     } else {
@@ -270,29 +273,19 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     }
 }
 
-/// Honest notices for selectors the native pipeline handles by fallback.
+/// Remaining notice for the verbosity flag until real levels land.
 /// Every other flag above is wired through [`pipeline_config_for`]: level
 /// caps and exact `--zoom-level`/`--image-index`/`--largest`, `parallelism`
-/// as `max_concurrent`, `retry_delay`, `compression` as JPEG quality
+/// as `max_concurrent`, `--dezoomer` validated CLI-side, `max_retries`
+/// (including 0) passed through, `retry_delay`, `compression` as JPEG quality
 /// `100 - compression` plus PNG tiers, `timeout`/`connect-timeout`,
 /// `max_idle_per_host`, and per-tile `min_interval` staggering (bulk
 /// inter-image pacing still uses the local `Throttler` with the same value).
 fn warn_selection_gaps(parsed: &Args) {
-    if parsed.dezoomer != "auto" {
-        eprintln!(
-            "warning: --dezoomer {} is parsed but named formats need native support; auto-detecting instead",
-            parsed.dezoomer
-        );
-    }
     if parsed.logging != "info" {
         eprintln!(
             "warning: --logging {} is parsed but verbosity is fixed; reporting through human lines on stderr plus --json on stdout",
             parsed.logging
-        );
-    }
-    if parsed.retries == 0 {
-        eprintln!(
-            "warning: --retries 0 is parsed; the job engine floor of 1 is emulated with no refetch (no second request is sent)"
         );
     }
 }

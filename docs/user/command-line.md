@@ -33,13 +33,13 @@ ignores caps).
 
 | You want to… | Option |
 |---|---|
-| Let the tool detect the format, or force one | `-d, --dezoomer auto` (default; named formats fall back to auto-detect) |
+| Let the tool detect the format, or force one | `-d, --dezoomer auto` (default; named formats are validated, unknown names fail) |
 | Always take the highest resolution | `-l, --largest` (implied in bulk mode without level caps) |
 | Cap the resolution (e.g. 4000 pixels wide) | `-w, --max-width 4000` |
 | Cap the height | `-h, --max-height 800` |
 | Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
 | Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
-| Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries, emulated with no refetch) |
+| Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries) |
 | Wait before retrying | `--retry-delay 2s` (delay before first retry, then doubling, plus per-tile jitter) |
 | Tune output compression | `--compression 5` (JPEG quality `100 - compression`, default 95; PNG fast/balanced/best tiers) |
 | Tune the connection pool | `--max-idle-per-host 32` (max idle connections per host) |

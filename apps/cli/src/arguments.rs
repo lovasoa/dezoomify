@@ -11,7 +11,9 @@ pub struct Args {
     pub output: Option<PathBuf>,
     pub overwrite: bool,
     pub json: bool,
-    /// Format selector, `auto` detects. Named formats fall back to auto.
+    /// Format selector, `auto` detects. Named formats are validated
+    /// CLI-side against the known format list; unknown names fail.
+    /// The native engine auto-detects (it has no format selector field).
     pub dezoomer: String,
     /// Select the largest level. Maps to uncapped width plus the native
     /// largest flag (bulk-implied when no level cap was given).
@@ -29,7 +31,7 @@ pub struct Args {
     /// `image_index`; out-of-range uses the last image.
     pub image_index: Option<usize>,
     /// Tile retry budget, wired to native `max_retries`. Zero means no
-    /// retries, emulated with no refetch past the engine floor of 1.
+    /// retries and is passed through unchanged.
     pub retries: u32,
     /// Delay before the first retry, then doubling. Wired to native
     /// `retry_delay` (plus deterministic per-tile jitter).
@@ -306,6 +308,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         return Err("--outfile conflicts with positional <output>".to_string());
     }
     let output = outfile_option.or(positional_output);
+    validate_dezoomer(&dezoomer)?;
     // Single mode allows a missing output for title-based auto-naming;
     // a missing input prompts when a terminal is present, else prints help.
     // Bulk mode already allows missing positionals.
@@ -381,6 +384,52 @@ fn take_value(
     args.get(*i)
         .cloned()
         .ok_or_else(|| format!("missing value for {flag}"))
+}
+
+/// Known `--dezoomer` format names, mirroring the core registry order
+/// (`dezoomify-core/src/core/registry.rs` snapshot). `auto` is the
+/// pseudo-name for automatic detection and is always accepted.
+#[must_use]
+pub fn known_dezoomers() -> &'static [&'static str] {
+    &[
+        "custom",
+        "google_arts_and_culture",
+        "zoomify",
+        "iiif",
+        "deepzoom",
+        "generic",
+        "krpano",
+        "iipimage",
+        "xlimage",
+        "topviewer",
+        "fsi",
+        "lizardtech",
+        "vls",
+        "hungaricana",
+        "wmts",
+        "arcgis",
+        "pnav",
+        "bulk_text",
+    ]
+}
+
+/// Validate a `--dezoomer` value: `auto` or a known format (case-insensitive,
+/// matching the core `registry_for`). Unknown names fail with a typed error
+/// listing the expected values; no fallback warning is emitted.
+fn validate_dezoomer(name: &str) -> Result<(), String> {
+    if name == "auto" {
+        return Ok(());
+    }
+    if known_dezoomers()
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(name))
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "unknown dezoomer '{name}' (expected one of: auto, {})",
+        known_dezoomers().join(", ")
+    ))
 }
 
 /// Parse durations like `50ms`, `2s`, `1min`, `1m`, `1h`, `100ns`.
@@ -669,6 +718,30 @@ mod tests {
         assert_eq!(args.parallelism, 8);
         assert!(args.should_use_largest());
         assert!(args.has_level_specifying_args());
+    }
+
+    #[test]
+    fn unknown_dezoomer_fails_with_typed_error() {
+        let err = parse(&[
+            "--dezoomer".to_string(),
+            "nope".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect_err("unknown dezoomer must fail");
+        assert!(
+            err.contains("unknown dezoomer 'nope'"),
+            "typed error: {err}"
+        );
+        assert!(err.contains("auto"), "lists auto: {err}");
+        let ok = parse(&[
+            "--dezoomer".to_string(),
+            "IIIF".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("known names validate case-insensitively");
+        assert_eq!(ok.dezoomer, "IIIF");
     }
 
     #[test]
