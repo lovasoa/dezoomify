@@ -7,8 +7,9 @@ High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
   proxy fallback, canvas assembly, and real save (Chromium E2E covered).
 - Extension (`apps/extension/`): explicit-action scan with unit coverage;
   store listing submitted (pending review).
-- Desktop (`apps/desktop/`): lean Tauri shell (logic + config only; window
-  and installer not yet implemented).
+- Desktop (`apps/desktop/`): real Tauri window with the five capability
+  commands, native save dialog, ed25519-verified updater, and installer
+  bundling (`cargo xtask build desktop`).
 - CLI (`apps/cli/`): real download pipeline through the native runtime,
   covering discovery, bounded tile download, assembly, and output writing.
 

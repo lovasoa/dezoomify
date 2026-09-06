@@ -13,11 +13,10 @@
 //      passes,
 //   5. the checked-in wasm transcript golden parses and carries protocol 1.0.
 //
-// EXCEPTION (recorded, not a failure): real `wasm-pack` Node/browser tests
-// (`wasm-pack test --node/--headless`) require pinned `wasm-pack` plus
-// browsers. Neither is installed in this environment, so generated-glue and
-// headless-browser workflows are out of scope here; the native tests above
-// exercise the same adapter logic (wasm-bindgen exports are thin
+// Real headless-browser coverage runs through `cargo xtask test wasm
+// --browser`, which executes the compiled adapter inside Chromium via the
+// webapp E2E suite; the native tests above exercise the same adapter logic
+// (wasm-bindgen exports are thin
 // `cfg(target_arch = "wasm32")` wrappers over it).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";

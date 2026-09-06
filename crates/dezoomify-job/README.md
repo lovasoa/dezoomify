@@ -1,10 +1,11 @@
-# dezoomify-job (Phase 06 lean scope)
+# dezoomify-job
 
-Deterministic state machine for one job: discovery-by-length, fixed
-`img:0`/`lvl:0` selection, fixed `tile:0`/`tile:1` plan, retries,
-cancellation, and progress. Hosts inject fetch/save capabilities; the machine
-itself does no I/O, so workflows replay identically everywhere, including in
-tests. Full format-aware planning via `dezoomify-core` is future work.
+Deterministic state machine for one job: format-aware discovery through
+`dezoomify-core`, real catalog projection, explicit image/level selection
+over real ids, real per-level tile plans (probe-driven levels through the
+core probe step machine when `plan_probes` allows), retries, cancellation,
+and progress. Hosts inject fetch/save capabilities; the machine itself does
+no I/O, so workflows replay identically everywhere, including in tests.
 
 ```sh
 cargo xtask test job                 # workflows + adversarial cases
