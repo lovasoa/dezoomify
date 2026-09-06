@@ -465,13 +465,13 @@ function mountInputSection(
       Enter the <abbr title="Uniform Resource Locator, the address of a webpage">URL</abbr>
       of such an image in the text field below. The image will be saved at maximal resolution.
       You can then right-click on the image, and choose "Save As" in order to save it as a PNG file on your computer.
-      If it doesn't work, read our <a href="https://dezoomify.ophir.dev/help/troubleshooting.html" target="_blank" rel="noopener">troubleshooting guide</a>.
+      If it doesn't work, read our <a href="./help/troubleshooting.html" target="_blank" rel="noopener">troubleshooting guide</a>.
       If you want more information, read our <a href="https://github.com/lovasoa/dezoomify#dezoomify" target="_blank" rel="noopener">project page</a>.
     </p>
     <p class="dz-license-text">
       This script is released under the <a href="http://www.gnu.org/licenses/gpl.html" target="_blank" rel="noopener">GPL</a>.
       <a href="http://github.com/lovasoa/dezoomify" target="_blank" rel="noopener">See the source code</a>.
-      <a href="https://dezoomify.ophir.dev/terms.html" target="_blank" rel="noopener">We decline any responsibility for an illegal use of this software</a>.
+      <a href="./terms.html" target="_blank" rel="noopener">We decline any responsibility for an illegal use of this software</a>.
     </p>
   `;
   body.appendChild(desc);
@@ -1039,7 +1039,7 @@ function mountFailedSection(
           </div>
           <span class="dz-guidance-item-desc">For images that exceed browser memory limits, within an 8 GiB canvas cap (needing matching free memory). Processes natively on your computer.</span>
         </button>
-        <a class="dz-guidance-item" href="https://dezoomify.ophir.dev/help/finding-the-image-address.html" target="_blank" rel="noopener">
+        <a class="dz-guidance-item" href="./help/finding-the-image-address.html" target="_blank" rel="noopener">
           <div class="dz-guidance-item-header">
             <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             <span class="dz-guidance-item-title">Help &amp; URL Extraction</span>
