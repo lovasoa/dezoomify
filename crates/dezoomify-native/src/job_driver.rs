@@ -8,12 +8,15 @@
 //!
 //! * `acquire-resource{uri}` → [`fetch`] + [`merge_headers`], replying
 //!   `ResourceBytes` (with the post-redirect URL) or `FetchFailure`.
-//! * `catalog` → first-entry selection mirroring the legacy
-//!   `choose_image` rule (first ready image wins; a leading deferred entry
-//!   is followed with a fresh bounded job), replying `SelectedImage`.
-//! * `levels` → legacy `choose_level` rule over declared sizes (largest
-//!   area fitting `max_width`, else the narrowest), replying
-//!   `SelectedLevel`.
+//! * `catalog` → legacy `choose_image`/`choose_level` parity: exact
+//!   `image_index` (out-of-range uses the last image; a deferred selection
+//!   is followed with a fresh bounded job), then exact `zoom_level`
+//!   (out-of-range uses the last level), then `largest`, then the
+//!   width+height `best_size` filter (largest fitting area, else the
+//!   narrowest), replying `SelectedImage`/`SelectedLevel`.
+//! * `levels` → legacy `choose_level` rule over declared sizes (exact index,
+//!   then largest, then the width+height filter, else the largest area),
+//!   replying `SelectedLevel`.
 //! * `request-destination` → [`validate_destination`] + overwrite policy,
 //!   replying `DestinationGranted`/`DestinationDenied`.
 //! * `acquire-tile{probe:true}` → [`probe_tile_bytes`], replying
@@ -147,43 +150,97 @@ fn job_config_for(config: &PipelineConfig) -> Result<JobConfig, NativeError> {
 /// First catalog entry wins: ready entries are selected, a leading deferred
 /// entry is followed. Width `0` means unknown (never fits a cap, sorts last
 /// as narrowest), mirroring the legacy `None` handling.
+///
+/// Level selection mirrors the reference `choose_level` priority: exact
+/// `zoom_level` index first (out-of-range uses the last level), then
+/// explicit `largest`, then the width+height `best_size` filter (largest
+/// fitting area; unknown extents never fit), else the largest area.
+/// Nothing fitting a cap falls back to the narrowest level rather than
+/// exceeding the cap (the reference would prompt; the non-interactive
+/// driver stays fail-closed on the cap).
+pub(crate) struct LevelSelection {
+    pub largest: bool,
+    pub max_width: Option<u32>,
+    pub max_height: Option<u32>,
+    pub zoom_level: Option<usize>,
+}
+
+impl LevelSelection {
+    fn from_config(config: &PipelineConfig) -> Self {
+        Self {
+            largest: config.largest,
+            max_width: config.max_width,
+            max_height: config.max_height,
+            zoom_level: config.zoom_level,
+        }
+    }
+}
+
+fn max_area_id(levels: &[&(String, u64, u64)]) -> Option<String> {
+    levels
+        .iter()
+        .max_by_key(|(_, width, height)| u128::from(*width) * u128::from(*height))
+        .map(|(id, _, _)| (*id).clone())
+}
+
+/// Image selection mirrors the reference `choose_image` rule: the exact
+/// `image_index` wins with out-of-range falling back to the last image;
+/// `None` keeps the first entry (bulk auto-first parity).
+pub(crate) fn select_image_index(count: usize, image_index: Option<usize>) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    Some(image_index.map_or(0, |requested| requested.min(count - 1)))
+}
+
 pub(crate) fn select_level_id(
     levels: &[(String, u64, u64)],
-    max_width: Option<u32>,
+    selection: &LevelSelection,
 ) -> Option<String> {
-    const UNKNOWN: u64 = u64::MAX;
-    let width_of = |width: u64| {
-        if width == 0 {
-            UNKNOWN
-        } else {
-            width
-        }
-    };
-    let candidates: Vec<&(String, u64, u64)> = match max_width {
-        Some(cap) => {
-            let cap = u64::from(cap);
-            let fitting: Vec<&(String, u64, u64)> = levels
-                .iter()
-                .filter(|(_, width, _)| *width != 0 && *width <= cap)
-                .collect();
-            if fitting.is_empty() {
-                // No level fits: honestly take the narrowest one rather
-                // than silently exceeding the cap.
-                levels
-                    .iter()
-                    .min_by_key(|(_, width, _)| width_of(*width))
-                    .into_iter()
-                    .collect()
+    if levels.is_empty() {
+        return None;
+    }
+    if let Some(requested) = selection.zoom_level {
+        let index = requested.min(levels.len() - 1);
+        return Some(levels[index].0.clone());
+    }
+    if selection.largest {
+        let refs: Vec<&(String, u64, u64)> = levels.iter().collect();
+        return max_area_id(&refs);
+    }
+    if selection.max_width.is_some() || selection.max_height.is_some() {
+        const UNKNOWN: u64 = u64::MAX;
+        let width_of = |width: u64| {
+            if width == 0 {
+                UNKNOWN
             } else {
-                fitting
+                width
             }
+        };
+        let fitting: Vec<&(String, u64, u64)> = levels
+            .iter()
+            .filter(|(_, width, height)| {
+                let width_ok = selection
+                    .max_width
+                    .is_none_or(|cap| *width != 0 && *width <= u64::from(cap));
+                let height_ok = selection
+                    .max_height
+                    .is_none_or(|cap| *height != 0 && *height <= u64::from(cap));
+                width_ok && height_ok
+            })
+            .collect();
+        if fitting.is_empty() {
+            // No level fits: honestly take the narrowest one rather
+            // than silently exceeding the cap.
+            return levels
+                .iter()
+                .min_by_key(|(_, width, _)| width_of(*width))
+                .map(|(id, _, _)| id.clone());
         }
-        None => levels.iter().collect(),
-    };
-    candidates
-        .into_iter()
-        .max_by_key(|(_, width, height)| u128::from(*width) * u128::from(*height))
-        .map(|(id, _, _)| id.clone())
+        return max_area_id(&fitting);
+    }
+    let refs: Vec<&(String, u64, u64)> = levels.iter().collect();
+    max_area_id(&refs)
 }
 
 /// Map a terminal job failure onto the stable native code the same failure
@@ -236,6 +293,9 @@ struct Attempt<'a> {
     on_event: &'a mut dyn FnMut(PipelineEvent),
     discovery_resources: usize,
     catalog: Vec<CatalogImage>,
+    /// Index into `catalog` chosen by [`select_image_index`]; level
+    /// selection and the reported format follow this entry, not entry 0.
+    selected_image: Option<usize>,
     canvas: Option<Vec2d>,
     /// Plan-order tile ids (first-seen order matches plan order).
     order: Vec<String>,
@@ -288,6 +348,7 @@ fn drive_job(
         on_event,
         discovery_resources: 0,
         catalog: Vec::new(),
+        selected_image: None,
         canvas: None,
         order: Vec::new(),
         geoms: HashMap::new(),
@@ -314,8 +375,11 @@ fn drive_job(
             handle_event(&mut attempt, &event)?;
         }
         if job.state() == JobState::AwaitingImageSelection && !attempt.catalog.is_empty() {
-            if attempt.catalog[0].ready {
-                let image = attempt.catalog[0].id.clone();
+            let selected =
+                select_image_index(attempt.catalog.len(), attempt.config.image_index).unwrap_or(0);
+            if attempt.catalog[selected].ready {
+                let image = attempt.catalog[selected].id.clone();
+                attempt.selected_image = Some(selected);
                 reply(
                     &mut job,
                     JobResponse::SelectedImage {
@@ -324,21 +388,27 @@ fn drive_job(
                     },
                 )?;
             } else {
-                let uri = job.deferred_uri(&attempt.catalog[0].id).ok_or_else(|| {
-                    NativeError::new(
-                        "discovery.no-image",
-                        "no zoomable image found at the input url",
-                    )
-                })?;
+                let uri = job
+                    .deferred_uri(&attempt.catalog[selected].id)
+                    .ok_or_else(|| {
+                        NativeError::new(
+                            "discovery.no-image",
+                            "no zoomable image found at the input url",
+                        )
+                    })?;
                 return Ok(AttemptDone::Deferred(uri));
             }
             continue;
         }
         if job.state() == JobState::AwaitingLevelSelection && !attempt.catalog.is_empty() {
-            let level = select_level_id(&attempt.catalog[0].levels, attempt.config.max_width)
-                .ok_or_else(|| {
-                    NativeError::new("discovery.no-level", "image has no zoom levels")
-                })?;
+            let selected = attempt
+                .selected_image
+                .unwrap_or(0)
+                .min(attempt.catalog.len() - 1);
+            let selection = LevelSelection::from_config(attempt.config);
+            let level = select_level_id(&attempt.catalog[selected].levels, &selection).ok_or_else(
+                || NativeError::new("discovery.no-level", "image has no zoom levels"),
+            )?;
             reply(
                 &mut job,
                 JobResponse::SelectedLevel {
@@ -374,8 +444,9 @@ fn drive_job(
                 tile_count: published.tile_count,
                 image_size: published.image_size,
                 format: attempt
-                    .catalog
-                    .first()
+                    .selected_image
+                    .and_then(|index| attempt.catalog.get(index))
+                    .or_else(|| attempt.catalog.first())
                     .map(|image| image.format.clone())
                     .unwrap_or_default(),
                 partial: published.partial,
@@ -1008,9 +1079,27 @@ mod tests {
             .collect()
     }
 
+    fn uncapped() -> LevelSelection {
+        LevelSelection {
+            largest: false,
+            max_width: None,
+            max_height: None,
+            zoom_level: None,
+        }
+    }
+
+    fn capped(width: Option<u32>, height: Option<u32>) -> LevelSelection {
+        LevelSelection {
+            largest: false,
+            max_width: width,
+            max_height: height,
+            zoom_level: None,
+        }
+    }
+
     #[test]
     fn largest_level_wins_without_a_cap() {
-        let picked = select_level_id(&levels(&[("a", 256, 256), ("b", 512, 512)]), None);
+        let picked = select_level_id(&levels(&[("a", 256, 256), ("b", 512, 512)]), &uncapped());
         assert_eq!(picked.as_deref(), Some("b"));
     }
 
@@ -1018,14 +1107,83 @@ mod tests {
     fn cap_selects_the_largest_fitting_level() {
         let picked = select_level_id(
             &levels(&[("small", 128, 128), ("mid", 256, 256), ("big", 512, 512)]),
-            Some(300),
+            &capped(Some(300), None),
         );
         assert_eq!(picked.as_deref(), Some("mid"));
     }
 
     #[test]
+    fn height_cap_filters_alongside_width() {
+        // Wide but short vs narrow but tall: without a height cap the tall
+        // level has the largest fitting area; the height cap excludes it.
+        let all = levels(&[("wide", 512, 128), ("tall", 256, 512), ("small", 128, 128)]);
+        let picked = select_level_id(&all, &capped(Some(600), None));
+        assert_eq!(picked.as_deref(), Some("tall"));
+        let picked = select_level_id(&all, &capped(Some(600), Some(256)));
+        assert_eq!(picked.as_deref(), Some("wide"));
+        let picked = select_level_id(&all, &capped(None, Some(200)));
+        assert_eq!(picked.as_deref(), Some("wide"));
+    }
+
+    #[test]
+    fn largest_flag_ignores_size_caps() {
+        let all = levels(&[("small", 128, 128), ("big", 512, 512)]);
+        let selection = LevelSelection {
+            largest: true,
+            max_width: Some(200),
+            max_height: Some(200),
+            zoom_level: None,
+        };
+        let picked = select_level_id(&all, &selection);
+        assert_eq!(picked.as_deref(), Some("big"));
+    }
+
+    #[test]
+    fn zoom_level_selects_exact_index_with_last_fallback() {
+        let all = levels(&[("small", 100, 100), ("mid", 200, 200), ("big", 400, 400)]);
+        for (requested, expected) in [(0, "small"), (1, "mid"), (2, "big"), (10, "big")] {
+            let selection = LevelSelection {
+                largest: false,
+                max_width: None,
+                max_height: None,
+                zoom_level: Some(requested),
+            };
+            assert_eq!(
+                select_level_id(&all, &selection).as_deref(),
+                Some(expected),
+                "zoom_level {requested}"
+            );
+        }
+    }
+
+    #[test]
+    fn zoom_level_wins_over_largest_and_caps() {
+        let all = levels(&[("small", 128, 128), ("big", 512, 512)]);
+        let selection = LevelSelection {
+            largest: true,
+            max_width: Some(200),
+            max_height: Some(200),
+            zoom_level: Some(0),
+        };
+        assert_eq!(select_level_id(&all, &selection).as_deref(), Some("small"));
+    }
+
+    #[test]
+    fn image_index_selects_exact_entry_with_last_fallback() {
+        assert_eq!(select_image_index(0, None), None);
+        assert_eq!(select_image_index(3, None), Some(0));
+        assert_eq!(select_image_index(3, Some(0)), Some(0));
+        assert_eq!(select_image_index(3, Some(2)), Some(2));
+        assert_eq!(select_image_index(3, Some(10)), Some(2));
+        assert_eq!(select_image_index(1, Some(100)), Some(0));
+    }
+
+    #[test]
     fn empty_fit_falls_back_to_the_narrowest_level() {
-        let picked = select_level_id(&levels(&[("big", 512, 512), ("small", 128, 128)]), Some(64));
+        let picked = select_level_id(
+            &levels(&[("big", 512, 512), ("small", 128, 128)]),
+            &capped(Some(64), None),
+        );
         assert_eq!(picked.as_deref(), Some("small"));
     }
 
@@ -1033,9 +1191,12 @@ mod tests {
     fn unknown_sizes_never_fit_but_lose_narrowest_tiebreaks() {
         // Probe-declared levels (0x0) cannot satisfy a cap, yet stay
         // selectable when nothing else fits.
-        let picked = select_level_id(&levels(&[("probe", 0, 0)]), Some(300));
+        let picked = select_level_id(&levels(&[("probe", 0, 0)]), &capped(Some(300), None));
         assert_eq!(picked.as_deref(), Some("probe"));
-        let picked = select_level_id(&levels(&[("probe", 0, 0), ("known", 128, 128)]), Some(64));
+        let picked = select_level_id(
+            &levels(&[("probe", 0, 0), ("known", 128, 128)]),
+            &capped(Some(64), None),
+        );
         assert_eq!(picked.as_deref(), Some("known"));
     }
 

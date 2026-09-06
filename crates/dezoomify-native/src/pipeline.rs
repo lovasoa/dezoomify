@@ -62,7 +62,26 @@ pub struct PipelineConfig {
     pub cache_dir: Option<PathBuf>,
     /// Legacy parity: cap the output width. The largest level whose width
     /// fits is downloaded; when none fits, the smallest level is used.
+    /// `None` (including `--largest` or bulk-implied largest mapped to
+    /// uncapped width by the CLI) downloads the largest level.
     pub max_width: Option<u32>,
+    /// Legacy parity: cap the output height, combined with [`Self::max_width`]
+    /// as a width+height filter (largest fitting area wins). Unknown (0)
+    /// extents never satisfy a cap. Parsed by the CLI; `None` disables.
+    pub max_height: Option<u32>,
+    /// Legacy parity: exact level index, 0 is the smallest level (catalog
+    /// order); out-of-range uses the last level. Wins over
+    /// [`Self::largest`] and the size caps, mirroring `choose_level`.
+    pub zoom_level: Option<usize>,
+    /// Legacy parity: 0-based image selection when several are found;
+    /// out-of-range uses the last image. `None` keeps the first entry
+    /// (bulk auto-first parity).
+    pub image_index: Option<usize>,
+    /// Legacy parity: select the largest level regardless of the size caps.
+    /// The CLI also sets this implicitly in bulk mode when no
+    /// level-specifying arg was given (`should_use_largest`); uncapped width
+    /// already selects the largest level emergently.
+    pub largest: bool,
     /// What to do when required tiles still fail after retries.
     pub partial_policy: PartialPolicy,
     /// Cooperative cancellation: when set, the driver stops issuing new
@@ -83,6 +102,10 @@ impl Default for PipelineConfig {
             jpeg_quality: JPEG_QUALITY,
             cache_dir: None,
             max_width: None,
+            max_height: None,
+            zoom_level: None,
+            image_index: None,
+            largest: false,
             partial_policy: PartialPolicy::Fail,
             cancel_flag: Arc::new(AtomicBool::new(false)),
         }
