@@ -49,7 +49,7 @@ fn ci_lane(lane: &str) -> Result<(), String> {
         }
         "wasm" => super::wasm::run(&[]),
         "browser" => super::browser::test_browser(&[]),
-        "web" => super::browser::test_web(&[]),
+        "web" => super::browser::test_web(&["--e2e".to_string()]),
         "native" => super::native::test_native(&[]),
         "desktop" => super::desktop::test_desktop(&[]),
         "extension" => super::extension::test_extension(&[]),
@@ -65,7 +65,9 @@ fn ci_lane(lane: &str) -> Result<(), String> {
 
 pub fn test_all() -> Result<(), String> {
     super::test_cmd::run(&[])?;
-    println!("test all: ok (fast deterministic aggregate)");
+    // Full aggregate includes web E2E while bare `test` omits it.
+    super::browser::test_web(&["--e2e".to_string()])?;
+    println!("test all: ok (full deterministic aggregate)");
     Ok(())
 }
 

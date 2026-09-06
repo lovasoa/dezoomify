@@ -89,11 +89,11 @@ pub fn test_ui(_args: &[String]) -> Result<(), String> {
 }
 
 pub fn test_web(args: &[String]) -> Result<(), String> {
-    let mut e2e = true;
+    let mut e2e = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--no-e2e" => e2e = false,
+            "--e2e" => e2e = true,
             other => return Err(format!("unknown test web arg '{other}'")),
         }
         i += 1;
