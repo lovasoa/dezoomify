@@ -1,0 +1,60 @@
+{
+  "capabilities": {
+    "bulkSupported": false,
+    "canvasBytes": 8589934592,
+    "decoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "destinationModes": [
+      "file",
+      "iiif-dir"
+    ],
+    "encoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "handoff": true,
+    "maxConcurrency": 16,
+    "storageModes": [
+      "cache"
+    ]
+  },
+  "code": "deep-link.rejected",
+  "commands": [],
+  "description": "Desktop deep-link rejection: secret, userinfo, unknown-field, version, and oversize links are rejected with zero side effects and no confirmation gate.",
+  "effects": [],
+  "error": {
+    "code": "deep-link.rejected",
+    "message": "deep-link.rejected: secret field cookie is forbidden",
+    "phase": "validation",
+    "recovery": "edit-input",
+    "resourceKind": "handoff",
+    "retryable": false,
+    "transport": "native"
+  },
+  "events": [
+    {
+      "channel": "dezoomify://deep-link-pending",
+      "kind": "deep-link-rejected",
+      "seq": 1,
+      "state": "Rejected"
+    }
+  ],
+  "originClean": "n/a (no fetch was started; no canvas taint)",
+  "outcome": "rejected",
+  "output": null,
+  "protocol": "1.0",
+  "provenance": "fixture",
+  "readableBytes": false,
+  "redacted": true,
+  "resources": [],
+  "scenario": "desktop/deep-link-reject",
+  "states": [
+    "idle",
+    "rejected"
+  ],
+  "transitions": []
+}

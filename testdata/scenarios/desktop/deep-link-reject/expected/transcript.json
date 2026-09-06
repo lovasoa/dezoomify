@@ -1,0 +1,68 @@
+{
+  "description": "Desktop deep-link-reject transcript: each vector names its stable rejection, performs no network or file effect, and never reaches confirmation.",
+  "expected": {
+    "confirmationReached": false,
+    "fileEffects": 0,
+    "networkCalls": 0,
+    "vectors": [
+      "secret-field",
+      "userinfo",
+      "unknown-field",
+      "unsupported-version",
+      "oversize"
+    ]
+  },
+  "scenario": "desktop/deep-link-reject",
+  "transcript": [
+    {
+      "code": "deep-link.rejected",
+      "event": "deep-link-rejected",
+      "networkCalls": 0,
+      "reason": "secret field cookie is forbidden",
+      "step": 1,
+      "url": "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx&cookie=abc",
+      "vector": "secret-field"
+    },
+    {
+      "code": "deep-link.rejected",
+      "event": "deep-link-rejected",
+      "networkCalls": 0,
+      "reason": "userinfo credentials are forbidden",
+      "step": 2,
+      "url": "dezoomify://open?v=2&src=https%3A%2F%2Fuser%3Apass%40example.com%2Fx",
+      "vector": "userinfo"
+    },
+    {
+      "code": "deep-link.rejected",
+      "event": "deep-link-rejected",
+      "networkCalls": 0,
+      "reason": "unknown field extra",
+      "step": 3,
+      "url": "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx&extra=1",
+      "vector": "unknown-field"
+    },
+    {
+      "code": "deep-link.rejected",
+      "event": "deep-link-rejected",
+      "networkCalls": 0,
+      "reason": "unsupported version 3",
+      "step": 4,
+      "url": "dezoomify://open?v=3&src=https%3A%2F%2Fexample.com%2Fx",
+      "vector": "unsupported-version"
+    },
+    {
+      "code": "deep-link.rejected",
+      "event": "deep-link-rejected",
+      "networkCalls": 0,
+      "reason": "oversize beyond 2048 bytes",
+      "step": 5,
+      "url": "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Faaa... (3000 chars)",
+      "vector": "oversize"
+    },
+    {
+      "canariesFound": [],
+      "event": "secret-scan",
+      "step": 6
+    }
+  ]
+}

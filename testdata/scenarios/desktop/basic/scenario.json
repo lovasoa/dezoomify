@@ -1,0 +1,13 @@
+{
+  "description": "Desktop happy path: start_job plus request_destination drives the shared native pipeline over loopback and publishes a 512x512 PNG",
+  "id": "desktop/basic",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/desktop/basic/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

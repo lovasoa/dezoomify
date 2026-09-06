@@ -1,0 +1,78 @@
+{
+  "description": "Desktop handoff transcript: consent is origin-scoped and single-use, the cookie reaches only the input host, and replay or sibling use sends nothing.",
+  "expected": {
+    "canariesFound": [],
+    "consent": {
+      "containsValues": false,
+      "cookieNames": [
+        "session"
+      ],
+      "origins": [
+        "https://fixtures.test/"
+      ]
+    },
+    "continuedCookieless": true,
+    "cookiesPersisted": false,
+    "replayRejectedWithoutNetwork": true,
+    "siblingGetsNoCookie": true,
+    "singleUse": true
+  },
+  "scenario": "desktop/handoff",
+  "transcript": [
+    {
+      "event": "negotiate",
+      "result": "ok",
+      "step": 1
+    },
+    {
+      "cookieNames": [
+        "session"
+      ],
+      "event": "consent-shown",
+      "origins": [
+        "https://fixtures.test/"
+      ],
+      "step": 2
+    },
+    {
+      "continuedCookieless": true,
+      "event": "consent-declined-once",
+      "networkCalls": 0,
+      "step": 3
+    },
+    {
+      "cookieNames": [
+        "session"
+      ],
+      "event": "consent-confirmed",
+      "origins": [
+        "https://fixtures.test/"
+      ],
+      "step": 4
+    },
+    {
+      "event": "native-redeem-once",
+      "jobStarted": true,
+      "result": "ok",
+      "step": 5
+    },
+    {
+      "code": "handoff.rejected",
+      "event": "replay-attempt",
+      "networkCalls": 0,
+      "result": "rejected",
+      "step": 6
+    },
+    {
+      "cookieSent": false,
+      "event": "sibling-request",
+      "step": 7,
+      "url": "https://sibling.example/"
+    },
+    {
+      "canariesFound": [],
+      "event": "secret-scan",
+      "step": 8
+    }
+  ]
+}

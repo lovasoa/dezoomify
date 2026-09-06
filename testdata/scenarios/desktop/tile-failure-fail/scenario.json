@@ -1,0 +1,13 @@
+{
+  "description": "Desktop fail-closed tiles: missing tiles with the fail policy report tile.download-failed and write no output",
+  "id": "desktop/tile-failure-fail",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/desktop/tile-failure-fail/broken.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

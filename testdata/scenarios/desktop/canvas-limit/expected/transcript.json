@@ -1,0 +1,33 @@
+{
+  "description": "Desktop canvas-limit transcript: the budget check runs before any tile fetch or allocation, so no tile request is sent and no file appears.",
+  "expected": {
+    "outputWritten": false,
+    "recovery": "choose-output",
+    "terminal": "failed",
+    "tileRequests": 0
+  },
+  "scenario": "desktop/canvas-limit",
+  "transcript": [
+    {
+      "event": "command",
+      "name": "start_job",
+      "step": 1
+    },
+    {
+      "event": "request-observed",
+      "step": 2,
+      "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
+    },
+    {
+      "event": "command",
+      "name": "request_destination",
+      "step": 3
+    },
+    {
+      "code": "output.canvas-limit",
+      "event": "failed",
+      "state": "Failed",
+      "step": 4
+    }
+  ]
+}

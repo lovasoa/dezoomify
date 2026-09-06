@@ -1,0 +1,81 @@
+{
+  "capabilities": {
+    "bulkSupported": false,
+    "canvasBytes": 8589934592,
+    "decoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "destinationModes": [
+      "file",
+      "iiif-dir"
+    ],
+    "encoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "handoff": true,
+    "maxConcurrency": 16,
+    "storageModes": [
+      "cache"
+    ]
+  },
+  "code": "output.exists",
+  "commands": [
+    "start_job",
+    "request_destination"
+  ],
+  "description": "Desktop destination denied: an existing output without overwrite confirmation is refused before any fetch, decode, or write.",
+  "effects": [],
+  "error": {
+    "code": "output.exists",
+    "message": "output exists (refusing overwrite); choose a different destination or confirm overwrite",
+    "phase": "output",
+    "recovery": "choose-output",
+    "resourceKind": "output",
+    "retryable": false,
+    "transport": "native"
+  },
+  "events": [
+    {
+      "channel": "dezoomify://job-state",
+      "kind": "job-state",
+      "seq": 1,
+      "state": "Discovering"
+    },
+    {
+      "channel": "dezoomify://job-state",
+      "kind": "recovery-requested",
+      "seq": 2,
+      "state": "AwaitingRecovery"
+    }
+  ],
+  "originClean": "n/a (native runtime decodes bytes directly; no canvas taint)",
+  "outcome": "failed",
+  "output": null,
+  "protocol": "1.0",
+  "provenance": "fixture",
+  "readableBytes": true,
+  "redacted": true,
+  "resources": [
+    {
+      "method": "GET",
+      "purpose": "metadata",
+      "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
+    }
+  ],
+  "scenario": "desktop/destination-denied",
+  "states": [
+    "idle",
+    "awaiting-destination",
+    "failed"
+  ],
+  "transitions": [
+    "Created",
+    "Discovering",
+    "AwaitingDestination",
+    "AwaitingRecovery"
+  ]
+}

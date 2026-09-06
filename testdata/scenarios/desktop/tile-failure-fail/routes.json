@@ -1,0 +1,37 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/desktop/tile-failure-fail/broken.dzi",
+      "payload": "payloads/fixtures.test/desktop/tile-failure-fail/broken.dzi",
+      "route_id": "desktop-fail-metadata",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/desktop/tile-failure-fail/broken_files/9/0_0.png",
+      "payload": "payloads/fixtures.test/desktop/tile-failure-fail/0_0.png",
+      "route_id": "desktop-fail-0-0",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/desktop/tile-failure-fail/broken_files/9/1_0.png",
+      "payload": "payloads/fixtures.test/desktop/tile-failure-fail/1_0.png",
+      "route_id": "desktop-fail-1-0",
+      "status": 200
+    }
+  ]
+}

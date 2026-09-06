@@ -1,0 +1,113 @@
+{
+  "capabilities": {
+    "bulkSupported": false,
+    "canvasBytes": 8589934592,
+    "decoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "destinationModes": [
+      "file",
+      "iiif-dir"
+    ],
+    "encoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "handoff": true,
+    "maxConcurrency": 16,
+    "storageModes": [
+      "cache"
+    ]
+  },
+  "code": "job.cancelled",
+  "commands": [
+    "start_job",
+    "cancel_job"
+  ],
+  "description": "Desktop cancel over loopback: cancel_job stops new work at the next effect boundary, cancels in-flight effects, removes uncommitted output, and reports job.cancelled.",
+  "effects": [
+    {
+      "effect": "acquire-resource",
+      "purpose": "metadata",
+      "resource": "https://fixtures.test/desktop/basic/pyramid.dzi",
+      "result": "bytes"
+    },
+    {
+      "effect": "cancel-work",
+      "purpose": "cancel",
+      "resource": "in-flight",
+      "result": "ok"
+    },
+    {
+      "effect": "release-bytes",
+      "purpose": "cleanup",
+      "resource": "buffers",
+      "result": "ok"
+    }
+  ],
+  "error": {
+    "code": "job.cancelled",
+    "message": "job cancelled before publish; no output was written",
+    "phase": "cleanup",
+    "recovery": "none (terminal cancel; start a new job to retry)",
+    "resourceKind": "job",
+    "retryable": false,
+    "transport": "native"
+  },
+  "events": [
+    {
+      "channel": "dezoomify://job-state",
+      "kind": "job-state",
+      "seq": 1,
+      "state": "Discovering"
+    },
+    {
+      "channel": "dezoomify://job-state",
+      "kind": "job-state",
+      "seq": 2,
+      "state": "Cancelling"
+    },
+    {
+      "channel": "dezoomify://job-state",
+      "kind": "job-state",
+      "seq": 3,
+      "state": "CleaningUp"
+    },
+    {
+      "channel": "dezoomify://job-state",
+      "kind": "cancelled",
+      "seq": 4,
+      "state": "Cancelled"
+    }
+  ],
+  "originClean": "n/a (native runtime decodes bytes directly; no canvas taint)",
+  "outcome": "cancelled",
+  "output": null,
+  "protocol": "1.0",
+  "provenance": "fixture",
+  "readableBytes": true,
+  "redacted": true,
+  "resources": [
+    {
+      "method": "GET",
+      "purpose": "metadata",
+      "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
+    }
+  ],
+  "scenario": "desktop/cancel",
+  "states": [
+    "idle",
+    "downloading",
+    "cancelled"
+  ],
+  "transitions": [
+    "Created",
+    "Discovering",
+    "Cancelling",
+    "CleaningUp",
+    "Cancelled"
+  ]
+}

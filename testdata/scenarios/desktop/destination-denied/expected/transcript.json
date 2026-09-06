@@ -1,0 +1,39 @@
+{
+  "description": "Desktop destination-denied transcript: refusal happens before any work, the existing file keeps its bytes, and recovery offers a new destination.",
+  "expected": {
+    "existingBytesPreserved": true,
+    "networkCalls": 0,
+    "progressEvents": 0,
+    "recovery": "choose-output"
+  },
+  "scenario": "desktop/destination-denied",
+  "transcript": [
+    {
+      "event": "command",
+      "name": "start_job",
+      "step": 1
+    },
+    {
+      "event": "job-state",
+      "state": "Discovering",
+      "step": 2
+    },
+    {
+      "event": "command",
+      "name": "request_destination",
+      "overwrite": false,
+      "step": 3
+    },
+    {
+      "event": "command-rejected",
+      "code": "output.exists",
+      "step": 4
+    },
+    {
+      "event": "recovery-requested",
+      "recovery": "choose-output",
+      "state": "AwaitingRecovery",
+      "step": 5
+    }
+  ]
+}

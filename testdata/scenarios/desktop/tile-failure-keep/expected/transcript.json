@@ -1,0 +1,88 @@
+{
+  "description": "Desktop keep-partial transcript: the corrupt quadrant stays blank black while the other three quadrants keep their pixels.",
+  "expected": {
+    "imageSize": {
+      "x": 512,
+      "y": 512
+    },
+    "missingTiles": [
+      "https://fixtures.test/desktop/tile-failure-keep/corrupt_files/9/1_1.png"
+    ],
+    "outputFormat": "png",
+    "outputHash": "sha256:c5ab0d889885b3884dee28489f29ce945e05d6fa36dc6a3fe3d105dd62b7afa5",
+    "partial": true,
+    "pixels": {
+      "blankQuadrant": [
+        0,
+        0,
+        0
+      ],
+      "bottomLeft": [
+        48,
+        72,
+        200
+      ],
+      "topLeft": [
+        196,
+        48,
+        48
+      ]
+    },
+    "tileCount": 3
+  },
+  "scenario": "desktop/tile-failure-keep",
+  "transcript": [
+    {
+      "event": "command",
+      "name": "start_job",
+      "step": 1
+    },
+    {
+      "event": "request-observed",
+      "step": 2,
+      "url": "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi"
+    },
+    {
+      "event": "command",
+      "name": "request_destination",
+      "step": 3
+    },
+    {
+      "event": "request-observed",
+      "step": 4,
+      "url": "https://fixtures.test/desktop/tile-failure-keep/corrupt_files/9/0_0.png"
+    },
+    {
+      "event": "request-observed",
+      "step": 5,
+      "url": "https://fixtures.test/desktop/tile-failure-keep/corrupt_files/9/1_0.png"
+    },
+    {
+      "event": "request-observed",
+      "step": 6,
+      "url": "https://fixtures.test/desktop/tile-failure-keep/corrupt_files/9/0_1.png"
+    },
+    {
+      "event": "request-observed",
+      "result": "decode-failed-after-retries",
+      "step": 7,
+      "url": "https://fixtures.test/desktop/tile-failure-keep/corrupt_files/9/1_1.png"
+    },
+    {
+      "event": "missing-work",
+      "state": "AwaitingPartialDecision",
+      "step": 8
+    },
+    {
+      "event": "answer_choice",
+      "choice": "keep",
+      "step": 9
+    },
+    {
+      "event": "partial-completed",
+      "outputHash": "sha256:c5ab0d889885b3884dee28489f29ce945e05d6fa36dc6a3fe3d105dd62b7afa5",
+      "state": "PartiallyCompleted",
+      "step": 10
+    }
+  ]
+}

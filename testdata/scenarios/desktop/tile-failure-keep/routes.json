@@ -1,0 +1,59 @@
+{
+  "routes": [
+    {
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/desktop/tile-failure-keep/corrupt.dzi",
+      "payload": "payloads/fixtures.test/desktop/tile-failure-keep/corrupt.dzi",
+      "route_id": "desktop-keep-metadata",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/desktop/tile-failure-keep/corrupt_files/9/0_0.png",
+      "payload": "payloads/fixtures.test/desktop/tile-failure-keep/0_0.png",
+      "route_id": "desktop-keep-0-0",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/desktop/tile-failure-keep/corrupt_files/9/1_0.png",
+      "payload": "payloads/fixtures.test/desktop/tile-failure-keep/1_0.png",
+      "route_id": "desktop-keep-1-0",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/desktop/tile-failure-keep/corrupt_files/9/0_1.png",
+      "payload": "payloads/fixtures.test/desktop/tile-failure-keep/0_1.png",
+      "route_id": "desktop-keep-0-1",
+      "status": 200
+    },
+    {
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "host": "fixtures.test",
+      "method": "GET",
+      "path": "/desktop/tile-failure-keep/corrupt_files/9/1_1.png",
+      "payload": "payloads/fixtures.test/desktop/tile-failure-keep/1_1.png",
+      "route_id": "desktop-keep-1-1",
+      "status": 200
+    }
+  ]
+}

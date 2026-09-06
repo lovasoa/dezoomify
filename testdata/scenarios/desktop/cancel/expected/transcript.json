@@ -1,0 +1,49 @@
+{
+  "description": "Desktop cancel transcript: cancellation lands before publish, the terminal cancelled event appears exactly once, and a second cancel is stale with no new effect.",
+  "expected": {
+    "networkCallsAfterCancel": 0,
+    "outputWritten": false,
+    "secondCancel": "job.stale",
+    "terminal": "cancelled",
+    "terminalOnce": true
+  },
+  "scenario": "desktop/cancel",
+  "transcript": [
+    {
+      "event": "command",
+      "name": "start_job",
+      "step": 1
+    },
+    {
+      "event": "job-state",
+      "state": "Discovering",
+      "step": 2
+    },
+    {
+      "event": "command",
+      "name": "cancel_job",
+      "step": 3
+    },
+    {
+      "event": "job-state",
+      "state": "Cancelling",
+      "step": 4
+    },
+    {
+      "event": "job-state",
+      "state": "CleaningUp",
+      "step": 5
+    },
+    {
+      "event": "cancelled",
+      "state": "Cancelled",
+      "step": 6
+    },
+    {
+      "event": "command-rejected",
+      "code": "job.stale",
+      "name": "cancel_job",
+      "step": 7
+    }
+  ]
+}

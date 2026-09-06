@@ -1,0 +1,13 @@
+{
+  "description": "Desktop keep-partial: one corrupt tile with the keep policy encodes acquired tiles and leaves the bad quadrant blank",
+  "id": "desktop/tile-failure-keep",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

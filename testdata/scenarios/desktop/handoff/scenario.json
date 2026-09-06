@@ -1,0 +1,13 @@
+{
+  "description": "Desktop handoff: consented one-use extension cookie handoff starts one origin-scoped job; decline stays cookieless and replay is rejected",
+  "id": "desktop/handoff",
+  "input": {
+    "mode": "explicit",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/desktop/basic/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "apps/desktop/src-tauri/src/native_host/host.rs",
+    "snapshot": "local"
+  }
+}

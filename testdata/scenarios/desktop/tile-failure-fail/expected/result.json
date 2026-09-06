@@ -22,65 +22,42 @@
       "cache"
     ]
   },
+  "code": "tile.download-failed",
   "commands": [
     "start_job",
     "request_destination"
   ],
-  "description": "Desktop happy path over loopback: the shared native pipeline assembles the 512x512 DZI pyramid and publishes one PNG.",
+  "description": "Desktop fail-closed tiles over loopback: missing tiles exhaust the retry budget, the fail policy discards partial output, and no file is written.",
   "effects": [
     {
       "effect": "acquire-resource",
       "purpose": "metadata",
-      "resource": "https://fixtures.test/desktop/basic/pyramid.dzi",
+      "resource": "https://fixtures.test/desktop/tile-failure-fail/broken.dzi",
       "result": "bytes"
     },
     {
       "effect": "acquire-tile",
       "purpose": "tile",
-      "resource": "https://fixtures.test/desktop/basic/pyramid_files/9/0_0.png",
+      "resource": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/0_0.png",
       "result": "ok"
     },
     {
       "effect": "acquire-tile",
       "purpose": "tile",
-      "resource": "https://fixtures.test/desktop/basic/pyramid_files/9/1_0.png",
+      "resource": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/1_0.png",
       "result": "ok"
     },
     {
       "effect": "acquire-tile",
       "purpose": "tile",
-      "resource": "https://fixtures.test/desktop/basic/pyramid_files/9/0_1.png",
-      "result": "ok"
+      "resource": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/0_1.png",
+      "result": "http-404-after-retries"
     },
     {
       "effect": "acquire-tile",
       "purpose": "tile",
-      "resource": "https://fixtures.test/desktop/basic/pyramid_files/9/1_1.png",
-      "result": "ok"
-    },
-    {
-      "effect": "decode-pixels",
-      "purpose": "tile",
-      "resource": "tile:4",
-      "result": "ok"
-    },
-    {
-      "effect": "open-encoder",
-      "purpose": "output",
-      "resource": "output",
-      "result": "ok"
-    },
-    {
-      "effect": "finalize-encoder",
-      "purpose": "output",
-      "resource": "output",
-      "result": "ok"
-    },
-    {
-      "effect": "publish-output",
-      "purpose": "output",
-      "resource": "out:0",
-      "result": "ok"
+      "resource": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/1_1.png",
+      "result": "http-404-after-retries"
     },
     {
       "effect": "release-bytes",
@@ -89,8 +66,15 @@
       "result": "ok"
     }
   ],
-  "encoder": "png",
-  "error": null,
+  "error": {
+    "code": "tile.download-failed",
+    "message": "tile download failed after retries; no output was written",
+    "phase": "acquisition",
+    "recovery": "retry",
+    "resourceKind": "tile",
+    "retryable": true,
+    "transport": "native"
+  },
   "events": [
     {
       "channel": "dezoomify://job-state",
@@ -111,22 +95,21 @@
       "state": "Acquiring"
     },
     {
-      "channel": "dezoomify://job-output",
-      "kind": "completed",
+      "channel": "dezoomify://job-state",
+      "kind": "job-state",
       "seq": 4,
-      "state": "Completed"
+      "state": "CleaningUp"
+    },
+    {
+      "channel": "dezoomify://job-error",
+      "kind": "failed",
+      "seq": 5,
+      "state": "Failed"
     }
   ],
   "originClean": "n/a (native runtime decodes bytes directly; no canvas taint)",
-  "output": {
-    "format": "png",
-    "height": 512,
-    "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
-    "partial": false,
-    "tileCount": 4,
-    "width": 512
-  },
-  "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
+  "outcome": "failed",
+  "output": null,
   "protocol": "1.0",
   "provenance": "fixture",
   "readableBytes": true,
@@ -135,35 +118,36 @@
     {
       "method": "GET",
       "purpose": "metadata",
-      "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken.dzi"
     },
     {
       "method": "GET",
       "purpose": "tile",
-      "url": "https://fixtures.test/desktop/basic/pyramid_files/9/0_0.png"
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/0_0.png"
     },
     {
       "method": "GET",
       "purpose": "tile",
-      "url": "https://fixtures.test/desktop/basic/pyramid_files/9/1_0.png"
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/1_0.png"
     },
     {
       "method": "GET",
       "purpose": "tile",
-      "url": "https://fixtures.test/desktop/basic/pyramid_files/9/0_1.png"
+      "result": "http-404-after-retries",
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/0_1.png"
     },
     {
       "method": "GET",
       "purpose": "tile",
-      "url": "https://fixtures.test/desktop/basic/pyramid_files/9/1_1.png"
+      "result": "http-404-after-retries",
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/1_1.png"
     }
   ],
-  "scenario": "desktop/basic",
+  "scenario": "desktop/tile-failure-fail",
   "states": [
     "idle",
     "downloading",
-    "saving",
-    "completed"
+    "failed"
   ],
   "transitions": [
     "Created",
@@ -171,11 +155,7 @@
     "AwaitingDestination",
     "Planning",
     "AcquiringTiles",
-    "ProcessingTiles",
-    "Encoding",
-    "Finalizing",
-    "Publishing",
     "CleaningUp",
-    "Completed"
+    "Failed"
   ]
 }

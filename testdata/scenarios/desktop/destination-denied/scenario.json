@@ -1,0 +1,13 @@
+{
+  "description": "Desktop destination denied: request_destination without overwrite refuses an existing output before any work",
+  "id": "desktop/destination-denied",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/desktop/basic/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "apps/desktop/src-tauri/src/jobs.rs",
+    "snapshot": "local"
+  }
+}

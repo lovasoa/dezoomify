@@ -1,0 +1,57 @@
+{
+  "description": "Desktop fail-closed transcript: the two missing tiles return stable fixture-missing 404s, retries are bounded, and no output file appears.",
+  "expected": {
+    "missingTiles": [
+      "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/0_1.png",
+      "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/1_1.png"
+    ],
+    "outputWritten": false,
+    "terminal": "failed"
+  },
+  "scenario": "desktop/tile-failure-fail",
+  "transcript": [
+    {
+      "event": "command",
+      "name": "start_job",
+      "step": 1
+    },
+    {
+      "event": "request-observed",
+      "step": 2,
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken.dzi"
+    },
+    {
+      "event": "command",
+      "name": "request_destination",
+      "step": 3
+    },
+    {
+      "event": "request-observed",
+      "step": 4,
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/0_0.png"
+    },
+    {
+      "event": "request-observed",
+      "step": 5,
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/1_0.png"
+    },
+    {
+      "event": "request-observed",
+      "result": "http-404-after-retries",
+      "step": 6,
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/0_1.png"
+    },
+    {
+      "event": "request-observed",
+      "result": "http-404-after-retries",
+      "step": 7,
+      "url": "https://fixtures.test/desktop/tile-failure-fail/broken_files/9/1_1.png"
+    },
+    {
+      "code": "tile.download-failed",
+      "event": "failed",
+      "state": "Failed",
+      "step": 8
+    }
+  ]
+}

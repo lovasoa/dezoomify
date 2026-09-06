@@ -26,54 +26,41 @@
     "start_job",
     "request_destination"
   ],
-  "description": "Desktop happy path over loopback: the shared native pipeline assembles the 512x512 DZI pyramid and publishes one PNG.",
+  "description": "Desktop handoff: a consented one-use cookie handoff starts one origin-scoped job; decline continues cookieless and replay is rejected without network.",
   "effects": [
     {
       "effect": "acquire-resource",
+      "headers": "cookie-scoped-to-input-host",
       "purpose": "metadata",
       "resource": "https://fixtures.test/desktop/basic/pyramid.dzi",
       "result": "bytes"
     },
     {
       "effect": "acquire-tile",
+      "headers": "cookie-scoped-to-input-host",
       "purpose": "tile",
       "resource": "https://fixtures.test/desktop/basic/pyramid_files/9/0_0.png",
       "result": "ok"
     },
     {
       "effect": "acquire-tile",
+      "headers": "cookie-scoped-to-input-host",
       "purpose": "tile",
       "resource": "https://fixtures.test/desktop/basic/pyramid_files/9/1_0.png",
       "result": "ok"
     },
     {
       "effect": "acquire-tile",
+      "headers": "cookie-scoped-to-input-host",
       "purpose": "tile",
       "resource": "https://fixtures.test/desktop/basic/pyramid_files/9/0_1.png",
       "result": "ok"
     },
     {
       "effect": "acquire-tile",
+      "headers": "cookie-scoped-to-input-host",
       "purpose": "tile",
       "resource": "https://fixtures.test/desktop/basic/pyramid_files/9/1_1.png",
-      "result": "ok"
-    },
-    {
-      "effect": "decode-pixels",
-      "purpose": "tile",
-      "resource": "tile:4",
-      "result": "ok"
-    },
-    {
-      "effect": "open-encoder",
-      "purpose": "output",
-      "resource": "output",
-      "result": "ok"
-    },
-    {
-      "effect": "finalize-encoder",
-      "purpose": "output",
-      "resource": "output",
       "result": "ok"
     },
     {
@@ -89,32 +76,49 @@
       "result": "ok"
     }
   ],
-  "encoder": "png",
   "error": null,
   "events": [
     {
       "channel": "dezoomify://job-state",
-      "kind": "job-state",
+      "kind": "negotiate",
       "seq": 1,
-      "state": "Discovering"
+      "state": "Handshaked"
     },
     {
       "channel": "dezoomify://job-state",
-      "kind": "destination",
+      "kind": "consent-shown",
       "seq": 2,
-      "state": "Planning"
+      "state": "AwaitingConfirm"
     },
     {
-      "channel": "dezoomify://job-progress",
-      "kind": "progress",
+      "channel": "dezoomify://job-state",
+      "kind": "consent-declined-once",
       "seq": 3,
-      "state": "Acquiring"
+      "state": "Cookieless"
+    },
+    {
+      "channel": "dezoomify://job-state",
+      "kind": "consent-confirmed",
+      "seq": 4,
+      "state": "Confirmed"
+    },
+    {
+      "channel": "dezoomify://job-state",
+      "kind": "native-redeem-once",
+      "seq": 5,
+      "state": "Discovering"
     },
     {
       "channel": "dezoomify://job-output",
       "kind": "completed",
-      "seq": 4,
+      "seq": 6,
       "state": "Completed"
+    },
+    {
+      "channel": "dezoomify://job-error",
+      "kind": "replay-attempt",
+      "seq": 7,
+      "state": "Rejected"
     }
   ],
   "originClean": "n/a (native runtime decodes bytes directly; no canvas taint)",
@@ -158,7 +162,7 @@
       "url": "https://fixtures.test/desktop/basic/pyramid_files/9/1_1.png"
     }
   ],
-  "scenario": "desktop/basic",
+  "scenario": "desktop/handoff",
   "states": [
     "idle",
     "downloading",

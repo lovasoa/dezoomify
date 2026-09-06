@@ -1,0 +1,13 @@
+{
+  "description": "Desktop deep-link rejection: untrusted dezoomify://open input that fails validation produces no effect and needs no confirmation",
+  "id": "desktop/deep-link-reject",
+  "input": {
+    "mode": "explicit",
+    "url": "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx&cookie=abc"
+  },
+  "operation": "recognize",
+  "source_evidence": {
+    "path": "apps/desktop/src-tauri/src/deep_link.rs",
+    "snapshot": "local"
+  }
+}

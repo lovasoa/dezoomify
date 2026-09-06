@@ -1,0 +1,13 @@
+{
+  "description": "Desktop canvas budget: a composed canvas beyond max_canvas_bytes fails with output.canvas-limit before any allocation",
+  "id": "desktop/canvas-limit",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/desktop/basic/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

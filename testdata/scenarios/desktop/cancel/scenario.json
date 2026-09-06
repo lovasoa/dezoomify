@@ -1,0 +1,13 @@
+{
+  "description": "Desktop cancel: cancel_job at the next effect boundary reports job.cancelled and writes no output",
+  "id": "desktop/cancel",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/desktop/basic/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "apps/desktop/src-tauri/src/jobs.rs",
+    "snapshot": "local"
+  }
+}
