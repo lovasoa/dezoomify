@@ -613,6 +613,9 @@ async function drawTile(client2: DiscoveryClient, ctx2d: CanvasRenderingContext2
 async function runJob(url: string): Promise<void> {
   const token = ++jobToken;
   resetActivity(url);
+  viewCtx.imageChoice = undefined;
+  viewCtx.currentProgress = undefined;
+  viewCtx.completedInfo = undefined;
   writeHash(url);
   startHeartbeat();
   setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
@@ -629,7 +632,11 @@ async function runJob(url: string): Promise<void> {
     controller.dispatch(
       nextEvent("images-found", { imageCount: catalog.images.length, transport: via }) as never,
     );
-    setStep("Image found; picking the best one…");
+    const foundNoun = catalog.images.length === 1 ? "1 image" : `${catalog.images.length} images`;
+    setStep(
+      `Found ${foundNoun}, saving largest that fits…`,
+      "The website saves the first image automatically; use the desktop app to choose another.",
+    );
     controller.dispatch(nextEvent("image-chosen") as never);
     const level = pickLevel(image);
     setStep("Choosing the highest resolution…");
@@ -653,7 +660,7 @@ async function runJob(url: string): Promise<void> {
     }
     const width = plan.canvas ? plan.canvas.x : 0;
     const height = plan.canvas ? plan.canvas.y : 0;
-    if (!(width > 0 && height > 0 && width * height <= BROWSER_MAX_CANVAS_AREA)) {
+    if (!(width > 0 && height > 0)) {
       throw failure(
         "PLAN_INVALID",
         "The image size could not be determined.",
@@ -662,12 +669,22 @@ async function runJob(url: string): Promise<void> {
         `invalid tile plan: canvas ${width}x${height}`,
       );
     }
+    if (width * height > BROWSER_MAX_CANVAS_AREA) {
+      throw failure(
+        "PLAN_INVALID",
+        "This image is too large for this browser tab. Use the desktop app for the full-size image.",
+        false,
+        undefined,
+        `canvas ${width}x${height} exceeds the browser limit`,
+      );
+    }
     canvas.width = width;
     canvas.height = height;
     const ctx2d = canvas.getContext("2d") as CanvasRenderingContext2D;
     ctx2d.clearRect(0, 0, width, height);
 
     const total = plan.tiles.length;
+    viewCtx.imageChoice = { width, height, tiles: total };
     setStep("Saving image tiles…", `${total} tiles at full resolution`);
     reportProgress(0, total, `Saving ${total} tiles…`);
     let done = 0;
@@ -813,6 +830,7 @@ function update(): void {
         viewCtx.completedInfo = undefined;
         viewCtx.jobActivity = undefined;
         viewCtx.initialUrl = undefined;
+        viewCtx.imageChoice = undefined;
         activeTransport = null;
         clearHash();
         if (resultBlobUrl) {
@@ -826,6 +844,7 @@ function update(): void {
         if (!lastUrl || !isAllowedSourceUrl(lastUrl)) return;
         viewCtx.currentProgress = undefined;
         viewCtx.completedInfo = undefined;
+        viewCtx.imageChoice = undefined;
         runJob(lastUrl);
       },
       onSave() {

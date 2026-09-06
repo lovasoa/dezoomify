@@ -55,6 +55,13 @@ export interface ViewContext {
   jobActivity?: JobActivity;
   /** Prefilled URL (e.g. restored from a legacy `#url` hash). */
   initialUrl?: string;
+  /**
+   * Auto-choice notice (todo 4.3): local-only aux, never a protocol event.
+   * The pipeline auto-saves images[0] at the largest fitting level; the job
+   * view renders this honestly from controller imageCount plus these dims.
+   * No picker is offered.
+   */
+  imageChoice?: { width?: number; height?: number; tiles?: number };
 }
 
 export interface ModalHost {
@@ -506,7 +513,6 @@ function mountInputSection(
 
   // Discovery detects the image format automatically from the URL and page
   // contents; the submit path carries no manual format override.
-
   // Centered Tactile "Dezoomify !" Button
   const btnRow = parent.ownerDocument.createElement("div");
   btnRow.className = "dz-button-row";
@@ -578,6 +584,11 @@ function mountJobSection(
       <div class="dz-progress-bar" id="dz-job-bar" style="width: 35%;"></div>
     </div>
     <p class="dz-tile-counts" id="dz-job-counts"></p>
+    <p class="dz-job-detail" id="dz-job-images" style="display: none;">
+      <span id="dz-job-images-text"></span>
+      <button type="button" class="dz-btn-secondary" id="dz-job-change">Change</button>
+    </p>
+    <p class="dz-job-detail" id="dz-job-change-hint" style="display: none;"></p>
     <div class="dz-pending-box" id="dz-job-pending-box" style="display: none;">
       <div class="dz-pending-line">
         <span id="dz-job-pending-status"></span>
@@ -613,6 +624,10 @@ function mountJobSection(
   sec.querySelector("#dz-btn-share")?.addEventListener("click", () => {
     const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
     cb?.onCopyShareLink?.();
+  });
+  sec.querySelector("#dz-job-change")?.addEventListener("click", () => {
+    const hint = sec.querySelector<HTMLElement>("#dz-job-change-hint");
+    if (hint) hint.style.display = hint.style.display === "none" ? "" : "none";
   });
 
   parent.appendChild(sec);
@@ -709,6 +724,40 @@ function updateJobSection(
         : "";
     if (countsEl.textContent !== countsText) {
       countsEl.textContent = countsText;
+    }
+  }
+
+  // 4b. Catalog auto-choice notice (todo 4.3): honest step without a picker.
+  // Uses existing controller imageCount, never a new protocol event. WxH and
+  // tile counts come from local ViewContext.imageChoice when known.
+  const imagesEl = sec.querySelector<HTMLElement>("#dz-job-images");
+  const imagesText = sec.querySelector<HTMLElement>("#dz-job-images-text");
+  const changeHint = sec.querySelector<HTMLElement>("#dz-job-change-hint");
+  const choiceCount = state.imageCount ?? 0;
+  if (imagesEl && imagesText) {
+    if (choiceCount > 0) {
+      const choiceWidth = ctx?.imageChoice?.width ?? ctx?.completedInfo?.width ?? 0;
+      const choiceHeight = ctx?.imageChoice?.height ?? ctx?.completedInfo?.height ?? 0;
+      const choiceTiles = ctx?.imageChoice?.tiles ?? (determinate ? total : 0);
+      const noun = choiceCount === 1 ? "1 image" : `${choiceCount} images`;
+      let suffix = ".";
+      if (choiceWidth > 0 && choiceHeight > 0 && choiceTiles > 0) {
+        suffix = ` (${choiceWidth}×${choiceHeight}, ${choiceTiles} tiles).`;
+      } else if (choiceWidth > 0 && choiceHeight > 0) {
+        suffix = ` (${choiceWidth}×${choiceHeight}).`;
+      } else if (choiceTiles > 0) {
+        suffix = ` (${choiceTiles} tiles).`;
+      }
+      const notice = `Found ${noun}, saving largest that fits${suffix}`;
+      if (imagesText.textContent !== notice) imagesText.textContent = notice;
+      imagesEl.style.display = "";
+      if (changeHint) {
+        const hint = "The website saves the first image automatically. To choose a different image, use the desktop app.";
+        if (changeHint.textContent !== hint) changeHint.textContent = hint;
+      }
+    } else {
+      imagesEl.style.display = "none";
+      if (changeHint) changeHint.style.display = "none";
     }
   }
 

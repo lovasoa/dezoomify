@@ -139,6 +139,14 @@ interface PendingDecision {
 
 let pendingDecision: PendingDecision | null = null;
 
+// Catalog auto-choice notice (todo 4.3): reuses the pendingDecision aux
+// pattern as local-only state, never a new protocol event. The native
+// pipeline auto-saves images[0] at the largest fitting level; the shared job
+// view renders this honestly from controller imageCount plus this aux
+// (WxH/K tiles). No picker is offered.
+let catalogNotice: { imageCount: number; width?: number; height?: number; tiles?: number } | null =
+  null;
+
 // Accessibility (Task 5.2): dialog focus state. Each modal stores the element
 // focused before it opened so focus returns on close. Recovery tracks its key
 // so a new decision moves focus once without stealing it on every tick.
@@ -738,6 +746,7 @@ function dispatchFail(
   });
   pushLog(`Failed (${code}): ${trimTechnical(message, 160)}`);
   pendingDecision = null;
+  catalogNotice = null;
   stopHeartbeat();
   update();
 }
@@ -746,7 +755,9 @@ function clearJobViewState(): void {
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.jobActivity = undefined;
+  viewCtx.imageChoice = undefined;
   pendingDecision = null;
+  catalogNotice = null;
   completedPartial = false;
   completedMissing = [];
   grantedFormat = "png";
@@ -906,6 +917,7 @@ function handleCancel(): void {
   pushLog("Cancelling… cleaning up…");
   setStep("Working…", "Cleaning up… removing unfinished file…");
   pendingDecision = null;
+  catalogNotice = null;
   if (job && invoke) {
     void invoke("cancel_job", { job }).then(
       () => {
@@ -1264,6 +1276,25 @@ function completeJob(
   ensureChosenThroughPreflight();
   if (completedInfo) viewCtx.completedInfo = completedInfo;
   const info = viewCtx.completedInfo;
+  if (info && info.width > 0 && info.height > 0) {
+    const prevCount = catalogNotice?.imageCount ?? controller.getState().imageCount ?? 0;
+    catalogNotice = {
+      ...(catalogNotice ?? {}),
+      imageCount: prevCount,
+      width: info.width,
+      height: info.height,
+      ...(typeof viewCtx.currentProgress?.total === "number" && viewCtx.currentProgress.total > 0
+        ? { tiles: viewCtx.currentProgress.total }
+        : {}),
+    };
+    viewCtx.imageChoice = {
+      width: info.width,
+      height: info.height,
+      ...(typeof viewCtx.currentProgress?.total === "number" && viewCtx.currentProgress.total > 0
+        ? { tiles: viewCtx.currentProgress.total }
+        : {}),
+    };
+  }
   pendingDecision = null;
   completedPartial = partial === true;
   completedMissing = Array.isArray(missing) ? missing.slice(0, 60) : [];
@@ -2003,8 +2034,10 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     return;
   }
 
-  // Catalog / image selection: the native pipeline auto-selects, but an
-  // explicit catalog event still walks the controller into choosing-image.
+  // Catalog / image selection: the native pipeline auto-saves images[0] at
+  // the largest fitting level. Record the honest auto-choice notice in local
+  // aux (pendingDecision pattern, no protocol event); the shared job view
+  // renders "Found N images, saving largest that fits (WxH, K tiles)".
   if (
     kind === "catalog" ||
     kind === "images-found" ||
@@ -2016,16 +2049,31 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     flat.indexOf("awaitingimageselection") >= 0 ||
     text.indexOf("choosing") >= 0
   ) {
+    const found = numField(payload, detailRaw, ["imageCount", "images", "count"]);
     controller.dispatch({
       seq: nextSeq(),
       sessionId,
       kind: "images-found",
-      ...(numField(payload, detailRaw, ["imageCount", "images", "count"]) !== undefined
-        ? { imageCount: numField(payload, detailRaw, ["imageCount", "images", "count"]) as number }
-        : {}),
+      ...(found !== undefined ? { imageCount: found } : {}),
       transport: NATIVE_TRANSPORT,
     });
-    setStep("Image found; picking the best one…");
+    if (found !== undefined) {
+      catalogNotice = { ...(catalogNotice ?? {}), imageCount: found };
+    } else if (!catalogNotice && controller.getState().imageCount > 0) {
+      catalogNotice = { imageCount: controller.getState().imageCount };
+    }
+    const noun = (catalogNotice?.imageCount ?? found ?? 0) === 1
+      ? "1 image"
+      : `${catalogNotice?.imageCount ?? found ?? 0} images`;
+    if ((catalogNotice?.imageCount ?? found ?? 0) > 0) {
+      pushLog(`Found ${noun}; auto-saving largest that fits`);
+      setStep(
+        `Found ${noun}, saving largest that fits…`,
+        "The app saves the first image automatically; no picker is offered.",
+      );
+    } else {
+      setStep("Image found; picking the best one…");
+    }
     update();
     return;
   }
@@ -2074,9 +2122,16 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
       numField(payload, detailRaw, ["current", "acquired", "completed", "done", "resources"]) ?? 0;
     const total = numField(payload, detailRaw, ["total"]) ?? 0;
     const message = strField(payload, ["message"]);
-    ensureChosenThroughPreflight(
-      numField(payload, detailRaw, ["imageCount", "images", "count"]),
-    );
+    const progressCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
+    ensureChosenThroughPreflight(progressCount);
+    if (progressCount !== undefined || total > 0) {
+      const prevCount = catalogNotice?.imageCount ?? controller.getState().imageCount ?? 0;
+      catalogNotice = {
+        ...(catalogNotice ?? {}),
+        imageCount: progressCount ?? prevCount,
+        ...(total > 0 ? { tiles: total } : {}),
+      };
+    }
     viewCtx.currentProgress = { current, total, ...(message ? { message } : {}) };
     noteProgress(current, total);
     if (kind === "discovery" || text.indexOf("discover") >= 0) {
@@ -2106,9 +2161,11 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     text.indexOf("job-state") >= 0
   ) {
     if (text.indexOf("running") >= 0 || text.indexOf("downloading") >= 0 || text.indexOf("acquiring") >= 0) {
-      ensureChosenThroughPreflight(
-        numField(payload, detailRaw, ["imageCount", "images", "count"]),
-      );
+      const runningCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
+      ensureChosenThroughPreflight(runningCount);
+      if (runningCount !== undefined && !catalogNotice) {
+        catalogNotice = { imageCount: runningCount };
+      }
       controller.dispatch({ seq: nextSeq(), sessionId, kind: "progress" });
       setStep("Saving image tiles…");
     } else if (text.indexOf("cancelling") >= 0 || text.indexOf("cleaning") >= 0) {
@@ -2671,6 +2728,17 @@ function update() {
   const state = controller.getState();
   const caps = integration.getCapabilities();
   if (viewCtx.jobActivity && !isTerminalStatus(state.status)) refreshLongestPending();
+  const auxTiles = catalogNotice?.tiles ?? viewCtx.imageChoice?.tiles ?? viewCtx.currentProgress?.total;
+  const auxWidth = catalogNotice?.width ?? viewCtx.imageChoice?.width ?? viewCtx.completedInfo?.width;
+  const auxHeight = catalogNotice?.height ?? viewCtx.imageChoice?.height ?? viewCtx.completedInfo?.height;
+  const auxChoice =
+    catalogNotice || viewCtx.imageChoice || auxTiles !== undefined || auxWidth !== undefined
+      ? {
+          ...(typeof auxWidth === "number" ? { width: auxWidth } : {}),
+          ...(typeof auxHeight === "number" ? { height: auxHeight } : {}),
+          ...(typeof auxTiles === "number" ? { tiles: auxTiles } : {}),
+        }
+      : undefined;
 
   renderView(
     root,
@@ -2709,10 +2777,13 @@ function update() {
       ...(viewCtx.completedInfo ? { completedInfo: viewCtx.completedInfo } : {}),
       ...(viewCtx.jobActivity ? { jobActivity: viewCtx.jobActivity } : {}),
       ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
+      ...(auxChoice ? { imageChoice: auxChoice } : {}),
     },
   );
   ensureDesktopAuxPanel();
   ensureDesktopSettingsPanel();
+  ensureDesktopHelpAbout();
+  ensureDesktopExternalNav();
   ensureDesktopFooter();
 }
 
@@ -2747,6 +2818,10 @@ function getPendingDecision(): PendingDecision | null {
   };
 }
 
+function getCatalogNotice(): { imageCount: number; width?: number; height?: number; tiles?: number } | null {
+  return catalogNotice ? { ...catalogNotice } : null;
+}
+
 function getCompletedPartial(): boolean {
   return completedPartial;
 }
@@ -2767,6 +2842,7 @@ export {
   getSessionId,
   getSeq,
   getPendingDecision,
+  getCatalogNotice,
   getCompletedPartial,
   getCompletedMissing,
   getRemoteSeq,
