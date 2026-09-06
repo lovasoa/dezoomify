@@ -82,6 +82,30 @@ not allowed by your browser to load those. The desktop app can still fetch
 them: it is an ordinary program on your computer and follows the site's own
 setup.
 
+## The site limited requests from our server
+
+The page could not be opened because the image site limited how often our
+server may ask. Try again later, or save from your own connection with the
+[browser extension](./browser-extension.md) or the [desktop app](./desktop-app.md).
+
+## The site asks you to wait a few minutes
+
+The image site is receiving too many requests right now. Wait a few minutes
+and try the same address again.
+
+## The image shows but cannot be saved
+
+The site shows the picture without letting Dezoomify save a copy from it.
+Open the page and use the [browser extension](./browser-extension.md) to find
+the image there; see [finding the image address](./finding-the-image-address.md).
+
+## Sending a signed-in image to another app asks for approval
+
+That approval step is expected. The [browser extension](./browser-extension.md)
+asks first before passing anything needed for that job; see
+[what the extension does with your data](./browser-extension.md#what-the-extension-does-with-your-data)
+and the [desktop app](./desktop-app.md).
+
 ## Still stuck?
 
 - Disable other browser extensions and try once more; some of them
