@@ -9,6 +9,10 @@
  * import-free for deterministic unit tests).
  *
  * Plain JavaScript + JSDoc.
+ *
+ * Status: covered by unit tests; the v1 extension page (`page/page.ts`)
+ * drives the guarded session fetcher directly. Wire this integration when
+ * the extension page adopts the shared UI.
  */
 
 /**
