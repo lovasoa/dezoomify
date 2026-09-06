@@ -907,7 +907,7 @@ function mountDisplayOnlySection(
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
       <div>
-        <h2 class="dz-notice-title">Display-Only Preview</h2>
+        <h2 class="dz-notice-title">Image downloaded</h2>
         <p class="dz-notice-message">${guidance}</p>
       </div>
     </div>

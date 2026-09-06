@@ -17,8 +17,10 @@ export function renderSaveGuidance(originClean: boolean): string {
     );
   }
   return (
-    "This preview is display only. To keep a copy, right-click the image where " +
-    "your browser supports it. To save the full-size image, use the desktop app."
+    "Your image should appear below. In order to persist it as a file on " +
+    "your computer, right-click on it and select \"Save Image As...\". " +
+    "For faster downloads that automatically create files in the format " +
+    "you choose, use the desktop app."
   );
 }
 
