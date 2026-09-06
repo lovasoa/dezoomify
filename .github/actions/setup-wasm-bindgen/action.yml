@@ -1,0 +1,20 @@
+name: setup-wasm-bindgen
+description: Resolve wasm-bindgen-cli from Cargo.lock and install the matching release
+outputs:
+  version:
+    description: wasm-bindgen version resolved from Cargo.lock
+    value: ${{ steps.resolve.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve wasm-bindgen-cli version from Cargo.lock
+      id: resolve
+      shell: bash
+      run: |
+        v="$(awk '/^name = "wasm-bindgen"$/{getline; sub(/^version = "/,""); sub(/"$/,""); print; exit}' Cargo.lock)"
+        test -n "$v" || { echo "wasm-bindgen version not found in Cargo.lock"; exit 1; }
+        echo "version=$v" >> "$GITHUB_OUTPUT"
+    - name: Install wasm-bindgen-cli
+      uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
+      with:
+        tool: wasm-bindgen-cli@${{ steps.resolve.outputs.version }}
