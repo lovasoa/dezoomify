@@ -51,6 +51,21 @@ const integration = createDesktopIntegration();
 // together. Used only for copy-diagnostics provenance, never for logic.
 const DESKTOP_APP_VERSION = "3.0.0";
 
+// Task 5.3 Help/About (docs rule: docs/user/ is the only source of user
+// text; link, never duplicate). Short link labels only; every user guide
+// lives in the published docs pages below, opened via openExternalLink
+// (https-only). No user copy is duplicated here.
+const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
+const DESKTOP_HELP_LINKS: Array<{ label: string; url: string }> = [
+  { label: "Help", url: `${DESKTOP_DOCS_BASE}/help/` },
+  { label: "Desktop guide", url: `${DESKTOP_DOCS_BASE}/help/desktop-app.html` },
+  { label: "Troubleshooting", url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
+  { label: "FAQ", url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
+  { label: "Privacy", url: `${DESKTOP_DOCS_BASE}/privacy.html` },
+  { label: "Terms", url: `${DESKTOP_DOCS_BASE}/terms.html` },
+  { label: "Donate", url: "https://github.com/sponsors/lovasoa/" },
+];
+
 // Transport reported for every desktop controller transition. Pixels stay
 // native, so the badge never claims a browser transport.
 const NATIVE_TRANSPORT = "native";
@@ -2236,7 +2251,7 @@ function syncInitialUrlFromLocation(): void {
 // Output format selector (todo 4.4): 3 native radios (PNG/JPEG/TIFF) bound
 // to grantedFormat. Flat flow inside the aux panel, native inputs so Tab and
 // screen readers work; the crisp 2px focus ring comes from desktop.css.
-// Changing a radio only updates grantedFormat — requestOutputAndResume reads
+// Changing a radio only updates grantedFormat; requestOutputAndResume reads
 // it when building { format, suggestedName } for requestSaveDestination.
 function appendOutputFormatRadios(parent: HTMLElement, doc: Document): void {
   const group = doc.createElement("fieldset");
@@ -2715,24 +2730,143 @@ function ensureDesktopSettingsPanel(): void {
   card.appendChild(panel);
 }
 
-// Pinned bottom footer: the static markup in index.html carries the five
-// legal/repo links only. Wire its anchors to the native opener so remote
-// content never navigates inside the privileged window. Idempotent.
+// Resolve any anchor href seen in the privileged window to a canonical
+// https external URL (docs/user/ rendered pages, legal pages, repo links).
+// Returns null for in-page fragments and non-navigating hrefs. Relative
+// docs/site hrefs from the shared view ("./help/…", "./privacy.html", …)
+// map to the published site so they also leave via openExternalLink.
+function resolveDesktopExternalUrl(href: string): string | null {
+  const raw = (href ?? "").trim();
+  if (raw === "") return null;
+  if (raw.startsWith("#")) return null;
+  const lower = raw.toLowerCase();
+  if (
+    lower.startsWith("javascript:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:")
+  ) {
+    return null;
+  }
+  if (raw.startsWith("https://")) return raw;
+  if (raw.startsWith("http://")) return `https://${raw.slice("http://".length)}`;
+  let path = raw;
+  while (path.startsWith("../")) path = path.slice(3);
+  if (path.startsWith("./")) path = path.slice(2);
+  else if (path.startsWith("/")) path = path.slice(1);
+  if (path === "" || path === "index.html") return `${DESKTOP_DOCS_BASE}/`;
+  if (path === "help" || path === "help/") return `${DESKTOP_DOCS_BASE}/help/`;
+  if (path.startsWith("help/")) return `${DESKTOP_DOCS_BASE}/${path}`;
+  if (path === "privacy.html" || path === "terms.html") {
+    return `${DESKTOP_DOCS_BASE}/${path}`;
+  }
+  return null;
+}
+
+// No in-window remote navigation: a single delegated interceptor routes
+// every anchor in the privileged window through openExternalLink
+// (https-only, validated again in desktopIntegration.ts). Unknown remote
+// hrefs are blocked fail-closed (prevented, never opened in-window).
+// Wired once; covers the footer, the shared-view guidance links, and any
+// future anchors. Idempotent.
+function ensureDesktopExternalNav(): void {
+  if (typeof document === "undefined") return;
+  const doc = document as Document & { [key: string]: unknown };
+  if (doc.documentElement?.getAttribute("data-dz-external-wired") === "true") return;
+  doc.documentElement?.setAttribute("data-dz-external-wired", "true");
+  document.addEventListener(
+    "click",
+    (e) => {
+      const target = e.target as HTMLElement | null;
+      const anchor = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor || !document.contains(anchor)) return;
+      const href = anchor.getAttribute("href") ?? "";
+      const trimmed = href.trim();
+      if (trimmed === "" || trimmed.startsWith("#")) return;
+      const resolved = resolveDesktopExternalUrl(trimmed);
+      if (resolved) {
+        e.preventDefault();
+        handleOpenExternalLink(resolved);
+        return;
+      }
+      // Fail closed: anything that looks like a remote or site navigation
+      // never runs inside the privileged window.
+      const looksRemote =
+        /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) ||
+        trimmed.startsWith("//") ||
+        trimmed.startsWith("./") ||
+        trimmed.startsWith("../") ||
+        trimmed.startsWith("/") ||
+        trimmed.startsWith("help/") ||
+        trimmed.endsWith(".html");
+      if (looksRemote) {
+        e.preventDefault();
+      }
+    },
+    true,
+  );
+}
+
+// Pinned bottom footer: the static markup in index.html carries exactly the
+// five legal/repo links. Navigation itself is handled by the delegated
+// ensureDesktopExternalNav interceptor above, so this only verifies the
+// footer exists. Idempotent.
 function ensureDesktopFooter(): void {
   if (typeof document === "undefined") return;
   const footer = document.querySelector(".dz-site-footer");
   if (!footer) return;
   if (footer.getAttribute("data-dz-wired") === "true") return;
   footer.setAttribute("data-dz-wired", "true");
-  footer.querySelectorAll("a[href]").forEach((anchor) => {
-    anchor.addEventListener("click", (e) => {
-      const href = anchor.getAttribute("href") ?? "";
-      if (href.startsWith("https://")) {
-        e.preventDefault();
-        handleOpenExternalLink(href);
-      }
-    });
-  });
+}
+
+// Task 5.3 Help/About: link-only region inside the single status card.
+// Buttons (never anchors, so no navigation risk) open the published
+// docs/user/ pages, legal pages, and Donate via openExternalLink
+// (https-only). Labels only; no user copy is duplicated here. The version
+// line is app metadata, not docs text.
+//
+// Accessibility: region labelled by its heading; all actions are native
+// buttons reachable by Tab with the crisp 2px focus ring. Rebuilds are
+// skipped while focus sits inside so progress ticks never drop focus.
+function ensureDesktopHelpAbout(): void {
+  if (typeof document === "undefined" || !root) return;
+  const card = root.querySelector(".dz-card");
+  if (!card) return;
+  const existing = document.getElementById("dz-desktop-help");
+  if (existing && existing.contains(document.activeElement)) return;
+  existing?.remove();
+
+  const doc = root.ownerDocument;
+  const region = doc.createElement("div");
+  region.id = "dz-desktop-help";
+  region.className = "dz-view-body dz-desktop-help";
+  region.setAttribute("role", "region");
+  region.setAttribute("aria-labelledby", "dz-help-title");
+
+  const title = doc.createElement("h2");
+  title.className = "dz-notice-title";
+  title.id = "dz-help-title";
+  title.textContent = "Help and about";
+  region.appendChild(title);
+
+  const version = doc.createElement("p");
+  version.className = "dz-notice-message";
+  version.textContent = `Dezoomify Desktop ${DESKTOP_APP_VERSION}`;
+  region.appendChild(version);
+
+  const row = doc.createElement("div");
+  row.className = "dz-actions-row dz-help-actions";
+  for (const link of DESKTOP_HELP_LINKS) {
+    const btn = doc.createElement("button");
+    btn.type = "button";
+    btn.className = "dz-btn-secondary";
+    btn.textContent = link.label;
+    btn.setAttribute("aria-label", link.label);
+    btn.addEventListener("click", () => handleOpenExternalLink(link.url));
+    row.appendChild(btn);
+  }
+  region.appendChild(row);
+
+  card.appendChild(region);
 }
 
 function update() {
