@@ -1257,6 +1257,10 @@ async function runJob(url: string): Promise<void> {
     canvas.height = height;
     const ctx2d = canvas.getContext("2d") as CanvasRenderingContext2D;
     ctx2d.clearRect(0, 0, width, height);
+    // Reveal the canvas before the first tile paints (legacy parity): tiles
+    // assemble visibly as they arrive, and the picture stays right-clickable
+    // throughout acquisition, whichever finish follows.
+    setCanvasVisible(true);
 
     const total = plan.tiles.length;
     viewCtx.imageChoice = { width, height, tiles: total };

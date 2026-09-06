@@ -87,6 +87,14 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   // The pipeline must reach the completed state with real dimensions.
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
   await expect(page.getByText(/512/)).toBeVisible();
+  // Tiles paint live during acquisition (legacy parity), so the assembled
+  // picture stays visible next to the save button on the clean path too.
+  const canvas = page.locator("#rendering-canvas");
+  await expect(canvas).toBeVisible();
+  assert.deepEqual(
+    await canvas.evaluate((el) => ({ width: el.width, height: el.height })),
+    { width: 512, height: 512 },
+  );
 
   const downloadPromise = page.waitForEvent("download", { timeout: 30000 });
   await page.getByRole("button", { name: "Save image" }).click();
