@@ -157,6 +157,86 @@ pub fn is_our_manifest_text(text: &str) -> bool {
         .is_some_and(|name| name == NATIVE_HOST_NAME)
 }
 
+/// Manifest file name shared by every per-user destination.
+#[must_use]
+pub fn manifest_file_name() -> String {
+    format!("{NATIVE_HOST_NAME}.json")
+}
+
+/// All per-user manifest file destinations for one home directory on the
+/// current OS. Linux covers `~/.config/chromium`, `~/.config/google-chrome`,
+/// and `~/.mozilla`; macOS covers `~/Library/...`; Windows uses HKCU
+/// registry keys instead, so this is empty there. Never system-wide.
+#[must_use]
+pub fn manifest_paths_for_home(home: &str) -> Vec<String> {
+    if home.is_empty() {
+        return Vec::new();
+    }
+    match std::env::consts::OS {
+        "linux" => vec![
+            linux_chromium_manifest_path(home),
+            linux_chrome_manifest_path(home),
+            linux_firefox_manifest_path(home),
+        ],
+        "macos" => vec![
+            macos_chromium_manifest_path(home),
+            macos_firefox_manifest_path(home),
+        ],
+        // Windows uses HKCU registry keys; no file manifests.
+        _ => Vec::new(),
+    }
+}
+
+/// True when the file at `path` with observed `content` may be removed by
+/// uninstall: parseable content naming our host, or unparseable content
+/// carrying our exact file name (a truncated write). Parseable foreign
+/// content is never removable, even when the file name matches ours (a
+/// squatter must survive uninstall). Missing files (`None`) are not
+/// removable.
+#[must_use]
+pub fn is_removable_manifest(path: &str, content: Option<&str>) -> bool {
+    let Some(text) = content else {
+        return false;
+    };
+    if is_our_manifest_text(text) {
+        return true;
+    }
+    // Parseable but not ours: foreign squatter, never delete.
+    if serde_json::from_str::<serde_json::Value>(text).is_ok() {
+        return false;
+    }
+    // Unparseable: only a truncated write at our exact file name.
+    let file_name = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    file_name == manifest_file_name()
+}
+
+/// Remove only our per-user manifests for one home directory. Returns the
+/// removed paths. Never deletes parseable foreign manifests, even when the
+/// file name matches ours; never touches missing files. Windows registry
+/// cleanup goes through `uninstall_windows_registry`.
+pub fn uninstall_native_manifests(home: &str) -> Result<Vec<String>, String> {
+    if home.is_empty() {
+        return Err("home must not be empty".to_string());
+    }
+    let mut removed = Vec::new();
+    for path in manifest_paths_for_home(home) {
+        let content = std::fs::read_to_string(&path).ok();
+        if !is_removable_manifest(&path, content.as_deref()) {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed.push(path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("failed to remove {path}: {e}")),
+        }
+    }
+    removed.sort();
+    Ok(removed)
+}
+
 /// Destinations for one home directory on the current OS: `(engine, path,
 /// manifest_json)`. File destinations only; Windows registry keys are
 /// handled by `install_windows_registry`.
@@ -223,7 +303,7 @@ fn write_manifest_file(path: &str, content: &str) -> Result<bool, String> {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let ours = format!("{NATIVE_HOST_NAME}.json");
+            let ours = manifest_file_name();
             if file_name != ours || serde_json::from_str::<serde_json::Value>(&existing).is_ok() {
                 return Err(format!("foreign manifest at {path}; refusing to overwrite"));
             }
@@ -247,6 +327,10 @@ pub fn install_native_manifests(
     if home.is_empty() {
         return Err("home must not be empty".to_string());
     }
+    // Validate on every OS before any write, so Windows (HKCU) also fails
+    // closed on relative host paths and wildcard ids.
+    chromium_manifest(host_path, chromium_id)?;
+    firefox_manifest(host_path, firefox_id)?;
     let destinations = manifest_destinations(home, host_path, chromium_id, firefox_id)?;
     if destinations.is_empty() {
         // Windows (or unknown OS): no file manifests to write.
@@ -368,6 +452,42 @@ pub fn install_windows_registry(exec_path: &str) -> Result<String, String> {
         }
     }
     Ok(format!("HKCU\\{protocol_key} + HKCU\\{host_key}"))
+}
+
+/// Windows HKCU keys managed by registration (per-user only, never HKLM).
+#[must_use]
+pub fn windows_managed_keys() -> Vec<String> {
+    vec![
+        format!("HKCU\\{}", windows_protocol_key()),
+        format!("HKCU\\{}", windows_native_host_key()),
+    ]
+}
+
+/// Remove our Windows HKCU keys via `reg.exe`. Skips absent keys; fails
+/// closed when `reg.exe` is missing or refuses the delete. Per-user only
+/// (HKCU, never HKLM/system-wide).
+pub fn uninstall_windows_registry() -> Result<Vec<String>, String> {
+    use std::process::Command;
+    let mut removed = Vec::new();
+    for key in windows_managed_keys() {
+        let query = Command::new("reg")
+            .args(["query", &key, "/ve"])
+            .output()
+            .map_err(|e| format!("failed to run reg.exe: {e}"))?;
+        if !query.status.success() {
+            continue;
+        }
+        let status = Command::new("reg")
+            .args(["delete", &key, "/f"])
+            .status()
+            .map_err(|e| format!("failed to run reg.exe: {e}"))?;
+        if !status.success() {
+            return Err(format!("reg.exe refused to delete {key}"));
+        }
+        removed.push(key);
+    }
+    removed.sort();
+    Ok(removed)
 }
 
 #[cfg(test)]
@@ -505,6 +625,107 @@ mod tests {
                 .unwrap()
                 .contains("other.host"));
         }
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn manifest_paths_stay_per_user() {
+        let home = "/home/alice";
+        for path in manifest_paths_for_home(home) {
+            assert!(path.starts_with(home), "{path} outside home");
+            assert!(
+                !path.contains("/etc/"),
+                "system-wide path forbidden: {path}"
+            );
+            assert!(
+                !path.contains("/usr/"),
+                "system-wide path forbidden: {path}"
+            );
+        }
+        if std::env::consts::OS == "linux" {
+            let paths = manifest_paths_for_home(home);
+            assert_eq!(paths.len(), 3);
+            assert!(paths.iter().any(|p| p.contains(".config/chromium")));
+            assert!(paths.iter().any(|p| p.contains(".config/google-chrome")));
+            assert!(paths.iter().any(|p| p.contains(".mozilla")));
+            for path in &paths {
+                assert!(path.ends_with(&manifest_file_name()));
+            }
+        }
+        // Windows registry keys are HKCU only, never HKLM.
+        for key in windows_managed_keys() {
+            assert!(key.starts_with("HKCU\\"), "must be per-user HKCU: {key}");
+            assert!(!key.contains("HKLM"), "system-wide HKLM forbidden: {key}");
+        }
+    }
+
+    #[test]
+    fn is_removable_manifest_never_takes_parseable_foreign() {
+        let ours_path = format!(
+            "/home/u/.config/chromium/NativeMessagingHosts/{}",
+            manifest_file_name()
+        );
+        let ours_text =
+            format!(r#"{{"name":"{NATIVE_HOST_NAME}","path":"/opt/host","type":"stdio"}}"#);
+        assert!(is_removable_manifest(&ours_path, Some(&ours_text)));
+        // Parseable foreign with the exact ours file name is NOT removable
+        // (squatter must survive uninstall).
+        let foreign_text = r#"{"name":"other.host","path":"/x"}"#;
+        assert!(!is_removable_manifest(&ours_path, Some(foreign_text)));
+        // Unparseable content with our exact file name is a truncated write:
+        // removable so reinstall/uninstall can heal it.
+        assert!(is_removable_manifest(&ours_path, Some("not json {")));
+        assert!(is_removable_manifest(&ours_path, Some("")));
+        // Unparseable content at a foreign file name is not ours.
+        assert!(!is_removable_manifest(
+            "/tmp/other.host.json",
+            Some("not json {")
+        ));
+        // Missing files are never removable.
+        assert!(!is_removable_manifest(&ours_path, None));
+    }
+
+    #[test]
+    fn uninstall_removes_only_ours_never_foreign_squatter() {
+        let home = temp_home("uninstall");
+        let host = "/opt/dezoomify/dezoomify-native-host";
+        let written = install_native_manifests(
+            &home,
+            host,
+            CHROMIUM_RELEASE_EXTENSION_ID,
+            FIREFOX_RELEASE_EXTENSION_ID,
+        )
+        .unwrap();
+        if manifest_paths_for_home(&home).is_empty() {
+            // Windows/unknown OS: no file manifests; nothing to remove.
+            assert!(uninstall_native_manifests(&home).unwrap().is_empty());
+            std::fs::remove_dir_all(&home).unwrap();
+            return;
+        }
+        assert!(!written.is_empty());
+        // Uninstall removes exactly what install wrote.
+        let removed = uninstall_native_manifests(&home).unwrap();
+        assert_eq!(removed, written);
+        for path in &removed {
+            assert!(!std::path::Path::new(path).exists(), "{path} not removed");
+        }
+        // Second uninstall is a no-op (missing files are skipped).
+        assert!(uninstall_native_manifests(&home).unwrap().is_empty());
+        // A parseable foreign squatter at our exact destination survives.
+        let dest = manifest_paths_for_home(&home)[0].clone();
+        if let Some(parent) = std::path::Path::new(&dest).parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&dest, r#"{"name":"other.host","path":"/x"}"#).unwrap();
+        assert!(uninstall_native_manifests(&home).unwrap().is_empty());
+        assert!(std::fs::read_to_string(&dest)
+            .unwrap()
+            .contains("other.host"));
+        // A truncated (unparseable) write at our exact file name is healed.
+        std::fs::write(&dest, "truncated {").unwrap();
+        let removed = uninstall_native_manifests(&home).unwrap();
+        assert_eq!(removed, vec![dest.clone()]);
+        assert!(!std::path::Path::new(&dest).exists());
         std::fs::remove_dir_all(&home).unwrap();
     }
 }

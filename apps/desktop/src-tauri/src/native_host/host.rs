@@ -18,7 +18,7 @@
 //!   diagnostics, and are best-effort overwritten after transfer (no
 //!   universal-zeroization claim).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::jobs::JobTable;
 use crate::native_host::envelope::{self, CookieEntry, HostRequest, MAX_COOKIES, MAX_TOKEN_LEN};
@@ -259,14 +259,14 @@ impl HostState {
                 job_id,
                 source_url,
                 origins,
-                cookies,
+                mut cookies,
             } => self.handle_credential(
                 &challenge,
                 &nonce,
                 &job_id,
                 &source_url,
                 &origins,
-                &cookies,
+                &mut cookies,
                 now_ms,
             ),
             HostRequest::Decline { challenge } => {
@@ -283,7 +283,14 @@ impl HostState {
     }
 
     /// Validate a credential message against its consented session, start one
-    /// job, overwrite cookie values, and report the redacted outcome.
+    /// job with origin-scoped `UserHeaders` cookies, overwrite cookie values,
+    /// and report the redacted outcome.
+    ///
+    /// Cookies are memory-only: the inbound values are best-effort
+    /// overwritten after transfer and the driver's copy lives in the job's
+    /// `PipelineConfig::user_headers` RAM only (never logged, never cached,
+    /// never serialized). Only cookies scoped to the source URL origin reach
+    /// the driver; sibling entries are dropped and never sent elsewhere.
     #[allow(clippy::too_many_arguments)]
     fn handle_credential(
         &mut self,
@@ -292,7 +299,7 @@ impl HostState {
         job_id: &str,
         source_url: &str,
         origins: &[String],
-        cookies: &[CookieEntry],
+        cookies: &mut [CookieEntry],
         now_ms: u64,
     ) -> (Vec<u8>, Option<String>) {
         if challenge.is_empty()
@@ -375,7 +382,7 @@ impl HostState {
                 None,
             );
         }
-        for cookie in cookies {
+        for cookie in cookies.iter() {
             if !envelope::validate_cookie_shape(cookie) {
                 return (
                     json_bytes(&Self::error_envelope(
@@ -404,7 +411,7 @@ impl HostState {
         // Sibling isolation: every cookie origin must be consented, and every
         // cookie name must have been disclosed at consent time. Cookieless
         // handoffs (zero cookies) are always allowed.
-        for cookie in cookies {
+        for cookie in cookies.iter() {
             if !sess_origins.iter().any(|o| o == &cookie.origin) {
                 return (
                     json_bytes(&Self::error_envelope(
@@ -424,11 +431,33 @@ impl HostState {
                 );
             }
         }
+        // The source URL must live inside the consented scope: its host must
+        // match at least one consented origin host. Otherwise consented
+        // cookies could be attached to a job fetching an unconsented sibling.
+        if !source_in_scope(source_url, &sess_origins) {
+            return (
+                json_bytes(&Self::error_envelope(
+                    "bad-origins",
+                    "source outside consent",
+                )),
+                None,
+            );
+        }
+        // Origin-scoped driver headers: only cookies whose origin host matches
+        // the source URL host reach the driver (as one `Cookie` header, the
+        // native `UserHeaders` credential shape). Sibling entries are dropped
+        // here and never sent elsewhere. Empty means a cookieless job.
+        let mut values: Vec<String> = cookies.iter().map(|c| c.value.clone()).collect();
+        let mut user_headers = BTreeMap::new();
+        if let Some(header) = cookie_header_for_source(source_url, cookies) {
+            user_headers.insert("cookie".to_string(), header);
+        }
         // All checks passed: redeem exactly once before any job effect, then
         // start the job. Any failure below still consumed the nonce.
-        let mut values: Vec<String> = cookies.iter().map(|c| c.value.clone()).collect();
         let mark = {
             let Some(sess) = self.sessions.get_mut(challenge) else {
+                overwrite_owned(&mut values);
+                overwrite_cookie_values(cookies);
                 return (
                     json_bytes(&Self::error_envelope(
                         "unknown-challenge",
@@ -443,13 +472,20 @@ impl HostState {
             let code = session_error_code(&e).to_string();
             let message = session_error_message(&e);
             overwrite_owned(&mut values);
+            overwrite_cookie_values(cookies);
+            // Drop any header copy built above (it holds joined secrets).
+            overwrite_header_map(&mut user_headers);
             return (json_bytes(&Self::error_envelope(&code, &message)), None);
         }
         self.sessions.remove(challenge);
-        let job = match self.jobs.start_job(source_url) {
+        let job = match self
+            .jobs
+            .start_job_with_user_headers(source_url, user_headers)
+        {
             Ok(id) => id,
             Err(_) => {
                 overwrite_owned(&mut values);
+                overwrite_cookie_values(cookies);
                 return (
                     json_bytes(&Self::error_envelope(
                         "handoff.rejected",
@@ -469,6 +505,7 @@ impl HostState {
             &values.iter().map(String::as_str).collect::<Vec<_>>(),
         );
         overwrite_owned(&mut values);
+        overwrite_cookie_values(cookies);
         let response = serde_json::json!({
             "kind": "job-started",
             "job": job,
@@ -524,6 +561,87 @@ fn overwrite_owned(values: &mut [String]) {
         redaction::best_effort_overwrite(&mut bytes);
         *value = String::new();
     }
+}
+
+/// Best-effort overwrite of inbound credential values in place. The driver's
+/// own header copy (moved into `JobTable`) is a separate allocation and is
+/// intentionally retained for the job lifetime; everything else holding the
+/// values is wiped here.
+fn overwrite_cookie_values(cookies: &mut [CookieEntry]) {
+    for cookie in cookies.iter_mut() {
+        let mut bytes = std::mem::take(&mut cookie.value).into_bytes();
+        redaction::best_effort_overwrite(&mut bytes);
+        cookie.value = String::new();
+    }
+}
+
+/// Best-effort overwrite of a header map built but never handed to the driver
+/// (redeem-failure path). The successfully started job keeps its own map.
+fn overwrite_header_map(headers: &mut BTreeMap<String, String>) {
+    for value in headers.values_mut() {
+        let mut bytes = std::mem::take(value).into_bytes();
+        redaction::best_effort_overwrite(&mut bytes);
+    }
+    headers.clear();
+}
+
+/// Lowercased host of an http(s) URL or origin string, without port.
+/// Pure string parsing (no DNS, no network); `None` on malformed input.
+fn host_of(url_or_origin: &str) -> Option<String> {
+    let after_scheme = url_or_origin.split("://").nth(1)?;
+    let authority_end = after_scheme
+        .find(['/', '?', '#'])
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    let host = match authority.rsplit_once(':') {
+        Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => h,
+        _ => authority,
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some(host.to_ascii_lowercase())
+}
+
+/// True when the source URL host matches at least one consented origin host
+/// (case-insensitive). Ports/paths are ignored: consent scopes the host, and
+/// per-cookie origin membership is enforced separately above.
+fn source_in_scope(source_url: &str, consented_origins: &[String]) -> bool {
+    let Some(source_host) = host_of(source_url) else {
+        return false;
+    };
+    consented_origins
+        .iter()
+        .filter_map(|o| host_of(o))
+        .any(|h| h == source_host)
+}
+
+/// Build the origin-scoped `Cookie` header value for the driver.
+///
+/// Keeps only cookies whose origin host matches the source URL host; sibling
+/// entries are dropped (never sent to another origin). Pairs sort by name
+/// for determinism. Returns `None` when no cookie applies (cookieless job).
+fn cookie_header_for_source(source_url: &str, cookies: &[CookieEntry]) -> Option<String> {
+    let source_host = host_of(source_url)?;
+    let mut pairs: Vec<(&str, &str)> = cookies
+        .iter()
+        .filter(|c| host_of(&c.origin).is_some_and(|h| h == source_host))
+        .map(|c| (c.name.as_str(), c.value.as_str()))
+        .collect();
+    if pairs.is_empty() {
+        return None;
+    }
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    Some(
+        pairs
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
 }
 
 #[cfg(test)]
@@ -650,6 +768,27 @@ mod tests {
         assert!(diag.contains("session"), "names only diagnostic");
         assert!(!diag.contains("CANARY-abc123"), "value leaked into stderr");
         assert_eq!(state.pending_count(), 0);
+        // The driver job carries the origin-scoped cookie in memory-only
+        // `UserHeaders` (never in the response/diagnostic/Debug).
+        let driver_job = value
+            .get("job")
+            .and_then(|j| j.as_str())
+            .expect("driver job id")
+            .to_string();
+        let config = state
+            .jobs
+            .config_for(&driver_job)
+            .expect("driver config for handoff job");
+        assert_eq!(
+            config.user_headers.get("cookie").map(String::as_str),
+            Some("session=CANARY-abc123"),
+            "consented cookie must reach the driver"
+        );
+        let debug = format!("{:?}", state.jobs);
+        assert!(
+            !debug.contains("CANARY-abc123"),
+            "cookie value leaked into Debug"
+        );
         // Replay with the same nonce is rejected without a new job.
         let (res, diag) =
             state.handle(&serde_json::to_vec(&credential).unwrap(), 1000, &mut || {
@@ -801,5 +940,198 @@ mod tests {
             value.pointer("/error/code").and_then(|v| v.as_str()),
             Some("unknown-challenge")
         );
+    }
+
+    fn consented_state(
+        state: &mut HostState,
+        tag: &str,
+        job: &str,
+        origins: &[&str],
+        names: &[&str],
+        now: u64,
+    ) -> (String, String) {
+        let (challenge, nonce) = negotiate(state, tag, job, now);
+        let consent = serde_json::json!({
+            "kind": "consent",
+            "challenge": challenge,
+            "nonce": nonce,
+            "jobId": job,
+            "origins": origins,
+            "cookieNames": names,
+            "confirmed": true,
+        });
+        let (res, _) = state.handle(&serde_json::to_vec(&consent).unwrap(), now, &mut || {
+            fresh_pair("x")
+        });
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&res)
+                .unwrap()
+                .get("kind")
+                .and_then(|k| k.as_str()),
+            Some("consented")
+        );
+        (challenge, nonce)
+    }
+
+    #[test]
+    fn source_outside_consent_rejected_without_job() {
+        let mut state = HostState::production();
+        let (challenge, nonce) = consented_state(
+            &mut state,
+            "scope",
+            "job:ext-scope",
+            &["https://protected.example/"],
+            &["session"],
+            0,
+        );
+        let jobs_before = state.jobs.len();
+        let credential = serde_json::json!({
+            "kind": "credential",
+            "challenge": challenge,
+            "nonce": nonce,
+            "jobId": "job:ext-scope",
+            "sourceUrl": "https://sibling.example/item",
+            "origins": ["https://protected.example/"],
+            "cookies": [{"name": "session", "value": "CANARY-scope", "origin": "https://protected.example/"}],
+        });
+        let (res, diag) = state.handle(&serde_json::to_vec(&credential).unwrap(), 0, &mut || {
+            fresh_pair("x")
+        });
+        let value: serde_json::Value = serde_json::from_slice(&res).unwrap();
+        assert_eq!(
+            value.pointer("/error/code").and_then(|v| v.as_str()),
+            Some("bad-origins"),
+            "source outside consent must be rejected: {value}"
+        );
+        assert!(diag.is_none());
+        assert!(!serde_json::to_string(&value)
+            .unwrap()
+            .contains("CANARY-scope"));
+        assert_eq!(state.jobs.len(), jobs_before, "no job on scope rejection");
+    }
+
+    #[test]
+    fn sibling_cookie_filtered_from_driver_header() {
+        let mut state = HostState::production();
+        let (challenge, nonce) = consented_state(
+            &mut state,
+            "multi",
+            "job:ext-multi",
+            &["https://a.example/", "https://b.example/"],
+            &["session", "theme"],
+            0,
+        );
+        let credential = serde_json::json!({
+            "kind": "credential",
+            "challenge": challenge,
+            "nonce": nonce,
+            "jobId": "job:ext-multi",
+            "sourceUrl": "https://a.example/item",
+            "origins": ["https://a.example/", "https://b.example/"],
+            "cookies": [
+                {"name": "session", "value": "CANARY-A", "origin": "https://a.example/"},
+                {"name": "theme", "value": "CANARY-B", "origin": "https://b.example/"},
+            ],
+        });
+        let (res, diag) = state.handle(&serde_json::to_vec(&credential).unwrap(), 0, &mut || {
+            fresh_pair("x")
+        });
+        let value: serde_json::Value = serde_json::from_slice(&res).unwrap();
+        assert_eq!(
+            value.get("kind").and_then(|k| k.as_str()),
+            Some("job-started"),
+            "multi-origin handoff must start: {value}"
+        );
+        let driver_job = value
+            .get("job")
+            .and_then(|j| j.as_str())
+            .expect("driver job id");
+        let config = state.jobs.config_for(driver_job).expect("driver config");
+        // Only the source-origin cookie reaches the driver; the sibling is
+        // dropped and never sent to another origin.
+        assert_eq!(
+            config.user_headers.get("cookie").map(String::as_str),
+            Some("session=CANARY-A"),
+            "sibling cookie must never reach the source job"
+        );
+        let text = serde_json::to_string(&value).unwrap();
+        assert!(!text.contains("CANARY-A") && !text.contains("CANARY-B"));
+        let diag = diag.expect("diagnostic");
+        assert!(!diag.contains("CANARY-A") && !diag.contains("CANARY-B"));
+    }
+
+    #[test]
+    fn cookieless_handoff_starts_job_without_cookie_header() {
+        let mut state = HostState::production();
+        let (challenge, nonce) = consented_state(
+            &mut state,
+            "free",
+            "job:ext-free",
+            &["https://protected.example/"],
+            &[],
+            0,
+        );
+        let credential = serde_json::json!({
+            "kind": "credential",
+            "challenge": challenge,
+            "nonce": nonce,
+            "jobId": "job:ext-free",
+            "sourceUrl": "https://protected.example/item",
+            "origins": ["https://protected.example/"],
+            "cookies": [],
+        });
+        let (res, _) = state.handle(&serde_json::to_vec(&credential).unwrap(), 0, &mut || {
+            fresh_pair("x")
+        });
+        let value: serde_json::Value = serde_json::from_slice(&res).unwrap();
+        assert_eq!(
+            value.get("kind").and_then(|k| k.as_str()),
+            Some("job-started"),
+            "cookieless handoff must start: {value}"
+        );
+        let driver_job = value.get("job").and_then(|j| j.as_str()).unwrap();
+        let config = state.jobs.config_for(driver_job).unwrap();
+        assert!(
+            !config.user_headers.contains_key("cookie"),
+            "cookieless job must carry no cookie header"
+        );
+    }
+
+    #[test]
+    fn cookie_header_scoping_helpers() {
+        assert_eq!(
+            host_of("https://Example.com/item"),
+            Some("example.com".into())
+        );
+        assert_eq!(
+            host_of("https://example.com:8443/x"),
+            Some("example.com".into())
+        );
+        assert!(host_of("file:///etc/passwd").is_none());
+        assert!(host_of("https://user:pass@example.com/").is_none());
+        let cookies = vec![
+            CookieEntry {
+                name: "b".into(),
+                value: "2".into(),
+                origin: "https://a.example/".into(),
+            },
+            CookieEntry {
+                name: "a".into(),
+                value: "1".into(),
+                origin: "https://a.example/".into(),
+            },
+        ];
+        assert_eq!(
+            cookie_header_for_source("https://a.example/item", &cookies).as_deref(),
+            Some("a=1; b=2")
+        );
+        assert!(source_in_scope(
+            "https://a.example/item",
+            &["https://a.example/".to_string()]
+        ));
+        assert!(!source_in_scope(
+            "https://sibling.example/item",
+            &["https://a.example/".to_string()]
+        ));
     }
 }

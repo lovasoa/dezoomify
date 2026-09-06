@@ -23,6 +23,67 @@ export interface DesktopEventEnvelope {
   payload: Record<string, unknown>;
 }
 
+// Typed payload shapes emitted by the Rust shell (`jobs.rs` projection).
+// Every job payload carries both `job` and `jobId` aliases plus `seq` so
+// stale-job and stale-seq guards keep working. Only counts, hashes, codes,
+// and the redacted origin cross IPC; tile bytes, paths, full URLs, and
+// secrets never do.
+export interface JobStatePayload {
+  job: string;
+  jobId: string;
+  seq: number;
+  kind: string;
+  state: string;
+  detail: string;
+  origin: string;
+}
+
+export interface JobProgressPayload {
+  job: string;
+  jobId: string;
+  seq: number;
+  kind: string;
+  state: string;
+  acquired: number;
+  total: number;
+  detail: string;
+  origin: string;
+}
+
+export interface JobOutputPayload {
+  job: string;
+  jobId: string;
+  seq: number;
+  kind: string;
+  state: string;
+  outputHash: string;
+  format: string;
+  width: number;
+  height: number;
+  tileCount: number;
+  detail: string;
+  origin: string;
+}
+
+export interface JobErrorPayload {
+  job: string;
+  jobId: string;
+  seq: number;
+  kind: string;
+  state: string;
+  code: string;
+  phase: string;
+  retryable: boolean;
+  recovery: string;
+  message: string;
+  detail: string;
+  origin: string;
+  transport: string;
+  ["resource-kind"]?: string;
+  resource_kind?: string;
+  resourceKind?: string;
+}
+
 const FORBIDDEN_IPC_KEYS = new Set([
   "tilebytes",
   "tile_bytes",

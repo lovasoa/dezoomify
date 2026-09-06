@@ -212,6 +212,23 @@ test("desktop typescript stays host-neutral (no web/extension imports)", () => {
   assert.ok(/default\s*=\s*\[\]/m.test(cargo), "default features stay lean");
 });
 
+test("desktop fingerprint matches protocol-ts fingerprint (Rust/TS/schema agreement)", () => {
+  // Task 6.5: fingerprints match across Rust/TS/schema. The Rust generator
+  // (dto.rs) projects packages/protocol-ts; the desktop capability documents
+  // must carry the same fingerprint and protocol, or N/N-1 negotiation drifts.
+  const protoFp = readJson("../../../packages/protocol-ts/fingerprints.json");
+  const desktopCap = readJson("../../../generated/desktop-capabilities.json");
+  const x = xdezoomify(desktopCap);
+  assert.equal(x.fingerprint, protoFp.dto, "desktop fingerprint tracks Rust/TS dto fingerprint");
+  const desktopProto = desktopCap.protocol ?? x.protocol;
+  assert.equal(desktopProto.version ?? desktopProto, protoFp.protocol, "protocol version tracks");
+  assert.deepEqual(desktopProto, { max: "1.0", min: "1.0", version: "1.0" });
+  // Compat fixtures: single-version rollout per release/compatibility.toml.
+  const compat = readText("../../../release/compatibility.toml");
+  assert.ok(compat.includes('current = "1.0"'), "compat current is 1.0");
+  assert.ok(compat.includes('n_minus_1 = "1.0"'), "compat N-1 is 1.0");
+});
+
 test("desktop scenario transcript is minimal and redacted", () => {
   const result = readJson("../../../testdata/scenarios/desktop/basic/expected/result.json");
   assert.ok(Array.isArray(result.states) && result.states.length >= 2, "states");

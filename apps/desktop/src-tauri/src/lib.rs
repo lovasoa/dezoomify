@@ -9,6 +9,7 @@ pub mod deep_link;
 pub mod install_integration;
 pub mod jobs;
 pub mod native_host;
+pub mod settings;
 pub mod updater;
 
 // The real window shell is behind the `tauri` feature; the default build

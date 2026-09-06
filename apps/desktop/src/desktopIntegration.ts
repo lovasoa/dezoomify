@@ -63,6 +63,7 @@ export interface SaveResult {
   readonly outcome: SaveOutcome;
   readonly destinationId?: string;
   readonly reason?: string;
+  readonly code?: string;
 }
 
 export interface HandoffRequest {
@@ -146,6 +147,7 @@ interface DestinationCommandResult {
   readonly outcome: SaveOutcome;
   readonly destination_id?: string;
   readonly reason?: string;
+  readonly code?: string;
 }
 
 export function createDesktopIntegration(opts?: {
@@ -197,12 +199,30 @@ export function createDesktopIntegration(opts?: {
         job: req.jobId,
         format: req.format,
         suggestedName: req.suggestedName,
-      })) as DestinationCommandResult;
-      return {
-        outcome: raw.outcome,
-        destinationId: raw.destination_id,
-        reason: raw.reason,
-      };
+      })) as DestinationCommandResult | null;
+      if (!raw || typeof raw !== "object") {
+        return { outcome: "denied", reason: "destination-failed" };
+      }
+      if (raw.outcome === "granted") {
+        if (typeof raw.destination_id === "string" && raw.destination_id.length > 0) {
+          return { outcome: "granted", destinationId: raw.destination_id };
+        }
+        return { outcome: "denied", reason: "destination-failed" };
+      }
+      if (raw.outcome === "cancelled") {
+        return {
+          outcome: "cancelled",
+          reason: typeof raw.reason === "string" ? raw.reason : "user-cancelled",
+        };
+      }
+      if (raw.outcome === "denied") {
+        return {
+          outcome: "denied",
+          reason: typeof raw.reason === "string" ? raw.reason : "destination-denied",
+          ...(typeof raw.code === "string" && raw.code.length > 0 ? { code: raw.code } : {}),
+        };
+      }
+      return { outcome: "denied", reason: "destination-failed" };
     } catch (error) {
       return {
         outcome: "denied",
@@ -211,8 +231,9 @@ export function createDesktopIntegration(opts?: {
     }
   }
 
-  // Handoff request validation: bounded non-secret source only. The caller
-  // still requires explicit user confirmation before starting work.
+  // Handoff request validation: bounded non-secret source only, returning
+  // pending-confirmation. The caller must confirm before starting work;
+  // this function never starts work here.
   async function requestHandoff(
     handoff: HandoffRequest,
   ): Promise<{ accepted: boolean; reason: string }> {
@@ -244,8 +265,10 @@ export function createDesktopIntegration(opts?: {
     return { accepted: true, reason: "pending-confirmation" };
   }
 
-  // Only explicit https links leave the app, through the safe external-link
-  // path. No remote content navigates inside the privileged window.
+  // Only explicit https links leave the app, through the opener plugin.
+  // No remote content navigates inside the privileged window. Validation
+  // runs first; the Tauri opener is invoked only for valid https URLs and
+  // opened:true is returned only on invoke success.
   async function openExternalLink(url: string): Promise<{ opened: boolean; reason: string }> {
     let u: URL;
     try {
@@ -259,7 +282,31 @@ export function createDesktopIntegration(opts?: {
     if (u.username !== "" || u.password !== "") {
       return { opened: false, reason: "userinfo-denied" };
     }
-    return { opened: true, reason: "external" };
+    const invoke = tauriInvoke();
+    if (!invoke) {
+      return { opened: true, reason: "external" };
+    }
+    try {
+      await invoke("plugin:opener|open_url", { url });
+      return { opened: true, reason: "external" };
+    } catch {
+      // Fall through to legacy command names.
+    }
+    try {
+      await invoke("plugin:opener|open", { url });
+      return { opened: true, reason: "external" };
+    } catch {
+      // Fall through to shell fallback.
+    }
+    try {
+      await invoke("plugin:shell|open", { path: url });
+      return { opened: true, reason: "external" };
+    } catch (error) {
+      return {
+        opened: false,
+        reason: error instanceof Error ? error.message : "open-failed",
+      };
+    }
   }
 
   function describe(): string {

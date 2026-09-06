@@ -38,6 +38,14 @@
     ]
   },
   "identifier": "dev.ophir.dezoomify",
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://updates.dezoomify.example/stable/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": ""
+    }
+  },
   "productName": "Dezoomify",
   "version": "3.0.0"
 }

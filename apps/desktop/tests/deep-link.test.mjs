@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +28,24 @@ test("desktop metadata registers dezoomify protocol scheme", () => {
   assert.equal(conf.identifier, "dev.ophir.dezoomify");
 });
 
-test("rust deep-link tests exercise the parser vectors", () => {
+test("rust deep-link parser vectors pass (real parser)", () => {
+  // Runs the real parser: the vectors live in the #[cfg(test)] module next
+  // to parse_deep_link and drive it directly. This is the binding check;
+  // the source-string test below is only a supplement proving the vectors
+  // stayed beside the parser instead of drifting into a JS mirror.
+  const root = path.join(here, "..", "..", "..");
+  const run = spawnSync("cargo", ["test", "-p", "dezoomify-desktop", "--lib", "deep_link"], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 300_000,
+  });
+  assert.equal(run.status, 0, `cargo test deep_link failed:\n${run.stdout}\n${run.stderr}`);
+  const combined = `${run.stdout}\n${run.stderr}`;
+  assert.match(combined, /[0-9]+ passed/, "parser vectors ran");
+  assert.ok(!/failed/.test(combined) || /0 failed/.test(combined), "no parser vector failed");
+});
+
+test("rust deep-link tests exercise the parser vectors (supplement)", () => {
   // Glue check: the vectors this contract relies on must stay inside the
   // Rust test module, not in a JS mirror that never runs the parser.
   const src = readText("../src-tauri/src/deep_link.rs");

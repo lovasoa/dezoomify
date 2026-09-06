@@ -191,6 +191,24 @@ fn validate_source(src: &str) -> Result<(), DeepLinkError> {
     Ok(())
 }
 
+/// Scan process argv for the first `dezoomify://` deep-link candidate.
+///
+/// Second-instance forwarding and initial-launch handling share this scan:
+/// the OS delivers the link as a plain argv entry (`dezoomify://open?...`).
+/// The returned candidate is still untrusted input: callers must validate it
+/// with [`parse_deep_link`] and gate every effect with
+/// [`apply_after_confirmation`]. Returns `None` when no entry carries the
+/// scheme. Never performs an effect.
+pub fn find_deep_link_in_argv(argv: &[String]) -> Option<String> {
+    for arg in argv {
+        let candidate = arg.trim();
+        if candidate.starts_with(&format!("{DEEP_LINK_SCHEME}://")) {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
 /// Parse and validate one `dezoomify://open` URL. No effect is performed.
 pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     if url.len() > MAX_DEEP_LINK_LEN {
@@ -515,6 +533,26 @@ mod tests {
             parse_deep_link(&bad),
             Err(DeepLinkError::MalformedEncoding(_))
         ));
+    }
+
+    #[test]
+    fn argv_scan_finds_first_deep_link() {
+        let argv = vec![
+            "dezoomify-desktop".to_string(),
+            "--help".to_string(),
+            "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx".to_string(),
+        ];
+        assert_eq!(
+            find_deep_link_in_argv(&argv).as_deref(),
+            Some("dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx")
+        );
+        let none: Vec<String> = vec!["dezoomify-desktop".to_string()];
+        assert_eq!(find_deep_link_in_argv(&none), None);
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(find_deep_link_in_argv(&empty), None);
+        // Non-deep-link schemes are ignored.
+        let other = vec!["app".to_string(), "https://example.com/x".to_string()];
+        assert_eq!(find_deep_link_in_argv(&other), None);
     }
 
     #[test]

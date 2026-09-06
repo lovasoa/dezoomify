@@ -1,11 +1,23 @@
 // Signed updater metadata validator (pure Rust; ed25519-dalek, no system
 // libraries).
 //
-// Policy: HTTPS-only allowlisted endpoints, signed metadata required,
+// Policy: HTTPS-only allowlisted endpoints, signed metadata required
+// (strict ed25519 over the canonical dezoomify-updater-v1 message),
 // anti-rollback (candidate must be newer than installed), stale timestamps
-// rejected, and explicit user confirmation before staging anything. The app
+// rejected after 7 days, future timestamps rejected beyond +300s clock
+// skew, and explicit user confirmation before staging anything. The app
 // keeps working when metadata is missing, delayed, older, or newer than
 // store versions. Unsigned packages are never staged or executed.
+//
+// Production endpoint and key status: the real update host and the
+// production public key are still TBD. The allowlist keeps the placeholder
+// `updates.dezoomify.example` HTTPS shape until the real host lands; the
+// production public key follows the `release/gpg-public-key.asc` pattern
+// (a new `release/updater-public-key.*` file, never a test key).
+// TODO(task-3.4-updater-e2e, apps/desktop/src-tauri/src/updater.rs:20):
+// replace the placeholder host and wire the production public key from
+// release config once the real update host and key exist; keep this
+// allowlist shape and the capability `updater.allowlist` entries in sync.
 
 use ed25519_dalek::{Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
 
@@ -15,6 +27,19 @@ pub const UPDATER_ALLOWLIST_HOSTS: &[&str] = &["updates.dezoomify.example"];
 pub const UPDATER_CHANNEL: &str = "stable";
 /// Maximum metadata age in seconds before it counts as stale (7 days).
 pub const UPDATER_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+/// Future clock-skew tolerance in seconds (timestamps beyond now + skew).
+pub const UPDATER_FUTURE_SKEW_SECS: u64 = 300;
+/// Full allowlisted endpoint template mirrored into
+/// `apps/desktop/src-tauri/tauri.conf.json` (`plugins.updater.endpoints`)
+/// and `release/config.toml` (`[updater]`). The host stays within
+/// `UPDATER_ALLOWLIST_HOSTS`; HTTPS only.
+pub const UPDATER_ENDPOINTS: &[&str] =
+    &["https://updates.dezoomify.example/stable/{{target}}/{{arch}}/{{current_version}}"];
+/// Production updater public key for `tauri-plugin-updater` (minisign form
+/// carries the same ed25519 key that `validate_update` verifies as hex).
+/// TBD: empty until the real key lands; empty never validates (fail
+/// closed). Test keys live in `#[cfg(test)]` only, never here.
+pub const UPDATER_PUBKEY: &str = "";
 
 /// Candidate update metadata (parsed, non-secret fields only).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,7 +140,7 @@ pub fn validate_update(
         return Err("updater.rejected: tampered hash".to_string());
     }
     // Stale timestamps never stage.
-    if candidate.timestamp > now_secs.saturating_add(300) {
+    if candidate.timestamp > now_secs.saturating_add(UPDATER_FUTURE_SKEW_SECS) {
         return Err("updater.rejected: timestamp in the future".to_string());
     }
     if now_secs.saturating_sub(candidate.timestamp) > UPDATER_MAX_AGE_SECS {
@@ -285,5 +310,150 @@ mod tests {
         foreign.url = "https://evil.example/desktop/0.2.0/bundle".to_string();
         foreign.signature = Some(sign(&signing, &foreign));
         assert!(validate_update("0.1.0", &foreign, 1_700_000_100, &verifying).is_err());
+    }
+
+    #[test]
+    fn http_scheme_rejected_even_when_signed() {
+        let (signing, verifying) = test_keypair();
+        let mut http = valid();
+        http.url = "http://updates.dezoomify.example/desktop/0.2.0/bundle".to_string();
+        http.signature = Some(sign(&signing, &http));
+        let err = validate_update("0.1.0", &http, 1_700_000_100, &verifying).unwrap_err();
+        assert!(err.contains("https required"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn malformed_hash_rejected_even_when_signed() {
+        let (signing, verifying) = test_keypair();
+        let mut bad_hash = valid();
+        bad_hash.sha256 = "00".to_string();
+        bad_hash.signature = Some(sign(&signing, &bad_hash));
+        let err = validate_update("0.1.0", &bad_hash, 1_700_000_100, &verifying).unwrap_err();
+        assert!(err.contains("tampered hash"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn stale_metadata_rejected_even_when_signed() {
+        let (signing, verifying) = test_keypair();
+        let now = 1_700_000_100u64;
+        let mut stale = valid();
+        stale.timestamp = now - UPDATER_MAX_AGE_SECS - 1;
+        stale.signature = Some(sign(&signing, &stale));
+        let err = validate_update("0.1.0", &stale, now, &verifying).unwrap_err();
+        assert!(err.contains("stale metadata"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn future_timestamp_rejected_even_when_signed() {
+        let (signing, verifying) = test_keypair();
+        let now = 1_700_000_100u64;
+        let mut future = valid();
+        future.timestamp = now + UPDATER_FUTURE_SKEW_SECS + 1;
+        future.signature = Some(sign(&signing, &future));
+        let err = validate_update("0.1.0", &future, now, &verifying).unwrap_err();
+        assert!(err.contains("in the future"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn stale_and_future_boundaries_hold() {
+        let (signing, verifying) = test_keypair();
+        let now = 1_700_000_100u64;
+        // Exactly at the bounds still validates (rejection is strictly beyond).
+        let mut fresh_edge = valid();
+        fresh_edge.timestamp = now - UPDATER_MAX_AGE_SECS;
+        fresh_edge.signature = Some(sign(&signing, &fresh_edge));
+        assert_eq!(
+            validate_update("0.1.0", &fresh_edge, now, &verifying),
+            Ok(true)
+        );
+        let mut skew_edge = valid();
+        skew_edge.timestamp = now + UPDATER_FUTURE_SKEW_SECS;
+        skew_edge.signature = Some(sign(&signing, &skew_edge));
+        assert_eq!(
+            validate_update("0.1.0", &skew_edge, now, &verifying),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn rollback_and_same_version_rejected_even_when_signed() {
+        let (signing, verifying) = test_keypair();
+        let mut rollback = valid();
+        rollback.version = "0.0.9".to_string();
+        rollback.signature = Some(sign(&signing, &rollback));
+        let err = validate_update("0.1.0", &rollback, 1_700_000_100, &verifying).unwrap_err();
+        assert!(err.contains("rollback"), "unexpected error: {err}");
+        let mut same = valid();
+        same.version = "0.1.0".to_string();
+        same.signature = Some(sign(&signing, &same));
+        let err = validate_update("0.1.0", &same, 1_700_000_100, &verifying).unwrap_err();
+        assert!(err.contains("rollback"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn malformed_version_and_url_rejected_even_when_signed() {
+        let (signing, verifying) = test_keypair();
+        let mut bad_version = valid();
+        bad_version.version = "not-a-version".to_string();
+        bad_version.signature = Some(sign(&signing, &bad_version));
+        let err = validate_update("0.1.0", &bad_version, 1_700_000_100, &verifying).unwrap_err();
+        assert!(err.contains("malformed version"), "unexpected error: {err}");
+        let mut bad_url = valid();
+        bad_url.url = "not a url".to_string();
+        bad_url.signature = Some(sign(&signing, &bad_url));
+        assert!(validate_update("0.1.0", &bad_url, 1_700_000_100, &verifying).is_err());
+    }
+
+    #[test]
+    fn malformed_public_key_never_validates() {
+        assert!(parse_public_key("").is_err());
+        assert!(parse_public_key("zzzz").is_err());
+        assert!(parse_public_key(UPDATER_PUBKEY).is_err());
+    }
+
+    #[test]
+    fn production_pubkey_placeholder_never_validates() {
+        // The TBD placeholder must stay fail-closed until the real key lands.
+        assert_eq!(UPDATER_PUBKEY, "");
+    }
+
+    #[test]
+    fn missing_delayed_older_metadata_never_stages_app_keeps_working() {
+        let (signing, verifying) = test_keypair();
+        // Missing signature: no staging, caller sees Err and continues.
+        let missing = valid();
+        assert!(validate_update("0.1.0", &missing, 1_700_000_100, &verifying).is_err());
+        // Delayed (stale) metadata: no staging, app keeps running.
+        let mut delayed = valid();
+        delayed.timestamp = 1_600_000_000;
+        delayed.signature = Some(sign(&signing, &delayed));
+        assert!(validate_update("0.1.0", &delayed, 1_700_000_100, &verifying).is_err());
+        // Older candidate than installed: no staging, app keeps running.
+        let mut older = valid();
+        older.version = "0.0.1".to_string();
+        older.signature = Some(sign(&signing, &older));
+        assert!(validate_update("0.1.0", &older, 1_700_000_100, &verifying).is_err());
+        // Newer-but-unsigned candidate: still never stages.
+        let mut newer_unsigned = valid();
+        newer_unsigned.version = "9.9.9".to_string();
+        newer_unsigned.signature = None;
+        assert!(validate_update("0.1.0", &newer_unsigned, 1_700_000_100, &verifying).is_err());
+    }
+
+    #[test]
+    fn endpoints_stay_within_allowlist_https_shape() {
+        assert!(!UPDATER_ENDPOINTS.is_empty());
+        assert_eq!(UPDATER_CHANNEL, "stable");
+        for endpoint in UPDATER_ENDPOINTS {
+            assert!(
+                endpoint.starts_with("https://"),
+                "endpoint must be https: {endpoint}"
+            );
+            let host = url_host(endpoint).expect("endpoint must parse");
+            assert!(
+                UPDATER_ALLOWLIST_HOSTS.contains(&host.as_str()),
+                "endpoint host not allowlisted: {host}"
+            );
+        }
     }
 }

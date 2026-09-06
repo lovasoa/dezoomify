@@ -32,14 +32,18 @@ fn best_effort_register() {
     if home.is_empty() || sibling.is_empty() {
         return;
     }
-    // Best-effort only: installer failures must not block the window.
-    let _ = dezoomify_desktop::install_integration::install_native_manifests(
+    // Best-effort only: log to stderr, never block the window.
+    if let Err(e) = dezoomify_desktop::install_integration::install_native_manifests(
         &home,
         &sibling,
         dezoomify_desktop::install_integration::CHROMIUM_RELEASE_EXTENSION_ID,
         dezoomify_desktop::install_integration::FIREFOX_RELEASE_EXTENSION_ID,
-    );
-    let _ = dezoomify_desktop::install_integration::install_protocol_handler(&home, &exe);
+    ) {
+        eprintln!("dezoomify-desktop: best-effort native manifest registration failed: {e}");
+    }
+    if let Err(e) = dezoomify_desktop::install_integration::install_protocol_handler(&home, &exe) {
+        eprintln!("dezoomify-desktop: best-effort protocol registration failed: {e}");
+    }
 }
 
 #[cfg(not(feature = "tauri"))]
@@ -99,7 +103,8 @@ fn main() {
             }
         }
         Some("--check-native-host") => {
-            let home = home_dir().unwrap_or_default();
+            let home =
+                flag_value(&args, "--home").unwrap_or_else(|| home_dir().unwrap_or_default());
             let mut found = 0;
             for path in checked_manifest_paths(&home) {
                 match std::fs::read_to_string(&path) {
@@ -113,37 +118,65 @@ fn main() {
                     Err(_) => println!("absent: {path}"),
                 }
             }
+            #[cfg(windows)]
+            {
+                for key in dezoomify_desktop::install_integration::windows_managed_keys() {
+                    let present = std::process::Command::new("reg")
+                        .args(["query", &key, "/ve"])
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+                    if present {
+                        println!("registered: {key}");
+                        found += 1;
+                    } else {
+                        println!("absent: {key}");
+                    }
+                }
+            }
             if found == 0 {
                 println!("not registered");
             }
         }
         Some("--unregister-native-host") => {
-            let home = home_dir().unwrap_or_default();
-            let mut removed = 0;
-            for path in checked_manifest_paths(&home) {
-                let ours = std::fs::read_to_string(&path)
-                    .map(|text| dezoomify_desktop::install_integration::is_our_manifest_text(&text))
-                    .unwrap_or(false)
-                    || std::path::Path::new(&path).file_name().is_some_and(|n| {
-                        n.to_string_lossy() == "dev.ophir.dezoomify.native_host.json"
-                    });
-                if !ours {
-                    continue;
-                }
-                match std::fs::remove_file(&path) {
-                    Ok(()) => {
+            let home =
+                flag_value(&args, "--home").unwrap_or_else(|| home_dir().unwrap_or_default());
+            // Safe removal lives in the library: parseable ours, or
+            // unparseable with our exact file name (truncated write).
+            // Parseable foreign is never deleted, even if the file name
+            // matches ours (squatter survives uninstall).
+            match dezoomify_desktop::install_integration::uninstall_native_manifests(&home) {
+                Ok(removed) => {
+                    for path in &removed {
                         println!("removed: {path}");
-                        removed += 1;
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => {
-                        eprintln!("failed to remove {path}: {e}");
-                        std::process::exit(1);
+                    #[cfg(windows)]
+                    let mut removed_count = removed.len();
+                    #[cfg(not(windows))]
+                    let removed_count = removed.len();
+                    #[cfg(windows)]
+                    {
+                        match dezoomify_desktop::install_integration::uninstall_windows_registry() {
+                            Ok(keys) => {
+                                for key in &keys {
+                                    println!("removed: {key}");
+                                }
+                                removed_count += keys.len();
+                            }
+                            Err(e) => {
+                                eprintln!("failed to remove windows registry keys: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    if removed_count == 0 {
+                        println!("nothing registered");
                     }
                 }
-            }
-            if removed == 0 {
-                println!("nothing registered");
+                Err(e) => {
+                    eprintln!("failed to unregister: {e}");
+                    std::process::exit(1);
+                }
             }
         }
         Some(other) => {
@@ -192,20 +225,8 @@ fn sibling_host_path(exe: &str) -> String {
 
 #[cfg(not(feature = "tauri"))]
 fn checked_manifest_paths(home: &str) -> Vec<String> {
-    use dezoomify_desktop::install_integration as install;
-    if home.is_empty() {
-        return Vec::new();
-    }
-    match std::env::consts::OS {
-        "linux" => vec![
-            install::linux_chromium_manifest_path(home),
-            install::linux_chrome_manifest_path(home),
-            install::linux_firefox_manifest_path(home),
-        ],
-        "macos" => vec![
-            install::macos_chromium_manifest_path(home),
-            install::macos_firefox_manifest_path(home),
-        ],
-        _ => Vec::new(),
-    }
+    // Single source of truth for per-user destinations (Linux
+    // ~/.config/chromium + ~/.config/google-chrome + ~/.mozilla, macOS
+    // ~/Library/..., Windows HKCU via reg.exe so no file paths there).
+    dezoomify_desktop::install_integration::manifest_paths_for_home(home)
 }
