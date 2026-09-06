@@ -176,21 +176,17 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
     "High-performance native application for gigapixel museum artworks and local scans",
     `
       <div class="dz-modal-download-box">
-        <a class="dz-btn-download-primary" href="https://github.com/lovasoa/dezoomify/releases/latest" target="_blank" rel="noopener">
-          <span>${escapeHtml(p.label)}</span>
-          <span style="font-size: 0.82rem; font-weight: 400; opacity: 0.85;">(${escapeHtml(p.file)} from GitHub Releases)</span>
-        </a>
-        <div style="margin-top: 0.65rem; font-size: 0.85rem; color: var(--dz-text-muted);">
-          Also available for Windows, macOS, and Linux on
-          <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">GitHub Releases</a>
+        <div style="font-size: 0.9rem; color: var(--dz-text-muted);">
+          No installer ships yet. A future installer for ${escapeHtml(p.name)} will appear on
+          <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">GitHub Releases</a>.
         </div>
       </div>
 
       <div class="dz-modal-section">
         <div class="dz-modal-section-title">Why use the Desktop App?</div>
         <ul class="dz-modal-list">
-          <li><strong>Handles Gigapixel Artworks:</strong> Web browsers enforce strict memory limits (often 2 GB per tab). The Desktop App runs natively on your machine to assemble arbitrarily large gigapixel images with zero memory ceilings.</li>
-          <li><strong>Lossless &amp; High-Quality Output:</strong> Direct output to uncompressed TIFF, high-quality PNG, or JPEG without browser blob allocation limits.</li>
+          <li><strong>Handles Larger Artworks:</strong> Web browsers enforce strict memory limits (often 2 GB per tab). The Desktop App runs natively on your machine with single-job PNG output to a file, assembling images in memory up to an 8 GiB canvas limit (needing matching free memory).</li>
+          <li><strong>Lossless Output:</strong> Direct PNG output without browser blob allocation limits.</li>
           <li><strong>Multi-Threaded Performance:</strong> Retrieves and composites tiles in parallel using native multi-core CPU scheduling.</li>
         </ul>
       </div>
@@ -200,7 +196,7 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
         <div class="dz-modal-steps">
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">1</span>
-            <div>Save the native installer for ${escapeHtml(p.name)} from our GitHub Releases page.</div>
+            <div>No installer ships yet; a future installer for ${escapeHtml(p.name)} will appear on our GitHub Releases page.</div>
           </div>
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">2</span>
@@ -215,10 +211,10 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
 
       <div class="dz-modal-cli-box">
         <div class="dz-modal-cli-header">
-          <strong>Need automation or batch processing? Try the Dezoomify CLI</strong>
+          <strong>Need automation? Try the Dezoomify CLI</strong>
         </div>
         <p class="dz-modal-cli-desc">
-          The CLI provides headless, scriptable saving ideal for automated pipelines, server environments, or batch saving hundreds of artworks from lists without a GUI.
+          The CLI provides headless, scriptable single-job saving ideal for automated pipelines and server environments without a GUI.
         </p>
         <div class="dz-modal-cli-links">
           <a href="https://github.com/lovasoa/dezoomify/releases/latest" target="_blank" rel="noopener" class="dz-btn-secondary" style="height: 32px; font-size: 0.85rem;">
@@ -253,16 +249,16 @@ export function showExtensionGuidance(hostDocument: Document): void {
             <div style="font-weight: 700; font-size: 0.98rem;">Chrome Web Store</div>
           </div>
         </a>
-        <a href="https://addons.mozilla.org/en-US/firefox/addon/dezoomify/" target="_blank" rel="noopener" class="dz-btn-store">
+        <div class="dz-btn-store" aria-disabled="true">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="12" cy="12" r="10"></circle>
             <path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12c0-2.5 1-4.8 2.6-6.5C7.2 9 8 13 12 14c0-2 1-3.5 2.5-4.5C13 8 11.5 6 12 2z"></path>
           </svg>
           <div>
-            <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.8;">Get for</div>
-            <div style="font-weight: 700; font-size: 0.98rem;">Firefox Add-ons</div>
+            <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.8;">Firefox version</div>
+            <div style="font-weight: 700; font-size: 0.98rem;">On its way</div>
           </div>
-        </a>
+        </div>
       </div>
 
       <div class="dz-modal-section">
@@ -279,7 +275,7 @@ export function showExtensionGuidance(hostDocument: Document): void {
         <div class="dz-modal-steps">
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">1</span>
-            <div>Install the extension from the Chrome Web Store or Firefox Add-ons.</div>
+            <div>Install the extension from the Chrome Web Store. The Firefox version is on its way.</div>
           </div>
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">2</span>
@@ -1041,7 +1037,7 @@ function mountFailedSection(
             <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
             <span class="dz-guidance-item-title">Desktop App Guide</span>
           </div>
-          <span class="dz-guidance-item-desc">For gigapixel images that exceed browser memory limits. Processes natively on your computer.</span>
+          <span class="dz-guidance-item-desc">For images that exceed browser memory limits, within an 8 GiB canvas cap (needing matching free memory). Processes natively on your computer.</span>
         </button>
         <a class="dz-guidance-item" href="https://dezoomify.ophir.dev/help/finding-the-image-address.html" target="_blank" rel="noopener">
           <div class="dz-guidance-item-header">
