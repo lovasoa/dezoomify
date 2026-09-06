@@ -50,6 +50,18 @@ extension-to-native cookie handoff is separately consent-gated. It connects
 `packages/shared-ui` to
 `crates/dezoomify-wasm` on the website and in the extension.
 
+### Metadata CORS proxy
+
+The metadata relay is one pure module, `src/server/proxy.ts`
+(`handleProxyRequest`), with three thin host adapters around it:
+`functions/api/proxy.ts` (Cloudflare Pages Function),
+`src/server/proxy-node.ts` (Node HTTP, used by the local dev server), and the
+`node:test` seam in `test/proxy-*.test.mjs`. Each adapter translates its host
+transport to the same relay call, so the SSRF, credential, redirect, size,
+content-type, and CORS policy is identical in tests, local development, and
+production. The dev server (`scripts/dev-server.mjs`) serves the assembled
+`dist/` tree and routes `/api/proxy` to the Node adapter.
+
 ### Support workspaces
 
 `packages/protocol-ts` contains generated TypeScript protocol bindings. `crates/fixture-server` serves controlled origins, `testdata/scenarios` contains shared declarative cases, and `crates/xtask` owns repository generation and validation tasks.

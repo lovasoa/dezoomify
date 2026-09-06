@@ -185,9 +185,11 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
         "src/proxyTransport.ts",
         "src/worker.js",
         "src/server/proxy.ts",
+        "src/server/proxy-node.ts",
         "functions/proxy.js",
         "functions/api/proxy.ts",
         "src/server/security.ts",
+        "scripts/dev-server.mjs",
         "packages/shared-ui/src/controller.ts",
     ] {
         if !super::repo_root().join(rel).is_file() {
@@ -313,8 +315,9 @@ fn dist_fresh() -> bool {
 }
 
 /// Shared-UI and website development: build the full site (mirrors, wasm
-/// glue, dist tree) and serve it on loopback through the deterministic
-/// fixture server, exactly as deployed.
+/// glue, dist tree) and serve it on loopback through the Node dev server
+/// (static files plus the same /api/proxy relay as production), exactly as
+/// deployed.
 fn dev_web(args: &[String]) -> Result<(), String> {
     let no_wasm = parse_dev_site_args("dev web", args)?;
     if dist_fresh() {
@@ -344,33 +347,21 @@ fn dev_ui(args: &[String]) -> Result<(), String> {
 
 fn serve_dist(port: u16, label: &str) -> Result<(), String> {
     let root = super::repo_root();
-    let bin = root.join("target/debug/dezoomify-fixture-server");
-    if !bin.exists() {
-        let status = Command::new("cargo")
-            .args(["build", "-p", "dezoomify-fixture-server"])
-            .current_dir(&root)
-            .status()
-            .map_err(|e| format!("failed to run cargo: {e}"))?;
-        if !status.success() {
-            return Err("fixture server build failed".to_string());
-        }
-    }
     let dist = root.join("dist");
     if !dist.exists() {
         return Err("dist/ missing after the site build".to_string());
     }
-    let mut child = Command::new(&bin)
+    let mut child = Command::new("node")
         .args([
+            "scripts/dev-server.mjs",
             "--port",
             &port.to_string(),
             "--static-dir",
             &dist.display().to_string(),
-            "--scenarios-dir",
-            &root.join("testdata/scenarios").display().to_string(),
         ])
         .current_dir(&root)
         .spawn()
-        .map_err(|e| format!("failed to start the fixture server: {e}"))?;
+        .map_err(|e| format!("failed to start the dev server: {e}"))?;
     println!(
         "{label}: serving http://127.0.0.1:{port}/ (Ctrl-C to stop; the server exits with the task)"
     );

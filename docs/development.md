@@ -119,6 +119,12 @@ prints its URLs and cleanup instructions:
 | `desktop` | the real Tauri development application; fails closed with the webview system package list when they are missing |
 | `extension` | an unpacked load staged from the sources and a Chromium launch with an isolated throwaway profile; chromium engine only, other engines fail closed |
 
+`dev web` and `dev ui` serve the assembled `dist/` tree through
+`scripts/dev-server.mjs`: a loopback static server plus the same `POST`/`OPTIONS
+/api/proxy` metadata relay that Cloudflare runs from `functions/api/proxy.ts`
+(the relay core lives once in `src/server/proxy.ts`). Nothing extra is
+installed; the app is fully functional from `cargo xtask dev web` alone.
+
 For example, use `cargo xtask dev extension --browser chromium` or
 `cargo xtask dev web`. Start standalone deterministic origins with
 `cargo xtask fixtures serve --port 0`. Development commands bind local services
