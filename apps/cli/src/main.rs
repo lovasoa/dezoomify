@@ -237,7 +237,8 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
         }
     }
     // `--largest` (or bulk-implied largest) selects the uncapped level,
-    // mirroring the reference `should_use_largest` rule.
+    // mirroring the reference `should_use_largest` rule. The `largest` flag
+    // itself is also passed through so size caps are ignored natively.
     let max_width = if parsed.should_use_largest() {
         None
     } else {
@@ -246,9 +247,20 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     PipelineConfig {
         user_headers,
         max_width,
+        max_height: parsed.max_height,
+        zoom_level: parsed.zoom_level,
+        image_index: parsed.image_index,
+        largest: parsed.should_use_largest(),
+        max_concurrent: parsed.parallelism,
         max_retries: parsed.retries,
+        retry_delay: parsed.retry_delay,
+        min_interval: parsed.min_interval,
+        compression: parsed.compression,
         cache_dir: parsed.tile_cache.clone(),
         fetch: FetchLimits {
+            timeout: parsed.timeout,
+            connect_timeout: parsed.connect_timeout,
+            max_idle_per_host: parsed.max_idle_per_host,
             tls: TlsPolicy {
                 accept_invalid_certs: parsed.accept_invalid_certs,
             },
@@ -258,6 +270,13 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     }
 }
 
+/// Honest notices for selectors the native pipeline handles by fallback.
+/// Every other flag above is wired through [`pipeline_config_for`]: level
+/// caps and exact `--zoom-level`/`--image-index`/`--largest`, `parallelism`
+/// as `max_concurrent`, `retry_delay`, `compression` as JPEG quality
+/// `100 - compression` plus PNG tiers, `timeout`/`connect-timeout`,
+/// `max_idle_per_host`, and per-tile `min_interval` staggering (bulk
+/// inter-image pacing still uses the local `Throttler` with the same value).
 fn warn_selection_gaps(parsed: &Args) {
     if parsed.dezoomer != "auto" {
         eprintln!(
@@ -265,70 +284,15 @@ fn warn_selection_gaps(parsed: &Args) {
             parsed.dezoomer
         );
     }
-    if let Some(height) = parsed.max_height {
-        eprintln!(
-            "warning: --max-height {height} is parsed but level selection is width-only in native; ignoring the height cap"
-        );
-    }
-    if let Some(level) = parsed.zoom_level {
-        eprintln!(
-            "warning: --zoom-level {level} is parsed but exact level selection needs native support; saving the automatic level"
-        );
-    }
-    if parsed.parallelism != 16 {
-        eprintln!(
-            "warning: --parallelism {} is parsed but concurrency needs native support; continuing with 6 concurrent tile fetches",
-            parsed.parallelism
-        );
-    }
-    if parsed.retry_delay != std::time::Duration::from_secs(2) {
-        eprintln!(
-            "warning: --retry-delay is parsed but retry timing needs native support; continuing with engine defaults"
-        );
-    }
-    if parsed.compression != 5 {
-        eprintln!(
-            "warning: --compression {} is parsed but quality control needs native support; encoding JPEG at quality 92",
-            parsed.compression
-        );
-    }
-    if parsed.max_idle_per_host != 32 {
-        eprintln!(
-            "warning: --max-idle-per-host {} is parsed but connection pooling needs native support; ignoring",
-            parsed.max_idle_per_host
-        );
-    }
-    if parsed.timeout != std::time::Duration::from_secs(30) {
-        eprintln!(
-            "warning: --timeout is parsed but timeout tuning needs native support; continuing with a 60s timeout"
-        );
-    }
-    if parsed.connect_timeout != std::time::Duration::from_secs(6) {
-        eprintln!(
-            "warning: --connect-timeout is parsed but timeout tuning needs native support; continuing with a 15s connect timeout"
-        );
-    }
     if parsed.logging != "info" {
         eprintln!(
-            "warning: --logging {} is parsed but verbosity control needs native support; reporting through human lines plus --json",
+            "warning: --logging {} is parsed but verbosity is fixed; reporting through human lines on stderr plus --json on stdout",
             parsed.logging
         );
     }
     if parsed.retries == 0 {
         eprintln!(
-            "warning: --retries 0 is parsed but the job engine clamps to at least 1 retry; continuing with 1"
-        );
-    }
-    if let Some(index) = parsed.image_index {
-        if index != 0 {
-            eprintln!(
-                "warning: --image-index {index} is parsed but the native driver currently resolves the first catalog entry; saving the first image"
-            );
-        }
-    }
-    if !parsed.min_interval.is_zero() && !parsed.is_bulk_mode() {
-        eprintln!(
-            "warning: --min-interval is parsed but per-tile throttling needs native support; continuing without delay"
+            "warning: --retries 0 is parsed; the job engine floor of 1 is emulated with no refetch (no second request is sent)"
         );
     }
 }
