@@ -3,7 +3,9 @@
 //! [`JobResponse`] is the lean test-oriented input enum: every variant carries
 //! its owning `job` id so wrong-job correlation is rejected without state
 //! corruption. Effects and events are `serde_json::Value` objects with
-//! `{kind, seq, job}` plus correlation ids.
+//! `{kind, seq, job}` plus correlation ids. This lean projection keeps the
+//! engine testable without host I/O; the cross-host wire truth remains
+//! `dezoomify-protocol` DTOs, which the WASM adapter projects onto.
 
 use serde::{Deserialize, Serialize};
 

@@ -8,9 +8,12 @@ use std::path::{Path, PathBuf};
 
 pub const CACHE_VERSION: u32 = 1;
 
+/// FNV-1a 64-bit offset basis (standard constant, also used for protocol fingerprints).
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+
 #[must_use]
 pub fn cache_key(uri: &str) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut hash: u64 = FNV_OFFSET_BASIS;
     for b in uri.bytes() {
         hash ^= u64::from(b);
         hash = hash.wrapping_mul(0x100000001b3);

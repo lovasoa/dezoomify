@@ -8,6 +8,9 @@ use crate::dto::{CapabilitiesDto, PROTOCOL_VERSION};
 pub const GENERATED_MARKER: &str =
     "// DO NOT EDIT: generated from crates/dezoomify-protocol/src/dto.rs";
 
+/// FNV-1a 64-bit offset basis (standard constant, also used for cache keys).
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+
 /// Stable fingerprint of the canonical DTO source (first 16 hex of a
 /// deterministic hash over DTO names + version).
 #[must_use]
@@ -15,7 +18,7 @@ pub fn dto_fingerprint() -> String {
     let seed = format!(
         "protocol={PROTOCOL_VERSION};ids=sess,scan,cand,job,op,req,img,lvl,tile,att,fx,buf,dst,out,rec,hand;messages=command,effect,event,scan,handoff,error"
     );
-    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut hash: u64 = FNV_OFFSET_BASIS;
     for b in seed.bytes() {
         hash ^= u64::from(b);
         hash = hash.wrapping_mul(0x100000001b3);
