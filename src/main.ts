@@ -52,6 +52,64 @@ export const BROWSER_MAX_CANVAS_AREA = 268435456;
  */
 export const DIRECT_METADATA_TIMEOUT_MS = 250;
 
+/**
+ * Tile politeness + resilience (todo 5.2). At most 5 tile request starts per
+ * second per host (legacy ZoomManager.MAX_REQUESTS_PER_SECOND parity:
+ * 1000/5 ms spacing between starts). The 4-worker pool below is unchanged;
+ * starts for the same host are staggered through a per-host chain so the
+ * 4 parallel workers still cap at 5/s combined, they do not each get 5/s.
+ * Each tile retries twice (3 attempts) with exponential backoff + jitter;
+ * the exhausted failure still maps to TILE_FAILED (never a display string).
+ */
+export const TILE_MAX_REQUESTS_PER_SECOND = 5;
+export const TILE_MIN_INTERVAL_MS = 1000 / TILE_MAX_REQUESTS_PER_SECOND;
+export const TILE_MAX_RETRIES = 2;
+export const TILE_RETRY_BASE_MS = 250;
+
+function tileHostOf(url: string): string {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const tileThrottleLast = new Map<string, number>();
+const tileThrottleQueue = new Map<string, Promise<void>>();
+
+/**
+ * Stagger tile request starts per host to <=5/s. Chained per host so the
+ * parallel workers share one spacing clock: each starter waits for the
+ * previous starter for that host, enforces the 200 ms gap, then releases
+ * the next waiter.
+ */
+function throttleTileStart(url: string): Promise<void> {
+  const host = tileHostOf(url) || "global";
+  const prev = tileThrottleQueue.get(host) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  tileThrottleQueue.set(host, current);
+  const run = (async () => {
+    await prev;
+    const now = Date.now();
+    const last = tileThrottleLast.get(host) ?? 0;
+    const wait = TILE_MIN_INTERVAL_MS - (now - last);
+    if (wait > 0) await sleep(wait);
+    tileThrottleLast.set(host, Date.now());
+  })();
+  return run.finally(release);
+}
+
+function tileRetryDelayMs(retryIndex: number): number {
+  return TILE_RETRY_BASE_MS * Math.pow(2, retryIndex) + Math.random() * 100;
+}
+
 // --- Live job activity (drives the progressive-disclosure job view) ---
 let requestSeq = 0;
 const pendingStarts = new Map<number, { startedAt: number; label: string }>();
@@ -452,17 +510,28 @@ async function fetchMetadataFor(
 }
 
 async function fetchTileFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }> {
-  const direct = await fetchDirect(url, headers);
-  if (direct.outcome !== "readable" || !direct.bytes) {
-    throw failure(
-      "TILE_FAILED",
-      "Part of the image could not be saved. Try again in a moment.",
-      true,
-      undefined,
-      `tile fetch: ${direct.outcome} (HTTP ${direct.status ?? "n/a"}) from ${shortUrl(url)}`,
-    );
+  let lastOutcome = "network-error";
+  let lastStatus: number | undefined;
+  for (let attempt = 0; ; attempt++) {
+    await throttleTileStart(url);
+    const direct = await fetchDirect(url, headers);
+    if (direct.outcome === "readable" && direct.bytes) {
+      return { bytes: direct.bytes };
+    }
+    lastOutcome = direct.outcome;
+    lastStatus = direct.status;
+    if (direct.outcome === "cancelled" || attempt >= TILE_MAX_RETRIES) {
+      break;
+    }
+    await sleep(tileRetryDelayMs(attempt));
   }
-  return { bytes: direct.bytes };
+  throw failure(
+    "TILE_FAILED",
+    "Part of the image could not be saved. Try again in a moment.",
+    true,
+    undefined,
+    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) from ${shortUrl(url)} after ${TILE_MAX_RETRIES + 1} attempts`,
+  );
 }
 
 async function probeSizeFor(
