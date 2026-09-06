@@ -58,7 +58,6 @@ const pendingStarts = new Map<number, { startedAt: number; label: string }>();
 let completedRequests = 0;
 let failedRequests = 0;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-let suppressHashWrite = false;
 
 function activity(): NonNullable<ViewContext["jobActivity"]> {
   if (!viewCtx.jobActivity) viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
@@ -508,7 +507,7 @@ function reportProgress(current: number, total: number, message: string): void {
 }
 
 function writeHash(url: string): void {
-  if (suppressHashWrite || typeof window === "undefined" || !window.location) return;
+  if (typeof window === "undefined" || !window.location) return;
   try {
     // Legacy contract: the hash body IS the target URL (`#https://…`).
     window.location.hash = buildHash(url);
@@ -654,7 +653,7 @@ async function runJob(url: string): Promise<void> {
     }
     const width = plan.canvas ? plan.canvas.x : 0;
     const height = plan.canvas ? plan.canvas.y : 0;
-    if (!(width > 0 && height > 0 && width * height <= 268435456)) {
+    if (!(width > 0 && height > 0 && width * height <= BROWSER_MAX_CANVAS_AREA)) {
       throw failure(
         "PLAN_INVALID",
         "The image size could not be determined.",
@@ -891,7 +890,6 @@ if (appContainer) {
       const raw = parseHash(window.location.hash);
       const current = viewCtx.jobActivity?.url;
       if (raw && raw !== current && looksLikeUsableUrl(raw) && isAllowedSourceUrl(raw)) {
-        suppressHashWrite = false;
         runJob(raw);
       } else if (!raw && !current) {
         viewCtx.initialUrl = undefined;

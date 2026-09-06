@@ -8,7 +8,6 @@ import {
   isAllowedMetadataContentType,
   stripUpstreamHeaders,
   validateProxyTarget,
-  validateUpstreamMethod,
 } from "./security.ts";
 
 export interface IncomingProxyRequest {
@@ -126,10 +125,7 @@ export async function handleProxyRequest(
     let rateLimitAttempts = 0;
     for (;;) {
       try {
-        // Upstream is always GET (HEAD validated as allowed but relay uses GET).
-        if (!validateUpstreamMethod("GET")) {
-          return { status: 500, headers: baseHeaders, code: "PROXY_POLICY_DENIED", requestId };
-        }
+        // Upstream is always GET.
         res = await deps.fetchUpstream(current, { method: "GET", headers: upstreamHeaders });
       } catch {
         return { status: 502, headers: baseHeaders, code: "TRANSPORT_NETWORK_ERROR", requestId };
