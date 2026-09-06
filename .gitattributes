@@ -1,0 +1,4 @@
+# Byte-canonical JSON artifacts must check out with LF on every OS:
+# capabilities tests assert LF/pretty/no-drift bytes, which a Windows
+# CRLF checkout would break. Served URLs are unaffected.
+*.json text eol=lf
