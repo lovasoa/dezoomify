@@ -54,6 +54,9 @@ pub fn build_desktop(args: &[String]) -> Result<(), String> {
 }
 
 pub fn test_desktop(_args: &[String]) -> Result<(), String> {
+    // Lean shell unit tests: handoff execution, registration, deep links,
+    // commands, updater (standalone manifest, always builds offline).
+    run_cargo(&["test", "--manifest-path", DESKTOP_MANIFEST])?;
     run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
     println!("test desktop: ok");

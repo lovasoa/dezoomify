@@ -28,11 +28,13 @@ name = "dezoomify-native-host"
 path = "src/bin/dezoomify-native-host.rs"
 
 [dependencies]
-# Pure standard-library logic in the lean shell; ed25519-dalek is pure Rust
-# (no system libraries) and provides real updater signature verification.
+# Lean offline shell: pure Rust only (no webview system packages). ed25519-dalek
+# is pure Rust and provides real updater signature verification; serde/serde_json
+# are pure Rust and provide the Native Messaging wire JSON (framed, bounded).
 ed25519-dalek = { version = "2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
 # Real window shell (optional; see the `tauri` feature below).
-serde = { version = "1", optional = true, features = ["derive"] }
 tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
@@ -47,4 +49,4 @@ default = []
 # Real Tauri window shell. Requires the platform webview system packages
 # (on Linux: libwebkit2gtk-4.1-dev, libgtk-3-dev, libsoup-3.0-dev); the lean
 # offline shell stays the default so this manifest keeps building anywhere.
-tauri = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:serde"]
+tauri = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater"]

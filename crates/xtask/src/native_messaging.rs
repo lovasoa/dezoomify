@@ -240,6 +240,146 @@ pub fn normalize_engine(name: &str) -> Option<&'static str> {
     }
 }
 
+fn is_absolute_path(path: &str) -> bool {
+    path.starts_with('/')
+        || (path.len() >= 3
+            && path.as_bytes()[1] == b':'
+            && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/'))
+}
+
+fn is_exact_extension_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 128 {
+        return false;
+    }
+    if id.contains('*') || id.contains('?') {
+        return false;
+    }
+    !id.contains(char::is_whitespace)
+}
+
+fn expand_template(template: &str, host_path: &str, extension_id: &str) -> Result<String, String> {
+    if !is_absolute_path(host_path) {
+        return Err("host path must be absolute".to_string());
+    }
+    if !is_exact_extension_id(extension_id) {
+        return Err("extension id must be exact (no wildcards)".to_string());
+    }
+    let expanded = template
+        .replace("@HOST_PATH@", host_path)
+        .replace("@EXTENSION_ID@", extension_id);
+    if expanded.contains("@HOST_PATH@") || expanded.contains("@EXTENSION_ID@") {
+        return Err("template placeholders unfilled".to_string());
+    }
+    if expanded.contains('*') {
+        return Err("wildcard forbidden in expanded manifest".to_string());
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(&expanded).map_err(|e| format!("expanded manifest not JSON: {e}"))?;
+    if value.get("name").and_then(|n| n.as_str()) != Some(NATIVE_HOST_NAME) {
+        return Err("expanded manifest names the wrong host".to_string());
+    }
+    if !std::path::Path::new(host_path).is_absolute()
+        && !is_absolute_path(
+            value
+                .get("path")
+                .and_then(|p| p.as_str())
+                .unwrap_or_default(),
+        )
+    {
+        return Err("manifest host path must be absolute".to_string());
+    }
+    Ok(expanded)
+}
+
+/// Install per-user manifests under `home` (test-isolated; production passes
+/// the real home). Uses the reviewed `installer/native-messaging/*.in`
+/// templates so the shipped manifests and this installer cannot drift.
+/// Returns the written paths. Foreign manifests are never overwritten;
+/// wildcards and relative host paths fail before any write.
+pub fn install_to(
+    home: &Path,
+    host_path: &str,
+    chromium_id: &str,
+    firefox_id: &str,
+) -> Result<Vec<String>, String> {
+    let root = super::repo_root();
+    let chromium_template =
+        std::fs::read_to_string(root.join("installer/native-messaging/chromium.json.in"))
+            .map_err(|e| format!("missing chromium template: {e}"))?;
+    let firefox_template =
+        std::fs::read_to_string(root.join("installer/native-messaging/firefox.json.in"))
+            .map_err(|e| format!("missing firefox template: {e}"))?;
+    let chromium_json = expand_template(&chromium_template, host_path, chromium_id)?;
+    let firefox_json = expand_template(&firefox_template, host_path, firefox_id)?;
+    // Destinations mirror `known_registrations` but rooted at `home` so tests
+    // never touch the real profile.
+    let destinations: Vec<(&str, PathBuf, String)> = match std::env::consts::OS {
+        "linux" => vec![
+            (
+                "chromium",
+                home.join(".config/chromium/NativeMessagingHosts")
+                    .join(registration_file_name()),
+                chromium_json.clone(),
+            ),
+            (
+                "chromium",
+                home.join(".config/google-chrome/NativeMessagingHosts")
+                    .join(registration_file_name()),
+                chromium_json,
+            ),
+            (
+                "firefox",
+                home.join(".mozilla/native-messaging-hosts")
+                    .join(registration_file_name()),
+                firefox_json,
+            ),
+        ],
+        "macos" => vec![
+            (
+                "chromium",
+                home.join("Library/Application Support/Google/Chrome/NativeMessagingHosts")
+                    .join(registration_file_name()),
+                chromium_json,
+            ),
+            (
+                "firefox",
+                home.join("Library/Application Support/Mozilla/NativeMessagingHosts")
+                    .join(registration_file_name()),
+                firefox_json,
+            ),
+        ],
+        _ => return Err("file installs cover linux/macos only (windows uses HKCU)".to_string()),
+    };
+    let mut written = Vec::new();
+    for (_engine, path, content) in &destinations {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+        }
+        if let Ok(existing) = std::fs::read_to_string(path) {
+            if !is_our_manifest(&existing) {
+                let ours = registration_file_name();
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let parseable = serde_json::from_str::<serde_json::Value>(&existing).is_ok();
+                if file_name != ours || parseable {
+                    return Err(format!(
+                        "foreign manifest at {}; refusing to overwrite",
+                        path.display()
+                    ));
+                }
+            }
+        }
+        std::fs::write(path, content)
+            .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+        written.push(path.display().to_string());
+    }
+    written.sort();
+    Ok(written)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,5 +451,78 @@ mod tests {
         assert_eq!(normalize_engine("chromium"), Some("chromium"));
         assert_eq!(normalize_engine("firefox"), Some("firefox"));
         assert_eq!(normalize_engine("webkit"), None);
+    }
+
+    fn temp_home(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "dz-nm-install-{}-{}-{}",
+            std::process::id(),
+            tag,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn install_round_trip_then_cleanup() {
+        let home = temp_home("ok");
+        let host = "/opt/dezoomify/dezoomify-native-host";
+        let chromium_id = "abcdefghijklmnopqrstuvwxyzabcdef";
+        let firefox_id = "dezoomify@dezoomify.example";
+        let written = install_to(&home, host, chromium_id, firefox_id).unwrap();
+        assert!(!written.is_empty());
+        for path in &written {
+            assert!(path.starts_with(home.to_string_lossy().as_ref()));
+            let text = std::fs::read_to_string(path).unwrap();
+            assert!(is_our_manifest(&text));
+            assert!(text.contains(host));
+            assert!(!text.contains('*'));
+        }
+        // Re-install overwrites our own manifests.
+        let written2 = install_to(&home, "/opt/dezoomify/host-2", chromium_id, firefox_id).unwrap();
+        assert_eq!(written, written2);
+        // Cleanup removes only ours.
+        let regs: Vec<Registration> = written
+            .iter()
+            .map(|p| Registration::File {
+                engine: "chromium",
+                path: PathBuf::from(p),
+            })
+            .collect();
+        let removed = cleanup(&regs).unwrap();
+        assert_eq!(removed.len(), written.len());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn install_refuses_wildcards_relative_and_foreign() {
+        let home = temp_home("refuse");
+        assert!(install_to(
+            &home,
+            "relative/host",
+            "abcdefghijklmnopqrstuvwxyzabcdef",
+            "dezoomify@dezoomify.example"
+        )
+        .is_err());
+        assert!(install_to(&home, "/opt/host", "*", "dezoomify@dezoomify.example").is_err());
+        // Foreign manifest at our destination is never overwritten.
+        let dest = home
+            .join(".config/chromium/NativeMessagingHosts")
+            .join(registration_file_name());
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(&dest, r#"{"name":"other.host","path":"/x"}"#).unwrap();
+        let err = install_to(
+            &home,
+            "/opt/dezoomify/dezoomify-native-host",
+            "abcdefghijklmnopqrstuvwxyzabcdef",
+            "dezoomify@dezoomify.example",
+        )
+        .unwrap_err();
+        assert!(err.contains("foreign"), "must refuse foreign: {err}");
+        std::fs::remove_dir_all(&home).unwrap();
     }
 }

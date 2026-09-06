@@ -631,6 +631,7 @@ version = "3.0.0"
 dependencies = [
  "ed25519-dalek",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

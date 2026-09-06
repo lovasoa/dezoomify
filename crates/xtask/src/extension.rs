@@ -198,8 +198,57 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
     }
     super::reject_unknown_args("test native-messaging", args)?;
     run_node_glob("apps/extension/tests/unit")?;
+    test_install_round_trip()?;
     super::native_messaging::inspect_and_report(None)?;
     println!("test native-messaging: ok");
+    Ok(())
+}
+
+/// Deterministic registration proof: install the reviewed templates into a
+/// temp home, verify exact IDs with no wildcards, then clean up. Never
+/// touches the real profile; the `--cleanup-only` gate covers real-profile
+/// hygiene separately.
+fn test_install_round_trip() -> Result<(), String> {
+    let home = std::env::temp_dir().join(format!(
+        "dz-nm-xtask-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::create_dir_all(&home).map_err(|e| format!("create temp home: {e}"))?;
+    let written = super::native_messaging::install_to(
+        &home,
+        "/opt/dezoomify/dezoomify-native-host",
+        "abcdefghijklmnopqrstuvwxyzabcdef",
+        "dezoomify@dezoomify.example",
+    )?;
+    if written.is_empty() {
+        return Err("install round trip wrote no manifests".to_string());
+    }
+    for path in &written {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?;
+        if !super::native_messaging::is_our_manifest(&text) {
+            return Err(format!("installed manifest does not name our host: {path}"));
+        }
+        if text.contains('*') {
+            return Err(format!("installed manifest contains wildcard: {path}"));
+        }
+    }
+    let regs: Vec<super::native_messaging::Registration> = written
+        .iter()
+        .map(|p| super::native_messaging::Registration::File {
+            engine: "chromium",
+            path: std::path::PathBuf::from(p),
+        })
+        .collect();
+    super::native_messaging::cleanup(&regs)?;
+    std::fs::remove_dir_all(&home).map_err(|e| format!("remove temp home: {e}"))?;
+    println!(
+        "test native-messaging: install round trip ok ({} manifest(s))",
+        written.len()
+    );
     Ok(())
 }
 

@@ -125,6 +125,7 @@ export function createNativeHandoffManager(deps = {}) {
   /**
    * Bind an explicit consent decision to the challenge/job/nonce.
    * Rejects replay/expired/wrong-job without any native/network activity.
+   * Records the consented origins/names (never values) for later scope checks.
    */
   function bindConsent({ challenge, nonce, jobId, origins, cookieNames, confirmed }) {
     const sess = pending.get(challenge);
@@ -141,6 +142,7 @@ export function createNativeHandoffManager(deps = {}) {
       try {
         const u = new URL(o);
         if (u.protocol !== "http:" && u.protocol !== "https:") return { ok: false, code: "bad-origins" };
+        if (u.username || u.password) return { ok: false, code: "bad-origins" };
       } catch {
         return { ok: false, code: "bad-origins" };
       }
@@ -148,7 +150,17 @@ export function createNativeHandoffManager(deps = {}) {
     if (!Array.isArray(cookieNames) || cookieNames.length > MAX_COOKIE_NAMES) {
       return { ok: false, code: "bad-cookies" };
     }
+    for (const name of cookieNames) {
+      if (typeof name !== "string" || name.length === 0 || name.length > 256) {
+        return { ok: false, code: "bad-cookies" };
+      }
+      if (/[\r\n\0=;, ]/.test(name) || /[\x00-\x20\x7f]/.test(name)) {
+        return { ok: false, code: "bad-cookies" };
+      }
+    }
     sess.consented = true;
+    sess.origins = [...origins];
+    sess.cookieNames = [...cookieNames];
     return { ok: true };
   }
 
