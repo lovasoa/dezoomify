@@ -87,6 +87,53 @@ fn preferred_name(uri: &str) -> Option<&'static DezoomerSpec> {
     BUILTINS.iter().find(|spec| spec.prefers(uri))
 }
 
+/// A candidate URL ranked against the builtin formats: the input URL plus the
+/// preferred builtin format name, if any builtin prefers it. Ranking is pure
+/// (URL text only, no fetching) and total (unknowns rank last, never dropped).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RankedCandidate<'a> {
+    pub url: &'a str,
+    pub format: Option<&'static str>,
+}
+
+/// The preferred builtin format for `url`, if any builtin prefers it.
+#[must_use]
+pub fn classify_url(url: &str) -> Option<&'static str> {
+    preferred_name(url).map(DezoomerSpec::name)
+}
+
+fn builtin_index(name: &str) -> usize {
+    BUILTINS
+        .iter()
+        .position(|spec| spec.name() == name)
+        .unwrap_or(usize::MAX)
+}
+
+/// Rank candidate URLs without fetching: known formats first in builtin order,
+/// unknowns last in first-seen order. Stable and total: every input URL is
+/// returned exactly once, so callers try in order until discovery succeeds.
+#[must_use]
+pub fn rank_candidate_urls<'a>(urls: &[&'a str]) -> Vec<RankedCandidate<'a>> {
+    let mut ranked: Vec<(usize, RankedCandidate<'a>)> = urls
+        .iter()
+        .enumerate()
+        .map(|(index, url)| {
+            (
+                index,
+                RankedCandidate {
+                    url,
+                    format: classify_url(url),
+                },
+            )
+        })
+        .collect();
+    ranked.sort_by_key(|(index, candidate)| match candidate.format {
+        Some(name) => (0, builtin_index(name), *index),
+        None => (1, usize::MAX, *index),
+    });
+    ranked.into_iter().map(|(_, candidate)| candidate).collect()
+}
+
 /// Compose every built-in dezoomer, preferring the one whose URL hints match.
 #[must_use]
 pub fn default_registry(uri: &str) -> Registry {
@@ -188,5 +235,39 @@ mod tests {
             let mut operation = registry_for(name).unwrap().start("memory://unknown");
             assert_eq!(operation.missing_resources().unwrap().len(), 1, "{name}");
         }
+    }
+
+    #[test]
+    fn classify_url_returns_the_preferred_builtin() {
+        assert_eq!(classify_url("x/info.json"), Some("iiif"));
+        assert_eq!(classify_url("server?fif=image.tif"), Some("iipimage"));
+        assert_eq!(classify_url("x/TileGroup0/0-0-0.jpg"), Some("zoomify"));
+        assert_eq!(classify_url("https://example.test/unknown"), None);
+    }
+
+    #[test]
+    fn rank_candidate_urls_is_total_stable_and_known_first() {
+        let urls = [
+            "https://example.test/unknown-b",
+            "https://example.test/TileGroup0/0-0-0.jpg",
+            "https://example.test/unknown-a",
+            "https://example.test/info.json",
+        ];
+        let ranked = rank_candidate_urls(&urls);
+        let ordered: Vec<&str> = ranked.iter().map(|candidate| candidate.url).collect();
+        // zoomify precedes iiif in builtin order; unknowns keep first-seen order.
+        assert_eq!(
+            ordered,
+            [
+                "https://example.test/TileGroup0/0-0-0.jpg",
+                "https://example.test/info.json",
+                "https://example.test/unknown-b",
+                "https://example.test/unknown-a",
+            ]
+        );
+        assert_eq!(ranked[0].format, Some("zoomify"));
+        assert_eq!(ranked[1].format, Some("iiif"));
+        assert_eq!(ranked[2].format, None);
+        assert!(rank_candidate_urls(&[]).is_empty());
     }
 }
