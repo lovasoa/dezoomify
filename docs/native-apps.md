@@ -11,7 +11,7 @@ The CLI and Tauri desktop application share `crates/dezoomify-native`. This runt
 - remote metadata and tile fetch with local output file access, plus filesystem reads for plain local paths and `file://` URIs (single local `tiles.yaml` inputs and local tile URIs flow end-to-end; `file://` only names local absolute paths, credentials stay scoped and errors redacted);
 - level selection with `--largest`, exact `--zoom-level` (out-of-range uses the last level), width and height caps, and exact `--image-index` (out-of-range uses the last image);
 - in-memory tile decode and canvas assembly bounded by an 8 GiB canvas cap;
-- PNG (deflate tier from `--compression`), JPEG (quality `100 - compression`, default 95), TIFF, and `iiif-dir` encode with atomic final publication, preserving the first tile ICC profile (JPEG, PNG, TIFF) and EXIF metadata (PNG);
+- PNG (deflate tier from `--compression`), JPEG (quality `100 - compression`, default 95), TIFF (deflate level from `--compression`, lossless at every level), and `iiif-dir` encode with atomic final publication, preserving the first tile ICC profile (JPEG, PNG, TIFF) and EXIF metadata (PNG);
 - an optional tile resume cache: with a cache directory configured, each
   fetched tile body persists under `<cache-dir>/<job>/<key>` and a later run
   of the same job skips fetching tiles whose stored bytes still decode;

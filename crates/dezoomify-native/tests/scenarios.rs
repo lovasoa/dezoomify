@@ -285,7 +285,7 @@ fn jpeg_and_tiff_encode_and_decode_round_trip() {
         .expect("jpeg decodes")
         .to_rgba8();
     assert_eq!((decoded.width(), decoded.height()), (16, 16));
-    let tiff = encode_tiff(&image, None).expect("tiff encodes");
+    let tiff = encode_tiff(&image, 5, None).expect("tiff encodes");
     let decoded = image::load_from_memory(&tiff)
         .expect("tiff decodes")
         .to_rgba8();

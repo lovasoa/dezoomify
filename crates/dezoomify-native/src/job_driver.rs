@@ -37,7 +37,8 @@
 //!   every output is a single-image re-encode of decoded pixels.
 //! * `publish-output` → canvas-limit check, assemble with [`blit_onto`],
 //!   encode per the inferred [`OutputFormat`] (PNG at the configured deflate
-//!   tier, JPEG at quality `100 - compression`, TIFF, or an `iiif-dir` tile
+//!   tier, JPEG at quality `100 - compression`, TIFF deflate-compressed at
+//!   the configured level, or an `iiif-dir` tile
 //!   digest (over the file bytes, or over `info.json` plus tile bytes in
 //!   sorted path order for directories).
 //! * `release-bytes`/`cancel-work` → drop decoded buffers; no output is
@@ -1130,7 +1131,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Tiff => {
-            let encoded = encode_tiff(&target, icc_profile)?;
+            let encoded = encode_tiff(&target, attempt.config.compression, icc_profile)?;
             attempt.emit(
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),

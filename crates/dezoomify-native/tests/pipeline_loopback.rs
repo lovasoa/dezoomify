@@ -481,8 +481,8 @@ fn tiff_output_decodes_losslessly() {
     assert_eq!(outcome.output_hash, sha256_of_file(&output));
     assert_eq!(
         outcome.output_hash,
-        "sha256:00332ec92fd2380ed6edc188227e4a05639d2be6c72416e83a65f9110ee69081",
-        "tiff bytes are deterministic; pin the golden"
+        "sha256:ede4363cc018c9c22b8dfa35a95702a3ec8ce7c43d4844eb5e5c1b2d1f2adc1e",
+        "tiff bytes are deterministic (deflate at the default compression 5); pin the golden"
     );
 }
 

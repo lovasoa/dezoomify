@@ -68,11 +68,11 @@ pub struct PipelineConfig {
     pub max_canvas_bytes: u64,
     /// Output compression, 0 is less, 100 is more (reference `--compression`,
     /// default 5). JPEG quality is `100 - compression` (see
-    /// [`PipelineConfig::jpeg_quality`]); PNG deflate tiers map below (see
-    /// [`PipelineConfig::png_compression`]). TIFF output is a lossless
-    /// single-image re-encode, so no quality applies there (the reference
-    /// inner-JPEG quality only exists on its passthrough path, which native
-    /// documents as a gap instead of reimplementing).
+    /// [`PipelineConfig::jpeg_quality`]); PNG and TIFF deflate tiers map
+    /// below (see [`PipelineConfig::png_compression`] and
+    /// [`tiff_compression_for`]). TIFF stays lossless at every level:
+    /// higher compression only trades slower encodes for smaller files,
+    /// never quality.
     pub compression: u8,
     /// Tile resume cache: when set, each successfully fetched tile body is
     /// stored under `<cache_dir>/<job>/<key>` (see [`crate::cache`]) and a
@@ -166,6 +166,20 @@ pub(crate) fn png_compression_for(compression: u8) -> image::codecs::png::Compre
         0..=19 => CompressionType::Fast,
         20..=60 => CompressionType::Default,
         _ => CompressionType::Best,
+    }
+}
+
+/// TIFF deflate level for a `--compression` value: the same tiers as
+/// [`png_compression_for`] (0-19 fast, 20-60 balanced, above best), so one
+/// flag drives every lossless encoder identically. The `tiff` encoder has
+/// no inner-JPEG quality knob, and native never re-encodes lossy inside
+/// TIFF: higher compression only trades slower encodes for smaller files.
+pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compression::DeflateLevel {
+    use tiff::encoder::compression::DeflateLevel;
+    match compression {
+        0..=19 => DeflateLevel::Fast,
+        20..=60 => DeflateLevel::Balanced,
+        _ => DeflateLevel::Best,
     }
 }
 
@@ -454,27 +468,40 @@ pub fn encode_jpeg(
     Ok(bytes)
 }
 
-/// Encode the assembled canvas as TIFF (lossless, no side limit). The first
-/// tile's ICC profile is embedded when present; the reference inner-JPEG
-/// quality only exists on its passthrough path, which native documents as
-/// a gap instead of reimplementing.
+/// Encode the assembled canvas as TIFF: one deflate-compressed image at the
+/// level selected by `compression` (see [`tiff_compression_for`]; the
+/// default 5 selects fast), with no side limit. The output stays lossless
+/// at every level: higher compression only trades slower encodes for
+/// smaller files, never quality. The first tile's ICC profile is embedded
+/// when present (reference `canvas.rs:180-189`).
 pub fn encode_tiff(
     image: &image::RgbaImage,
+    compression: u8,
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, NativeError> {
-    let mut cursor = std::io::Cursor::new(Vec::new());
-    let mut encoder = image::codecs::tiff::TiffEncoder::new(&mut cursor);
-    if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+    fn failed(error: tiff::TiffError) -> NativeError {
+        NativeError::new(
+            "output.encode-failed",
+            format!("tiff encode failed: {error}"),
+        )
     }
-    image::ImageEncoder::write_image(
-        encoder,
-        image.as_raw(),
-        image.width(),
-        image.height(),
-        image::ExtendedColorType::Rgba8,
-    )
-    .map_err(|e| NativeError::new("output.encode-failed", format!("tiff encode failed: {e}")))?;
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor)
+            .map_err(failed)?
+            .with_compression(tiff::encoder::Compression::Deflate(tiff_compression_for(
+                compression,
+            )));
+        let mut directory = encoder
+            .new_image::<tiff::encoder::colortype::RGBA8>(image.width(), image.height())
+            .map_err(failed)?;
+        if let Some(profile) = icc_profile {
+            let _ = directory
+                .encoder()
+                .write_tag(tiff::tags::Tag::IccProfile, profile);
+        }
+        directory.write_data(image.as_raw()).map_err(failed)?;
+    }
     Ok(cursor.into_inner())
 }
 
@@ -653,6 +680,7 @@ mod tests {
     #[test]
     fn compression_maps_to_jpeg_quality_and_png_tiers() {
         use image::codecs::png::CompressionType;
+        use tiff::encoder::compression::DeflateLevel;
         let config = PipelineConfig {
             compression: 5,
             ..Default::default()
@@ -665,11 +693,69 @@ mod tests {
         assert_eq!(png_compression_for(60), CompressionType::Default);
         assert_eq!(png_compression_for(61), CompressionType::Best);
         assert_eq!(png_compression_for(100), CompressionType::Best);
+        // TIFF deflate follows the same tiers: one flag drives every
+        // lossless encoder identically.
+        assert_eq!(tiff_compression_for(0), DeflateLevel::Fast);
+        assert_eq!(tiff_compression_for(5), DeflateLevel::Fast);
+        assert_eq!(tiff_compression_for(20), DeflateLevel::Balanced);
+        assert_eq!(tiff_compression_for(60), DeflateLevel::Balanced);
+        assert_eq!(tiff_compression_for(61), DeflateLevel::Best);
+        assert_eq!(tiff_compression_for(100), DeflateLevel::Best);
         let max = PipelineConfig {
             compression: 100,
             ..Default::default()
         };
         assert_eq!(max.jpeg_quality(), 0);
+    }
+
+    #[test]
+    fn tiff_deflate_levels_decode_pixel_exact() {
+        let mut image = image::RgbaImage::new(16, 16);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            *pixel = image::Rgba([(x * 16) as u8, (y * 16) as u8, 128, 255]);
+        }
+        // Every compression level writes a real little-endian TIFF and
+        // decodes back pixel-exact: deflate trades size for time, never
+        // quality.
+        for compression in [0, 5, 20, 60, 61, 100] {
+            let tiff = encode_tiff(&image, compression, None).expect("tiff encodes");
+            assert!(
+                tiff.starts_with(&[0x49, 0x49, 0x2A, 0x00]),
+                "tiff output carries the little-endian magic at compression {compression}"
+            );
+            let decoded = image::load_from_memory(&tiff)
+                .expect("tiff decodes")
+                .to_rgba8();
+            assert_eq!((decoded.width(), decoded.height()), (16, 16));
+            assert_eq!(
+                decoded.as_raw(),
+                image.as_raw(),
+                "deflate must be lossless at compression {compression}"
+            );
+        }
+    }
+
+    #[test]
+    fn tiff_embeds_icc_profile() {
+        let icc = vec![
+            0x00, 0x00, 0x02, 0x0C, 0x61, 0x64, 0x73, 0x70, 0x00, 0x00, 0x00, 0x00, 0x6D, 0x6E,
+            0x74, 0x72, 0x52, 0x47, 0x42, 0x20,
+        ];
+        let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([9, 9, 9, 255]));
+        let tiff = encode_tiff(&image, 5, Some(&icc)).expect("tiff encodes");
+        // Assert through the TIFF decoder: the tag is present with the exact
+        // profile bytes. (`load_image_with_metadata` applies the image
+        // crate's default decode limits, under which its TIFF ICC accessor
+        // reports `None` even for a conformant tag, so it cannot observe
+        // this; the PNG/JPEG ICC round-trip above covers that path.)
+        let mut decoder =
+            tiff::decoder::Decoder::new(std::io::Cursor::new(&tiff)).expect("tiff decodes");
+        assert_eq!(
+            decoder
+                .get_tag_u8_vec(tiff::tags::Tag::IccProfile)
+                .expect("icc tag present"),
+            icc,
+        );
     }
 
     #[test]
