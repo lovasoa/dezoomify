@@ -20,10 +20,12 @@ Run `./target/debug/dezoomify-cli --help` for the full list: `--overwrite`,
 `-H/--header "Name: value"`, `-i/--min-interval <duration>` (default 0),
 `--timeout <duration>` (default 30s), `--connect-timeout <duration>`
 (default 6s), `--logging <level>` (default info), `-c/--tile-cache <dir>`,
+`--keep-partial` (default), `--no-partial`,
 `--bulk <file-or-url>`, `--outfile <file>`, `-?/--help`, `-V/--version`.
 
-Each single run saves one job to one output file (PNG, JPEG, TIFF, or IIIF
-folder by extension). When the output is omitted it auto-names from the
+Each single run saves one job to one output file (`.png`, `.jpg`/`.jpeg`,
+`.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, or extensionless `iiif-dir` by
+extension). When the output is omitted it auto-names from the
 image title when known, else `dezoomified` with a JPEG-fit extension
 (small images use `.jpg`, large or unknown sizes use `.png`) and `_0001`
 collision suffixes. With no arguments the tool repeats prompts when a
@@ -39,14 +41,16 @@ retries). `--image-index`, `--zoom-level`,
 `--retry-delay`, `--compression` (JPEG quality `100 - compression`, PNG
 tiers), `--max-idle-per-host`, `--timeout`, `--connect-timeout`, and
 per-tile `--min-interval` are wired through to native; bulk
-`--min-interval` also paces images. `--dezoomer` is validated against
-known formats (unknown names fail with exit 2; the native engine has no
-format selector field and auto-detects), and `--logging` (error, warn,
-info, debug, trace; default info) controls human stderr verbosity while
+`--min-interval` also paces images. `--dezoomer` selects the native format
+(`auto` auto-detects, a named format selects the single program; unknown
+names fail with exit 2), and `--logging` (error, warn, info, debug, trace;
+default info) controls human stderr verbosity while
 `--json` stdout stays machine-only (see
 `docs/user/command-line.md`). The default `Referer` is the http(s) bulk source or input URL unless
 `-H "Referer: …"` overrides it; `--largest` (implied in bulk mode without
-level caps) selects the uncapped level.
+level caps) selects the uncapped level. Tile failures after retries keep a
+partial output with blank regions by default; `--no-partial` discards
+instead with `tile.download-failed` and no output.
 
 Bulk mode saves one output per list entry and never stops early:
 

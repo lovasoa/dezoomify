@@ -23,8 +23,11 @@ options:
   --connect-timeout <duration> max time to connect (default 6s)
   --logging <level>           log verbosity: error, warn, info, debug, trace (default info)
   -c, --tile-cache <dir>      resume folder reusing downloaded tiles
+  --keep-partial              keep partial output with blank regions on tile failure (default)
+  --no-partial                discard partial output on tile failure (fail with no output)
   --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)
                               or IIIF collection manifest URL; saves one output per entry
-  --outfile <file>            explicit output file, or bulk base name (bulk_1.ext, …)
+  --outfile <file>            explicit output file (.png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif,
+                              or extensionless iiif-dir), or bulk base name (bulk_1.ext, …)
   -?, --help                  show this help
   -V, --version               show version

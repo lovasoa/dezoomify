@@ -13,7 +13,8 @@ pub struct Args {
     pub json: bool,
     /// Format selector, `auto` detects. Named formats are validated
     /// CLI-side against the known format list; unknown names fail.
-    /// The native engine auto-detects (it has no format selector field).
+    /// Wired to native `format` (`None`/`auto` auto-detects, named selects
+    /// the single program, unknown fails typed).
     pub dezoomer: String,
     /// Select the largest level. Maps to uncapped width plus the native
     /// largest flag (bulk-implied when no level cap was given).
@@ -59,6 +60,12 @@ pub struct Args {
     /// Bulk source: local text-list file or URL (including IIIF collection
     /// manifests, best-effort). When present, one output per entry.
     pub bulk: Option<String>,
+    /// Partial output policy: keep a partial image with blank regions when
+    /// some tiles fail after retries (default, reference `PartialDownload`
+    /// file behavior). `--no-partial` discards instead with
+    /// `tile.download-failed` and no output. `--keep-partial` is the
+    /// explicit opt-in spelling of the default; last flag wins.
+    pub keep_partial: bool,
 }
 
 impl Args {
@@ -128,6 +135,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut parallelism: usize = 16;
     let mut tile_cache: Option<PathBuf> = None;
     let mut bulk: Option<String> = None;
+    let mut keep_partial = true;
     let mut i = 0;
     while i < args.len() {
         let (flag, inline_value) = split_flag_value(&args[i]);
@@ -143,6 +151,14 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             "--json" => {
                 reject_inline_value(flag, inline_value)?;
                 json = true;
+            }
+            "--keep-partial" => {
+                reject_inline_value(flag, inline_value)?;
+                keep_partial = true;
+            }
+            "--no-partial" => {
+                reject_inline_value(flag, inline_value)?;
+                keep_partial = false;
             }
             "--dezoomer" | "-d" => {
                 let raw = take_value(args, &mut i, inline_value, "--dezoomer")?;
@@ -336,6 +352,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         parallelism,
         tile_cache,
         bulk,
+        keep_partial,
     })
 }
 
@@ -522,9 +539,12 @@ fn help() -> String {
         "  --connect-timeout <duration> max time to connect (default 6s)",
         "  --logging <level>           log verbosity: error, warn, info, debug, trace (default info)",
         "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
+        "  --keep-partial              keep partial output with blank regions on tile failure (default)",
+        "  --no-partial                discard partial output on tile failure (fail with no output)",
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
         "                              or IIIF collection manifest URL; saves one output per entry",
-        "  --outfile <file>            explicit output file, or bulk base name (bulk_1.ext, …)",
+        "  --outfile <file>            explicit output file (.png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif,",
+        "                              or extensionless iiif-dir), or bulk base name (bulk_1.ext, …)",
         "  -?, --help                  show this help",
         "  -V, --version               show version",
     ]
@@ -958,5 +978,37 @@ mod tests {
         assert_eq!(args.input.as_deref(), Some("https://example.com/x.dzi"));
         assert_eq!(args.output, None);
         assert_eq!(args.bulk_output_file(), None);
+    }
+
+    #[test]
+    fn keep_partial_defaults_to_keep_and_last_flag_wins() {
+        let args = parse(&[
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("defaults");
+        assert!(args.keep_partial, "partial output is kept by default");
+        let kept = parse(&[
+            "--keep-partial".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("keep-partial parses");
+        assert!(kept.keep_partial);
+        let discarded = parse(&[
+            "--no-partial".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("no-partial parses");
+        assert!(!discarded.keep_partial);
+        let last_wins = parse(&[
+            "--no-partial".to_string(),
+            "--keep-partial".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("last flag wins");
+        assert!(last_wins.keep_partial);
     }
 }

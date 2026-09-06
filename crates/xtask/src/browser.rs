@@ -82,7 +82,8 @@ fn build_only_check() -> Result<(), String> {
     Ok(())
 }
 
-pub fn test_ui(_args: &[String]) -> Result<(), String> {
+pub fn test_ui(args: &[String]) -> Result<(), String> {
+    super::reject_unknown_args("test ui", args)?;
     run_node(&["--test", "test/controller.test.mjs"])?;
     println!("test ui: ok");
     Ok(())
@@ -96,6 +97,7 @@ pub fn test_web(args: &[String]) -> Result<(), String> {
     while i < args.len() {
         match args[i].as_str() {
             "--e2e" => e2e = true,
+            "--no-e2e" => e2e = false,
             "--skip-browser-matrix" => skip_browser_matrix = true,
             "--no-unit" => no_unit = true,
             other => return Err(format!("unknown test web arg '{other}'")),

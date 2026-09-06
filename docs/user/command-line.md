@@ -5,8 +5,9 @@
 The command-line tool saves one image per run, or many with `--bulk`. It
 is the right choice for scripts and for automating regular jobs. It
 supports [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
-Each run saves one job to one output file (PNG, JPEG, TIFF, or IIIF folder
-by extension). `--tile-cache` keeps a resume folder so a repeated run
+Each run saves one job to one output file (`.png`, `.jpg`/`.jpeg`,
+`.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, or extensionless `iiif-dir` by
+extension). `--tile-cache` keeps a resume folder so a repeated run
 reuses tiles instead of fetching them again; see
 [resuming an interrupted save](./desktop-app.md#resuming-an-interrupted-save).
 
@@ -33,12 +34,14 @@ ignores caps).
 
 | You want to… | Option |
 |---|---|
-| Let the tool detect the format, or force one | `-d, --dezoomer auto` (default; named formats are validated, unknown names fail) |
+| Let the tool detect the format, or force one | `-d, --dezoomer auto` (default; a named format selects the single program, unknown names fail) |
 | Always take the highest resolution | `-l, --largest` (implied in bulk mode without level caps) |
 | Cap the resolution (e.g. 4000 pixels wide) | `-w, --max-width 4000` |
 | Cap the height | `-h, --max-height 800` |
 | Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
 | Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
+| Keep a partial image when some tiles fail | `--keep-partial` (default; missing regions stay blank) |
+| Discard partial output on tile failure | `--no-partial` (fails with `tile.download-failed` and no output) |
 | Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries) |
 | Wait before retrying | `--retry-delay 2s` (delay before first retry, then doubling, plus per-tile jitter) |
 | Tune output compression | `--compression 5` (JPEG quality `100 - compression`, default 95; PNG fast/balanced/best tiers) |

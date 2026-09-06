@@ -39,10 +39,12 @@ pub const IIIF_TILE_WIDTH: u32 = 512;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PartialPolicy {
     /// Fail the job with `tile.download-failed` and write no output.
-    #[default]
     Fail,
     /// Encode the acquired tiles with missing regions left blank and
-    /// report success with `partial: true`.
+    /// report success with `partial: true`. This matches the reference
+    /// `PartialDownload` file behavior (partial output kept) and is the
+    /// default; `--no-partial` selects `Fail`.
+    #[default]
     Keep,
 }
 
@@ -113,6 +115,8 @@ pub struct PipelineConfig {
     /// Unknown names fail with typed `discovery.unknown-dezoomer`.
     pub format: Option<String>,
     /// What to do when required tiles still fail after retries.
+    /// Default `Keep` matches the reference `PartialDownload` file behavior
+    /// (partial output kept, blank regions, `partial: true`).
     pub partial_policy: PartialPolicy,
     /// Cooperative cancellation: when set, the driver stops issuing new
     /// work at the next effect boundary, cleans up, and reports
@@ -139,7 +143,7 @@ impl Default for PipelineConfig {
             image_index: None,
             largest: false,
             format: None,
-            partial_policy: PartialPolicy::Fail,
+            partial_policy: PartialPolicy::Keep,
             cancel_flag: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -224,10 +228,8 @@ pub fn run(
     config: &PipelineConfig,
     on_event: &mut dyn FnMut(PipelineEvent),
 ) -> Result<PipelineOutcome, NativeError> {
-    let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))
-        .map_err(NativeError::from)?;
-    validate_destination(std::path::Path::new(output_path), &format, overwrite)
-        .map_err(NativeError::from)?;
+    let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))?;
+    validate_destination(std::path::Path::new(output_path), &format, overwrite)?;
 
     let user = user_headers_for(input_url, config);
     crate::job_driver::drive(input_url, output_path, overwrite, config, &user, on_event)

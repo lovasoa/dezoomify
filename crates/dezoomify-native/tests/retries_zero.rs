@@ -7,7 +7,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use dezoomify_native::pipeline::PipelineConfig;
+use dezoomify_native::pipeline::{PartialPolicy, PipelineConfig};
 
 fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -120,12 +120,15 @@ fn setup_three_of_four() -> (String, Arc<Mutex<HashMap<String, usize>>>) {
 
 #[test]
 fn retries_zero_sends_no_second_request() {
+    // Explicit `Fail` keeps this a retry-counting test: the missing tile
+    // fails honestly with no output (default `Keep` would keep a partial).
     let (base, counts) = setup_three_of_four();
     let input = format!("{base}/pyr.dzi");
     let out_dir = temp_dir("zero");
     let output = out_dir.join("zero.png");
     let config = PipelineConfig {
         max_retries: 0,
+        partial_policy: PartialPolicy::Fail,
         ..Default::default()
     };
     let error = dezoomify_native::pipeline::run(
@@ -153,12 +156,14 @@ fn retries_zero_sends_no_second_request() {
 
 #[test]
 fn retries_one_refetches_the_missing_tile() {
+    // Explicit `Fail` (see above): missing tile still fails after one retry.
     let (base, counts) = setup_three_of_four();
     let input = format!("{base}/pyr.dzi");
     let out_dir = temp_dir("one");
     let output = out_dir.join("one.png");
     let config = PipelineConfig {
         max_retries: 1,
+        partial_policy: PartialPolicy::Fail,
         ..Default::default()
     };
     let error = dezoomify_native::pipeline::run(

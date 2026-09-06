@@ -124,15 +124,22 @@ fn assembles_dzi_pyramid_from_fixture_scenario() {
 
 #[test]
 fn tile_failure_fails_honestly_without_output() {
+    // Explicit `Fail` discards on tile failure: honest
+    // `tile.download-failed`, no output. The default `Keep` keeps a partial
+    // instead (see `partial_keep_policy_encodes_acquired_tiles`).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
     let out_dir = temp_dir("failure");
     let output = out_dir.join("broken.png");
+    let config = PipelineConfig {
+        partial_policy: PartialPolicy::Fail,
+        ..Default::default()
+    };
     let error = pipeline::run(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &config,
         &mut |_event| {},
     )
     .expect_err("pipeline fails on missing tiles");
@@ -164,6 +171,7 @@ fn retries_zero_fails_without_a_second_attempt() {
     let output = out_dir.join("broken.png");
     let config = PipelineConfig {
         max_retries: 0,
+        partial_policy: PartialPolicy::Fail,
         ..Default::default()
     };
     let error = pipeline::run(
@@ -257,16 +265,21 @@ fn sha256_of_file(path: &std::path::Path) -> String {
 fn corrupt_tile_fails_like_a_missing_tile() {
     // A 200 response with undecodable bytes exhausts retries exactly like a
     // 404: deterministic decode failures are not retried forever, and the
-    // terminal code stays `tile.download-failed`.
+    // terminal code stays `tile.download-failed`. Explicit `Fail` discards
+    // partial output; the default `Keep` keeps it (see the next test).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
     let out_dir = temp_dir("corrupt");
     let output = out_dir.join("corrupt.png");
+    let config = PipelineConfig {
+        partial_policy: PartialPolicy::Fail,
+        ..Default::default()
+    };
     let error = pipeline::run(
         &input,
         output.to_str().expect("utf8 output"),
         false,
-        &PipelineConfig::default(),
+        &config,
         &mut |_event| {},
     )
     .expect_err("pipeline fails on corrupt tiles");
@@ -281,14 +294,17 @@ fn corrupt_tile_fails_like_a_missing_tile() {
 
 #[test]
 fn partial_keep_policy_encodes_acquired_tiles() {
+    // The default policy keeps partial output (reference `PartialDownload`
+    // file behavior): missing regions stay blank, `partial` is true.
+    assert_eq!(
+        PipelineConfig::default().partial_policy,
+        PartialPolicy::Keep
+    );
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
     let out_dir = temp_dir("partial");
     let output = out_dir.join("partial.png");
-    let config = PipelineConfig {
-        partial_policy: PartialPolicy::Keep,
-        ..Default::default()
-    };
+    let config = PipelineConfig::default();
     let outcome = pipeline::run(
         &input,
         output.to_str().expect("utf8 output"),

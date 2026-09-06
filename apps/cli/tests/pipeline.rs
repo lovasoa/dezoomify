@@ -68,11 +68,15 @@ fn cli_downloads_and_saves_real_output() {
 
 #[test]
 fn cli_fails_honestly_on_missing_tiles() {
+    // Explicit `--no-partial` discards on tile failure: no output, honest
+    // `tile.download-failed`, exit 1. The default `--keep-partial` keeps a
+    // partial instead (see the next test).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
     let out_dir = temp_dir("e2e-failure");
     let output = out_dir.join("broken.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--no-partial")
         .arg(&input)
         .arg(&output)
         .output()
@@ -301,6 +305,8 @@ fn cli_bulk_saves_each_entry_with_summary() {
 
 #[test]
 fn cli_bulk_continues_after_failure() {
+    // Explicit `--no-partial` keeps the strict bulk contract: the good entry
+    // saves, the broken entry writes nothing, totals count 1/1, exit 1.
     let origin = start_fixture_server();
     let good = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let bad = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
@@ -309,6 +315,7 @@ fn cli_bulk_continues_after_failure() {
     std::fs::write(&list, format!("{good}\n{bad}\n")).expect("bulk list");
     let base = out_dir.join("collection.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--no-partial")
         .arg("--bulk")
         .arg(&list)
         .arg("--outfile")
@@ -427,6 +434,7 @@ fn cli_full_flags_produce_golden_output() {
         .arg("0")
         .arg("--min-interval")
         .arg("1ms")
+        .arg("--keep-partial")
         .arg("--overwrite")
         .arg(&input)
         .arg(&output)
@@ -476,14 +484,15 @@ fn cli_full_flags_produce_golden_output() {
 fn cli_selection_gaps_are_real_no_warnings() {
     // `--dezoomer <named>`, `--logging <non-info>`, and `--retries 0` are
     // real: validated/passed through with zero warnings. The fetch still
-    // succeeds and hashes to the cli-dzi golden.
+    // succeeds and hashes to the cli-dzi golden (`deepzoom` is the named
+    // program that parses the pyramid DZI; `iiif` would fail typed).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-no-fallback-warnings");
     let output = out_dir.join("real.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
         .arg("--dezoomer")
-        .arg("iiif")
+        .arg("deepzoom")
         .arg("--logging")
         .arg("debug")
         .arg("--retries")
@@ -736,5 +745,87 @@ fn cli_auto_naming_avoids_collision() {
     assert_eq!(
         std::fs::read(out_dir.join("dezoomified.png")).expect("seed intact"),
         b"existing"
+    );
+}
+
+#[test]
+fn cli_keep_partial_default_keeps_output() {
+    // Default `Keep` (reference `PartialDownload` file behavior): corrupt
+    // tiles keep a partial output instead of failing. Pixel-exact blank
+    // region checks live in native `partial_keep_policy_encodes_acquired_tiles`;
+    // here the kept file existing with a real PNG body is the contract.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
+    let out_dir = temp_dir("e2e-keep-default");
+    let output = out_dir.join("partial.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(
+        run.status.success(),
+        "keep-partial default should succeed: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let bytes = std::fs::read(&output).expect("partial output kept by default");
+    assert!(
+        bytes.len() > 100,
+        "kept partial carries a real PNG body, got {} bytes",
+        bytes.len()
+    );
+}
+
+#[test]
+fn cli_no_partial_discards_output() {
+    // Explicit `--no-partial` selects `Fail`: corrupt tiles fail with
+    // `tile.download-failed` and no output.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/corrupt.dzi");
+    let out_dir = temp_dir("e2e-no-partial");
+    let output = out_dir.join("partial.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--no-partial")
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(
+        !run.status.success(),
+        "no-partial must fail on corrupt tiles"
+    );
+    assert!(!output.exists(), "no output when discarding partial");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("tile.download-failed"),
+        "honest code: {stderr}"
+    );
+}
+
+#[test]
+fn cli_named_dezoomer_mismatch_fails_instead_of_detecting() {
+    // A known but wrong `--dezoomer` selects the single program and fails
+    // typed instead of falling back to auto-detection.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-dezoomer-mismatch");
+    let output = out_dir.join("mismatch.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--dezoomer")
+        .arg("iiif")
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(
+        !run.status.success(),
+        "mismatched dezoomer must fail: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    assert!(!output.exists(), "failed jobs write no output");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("discovery."),
+        "typed discovery failure: {stderr}"
     );
 }

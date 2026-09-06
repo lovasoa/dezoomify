@@ -245,9 +245,10 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     // `--largest` (or bulk-implied largest) selects the uncapped level,
     // mirroring the reference `should_use_largest` rule. The `largest` flag
     // itself is also passed through so size caps are ignored natively.
-    // `--dezoomer` has no native selector field (`PipelineConfig` and the job
-    // engine auto-detect); it is validated CLI-side against the known format
-    // list and `max_retries` (including 0) is passed through unchanged.
+    // `--dezoomer` selects the native `format` (`auto` auto-detects, named
+    // selects the single program); `max_retries` (including 0) is passed
+    // through unchanged. Partial output is kept by default (reference
+    // `PartialDownload` file behavior); `--no-partial` discards instead.
     let max_width = if parsed.should_use_largest() {
         None
     } else {
@@ -266,6 +267,16 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
         min_interval: parsed.min_interval,
         compression: parsed.compression,
         cache_dir: parsed.tile_cache.clone(),
+        format: if parsed.dezoomer.eq_ignore_ascii_case("auto") {
+            None
+        } else {
+            Some(parsed.dezoomer.clone())
+        },
+        partial_policy: if parsed.keep_partial {
+            dezoomify_native::pipeline::PartialPolicy::Keep
+        } else {
+            dezoomify_native::pipeline::PartialPolicy::Fail
+        },
         fetch: FetchLimits {
             timeout: parsed.timeout,
             connect_timeout: parsed.connect_timeout,
