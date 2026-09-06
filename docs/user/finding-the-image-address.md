@@ -10,9 +10,11 @@ find it.
 
 ## Way 1: let the extension find it
 
-The [browser extension](./browser-extension.md) watches the page while you
-look at the image and finds the address for you. Try it first; it exists
-exactly for this problem.
+The [browser extension](./browser-extension.md) finds the address for you,
+but only after you press its toolbar button on that page. It then listens
+for a short time while you reload the page or zoom into the image once,
+then stops on its own. It does not watch your browsing in the background.
+Try it first; it exists exactly for this problem.
 
 ## Way 2: find it yourself in the browser
 
