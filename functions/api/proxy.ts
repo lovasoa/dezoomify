@@ -16,10 +16,10 @@ function websiteOriginOf(url: string): string {
   }
 }
 
-function policyJsonResponse(status: number): Response {
+function policyJsonResponse(status: number, cors: Record<string, string>): Response {
   return Response.json(
     { code: "PROXY_POLICY_DENIED" },
-    { status, headers: { "cache-control": "no-store" } },
+    { status, headers: { ...cors, "cache-control": "no-store" } },
   );
 }
 
@@ -38,16 +38,17 @@ async function readBoundedJson(request: Request): Promise<unknown | null> {
 export async function onRequestPost(context: { request: Request }): Promise<Response> {
   const { request } = context;
   const websiteOrigin = websiteOriginOf(request.url);
+  const cors = buildProxyCorsHeaders(websiteOrigin, request.headers.get("origin") ?? undefined);
   const parsed = await readBoundedJson(request);
   if (parsed === null || typeof parsed !== "object") {
-    return policyJsonResponse(400);
+    return policyJsonResponse(400, cors);
   }
   const body = parsed as {
     targetUrl?: unknown;
     protocolVersion?: unknown;
   };
   if (typeof body.targetUrl !== "string" || typeof body.protocolVersion !== "number") {
-    return policyJsonResponse(422);
+    return policyJsonResponse(422, cors);
   }
   const result = await handleProxyRequest(
     {
