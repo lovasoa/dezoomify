@@ -237,6 +237,7 @@ interface DirectOutcome {
   finalUrl?: string;
   status?: number;
   bytes?: ArrayBuffer;
+  contentType?: string;
 }
 
 async function fetchDirect(
@@ -255,7 +256,14 @@ async function fetchDirect(
     }
     const bytes = await res.arrayBuffer();
     noteRequestEnd(reqId, true);
-    return { outcome: "readable", finalUrl: res.url, status: res.status, bytes };
+    let contentType: string | undefined;
+    try {
+      const ct = res.headers?.get?.("content-type");
+      if (typeof ct === "string" && ct !== "") contentType = ct;
+    } catch {
+      // A missing/unreadable header must never break the readable path.
+    }
+    return { outcome: "readable", finalUrl: res.url, status: res.status, bytes, ...(contentType ? { contentType } : {}) };
   } catch (e) {
     noteRequestEnd(reqId, false);
     if (signal?.aborted) return { outcome: "cancelled" };
@@ -365,6 +373,7 @@ async function fetchMetadataFor(
   const direct = await fetchDirect(url, headers, undefined, DIRECT_METADATA_TIMEOUT_MS);
   let via = "direct";
   let bytes: ArrayBuffer | null = null;
+  let contentType: string | undefined;
   // Post-redirect base for relative tile URLs. Direct fetches report
   // res.url; proxied fetches must fall back to the requested URL (the relay
   // follows redirects internally without exposing the upstream final URL).
@@ -374,6 +383,7 @@ async function fetchMetadataFor(
   if (direct.outcome === "readable" && direct.bytes) {
     bytes = direct.bytes;
     if (typeof direct.finalUrl === "string" && direct.finalUrl !== "") finalUri = direct.finalUrl;
+    if (typeof direct.contentType === "string" && direct.contentType !== "") contentType = direct.contentType;
   } else if (
     direct.outcome === "network-error" &&
     isProxyEligible({ url, kind: "metadata", headers }).eligible
@@ -429,7 +439,7 @@ async function fetchMetadataFor(
       `direct fetch: no readable response (network error or blocked read) fetching ${target}`,
     );
   }
-  const verdict = classifyReadableBytes(bytes, { via });
+  const verdict = classifyReadableBytes(bytes, { via, contentType });
   if (!verdict.found) {
     throw failure(
       "NO_IMAGE_FOUND",
