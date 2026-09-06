@@ -225,7 +225,16 @@ async function assemble(session, plan, tabOrigin) {
     let bytes = out.bytes;
     if (tile.processing) bytes = session.applyProcessing(tile.processing, bytes);
     const bmp = await createImageBitmap(new Blob([bytes]));
-    ctx.drawImage(bmp, tile.x, tile.y, tile.w ?? bmp.width, tile.h ?? bmp.height);
+    // Trust the plan for placement so a mis-sized decode never leaves a seam:
+    // log the mismatch and scale the decoded bytes to the planned extent.
+    const planW = tile.w ?? bmp.width;
+    const planH = tile.h ?? bmp.height;
+    if (planW !== bmp.width || planH !== bmp.height) {
+      log("tile size mismatch at " + tile.x + "," + tile.y + ": plan " + planW + "x" + planH + ", decoded " + bmp.width + "x" + bmp.height);
+    }
+    if (planW > 0 && planH > 0 && bmp.width > 0 && bmp.height > 0) {
+      ctx.drawImage(bmp, 0, 0, bmp.width, bmp.height, tile.x, tile.y, planW, planH);
+    }
     const sample = ctx.getImageData(tile.x + 5, tile.y + 5, 1, 1).data;
     log("tile " + ++done + "/" + plan.tiles.length + " at " + tile.x + "," + tile.y + " bmp " + bmp.width + "px sample " + [...sample].join(","));
   }

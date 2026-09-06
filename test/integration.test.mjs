@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createWebIntegration, isProxyEligible } from "../src/webIntegration.ts";
+import { createWebIntegration, errorTransportFor, isOrdinaryImageTile, isProxyEligible } from "../src/webIntegration.ts";
 import { createProxyTransport } from "../src/proxyTransport.ts";
 import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/types.ts";
 
@@ -295,4 +295,82 @@ test("served browser import graph resolves to generated files", () => {
   ]) {
     assert.ok(seen.has(expected), `browser graph must include ${expected}`);
   }
+});
+
+test("ordinary display fallback only for unprocessed tiles", () => {
+  for (const processing of [undefined, null, "", "none"]) {
+    assert.equal(isOrdinaryImageTile(processing), true, JSON.stringify(processing));
+  }
+  // Processed tiles need readable bytes: display fallback would drop the
+  // processing, so it is never allowed.
+  for (const processing of ["google-arts-decrypt", "xor", "NONE", "None"]) {
+    assert.equal(isOrdinaryImageTile(processing), false, JSON.stringify(processing));
+  }
+});
+
+test("tile failures report the direct transport, never the metadata proxy", () => {
+  assert.equal(errorTransportFor("TILE_FAILED", "Metadata proxy"), DIRECT_TRANSPORT_LABEL);
+  assert.equal(errorTransportFor("TILE_FAILED", null), DIRECT_TRANSPORT_LABEL);
+  assert.equal(errorTransportFor("DISCOVERY_FAILED", "Metadata proxy"), "Metadata proxy");
+  assert.equal(errorTransportFor("NO_IMAGE_FOUND", null), "direct");
+});
+
+test("shipped webapp paints unreadable ordinary tiles instead of failing", () => {
+  const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
+  // Readable bytes first, plain <img> fallback for ordinary tiles only.
+  assert.ok(mainTs.includes("isOrdinaryImageTile("), "drawTile must gate the <img> fallback on the recipe");
+  assert.ok(mainTs.includes("new Image()"), "fallback must load tiles as ordinary image elements");
+  assert.ok(!mainTs.includes("crossOrigin"), "fallback <img> must never request CORS");
+  assert.ok(
+    mainTs.includes("preflight-display-only"),
+    "a tainted canvas must finish as display-only, never as a save",
+  );
+  assert.ok(mainTs.includes("setCanvasVisible(true)"), "display-only must reveal the assembled picture");
+  // A tainted canvas is never read back programmatically.
+  const taintedFinish = mainTs.slice(
+    mainTs.indexOf("if (tainted) {"),
+    mainTs.indexOf('controller.dispatch(nextEvent("save-start")'),
+  );
+  assert.ok(taintedFinish.length > 0, "tainted finish must precede the clean save path");
+  assert.ok(!taintedFinish.includes("toBlob"), "display-only finish must never encode the tainted canvas");
+  // Page policy must permit cross-origin tile images for display.
+  const html = fs.readFileSync(path.join(REPO_ROOT, "index.html"), "utf8");
+  assert.ok(html.includes("img-src 'self' data: blob: https:"), "CSP must allow cross-origin tile display");
+});
+
+test("website trusts the tile plan, warns on color profiles, and compresses PNG", () => {
+  const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
+  // Seam: the plan wins for placement; a mis-sized decode is logged and scaled
+  // to the planned extent so no gap appears (no Math.min clipping to the decode).
+  assert.ok(mainTs.includes("tile size mismatch"), "drawTile must log plan/decode mismatches");
+  assert.ok(!mainTs.includes("Math.min(tile.w"), "drawTile must trust the plan, not clip to the decode");
+  assert.ok(
+    mainTs.includes("drawImage(source, 0, 0, fullW, fullH, tile.x, tile.y, planW, planH)"),
+    "drawTile must scale the decoded bytes to the planned extent",
+  );
+  // Color: the browser canvas path strips ICC/EXIF (native preserves the first
+  // tile profile), so the completed save must warn that colors may shift.
+  assert.ok(mainTs.includes("Colors may shift"), "website save must warn about the stripped color profile");
+  const componentsTs = fs.readFileSync(
+    path.join(REPO_ROOT, "packages", "shared-ui", "src", "components.ts"),
+    "utf8",
+  );
+  assert.ok(
+    componentsTs.includes("Colors may shift"),
+    "shared save guidance must carry the color-profile notice",
+  );
+  // Compression: the repository-owned PNG encoder must use real DEFLATE, not
+  // stored (uncompressed) blocks.
+  const saveTs = fs.readFileSync(
+    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "save.ts"),
+    "utf8",
+  );
+  assert.ok(saveTs.includes("zlibDeflate"), "PNG encoder must compress with DEFLATE");
+  assert.ok(!saveTs.includes("zlibStored"), "stored-block encoder must be gone");
+  // Extension assembly follows the same trust-the-plan rule.
+  const pageTs = fs.readFileSync(
+    path.join(REPO_ROOT, "apps", "extension", "src", "page", "page.ts"),
+    "utf8",
+  );
+  assert.ok(pageTs.includes("tile size mismatch"), "extension assembly must log plan/decode mismatches");
 });

@@ -89,6 +89,10 @@ test("components render transport/save/error/progress plainly", () => {
   assert.equal(renderTransportLabel("proxy"), "Metadata proxy");
   assert.ok(renderSaveGuidance(false).includes("display only"));
   assert.ok(renderSaveGuidance(true).includes("save this picture"));
+  assert.ok(
+    renderSaveGuidance(true).includes("Colors may shift"),
+    "browser save must warn that the color profile is not preserved",
+  );
   const summary = renderErrorSummary({ code: "X", category: "c", retryable: true, message: "The picture could not be opened." });
   assert.ok(summary.includes("try again"));
   assert.ok(renderProgress(1, 4).includes("1 of 4"));

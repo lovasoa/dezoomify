@@ -10,7 +10,11 @@ export function renderTransportLabel(transport: string): string {
 
 export function renderSaveGuidance(originClean: boolean): string {
   if (originClean) {
-    return "You can save this picture in the format and name shown below.";
+    return (
+      "You can save this picture in the format and name shown below. " +
+      "Colors may shift slightly: the browser save does not keep the original " +
+      "color profile. For exact colors, use the desktop app."
+    );
   }
   return (
     "This preview is display only. To keep a copy, right-click the image where " +

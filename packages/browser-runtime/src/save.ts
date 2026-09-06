@@ -71,36 +71,158 @@ function pngChunk(type: string, data: Uint8Array): Uint8Array {
   return out;
 }
 
-// zlib stream made only of deflate stored (uncompressed) blocks: deterministic
-// and decodable by any PNG/zlib implementation.
-function zlibStored(data: Uint8Array): Uint8Array {
-  const blocks = Math.max(1, Math.ceil(data.length / 65535));
-  const out = new Uint8Array(2 + data.length + blocks * 5 + 4);
+// zlib stream with real DEFLATE compression (fixed Huffman + LZ77):
+// deterministic and decodable by any PNG/zlib implementation. Replaces the
+// previous stored (uncompressed) blocks, which bloated typical tiles ~4x.
+function reverseBits(code: number, len: number): number {
+  let res = 0;
+  for (let i = 0; i < len; i++) {
+    res = (res << 1) | (code & 1);
+    code >>>= 1;
+  }
+  return res;
+}
+
+function fixedLitCode(lit: number): { code: number; len: number } {
+  if (lit <= 143) return { code: reverseBits(0x30 + lit, 8), len: 8 };
+  if (lit <= 255) return { code: reverseBits(0x190 + (lit - 144), 9), len: 9 };
+  if (lit <= 279) return { code: reverseBits(lit - 256, 7), len: 7 };
+  return { code: reverseBits(0xc0 + (lit - 280), 8), len: 8 };
+}
+
+function fixedDistCode(dist: number): { code: number; len: number } {
+  return { code: reverseBits(dist, 5), len: 5 };
+}
+
+const LENGTH_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+const LENGTH_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+const DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+const DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+
+function lengthCode(len: number): { sym: number; extra: number; extraBits: number } {
+  for (let i = 0; i < LENGTH_BASE.length; i++) {
+    const base = LENGTH_BASE[i] ?? 0;
+    const extra = LENGTH_EXTRA[i] ?? 0;
+    const max = base + (extra === 0 ? 0 : (1 << extra) - 1);
+    if (len >= base && len <= max) return { sym: 257 + i, extra, extraBits: len - base };
+  }
+  throw new Error(`bad match length: ${len}`);
+}
+
+function distCode(dist: number): { sym: number; extra: number; extraBits: number } {
+  for (let i = 0; i < DIST_BASE.length; i++) {
+    const base = DIST_BASE[i] ?? 0;
+    const extra = DIST_EXTRA[i] ?? 0;
+    const max = base + (extra === 0 ? 0 : (1 << extra) - 1);
+    if (dist >= base && dist <= max) return { sym: i, extra, extraBits: dist - base };
+  }
+  throw new Error(`bad match distance: ${dist}`);
+}
+
+function deflateFixedRaw(data: Uint8Array): Uint8Array {
+  const n = data.length;
+  const head = new Int32Array(1 << 15).fill(-1);
+  const prev = new Int32Array(Math.max(1, n)).fill(-1);
+  type Token = { lit: number } | { len: number; dist: number };
+  const tokens: Token[] = [];
+  const hashAt = (p: number): number =>
+    (((data[p] ?? 0) << 10) ^ ((data[p + 1] ?? 0) << 5) ^ (data[p + 2] ?? 0)) & 0x7fff;
+  let p = 0;
+  while (p < n) {
+    let bestLen = 0;
+    let bestDist = 0;
+    if (p + 3 <= n) {
+      const h = hashAt(p);
+      let cand = head[h] ?? -1;
+      let chain = 0;
+      const maxChain = 32;
+      const minPos = p - Math.min(p, 32768);
+      while (cand !== -1 && cand >= minPos && chain < maxChain) {
+        const dist = p - cand;
+        if (dist >= 1 && dist <= 32768) {
+          const maxLen = Math.min(258, n - p);
+          let len = 0;
+          while (len < maxLen && data[cand + len] === data[p + len]) len++;
+          if (len > bestLen && len >= 3) {
+            bestLen = len;
+            bestDist = dist;
+            if (len === 258) break;
+          }
+        }
+        cand = prev[cand] ?? -1;
+        chain++;
+      }
+      prev[p] = head[h] ?? -1;
+      head[h] = p;
+    }
+    if (bestLen >= 3) {
+      tokens.push({ len: bestLen, dist: bestDist });
+      for (let k = 1; k < bestLen; k++) {
+        if (p + k + 3 <= n) {
+          const h2 = hashAt(p + k);
+          prev[p + k] = head[h2] ?? -1;
+          head[h2] = p + k;
+        }
+      }
+      p += bestLen;
+    } else {
+      tokens.push({ lit: data[p] ?? 0 });
+      p += 1;
+    }
+  }
+  const out: number[] = [];
+  let bitbuf = 0;
+  let bitcnt = 0;
+  const writeBits = (val: number, len: number): void => {
+    bitbuf |= val << bitcnt;
+    bitcnt += len;
+    while (bitcnt >= 8) {
+      out.push(bitbuf & 0xff);
+      bitbuf >>>= 8;
+      bitcnt -= 8;
+    }
+  };
+  writeBits(1, 1);
+  writeBits(1, 2);
+  for (const t of tokens) {
+    if ("lit" in t) {
+      const { code, len } = fixedLitCode(t.lit);
+      writeBits(code, len);
+    } else {
+      const lc = lengthCode(t.len);
+      const lit = fixedLitCode(lc.sym);
+      writeBits(lit.code, lit.len);
+      if (lc.extra > 0) writeBits(lc.extraBits, lc.extra);
+      const dc = distCode(t.dist);
+      const dist = fixedDistCode(dc.sym);
+      writeBits(dist.code, dist.len);
+      if (dc.extra > 0) writeBits(dc.extraBits, dc.extra);
+    }
+  }
+  {
+    const { code, len } = fixedLitCode(256);
+    writeBits(code, len);
+  }
+  if (bitcnt > 0) out.push(bitbuf & 0xff);
+  return Uint8Array.from(out);
+}
+
+function zlibDeflate(data: Uint8Array): Uint8Array {
+  const raw = deflateFixedRaw(data);
+  const out = new Uint8Array(2 + raw.length + 4);
   out[0] = 0x78;
   out[1] = 0x01;
-  let src = 0;
-  let dst = 2;
-  for (let i = 0; i < blocks; i++) {
-    const len = Math.min(65535, data.length - src);
-    out[dst] = i === blocks - 1 ? 1 : 0;
-    out[dst + 1] = len & 0xff;
-    out[dst + 2] = (len >>> 8) & 0xff;
-    out[dst + 3] = (~len) & 0xff;
-    out[dst + 4] = ((~len) >>> 8) & 0xff;
-    out.set(data.subarray(src, src + len), dst + 5);
-    src += len;
-    dst += 5 + len;
-  }
+  out.set(raw, 2);
   const adler = adler32(data);
-  out[dst] = (adler >>> 24) & 0xff;
-  out[dst + 1] = (adler >>> 16) & 0xff;
-  out[dst + 2] = (adler >>> 8) & 0xff;
-  out[dst + 3] = adler & 0xff;
-  return out.subarray(0, dst + 4);
+  out[2 + raw.length] = (adler >>> 24) & 0xff;
+  out[2 + raw.length + 1] = (adler >>> 16) & 0xff;
+  out[2 + raw.length + 2] = (adler >>> 8) & 0xff;
+  out[2 + raw.length + 3] = adler & 0xff;
+  return out;
 }
 
 // Encodes RGBA pixels as a real, decodable PNG (color type 6, bit depth 8,
-// filter 0 per scanline, uncompressed IDAT).
+// filter 0 per scanline, fixed-Huffman DEFLATE IDAT).
 export function encodePng(
   pixels: Uint8ClampedArray,
   width: number,
@@ -118,7 +240,7 @@ export function encodePng(
   ihdrView.setUint32(4, height);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 6; // color type RGBA
-  const idat = zlibStored(raw);
+  const idat = zlibDeflate(raw);
   const total =
     PNG_SIGNATURE.length + (12 + 13) + (12 + idat.length) + 12;
   const out = new Uint8Array(total);

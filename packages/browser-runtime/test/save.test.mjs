@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import zlib from "node:zlib";
 import { saveReadable, defaultEncode, encodePng } from "../src/save.ts";
 import { SAVE_REQUIRES_READABLE_BYTES } from "../src/types.ts";
 
@@ -17,8 +18,9 @@ function surface2x2(pixels) {
 }
 
 // Independent minimal PNG reader for the encoder's own output: verifies the
-// signature, chunk structure and CRCs, and decodes the (stored-block) IDAT
-// back to RGBA pixels. Filter 0 and color type 6 only, matching the encoder.
+// signature, chunk structure and CRCs, and decodes the DEFLATE IDAT (fixed
+// Huffman real compression) back to RGBA pixels via Node zlib. Filter 0 and
+// color type 6 only, matching the encoder.
 function decodePng(bytes) {
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   for (let i = 0; i < 8; i++) assert.equal(bytes[i], sig[i], "PNG signature");
@@ -51,19 +53,10 @@ function decodePng(bytes) {
   const h = view.getUint32(ihdr.byteOffset + 4);
   assert.equal(ihdr[8], 8, "bit depth 8");
   assert.equal(ihdr[9], 6, "color type RGBA");
-  // Inflate stored deflate blocks from the zlib stream.
+  // Inflate the zlib DEFLATE stream with real compression via Node zlib.
   const z = chunks[1].data;
   assert.equal(z[0], 0x78);
-  const raw = [];
-  let p = 2;
-  for (;;) {
-    const bfinal = z[p] & 1;
-    const len = z[p + 1] | (z[p + 2] << 8);
-    assert.equal((z[p + 1] | (z[p + 2] << 8)) ^ 0xffff, z[p + 3] | (z[p + 4] << 8), "NLEN complement");
-    for (let i = 0; i < len; i++) raw.push(z[p + 5 + i]);
-    p += 5 + len;
-    if (bfinal) break;
-  }
+  const raw = Array.from(zlib.inflateSync(Buffer.from(z)));
   const scanline = w * 4 + 1;
   assert.equal(raw.length, scanline * h);
   const pixels = [];
@@ -106,6 +99,31 @@ test("larger non-trivial image round-trips through PNG decode", () => {
   const decoded = decodePng(encodePng(pixels, w, h));
   assert.equal(decoded.w, w);
   assert.equal(decoded.h, h);
+  assert.deepEqual([...decoded.pixels], [...pixels]);
+});
+
+test("real DEFLATE compression beats stored blocks and stays deterministic", () => {
+  const w = 64;
+  const h = 64;
+  const pixels = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      pixels[i] = 255;
+      pixels[i + 1] = 0;
+      pixels[i + 2] = 0;
+      pixels[i + 3] = 255;
+    }
+  }
+  const bytes = encodePng(pixels, w, h);
+  const storedEstimate = 2 + (w * 4 + 1) * h + 5 + 4 + 8 + 25 + 12;
+  assert.ok(
+    bytes.length < storedEstimate / 2,
+    `compressed ${bytes.length} must beat stored ~${storedEstimate}`,
+  );
+  const again = encodePng(new Uint8ClampedArray(pixels), w, h);
+  assert.deepEqual([...bytes], [...again]);
+  const decoded = decodePng(bytes);
   assert.deepEqual([...decoded.pixels], [...pixels]);
 });
 

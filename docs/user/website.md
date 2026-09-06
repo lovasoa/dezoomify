@@ -37,13 +37,21 @@ computer:
   [browser extension](./browser-extension.md).
 - **Size limits.** A browser tab can only hold a certain amount of picture.
   With very large images, the picture may appear blank, or the browser may
-  refuse to save it. Dezoomify warns you and offers a smaller copy when it
-  sees this coming. For the full-size image, use the
-  [desktop app](./desktop-app.md).
+  refuse to save it. The website stops the job with an error and points to
+  the [desktop app](./desktop-app.md) for the full-size image. To save a
+  smaller copy, use the [command-line tool](./command-line.md) with
+  `--max-width`.
 - **Some sites refuse visitors.** A few image servers only answer to their
   own pages and send an error to everyone else. The
   [desktop app](./desktop-app.md) can introduce itself as coming from the
   site's own viewer.
+- **Viewing without saving.** Some sites show their pieces without letting
+  the browser keep a copy. The website then shows the assembled picture for
+  viewing only: right-click it where your browser supports it, or use the
+  [desktop app](./desktop-app.md) for the full-size image.
+- **Colors may shift.** The browser save does not keep the original color
+  profile (ICC) or photo metadata (EXIF). The desktop app preserves the
+  first tile's color profile for exact colors.
 
 ## Next steps
 
