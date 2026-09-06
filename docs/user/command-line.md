@@ -24,8 +24,10 @@ image title when known, else `dezoomified` with a JPEG-fit extension and
 when a terminal is present until end of input, else it prints help. When
 several images or levels are found and no selector was given, a terminal
 prompts to pick one; without a terminal the first image and automatic
-level win. The tool takes the largest level that fits `--max-width` when
-given, else the largest level.
+level win. The tool takes the exact `--zoom-level` when given, else the
+largest level that fits `--max-width`/`--max-height` when given, else the
+largest level (`--largest`, implied in bulk mode without level caps,
+ignores caps).
 
 ## Useful options
 
@@ -35,16 +37,16 @@ given, else the largest level.
 | Always take the highest resolution | `-l, --largest` (implied in bulk mode without level caps) |
 | Cap the resolution (e.g. 4000 pixels wide) | `-w, --max-width 4000` |
 | Cap the height | `--max-height 800` (or `-h 800`; bare `-h` shows help, as does `--help` and `-?`) |
-| Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; needs native support) |
-| Pick a specific image when several are found | `--image-index 2` (0-based; the native driver currently resolves the first entry) |
-| Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 is parsed but the engine clamps to at least 1) |
-| Wait before retrying | `--retry-delay 2s` (parsed; timing needs native support) |
-| Tune output compression | `--compression 5` (parsed; native encodes JPEG at quality 92) |
-| Tune the connection pool | `--max-idle-per-host 32` (parsed; pooling needs native support) |
-| Go slower to stay gentle with the server | `-i, --min-interval 200ms` (parsed; per-tile throttling needs native support) |
-| Tune timeouts | `--timeout 30s`, `--connect-timeout 6s` (parsed; native uses 60s and 15s) |
-| Tune logging | `--logging info` (parsed; reporting stays human lines plus `--json`) |
-| Tune concurrency | `-n, --parallelism 16` (parsed; native runs 6 concurrent fetches) |
+| Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
+| Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
+| Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries, emulated with no refetch) |
+| Wait before retrying | `--retry-delay 2s` (delay before first retry, then doubling, plus per-tile jitter) |
+| Tune output compression | `--compression 5` (JPEG quality `100 - compression`, default 95; PNG fast/balanced/best tiers) |
+| Tune the connection pool | `--max-idle-per-host 32` (max idle connections per host) |
+| Go slower to stay gentle with the server | `-i, --min-interval 200ms` (bulk paces images; per-tile requests are staggered) |
+| Tune timeouts | `--timeout 30s`, `--connect-timeout 6s` (max time for one request and to connect) |
+| Tune logging | `--logging info` (non-`info` warns; reporting stays human lines on stderr plus `--json` on stdout) |
+| Tune concurrency | `-n, --parallelism 16` (max concurrent tile downloads) |
 | Look like you come from the site's viewer | `-H "Referer: <viewer page>"` (`--header` is an alias; otherwise the http(s) input or bulk source is sent as `Referer`) |
 | Keep saved pieces to resume later | `-c, --tile-cache my-folder` |
 | Turn off address checking for odd servers | `--accept-invalid-certs` (careful: this disables protection against impostor servers) |

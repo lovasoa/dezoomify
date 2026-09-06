@@ -33,13 +33,16 @@ a terminal prompts to pick one (any number works; too large uses the
 last); without a terminal the first image and automatic level win.
 Missing input without a terminal prints help; unknown flags fail with
 exit 2. `--tile-cache` reuses downloaded tiles
-across runs; `--retries` overrides the tile retry budget of 3 (0 is parsed;
-the job engine clamps to at least 1). `--image-index`, `--zoom-level`,
-`--max-height`, per-tile `--min-interval`, `--parallelism`,
-`--retry-delay`, `--compression`, `--max-idle-per-host`, `--timeout`,
-`--connect-timeout`, `--logging`, and non-auto `--dezoomer` are parsed with
-native gaps (see `docs/user/command-line.md`); bulk `--min-interval` paces
-images. The default `Referer` is the http(s) bulk source or input URL unless
+across runs; `--retries` overrides the tile retry budget of 3 (0 means no
+retries, emulated with no refetch). `--image-index`, `--zoom-level`,
+`--max-height`, `--largest`, `--parallelism` (as `max_concurrent`),
+`--retry-delay`, `--compression` (JPEG quality `100 - compression`, PNG
+tiers), `--max-idle-per-host`, `--timeout`, `--connect-timeout`, and
+per-tile `--min-interval` are wired through to native; bulk
+`--min-interval` also paces images. Non-auto `--dezoomer` falls back to
+auto-detect with a warning, and non-`info` `--logging` warns while
+reporting stays human lines on stderr plus `--json` on stdout (see
+`docs/user/command-line.md`). The default `Referer` is the http(s) bulk source or input URL unless
 `-H "Referer: …"` overrides it; `--largest` (implied in bulk mode without
 level caps) selects the uncapped level.
 

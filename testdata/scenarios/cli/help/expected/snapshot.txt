@@ -18,7 +18,7 @@ options:
   --max-idle-per-host <n>     max idle connections per host (default 32)
   --accept-invalid-certs      accept insecure TLS certificates (insecure)
   -i, --min-interval <duration> minimum delay between requests, e.g. 50ms, 2s (default 0)
-                              (bulk paces images; single needs native support)
+                              (bulk paces images; per-tile requests are staggered)
   --timeout <duration>        max time for one request (default 30s)
   --connect-timeout <duration> max time to connect (default 6s)
   --logging <level>           log verbosity, e.g. info, debug (default info)

@@ -11,46 +11,46 @@ pub struct Args {
     pub output: Option<PathBuf>,
     pub overwrite: bool,
     pub json: bool,
-    /// Format selector, `auto` detects. Named formats need native support.
+    /// Format selector, `auto` detects. Named formats fall back to auto.
     pub dezoomer: String,
-    /// Select the largest level. Maps to uncapped width for native.
+    /// Select the largest level. Maps to uncapped width plus the native
+    /// largest flag (bulk-implied when no level cap was given).
     pub largest: bool,
     pub max_width: Option<u32>,
-    /// Height cap. Parsed here; native selection is width-only (gap).
+    /// Height cap, wired to native `max_height` (largest fitting area wins).
     pub max_height: Option<u32>,
     /// Exact level index, 0 is smallest, out-of-range uses last.
-    /// Parsed here; native selection is automatic (gap).
+    /// Wired to native `zoom_level`; wins over largest and size caps.
     pub zoom_level: Option<usize>,
     pub accept_invalid_certs: bool,
     /// Trusted user headers (`-H "Name: value"` / `--header`), last wins.
     pub headers: BTreeMap<String, String>,
-    /// 0-based image selection when several are found. Parsed here; the
-    /// native driver currently resolves the first catalog entry (gap).
+    /// 0-based image selection when several are found, wired to native
+    /// `image_index`; out-of-range uses the last image.
     pub image_index: Option<usize>,
-    /// Tile retry budget. Overrides the native default of 3. Zero is
-    /// accepted here; the job engine clamps to at least 1 (gap).
+    /// Tile retry budget, wired to native `max_retries`. Zero means no
+    /// retries, emulated with no refetch past the engine floor of 1.
     pub retries: u32,
-    /// Delay before the first retry, then doubling. Parsed here;
-    /// the job engine owns retry timing (gap).
+    /// Delay before the first retry, then doubling. Wired to native
+    /// `retry_delay` (plus deterministic per-tile jitter).
     pub retry_delay: Duration,
-    /// Output compression, 0 is less, 100 is more. Parsed here;
-    /// native encodes JPEG at fixed quality 92 (gap).
+    /// Output compression, 0 is less, 100 is more. Wired to native
+    /// `compression`: JPEG quality is `100 - compression`, PNG tiers map
+    /// 0-19 fast, 20-60 balanced, above high.
     pub compression: u8,
-    /// Max idle connections per host. Parsed here; native owns pooling (gap).
+    /// Max idle connections per host, wired to native fetch limits.
     pub max_idle_per_host: usize,
-    /// Minimum delay between requests. Parsed here (see `parse_duration`);
-    /// per-tile throttling needs native support (gap); bulk runs delay
-    /// between images.
+    /// Minimum delay between requests (see `parse_duration`). Wired to
+    /// native per-tile staggering; bulk runs also pace images.
     pub min_interval: Duration,
-    /// Max time for one request. Parsed here; native uses 60s (gap).
+    /// Max time for one request, wired to native fetch `timeout`.
     pub timeout: Duration,
-    /// Max time to connect. Parsed here; native uses 15s (gap).
+    /// Max time to connect, wired to native fetch `connect_timeout`.
     pub connect_timeout: Duration,
-    /// Log verbosity, e.g. `info` or `debug`. Parsed here; the CLI reports
-    /// through human lines on stderr plus `--json` on stdout (gap).
+    /// Log verbosity, e.g. `info` or `debug`. The CLI reports through human
+    /// lines on stderr plus `--json` on stdout; non-`info` warns.
     pub logging: String,
-    /// Degree of parallelism. Parsed here; native runs 6 concurrent
-    /// tile fetches (gap).
+    /// Degree of parallelism, wired to native `max_concurrent`.
     pub parallelism: usize,
     /// Resume folder wired to native `cache_dir`.
     pub tile_cache: Option<PathBuf>,
@@ -486,7 +486,7 @@ fn help() -> String {
         "  --max-idle-per-host <n>     max idle connections per host (default 32)",
         "  --accept-invalid-certs      accept insecure TLS certificates (insecure)",
         "  -i, --min-interval <duration> minimum delay between requests, e.g. 50ms, 2s (default 0)",
-        "                              (bulk paces images; single needs native support)",
+        "                              (bulk paces images; per-tile requests are staggered)",
         "  --timeout <duration>        max time for one request (default 30s)",
         "  --connect-timeout <duration> max time to connect (default 6s)",
         "  --logging <level>           log verbosity, e.g. info, debug (default info)",
