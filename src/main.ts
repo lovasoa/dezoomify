@@ -821,6 +821,13 @@ function update(): void {
         }
         update();
       },
+      onRetrySameUrl() {
+        const lastUrl = viewCtx.jobActivity?.url ?? viewCtx.initialUrl;
+        if (!lastUrl || !isAllowedSourceUrl(lastUrl)) return;
+        viewCtx.currentProgress = undefined;
+        viewCtx.completedInfo = undefined;
+        runJob(lastUrl);
+      },
       onSave() {
         if (!resultBlobUrl) return;
         const anchor = document.createElement("a");

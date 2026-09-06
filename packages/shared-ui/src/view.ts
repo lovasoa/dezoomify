@@ -17,6 +17,8 @@ export interface ViewCallbacks {
   onSubmitUrl(url: string, dezoomer?: string): void;
   onCancel(): void;
   onReset(): void;
+  /** Retry the same URL without clearing it (failed-section Try again). Optional for backward compatibility. */
+  onRetrySameUrl?(): void;
   onSave(): void;
   onSelectImage?(index: number): void;
   onSelectLevel?(level: number): void;
@@ -1062,6 +1064,7 @@ function mountFailedSection(
 
     <div class="dz-actions-row">
       <button type="button" class="dz-btn-tactile" id="dz-btn-try-again" style="min-width: 140px;">Try again</button>
+      <button type="button" class="dz-btn-secondary" id="dz-btn-start-over">Start over</button>
     </div>
   `;
   // Diagnostics and user message are set as text content (never innerHTML):
@@ -1073,7 +1076,8 @@ function mountFailedSection(
   const hostDoc = parent.ownerDocument;
   section.querySelector("#dz-card-extension")?.addEventListener("click", () => showExtensionGuidance(hostDoc));
   section.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance(hostDoc));
-  section.querySelector("#dz-btn-try-again")?.addEventListener("click", () => callbacks.onReset());
+  section.querySelector("#dz-btn-try-again")?.addEventListener("click", () => (callbacks.onRetrySameUrl ?? callbacks.onReset)());
+  section.querySelector("#dz-btn-start-over")?.addEventListener("click", () => callbacks.onReset());
 
   parent.appendChild(section);
 }
