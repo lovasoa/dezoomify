@@ -194,3 +194,60 @@ fn empty_resource_bytes_fail_without_catalog() {
         "empty bytes must not emit a catalog"
     );
 }
+
+#[test]
+fn batch_sibling_answer_after_a_winner_is_ignored() {
+    // A tile URL fans out to metadata plus the input itself; the first
+    // answer may win discovery while the sibling fetch is still in flight.
+    // The late sibling must be ignored so the winning catalog survives
+    // (live NGV/ONB/Washington/TopViewer regression).
+    let mut host = ScriptedHost::new(
+        "job:batch",
+        "https://example.test/TileGroup0/0-0-0.jpg",
+        Config::default(),
+    )
+    .unwrap();
+    host.start().unwrap();
+    let requests: Vec<String> = host
+        .effects
+        .iter()
+        .filter(|effect| {
+            effect.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-resource")
+        })
+        .filter_map(|effect| {
+            effect
+                .get("request")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(requests.len(), 2, "metadata plus input stay outstanding");
+    let xml = r#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />"#;
+    host.apply(JobResponse::ResourceBytes {
+        job: "job:batch".to_string(),
+        request: requests[0].clone(),
+        bytes: xml.as_bytes().to_vec(),
+        final_uri: None,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AwaitingImageSelection");
+    let len = host.transcript().len();
+    let late = host
+        .apply(JobResponse::ResourceBytes {
+            job: "job:batch".to_string(),
+            request: requests[1].clone(),
+            bytes: vec![1, 2, 3],
+            final_uri: None,
+        })
+        .unwrap();
+    assert_eq!(late, dezoomify_job::Outcome::Ignored);
+    let late_failure = host
+        .apply(JobResponse::FetchFailure {
+            job: "job:batch".to_string(),
+            request: requests[1].clone(),
+        })
+        .unwrap();
+    assert_eq!(late_failure, dezoomify_job::Outcome::Ignored);
+    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.state(), "AwaitingImageSelection");
+}

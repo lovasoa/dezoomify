@@ -579,6 +579,12 @@ fn execute_effects(
             .unwrap_or("");
         match kind {
             "acquire-resource" => {
+                // Batch discovery may hold sibling fetches after a winner
+                // already finished discovery; those are moot and skipped
+                // so a late answer never masks the winning catalog.
+                if job.state() != JobState::Discovering {
+                    continue;
+                }
                 let request = effect
                     .get("request")
                     .and_then(serde_json::Value::as_str)

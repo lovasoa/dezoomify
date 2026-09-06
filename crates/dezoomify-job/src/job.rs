@@ -385,6 +385,9 @@ impl Job {
             .images;
         self.catalog = Some(catalog);
         self.catalog_images = images;
+        // Sibling discovery fetches still in flight are moot once the
+        // catalog wins; drop them so late answers are plain duplicates.
+        self.pending_discovery.clear();
         self.set_state(State::AwaitingImageSelection)?;
         let payload = serde_json::json!({ "images": self.catalog_images });
         self.push_event("catalog", payload)?;
@@ -411,10 +414,13 @@ impl Job {
         let Some(&core_id) = self.pending_discovery.get(request) else {
             return Ok(Outcome::Ignored);
         };
+        // Batch discovery emits one effect per outstanding core need; the
+        // first answer may complete discovery while sibling fetches are
+        // still in flight. Late answers for still-pending requests are
+        // moot and safely ignored so the winning catalog survives.
         if self.state != State::Discovering {
-            return Err(JobError::invalid_state(
-                "resource bytes valid only while Discovering",
-            ));
+            self.pending_discovery.remove(request);
+            return Ok(Outcome::Ignored);
         }
         let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         if len > self.config.max_bytes {
@@ -468,10 +474,11 @@ impl Job {
         let Some(&core_id) = self.pending_discovery.get(request) else {
             return Ok(Outcome::Ignored);
         };
+        // Sibling discovery fetches may still fail after a winner already
+        // completed discovery; those late failures are moot and ignored.
         if self.state != State::Discovering {
-            return Err(JobError::invalid_state(
-                "fetch failure valid only while Discovering",
-            ));
+            self.pending_discovery.remove(request);
+            return Ok(Outcome::Ignored);
         }
         // The core owns candidate fallback on failure: it may surface another
         // need (a different candidate) or end discovery with a typed error.
