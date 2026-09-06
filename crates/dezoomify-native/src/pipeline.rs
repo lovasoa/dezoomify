@@ -49,7 +49,9 @@ pub struct PipelineConfig {
     pub max_tiles: usize,
     pub max_concurrent: usize,
     pub max_retries: u32,
-    /// Hard cap on composed canvas bytes (RGBA, 4 bytes/pixel).
+    /// Hard cap on composed canvas bytes (RGBA, 4 bytes/pixel, plus
+    /// transient encode buffers). Default 8 GiB: jobs needing more fail with
+    /// typed `output.canvas-limit` before any allocation.
     pub max_canvas_bytes: u64,
     /// JPEG quality for `.jpg` output and `iiif-dir` tiles (default 92).
     pub jpeg_quality: u8,
@@ -77,7 +79,7 @@ impl Default for PipelineConfig {
             max_tiles: 1 << 20,
             max_concurrent: 6,
             max_retries: 3,
-            max_canvas_bytes: 1 << 30,
+            max_canvas_bytes: 8 << 30,
             jpeg_quality: JPEG_QUALITY,
             cache_dir: None,
             max_width: None,

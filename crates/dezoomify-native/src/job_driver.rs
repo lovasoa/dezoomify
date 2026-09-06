@@ -868,6 +868,21 @@ fn acquire_tiles(
     Ok(())
 }
 
+/// Human-readable byte counts for the canvas-limit error (exact bytes plus
+/// a GiB/MiB approximation); never carries paths or credentials.
+fn describe_bytes(bytes: u64) -> String {
+    const GIB: f64 = (1u64 << 30) as f64;
+    const MIB: f64 = (1u64 << 20) as f64;
+    let approx = bytes as f64;
+    if approx >= GIB {
+        format!("{:.1} GiB ({bytes} bytes)", approx / GIB)
+    } else if approx >= MIB {
+        format!("{:.1} MiB ({bytes} bytes)", approx / MIB)
+    } else {
+        format!("{bytes} bytes")
+    }
+}
+
 fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
     if attempt.config.cancel_flag.load(Ordering::SeqCst) {
         return Err(NativeError::new(
@@ -887,10 +902,28 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             height = height.max(geom.destination.y.saturating_add(image.height()));
         }
     }
-    if u64::from(width) * u64::from(height) * 4 > attempt.config.max_canvas_bytes {
+    // Explicit memory check before allocating: the canvas holds 4 bytes per
+    // pixel plus transient encode buffers, so the required bytes (checked
+    // against overflow) must fit the configured budget. The default budget
+    // is 8 GiB; jobs beyond it fail with typed `output.canvas-limit` naming
+    // the required memory, never with an allocation crash.
+    let required = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4));
+    let over_budget = match required {
+        Some(bytes) => bytes > attempt.config.max_canvas_bytes,
+        None => true,
+    };
+    if over_budget {
+        let required_text = required
+            .map(describe_bytes)
+            .unwrap_or_else(|| "over 16 EiB".to_string());
         return Err(NativeError::new(
             "output.canvas-limit",
-            "composed image exceeds the canvas size limit",
+            format!(
+                "composed image {width}x{height} needs {required_text} of canvas memory (limit {}); save a smaller level with --max-width or raise the canvas budget",
+                describe_bytes(attempt.config.max_canvas_bytes),
+            ),
         ));
     }
     let partial = attempt.decoded.len() != attempt.order.len();

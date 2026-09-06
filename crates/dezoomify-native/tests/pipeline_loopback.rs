@@ -539,6 +539,13 @@ fn tiny_canvas_budget_fails_before_any_write() {
     )
     .expect_err("canvas budget fails");
     assert_eq!(error.code, "output.canvas-limit");
+    assert!(
+        error.message.contains("512x512")
+            && error.message.contains("1048576 bytes")
+            && error.message.contains("--max-width"),
+        "canvas-limit names the size, the required memory, and the next action: {}",
+        error.message
+    );
     assert!(!output.exists(), "over-budget jobs write nothing");
     let expected = scenario_expected("cli-canvas-limit");
     assert_eq!(error.code, expected["code"].as_str().expect("code"));

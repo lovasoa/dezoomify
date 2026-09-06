@@ -3,18 +3,22 @@
 # Desktop app
 
 The desktop app runs Dezoomify natively on Windows, macOS, and Linux,
-beyond what a browser tab can hold, within a 1 GiB in-memory canvas cap.
+beyond what a browser tab can hold, within an 8 GiB in-memory canvas cap.
 Use it when:
 
 - the image is **very large**: a browser may refuse to display or save
   images beyond a certain size; the desktop app assembles larger images
-  than a browser tab (up to the 1 GiB canvas limit) and writes the
+  than a browser tab (up to the 8 GiB canvas limit) and writes the
   finished output directly to disk;
 - the site **refuses visitors from other pages**: the app can introduce
   itself as coming from the site's own viewer page.
 
 Each run saves one job to one output file or IIIF tile folder. It runs
-no bulk queue.
+no bulk queue. The app holds the full image in memory while it works (4
+bytes per pixel plus working space), so very large saves need matching
+free memory; when the image exceeds the 8 GiB canvas limit the save stops
+with a typed error before anything is written, and saving a smaller level
+fits the budget.
 
 ## Resuming an interrupted save
 
@@ -67,8 +71,9 @@ archiving and further editing. JPEG cannot address images larger than
 folder. The IIIF tile folder holds an `info.json` file plus JPEG tiles and
 suits viewers that read IIIF image folders.
 
-If a save stops partway, run it again from the start. The app keeps no
-resume cache, so already-saved pieces are never reused.
+If a save stops partway, run it again with the same resume folder so
+already-saved tiles are reused; see
+[resuming an interrupted save](#resuming-an-interrupted-save).
 
 ## Next steps
 
