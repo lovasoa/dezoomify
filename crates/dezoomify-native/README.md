@@ -7,8 +7,9 @@ lifecycle policy while `pipeline`/`job_driver` execute fetch, probe, decode,
 assemble, output encode (PNG, JPEG, TIFF, static `iiif-dir` tile trees),
 atomic write, and real sha256); plus auth/header scope
 (credentials redacted from every error, log, and snapshot), bounded scheduler
-counters, unwired tile-cache helpers (storage `none`: the pipeline refetches
-every run and keeps no resume cache), and output validation.
+counters, an optional tile resume cache (storage `cache`: response bodies
+under per-job digest namespaces, reused across runs, headers and cookies
+never stored), and output validation.
 
 ```sh
 cargo xtask test native     # runtime + CLI suites, loopback egress tests

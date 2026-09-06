@@ -18,9 +18,11 @@
 //!   replying `DestinationGranted`/`DestinationDenied`.
 //! * `acquire-tile{probe:true}` → [`probe_tile_bytes`], replying
 //!   `ProbeOutcome` with observed geometry.
-//! * `acquire-tile` → [`fetch_and_decode`] under the job's concurrency
+//! * `acquire-tile` → [`fetch_and_decode_cached`] under the job's concurrency
 //!   gate (one [`std::thread::scope`] pool per drained batch), replying
-//!   `TileOutcome`; the job owns retry counting and partial decisions.
+//!   `TileOutcome`; the job owns retry counting and partial decisions. With
+//!   `PipelineConfig::cache_dir` set, tile bodies persist under the job
+//!   namespace and later runs skip refetching tiles whose bytes still decode.
 //! * `decode-pixels`/`open-encoder`/`finalize-encoder` → acknowledged from
 //!   the tiles already decoded during acquisition (encoders run one-shot).
 //! * `publish-output` → canvas-limit check, assemble with [`blit_onto`],
@@ -42,7 +44,7 @@
 //! [`merge_headers`]: crate::pipeline::merge_headers
 //! [`validate_destination`]: crate::output::validate_destination
 //! [`probe_tile_bytes`]: crate::pipeline::probe_tile_bytes
-//! [`fetch_and_decode`]: crate::pipeline::fetch_and_decode
+//! [`fetch_and_decode_cached`]: crate::pipeline::fetch_and_decode_cached
 //! [`blit_onto`]: crate::pipeline::blit_onto
 //! [`OutputFormat`]: crate::output::OutputFormat
 //! [`OutputFormat::infer_from_path`]: crate::output::OutputFormat::infer_from_path
@@ -63,7 +65,7 @@ use crate::error::NativeError;
 use crate::http::{fetch, UserHeaders};
 use crate::output::{validate_destination, write_atomic, write_iiif_dir, OutputFormat};
 use crate::pipeline::{
-    blit_onto, encode_jpeg, encode_png, encode_tiff, fetch_and_decode, merge_headers,
+    blit_onto, encode_jpeg, encode_png, encode_tiff, fetch_and_decode_cached, merge_headers,
     probe_tile_bytes, render_iiif_dir, sha256_hex, PartialPolicy, PipelineConfig, PipelineEvent,
     PipelineOutcome,
 };
@@ -228,6 +230,9 @@ struct Attempt<'a> {
     output_path: PathBuf,
     overwrite: bool,
     format: OutputFormat,
+    /// Resume cache as `(cache_dir, job_namespace)`; `None` refetches all
+    /// tiles every run.
+    cache: Option<(PathBuf, String)>,
     on_event: &'a mut dyn FnMut(PipelineEvent),
     discovery_resources: usize,
     catalog: Vec<CatalogImage>,
@@ -276,6 +281,10 @@ fn drive_job(
         output_path: PathBuf::from(output_path),
         overwrite,
         format,
+        cache: config
+            .cache_dir
+            .clone()
+            .map(|dir| (dir, crate::cache::job_namespace(input_url))),
         on_event,
         discovery_resources: 0,
         catalog: Vec::new(),
@@ -804,6 +813,10 @@ fn acquire_tiles(
     let job_id = job.id().to_string();
     let config = attempt.config;
     let user = attempt.user;
+    let cache = attempt
+        .cache
+        .as_ref()
+        .map(|(dir, namespace)| (dir.as_path(), namespace.as_str()));
     let mut outcomes: Vec<(String, bool, Option<image::RgbaImage>)> =
         Vec::with_capacity(tiles.len());
     std::thread::scope(|scope| {
@@ -812,7 +825,14 @@ fn acquire_tiles(
             handles.push((
                 need.tile.clone(),
                 scope.spawn(move || {
-                    fetch_and_decode(&need.uri, &need.headers, &need.processing, config, user)
+                    fetch_and_decode_cached(
+                        &need.uri,
+                        &need.headers,
+                        &need.processing,
+                        config,
+                        user,
+                        cache,
+                    )
                 }),
             ));
         }

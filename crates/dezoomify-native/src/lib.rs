@@ -1,6 +1,6 @@
 //! Native effect runtime: real HTTP egress (rustls), header/auth scope,
-//! bounded scheduler bookkeeping, unwired tile-cache helpers (storage `none`,
-//! no resume cache), output validation, progress
+//! bounded scheduler bookkeeping, tile resume cache (storage `cache`),
+//! output validation, progress
 //! counters, image decode/assemble/encode pipeline (PNG, JPEG, TIFF, and
 //! static `iiif-dir` tile trees), and real output hashing.
 #![forbid(unsafe_code)]

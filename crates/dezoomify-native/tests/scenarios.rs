@@ -131,6 +131,33 @@ fn cache_keys_distinguish_resources_and_never_persist_secrets() {
 }
 
 #[test]
+fn cache_namespaces_isolate_jobs_and_reject_traversal() {
+    // The namespace derives from the input URL alone: repeated runs of one
+    // job share entries, distinct jobs never do, and no URL text survives.
+    let first = cache::job_namespace("https://h/painting");
+    assert_eq!(first, cache::job_namespace("https://h/painting"));
+    assert_ne!(first, cache::job_namespace("https://h/other"));
+    assert!(
+        !first.contains("painting") && !first.contains("https"),
+        "namespace must carry no URL text: {first}"
+    );
+    let dir = std::env::temp_dir().join(format!("dz-ns-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    cache::store(&dir, &first, "https://h/tile?x=0", b"bytes").unwrap();
+    assert_eq!(
+        cache::load(&dir, &first, "https://h/tile?x=0").unwrap(),
+        b"bytes"
+    );
+    // A missing entry is a miss, not an error.
+    assert!(cache::load(&dir, &first, "https://h/tile?x=1").is_none());
+    // Foreign namespaces never read or write outside the cache root.
+    assert!(cache::store(&dir, "../escape", "https://h/t", b"x").is_err());
+    assert!(cache::store(&dir, "a/b", "https://h/t", b"x").is_err());
+    assert!(cache::load(&dir, "../escape", "https://h/t").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn output_refuses_mismatch_without_overwrite_and_replaces_stale_temp() {
     let dir = std::env::temp_dir().join(format!("dz-out-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

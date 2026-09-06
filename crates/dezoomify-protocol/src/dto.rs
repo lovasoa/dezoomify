@@ -540,11 +540,11 @@ impl CapabilitiesDto {
     }
 
     /// Honest native baseline: PNG, JPEG, and TIFF output to a single file
-    /// plus static `iiif-dir` tile trees, no persistent storage, no bulk
-    /// queue. Deferred bulk-text entries resolve one at a time through fresh
-    /// bounded jobs. Handoff import is supported. Wave 2 widens these fields
-    /// only alongside the matching pipeline, encoder, cache, and
-    /// bulk-runner implementation.
+    /// plus static `iiif-dir` tile trees, with an optional tile resume cache
+    /// and no bulk queue. Deferred bulk-text entries resolve one at a time
+    /// through fresh bounded jobs. Handoff import is supported. Wave 2
+    /// widens these fields only alongside the matching pipeline, encoder,
+    /// cache, and bulk-runner implementation.
     #[must_use]
     pub fn native_baseline() -> Self {
         Self {
@@ -552,7 +552,7 @@ impl CapabilitiesDto {
             decoders: vec!["png".into(), "jpeg".into(), "tiff".into()],
             encoders: vec!["png".into(), "jpeg".into(), "tiff".into()],
             destination_modes: vec!["file".into(), "iiif-dir".into()],
-            storage_modes: vec!["none".into()],
+            storage_modes: vec!["cache".into()],
             bulk_supported: false,
             handoff_supported: true,
             ..Self::browser_baseline()

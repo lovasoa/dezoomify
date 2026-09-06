@@ -457,6 +457,70 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
 }
 
 #[test]
+fn tile_cache_reuses_tiles_after_the_server_loses_them() {
+    // First run populates the cache; then the tiles vanish from the server
+    // (interrupted save) while the metadata stays. The second run reuses the
+    // cached bodies and publishes the identical digest without refetching.
+    let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let base = serve_shared_map(Arc::clone(&shared));
+    let tiles = ["0_0", "1_0", "0_1", "1_1"];
+    {
+        let mut map = shared.lock().expect("lock");
+        map.insert(
+            "/pyr.dzi".to_string(),
+            http_response("200 OK", "application/xml", DZI_512.as_bytes()),
+        );
+        for tile in tiles {
+            let bytes = scenario_payload(&format!("tile-{tile}.png"));
+            map.insert(
+                format!("/pyr_files/9/{tile}.png"),
+                http_response("200 OK", "image/png", &bytes),
+            );
+        }
+    }
+    let input = format!("{base}/pyr.dzi");
+    let out_dir = temp_dir("tile-cache");
+    let cache_dir = out_dir.join("cache");
+    let config = PipelineConfig {
+        cache_dir: Some(cache_dir.clone()),
+        ..Default::default()
+    };
+    let first = out_dir.join("first.png");
+    let outcome = pipeline::run(
+        &input,
+        first.to_str().expect("utf8 output"),
+        false,
+        &config,
+        &mut |_event| {},
+    )
+    .expect("first run populates the cache");
+    let entries: Vec<_> =
+        std::fs::read_dir(cache_dir.join(dezoomify_native::cache::job_namespace(&input)))
+            .expect("job namespace written")
+            .collect();
+    assert_eq!(entries.len(), 4, "one cache entry per tile");
+    // The tiles are gone from the server; only the metadata survives.
+    {
+        let mut map = shared.lock().expect("lock");
+        for tile in tiles {
+            map.remove(&format!("/pyr_files/9/{tile}.png"));
+        }
+    }
+    let second = out_dir.join("second.png");
+    let resumed = pipeline::run(
+        &input,
+        second.to_str().expect("utf8 output"),
+        false,
+        &config,
+        &mut |_event| {},
+    )
+    .expect("second run reuses the cache");
+    assert_eq!(resumed.output_hash, outcome.output_hash);
+    assert_eq!(resumed.tile_count, 4);
+    assert!(!resumed.partial);
+}
+
+#[test]
 fn tiny_canvas_budget_fails_before_any_write() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");

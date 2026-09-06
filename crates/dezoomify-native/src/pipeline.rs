@@ -53,6 +53,11 @@ pub struct PipelineConfig {
     pub max_canvas_bytes: u64,
     /// JPEG quality for `.jpg` output and `iiif-dir` tiles (default 92).
     pub jpeg_quality: u8,
+    /// Tile resume cache: when set, each successfully fetched tile body is
+    /// stored under `<cache_dir>/<job>/<key>` (see [`crate::cache`]) and a
+    /// later run of the same job skips the fetch when the stored bytes still
+    /// decode. `None` keeps no tile bytes between runs.
+    pub cache_dir: Option<PathBuf>,
     /// Legacy parity: cap the output width. The largest level whose width
     /// fits is downloaded; when none fits, the smallest level is used.
     pub max_width: Option<u32>,
@@ -74,6 +79,7 @@ impl Default for PipelineConfig {
             max_retries: 3,
             max_canvas_bytes: 1 << 30,
             jpeg_quality: JPEG_QUALITY,
+            cache_dir: None,
             max_width: None,
             partial_policy: PartialPolicy::Fail,
             cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -140,13 +146,27 @@ pub(crate) fn merge_headers(request: &Request) -> BTreeMap<String, String> {
     merged
 }
 
-pub(crate) fn fetch_and_decode(
+/// Fetch one tile with resume-cache support. When `cache` carries
+/// `(cache_dir, job_namespace)`, stored bytes that still decode skip the
+/// fetch; a fresh fetch stores its processed body for later runs. Stored
+/// entries hold response bodies only, never headers or cookies. A corrupt
+/// entry quietly falls back to a fresh fetch, and a failed store never fails
+/// the tile: the cache stays best-effort.
+pub(crate) fn fetch_and_decode_cached(
     uri: &str,
     headers: &BTreeMap<String, String>,
     processing: &ProcessingRecipe,
     config: &PipelineConfig,
     user: &UserHeaders,
+    cache: Option<(&std::path::Path, &str)>,
 ) -> Result<image::RgbaImage, NativeError> {
+    if let Some((dir, namespace)) = cache {
+        if let Some(bytes) = crate::cache::load(dir, namespace, uri) {
+            if let Ok(decoded) = image::load_from_memory(&bytes) {
+                return Ok(decoded.to_rgba8());
+            }
+        }
+    }
     let mut request = Request::new(uri);
     request.headers = headers.clone();
     let merged = merge_headers(&request);
@@ -158,6 +178,9 @@ pub(crate) fn fetch_and_decode(
         ));
     }
     let bytes = processing.apply(outcome.body).map_err(NativeError::from)?;
+    if let Some((dir, namespace)) = cache {
+        let _ = crate::cache::store(dir, namespace, uri, &bytes);
+    }
     let decoded = image::load_from_memory(&bytes)
         .map_err(|e| NativeError::new("tile.decode-failed", format!("tile decode failed: {e}")))?;
     Ok(decoded.to_rgba8())

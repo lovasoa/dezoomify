@@ -13,8 +13,18 @@ Use it when:
 - the site **refuses visitors from other pages**: the app can introduce
   itself as coming from the site's own viewer page.
 
-Each run saves one job to one output file or IIIF tile folder. It keeps
-no resume cache and runs no bulk queue.
+Each run saves one job to one output file or IIIF tile folder. It runs
+no bulk queue.
+
+## Resuming an interrupted save
+
+Small network interruptions are retried automatically. When a save stops
+anyway, running the same job again with the same resume folder reuses the
+tiles already saved instead of fetching them again. On the command line,
+the resume folder is the `--tile-cache` option pointing at a folder.
+Tiles are keyed by digest of their address, so only response bytes persist
+there, never passwords, cookies, or session contents. If the site changes
+its image, remove the resume folder and start fresh.
 
 ## Install
 
