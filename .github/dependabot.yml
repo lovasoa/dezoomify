@@ -3,13 +3,10 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule: {interval: weekly}
-  # Standalone manifest (outside the root workspace). The glib advisory fix
-  # (0.20) is incompatible with the tauri 2 / gtk 0.18 dependency chain, and
-  # glib is only linked behind the optional `tauri` feature, so security
-  # updates for that range are recorded as consciously deferred here.
-  - package-ecosystem: cargo
-    directory: /apps/desktop/src-tauri
-    schedule: {interval: weekly}
+    # The glib advisory fix (0.20) is incompatible with the tauri 2 / gtk 0.18
+    # dependency chain, and glib is only linked behind the optional `tauri`
+    # feature of workspace member apps/desktop/src-tauri, so security
+    # updates for that range are recorded as consciously deferred here.
     ignore:
       - dependency-name: glib
         versions: [">=0.15.0, <0.20.0"]

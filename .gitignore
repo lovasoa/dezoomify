@@ -33,6 +33,6 @@ client_secret_*.json
 # wrangler local state (wrangler pages dev)
 /.wrangler/
 
-# desktop shell build output (src-tauri is outside the root workspace)
-/apps/desktop/src-tauri/target/
+# desktop shell build output (workspace member builds into the root target/)
+# plus Tauri-generated capability schemas
 /apps/desktop/src-tauri/gen/

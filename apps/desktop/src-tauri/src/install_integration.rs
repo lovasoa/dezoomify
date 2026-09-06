@@ -43,7 +43,9 @@ pub fn macos_chromium_manifest_path(home: &str) -> String {
 
 /// macOS Firefox manifest destination for one home directory.
 pub fn macos_firefox_manifest_path(home: &str) -> String {
-    format!("{home}/Library/Application Support/Mozilla/NativeMessagingHosts/{NATIVE_HOST_NAME}.json")
+    format!(
+        "{home}/Library/Application Support/Mozilla/NativeMessagingHosts/{NATIVE_HOST_NAME}.json"
+    )
 }
 
 /// Linux desktop entry destination for one home directory.
@@ -67,7 +69,10 @@ pub fn linux_firefox_manifest_path(home: &str) -> String {
 }
 
 fn is_absolute_path(path: &str) -> bool {
-    path.starts_with('/') || (path.len() >= 3 && path.as_bytes()[1] == b':' && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/'))
+    path.starts_with('/')
+        || (path.len() >= 3
+            && path.as_bytes()[1] == b':'
+            && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/'))
 }
 
 fn is_exact_extension_id(id: &str) -> bool {
@@ -321,10 +326,39 @@ pub fn install_windows_registry(exec_path: &str) -> Result<String, String> {
     let host_key = windows_native_host_key();
     // Protocol handler: URL Protocol + default icon + open command.
     let steps: Vec<Vec<String>> = vec![
-        vec!["add".into(), format!("HKCU\\{protocol_key}"), "/ve".into(), "/d".into(), "Dezoomify".into(), "/f".into()],
-        vec!["add".into(), format!("HKCU\\{protocol_key}"), "/v".into(), "URL Protocol".into(), "/d".into(), "".into(), "/f".into()],
-        vec!["add".into(), format!("HKCU\\{protocol_key}\\shell\\open\\command"), "/ve".into(), "/d".into(), format!("\"{exec_path}\" \"%1\""), "/f".into()],
-        vec!["add".into(), format!("HKCU\\{host_key}"), "/ve".into(), "/d".into(), exec_path.into(), "/f".into()],
+        vec![
+            "add".into(),
+            format!("HKCU\\{protocol_key}"),
+            "/ve".into(),
+            "/d".into(),
+            "Dezoomify".into(),
+            "/f".into(),
+        ],
+        vec![
+            "add".into(),
+            format!("HKCU\\{protocol_key}"),
+            "/v".into(),
+            "URL Protocol".into(),
+            "/d".into(),
+            "".into(),
+            "/f".into(),
+        ],
+        vec![
+            "add".into(),
+            format!("HKCU\\{protocol_key}\\shell\\open\\command"),
+            "/ve".into(),
+            "/d".into(),
+            format!("\"{exec_path}\" \"%1\""),
+            "/f".into(),
+        ],
+        vec![
+            "add".into(),
+            format!("HKCU\\{host_key}"),
+            "/ve".into(),
+            "/d".into(),
+            exec_path.into(),
+            "/f".into(),
+        ],
     ];
     for args in &steps {
         let status = Command::new("reg")
@@ -344,7 +378,11 @@ mod tests {
 
     #[test]
     fn chromium_manifest_uses_exact_origin() {
-        let json = chromium_manifest("/opt/dezoomify/dezoomify-native-host", CHROMIUM_RELEASE_EXTENSION_ID).unwrap();
+        let json = chromium_manifest(
+            "/opt/dezoomify/dezoomify-native-host",
+            CHROMIUM_RELEASE_EXTENSION_ID,
+        )
+        .unwrap();
         assert!(json.contains("chrome-extension://iapjjopjejpelnfdonefbffahmcndfbm/"));
         assert!(!json.contains('*'));
         assert!(chromium_manifest("relative/host", CHROMIUM_RELEASE_EXTENSION_ID).is_err());
@@ -353,7 +391,11 @@ mod tests {
 
     #[test]
     fn firefox_manifest_uses_exact_extension() {
-        let json = firefox_manifest("/opt/dezoomify/dezoomify-native-host", FIREFOX_RELEASE_EXTENSION_ID).unwrap();
+        let json = firefox_manifest(
+            "/opt/dezoomify/dezoomify-native-host",
+            FIREFOX_RELEASE_EXTENSION_ID,
+        )
+        .unwrap();
         assert!(json.contains("dezoomify@dezoomify.example"));
         assert!(!json.contains('*'));
         assert!(firefox_manifest("/opt/host", "chrome-extension://*/").is_err());
@@ -387,9 +429,13 @@ mod tests {
     fn install_writes_per_user_manifests_and_protocol_handler() {
         let home = temp_home("ok");
         let host = "/opt/dezoomify/dezoomify-native-host";
-        let written =
-            install_native_manifests(&home, host, CHROMIUM_RELEASE_EXTENSION_ID, FIREFOX_RELEASE_EXTENSION_ID)
-                .unwrap();
+        let written = install_native_manifests(
+            &home,
+            host,
+            CHROMIUM_RELEASE_EXTENSION_ID,
+            FIREFOX_RELEASE_EXTENSION_ID,
+        )
+        .unwrap();
         // Linux writes chromium, google-chrome, and firefox manifests.
         if std::env::consts::OS == "linux" {
             assert_eq!(written.len(), 3);
@@ -403,16 +449,21 @@ mod tests {
         }
         // Re-install overwrites our own manifests (host path update).
         let host2 = "/opt/dezoomify/dezoomify-native-host-2";
-        let rewritten =
-            install_native_manifests(&home, host2, CHROMIUM_RELEASE_EXTENSION_ID, FIREFOX_RELEASE_EXTENSION_ID)
-                .unwrap();
+        let rewritten = install_native_manifests(
+            &home,
+            host2,
+            CHROMIUM_RELEASE_EXTENSION_ID,
+            FIREFOX_RELEASE_EXTENSION_ID,
+        )
+        .unwrap();
         assert_eq!(written, rewritten);
         for path in &rewritten {
             assert!(std::fs::read_to_string(path).unwrap().contains(host2));
         }
         // Protocol handler installs per-user and advertises the scheme.
         if std::env::consts::OS == "linux" {
-            let entry = install_protocol_handler(&home, "/opt/dezoomify/dezoomify-desktop").unwrap();
+            let entry =
+                install_protocol_handler(&home, "/opt/dezoomify/dezoomify-desktop").unwrap();
             assert!(entry.starts_with(&home));
             let text = std::fs::read_to_string(&entry).unwrap();
             assert!(text.contains("x-scheme-handler/dezoomify"));
@@ -425,8 +476,17 @@ mod tests {
     fn install_refuses_wildcards_relative_paths_and_foreign_files() {
         let home = temp_home("refuse");
         // Wildcard ids and relative host paths fail before any write.
-        assert!(install_native_manifests(&home, "relative/host", CHROMIUM_RELEASE_EXTENSION_ID, FIREFOX_RELEASE_EXTENSION_ID).is_err());
-        assert!(install_native_manifests(&home, "/opt/host", "*", FIREFOX_RELEASE_EXTENSION_ID).is_err());
+        assert!(install_native_manifests(
+            &home,
+            "relative/host",
+            CHROMIUM_RELEASE_EXTENSION_ID,
+            FIREFOX_RELEASE_EXTENSION_ID
+        )
+        .is_err());
+        assert!(
+            install_native_manifests(&home, "/opt/host", "*", FIREFOX_RELEASE_EXTENSION_ID)
+                .is_err()
+        );
         assert!(install_protocol_handler(&home, "relative/bin").is_err());
         // A foreign manifest at our destination is never overwritten.
         if std::env::consts::OS == "linux" {
@@ -443,7 +503,9 @@ mod tests {
             )
             .unwrap_err();
             assert!(err.contains("foreign"), "must refuse foreign: {err}");
-            assert!(std::fs::read_to_string(&dest).unwrap().contains("other.host"));
+            assert!(std::fs::read_to_string(&dest)
+                .unwrap()
+                .contains("other.host"));
         }
         std::fs::remove_dir_all(&home).unwrap();
     }

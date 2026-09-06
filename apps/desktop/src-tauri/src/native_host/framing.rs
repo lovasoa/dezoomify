@@ -87,7 +87,10 @@ pub fn is_clean_eof(buffer: &[u8]) -> bool {
 
 /// True when `buffer` holds a truncated prefix/body (dirty EOF).
 pub fn is_truncated(buffer: &[u8]) -> bool {
-    !buffer.is_empty() && try_parse_frame(buffer).map(|o| o.is_none()).unwrap_or(false)
+    !buffer.is_empty()
+        && try_parse_frame(buffer)
+            .map(|o| o.is_none())
+            .unwrap_or(false)
 }
 
 #[cfg(test)]

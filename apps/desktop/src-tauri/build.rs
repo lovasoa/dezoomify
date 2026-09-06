@@ -20,7 +20,6 @@ fn main() {
             "dezoomify",
             tauri_build::InlinedPlugin::new().commands(COMMANDS),
         );
-        tauri_build::try_build(attributes)
-            .expect("failed to run the Tauri build step");
+        tauri_build::try_build(attributes).expect("failed to run the Tauri build step");
     }
 }

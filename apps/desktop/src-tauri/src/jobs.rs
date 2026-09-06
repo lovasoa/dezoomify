@@ -2,7 +2,7 @@
 //
 // Shapes mirror the dezoomify-job transcript event kinds (job-state,
 // progress, completed, cancelled, failed) without depending on the real
-// runtime, so this standalone manifest stays offline. The native runtime owns
+// runtime, so this lean shell stays offline. The native runtime owns
 // execution; this table only tracks lifecycle, scoped seq ordering, and
 // terminal-once guarantees for the creating window/session.
 
@@ -36,7 +36,10 @@ impl JobState {
     }
 
     pub fn is_terminal(&self) -> bool {
-        matches!(self, JobState::Completed | JobState::Cancelled | JobState::Failed)
+        matches!(
+            self,
+            JobState::Completed | JobState::Cancelled | JobState::Failed
+        )
     }
 }
 
@@ -94,11 +97,18 @@ impl JobTable {
     }
 
     pub fn events_for(&self, job: &str) -> Vec<JobEvent> {
-        self.jobs.get(job).map(|r| r.events.clone()).unwrap_or_default()
+        self.jobs
+            .get(job)
+            .map(|r| r.events.clone())
+            .unwrap_or_default()
     }
 
     fn push_event(&mut self, job: &str, kind: &str, detail: &str) -> u64 {
-        let seq = self.jobs.get(job).map(|r| r.seq.saturating_add(1)).unwrap_or(1);
+        let seq = self
+            .jobs
+            .get(job)
+            .map(|r| r.seq.saturating_add(1))
+            .unwrap_or(1);
         if let Some(record) = self.jobs.get_mut(job) {
             record.seq = seq;
             record.events.push(JobEvent {
@@ -169,7 +179,11 @@ impl JobTable {
     }
 
     /// Record a save destination grant for a live job.
-    pub fn request_destination(&mut self, job: &str, format: &str) -> Result<(u64, String), String> {
+    pub fn request_destination(
+        &mut self,
+        job: &str,
+        format: &str,
+    ) -> Result<(u64, String), String> {
         self.require_live(job)?;
         if !["png", "jpeg", "tiff"].contains(&format) {
             return Err("unsupported format".to_string());

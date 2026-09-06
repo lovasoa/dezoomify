@@ -142,13 +142,16 @@ pub fn dispatch(
             })
         }
         "start_job" => {
-            let input_url = arg.ok_or_else(|| CommandError::invalid_input("start_job needs an input_url"))?;
+            let input_url =
+                arg.ok_or_else(|| CommandError::invalid_input("start_job needs an input_url"))?;
             if !is_valid_input_url(input_url) {
                 return Err(CommandError::invalid_input(
                     "input_url must be an http(s) URL up to 2048 bytes without userinfo",
                 ));
             }
-            let id = table.start_job(input_url).map_err(|e| CommandError::invalid_input(&e))?;
+            let id = table
+                .start_job(input_url)
+                .map_err(|e| CommandError::invalid_input(&e))?;
             let seq = table.last_seq(&id).unwrap_or(1);
             Ok(DispatchOutcome {
                 job: id,
@@ -159,7 +162,9 @@ pub fn dispatch(
         "cancel_job" => {
             let id = job.ok_or_else(|| CommandError::invalid_input("cancel_job needs a job id"))?;
             if !is_valid_job_id(id) {
-                return Err(CommandError::invalid_input("job id must look like job:<suffix>"));
+                return Err(CommandError::invalid_input(
+                    "job id must look like job:<suffix>",
+                ));
             }
             match table.cancel_job(id) {
                 Ok(seq) => Ok(DispatchOutcome {
@@ -173,10 +178,14 @@ pub fn dispatch(
             }
         }
         "answer_choice" => {
-            let id = job.ok_or_else(|| CommandError::invalid_input("answer_choice needs a job id"))?;
-            let choice = arg.ok_or_else(|| CommandError::invalid_input("answer_choice needs a choice"))?;
+            let id =
+                job.ok_or_else(|| CommandError::invalid_input("answer_choice needs a job id"))?;
+            let choice =
+                arg.ok_or_else(|| CommandError::invalid_input("answer_choice needs a choice"))?;
             if !is_valid_job_id(id) {
-                return Err(CommandError::invalid_input("job id must look like job:<suffix>"));
+                return Err(CommandError::invalid_input(
+                    "job id must look like job:<suffix>",
+                ));
             }
             if choice.is_empty() || choice.len() > 128 {
                 return Err(CommandError::invalid_input("choice must be 1..128 bytes"));
@@ -193,10 +202,14 @@ pub fn dispatch(
             }
         }
         "request_destination" => {
-            let id = job.ok_or_else(|| CommandError::invalid_input("request_destination needs a job id"))?;
-            let format = arg.ok_or_else(|| CommandError::invalid_input("request_destination needs a format"))?;
+            let id = job
+                .ok_or_else(|| CommandError::invalid_input("request_destination needs a job id"))?;
+            let format = arg
+                .ok_or_else(|| CommandError::invalid_input("request_destination needs a format"))?;
             if !is_valid_job_id(id) {
-                return Err(CommandError::invalid_input("job id must look like job:<suffix>"));
+                return Err(CommandError::invalid_input(
+                    "job id must look like job:<suffix>",
+                ));
             }
             if !SUPPORTED_FORMATS.contains(&format) {
                 return Err(CommandError::invalid_input(
@@ -225,7 +238,13 @@ mod tests {
     #[test]
     fn registry_lists_exact_commands() {
         assert_eq!(COMMANDS.len(), 5);
-        for name in ["start_job", "cancel_job", "answer_choice", "request_destination", "query_capabilities"] {
+        for name in [
+            "start_job",
+            "cancel_job",
+            "answer_choice",
+            "request_destination",
+            "query_capabilities",
+        ] {
             assert!(is_known_command(name), "missing {name}");
         }
         assert!(!is_known_command("shell_exec"));
@@ -272,8 +291,20 @@ mod tests {
     fn invalid_input_rejected() {
         let mut table = JobTable::new();
         assert!(dispatch(&mut table, "start_job", None, Some("file:///etc/passwd")).is_err());
-        assert!(dispatch(&mut table, "start_job", None, Some("https://user:pass@example.com/x")).is_err());
-        assert!(dispatch(&mut table, "request_destination", Some("job:x"), Some("exe")).is_err());
+        assert!(dispatch(
+            &mut table,
+            "start_job",
+            None,
+            Some("https://user:pass@example.com/x")
+        )
+        .is_err());
+        assert!(dispatch(
+            &mut table,
+            "request_destination",
+            Some("job:x"),
+            Some("exe")
+        )
+        .is_err());
     }
 
     #[test]

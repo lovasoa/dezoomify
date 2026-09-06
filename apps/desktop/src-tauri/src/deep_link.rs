@@ -45,9 +45,13 @@ impl std::fmt::Display for DeepLinkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DeepLinkError::Oversize => write!(f, "deep-link.rejected: oversize beyond 2048 bytes"),
-            DeepLinkError::InvalidScheme => write!(f, "deep-link.rejected: scheme must be dezoomify://open"),
+            DeepLinkError::InvalidScheme => {
+                write!(f, "deep-link.rejected: scheme must be dezoomify://open")
+            }
             DeepLinkError::MissingField(k) => write!(f, "deep-link.rejected: missing field {k}"),
-            DeepLinkError::DuplicateField(k) => write!(f, "deep-link.rejected: duplicate field {k}"),
+            DeepLinkError::DuplicateField(k) => {
+                write!(f, "deep-link.rejected: duplicate field {k}")
+            }
             DeepLinkError::UnknownField(k) => write!(f, "deep-link.rejected: unknown field {k}"),
             DeepLinkError::UnsupportedVersion(v) => {
                 write!(f, "deep-link.rejected: unsupported version {v}")
@@ -61,7 +65,9 @@ impl std::fmt::Display for DeepLinkError {
             DeepLinkError::SecretForbidden(k) => {
                 write!(f, "deep-link.rejected: secret field {k} is forbidden")
             }
-            DeepLinkError::InvalidSource(m) => write!(f, "deep-link.rejected: invalid source ({m})"),
+            DeepLinkError::InvalidSource(m) => {
+                write!(f, "deep-link.rejected: invalid source ({m})")
+            }
         }
     }
 }
@@ -131,7 +137,13 @@ fn percent_decode(input: &str) -> Result<String, String> {
                     out.push((h * 16 + l) as u8);
                     i += 3;
                 }
-                _ => return Err(format!("bad escape %{}{}", bytes[i + 1] as char, bytes[i + 2] as char)),
+                _ => {
+                    return Err(format!(
+                        "bad escape %{}{}",
+                        bytes[i + 1] as char,
+                        bytes[i + 2] as char
+                    ))
+                }
             }
         } else if bytes[i] == b'+' {
             out.push(b' ');
@@ -148,7 +160,7 @@ fn has_userinfo(src: &str) -> bool {
     // Look at the authority section before the first /, ?, or #.
     if let Some(after_scheme) = src.split("://").nth(1) {
         let end = after_scheme
-            .find(|c| c == '/' || c == '?' || c == '#')
+            .find(['/', '?', '#'])
             .unwrap_or(after_scheme.len());
         let authority = &after_scheme[..end];
         if authority.contains('@') {
@@ -160,10 +172,14 @@ fn has_userinfo(src: &str) -> bool {
 
 fn validate_source(src: &str) -> Result<(), DeepLinkError> {
     if src.is_empty() || src.len() > MAX_FIELD_LEN {
-        return Err(DeepLinkError::InvalidSource("src must be 1..1024 bytes".to_string()));
+        return Err(DeepLinkError::InvalidSource(
+            "src must be 1..1024 bytes".to_string(),
+        ));
     }
     if !(src.starts_with("http://") || src.starts_with("https://")) {
-        return Err(DeepLinkError::InvalidSource("scheme must be http or https".to_string()));
+        return Err(DeepLinkError::InvalidSource(
+            "scheme must be http or https".to_string(),
+        ));
     }
     // userinfo credentials must never travel in a deep link.
     if has_userinfo(src) {
@@ -188,7 +204,7 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     {
         return Err(DeepLinkError::InvalidScheme);
     }
-    let query = url.splitn(2, '?').nth(1).unwrap_or("");
+    let query = url.split_once('?').map(|x| x.1).unwrap_or("");
     // Strip fragment: fragments never carry job input.
     let query = query.split('#').next().unwrap_or("");
     if query.is_empty() {
@@ -206,11 +222,17 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
         }
         let (name, value) = match pair.split_once('=') {
             Some((n, v)) => (n, v),
-            None => return Err(DeepLinkError::MalformedEncoding(format!("pair without =: {pair}"))),
+            None => {
+                return Err(DeepLinkError::MalformedEncoding(format!(
+                    "pair without =: {pair}"
+                )))
+            }
         };
         // Field names are literal; encoded names are rejected as malformed.
         if name.contains('%') {
-            return Err(DeepLinkError::MalformedEncoding("encoded field name".to_string()));
+            return Err(DeepLinkError::MalformedEncoding(
+                "encoded field name".to_string(),
+            ));
         }
         match name {
             "v" => {
@@ -249,7 +271,7 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     let version: u32 = version_raw
         .parse()
         .map_err(|_| DeepLinkError::UnsupportedVersion(version_raw.clone()))?;
-    if version < DEEP_LINK_MIN_SUPPORTED_VERSION || version > DEEP_LINK_CURRENT_VERSION {
+    if !(DEEP_LINK_MIN_SUPPORTED_VERSION..=DEEP_LINK_CURRENT_VERSION).contains(&version) {
         return Err(DeepLinkError::UnsupportedVersion(version_raw));
     }
     let source_url = percent_decode(&src_raw).map_err(DeepLinkError::MalformedEncoding)?;
@@ -269,10 +291,14 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
         Some(raw) => {
             let decoded = percent_decode(&raw).map_err(DeepLinkError::MalformedEncoding)?;
             if decoded.len() > 256 {
-                return Err(DeepLinkError::InvalidSource("hint beyond 256 bytes".to_string()));
+                return Err(DeepLinkError::InvalidSource(
+                    "hint beyond 256 bytes".to_string(),
+                ));
             }
             if decoded.contains('\0') {
-                return Err(DeepLinkError::InvalidSource("hint contains NUL".to_string()));
+                return Err(DeepLinkError::InvalidSource(
+                    "hint contains NUL".to_string(),
+                ));
             }
             if decoded.is_empty() {
                 None
@@ -298,7 +324,10 @@ pub fn requires_confirmation(_link: &DeepLink) -> bool {
 ///
 /// Returns the link only when `confirmed` is true; otherwise reports a
 /// pending-confirmation state and the caller must perform no effect.
-pub fn apply_after_confirmation(link: DeepLink, confirmed: bool) -> Result<DeepLink, DeepLinkError> {
+pub fn apply_after_confirmation(
+    link: DeepLink,
+    confirmed: bool,
+) -> Result<DeepLink, DeepLinkError> {
     if !confirmed {
         return Err(DeepLinkError::MissingField("confirm"));
     }
@@ -352,15 +381,11 @@ mod tests {
             "dezoomify://open?v=2&v=2&src=https%3A%2F%2Fexample.com%2Fx".to_string(),
             format!(
                 "dezoomify://open?v=2&src={}&src={}",
-                "https%3A%2F%2Fexample.com%2Fx",
-                "https%3A%2F%2Fexample.com%2Fy"
+                "https%3A%2F%2Fexample.com%2Fx", "https%3A%2F%2Fexample.com%2Fy"
             ),
         ] {
             assert!(
-                matches!(
-                    parse_deep_link(&url),
-                    Err(DeepLinkError::DuplicateField(_))
-                ),
+                matches!(parse_deep_link(&url), Err(DeepLinkError::DuplicateField(_))),
                 "{url} must be rejected as duplicate"
             );
         }
@@ -390,7 +415,10 @@ mod tests {
         for smuggled in ["cookie=abc", "token=abc", "session=abc", "apikey=abc"] {
             let url = link("2", &format!("https%3A%2F%2Fexample.com%2Fx%3F{smuggled}"));
             assert!(
-                matches!(parse_deep_link(&url), Err(DeepLinkError::SecretForbidden(_))),
+                matches!(
+                    parse_deep_link(&url),
+                    Err(DeepLinkError::SecretForbidden(_))
+                ),
                 "smuggled {smuggled} must be rejected"
             );
         }
@@ -404,7 +432,10 @@ mod tests {
             link("2", "https%3A%2F%2Fexample.com%2F%ZZ"),
         ] {
             assert!(
-                matches!(parse_deep_link(&bad), Err(DeepLinkError::MalformedEncoding(_))),
+                matches!(
+                    parse_deep_link(&bad),
+                    Err(DeepLinkError::MalformedEncoding(_))
+                ),
                 "{bad} must be rejected as malformed"
             );
         }
@@ -431,7 +462,10 @@ mod tests {
             Err(DeepLinkError::InvalidSource(_))
         ));
         // src beyond the per-field bound is rejected after decoding.
-        let big = link("2", &format!("https%3A%2F%2Fexample.com%2F{}", "a".repeat(1100)));
+        let big = link(
+            "2",
+            &format!("https%3A%2F%2Fexample.com%2F{}", "a".repeat(1100)),
+        );
         assert!(matches!(
             parse_deep_link(&big),
             Err(DeepLinkError::InvalidSource(_))
@@ -460,14 +494,27 @@ mod tests {
 
     #[test]
     fn oversize_userinfo_cookie_malformed_rejected() {
-        let big = format!("dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2F{}", "a".repeat(3000));
+        let big = format!(
+            "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2F{}",
+            "a".repeat(3000)
+        );
         assert_eq!(parse_deep_link(&big).unwrap_err(), DeepLinkError::Oversize);
         let userinfo = link("2", "https%3A%2F%2Fuser%3Apass%40example.com%2Fx");
-        assert_eq!(parse_deep_link(&userinfo).unwrap_err(), DeepLinkError::UserinfoForbidden);
-        let cookie = "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx&cookie=abc".to_string();
-        assert!(matches!(parse_deep_link(&cookie), Err(DeepLinkError::SecretForbidden(_))));
+        assert_eq!(
+            parse_deep_link(&userinfo).unwrap_err(),
+            DeepLinkError::UserinfoForbidden
+        );
+        let cookie =
+            "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fx&cookie=abc".to_string();
+        assert!(matches!(
+            parse_deep_link(&cookie),
+            Err(DeepLinkError::SecretForbidden(_))
+        ));
         let bad = link("2", "https%3A%2F%2Fexample.com%2F%ZZ");
-        assert!(matches!(parse_deep_link(&bad), Err(DeepLinkError::MalformedEncoding(_))));
+        assert!(matches!(
+            parse_deep_link(&bad),
+            Err(DeepLinkError::MalformedEncoding(_))
+        ));
     }
 
     #[test]

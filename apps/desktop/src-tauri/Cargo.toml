@@ -1,18 +1,16 @@
 [package]
 name = "dezoomify-desktop"
 version = "3.0.0"
-edition = "2021"
-license = "GPL-3.0-or-later"
+edition.workspace = true
+license.workspace = true
 description = "Dezoomify desktop shell (lean offline shell by default; real Tauri window behind the `tauri` feature)"
-repository = "https://github.com/lovasoa/dezoomify"
+repository.workspace = true
 
-# Standalone manifest: intentionally NOT a member of the root workspace. The
-# default build stays lean (pure Rust, no webview system packages), so the
-# manifest keeps building offline; tauri.conf.json and capabilities are
-# validated by node tests. The real Tauri window shell is behind the
-# non-default `tauri` feature and needs the platform webview packages
-# (Linux: libwebkit2gtk-4.1-dev, libgtk-3-dev, libsoup-3.0-dev, ...).
-[workspace]
+# Workspace member: shares the root Cargo.lock. The default build stays lean
+# (pure Rust, no webview system packages), so the Tauri SDK stays behind the
+# optional non-default `tauri` feature (Linux needs libwebkit2gtk-4.1-dev,
+# libgtk-3-dev, libsoup-3.0-dev, ... only for that feature);
+# tauri.conf.json and capabilities are validated by node tests.
 
 [lib]
 name = "dezoomify_desktop"
@@ -31,9 +29,9 @@ path = "src/bin/dezoomify-native-host.rs"
 # Lean offline shell: pure Rust only (no webview system packages). ed25519-dalek
 # is pure Rust and provides real updater signature verification; serde/serde_json
 # are pure Rust and provide the Native Messaging wire JSON (framed, bounded).
-ed25519-dalek = { version = "2", default-features = false }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1" }
+ed25519-dalek = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 # Real window shell (optional; see the `tauri` feature below).
 tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-dialog = { version = "2", optional = true }

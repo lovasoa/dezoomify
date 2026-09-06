@@ -1,7 +1,7 @@
 // Desktop entry point.
 //
 // Default build: lean offline shell (version, per-user Native Messaging +
-// protocol registration, handshake probe), so the standalone manifest stays
+// protocol registration, handshake probe), so the default features stay
 // checkable without webview system packages. With the `tauri` feature, the
 // real Tauri window shell runs (single local window, strict navigation
 // policy, the five capability commands, native save dialog). See
@@ -54,8 +54,10 @@ fn main() {
             println!("usage: dezoomify-desktop [--register-native-host [--host-path PATH] [--home HOME] | --check-native-host | --unregister-native-host]");
         }
         Some("--register-native-host") => {
-            let host_path = flag_value(&args, "--host-path").unwrap_or_else(sibling_host_path_from_exe);
-            let home = flag_value(&args, "--home").unwrap_or_else(|| home_dir().unwrap_or_default());
+            let host_path =
+                flag_value(&args, "--host-path").unwrap_or_else(sibling_host_path_from_exe);
+            let home =
+                flag_value(&args, "--home").unwrap_or_else(|| home_dir().unwrap_or_default());
             if home.is_empty() {
                 eprintln!("error: cannot determine home directory (pass --home HOME)");
                 std::process::exit(1);
@@ -120,13 +122,11 @@ fn main() {
             let mut removed = 0;
             for path in checked_manifest_paths(&home) {
                 let ours = std::fs::read_to_string(&path)
-                    .map(|text| {
-                        dezoomify_desktop::install_integration::is_our_manifest_text(&text)
-                    })
+                    .map(|text| dezoomify_desktop::install_integration::is_our_manifest_text(&text))
                     .unwrap_or(false)
-                    || std::path::Path::new(&path)
-                        .file_name()
-                        .is_some_and(|n| n.to_string_lossy() == "dev.ophir.dezoomify.native_host.json");
+                    || std::path::Path::new(&path).file_name().is_some_and(|n| {
+                        n.to_string_lossy() == "dev.ophir.dezoomify.native_host.json"
+                    });
                 if !ours {
                     continue;
                 }
@@ -156,9 +156,7 @@ fn main() {
 
 #[cfg(not(feature = "tauri"))]
 fn flag_value(args: &[String], flag: &str) -> Option<String> {
-    args.windows(2)
-        .find(|w| w[0] == flag)
-        .map(|w| w[1].clone())
+    args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
 }
 
 #[cfg(not(feature = "tauri"))]
@@ -183,7 +181,10 @@ fn sibling_host_path(exe: &str) -> String {
     }
     let path = std::path::Path::new(exe);
     match path.parent() {
-        Some(dir) => dir.join("dezoomify-native-host").to_string_lossy().into_owned(),
+        Some(dir) => dir
+            .join("dezoomify-native-host")
+            .to_string_lossy()
+            .into_owned(),
         None => String::new(),
     }
 }

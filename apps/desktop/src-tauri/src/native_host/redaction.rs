@@ -57,7 +57,10 @@ pub fn redact_cookie_header(header_value: &str) -> String {
 /// `names` are cookie names, `origin` is the exact scope, `job` is the job id.
 pub fn scoped_cookie_diagnostic(names: &[&str], origin: &str, job: &str) -> String {
     let list = names.join(",");
-    format!("cookies scope origin={} job={} names=[{}]", origin, job, list)
+    format!(
+        "cookies scope origin={} job={} names=[{}]",
+        origin, job, list
+    )
 }
 
 #[cfg(test)]

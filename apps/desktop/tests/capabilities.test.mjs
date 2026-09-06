@@ -201,7 +201,9 @@ test("desktop typescript stays host-neutral (no web/extension imports)", () => {
     assert.ok(!src.includes("XMLHttpRequest"), `${rel} must not use XHR`);
   }
   const cargo = readText("../src-tauri/Cargo.toml");
-  assert.ok(cargo.includes("[workspace]"), "standalone manifest detaches workspace");
+  const rootCargo = readText("../../../Cargo.toml");
+  assert.ok(rootCargo.includes("apps/desktop/src-tauri"), "desktop shell is a root workspace member");
+  assert.ok(!cargo.includes("[workspace]"), "desktop shell shares the root workspace (no detached [workspace])");
   // The real window shell is opt-in: the Tauri SDK stays an optional
   // dependency pulled only by the `tauri` feature, so the default build
   // keeps no SDK and no webview system requirements.

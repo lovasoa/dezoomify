@@ -60,7 +60,8 @@ fn decode_hex<const N: usize>(value: &str) -> Option<[u8; N]> {
 pub fn parse_public_key(public_key_hex: &str) -> Result<VerifyingKey, String> {
     let bytes = decode_hex::<PUBLIC_KEY_LENGTH>(public_key_hex)
         .ok_or_else(|| "updater.rejected: malformed public key".to_string())?;
-    VerifyingKey::from_bytes(&bytes).map_err(|e| format!("updater.rejected: malformed public key: {e}"))
+    VerifyingKey::from_bytes(&bytes)
+        .map_err(|e| format!("updater.rejected: malformed public key: {e}"))
 }
 
 /// Verify an ed25519 signature over the canonical metadata message.
@@ -97,7 +98,8 @@ pub fn validate_update(
     public_key: &VerifyingKey,
 ) -> Result<bool, String> {
     // HTTPS allowlist.
-    let host = url_host(&candidate.url).ok_or_else(|| "updater.rejected: invalid url".to_string())?;
+    let host =
+        url_host(&candidate.url).ok_or_else(|| "updater.rejected: invalid url".to_string())?;
     if !candidate.url.starts_with("https://") {
         return Err("updater.rejected: https required".to_string());
     }
@@ -109,9 +111,7 @@ pub fn validate_update(
     verify_candidate_signature(public_key, candidate)?;
     // Hash must look like 64 hex chars; authenticity is enforced by the
     // signature that covers this field.
-    if candidate.sha256.len() != 64
-        || !candidate.sha256.chars().all(|c| c.is_ascii_hexdigit())
-    {
+    if candidate.sha256.len() != 64 || !candidate.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("updater.rejected: tampered hash".to_string());
     }
     // Stale timestamps never stage.
@@ -134,7 +134,14 @@ pub fn validate_update(
 
 fn url_host(url: &str) -> Option<String> {
     let after = url.split("://").nth(1)?;
-    let host = after.split('/').next()?.split(':').next()?.split('?').next()?.to_string();
+    let host = after
+        .split('/')
+        .next()?
+        .split(':')
+        .next()?
+        .split('?')
+        .next()?
+        .to_string();
     if host.is_empty() {
         None
     } else {
@@ -213,8 +220,8 @@ mod tests {
         candidate.version = "0.9.0".to_string();
         assert!(validate_update("0.1.0", &candidate, 1_700_000_100, &verifying).is_err());
         let mut hash_flipped = valid();
-        hash_flipped.sha256 = "8f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-            .to_string();
+        hash_flipped.sha256 =
+            "8f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string();
         assert!(validate_update("0.1.0", &hash_flipped, 1_700_000_100, &verifying).is_err());
     }
 

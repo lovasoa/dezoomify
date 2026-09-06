@@ -71,9 +71,10 @@ fn run_dispatch(
     job: Option<&str>,
     arg: Option<&str>,
 ) -> Result<Dispatched, CommandFailure> {
-    let mut table = state
-        .lock()
-        .map_err(|_| CommandFailure { code: "shell.lock".into(), message: "job table poisoned".into() })?;
+    let mut table = state.lock().map_err(|_| CommandFailure {
+        code: "shell.lock".into(),
+        message: "job table poisoned".into(),
+    })?;
     let outcome = commands::dispatch(&mut table, command, job, arg)?;
     Ok(Dispatched {
         job: outcome.job,
@@ -102,7 +103,13 @@ fn start_job(
     input_url: String,
 ) -> Result<Dispatched, CommandFailure> {
     let dispatched = run_dispatch(&state, "start_job", None, Some(&input_url))?;
-    emit_job_state(&app, &dispatched.job, dispatched.seq, "job-state", "discovering");
+    emit_job_state(
+        &app,
+        &dispatched.job,
+        dispatched.seq,
+        "job-state",
+        "discovering",
+    );
     Ok(dispatched)
 }
 
@@ -130,11 +137,16 @@ fn answer_choice(
 }
 
 #[tauri::command]
-fn query_capabilities(state: State<'_, Mutex<JobTable>>) -> Result<CapabilitySnapshot, CommandFailure> {
+fn query_capabilities(
+    state: State<'_, Mutex<JobTable>>,
+) -> Result<CapabilitySnapshot, CommandFailure> {
     run_dispatch(&state, "query_capabilities", None, None)?;
     Ok(CapabilitySnapshot {
         native_available: true,
-        encoders: commands::SUPPORTED_FORMATS.iter().map(|s| (*s).to_string()).collect(),
+        encoders: commands::SUPPORTED_FORMATS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
         protocol_min: "1.0".into(),
         protocol_max: "1.0".into(),
         commands: COMMANDS.to_vec(),

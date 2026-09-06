@@ -43,6 +43,8 @@ fn ci_lane(lane: &str) -> Result<(), String> {
                 "dezoomify-job",
                 "-p",
                 "dezoomify-native",
+                "-p",
+                "dezoomify-desktop",
             ])
         }
         "wasm" => super::wasm::run(&[]),

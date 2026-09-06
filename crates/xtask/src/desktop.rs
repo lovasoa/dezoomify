@@ -4,10 +4,13 @@
 //! `tauri`) additionally needs the platform webview system packages and is
 //! compiled when they are present. Bundling runs only without
 //! `--unsigned-test` and only when the bundler prerequisites exist.
+//!
+//! `dezoomify-desktop` is a member of the root workspace and shares the root
+//! `Cargo.lock`; the default features keep it offline-capable.
 
 use std::process::Command;
 
-const DESKTOP_MANIFEST: &str = "apps/desktop/src-tauri/Cargo.toml";
+const DESKTOP_PKG: &str = "dezoomify-desktop";
 const WEBKIT_SYSTEM_PACKAGES: &str =
     "libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential";
 
@@ -25,14 +28,14 @@ pub fn build_desktop(args: &[String]) -> Result<(), String> {
             serde_json::from_str(&text).map_err(|e| format!("bad json {rel}: {e}"))?;
     }
     // The lean shell always compiles: it is the deterministic gate.
-    run_cargo(&["build", "--manifest-path", DESKTOP_MANIFEST])?;
-    println!("build desktop: lean shell compiled (apps/desktop/src-tauri/target/debug/dezoomify-desktop)");
+    run_cargo(&["build", "-p", DESKTOP_PKG])?;
+    println!("build desktop: lean shell compiled (target/debug/dezoomify-desktop)");
     if tauri_system_ready() {
         build_frontend()?;
         run_cargo(&[
             "build",
-            "--manifest-path",
-            DESKTOP_MANIFEST,
+            "-p",
+            DESKTOP_PKG,
             "--features",
             "tauri",
             "--bin",
@@ -55,8 +58,8 @@ pub fn build_desktop(args: &[String]) -> Result<(), String> {
 
 pub fn test_desktop(_args: &[String]) -> Result<(), String> {
     // Lean shell unit tests: handoff execution, registration, deep links,
-    // commands, updater (standalone manifest, always builds offline).
-    run_cargo(&["test", "--manifest-path", DESKTOP_MANIFEST])?;
+    // commands, updater (workspace member, always builds offline).
+    run_cargo(&["test", "-p", DESKTOP_PKG])?;
     run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
     println!("test desktop: ok");
@@ -75,15 +78,15 @@ pub fn dev_desktop() -> Result<(), String> {
     build_frontend()?;
     run_cargo(&[
         "build",
-        "--manifest-path",
-        DESKTOP_MANIFEST,
+        "-p",
+        DESKTOP_PKG,
         "--features",
         "tauri",
         "--bin",
         "dezoomify-desktop",
     ])?;
     let root = super::repo_root();
-    let bin = root.join("apps/desktop/src-tauri/target/debug/dezoomify-desktop");
+    let bin = root.join("target/debug/dezoomify-desktop");
     if !bin.exists() {
         return Err(format!(
             "desktop binary missing after build: {}",
