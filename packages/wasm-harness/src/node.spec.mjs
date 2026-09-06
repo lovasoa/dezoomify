@@ -46,29 +46,33 @@ function readSource(name) {
 describe("P07-EXPORTS: required JS surface is exported", () => {
   const lib = readSource("lib.rs");
 
-  // JS export name -> evidence expected in lib.rs (doc surface table,
-  // re-export, fn name, or wasm-bindgen js_name).
-  const surface = {
-    protocolVersion: ["protocolVersion", "protocol_version"],
-    Session: ["Session"],
-    dispatch: ["dispatch"],
-    drain: ["drain", "drainMessages", "drain_messages"],
+  // Each required JS export must be a real wasm-bindgen binding (a js_name
+  // attribute plus its concrete Rust item), not a passing mention in prose.
+  // A comment naming "dispatch" would satisfy a substring check without
+  // exporting anything; the attribute + item pair cannot.
+  const bindings = {
+    protocolVersion: ['js_name = "protocolVersion"', "pub fn js_protocol_version"],
+    Session: ['js_name = "Session"', "pub struct JsSession"],
+    dispatch: ['js_name = "dispatch"', "pub fn dispatch"],
+    drain: ['js_name = "drainMessages"', "pub fn drain_messages"],
     buffers: [
-      "buffers",
-      "allocate_buffer",
-      "commit_buffer",
-      "take_buffer",
-      "free_buffer",
+      'js_name = "allocateBuffer"',
+      'js_name = "writeBuffer"',
+      'js_name = "commitBuffer"',
+      'js_name = "takeBuffer"',
+      'js_name = "freeBuffer"',
     ],
-    process: ["process", "composite_crop", "composite-crop", "process_crop"],
-    dispose: ["dispose"],
+    process: ['js_name = "process"', "pub fn process"],
+    dispose: ['js_name = "dispose"', "pub fn dispose"],
   };
-  for (const [exportName, evidence] of Object.entries(surface)) {
+  for (const [exportName, evidence] of Object.entries(bindings)) {
     it(`exports ${exportName}`, () => {
-      assert.ok(
-        evidence.some((token) => lib.includes(token)),
-        `lib.rs must mention ${exportName} (looked for ${evidence.join(", ")})`,
-      );
+      for (const token of evidence) {
+        assert.ok(
+          lib.includes(token),
+          `lib.rs must bind ${exportName} via ${token}`,
+        );
+      }
     });
   }
 
@@ -76,6 +80,20 @@ describe("P07-EXPORTS: required JS surface is exported", () => {
     for (const token of ["Reentrancy", "Disposal", "exactly once", "invalidat"]) {
       assert.ok(lib.includes(token), `lib.rs must document ${token}`);
     }
+    // Prose alone is not a contract: the session implementation behind the
+    // bindings must back it (repeat-safe dispose, exactly-once drain).
+    const session = readSource("session.rs");
+    assert.ok(session.includes("pub fn dispose"), "session.rs must implement dispose");
+    assert.ok(session.includes("pub fn drain_messages"), "session.rs must implement drain_messages");
+    assert.ok(session.includes("pub fn dispatch"), "session.rs must implement dispatch");
+    assert.ok(
+      session.includes("if self.disposed"),
+      "dispose must guard on disposed (repeat-safe)",
+    );
+    assert.ok(
+      session.includes("drain(..)"),
+      "drain_messages must move the queue exactly once",
+    );
   });
 });
 
@@ -193,14 +211,20 @@ describe("P07-WORKFLOWS: transcript golden", () => {
 });
 
 describe("P07-PACKAGE: wasm-pack conformance", () => {
-  it("runs wasm-pack --node tests when wasm-pack is installed", () => {
+  it("runs wasm-pack --node tests when wasm-pack is installed", (t) => {
     const probe = spawnSync("wasm-pack", ["--version"], { encoding: "utf8" });
     if (probe.status !== 0) {
-      console.warn(
-        "EXCEPTION-RECORDED: wasm-pack is not installed; " +
-          "wasm-pack --node/--headless browser tests are out of scope. " +
-          "Native conformance above exercises the same adapter logic.",
-      );
+      // Explicit narrowed scope per docs/testing.md:105-108: lanes that need
+      // installed browsers/runners report the narrowing rather than claiming
+      // full coverage. t.skip marks the test skipped (not passed) so a
+      // missing toolchain can never read as green conformance.
+      const msg =
+        "EXCEPTION-RECORDED (narrowed scope per docs/testing.md:105-108): " +
+        "wasm-pack is not installed; " +
+        "wasm-pack --node/--headless browser tests are out of scope. " +
+        "Native conformance above exercises the same adapter logic.";
+      console.warn(msg);
+      t.skip(msg);
       return;
     }
     // wasm-pack present: the conformance suite must actually run on the
