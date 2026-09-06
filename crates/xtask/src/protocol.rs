@@ -76,6 +76,25 @@ fn check(_args: &[String]) -> Result<(), String> {
     generate_check()?;
     run_cargo(&["test", "-p", "dezoomify-protocol", "--test", "golden"])?;
     run_node_test()?;
+    wasm_portability_check()?;
+    println!("protocol check: ok");
+    Ok(())
+}
+
+pub fn test_protocol() -> Result<(), String> {
+    // Dedupe: `cargo test -p dezoomify-protocol` already covers the golden
+    // `--test golden` suite and `run_node_test` covers the TS goldens, so
+    // inline the check steps instead of calling `check()` which would rerun
+    // Node + golden a second time. Each suite still runs once.
+    generate_check()?;
+    run_cargo(&["test", "-p", "dezoomify-protocol"])?;
+    run_node_test()?;
+    wasm_portability_check()?;
+    println!("test protocol: ok");
+    Ok(())
+}
+
+fn wasm_portability_check() -> Result<(), String> {
     run_cargo(&[
         "check",
         "-p",
@@ -83,17 +102,7 @@ fn check(_args: &[String]) -> Result<(), String> {
         "--target",
         "wasm32-unknown-unknown",
         "--no-default-features",
-    ])?;
-    println!("protocol check: ok");
-    Ok(())
-}
-
-pub fn test_protocol() -> Result<(), String> {
-    run_cargo(&["test", "-p", "dezoomify-protocol"])?;
-    run_node_test()?;
-    check(&[])?;
-    println!("test protocol: ok");
-    Ok(())
+    ])
 }
 
 fn run_cargo(args: &[&str]) -> Result<(), String> {

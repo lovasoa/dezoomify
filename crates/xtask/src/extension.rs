@@ -99,7 +99,10 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("test extension", args)?;
     run_node_glob("apps/extension/tests/unit")?;
     test_headless_browser()?;
-    test_native_messaging(&[])?;
+    // The unit glob already ran above; skip it inside the composed
+    // native-messaging gate so the suite runs once per `test extension`.
+    // Standalone `test native-messaging` omits the flag and stays full.
+    test_native_messaging(&["--skip-unit".to_string()])?;
     println!("test extension: ok");
     Ok(())
 }
@@ -143,15 +146,26 @@ fn test_headless_browser() -> Result<(), String> {
 }
 
 pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
-    if args.first().map(String::as_str) == Some("--cleanup-only") {
+    // Aggregate dedupe: `--skip-unit`/`--no-unit` skips the shared extension
+    // unit glob when the caller already ran it (see `test_extension`).
+    // Standalone invocations omit the flag and stay full.
+    let mut skip_unit = false;
+    let mut rest: Vec<String> = Vec::new();
+    for arg in args {
+        match arg.as_str() {
+            "--skip-unit" | "--no-unit" => skip_unit = true,
+            _ => rest.push(arg.clone()),
+        }
+    }
+    if rest.first().map(String::as_str) == Some("--cleanup-only") {
         // Real cleanup: remove our per-user registrations (profile manifest
         // files and, on Windows, HKCU registry values). The unit gate never
         // registers anything in-process, so a clean report afterwards proves
         // no residual registration.
-        if args.len() > 1 {
+        if rest.len() > 1 {
             return Err(format!(
                 "unknown test native-messaging --cleanup-only argument(s): {}",
-                args[1..].join(" ")
+                rest[1..].join(" ")
             ));
         }
         let removed =
@@ -168,7 +182,7 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
     // Protocol + secret-scope checks via extension unit tests, then real
     // per-user registration inspection for the named engine. Browser-specific
     // handshakes need installed browsers; unknown engines fail closed.
-    if let Some(name) = args.strip_prefix(&["--browser".to_string()]) {
+    if let Some(name) = rest.strip_prefix(&["--browser".to_string()]) {
         match name
             .first()
             .and_then(|n| super::native_messaging::normalize_engine(n))
@@ -180,7 +194,13 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
                         name[1..].join(" ")
                     ));
                 }
-                run_node_glob("apps/extension/tests/unit")?;
+                if skip_unit {
+                    println!(
+                        "test native-messaging --browser {engine}: unit skipped (--skip-unit)"
+                    );
+                } else {
+                    run_node_glob("apps/extension/tests/unit")?;
+                }
                 let found = super::native_messaging::inspect_and_report(Some(engine))?;
                 println!(
                     "test native-messaging --browser {engine}: ok ({} registration(s) found)",
@@ -196,8 +216,12 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    super::reject_unknown_args("test native-messaging", args)?;
-    run_node_glob("apps/extension/tests/unit")?;
+    super::reject_unknown_args("test native-messaging", &rest)?;
+    if skip_unit {
+        println!("test native-messaging: unit skipped (--skip-unit; covered by test extension)");
+    } else {
+        run_node_glob("apps/extension/tests/unit")?;
+    }
     test_install_round_trip()?;
     super::native_messaging::inspect_and_report(None)?;
     println!("test native-messaging: ok");

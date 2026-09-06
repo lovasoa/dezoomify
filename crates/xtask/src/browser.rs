@@ -90,21 +90,35 @@ pub fn test_ui(_args: &[String]) -> Result<(), String> {
 
 pub fn test_web(args: &[String]) -> Result<(), String> {
     let mut e2e = false;
+    let mut skip_browser_matrix = false;
+    let mut no_unit = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--e2e" => e2e = true,
+            "--skip-browser-matrix" => skip_browser_matrix = true,
+            "--no-unit" => no_unit = true,
             other => return Err(format!("unknown test web arg '{other}'")),
         }
         i += 1;
     }
     generate_web_artifacts()?;
-    run_node(&[
-        "--test",
-        "test/*.test.mjs",
-        "packages/browser-runtime/test/*.test.mjs",
-    ])?;
-    println!("web unit tests: ok");
+    if no_unit {
+        println!("web unit tests: skipped (--no-unit)");
+    } else if skip_browser_matrix {
+        // Aggregate dedupe: the browser-runtime matrix already ran under
+        // `test browser` in the same aggregate, so only the website suite
+        // runs here. Standalone `test web` omits the flag and runs both.
+        run_node(&["--test", "test/*.test.mjs"])?;
+        println!("web unit tests: ok (browser-runtime matrix skipped; covered by test browser)");
+    } else {
+        run_node(&[
+            "--test",
+            "test/*.test.mjs",
+            "packages/browser-runtime/test/*.test.mjs",
+        ])?;
+        println!("web unit tests: ok");
+    }
     if e2e {
         run_e2e()?;
         println!("webapp E2E (chromium): ok");

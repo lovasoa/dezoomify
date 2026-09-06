@@ -61,7 +61,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         super::browser::test_browser(&[])
     })?;
     run_step("test-ui", &mut summary, || super::browser::test_ui(&[]))?;
-    run_step("test-web", &mut summary, || super::browser::test_web(&[]))?;
+    // Aggregate dedupe: the browser-runtime matrix already ran under
+    // `test-browser`, so `test-web` skips it here and runs only the website
+    // suite. Standalone `test web` omits the flag and stays full; `test all`
+    // adds E2E explicitly via `--e2e --no-unit` (see `ci::test_all`).
+    run_step("test-web", &mut summary, || {
+        super::browser::test_web(&["--skip-browser-matrix".to_string()])
+    })?;
     run_step("test-native", &mut summary, || {
         super::native::test_native(&[])
     })?;
@@ -97,8 +103,21 @@ fn run_step(
 }
 
 fn cargo_test() -> Result<(), String> {
+    // Aggregate dedupe: `check` already ran `fixtures verify` in the same
+    // aggregate, so skip the `fixture_manifest` unit test here which would
+    // verify the same corpus a second time. Standalone
+    // `cargo test -p xtask` omits the filter and stays full.
     let status = std::process::Command::new("cargo")
-        .args(["test", "-p", "xtask", "-p", "dezoomify-fixture-server"])
+        .args([
+            "test",
+            "-p",
+            "xtask",
+            "-p",
+            "dezoomify-fixture-server",
+            "--",
+            "--skip",
+            "fixture_manifest",
+        ])
         .current_dir(super::repo_root())
         .status()
         .map_err(|e| format!("failed to run cargo test: {e}"))?;

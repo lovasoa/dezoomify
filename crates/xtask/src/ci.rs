@@ -65,8 +65,11 @@ fn ci_lane(lane: &str) -> Result<(), String> {
 
 pub fn test_all() -> Result<(), String> {
     super::test_cmd::run(&[])?;
-    // Full aggregate includes web E2E while bare `test` omits it.
-    super::browser::test_web(&["--e2e".to_string()])?;
+    // Full aggregate includes web E2E while bare `test` omits it. `--no-unit`
+    // avoids rerunning the unit matrix bare already covered (browser lane +
+    // website suite); E2E is the only new coverage, so `test all` stays full
+    // via an explicit flag without doubles.
+    super::browser::test_web(&["--e2e".to_string(), "--no-unit".to_string()])?;
     println!("test all: ok (full deterministic aggregate)");
     Ok(())
 }
