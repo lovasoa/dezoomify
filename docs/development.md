@@ -54,7 +54,7 @@ sites.
 | `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
 | `web` | full site build via `scripts/build-site.mjs`: wasm adapter plus browser glue under `wasm/`, regenerated browser JS mirrors and help pages, and the deployable `dist/` tree (requires `wasm-bindgen-cli` matching the version in `Cargo.lock`; see below) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
-| `desktop` | the lean shell always compiles; the Tauri window shell (feature `tauri`) additionally compiles when the platform webview system packages are present; without `--unsigned-test` and with the bundler prerequisites installed, a real `.deb` bundle is produced |
+| `desktop` | the lean shell always compiles; the Tauri window shell (feature `tauri`) additionally compiles when the platform webview system packages are present; without `--unsigned-test` and with the bundler prerequisites installed, a real bundle for the matching host is produced (Linux `deb`, Windows `msi`/`nsis`, macOS `dmg`; see [Native apps](native-apps.md#desktop-bundles)) |
 | `extension` | real store-shaped ZIPs for chromium and firefox under `target/extension/`, packaged by the same script the store-submission workflow uses |
 
 Examples:
