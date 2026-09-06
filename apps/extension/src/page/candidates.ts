@@ -1,7 +1,9 @@
 /**
- * Candidate recognition for extension scans (Phase 12).
+ * Candidate collection for extension scans (Phase 12).
  *
- * - Records only `{ url, formatHint }` in memory.
+ * - Records only `{ url }` in memory. Format recognition is the core's job
+ *   (`rankCandidates` over the core registry, called once per scan in
+ *   `page.ts`); this module never guesses formats from URL text.
  * - http/https only; all other schemes rejected.
  * - Length caps (URL) + count caps (store) with deterministic first-seen order.
  * - Deduplicates deterministically (first-seen wins).
@@ -12,7 +14,7 @@
  *
  * Plain JavaScript + JSDoc (no TypeScript-only syntax).
  *
- * @typedef {{ url: string, formatHint: string }} Candidate
+ * @typedef {{ url: string }} Candidate
  */
 
 export const MAX_URL_LENGTH = 2048;
@@ -37,25 +39,6 @@ export const SENSITIVE_QUERY_KEYS = Object.freeze([
   "state",
   "sessiontoken",
 ]);
-
-/**
- * Heuristic format hint from URL text (no network, no body).
- * Mirrors legacy recognition families at a hint level; core does full parsing.
- * @param {string} url
- * @returns {string}
- */
-export function recognizeFormatHint(url) {
-  const lower = String(url).toLowerCase();
-  if (lower.includes("imageproperties.xml")) return "zoomify";
-  if (lower.includes(".dzi") || lower.includes("deepzoom")) return "dzi";
-  if (lower.includes("info.json") && lower.includes("iiif")) return "iiif";
-  if (lower.includes("/info.json")) return "iiif";
-  if (lower.includes("iip") || lower.includes("fif=")) return "iip";
-  if (lower.includes("tilegroup") || lower.includes("/tiles/") || lower.includes("tile_")) return "tile";
-  if (lower.includes("zoomify")) return "zoomify";
-  if (lower.includes("krpano") || lower.includes(".pff")) return "pff";
-  return "unknown";
-}
 
 /**
  * Redact a URL for display labels: strip userinfo, redact sensitive query.
@@ -123,7 +106,7 @@ export function createCandidateStore() {
     if (!v.ok) return { added: false, code: v.code ?? "invalid" };
     if (byUrl.has(rawUrl)) return { added: false, code: "duplicate" };
     if (byUrl.size >= MAX_CANDIDATES) return { added: false, code: "cap-reached" };
-    const candidate = { url: rawUrl, formatHint: recognizeFormatHint(rawUrl) };
+    const candidate = { url: rawUrl };
     byUrl.set(rawUrl, candidate);
     return { added: true, code: "added", candidate };
   }
@@ -133,7 +116,7 @@ export function createCandidateStore() {
   }
 
   function labels() {
-    return list().map((c) => ({ url: c.url, label: redactUrlForLabel(c.url), formatHint: c.formatHint }));
+    return list().map((c) => ({ url: c.url, label: redactUrlForLabel(c.url) }));
   }
 
   function clear() {

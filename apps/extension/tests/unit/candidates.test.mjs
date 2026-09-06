@@ -8,7 +8,7 @@ async function loadTs(rel) {
 }
 
 const mod = await loadTs("../../src/page/candidates.ts");
-const { createCandidateStore, recognizeFormatHint, redactUrlForLabel, validateCandidateUrl, MAX_URL_LENGTH, MAX_CANDIDATES } = mod;
+const { createCandidateStore, redactUrlForLabel, validateCandidateUrl, MAX_URL_LENGTH, MAX_CANDIDATES } = mod;
 
 test("caps exported", () => {
   assert.equal(MAX_URL_LENGTH, 2048);
@@ -47,11 +47,11 @@ test("length cap enforced", () => {
   assert.equal(validateCandidateUrl(long).code, "too-long");
 });
 
-test("first-seen deterministic dedup; records url+formatHint only", () => {
+test("first-seen deterministic dedup; records url only (ranking is the core's job)", () => {
   const store = createCandidateStore();
   const r1 = store.add("https://a.example/ImageProperties.xml");
   assert.equal(r1.added, true);
-  assert.deepEqual(Object.keys(r1.candidate).sort(), ["formatHint", "url"]);
+  assert.deepEqual(Object.keys(r1.candidate).sort(), ["url"]);
   const r2 = store.add("https://a.example/ImageProperties.xml");
   assert.equal(r2.added, false);
   assert.equal(r2.code, "duplicate");
@@ -60,8 +60,6 @@ test("first-seen deterministic dedup; records url+formatHint only", () => {
   const list = store.list();
   assert.equal(list[0].url, "https://a.example/ImageProperties.xml");
   assert.equal(list[1].url, "https://b.example/image.dzi");
-  assert.equal(list[0].formatHint, "zoomify");
-  assert.equal(list[1].formatHint, "dzi");
 });
 
 test("count cap enforced", () => {
@@ -76,11 +74,10 @@ test("count cap enforced", () => {
   assert.equal(store.size, MAX_CANDIDATES);
 });
 
-test("format hints cover legacy families", () => {
-  assert.equal(recognizeFormatHint("https://x/ImageProperties.xml"), "zoomify");
-  assert.equal(recognizeFormatHint("https://x/image.dzi"), "dzi");
-  assert.equal(recognizeFormatHint("https://x/iiif/2/image/info.json"), "iiif");
-  assert.equal(recognizeFormatHint("https://x/photo.jpg"), "unknown");
+test("store keeps raw urls; core rankCandidates decides formats", () => {
+  const store = createCandidateStore();
+  store.add("https://x/photo.jpg");
+  assert.equal(store.list()[0].url, "https://x/photo.jpg");
 });
 
 test("labels redact userinfo and sensitive query, drop fragments", () => {

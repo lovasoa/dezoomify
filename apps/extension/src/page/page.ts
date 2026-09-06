@@ -12,8 +12,10 @@
  */
 
 import { createScanner, isPrivilegedUrl } from "./scan.js";
-import { recognizeFormatHint, validateCandidateUrl } from "./candidates.js";
-import init, { DiscoverySession } from "../wasm/dezoomify-wasm.js";
+import { validateCandidateUrl } from "./candidates.js";
+import init, * as wasm from "../wasm/dezoomify-wasm.js";
+
+const { DiscoverySession } = wasm;
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -151,14 +153,55 @@ function save(blob) {
   anchor.remove();
 }
 
+/**
+ * Rank scan URLs in one core batch (`rankCandidates` over the core registry:
+ * known formats first in builtin order, unknowns last, never dropped).
+ * Falls back to first-seen order when the wasm glue predates the export.
+ */
+function rankUrls(urls) {
+  if (typeof wasm.rankCandidates !== "function") {
+    return urls.map((url) => ({ url, format: null }));
+  }
+  try {
+    const ranked = JSON.parse(wasm.rankCandidates(JSON.stringify(urls)));
+    if (Array.isArray(ranked) && ranked.every((entry) => entry && typeof entry.url === "string")) {
+      return ranked;
+    }
+  } catch {
+    // Fall through to first-seen order below.
+  }
+  return urls.map((url) => ({ url, format: null }));
+}
+
 async function run(tabId) {
   try {
     const urls = await runScan(tabId);
-    const source = urls.find((u) => recognizeFormatHint(u) !== "unknown");
-    if (!source) throw Object.assign(new Error("no zoomable candidate observed"), { code: "no-candidate" });
-    log("source: " + source);
-
-    const { session, catalog } = await discover(source);
+    if (urls.length === 0) {
+      throw Object.assign(new Error("no zoomable candidate observed"), { code: "no-candidate" });
+    }
+    await init();
+    const ranked = rankUrls(urls);
+    log("ranked " + ranked.length + " candidates");
+    let found = null;
+    for (let i = 0; i < ranked.length; i++) {
+      const candidate = ranked[i];
+      log("trying " + (i + 1) + "/" + ranked.length + (candidate.format ? " (" + candidate.format + ")" : ""));
+      try {
+        const result = await discover(candidate.url);
+        if (result.catalog.images && result.catalog.images.length > 0) {
+          found = { ...result, source: candidate.url };
+          break;
+        }
+        log("candidate has no image: " + candidate.url);
+      } catch (e) {
+        log("candidate failed: " + candidate.url + ": " + (e && e.message ? e.message : String(e)));
+      }
+    }
+    if (!found) {
+      throw Object.assign(new Error("no zoomable candidate observed"), { code: "no-candidate" });
+    }
+    const { session, catalog } = found;
+    log("source: " + found.source);
     const image = catalog.images[0];
     if (!image) throw Object.assign(new Error("catalog has no image"), { code: "no-image" });
     log("image: " + (image.title || image.format));
