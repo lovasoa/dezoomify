@@ -220,6 +220,14 @@ fn output_format_follows_the_destination_extension() {
         Ok(output::OutputFormat::Zif)
     );
     assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.webp")),
+        Ok(output::OutputFormat::Webp)
+    );
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.WEBP")),
+        Ok(output::OutputFormat::Webp)
+    );
+    assert_eq!(
         output::OutputFormat::infer_from_path(Path::new("painting.iiif")),
         Ok(output::OutputFormat::IiifDir)
     );
@@ -229,9 +237,15 @@ fn output_format_follows_the_destination_extension() {
         Ok(output::OutputFormat::IiifDir)
     );
     // Unknown extensions fail before any work starts, instead of writing a
-    // mislabeled file.
-    assert!(output::OutputFormat::infer_from_path(Path::new("painting.bmp")).is_err());
-    assert!(output::OutputFormat::infer_from_path(Path::new("painting.webp")).is_err());
+    // mislabeled file. The error names every supported extension.
+    let bmp = output::OutputFormat::infer_from_path(Path::new("painting.bmp"));
+    let message = bmp.expect_err("bmp stays unsupported");
+    for supported in [".png", ".jpg", ".tif", ".zif", ".webp", ".iiif"] {
+        assert!(
+            message.contains(supported),
+            "unsupported-extension error lists {supported}: {message}"
+        );
+    }
     // An existing directory is always an iiif-dir destination.
     let dir = std::env::temp_dir().join(format!("dz-infer-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -258,6 +272,11 @@ fn output_format_follows_the_destination_extension() {
     assert!(output::validate_destination(&zif, &output::OutputFormat::Zif, false).is_ok());
     assert!(output::validate_destination(&zif, &output::OutputFormat::Tiff, true).is_err());
     assert!(output::validate_destination(&zif, &output::OutputFormat::Png, true).is_err());
+    // A `.webp` path validates as WebP and never as another single file.
+    let webp = dir.join("out.webp");
+    assert!(output::validate_destination(&webp, &output::OutputFormat::Webp, false).is_ok());
+    assert!(output::validate_destination(&webp, &output::OutputFormat::Jpeg, true).is_err());
+    assert!(output::validate_destination(&webp, &output::OutputFormat::IiifDir, true).is_err());
     let iiif = dir.join("out.iiif");
     assert!(output::validate_destination(&iiif, &output::OutputFormat::IiifDir, false).is_ok());
     assert!(output::validate_destination(&iiif, &output::OutputFormat::Tiff, true).is_err());

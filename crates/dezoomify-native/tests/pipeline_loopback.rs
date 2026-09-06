@@ -528,6 +528,38 @@ fn zif_output_writes_tiff_pyramid() {
 }
 
 #[test]
+fn webp_output_decodes_losslessly() {
+    // `.webp` selects the lossless WebP encoder: the bytes decode back to
+    // the full canvas pixel-exact.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("webp");
+    let output = out_dir.join("pyramid.webp");
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .expect("webp pipeline succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    let bytes = std::fs::read(&output).expect("webp output written");
+    assert!(
+        bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP".as_slice()),
+        "webp output carries the RIFF/WEBP container markers"
+    );
+    let decoded = image::load_from_memory(&bytes)
+        .expect("webp output decodes")
+        .to_rgba8();
+    assert_eq!((decoded.width(), decoded.height()), (512, 512));
+    let pixel = decoded.get_pixel(64, 64).0;
+    assert_eq!((pixel[0], pixel[1], pixel[2]), (196, 48, 48));
+    assert_eq!(outcome.output_hash, sha256_of_file(&output));
+}
+
+#[test]
 fn iiif_extension_writes_a_directory_at_that_path() {
     // `.iiif` selects an `iiif-dir` tree written at the `.iiif` path,
     // mirroring the reference trigger.

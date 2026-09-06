@@ -25,7 +25,13 @@ pub const JPEG_QUALITY: u8 = 95;
 
 /// JPEG (ISO 10918-1) caps both dimensions at 65535 px; larger canvases must
 /// use PNG, TIFF, or `iiif-dir`.
+///
+/// WebP (VP8L lossless) caps both dimensions at 16383 px; larger canvases
+/// must use PNG, TIFF, ZIF, or `iiif-dir`.
 pub const JPEG_MAX_SIDE: u32 = 65_535;
+
+/// WebP lossless caps both dimensions at 16383 px.
+pub const WEBP_MAX_SIDE: u32 = 16_383;
 
 /// `iiif-dir` tile width: one entry of the `tiles` block in `info.json`.
 pub const IIIF_TILE_WIDTH: u32 = 512;
@@ -585,6 +591,41 @@ fn write_tiff_directory<W: std::io::Write + std::io::Seek>(
     directory.write_data(image.as_raw()).map_err(tiff_failed)
 }
 
+/// Encode the assembled canvas as lossless WebP (no side limit beyond
+/// [`WEBP_MAX_SIDE`]; sides beyond it fail with typed
+/// `output.encode-failed`). WebP lossless has no quality knob, so
+/// `--compression` does not apply here; the first tile's ICC profile is
+/// embedded when present (reference `canvas.rs:190-199`).
+pub fn encode_webp(
+    image: &image::RgbaImage,
+    icc_profile: Option<&[u8]>,
+) -> Result<Vec<u8>, NativeError> {
+    if image.width() > WEBP_MAX_SIDE || image.height() > WEBP_MAX_SIDE {
+        return Err(NativeError::new(
+            "output.encode-failed",
+            format!(
+                "webp output {}x{} exceeds the 16383px per-side webp limit; save as png, tiff, zif, or iiif-dir",
+                image.width(),
+                image.height()
+            ),
+        ));
+    }
+    let mut bytes = Vec::new();
+    let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut bytes);
+    if let Some(profile) = icc_profile {
+        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+    }
+    image::ImageEncoder::write_image(
+        encoder,
+        image.as_raw(),
+        image.width(),
+        image.height(),
+        image::ExtendedColorType::Rgba8,
+    )
+    .map_err(|e| NativeError::new("output.encode-failed", format!("webp encode failed: {e}")))?;
+    Ok(bytes)
+}
+
 /// Powers of two covering the pyramid: 1 always, then doubling while the
 /// downscaled canvas still exceeds one tile side.
 pub(crate) fn iiif_scale_factors(width: u32, height: u32) -> Vec<u32> {
@@ -891,6 +932,38 @@ mod tests {
             }
         }
         assert_eq!(level, 2, "512px canvas yields two pyramid levels");
+    }
+
+    #[test]
+    fn webp_lossless_round_trip_is_pixel_exact() {
+        let mut image = image::RgbaImage::new(16, 16);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            *pixel = image::Rgba([(x * 16) as u8, (y * 16) as u8, 128, 255]);
+        }
+        let webp = encode_webp(&image, None).expect("webp encodes");
+        assert!(
+            webp.starts_with(b"RIFF") && webp.get(8..12) == Some(b"WEBP".as_slice()),
+            "webp output carries the RIFF/WEBP container markers"
+        );
+        let decoded = image::load_from_memory(&webp)
+            .expect("webp decodes")
+            .to_rgba8();
+        assert_eq!((decoded.width(), decoded.height()), (16, 16));
+        assert_eq!(decoded.as_raw(), image.as_raw());
+        // An ICC profile never breaks the lossless path.
+        let icc = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
+        let tagged = encode_webp(&image, Some(&icc)).expect("webp encodes with icc");
+        let back = image::load_from_memory(&tagged)
+            .expect("tagged webp decodes")
+            .to_rgba8();
+        assert_eq!(back.as_raw(), image.as_raw());
+    }
+
+    #[test]
+    fn webp_rejects_canvases_beyond_its_side_limit() {
+        let wide = image::RgbaImage::new(WEBP_MAX_SIDE + 1, 1);
+        let error = encode_webp(&wide, None).expect_err("webp side limit applies");
+        assert_eq!(error.code, "output.encode-failed");
     }
 
     #[test]

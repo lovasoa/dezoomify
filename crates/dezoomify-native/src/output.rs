@@ -1,6 +1,6 @@
 //! Output writer: atomic file replacement, format/extension validation,
 //! overwrite policy identical to legacy behavior (refuse without flag).
-//! Single-file formats (PNG, JPEG, TIFF) encode to one file; `zif`
+//! Single-file formats (PNG, JPEG, TIFF, WebP) encode to one file; `zif`
 //! encodes one multi-directory TIFF pyramid file; `iiif-dir`
 //! writes a static tiled directory holding an `info.json` beside JPEG tiles.
 
@@ -19,6 +19,7 @@ pub enum OutputFormat {
     Jpeg,
     Tiff,
     Zif,
+    Webp,
     IiifDir,
 }
 
@@ -31,6 +32,7 @@ impl OutputFormat {
             OutputFormat::Jpeg => "jpeg",
             OutputFormat::Tiff => "tiff",
             OutputFormat::Zif => "zif",
+            OutputFormat::Webp => "webp",
             OutputFormat::IiifDir => "iiif-dir",
         }
     }
@@ -44,7 +46,7 @@ impl OutputFormat {
     /// Infer the output format from the destination path:
     ///
     /// * `.png` becomes PNG, `.jpg`/`.jpeg` becomes JPEG, `.tif`/`.tiff`
-    ///   becomes single-image TIFF;
+    ///   becomes single-image TIFF, `.webp` becomes lossless WebP;
     /// * `.zif` becomes ZIF: a TIFF-compatible multi-directory pyramid
     ///   holding the full-resolution canvas plus halved levels (see
     ///   [`crate::pipeline::encode_zif_pyramid`]). Byte-preserving
@@ -59,9 +61,9 @@ impl OutputFormat {
     ///   directory, becomes `iiif-dir`;
     /// * any other extension is a typed error (no output is attempted).
     ///   The reference generic canvas would write whatever `image` infers
-    ///   from the extension; native stays fail-closed here because only the
-    ///   PNG/JPEG/TIFF/ZIF codecs are compiled in and the capability manifest
-    ///   promises exactly those encoders.
+    ///   from the extension; native stays fail-closed for the rest because
+    ///   only the PNG/JPEG/TIFF/ZIF/WebP codecs are compiled in and the
+    ///   capability manifest promises exactly those encoders.
     ///
     /// Track C consumes this rule for the `--tile-cache`-sibling CLI surface:
     /// the output file name alone selects the encoder.
@@ -79,10 +81,11 @@ impl OutputFormat {
             "jpg" | "jpeg" => Ok(OutputFormat::Jpeg),
             "tif" | "tiff" => Ok(OutputFormat::Tiff),
             "zif" => Ok(OutputFormat::Zif),
+            "webp" => Ok(OutputFormat::Webp),
             "iiif" => Ok(OutputFormat::IiifDir),
             "" => Ok(OutputFormat::IiifDir),
             other => Err(format!(
-                "unsupported output extension .{other}; use .png, .jpg, .tif, .zif, .iiif, or an extensionless directory path for iiif-dir"
+                "unsupported output extension .{other}; use .png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif, or an extensionless directory path for iiif-dir"
             )),
         }
     }
@@ -98,7 +101,7 @@ fn is_single_file_extension(path: &Path) -> bool {
             .unwrap_or("")
             .to_ascii_lowercase()
             .as_str(),
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "zif"
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "zif" | "webp"
     )
 }
 
@@ -146,6 +149,15 @@ pub fn validate_destination(
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !ext.eq_ignore_ascii_case("zif") {
+                return Err("extension does not match format".to_string());
+            }
+        }
+        OutputFormat::Webp => {
+            if path.is_dir() {
+                return Err("destination is a directory, not a webp file".to_string());
+            }
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !ext.eq_ignore_ascii_case("webp") {
                 return Err("extension does not match format".to_string());
             }
         }
