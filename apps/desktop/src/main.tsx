@@ -20,6 +20,7 @@
 import { createController } from "../../../packages/shared-ui/src/controller.ts";
 import { renderView } from "../../../packages/shared-ui/src/view.ts";
 import type { ViewContext } from "../../../packages/shared-ui/src/view.ts";
+import { suggestedNameFor } from "../../../packages/shared-ui/src/saveName.ts";
 import {
   createDesktopIntegration,
   NATIVE_ENCODERS,
@@ -111,14 +112,12 @@ function normalizeNativeFormat(value: unknown): NativeEncoder {
   return "png";
 }
 
-function extensionForFormat(format: NativeEncoder): string {
-  if (format === "jpeg") return ".jpg";
-  if (format === "tiff") return ".tif";
-  return ".png";
-}
-
-function suggestedNameForFormat(format: NativeEncoder): string {
-  return `dezoomify${extensionForFormat(format)}`;
+function suggestedNameForFormat(
+  format: NativeEncoder,
+  width?: unknown,
+  height?: unknown,
+): string {
+  return suggestedNameFor(width, height, format);
 }
 
 // Minimal settings (task 3.5): persisted locally, validated with fail-closed
@@ -954,7 +953,11 @@ function requestOutputAndResume(origin: string): void {
   const job = currentJobId;
   if (!job || isTerminalStatus(controller.getState().status)) return;
   const format = normalizeNativeFormat(grantedFormat);
-  const suggestedName = suggestedNameForFormat(format);
+  const suggestedName = suggestedNameForFormat(
+    format,
+    catalogNotice?.width ?? viewCtx.imageChoice?.width ?? viewCtx.completedInfo?.width,
+    catalogNotice?.height ?? viewCtx.imageChoice?.height ?? viewCtx.completedInfo?.height,
+  );
   pushLog(origin === "choose-output" ? "Requesting save destination…" : "Requesting save destination (save)…");
   void integration
     .requestSaveDestination({ jobId: job, format, suggestedName })
@@ -2581,6 +2584,7 @@ function ensureDesktopSettingsPanel(): void {
     input.id = id;
     input.name = id;
     input.type = opts.type ?? "text";
+    input.className = "dz-input";
     if (opts.inputMode) input.inputMode = opts.inputMode;
     if (opts.placeholder) input.placeholder = opts.placeholder;
     input.value = value;
@@ -2661,6 +2665,12 @@ function ensureDesktopSettingsPanel(): void {
   addBrowseButton(outputInput, "Browse for output directory");
   addBrowseButton(cacheInput, "Browse for cache directory");
 
+  const headersDetails = doc.createElement("details");
+  headersDetails.className = "dz-details";
+  headersDetails.open = true;
+  const headersSummary = doc.createElement("summary");
+  headersSummary.className = "dz-summary";
+  headersSummary.textContent = "Advanced: request headers (trusted)";
   const headersLabel = doc.createElement("label");
   headersLabel.className = "dz-settings-field";
   headersLabel.setAttribute("for", "dz-settings-headers");
@@ -2669,6 +2679,7 @@ function ensureDesktopSettingsPanel(): void {
   const headersInput = doc.createElement("textarea");
   headersInput.id = "dz-settings-headers";
   headersInput.name = "dz-settings-headers";
+  headersInput.className = "dz-input";
   headersInput.rows = 3;
   headersInput.placeholder = "Referer: https://example.com/viewer";
   headersInput.value = Object.entries(desktopSettings.headers)
@@ -2676,7 +2687,8 @@ function ensureDesktopSettingsPanel(): void {
     .join("\n");
   headersInput.addEventListener("change", () => persistSettingsFromPanel());
   headersLabel.append(headersSpan, headersInput);
-  form.appendChild(headersLabel);
+  headersDetails.append(headersSummary, headersLabel);
+  form.appendChild(headersDetails);
 
   panel.appendChild(form);
 

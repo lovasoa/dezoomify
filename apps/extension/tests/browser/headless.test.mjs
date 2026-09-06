@@ -282,7 +282,7 @@ test("firefox: packaged extension runs a full job end to end", { timeout: 180000
     // Unbound first-run page shows guidance only (never a tab list).
     await driver.wait(async () => (await driver.findElements({ css: "#tabs p" })).length > 0, 15000);
 
-    const savedFile = path.join(downloadsDir, "dezoomify.png");
+    const savedFile = path.join(downloadsDir, "dezoomify-512x512.png");
     const driverApi = {
       openTarget: async (url) => {
         // Single-tab creation: returns the new tab id directly, no `tabs.query`.

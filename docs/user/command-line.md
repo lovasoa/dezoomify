@@ -20,7 +20,7 @@ dezoomify "https://museum.example/collection/painting" painting.png
 The first argument is the address of the viewer page or image description
 file; the second is the file to save (or pass `--outfile <file>` instead
 of the positional). When the output is omitted it auto-names from the
-image title when known, else `dezoomified` with a JPEG-fit extension and
+image title when known, else `dezoomify` with a JPEG-fit extension and
 `_0001` collision suffixes. With no arguments the tool repeats prompts
 when a terminal is present until end of input, else it prints help. When
 several images or levels are found and no selector was given, a terminal

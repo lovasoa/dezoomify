@@ -233,14 +233,38 @@ async function assemble(session, plan, tabOrigin) {
   return blob;
 }
 
-function save(blob) {
+// Shared save name (todo 4.6): canonical logic lives in
+// packages/shared-ui/src/saveName.ts (`dezoomify-WxH.png`, fallback
+// `dezoomify.png`). A literal shared-ui import is impossible here: this page
+// ships verbatim as `page.js` with no bundler (see `package-store.sh`), so
+// the pure helper is replicated, not imported (same pattern as the modal
+// geometry below).
+function extensionForSaveFormat(format) {
+  const lower = typeof format === "string" ? format.toLowerCase() : "png";
+  if (lower === "jpeg" || lower === "jpg") return "jpg";
+  if (lower === "tiff" || lower === "tif") return "tif";
+  return "png";
+}
+
+function suggestedNameFor(width, height, format) {
+  const ext = extensionForSaveFormat(format);
+  const w = typeof width === "number" ? width : Number(width);
+  const h = typeof height === "number" ? height : Number(height);
+  if (Number.isFinite(w) && Number.isFinite(h) && Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0) {
+    return `dezoomify-${w}x${h}.${ext}`;
+  }
+  return `dezoomify.${ext}`;
+}
+
+function save(blob, width, height) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "dezoomify.png";
+  anchor.download = suggestedNameFor(width, height, "png");
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+  return anchor.download;
 }
 
 /**
@@ -307,8 +331,8 @@ async function run(tabId) {
     const plan = await planLevel(session, image, tabOrigin);
     log("plan: " + plan.tiles.length + " tiles, canvas " + plan.canvas.x + "x" + plan.canvas.y);
     const blob = await assemble(session, plan, tabOrigin);
-    save(blob);
-    log("saved dezoomify.png");
+    const savedName = save(blob, plan.canvas.x, plan.canvas.y);
+    log("saved " + savedName);
     document.body.dataset.outcome = "saved";
   } catch (e) {
     fail(e.code || "job-failed", e.message + "\n" + (e.stack || ""));

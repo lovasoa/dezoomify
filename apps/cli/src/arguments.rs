@@ -507,7 +507,7 @@ pub fn generate_bulk_output_name(base: &std::path::Path, index: usize) -> PathBu
             result.set_file_name(format!("{stem}{suffix}"));
         }
     } else {
-        result.set_file_name(format!("dezoomified{suffix}.png"));
+        result.set_file_name(format!("dezoomify{suffix}.png"));
     }
     result
 }

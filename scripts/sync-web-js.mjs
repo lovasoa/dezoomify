@@ -33,6 +33,7 @@ const PAIRS = [
   ["packages/shared-ui/src/components.ts", "packages/shared-ui/src/components.js"],
   ["packages/shared-ui/src/controller.ts", "packages/shared-ui/src/controller.js"],
   ["packages/shared-ui/src/view.ts", "packages/shared-ui/src/view.js"],
+  ["packages/shared-ui/src/saveName.ts", "packages/shared-ui/src/saveName.js"],
   ["packages/browser-runtime/src/types.ts", "packages/browser-runtime/src/types.js"],
   ["packages/browser-runtime/src/session.ts", "packages/browser-runtime/src/session.js"],
 ];

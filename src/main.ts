@@ -6,6 +6,7 @@
 import { createController } from "../packages/shared-ui/src/controller.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.ts";
 import type { ViewContext } from "../packages/shared-ui/src/view.ts";
+import { suggestedNameFor } from "../packages/shared-ui/src/saveName.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
   SITE_BUSY_MESSAGE,
@@ -977,7 +978,11 @@ function update(): void {
         if (!resultBlobUrl) return;
         const anchor = document.createElement("a");
         anchor.href = resultBlobUrl;
-        anchor.download = "zoomed-image.png";
+        anchor.download = suggestedNameFor(
+          viewCtx.completedInfo?.width,
+          viewCtx.completedInfo?.height,
+          "png",
+        );
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();

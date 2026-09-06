@@ -467,11 +467,11 @@ fn bulk_output_for(base: Option<&Path>, title: Option<&str>, index: usize) -> Pa
             return PathBuf::from(format!("{clean}.png"));
         }
     }
-    PathBuf::from(format!("dezoomified_{}.png", index + 1))
+    PathBuf::from(format!("dezoomify_{}.png", index + 1))
 }
 
 /// Single-image auto-naming, porting `output_file::get_outname` for the
-/// omitted-output case: sanitized title or `dezoomified` fallback, JPEG-fit
+/// omitted-output case: sanitized title or `dezoomify` fallback, JPEG-fit
 /// extension, and `_0001` collision suffixes. The title and size are unknown
 /// before the native run, so callers pass `None` and the fallback plus PNG
 /// apply; the helper still honors titles and JPEG fit when given (tests).
@@ -482,7 +482,7 @@ fn single_auto_output(title: Option<&str>, size: Option<(u32, u32)>) -> PathBuf 
     let base = title
         .map(sanitize_title)
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "dezoomified".to_string());
+        .unwrap_or_else(|| "dezoomify".to_string());
     let mut path = base_dir.join(format!("{base}.{extension}"));
     if !path.exists() {
         return path;
@@ -490,7 +490,7 @@ fn single_auto_output(title: Option<&str>, size: Option<(u32, u32)>) -> PathBuf 
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("dezoomified")
+        .unwrap_or("dezoomify")
         .to_string();
     for i in 1.. {
         let candidate = base_dir.join(format!("{stem}_{i:04}.{extension}"));

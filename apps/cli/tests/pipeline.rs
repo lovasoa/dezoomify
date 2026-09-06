@@ -691,7 +691,7 @@ fn cli_unknown_dezoomer_fails_with_typed_error() {
 
 #[test]
 fn cli_auto_names_output_when_omitted() {
-    // Single runs without an output auto-name to `dezoomified.png` in the
+    // Single runs without an output auto-name to `dezoomify.png` in the
     // working directory; the bytes still hash to the cli-dzi golden.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
@@ -706,7 +706,7 @@ fn cli_auto_names_output_when_omitted() {
         "auto-naming should succeed: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
     );
-    let output = out_dir.join("dezoomified.png");
+    let output = out_dir.join("dezoomify.png");
     assert!(output.exists(), "auto-named output written");
     let golden: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
@@ -725,11 +725,11 @@ fn cli_auto_names_output_when_omitted() {
 
 #[test]
 fn cli_auto_naming_avoids_collision() {
-    // An existing `dezoomified.png` forces a `_0001` suffix, never overwrite.
+    // An existing `dezoomify.png` forces a `_0001` suffix, never overwrite.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-auto-collision");
-    std::fs::write(out_dir.join("dezoomified.png"), b"existing").expect("seed collision");
+    std::fs::write(out_dir.join("dezoomify.png"), b"existing").expect("seed collision");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
         .arg(&input)
         .current_dir(&out_dir)
@@ -740,10 +740,10 @@ fn cli_auto_naming_avoids_collision() {
         "collision run should succeed: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
     );
-    let output = out_dir.join("dezoomified_0001.png");
+    let output = out_dir.join("dezoomify_0001.png");
     assert!(output.exists(), "collision suffix written");
     assert_eq!(
-        std::fs::read(out_dir.join("dezoomified.png")).expect("seed intact"),
+        std::fs::read(out_dir.join("dezoomify.png")).expect("seed intact"),
         b"existing"
     );
 }

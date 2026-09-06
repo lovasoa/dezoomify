@@ -1,5 +1,6 @@
 // Programmatic save: only from origin-clean readable surfaces.
 import { SAVE_REQUIRES_READABLE_BYTES } from "./types.ts";
+import { suggestedNameFor } from "../../shared-ui/src/saveName.ts";
 
 export type SaveFormat = "png" | "jpeg";
 
@@ -177,6 +178,6 @@ export async function saveReadable(
     throw new Error("encoder returned empty bytes");
   }
   const mime = mimeFor(format);
-  const filename = `image-${surface.width}x${surface.height}.${format === "png" ? "png" : "jpg"}`;
+  const filename = suggestedNameFor(surface.width, surface.height, format);
   return { mime, bytes, width: surface.width, height: surface.height, filename };
 }

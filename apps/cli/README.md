@@ -26,7 +26,7 @@ Run `./target/debug/dezoomify-cli --help` for the full list: `--overwrite`,
 Each single run saves one job to one output file (`.png`, `.jpg`/`.jpeg`,
 `.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, or extensionless `iiif-dir` by
 extension). When the output is omitted it auto-names from the
-image title when known, else `dezoomified` with a JPEG-fit extension
+image title when known, else `dezoomify` with a JPEG-fit extension
 (small images use `.jpg`, large or unknown sizes use `.png`) and `_0001`
 collision suffixes. With no arguments the tool repeats prompts when a
 terminal is present until end of input, else prints help. When several
