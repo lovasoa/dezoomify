@@ -3,7 +3,10 @@
 //! runs: no timestamps, sorted keys, LF endings. This module performs no I/O;
 //! the `generate-protocol` binary writes the returned artifacts.
 
-use crate::dto::{CapabilitiesDto, PROTOCOL_VERSION};
+use crate::dto::{
+    CapabilitiesDto, DIRECT_TRANSPORT_LABEL, FORMAT_GRID, MAX_BROWSER_AREA, METADATA_WINDOW_MS,
+    NATIVE_MAX_BYTES, POWER_USER_FORMATS, PROTOCOL_VERSION, PROXY_MAX_BYTES, PROXY_TRANSPORT_LABEL,
+};
 
 pub const GENERATED_MARKER: &str =
     "// DO NOT EDIT: generated from crates/dezoomify-protocol/src/dto.rs";
@@ -26,17 +29,67 @@ pub fn dto_fingerprint() -> String {
     format!("{hash:016x}")
 }
 
+/// Stable fingerprint of the single limits/grid/transports generation
+/// (first 16 hex of FNV-1a over the four limits plus format grid plus
+/// transport labels). Extends the dto fingerprint plumbing without
+/// changing the dto value, so existing capability documents keep matching.
+#[must_use]
+pub fn limits_fingerprint() -> String {
+    let mut seed = format!(
+        "limits={MAX_BROWSER_AREA},{NATIVE_MAX_BYTES},{PROXY_MAX_BYTES},{METADATA_WINDOW_MS};transports={DIRECT_TRANSPORT_LABEL},{PROXY_TRANSPORT_LABEL};formats="
+    );
+    for (id, display) in FORMAT_GRID {
+        let power = if POWER_USER_FORMATS.contains(id) {
+            "p"
+        } else {
+            "-"
+        };
+        seed.push_str(&format!("{id}:{display}:{power},"));
+    }
+    let mut hash: u64 = FNV_OFFSET_BASIS;
+    for b in seed.bytes() {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn format_grid_ts() -> String {
+    let mut out = String::from("export const FORMAT_GRID = [\n");
+    for (id, display) in FORMAT_GRID {
+        let power = POWER_USER_FORMATS.contains(id);
+        out.push_str(&format!(
+            "  {{ id: \"{id}\", displayName: \"{display}\", powerUser: {power} }},\n"
+        ));
+    }
+    out.push_str("] as const;\n");
+    out
+}
+
 #[must_use]
 pub fn typescript() -> String {
     let fingerprint = dto_fingerprint();
+    let limits_fp = limits_fingerprint();
+    let grid_ts = format_grid_ts();
     format!(
         r#"{GENERATED_MARKER}
 // fingerprint: {fingerprint}
+// limits-fingerprint: {limits_fp}
 // protocol: {PROTOCOL_VERSION}
 
 export const PROTOCOL_VERSION = "{PROTOCOL_VERSION}" as const;
 export const DTO_FINGERPRINT = "{fingerprint}" as const;
+export const LIMITS_FINGERPRINT = "{limits_fp}" as const;
 
+export const MAX_BROWSER_AREA = {MAX_BROWSER_AREA} as const;
+export const NATIVE_MAX_BYTES = {NATIVE_MAX_BYTES} as const;
+export const PROXY_MAX_BYTES = {PROXY_MAX_BYTES} as const;
+export const METADATA_WINDOW_MS = {METADATA_WINDOW_MS} as const;
+
+export const DIRECT_TRANSPORT_LABEL = "{DIRECT_TRANSPORT_LABEL}" as const;
+export const PROXY_TRANSPORT_LABEL = "{PROXY_TRANSPORT_LABEL}" as const;
+
+{grid_ts}
 export type RequestPurpose = "metadata" | "tile" | "probe";
 export type Readiness = "ready" | "deferred";
 export type BufferState = "allocated" | "committed" | "consumed" | "freed";
@@ -112,6 +165,7 @@ pub fn artifacts() -> Vec<(String, String)> {
             "fingerprints.json".to_string(),
             serde_json::to_string_pretty(&serde_json::json!({
                 "dto": dto_fingerprint(),
+                "limits": limits_fingerprint(),
                 "protocol": PROTOCOL_VERSION,
             }))
             .unwrap()

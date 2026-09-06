@@ -155,6 +155,49 @@ impl BoundedU64 {
 }
 
 // ---------------------------------------------------------------------------
+// Runtime limits, format grid, transports (one generation source for TS)
+// ---------------------------------------------------------------------------
+
+/// Largest browser-tab canvas area in pixels (16384 x 16384, legacy parity).
+pub const MAX_BROWSER_AREA: u64 = 268_435_456;
+/// Native in-memory canvas cap in bytes (8 GiB RGBA).
+pub const NATIVE_MAX_BYTES: u64 = 8_589_934_592;
+/// Metadata proxy response cap in bytes (2 MiB, mirrors the server limit).
+pub const PROXY_MAX_BYTES: u64 = 2_097_152;
+/// Direct-first metadata head-start window in milliseconds.
+pub const METADATA_WINDOW_MS: u64 = 1_500;
+
+/// Active-transport labels (mirrors browser-runtime types.ts, verified by tests).
+pub const DIRECT_TRANSPORT_LABEL: &str = "Direct from your browser";
+pub const PROXY_TRANSPORT_LABEL: &str = "Metadata proxy";
+
+/// Format grid in registry precedence order: (id, display name).
+/// Mirrors `dezoomify-core/src/core/registry.rs` BUILTINS snapshot (18 entries).
+pub const FORMAT_GRID: &[(&str, &str)] = &[
+    ("custom", "Custom tiles"),
+    ("google_arts_and_culture", "Arts & Culture"),
+    ("zoomify", "Zoomify"),
+    ("iiif", "IIIF"),
+    ("deepzoom", "Seadragon (Deep Zoom Image)"),
+    ("generic", "Generic dezoomer"),
+    ("krpano", "krpano"),
+    ("iipimage", "IIPImage"),
+    ("xlimage", "XLimage"),
+    ("topviewer", "TopViewer"),
+    ("fsi", "FSI"),
+    ("lizardtech", "LizardTech ImageServer"),
+    ("vls", "VLS"),
+    ("hungaricana", "Hungaricana"),
+    ("wmts", "WMTS"),
+    ("arcgis", "ArcGIS MapServer"),
+    ("pnav", "pnav"),
+    ("bulk_text", "Bulk text"),
+];
+
+/// Power-user format ids (subset of FORMAT_GRID, hidden by default).
+pub const POWER_USER_FORMATS: &[&str] = &["custom", "bulk_text"];
+
+// ---------------------------------------------------------------------------
 // Requests and byte-buffer ownership
 // ---------------------------------------------------------------------------
 

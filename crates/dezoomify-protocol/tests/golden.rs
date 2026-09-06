@@ -29,6 +29,140 @@ fn version_negotiation() {
     assert!(negotiate_version("1").is_ok());
     let err = negotiate_version("2.0").unwrap_err();
     assert_eq!(err.code, "protocol.incompatible");
+    // Task 6.5: handshake failures surface at the handshake phase with
+    // update guidance (the peer must update), never as silent validation.
+    assert_eq!(err.phase, ErrorPhase::Handshake);
+    assert!(
+        err.message.contains("2.0") && err.message.contains("1.0"),
+        "update guidance must name both versions: {}",
+        err.message
+    );
+    assert!(!err.retryable);
+}
+
+#[test]
+fn envelope_version_alias_accepted() {
+    // Task 6.5: mutually supported 1.0 accepts the "1" alias; anything else
+    // is incompatible before any work.
+    let ok = ControlEnvelope::new(ControlBody::Error(ErrorDto::new(
+        "x.y",
+        ErrorPhase::Validation,
+        "m",
+    )))
+    .unwrap();
+    assert!(codec::check_envelope_version(&ok).is_ok());
+    let mut alias = ok.clone();
+    alias.protocol = "1".to_string();
+    assert!(codec::check_envelope_version(&alias).is_ok());
+    let mut bad = ok.clone();
+    bad.protocol = "2.0".to_string();
+    assert!(codec::check_envelope_version(&bad).is_err());
+}
+
+#[test]
+fn native_baseline_matches_desktop_contract() {
+    // Task 6.5: capabilities negotiation declaration. The native baseline is
+    // the single source the desktop handshake/capability documents project:
+    // http(s) input, native fetch, png/jpeg/tiff codecs, file + iiif-dir
+    // destinations, cache storage, max_concurrency 16, no bulk queue,
+    // handoff supported. The UI gates controls from this declaration and the
+    // engine re-validates the final request.
+    let caps = CapabilitiesDto::native_baseline();
+    assert_eq!(
+        caps.input_schemes,
+        vec!["https".to_string(), "http".to_string()]
+    );
+    assert_eq!(caps.fetch_modes, vec!["native".to_string()]);
+    assert_eq!(
+        caps.decoders,
+        vec!["png".to_string(), "jpeg".to_string(), "tiff".to_string()]
+    );
+    assert_eq!(
+        caps.encoders,
+        vec!["png".to_string(), "jpeg".to_string(), "tiff".to_string()]
+    );
+    assert_eq!(
+        caps.destination_modes,
+        vec!["file".to_string(), "iiif-dir".to_string()]
+    );
+    assert_eq!(caps.storage_modes, vec!["cache".to_string()]);
+    assert_eq!(caps.max_concurrency, 16);
+    assert!(!caps.bulk_supported);
+    assert!(caps.handoff_supported);
+}
+
+#[test]
+fn limits_grid_transports_single_generation() {
+    // Task 6.4: one limit/grid/capability generation via protocol generate.
+    // Limits mirror the website browser bound (16384 squared), the native
+    // 8 GiB canvas cap, the 2 MiB metadata proxy cap, and the 1500 ms
+    // direct-first metadata window.
+    assert_eq!(MAX_BROWSER_AREA, 268_435_456);
+    assert_eq!(MAX_BROWSER_AREA, 16_384 * 16_384);
+    assert_eq!(NATIVE_MAX_BYTES, 8_589_934_592);
+    assert_eq!(NATIVE_MAX_BYTES, 8 << 30);
+    assert_eq!(PROXY_MAX_BYTES, 2_097_152);
+    assert_eq!(PROXY_MAX_BYTES, 2 * 1024 * 1024);
+    assert_eq!(METADATA_WINDOW_MS, 1_500);
+    // Transport labels stay single-sourced with browser-runtime types.ts.
+    assert_eq!(DIRECT_TRANSPORT_LABEL, "Direct from your browser");
+    assert_eq!(PROXY_TRANSPORT_LABEL, "Metadata proxy");
+    // Format grid mirrors registry.rs BUILTINS snapshot: 18 entries in
+    // precedence order, with custom and bulk_text as power-user entries.
+    assert_eq!(FORMAT_GRID.len(), 18);
+    assert_eq!(FORMAT_GRID.first(), Some(&("custom", "Custom tiles")));
+    assert_eq!(FORMAT_GRID.last(), Some(&("bulk_text", "Bulk text")));
+    assert_eq!(POWER_USER_FORMATS, &["custom", "bulk_text"]);
+    for id in POWER_USER_FORMATS {
+        assert!(
+            FORMAT_GRID.iter().any(|(grid_id, _)| grid_id == id),
+            "power-user {id} must be in the grid"
+        );
+    }
+    let ids: Vec<&str> = FORMAT_GRID.iter().map(|(id, _)| *id).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "custom",
+            "google_arts_and_culture",
+            "zoomify",
+            "iiif",
+            "deepzoom",
+            "generic",
+            "krpano",
+            "iipimage",
+            "xlimage",
+            "topviewer",
+            "fsi",
+            "lizardtech",
+            "vls",
+            "hungaricana",
+            "wmts",
+            "arcgis",
+            "pnav",
+            "bulk_text",
+        ]
+    );
+}
+
+#[test]
+fn limits_fingerprint_covers_generation_deterministically() {
+    use dezoomify_protocol::generate::{dto_fingerprint, limits_fingerprint, typescript};
+    // Dto fingerprint stays stable so existing capability documents match;
+    // the extended limits fingerprint covers the new generation.
+    assert_eq!(dto_fingerprint(), "b4bad92b24615c58");
+    let first = limits_fingerprint();
+    assert_eq!(first.len(), 16);
+    assert_eq!(limits_fingerprint(), first);
+    let ts = typescript();
+    assert!(ts.contains(&format!("LIMITS_FINGERPRINT = \"{first}\"")));
+    assert!(ts.contains("MAX_BROWSER_AREA = 268435456"));
+    assert!(ts.contains("NATIVE_MAX_BYTES = 8589934592"));
+    assert!(ts.contains("PROXY_MAX_BYTES = 2097152"));
+    assert!(ts.contains("METADATA_WINDOW_MS = 1500"));
+    assert!(ts.contains("Direct from your browser"));
+    assert!(ts.contains("Metadata proxy"));
+    assert!(ts.contains("FORMAT_GRID"));
 }
 
 #[test]
