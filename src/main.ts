@@ -216,13 +216,7 @@ function nextEvent(kind: string, extra: Record<string, unknown> = {}) {
 function isAllowedSourceUrl(urlString: string): boolean {
   try {
     const u = new URL(urlString);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-    if (u.protocol === "http:") {
-      const host = u.hostname.toLowerCase();
-      const loopback = host === "localhost" || host === "127.0.0.1" || host === "::1";
-      if (!loopback) return false;
-    }
-    return true;
+    return u.protocol === "http:" || u.protocol === "https:";
   } catch {
     return false;
   }
@@ -731,7 +725,7 @@ function update(): void {
                 code: "INVALID_URL",
                 category: "validation",
                 retryable: false,
-                message: "Please enter a valid web address starting with https://",
+                message: "Please enter a valid web address starting with http:// or https://",
               },
             }) as never,
           );
