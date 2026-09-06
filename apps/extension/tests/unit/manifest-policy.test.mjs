@@ -32,7 +32,7 @@ const firefoxOverlay = readJson("../../src/manifest/firefox.json");
 const genChromium = readJson("../../generated/manifest.chromium.json");
 const genFirefox = readJson("../../generated/manifest.firefox.json");
 
-const REVIEWED_PERMS = new Set(["activeTab", "scripting", "webRequest", "downloads", "nativeMessaging", "tabs", "cookies"]);
+const REVIEWED_PERMS = new Set(["activeTab", "scripting", "webRequest", "nativeMessaging", "tabs", "cookies"]);
 const REVIEWED_OPTIONAL = new Set(["cookies"]);
 const EXPECTED_GECKO_ID = "dezoomify@example.com";
 
@@ -94,6 +94,9 @@ for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefo
       assert.ok(REVIEWED_OPTIONAL.has(p), `${name} unreviewed optional permission ${p}`);
     }
     assert.ok(!(manifest.permissions ?? []).includes("cookies"), `${name} cookies must be optional, not permanent`);
+    // Chrome Web Store rejects unused permissions: the page saves via a blob
+    // anchor, which needs no `downloads` permission, so it must stay absent.
+    assert.ok(!(manifest.permissions ?? []).includes("downloads"), `${name} unused downloads permission`);
   });
 }
 
@@ -112,6 +115,14 @@ test("least-privilege: activeTab present, nativeMessaging declared", () => {
     assert.ok((gen.permissions ?? []).includes("activeTab"));
     assert.ok((gen.permissions ?? []).includes("nativeMessaging"));
   }
+});
+
+test("declared permissions are used by shipped code", () => {
+  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
+  assert.ok(page.includes("sendNativeMessage"), "nativeMessaging must be used by page handoff");
+  assert.ok(page.includes("api.cookies.getAll"), "cookies must be used by consented handoff");
+  assert.ok(page.includes("api.webRequest.onBeforeRequest"), "webRequest must be used by scan");
+  assert.ok(!page.includes("chrome.downloads"), "downloads API must stay unused (blob anchor save)");
 });
 
 test("generated manifests are the deterministic generator output (base+overlay, no underscore keys)", () => {

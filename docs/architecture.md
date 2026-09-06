@@ -10,7 +10,7 @@ A pure Rust library that converts supplied resource bytes and URLs into discover
 
 ### `crates/dezoomify-job`
 
-A pure, host-neutral Rust effect/state machine. It owns the job through output-destination selection, tile acquisition and processing outcomes, encoding, finalization, partial publication, and cleanup. Hosts feed results back into the machine and execute its I/O effects. See [Job engine](job-engine.md).
+A pure, host-neutral Rust effect/state machine. It owns the job through output-destination selection, tile acquisition and processing outcomes, encoding, finalization, partial publication, and cleanup. Hosts feed results back into the machine and execute its I/O effects. The browser runtime drives it through the WASM adapter; the native runtime implements the equivalent lifecycle with scenario parity. See [Job engine](job-engine.md).
 
 ### `crates/dezoomify-protocol`
 
