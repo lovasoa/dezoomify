@@ -42,8 +42,7 @@ needs no `downloads` permission.
 
 ## Native handoff
 
-The extension offers native handoff for huge outputs, local destinations,
-bulk work, unsupported codecs, or durable jobs. Source URLs, catalog
+The extension offers native handoff for huge outputs or local destinations. Source URLs, catalog
 selection, recipes, and non-secret headers form bounded untrusted input that
 native validates and the user confirms.
 

@@ -39,4 +39,4 @@ The proxy is not a general relay and serves metadata only, never tiles. Both the
 
 ## Limits and capabilities
 
-At startup the runtime reports codec support, worker and storage availability, maximum practical canvas and allocation sizes, proxy availability, and supported output modes. The job engine validates plans against these [capabilities](protocol.md#capabilities). Jobs that exceed browser limits offer native handoff before tile download begins.
+At startup the runtime reports codec support, worker and storage availability, maximum practical canvas and allocation sizes, proxy availability, and supported output modes. The job engine validates plans against these [capabilities](protocol.md#capabilities). A job that exceeds browser limits fails with a typed error that points to the native app.
