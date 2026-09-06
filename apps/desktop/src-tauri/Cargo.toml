@@ -33,12 +33,12 @@ path = "src/bin/dezoomify-native-host.rs"
 ed25519-dalek = { version = "2", default-features = false }
 # Real window shell (optional; see the `tauri` feature below).
 serde = { version = "1", optional = true, features = ["derive"] }
-tauri = { version = "2", optional = true }
+tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
 
 [build-dependencies]
-tauri-build = { version = "2", optional = true }
+tauri-build = { version = "2", optional = true , features = [] }
 
 [dev-dependencies]
 
