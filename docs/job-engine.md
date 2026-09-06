@@ -24,11 +24,12 @@ Selection is explicit when discovery returns multiple images or levels. Headless
 
 Retry policy defines attempts, backoff inputs, and retryable error classes. The
 engine schedules retries; the host implements the delay and request. The web
-integration evaluates the first classified direct CORS or network failure as an
+integration evaluates the first classified direct CORS or network failure, or a
+direct fetch that does not complete within the 250 ms metadata window, as an
 application-specific transport transition before ordinary same-transport retry:
 an eligible public, non-credential metadata request supplies a metadata CORS
-proxy effect when proxy use is enabled, and the active-transport event makes
-that transition visible. Opt-out and ineligibility prohibit that effect.
+proxy effect, and the active-transport event makes
+that transition visible. Ineligibility prohibits that effect.
 Authentication failures, invalid metadata, unsupported formats, and
 deterministic decode failures are not retried automatically.
 

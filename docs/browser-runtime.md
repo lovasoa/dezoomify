@@ -29,11 +29,11 @@ Object URLs are scoped to the job and revoked after use. The optional browser ca
 The website uses this order:
 
 1. Direct browser fetch with cookies, `Authorization`, and browser credentials omitted.
-2. After a classified CORS or network failure, automatic metadata CORS proxy fallback when the metadata request is public and non-credential and proxy use is enabled.
+2. After a classified CORS or network failure, or a direct fetch that does not complete within the 250 ms metadata window, automatic metadata CORS proxy fallback when the metadata request is public and non-credential.
 3. For unprocessed ordinary tiles, an `<img>` element when display is possible without readable bytes.
 4. A typed recovery action offering the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route can supply readable bytes.
 
-The website always shows the active transport as direct browser fetch or the metadata CORS proxy, including an automatic transition after the classified direct failure. Proxy fallback requires no per-attempt consent. A user can opt out before or during a job; while proxy use is disabled, the website sends no new proxy requests and offers only eligible non-proxy recovery. Re-enabling the preference is not consent for a particular request.
+The website always shows the active transport as direct browser fetch or the metadata CORS proxy, including an automatic transition after the classified direct failure. Proxy fallback requires no per-attempt consent.
 
 The proxy is not a general relay and serves metadata only, never tiles. Both the browser-to-proxy request and the proxy's upstream request omit cookies, `Authorization`, and browser credentials. The proxy accepts only validated metadata requests for eligible public resources, blocks private and local networks, follows bounded redirects, limits size and duration, strips headers outside its allowlist, and returns explicit CORS headers. Details are in [Security](security.md).
 

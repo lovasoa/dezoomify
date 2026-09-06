@@ -22,7 +22,7 @@ The native effect implementation: HTTP transport, local-file access, persistent 
 
 ### `crates/dezoomify-wasm`
 
-The WASM adapter for core, job, and pure processing code. It does not own fetching, workers, decoding, browser canvases, storage, or downloads. See [Browser runtime](browser-runtime.md).
+The WASM adapter for core, job, and pure processing code. It does not own fetching, workers, decoding, browser canvases, storage, or output saves. See [Browser runtime](browser-runtime.md).
 
 ### `packages/shared-ui`
 
@@ -41,9 +41,9 @@ reporting, image decode, canvas and save surfaces, and an optional bounded
 browser cache. Hosts supply transport eligibility and fallback
 policy: the web integration tries a direct browser fetch first, with browser
 credentials omitted, and may automatically use the metadata CORS proxy only
-after a classified CORS or network failure for an eligible public,
-non-credential metadata request (never tiles) when the user
-has not opted out. The active transport is always visible. No cookies,
+after a classified CORS or network failure, or a direct fetch that does not
+complete within the 250 ms metadata window, for an eligible public,
+non-credential metadata request (never tiles). The active transport is always visible. No cookies,
 `Authorization`, browser credentials, or user-supplied credential headers are
 sent to or by the proxy. The extension never uses the metadata CORS proxy;
 extension-to-native cookie handoff is separately consent-gated. It connects

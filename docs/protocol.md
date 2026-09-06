@@ -32,7 +32,7 @@ At connection time a runtime reports supported input schemes, fetch modes, decod
 
 ## Errors
 
-Protocol errors contain a stable code, class, phase, retryability, safe user message, structured context, and permitted recovery actions. Host exception text is diagnostic data and never becomes the contract. See [Errors](errors.md).
+Protocol errors contain a stable code, phase, retryability, safe user message, structured context, and permitted recovery actions. Host exception text is diagnostic data and never becomes the contract. See [Errors](errors.md).
 
 ## Handoff
 

@@ -118,7 +118,7 @@ Website transport scenarios assert the full policy matrix: direct browser
 success makes no proxy request; only a classified CORS or network failure (or a
 direct fetch that does not complete within the 250 ms metadata window) can
 cause automatic metadata proxy fallback;
-the fallback has no per-attempt consent prompt and no opt-out;
+the fallback has no per-attempt consent prompt;
 and the website reports direct browser fetch and metadata CORS proxy transport
 states and transitions.
 Authentication, authorization,
@@ -130,7 +130,7 @@ only a narrow allowlist upstream (both browser-to-proxy and proxy-to-upstream
 legs), and the deployed function fetches with `redirect: "manual"` so every
 redirect hop is revalidated against the same policy.
 
-Live checks use no source-site credentials, bounded targets, low request rates,
+Live checks use no private source-site credentials (public demo keys embedded in fixture URLs are allowed), bounded targets, low request rates,
 and redacted reports. A live failure never replaces deterministic regression
 coverage or blocks an ordinary pull request.
 

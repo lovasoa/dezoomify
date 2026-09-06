@@ -25,7 +25,7 @@ A release candidate passes:
 - protocol upgrade, downgrade, event-gap, and handoff fixtures;
 - encoder output and large-image boundary tests;
 - website direct-first request-order and classified automatic proxy-fallback tests;
-- proxy public-resource eligibility, credential omission, redirect, active-transport display, and opt-out audits;
+- proxy public-resource eligibility, credential omission, redirect, and active-transport display audits;
 - extension permission, native cookie-consent, Native Messaging sender-authentication and replay-defense, redaction, and dependency audits.
 
 ## Pipeline
@@ -60,6 +60,6 @@ target until the Tauri shell is real; the inventory marks them so, and a
 release never claims an artifact it did not build. The operator sequence
 for cutting a release is the runbook in [Operations](operations.md).
 
-Artifacts are built from a tagged revision, signed with free mechanisms only (updater keypair, store submission, GPG tags), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project. Web release notes identify the automatic metadata CORS proxy fallback, active-transport indicator, and opt-out behavior; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
+Artifacts are built from a tagged revision, signed with free mechanisms only (updater keypair, store submission, GPG tags), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project. Web release notes identify the automatic metadata CORS proxy fallback and active-transport indicator; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
 
 See [Testing](testing.md) for test structure and [Security](security.md) for trust requirements.
