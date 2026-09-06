@@ -20,7 +20,7 @@
 
 ## Commands
 
-Commands express user intent and carry a request or job identifier. They cover discovery, selection, job start, pause or resume where supported, cancellation, recovery choice, output confirmation, and handoff import. Commands are idempotent where retries are expected; duplicate identifiers do not duplicate work.
+Commands express user intent and carry a request or job identifier. They cover discovery, selection, job start, cancellation, recovery choice, output confirmation, and handoff import. No pause or resume command exists in `JobCommand`, and the shared UI renders no pause controls. Commands are idempotent where retries are expected; duplicate identifiers do not duplicate work.
 
 ## Events
 
@@ -28,7 +28,7 @@ Events are ordered per job and include state snapshots, selection requests, phas
 
 ## Capabilities
 
-At connection time a runtime reports supported input schemes, fetch modes, decoders, encoders, processing operations, storage features, concurrency, practical size limits, bulk support, and handoff support. The shared UI gates controls from this declaration. The job engine also validates the final request, so capability checks are not UI-only.
+At connection time a runtime reports supported input schemes, fetch modes, decoders, encoders, processing operations, storage features, concurrency, practical size limits, bulk support, and handoff support. The shared UI gates controls from this declaration. The job engine also validates the final request, so capability checks are not UI-only. Bulk text discovery yields deferred entries that resolve one at a time; no runtime executes a multi-output bulk queue, so `bulk_supported` is false on every baseline. Handoff import is supported through validated `HandoffDto`. The native baseline reports encoders `[png, jpeg, tiff]`, destination modes `[file, iiif-dir]`, storage modes `[cache]`, and `bulk_supported` false. The CLI `--bulk` loop runs one bounded single-job run per list entry and is not a runtime multi-output bulk queue.
 
 ## Errors
 

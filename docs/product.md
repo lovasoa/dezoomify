@@ -2,14 +2,14 @@
 
 dezoomify turns tiled, zoomable images into portable image files. A user supplies a URL, chooses a discovered image and level, reviews output constraints, and runs a job with live progress, cancellation, retry, and an explicit partial-output policy.
 
-## Surfaces
+## Apps
 
 - **Website** handles common public sources without installation. It fetches readable bytes with a direct browser fetch first (250 ms window), then automatically uses the metadata CORS proxy only after a classified CORS or network failure or a direct fetch that does not complete in that window, and only for an eligible public, non-credential metadata request; tiles are never proxied. The website shows the active transport and never prompts for per-attempt proxy consent. Unprocessed ordinary tiles may remain visible through a tainted canvas without clean programmatic save.
 - **Browser extension** discovers viewers in the current page and performs browser-session requests under extension permissions.
-- **The desktop app** uses the native runtime for local files, large images, durable caching, and full encoder support.
-- **CLI** exposes the same native discovery and job behavior for scripts and bulk work.
+- **The desktop app** uses the native runtime for large images and local sources with single-job PNG, JPEG, and TIFF output to a file or `iiif-dir`.
+- **CLI** exposes the same native discovery and job behavior for scripts.
 
-The shared React UI presents the same job concepts in every app. Runtime capability negotiation changes available actions, not their meaning. See [Architecture](architecture.md) and [Protocol](protocol.md).
+The shared UI (vanilla TypeScript, no UI framework) presents the same job concepts in every app. Runtime capability negotiation changes available actions, not their meaning. See [Architecture](architecture.md) and [Protocol](protocol.md).
 
 ## Choosing an app
 
@@ -44,6 +44,6 @@ Discovery, selection, acquisition, processing, and saving remain distinct phases
 
 ## App boundaries
 
-The browser is optimized for interactive jobs that fit browser memory and save limits. Native apps own huge images, local input, bulk operation, resumable disk-backed work, and the complete output format set. The website sends neither cookies, `Authorization`, nor browser credentials on direct browser fetches or through the metadata CORS proxy. The extension is a distinct runtime: it obtains readable bytes under granted host permissions and the current browser session, processes them, and creates clean saves without the metadata CORS proxy.
+The browser is optimized for interactive jobs that fit browser memory and save limits. Native apps own huge images and local input with single-job PNG, JPEG, and TIFF output to a file or `iiif-dir`. The native baseline reports encoders `[png, jpeg, tiff]`, destination modes `[file, iiif-dir]`, storage modes `[cache]`, and `bulk_supported` false, with no pause or resume command. The CLI `--bulk` loop runs one bounded single-job run per list entry and is not a runtime multi-output bulk queue. The website sends neither cookies, `Authorization`, nor browser credentials on direct browser fetches or through the metadata CORS proxy. The extension is a distinct runtime: it obtains readable bytes under granted host permissions and the current browser session, processes them, and creates clean saves without the metadata CORS proxy.
 
 dezoomify does not bypass authentication or access controls. Users are responsible for permission to retrieve and reproduce source material. Credential handling follows [Security](security.md).
