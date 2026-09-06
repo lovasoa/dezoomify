@@ -171,8 +171,7 @@ pub fn fetch(
             .header("location")
             .ok_or_else(|| NativeError::new("transport.bad-redirect", "missing location"))?;
         let next = resolve_redirect(&request.uri, location)?;
-        request = rebuild_for_redirect(&request, &next, auth)
-            .map_err(|m| NativeError::new("transport.bad-redirect", m))?;
+        request = rebuild_for_redirect(&request, &next, auth)?;
         if let Some(user) = user {
             user.apply(&mut request);
         }

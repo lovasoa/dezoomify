@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::auth::EphemeralAuthorization;
+use crate::error::NativeError;
 
 #[derive(Clone, Debug)]
 pub struct EffectiveRequest {
@@ -16,10 +17,13 @@ pub fn build_request(
     uri: &str,
     extra: &BTreeMap<String, String>,
     auth: Option<&EphemeralAuthorization>,
-) -> Result<EffectiveRequest, String> {
+) -> Result<EffectiveRequest, NativeError> {
     for key in extra.keys() {
         if key.eq_ignore_ascii_case("cookie") || key.eq_ignore_ascii_case("authorization") {
-            return Err("cookie/authorization forbidden in public headers".to_string());
+            return Err(NativeError::new(
+                "auth.forbidden-header",
+                "cookie/authorization forbidden in public headers",
+            ));
         }
     }
     let mut headers = BTreeMap::new();
@@ -47,7 +51,7 @@ pub fn rebuild_for_redirect(
     previous: &EffectiveRequest,
     next_uri: &str,
     auth: Option<&EphemeralAuthorization>,
-) -> Result<EffectiveRequest, String> {
+) -> Result<EffectiveRequest, NativeError> {
     let mut headers = previous.headers.clone();
     headers.remove("cookie");
     if let Some(auth) = auth {
@@ -62,14 +66,16 @@ pub fn rebuild_for_redirect(
     })
 }
 
-fn split_url(uri: &str) -> Result<(String, String, Option<u16>, String), String> {
-    let (scheme, rest) = uri.split_once("://").ok_or("bad url")?;
+fn split_url(uri: &str) -> Result<(String, String, Option<u16>, String), NativeError> {
+    let (scheme, rest) = uri
+        .split_once("://")
+        .ok_or_else(|| NativeError::new("transport.bad-url", "bad url"))?;
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], rest[i..].to_string()),
         None => (rest, "/".to_string()),
     };
     if authority.contains('@') {
-        return Err("userinfo rejected".to_string());
+        return Err(NativeError::new("transport.bad-url", "userinfo rejected"));
     }
     let (host, port) = match authority.rsplit_once(':') {
         Some((h, p)) if p.bytes().all(|b| b.is_ascii_digit()) => {
