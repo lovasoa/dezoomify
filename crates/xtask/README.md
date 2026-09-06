@@ -39,7 +39,7 @@ keys only.
 ```sh
 cargo xtask setup
 cargo xtask check
-cargo xtask test scenario --scenario native/cache-resume
+cargo xtask test scenario
 cargo xtask build desktop --unsigned-test
 cargo xtask dev extension --browser chromium
 cargo xtask ci local
