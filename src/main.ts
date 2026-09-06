@@ -1172,13 +1172,50 @@ async function runJob(url: string): Promise<void> {
     );
     controller.dispatch(nextEvent("image-chosen") as never);
     const level = pickLevel(image);
+    // Pre-plan gate (todo 5.3): declared sizes fail fast with a desktop
+    // handoff link without calling `client.plan`, so the worker never
+    // serializes a trillion-tile plan. Undeclared sizes skip this gate
+    // (probe-driven; size is known only after probing) and rely on the
+    // worker `limit-exceeded` guard plus the post-plan `probeLimits` and
+    // tile-count caps below.
+    const pickedSize = image.levels.find((entry) => entry.index === level.index)?.imageSize;
+    if (pickedSize) {
+      if (probeLimits({ width: pickedSize.x, height: pickedSize.y }, BROWSER_LIMITS).verdict !== "ok") {
+        throw canvasTooLargeFailure(pickedSize.x, pickedSize.y, url);
+      }
+      const estimate = estimateTileCount(pickedSize.x, pickedSize.y);
+      if (estimate === null || estimate > BROWSER_MAX_PLAN_TILES) {
+        throw canvasTooLargeFailure(
+          pickedSize.x,
+          pickedSize.y,
+          url,
+          estimate === null
+            ? "tile-count estimate overflow"
+            : `estimated ${estimate} tiles exceeds the ${BROWSER_MAX_PLAN_TILES}-tile browser plan limit`,
+        );
+      }
+    }
     setStep("Choosing the highest resolution…");
     controller.dispatch(nextEvent("level-chosen") as never);
     setStep("Checking the image size…");
     controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
     update();
 
-    const plan = await client.plan(image.id, level.index);
+    let plan;
+    try {
+      plan = await client.plan(image.id, level.index);
+    } catch (error) {
+      // Worker allocation guard (wasm MAX_PLAN_TILES) surfaces as the stable
+      // `limit-exceeded` code inside the detail string; map that stable code
+      // (never UI copy) to the same desktop handoff so probe-driven huge
+      // levels fail as PLAN_INVALID instead of generic WORKER_FAILED.
+      const structured = error as { code?: string; detail?: string; technical?: string };
+      const hay = `${structured?.code ?? ""} ${structured?.detail ?? ""} ${structured?.technical ?? ""}`;
+      if (hay.includes("limit-exceeded")) {
+        throw canvasTooLargeFailure(pickedSize?.x ?? 0, pickedSize?.y ?? 0, url, "tile plan exceeds the browser plan limit");
+      }
+      throw error;
+    }
     if (token !== jobToken) return;
     pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
     const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
@@ -1202,13 +1239,15 @@ async function runJob(url: string): Promise<void> {
         `invalid tile plan: canvas ${width}x${height}`,
       );
     }
-    if (width * height > BROWSER_MAX_CANVAS_AREA) {
-      throw failure(
-        "PLAN_INVALID",
-        "This image is too large for this browser tab. Use the desktop app for the full-size image.",
-        false,
-        undefined,
-        `canvas ${width}x${height} exceeds the browser limit`,
+    if (probeLimits({ width, height }, BROWSER_LIMITS).verdict !== "ok") {
+      throw canvasTooLargeFailure(width, height, url);
+    }
+    if (plan.tiles.length > BROWSER_MAX_PLAN_TILES) {
+      throw canvasTooLargeFailure(
+        width,
+        height,
+        url,
+        `${plan.tiles.length} tiles exceeds the ${BROWSER_MAX_PLAN_TILES}-tile browser plan limit`,
       );
     }
     canvas.width = width;
