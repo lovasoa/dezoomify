@@ -100,9 +100,80 @@ pub fn machine_bulk_item(item: &BulkItem) -> String {
     .to_string()
 }
 
+/// Log verbosity rank for `--logging`: error=0, warn=1, info=2, debug=3,
+/// trace=4. Unknown defaults to info (defensive; the parser validates).
+/// Controls human stderr only; `--json` stdout is never filtered.
+#[must_use]
+pub fn log_level_rank(level: &str) -> u8 {
+    match level.trim().to_ascii_lowercase().as_str() {
+        "error" => 0,
+        "warn" => 1,
+        "info" => 2,
+        "debug" => 3,
+        "trace" => 4,
+        _ => 2,
+    }
+}
+
+/// Warnings (`warning: ...`, EOF notices) show at warn and above.
+#[must_use]
+pub fn show_warning(level: &str) -> bool {
+    log_level_rank(level) >= 1
+}
+
+/// Success lines (`saved ...`, human bulk summaries) show at info and above;
+/// error/warn stay quiet on success. Failures and `error:` lines always show.
+#[must_use]
+pub fn show_success(level: &str) -> bool {
+    log_level_rank(level) >= 2
+}
+
+/// Progress events (`started`, `discovery`, `downloading`, `encoding`) show at
+/// info and above; error/warn suppress them. Machine `--json` events are
+/// never filtered.
+#[must_use]
+pub fn show_progress(level: &str) -> bool {
+    log_level_rank(level) >= 2
+}
+
+/// Extra per-run diagnostics show at debug and above.
+#[must_use]
+pub fn is_verbose(level: &str) -> bool {
+    log_level_rank(level) >= 3
+}
+
+/// Full event payloads show at trace only.
+#[must_use]
+pub fn is_trace(level: &str) -> bool {
+    log_level_rank(level) >= 4
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_levels_gate_human_output() {
+        assert_eq!(log_level_rank("error"), 0);
+        assert_eq!(log_level_rank("warn"), 1);
+        assert_eq!(log_level_rank("info"), 2);
+        assert_eq!(log_level_rank("debug"), 3);
+        assert_eq!(log_level_rank("trace"), 4);
+        assert_eq!(log_level_rank("nope"), 2);
+        assert!(!show_warning("error"));
+        assert!(show_warning("warn"));
+        assert!(!show_success("error"));
+        assert!(!show_success("warn"));
+        assert!(show_success("info"));
+        assert!(!show_progress("warn"));
+        assert!(show_progress("info"));
+        assert!(show_progress("debug"));
+        assert!(!is_verbose("info"));
+        assert!(is_verbose("debug"));
+        assert!(is_verbose("trace"));
+        assert!(!is_trace("debug"));
+        assert!(is_trace("trace"));
+    }
 
     #[test]
     fn bulk_summary_shapes() {

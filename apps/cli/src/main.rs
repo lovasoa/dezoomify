@@ -105,7 +105,9 @@ fn run_single_from_cli(parsed: Args) {
         ..parsed
     };
     if !apply_pickers(&mut parsed) {
-        eprintln!("warning: Reached end of input. Exiting...");
+        if report::show_warning(&parsed.logging) {
+            eprintln!("warning: Reached end of input. Exiting...");
+        }
         std::process::exit(0);
     }
     let ok = run_single_inner(&parsed, &input, &output);
@@ -127,7 +129,9 @@ fn run_interactive_loop(base: Args) {
         let input = match prompt_input() {
             Some(input) => input,
             None => {
-                eprintln!("warning: Reached end of input. Exiting...");
+                if report::show_warning(&base.logging) {
+                    eprintln!("warning: Reached end of input. Exiting...");
+                }
                 break;
             }
         };
@@ -143,7 +147,9 @@ fn run_interactive_loop(base: Args) {
             ..base.clone()
         };
         if !apply_pickers(&mut parsed) {
-            eprintln!("warning: Reached end of input. Exiting...");
+            if report::show_warning(&parsed.logging) {
+                eprintln!("warning: Reached end of input. Exiting...");
+            }
             break;
         }
         if !run_single_inner(&parsed, &input, &output) {
@@ -273,25 +279,36 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     }
 }
 
-/// Remaining notice for the verbosity flag until real levels land.
-/// Every other flag above is wired through [`pipeline_config_for`]: level
-/// caps and exact `--zoom-level`/`--image-index`/`--largest`, `parallelism`
-/// as `max_concurrent`, `--dezoomer` validated CLI-side, `max_retries`
-/// (including 0) passed through, `retry_delay`, `compression` as JPEG quality
-/// `100 - compression` plus PNG tiers, `timeout`/`connect-timeout`,
-/// `max_idle_per_host`, and per-tile `min_interval` staggering (bulk
-/// inter-image pacing still uses the local `Throttler` with the same value).
-fn warn_selection_gaps(parsed: &Args) {
-    if parsed.logging != "info" {
+/// Extra human diagnostics for `--logging debug`/`trace` on stderr.
+/// Never includes headers, credentials, URLs, or paths: only numeric and
+/// selection config. Machine `--json` stdout is never touched.
+fn emit_verbose_diagnostics(level: &str, parsed: &Args) {
+    if report::is_verbose(level) {
         eprintln!(
-            "warning: --logging {} is parsed but verbosity is fixed; reporting through human lines on stderr plus --json on stdout",
-            parsed.logging
+            "debug dezoomer={} retries={} parallelism={} largest={} logging={}",
+            parsed.dezoomer, parsed.retries, parsed.parallelism, parsed.largest, parsed.logging,
+        );
+    }
+    if report::is_trace(level) {
+        eprintln!(
+            "trace max_width={:?} max_height={:?} zoom_level={:?} image_index={:?} compression={} retry_delay={:?} min_interval={:?} timeout={:?} connect_timeout={:?} max_idle_per_host={}",
+            parsed.max_width,
+            parsed.max_height,
+            parsed.zoom_level,
+            parsed.image_index,
+            parsed.compression,
+            parsed.retry_delay,
+            parsed.min_interval,
+            parsed.timeout,
+            parsed.connect_timeout,
+            parsed.max_idle_per_host,
         );
     }
 }
 
 fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
-    warn_selection_gaps(parsed);
+    let level = parsed.logging.as_str();
+    emit_verbose_diagnostics(level, parsed);
     let runtime = NativeRuntime::new(1 << 30);
     let output_str = output.to_string_lossy().into_owned();
     let mut handle = match runtime.start(JobRequest {
@@ -306,10 +323,15 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         }
     };
     handle.emit("started");
-    print_event(parsed.json, handle.events().last().expect("started event"));
+    print_event(
+        parsed.json,
+        handle.events().last().expect("started event"),
+        level,
+    );
 
     let config = pipeline_config_for(parsed);
     let json = parsed.json;
+    let level_owned = level.to_string();
     let result = pipeline::run(
         input,
         &output_str,
@@ -318,7 +340,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         &mut |event: PipelineEvent| {
             handle.emit_detail(&event.kind, event.detail.clone());
             if let Some(last) = handle.events().last() {
-                print_event(json, last);
+                print_event(json, last, &level_owned);
             }
         },
     );
@@ -338,7 +360,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
                         outcome.tile_count,
                     )
                 );
-            } else {
+            } else if report::show_success(level) {
                 eprintln!(
                     "saved {} ({} tiles, {}x{}) {}",
                     outcome.output_path.display(),
@@ -359,7 +381,8 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
 }
 
 fn run_bulk(parsed: Args) {
-    warn_selection_gaps(&parsed);
+    let level = parsed.logging.clone();
+    emit_verbose_diagnostics(&level, &parsed);
     let bulk_arg = parsed.bulk.clone().unwrap_or_default();
     let entries = match load_bulk_entries(&bulk_arg, &parsed.headers, parsed.accept_invalid_certs) {
         Ok(entries) => entries,
@@ -389,7 +412,7 @@ fn run_bulk(parsed: Args) {
                 let item = report::BulkItem::ok(index, url, &output_str, &hash);
                 if parsed.json {
                     println!("{}", report::machine_bulk_item(&item));
-                } else {
+                } else if report::show_success(&level) {
                     eprintln!("saved {output_str} from {url} ({hash})");
                 }
                 items.push(item);
@@ -412,7 +435,7 @@ fn run_bulk(parsed: Args) {
             "{}",
             report::machine_bulk_summary(items.len(), succeeded, failed)
         );
-    } else {
+    } else if report::show_success(&level) {
         eprintln!(
             "{}",
             report::human_bulk_summary(items.len(), succeeded, failed)
@@ -515,11 +538,12 @@ fn run_one_bulk_image(
     // bulk-item lines on stdout, so event details never pollute JSON.
     if !parsed.json {
         if let Some(last) = handle.events().last() {
-            print_event(false, last);
+            print_event(false, last, &parsed.logging);
         }
     }
     let config = pipeline_config_for(parsed);
     let mut events: Vec<PipelineEvent> = Vec::new();
+    let logging = parsed.logging.clone();
     let result = pipeline::run(
         url,
         output,
@@ -530,7 +554,7 @@ fn run_one_bulk_image(
             handle.emit_detail(&event.kind, event.detail.clone());
             if !parsed.json {
                 if let Some(last) = handle.events().last() {
-                    print_event(false, last);
+                    print_event(false, last, &logging);
                 }
             }
         },
@@ -742,23 +766,31 @@ mod url {
     }
 }
 
-fn print_event(json: bool, event: &JobEvent) {
+fn print_event(json: bool, event: &JobEvent, logging: &str) {
     if json {
         println!(
             "{}",
             report::machine_event_detail(&event.job, event.seq, event.kind.as_str(), &event.detail)
         );
+        return;
+    }
+    if !report::show_progress(logging) {
+        return;
+    }
+    let detail = event
+        .detail
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if detail.is_empty() {
+        eprintln!("{} {}", event.kind, event.job);
     } else {
-        let detail = event
-            .detail
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        if detail.is_empty() {
-            eprintln!("{} {}", event.kind, event.job);
-        } else {
-            eprintln!("{} {} {}", event.kind, event.job, detail);
+        eprintln!("{} {} {}", event.kind, event.job, detail);
+    }
+    if report::is_trace(logging) {
+        if let Ok(payload) = serde_json::to_string(&event.detail) {
+            eprintln!("trace {} {} {payload}", event.kind, event.job);
         }
     }
 }

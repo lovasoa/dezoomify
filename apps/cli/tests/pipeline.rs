@@ -473,14 +473,14 @@ fn cli_full_flags_produce_golden_output() {
 }
 
 #[test]
-fn cli_fallback_flags_warn_honestly() {
-    // `--dezoomer <named>` and `--retries 0` are now real: validated and
-    // passed through with no warnings. Only `--logging <non-info>` still
-    // warns until real levels land.
+fn cli_selection_gaps_are_real_no_warnings() {
+    // `--dezoomer <named>`, `--logging <non-info>`, and `--retries 0` are
+    // real: validated/passed through with zero warnings. The fetch still
+    // succeeds and hashes to the cli-dzi golden.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    let out_dir = temp_dir("e2e-fallback-warnings");
-    let output = out_dir.join("fallback.png");
+    let out_dir = temp_dir("e2e-no-fallback-warnings");
+    let output = out_dir.join("real.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
         .arg("--dezoomer")
         .arg("iiif")
@@ -495,21 +495,25 @@ fn cli_fallback_flags_warn_honestly() {
         .expect("run cli");
     assert!(
         run.status.success(),
-        "fallback flags should still succeed: stderr={:?}",
+        "real flags should succeed: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
     );
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
+        !stderr.contains("warning:"),
+        "zero warnings for owned items: {stderr}"
+    );
+    assert!(
         !stderr.contains("auto-detecting instead"),
-        "dezoomer no longer warns: {stderr}"
+        "dezoomer no longer falls back with a warning: {stderr}"
     );
     assert!(
         !stderr.contains("no refetch"),
-        "retries 0 no longer warns: {stderr}"
+        "retries 0 no longer emulates with a warning: {stderr}"
     );
     assert!(
-        stderr.contains("--logging debug") && stderr.contains("human lines on stderr"),
-        "logging still warns with human/json mapping: {stderr}"
+        !stderr.contains("verbosity is fixed"),
+        "logging no longer warns fixed verbosity: {stderr}"
     );
     let golden: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
@@ -524,6 +528,133 @@ fn cli_fallback_flags_warn_honestly() {
         .and_then(serde_json::Value::as_str)
         .expect("golden outputHash");
     assert_eq!(sha256_of_file(&output), expected_hash);
+}
+
+#[test]
+fn cli_logging_levels_control_human_verbosity() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    // error suppresses success lines; info shows them; debug adds diagnostics;
+    // trace adds full payloads. Machine JSON stays untouched (see next test).
+    let out_error = temp_dir("e2e-log-error");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--logging")
+        .arg("error")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(out_error.join("out.png"))
+        .output()
+        .expect("run cli");
+    assert!(run.status.success());
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        !stderr.contains("saved"),
+        "--logging error suppresses success lines: {stderr}"
+    );
+    assert!(!stderr.contains("warning:"), "no warnings: {stderr}");
+
+    let out_info = temp_dir("e2e-log-info");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--logging")
+        .arg("info")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(out_info.join("out.png"))
+        .output()
+        .expect("run cli");
+    assert!(run.status.success());
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("saved"), "info shows success: {stderr}");
+    assert!(
+        !stderr.contains("debug "),
+        "info has no debug diagnostics: {stderr}"
+    );
+
+    let out_debug = temp_dir("e2e-log-debug");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--logging")
+        .arg("debug")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(out_debug.join("out.png"))
+        .output()
+        .expect("run cli");
+    assert!(run.status.success());
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("saved"), "debug shows success: {stderr}");
+    assert!(
+        stderr.contains("debug "),
+        "debug adds diagnostics: {stderr}"
+    );
+
+    let out_trace = temp_dir("e2e-log-trace");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--logging")
+        .arg("trace")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(out_trace.join("out.png"))
+        .output()
+        .expect("run cli");
+    assert!(run.status.success());
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("saved"), "trace shows success: {stderr}");
+    assert!(stderr.contains("debug "), "trace keeps debug: {stderr}");
+    assert!(stderr.contains("trace "), "trace adds payloads: {stderr}");
+}
+
+#[test]
+fn cli_logging_does_not_touch_json_contract() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-log-json");
+    let output = out_dir.join("out.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--json")
+        .arg("--logging")
+        .arg("debug")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(run.status.success());
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let mut saw_completed = false;
+    for line in stdout.lines() {
+        let value: serde_json::Value =
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("stdout JSON: {line} ({e})"));
+        assert!(
+            !value.to_string().contains("debug "),
+            "machine JSON never carries human diagnostics: {line}"
+        );
+        if value.get("kind").and_then(serde_json::Value::as_str) == Some("completed") {
+            saw_completed = true;
+        }
+    }
+    assert!(saw_completed, "completed present: {stdout}");
+}
+
+#[test]
+fn cli_invalid_logging_fails_with_typed_error() {
+    let out_dir = temp_dir("e2e-log-invalid");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--logging")
+        .arg("verbose")
+        .arg("https://fixtures.test/cli/pyramid.dzi")
+        .arg(out_dir.join("out.png"))
+        .output()
+        .expect("run cli");
+    assert_eq!(run.status.code(), Some(2), "invalid logging must exit 2");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("invalid --logging value"),
+        "typed error: {stderr}"
+    );
+    assert!(
+        String::from_utf8_lossy(&run.stdout).is_empty(),
+        "arg error must not pollute stdout"
+    );
 }
 
 #[test]

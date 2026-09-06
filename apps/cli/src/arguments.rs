@@ -49,8 +49,8 @@ pub struct Args {
     pub timeout: Duration,
     /// Max time to connect, wired to native fetch `connect_timeout`.
     pub connect_timeout: Duration,
-    /// Log verbosity, e.g. `info` or `debug`. The CLI reports through human
-    /// lines on stderr plus `--json` on stdout; non-`info` warns.
+    /// Log verbosity: error, warn, info, debug, trace (default info).
+    /// Controls human stderr verbosity; `--json` stdout is unchanged.
     pub logging: String,
     /// Degree of parallelism, wired to native `max_concurrent`.
     pub parallelism: usize,
@@ -244,7 +244,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 if raw.is_empty() {
                     return Err("missing value for --logging".to_string());
                 }
-                logging = raw;
+                logging = validate_logging(&raw)?;
             }
             "--tile-cache" | "-c" => {
                 let raw = take_value(args, &mut i, inline_value, "--tile-cache")?;
@@ -432,6 +432,19 @@ fn validate_dezoomer(name: &str) -> Result<(), String> {
     ))
 }
 
+/// Validate a `--logging` value and normalize to lowercase.
+/// Real levels mirror the reference `init_log` verbosity: error, warn, info,
+/// debug, trace (case-insensitive). Unknown values fail with a typed error.
+fn validate_logging(raw: &str) -> Result<String, String> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "error" | "warn" | "info" | "debug" | "trace" => Ok(normalized),
+        _ => Err(format!(
+            "invalid --logging value: {raw} (expected one of: error, warn, info, debug, trace)"
+        )),
+    }
+}
+
 /// Parse durations like `50ms`, `2s`, `1min`, `1m`, `1h`, `100ns`.
 /// Bare `0` means no delay. Mirrors the reference `parse_duration`.
 pub fn parse_duration(s: &str) -> Result<Duration, String> {
@@ -507,7 +520,7 @@ fn help() -> String {
         "                              (bulk paces images; per-tile requests are staggered)",
         "  --timeout <duration>        max time for one request (default 30s)",
         "  --connect-timeout <duration> max time to connect (default 6s)",
-        "  --logging <level>           log verbosity, e.g. info, debug (default info)",
+        "  --logging <level>           log verbosity: error, warn, info, debug, trace (default info)",
         "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
         "                              or IIIF collection manifest URL; saves one output per entry",
@@ -886,6 +899,35 @@ mod tests {
         assert_eq!(timed.timeout, Duration::from_secs(10));
         assert_eq!(timed.connect_timeout, Duration::from_secs(3));
         assert_eq!(timed.logging, "debug");
+    }
+
+    #[test]
+    fn logging_accepts_real_levels_and_rejects_unknown() {
+        for level in ["error", "warn", "info", "debug", "trace", "DEBUG"] {
+            let args = parse(&[
+                "--logging".to_string(),
+                level.to_string(),
+                "https://example.com/x.dzi".to_string(),
+                "out.png".to_string(),
+            ])
+            .expect("level parses");
+            assert!(
+                ["error", "warn", "info", "debug", "trace"].contains(&args.logging.as_str()),
+                "normalized level: {}",
+                args.logging
+            );
+        }
+        let err = parse(&[
+            "--logging".to_string(),
+            "verbose".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect_err("unknown level must fail");
+        assert!(
+            err.contains("invalid --logging value"),
+            "typed error: {err}"
+        );
     }
 
     #[test]

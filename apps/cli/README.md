@@ -41,8 +41,9 @@ tiers), `--max-idle-per-host`, `--timeout`, `--connect-timeout`, and
 per-tile `--min-interval` are wired through to native; bulk
 `--min-interval` also paces images. `--dezoomer` is validated against
 known formats (unknown names fail with exit 2; the native engine has no
-format selector field and auto-detects), and non-`info` `--logging` warns while
-reporting stays human lines on stderr plus `--json` on stdout (see
+format selector field and auto-detects), and `--logging` (error, warn,
+info, debug, trace; default info) controls human stderr verbosity while
+`--json` stdout stays machine-only (see
 `docs/user/command-line.md`). The default `Referer` is the http(s) bulk source or input URL unless
 `-H "Referer: …"` overrides it; `--largest` (implied in bulk mode without
 level caps) selects the uncapped level.
