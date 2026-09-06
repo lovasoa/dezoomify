@@ -9,6 +9,11 @@ pub mod install_integration;
 pub mod jobs;
 pub mod updater;
 
+// The real window shell is behind the `tauri` feature; the default build
+// stays pure standard-library logic with no SDK or webview requirements.
+#[cfg(feature = "tauri")]
+pub mod tauri_shell;
+
 /// Native Messaging host name shared by manifests and capabilities.
 pub const NATIVE_HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 /// Deep-link protocol scheme.

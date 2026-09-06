@@ -202,7 +202,12 @@ test("desktop typescript stays host-neutral (no web/extension imports)", () => {
   }
   const cargo = readText("../src-tauri/Cargo.toml");
   assert.ok(cargo.includes("[workspace]"), "standalone manifest detaches workspace");
-  assert.ok(!cargo.match(/^tauri\s*=/m), "no tauri dependency in lean shell");
+  // The real window shell is opt-in: the Tauri SDK stays an optional
+  // dependency pulled only by the `tauri` feature, so the default build
+  // keeps no SDK and no webview system requirements.
+  assert.ok(/^\s*tauri\s*=\s*\{[^}]*optional\s*=\s*true/m.test(cargo), "tauri stays optional");
+  assert.ok(/^\s*tauri-plugin-dialog\s*=\s*\{[^}]*optional\s*=\s*true/m.test(cargo), "dialog plugin stays optional");
+  assert.ok(/default\s*=\s*\[\]/m.test(cargo), "default features stay lean");
 });
 
 test("desktop scenario transcript is minimal and redacted", () => {

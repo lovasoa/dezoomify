@@ -31,7 +31,11 @@
     "copyright": "GPL-3.0-or-later",
     "resources": [],
     "shortDescription": "Dezoomify desktop",
-    "targets": "all"
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png"
+    ]
   },
   "identifier": "dev.ophir.dezoomify",
   "productName": "Dezoomify",

@@ -47,15 +47,15 @@ sites.
 
 ## Builds
 
-`cargo xtask build <target>` scope (honest scaffold):
+`cargo xtask build <target>` output:
 
 | Target | Output |
 |---|---|
 | `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
 | `web` | full site build via `scripts/build-site.mjs`: wasm adapter plus browser glue under `wasm/`, regenerated browser JS mirrors and help pages, and the deployable `dist/` tree (requires `wasm-bindgen-cli` matching the version in `Cargo.lock`; see below) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
-| `desktop` | stub validation only (logic + config); no installer or bundle produced, including with `--unsigned-test` |
-| `extension` | stub validation only (manifests); no ZIP packaged (use `apps/extension/scripts/package-store.sh` for a real package) |
+| `desktop` | the lean shell always compiles; the Tauri window shell (feature `tauri`) additionally compiles when the platform webview system packages are present; without `--unsigned-test` and with the bundler prerequisites installed, a real `.deb` bundle is produced |
+| `extension` | real store-shaped ZIPs for chromium and firefox under `target/extension/`, packaged by the same script the store-submission workflow uses |
 
 Examples:
 
@@ -109,17 +109,17 @@ website-deploy.md) for the phase history.
 
 ## Development servers
 
-`cargo xtask dev <target>` starts one watch-mode environment and prints its
-allocated URLs and cleanup instructions:
+`cargo xtask dev <target>` runs the named app's development environment and
+prints its URLs and cleanup instructions:
 
 | Target | Environment |
 |---|---|
-| `ui` | isolated shared UI |
-| `web` | website with deterministic local services |
-| `desktop` | Tauri development application |
-| `extension` | extension watch build and isolated test profile |
+| `ui` | full site build served at `http://127.0.0.1:8081/` (the shared UI runs inside the beta app at `/beta`) |
+| `web` | full site build served at `http://127.0.0.1:8080/`, exactly as deployed |
+| `desktop` | the real Tauri development application; fails closed with the webview system package list when they are missing |
+| `extension` | an unpacked load staged from the sources and a Chromium launch with an isolated throwaway profile; chromium engine only, other engines fail closed |
 
-For example, use `cargo xtask dev extension --browser firefox` or
+For example, use `cargo xtask dev extension --browser chromium` or
 `cargo xtask dev web`. Start standalone deterministic origins with
 `cargo xtask fixtures serve --port 0`. Development commands bind local services
 to loopback and never fall back to public resources.

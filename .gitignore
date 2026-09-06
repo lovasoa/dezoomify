@@ -3,6 +3,7 @@ node_modules/
 test-results/
 /.pnpm-store/
 /dist/
+/apps/desktop/dist/
 /artifacts/
 *.log
 /target-wasm/
@@ -34,3 +35,4 @@ client_secret_*.json
 
 # desktop shell build output (src-tauri is outside the root workspace)
 /apps/desktop/src-tauri/target/
+/apps/desktop/src-tauri/gen/

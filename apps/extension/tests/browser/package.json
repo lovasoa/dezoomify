@@ -1,0 +1,14 @@
+{
+  "name": "dezoomify-extension-headless",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless browser gate for the packaged extension: load the real store packages in headless Chromium and Firefox and assert the background starts.",
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.60.0",
+    "puppeteer-core": "^25.10.0"
+  },
+  "license": "GPL-3.0-or-later"
+}

@@ -125,6 +125,27 @@ function extensionFor(format: NativeEncoder): string {
   return ".tif";
 }
 
+// Minimal Tauri IPC access. The Tauri runtime always injects
+// __TAURI_INTERNALS__; non-Tauri hosts (node tests) leave it absent and the
+// integration falls back to validation-only grants. No other host global is
+// ever touched.
+interface TauriInternals {
+  invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
+}
+
+function tauriInvoke(): TauriInternals["invoke"] | null {
+  const internals = (globalThis as Record<string, unknown>)["__TAURI_INTERNALS__"] as
+    | TauriInternals
+    | undefined;
+  return internals ? internals.invoke : null;
+}
+
+interface DestinationCommandResult {
+  readonly outcome: SaveOutcome;
+  readonly destination_id?: string;
+  readonly reason?: string;
+}
+
 export function createDesktopIntegration(opts?: {
   extensionAvailable?: boolean;
 }): AppIntegration {
@@ -142,10 +163,11 @@ export function createDesktopIntegration(opts?: {
     };
   }
 
-  // Native dialog stub: validate format and file name, then grant an opaque
-  // destination handle. The real app shows a native save dialog, passes the
-  // chosen path to the native runtime, and reports completion only after
-  // atomic output finalization.
+  // Native save path: validate the request, then route through the real
+  // Tauri command, which shows the native save dialog, grants the
+  // destination through the validated dispatch, and reports completion only
+  // after atomic output finalization. Non-Tauri hosts (unit tests) get the
+  // validation-only grant.
   async function requestSaveDestination(req: SaveRequest): Promise<SaveResult> {
     if (!isValidJobId(req.jobId)) {
       return { outcome: "denied", reason: "invalid-job-id" };
@@ -164,7 +186,27 @@ export function createDesktopIntegration(opts?: {
     if (suffix.length === 0) {
       return { outcome: "denied", reason: "invalid-job-id" };
     }
-    return { outcome: "granted", destinationId: `dst:${suffix}` };
+    const invoke = tauriInvoke();
+    if (!invoke) {
+      return { outcome: "granted", destinationId: `dst:${suffix}` };
+    }
+    try {
+      const raw = (await invoke("request_destination", {
+        job: req.jobId,
+        format: req.format,
+        suggestedName: req.suggestedName,
+      })) as DestinationCommandResult;
+      return {
+        outcome: raw.outcome,
+        destinationId: raw.destination_id,
+        reason: raw.reason,
+      };
+    } catch (error) {
+      return {
+        outcome: "denied",
+        reason: error instanceof Error ? error.message : "destination-failed",
+      };
+    }
   }
 
   // Handoff request validation: bounded non-secret source only. The caller
