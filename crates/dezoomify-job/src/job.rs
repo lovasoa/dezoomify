@@ -109,13 +109,11 @@ impl Job {
         if dezoomify_protocol::dto::JobId::new(job_id).is_none() {
             return Err(JobError::invalid_id("job id must look like job:<suffix>"));
         }
-        if input_url.is_empty()
-            || input_url.len() > 2048
-            || !(input_url.starts_with("http://") || input_url.starts_with("https://"))
-        {
+        if !is_valid_input_url(input_url) {
             return Err(JobError::new(
                 "job.invalid-input",
-                "input_url must be an http(s) URL up to 2048 bytes".to_string(),
+                "input_url must be an http(s) URL, file:// URI, or local path up to 2048 bytes"
+                    .to_string(),
             ));
         }
         if let Err(e) = config.validate() {
@@ -1182,4 +1180,26 @@ fn processing_name(recipe: &ProcessingRecipe) -> &'static str {
         ProcessingRecipe::None => "none",
         ProcessingRecipe::GoogleArtsDecrypt => "google-arts-decrypt",
     }
+}
+
+/// Whether `input_url` names a fetchable input: `http(s)` URLs, local
+/// `file://` URIs (only `file:///abs/path` and `file://localhost/abs/path`,
+/// mirroring the native `fetch_local` mapping; any other `file://` host is
+/// rejected), or plain filesystem paths read via `fs::read`. Empty and
+/// over-long inputs are rejected. Messages never echo the input text, which
+/// may name private directories.
+fn is_valid_input_url(input_url: &str) -> bool {
+    if input_url.is_empty() || input_url.len() > 2048 {
+        return false;
+    }
+    if input_url.starts_with("http://") || input_url.starts_with("https://") {
+        return true;
+    }
+    if let Some(rest) = input_url.strip_prefix("file://") {
+        if let Some(path) = rest.strip_prefix("localhost") {
+            return path.is_empty() || path.starts_with('/');
+        }
+        return rest.starts_with('/');
+    }
+    true
 }
