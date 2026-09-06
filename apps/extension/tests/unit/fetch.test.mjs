@@ -7,7 +7,7 @@ async function loadTs(rel) {
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
 }
 
-const { createSessionFetcher, isProxyUrl, PROXY_PATH } = await loadTs("../../src/background/fetch.ts");
+const { createSessionFetcher, isProxyUrl, PROXY_PATH } = await loadTs("../../src/page/fetch.ts");
 
 function bytes(n, fill = 1) {
   return new Uint8Array(n).fill(fill);

@@ -7,7 +7,7 @@ async function loadTs(rel) {
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
 }
 
-const scanMod = await loadTs("../../src/background/scan.ts");
+const scanMod = await loadTs("../../src/page/scan.ts");
 const { createScanner, isPrivilegedUrl, SCANNER_STATES } = scanMod;
 const reloadMod = await loadTs("../../src/content/reload-marker.ts");
 
@@ -263,7 +263,7 @@ test("scan-two-tabs transcript is fixed and minimal", () => {
 });
 
 test("TS source contains finite-machine and security tokens", () => {
-  const src = readFileSync(new URL("../../src/background/scan.ts", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../src/page/scan.ts", import.meta.url), "utf8");
   for (const tok of ["idle", "arming", "reloading", "observing", "settling", "stopped", "queryActiveTab", "removeWebRequestListener", "isPrivilegedUrl"]) {
     assert.ok(src.includes(tok), `scan.ts missing ${tok}`);
   }

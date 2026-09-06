@@ -1,7 +1,8 @@
 //! `cargo xtask build extension`, `dev extension`, `test extension`,
 //! `test native-messaging [--browser <name>|--cleanup-only]`: extension and
-//! Native Messaging gates. Browser E2E needs installed browsers/profiles;
-//! unit, manifest-policy, secret-scope, and package checks run here.
+//! Native Messaging gates. `test extension` runs the Node unit suites plus a
+//! headless browser gate (real store packages loaded in headless Chromium and
+//! Firefox; requires browsers, see apps/extension/tests/browser).
 
 use std::process::Command;
 
@@ -19,6 +20,7 @@ pub fn build_extension(_args: &[String]) -> Result<(), String> {
             return Err(format!("manifest {rel} lacks manifest_version"));
         }
     }
+    ensure_wasm_glue()?;
     // Package real store-shaped ZIPs for both listings via the same script
     // the store-submission workflow uses, so local builds cannot diverge
     // from what is uploaded.
@@ -48,12 +50,96 @@ pub fn build_extension(_args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// The extension page runs the wasm discovery core inline, so the generated
+/// glue (`wasm/dezoomify-wasm.js` + `dezoomify-wasm_bg.wasm`) must exist
+/// before packaging. Generated the same way `scripts/build-site.mjs` does;
+/// like all website generated artifacts it is never committed.
+fn ensure_wasm_glue() -> Result<(), String> {
+    let root = super::repo_root();
+    let glue = root.join("wasm/dezoomify-wasm.js");
+    let wasm = root.join("wasm/dezoomify-wasm_bg.wasm");
+    if glue.exists() && wasm.exists() {
+        return Ok(());
+    }
+    let status = Command::new("cargo")
+        .args([
+            "build",
+            "-p",
+            "dezoomify-wasm",
+            "--release",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to run cargo: {e}"))?;
+    if !status.success() {
+        return Err("wasm core build failed".to_string());
+    }
+    let status = Command::new("wasm-bindgen")
+        .args([
+            "--target",
+            "web",
+            "--out-dir",
+            "wasm",
+            "--out-name",
+            "dezoomify-wasm",
+            "target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm",
+        ])
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to run wasm-bindgen (is wasm-bindgen-cli installed?): {e}"))?;
+    if !status.success() {
+        return Err("wasm-bindgen failed".to_string());
+    }
+    Ok(())
+}
+
 pub fn test_extension(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("test extension", args)?;
     run_node_glob("apps/extension/tests/unit")?;
+    test_headless_browser()?;
     test_native_messaging(&[])?;
     println!("test extension: ok");
     Ok(())
+}
+
+/// Headless browser gate: load the real store-shaped packages in headless
+/// Chromium and Firefox and assert the background starts. Node deps live in
+/// `apps/extension/tests/browser` (npm-managed, like the webapp-e2e suite);
+/// install them on first run. Firefox binary discovery is documented in the
+/// test itself (`DEZOOMIFY_FIREFOX_BIN`, system paths, Playwright cache).
+fn test_headless_browser() -> Result<(), String> {
+    let dir = super::repo_root().join("apps/extension/tests/browser");
+    if !dir.join("node_modules").exists() {
+        let status = Command::new("npm")
+            .args(["ci", "--no-audit", "--no-fund"])
+            .current_dir(&dir)
+            .status()
+            .map_err(|e| format!("failed to run npm: {e}"))?;
+        if !status.success() {
+            return Err("npm ci (extension headless browser tests) failed".to_string());
+        }
+    }
+    let mut files: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| format!("read dir: {e}"))? {
+        let path = entry.map_err(|e| format!("dir entry: {e}"))?.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("mjs") {
+            files.push(path.to_string_lossy().into_owned());
+        }
+    }
+    files.sort();
+    let mut args = vec!["--test".to_string()];
+    args.extend(files);
+    let status = Command::new("node")
+        .args(&args)
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|e| format!("failed to run node: {e}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "extension headless browser tests failed".to_string())
 }
 
 pub fn test_native_messaging(args: &[String]) -> Result<(), String> {

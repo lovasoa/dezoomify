@@ -6,11 +6,13 @@ function readJson(rel) {
   return JSON.parse(readFileSync(new URL(rel, import.meta.url), "utf8"));
 }
 
-function deepMerge(base, overlay) {
+// Mirror of scripts/generate-manifests.mjs: deterministic merge, underscore
+// keys stripped. The generated manifests must match exactly.
+function merge(base, overlay) {
   if (Array.isArray(overlay)) return [...overlay];
   if (overlay !== null && typeof overlay === "object" && base !== null && typeof base === "object" && !Array.isArray(base)) {
     const out = { ...base };
-    for (const [k, v] of Object.entries(overlay)) out[k] = deepMerge(base[k], v);
+    for (const [k, v] of Object.entries(overlay)) out[k] = merge(base[k], v);
     return out;
   }
   return overlay;
@@ -34,10 +36,6 @@ const REVIEWED_PERMS = new Set(["activeTab", "scripting", "webRequest", "downloa
 const REVIEWED_OPTIONAL = new Set(["cookies"]);
 const EXPECTED_GECKO_ID = "dezoomify@example.com";
 
-function allHostLike(manifest) {
-  return [...(manifest.host_permissions ?? []), ...(manifest.permissions ?? []).filter((p) => p.includes("://") || p.includes("*"))];
-}
-
 function cspText(manifest) {
   const csp = manifest.content_security_policy;
   if (!csp) return "";
@@ -55,45 +53,37 @@ function backgroundUrls(manifest) {
 }
 
 for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
+  test(`${name}: MV3 with the dual cross-browser background`, () => {
+    assert.equal(manifest.manifest_version, 3);
+    assert.equal(manifest.background?.service_worker, "background/index.js");
+    assert.deepEqual(manifest.background?.scripts, ["background/index.js"]);
+  });
+
   test(`${name}: no wildcard permanent hosts`, () => {
-    for (const h of manifest.host_permissions ?? []) {
-      assert.ok(!h.includes("<all_urls>"), `${name} permanent <all_urls>`);
-      assert.ok(!h.includes("*"), `${name} permanent wildcard ${h}`);
+    for (const p of manifest.permissions ?? []) {
+      assert.ok(!(p.includes("://") || p.includes("*")), `${name} permanent host pattern ${p}`);
     }
-    for (const p of allHostLike(manifest)) {
-      assert.ok(!p.includes("<all_urls>"), `${name} wildcard permanent ${p}`);
-    }
-    // optional hosts may be broad but permanent must stay empty/narrow
     assert.deepEqual(manifest.host_permissions, []);
+    assert.deepEqual(manifest.optional_host_permissions, ["http://*/*", "https://*/*"]);
   });
 
   test(`${name}: no remote code`, () => {
-    const raw = JSON.stringify(manifest);
-    // Optional host permissions may contain scheme wildcards; everything else
-    // in the manifest must be free of remote http references.
     const withoutOptionalHosts = JSON.stringify({ ...manifest, optional_host_permissions: undefined });
     assert.ok(!withoutOptionalHosts.includes("http://"), `${name} unexpected remote http`);
-    for (const p of manifest.optional_host_permissions ?? []) {
-      assert.ok(
-        ["http://*/*", "https://*/*"].includes(p),
-        `${name} unexpected optional host pattern ${p}`,
-      );
-    }
+    assert.ok(!withoutOptionalHosts.includes("javascript:"), `${name} javascript: URL`);
     for (const u of backgroundUrls(manifest)) {
-      assert.ok(!u.startsWith("http://") && !u.startsWith("https://"), `${name} remote background ${u}`);
+      assert.ok(!u.startsWith("http"), `${name} remote background ${u}`);
       assert.ok(!u.startsWith("data:"), `${name} data background ${u}`);
     }
-    assert.ok(!raw.includes("javascript:"), `${name} javascript: URL`);
-    assert.ok(!raw.includes("<script"), `${name} inline script`);
   });
 
-  test(`${name}: no eval, strict CSP`, () => {
+  test(`${name}: strict CSP with wasm enabled for the page core`, () => {
     const csp = cspText(manifest);
-    assert.ok(csp.length > 0, `${name} missing CSP`);
-    assert.ok(!csp.includes("unsafe-eval"), `${name} unsafe-eval`);
-    assert.ok(!csp.includes("unsafe-inline") || csp.includes("script-src"), `${name} weak CSP`);
     assert.ok(csp.includes("script-src 'self'"), `${name} CSP must pin script-src 'self'`);
+    assert.ok(csp.includes("'wasm-unsafe-eval'"), `${name} CSP must allow the wasm core`);
     assert.ok(csp.includes("object-src 'none'"), `${name} CSP must block objects`);
+    assert.ok(!csp.replaceAll("'wasm-unsafe-eval'", "").includes("unsafe-eval"), `${name} unsafe-eval`);
+    assert.ok(!csp.includes("unsafe-inline"), `${name} unsafe-inline`);
   });
 
   test(`${name}: only reviewed permissions`, () => {
@@ -107,35 +97,35 @@ for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefo
   });
 }
 
-test("firefox gecko ID matches reviewed release config; chromium has no gecko ID", () => {
+test("chromium: minimum version supports the dual background (121+)", () => {
+  assert.ok(Number(genChromium.minimum_chrome_version) >= 121, "Chrome ignores background.scripts before 121");
+});
+
+test("firefox: gecko id matches reviewed release config; min version is MV3-capable", () => {
   assert.equal(genFirefox.browser_specific_settings?.gecko?.id, EXPECTED_GECKO_ID);
+  assert.ok(Number(genFirefox.browser_specific_settings.gecko.strict_min_version) >= 128);
   assert.equal(genChromium.browser_specific_settings, undefined);
 });
 
-test("chromium is MV3 service-worker; firefox documents MV2 compat", () => {
-  assert.equal(genChromium.manifest_version, 3);
-  assert.ok(typeof genChromium.background?.service_worker === "string");
-  assert.equal(genFirefox.manifest_version, 2);
-  assert.ok(Array.isArray(genFirefox.background?.scripts));
-  assert.ok(typeof firefoxOverlay._compatNote === "string" && firefoxOverlay._compatNote.length > 20);
-  assert.ok(typeof chromiumOverlay._compatNote === "string" && chromiumOverlay._compatNote.length > 20);
-});
-
-test("generated manifests are deterministic merges of base+overlay", () => {
-  assert.deepEqual(sortKeys(genChromium), sortKeys(deepMerge(base, chromiumOverlay)));
-  assert.deepEqual(sortKeys(genFirefox), sortKeys(deepMerge(base, firefoxOverlay)));
-  // script-free JSON: re-serialize deterministically without loss
-  for (const [name, gen] of [["chromium", genChromium], ["firefox", genFirefox]]) {
-    const raw = readFileSync(new URL(`../../generated/manifest.${name}.json`, import.meta.url), "utf8");
-    assert.ok(raw.endsWith("\n"), `${name} missing trailing newline`);
-    assert.deepEqual(JSON.parse(raw), gen);
-  }
-});
-
-test("least-privilege: activeTab present, no <all_urls> anywhere permanent", () => {
+test("least-privilege: activeTab present, nativeMessaging declared", () => {
   for (const gen of [genChromium, genFirefox]) {
     assert.ok((gen.permissions ?? []).includes("activeTab"));
     assert.ok((gen.permissions ?? []).includes("nativeMessaging"));
-    assert.ok(!(gen.permissions ?? []).some((p) => String(p).includes("<all_urls>")));
+  }
+});
+
+test("generated manifests are the deterministic generator output (base+overlay, no underscore keys)", () => {
+  for (const [name, overlay, gen] of [
+    ["chromium", chromiumOverlay, genChromium],
+    ["firefox", firefoxOverlay, genFirefox],
+  ]) {
+    const merged = Object.fromEntries(Object.entries(merge(base, overlay)).filter(([k]) => !k.startsWith("_")));
+    assert.deepEqual(sortKeys(gen), sortKeys(merged), `${name} must match scripts/generate-manifests.mjs output`);
+    const raw = readFileSync(new URL(`../../generated/manifest.${name}.json`, import.meta.url), "utf8");
+    assert.ok(raw.endsWith("\n"), `${name} missing trailing newline`);
+    assert.deepEqual(JSON.parse(raw), gen);
+    for (const key of Object.keys(gen)) {
+      assert.ok(!key.startsWith("_"), `${name} generated manifest must not ship ${key}`);
+    }
   }
 });

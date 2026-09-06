@@ -144,10 +144,18 @@ cargo xtask test native-messaging
 ```
 
 Verify manifests and permissions (narrow host grants, no remote code, strict
-CSP), scanning state machines with observer-before-reload ordering and bounded
-settle, browser-session fetch scoping, and handoff envelope validation with
-replay/expiry/origin rejection and zero side effects on rejection. These gates
-run the unit suites; full browser-profile E2E remains manual or CI-runner work.
+CSP with `wasm-unsafe-eval` for the page core), scanning state machines with
+observer-before-reload ordering and bounded settle, browser-session fetch
+scoping, and handoff envelope validation with replay/expiry/origin rejection
+and zero side effects on rejection. These gates run the unit suites plus a
+hermetic headless browser E2E in both engines: the real store-shaped package
+(with an E2E-only loopback grant) opens a fixture page, runs the finite
+reload scan, discovers through the wasm core, fetches the tiles, assembles
+the image, saves it, and the test verifies the saved PNG bytes against the
+fixture pyramid. Chromium runs under Playwright; Firefox under
+Selenium/geckodriver (binary via `DEZOOMIFY_FIREFOX_BIN`, a system install,
+or the Playwright cache; deps auto-install via npm on first run). Full
+user-facing UI flows remain manual or CI-runner work.
 
 ### Browser tainted canvas
 

@@ -7,7 +7,7 @@ async function loadTs(rel) {
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
 }
 
-const red = await loadTs("../../src/background/redaction.ts");
+const red = await loadTs("../../src/page/redaction.ts");
 const { redactUrl, scanForCanary, bestEffortOverwrite, FORBIDDEN_STORES } = red;
 
 test("redactUrl strips userinfo, sensitive query, fragments", () => {
@@ -40,13 +40,13 @@ test("best-effort overwrite zeroes owned buffers; documents limits", () => {
   assert.equal(bestEffortOverwrite(buf), true);
   assert.deepEqual([...buf], [0, 0, 0, 0]);
   assert.equal(bestEffortOverwrite("nope"), false);
-  const src = readFileSync(new URL("../../src/background/redaction.ts", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../src/page/redaction.ts", import.meta.url), "utf8");
   assert.ok(src.includes("cannot be"), "must disclaim universal zeroization");
   assert.ok(src.toLowerCase().includes("memory-only"), "must document memory-only handling");
 });
 
 test("redaction source never claims universal zeroization", () => {
-  const src = readFileSync(new URL("../../src/background/redaction.ts", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../src/page/redaction.ts", import.meta.url), "utf8");
   assert.ok(src.includes("best-effort") || src.includes("best_effort") || src.includes("bestEffort"), "must name best-effort overwrite");
   assert.ok(!/guaranteed zeroization/i.test(src), "must not promise guaranteed zeroization");
 });

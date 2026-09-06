@@ -7,7 +7,7 @@ async function loadTs(rel) {
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
 }
 
-const mod = await loadTs("../../src/background/candidates.ts");
+const mod = await loadTs("../../src/page/candidates.ts");
 const { createCandidateStore, recognizeFormatHint, redactUrlForLabel, validateCandidateUrl, MAX_URL_LENGTH, MAX_CANDIDATES } = mod;
 
 test("caps exported", () => {
@@ -16,7 +16,7 @@ test("caps exported", () => {
 });
 
 test("sensitive query keys match redaction.ts (no drift)", () => {
-  for (const rel of ["../../src/background/candidates.ts", "../../src/background/redaction.ts"]) {
+  for (const rel of ["../../src/page/candidates.ts", "../../src/page/redaction.ts"]) {
     const src = readFileSync(new URL(rel, import.meta.url), "utf8");
     // The canonical list lives in redaction.ts; candidates.ts mirrors it.
     assert.ok(src.includes('"sessiontoken"'), `${rel} missing sessiontoken`);
@@ -28,8 +28,8 @@ test("sensitive query keys match redaction.ts (no drift)", () => {
     assert.ok(m, "SENSITIVE_QUERY_KEYS list found");
     return JSON.stringify([...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]));
   };
-  const candidates = extract(readFileSync(new URL("../../src/background/candidates.ts", import.meta.url), "utf8"));
-  const redaction = extract(readFileSync(new URL("../../src/background/redaction.ts", import.meta.url), "utf8"));
+  const candidates = extract(readFileSync(new URL("../../src/page/candidates.ts", import.meta.url), "utf8"));
+  const redaction = extract(readFileSync(new URL("../../src/page/redaction.ts", import.meta.url), "utf8"));
   assert.equal(candidates, redaction, "sensitive key lists must stay identical");
 });
 

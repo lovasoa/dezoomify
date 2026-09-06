@@ -1,10 +1,20 @@
 {
-  "description": "Save full-resolution zoomable images. Finite active-tab scan only; no background monitoring.",
-  "icons": {
-    "128": "icons/icon128.png",
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png"
+  "action": {
+    "default_title": "Dezoomify"
   },
+  "background": {
+    "service_worker": "background/index.js",
+    "scripts": ["background/index.js"]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'"
+  },
+  "description": "Save full-resolution zoomable images. Finite active-tab scan only; no background monitoring.",
+  "host_permissions": [],
+  "manifest_version": 3,
   "name": "Dezoomify",
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "optional_permissions": ["cookies"],
+  "permissions": ["activeTab", "webRequest", "downloads", "nativeMessaging"],
   "version": "3.0.0"
 }

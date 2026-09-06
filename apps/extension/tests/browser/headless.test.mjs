@@ -1,96 +1,314 @@
-// Headless extension gate: load the REAL store-shaped packages (exactly what
-// package-store.sh ships to the Chromium Web Store and AMO) in headless
-// Chromium (MV3 service worker) and headless Firefox (MV2 background page),
-// and assert the background actually starts and runs. Hermetic: no page
-// navigation, no network, loopback-free.
+// Headless extension E2E: the REAL store-shaped package (staged by
+// package-store.sh, with loopback host permissions for the E2E only, since
+// browser chrome cannot be clicked headlessly to grant activeTab) runs a
+// complete job in both engines: open a fixture page -> traffic scan observes
+// the zoomable source -> wasm core discovers -> tiles fetched -> image
+// assembled -> saved bytes verified against the fixture pyramid.
 //
-// The Firefox assertion is the load-bearing one: MV2 background scripts are
-// classic scripts, so any `export`/`import` in the shipped sources is a
-// SyntaxError that unit tests (which import the same files as ESM) can never
-// see. Chromium asserts the module service worker starts.
+// Chromium: Playwright persistent context with --load-extension.
+// Firefox: Selenium + geckodriver (WebDriver moz/addon/install), downloads
+// routed to a temp dir via profile prefs. The shared body below is the same
+// for both drivers.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, firefox } from "playwright";
+import vm from "node:vm";
+import zlib from "node:zlib";
+import webdriver from "selenium-webdriver";
+import firefox from "selenium-webdriver/firefox.js";
+import { chromium } from "playwright";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
 const PACKAGE_SCRIPT = path.join(REPO_ROOT, "apps/extension/scripts/package-store.sh");
+const GECKO_ID = "dezoomify@example.com";
+const STATIC_DIR = path.join(HERE, "fixtures-static");
 
-// Stage the package the same way the store-submission workflow does, then
-// extract it so Chromium's --load-extension (which wants a directory) works.
 function stagePackage(browser, dir) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
   const staged = spawnSync("bash", [PACKAGE_SCRIPT, browser, zip], {
     cwd: REPO_ROOT,
     encoding: "utf8",
+    env: { ...process.env, DEZOOMIFY_TEST_HOST_PERMISSIONS: "1" },
   });
   assert.equal(staged.status, 0, `package-store.sh ${browser} failed:\n${staged.stderr}`);
-  const extracted = path.join(dir, `${browser}-package`);
-  const unzip = spawnSync("python3", ["-m", "zipfile", "-e", zip, extracted], {
-    encoding: "utf8",
-  });
-  assert.equal(unzip.status, 0, `unzip failed:\n${unzip.stderr}`);
-  return extracted;
+  return zip;
 }
 
-test("chromium: packaged MV3 extension starts its module service worker", { timeout: 60000 }, async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "dezoomify-ext-chromium-"));
+function findFirefoxBinary() {
+  if (process.env.DEZOOMIFY_FIREFOX_BIN) return process.env.DEZOOMIFY_FIREFOX_BIN;
+  for (const candidate of ["/usr/bin/firefox-esr", "/usr/bin/firefox"]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  const pwCache = path.join(process.env.HOME, ".cache", "ms-playwright");
+  if (existsSync(pwCache)) {
+    for (const build of readdirSync(pwCache).filter((d) => /^firefox-\d+$/.test(d)).sort().reverse()) {
+      const bin = path.join(pwCache, build, "firefox", "firefox");
+      if (existsSync(bin)) return bin;
+    }
+  }
+  return null;
+}
+
+// background/ and content/ ship as classic scripts in both browsers: every
+// staged file must parse without module syntax.
+function assertClassicScripts(stagingDir) {
+  for (const name of ["background", "content"]) {
+    const dir = path.join(stagingDir, name);
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
+      const source = readFileSync(path.join(dir, file), "utf8");
+      assert.doesNotThrow(
+        () => new vm.Script(source, { filename: `${name}/${file}` }),
+        `${name}/${file} must parse as a classic script`,
+      );
+    }
+  }
+}
+
+// --- deterministic fixture server on loopback ---
+async function startFixtureServer(workDir) {
+  const bin = path.join(REPO_ROOT, "target/debug/dezoomify-fixture-server");
+  if (!existsSync(bin)) {
+    const build = spawnSync("cargo", ["build", "-p", "dezoomify-fixture-server"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
+    assert.equal(build.status, 0, `fixture server build failed:\n${build.stderr}`);
+  }
+  const addrFile = path.join(workDir, "server.addr");
+  const proc = spawn(bin, [
+    "--port", "0",
+    "--write-address", addrFile,
+    "--scenarios-dir", path.join(REPO_ROOT, "testdata/scenarios"),
+    "--static-dir", STATIC_DIR,
+  ]);
+  let base = null;
+  for (let i = 0; i < 100 && !base; i++) {
+    // The server writes the bare socket address (e.g. "127.0.0.1:PORT").
+    const bound = existsSync(addrFile) ? readFileSync(addrFile, "utf8").trim() : null;
+    if (bound) base = `http://${bound}`;
+    else await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(base, "fixture server did not report its address");
+  return { proc, base };
+}
+
+// --- shared PNG verification (same fixture pyramid as the webapp E2E) ---
+function decodePngSize(bytes) {
+  assert.equal(bytes.readUInt32BE(0), 0x89504e47 >>> 0, "PNG signature");
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+function decodePngPixels(bytes) {
+  const idat = [];
+  let offset = 8;
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    if (type === "IDAT") idat.push(bytes.subarray(offset + 8, offset + 8 + length));
+    offset += 12 + length;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const { width, height } = decodePngSize(bytes);
+  const colorType = bytes[25];
+  const bpp = colorType === 6 ? 4 : 3;
+  const stride = width * bpp + 1;
+  const pixels = Buffer.alloc(width * height * bpp);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * stride];
+    const row = raw.subarray(y * stride + 1, (y + 1) * stride);
+    const out = pixels.subarray(y * width * bpp, (y + 1) * width * bpp);
+    for (let x = 0; x < row.length; x += 1) {
+      const a = x >= bpp ? out[x - bpp] : 0;
+      const b = y > 0 ? pixels[(y - 1) * width * bpp + x] : 0;
+      const c = x >= bpp && y > 0 ? pixels[(y - 1) * width * bpp + x - bpp] : 0;
+      let v = row[x];
+      switch (filter) {
+        case 0: break;
+        case 1: v += a; break;
+        case 2: v += b; break;
+        case 3: v += (a + b) >> 1; break;
+        case 4: {
+          const p = a + b - c;
+          const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+          v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+        }
+      }
+      out[x] = v & 0xff;
+    }
+  }
+  return { pixels, bpp, width, height };
+}
+
+function assertSavedPyramid(bytes) {
+  const { width, height } = decodePngSize(bytes);
+  assert.equal(width, 512, "saved image width");
+  assert.equal(height, 512, "saved image height");
+  const { pixels, bpp } = decodePngPixels(bytes);
+  const at = (x, y) => {
+    const o = (y * width + x) * bpp;
+    return [pixels[o], pixels[o + 1], pixels[o + 2]];
+  };
+  assert.deepEqual(at(64, 64), [196, 48, 48], "top-left quadrant red");
+  assert.deepEqual(at(448, 64), [48, 168, 64], "top-right quadrant green");
+  assert.deepEqual(at(64, 448), [48, 72, 200], "bottom-left quadrant blue");
+  assert.deepEqual(at(448, 448), [232, 220, 96], "bottom-right quadrant yellow");
+}
+
+// --- the shared E2E body ---
+// driver.extensionPage().scanAndSave(urlPart) runs the whole flow and
+// resolves with the saved PNG bytes.
+async function runExtensionJob(driver, base) {
+  await driver.openTarget(`${base}/target.html`);
+  const page = await driver.extensionPage();
+  const saved = await page.scanAndSave("target.html");
+  assertSavedPyramid(saved);
+}
+
+test("chromium: packaged extension runs a full job end to end", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));
+  let context = null;
+  let server = null;
   try {
-    const packageDir = stagePackage("chromium", dir);
-    const context = await chromium.launchPersistentContext(path.join(dir, "profile"), {
+    const zip = stagePackage("chromium", work);
+    const pkgDir = path.join(work, "pkg");
+    spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
+    server = await startFixtureServer(work);
+    context = await chromium.launchPersistentContext(path.join(work, "profile"), {
       channel: "chromium",
       headless: true,
-      args: [
-        `--disable-extensions-except=${packageDir}`,
-        `--load-extension=${packageDir}`,
-      ],
+      args: [`--disable-extensions-except=${pkgDir}`, `--load-extension=${pkgDir}`],
     });
-    try {
-      const worker = await context
-        .waitForEvent("serviceworker", { timeout: 20000 })
-        .catch(() => null);
-      assert.ok(worker, "extension service worker never started");
-      assert.ok(
-        worker.url().endsWith("background/index.js"),
-        `unexpected service worker url ${worker.url()}`,
-      );
-      assert.equal(await worker.evaluate(() => 1 + 1), 2, "service worker unresponsive");
-    } finally {
-      await context.close();
+    // runtime.onInstalled opens the extension page once.
+    let ext = null;
+    for (let i = 0; i < 60 && !ext; i++) {
+      ext = context.pages().find((p) => p.url().includes("page.html")) ?? null;
+      if (!ext) await new Promise((r) => setTimeout(r, 250));
     }
+    assert.ok(ext, "first-run extension page never opened");
+    await ext.waitForSelector("button[data-tabid]", { timeout: 15000 });
+
+    const driver = {
+      openTarget: async (url) => {
+        const target = await context.newPage();
+        await target.goto(url, { timeout: 20000 });
+      },
+      extensionPage: () => ({
+        scanAndSave: async (urlPart) => {
+          // Attach the download waiter before clicking so the event cannot
+          // slip past between save and listener registration.
+          const downloadPromise = ext.waitForEvent("download", { timeout: 90000 });
+          const tabId = await ext.evaluate(
+            (part) => browser.tabs.query({}).then((tabs) => {
+              const hit = tabs.find((t) => typeof t.url === "string" && t.url.includes(part));
+              if (!hit) throw new Error("target tab not visible to the page: " + part);
+              return hit.id;
+            }),
+            urlPart,
+          );
+          await ext.click(`button[data-tabid="${tabId}"]`);
+          await ext.waitForFunction(
+            () => document.body.dataset.outcome === "saved" || document.body.dataset.outcome === "failed",
+            null,
+            { timeout: 90000 },
+          );
+          const outcome = await ext.evaluate(() => document.body.dataset.outcome);
+          if (outcome === "failed") {
+            assert.fail("extension job failed: " + (await ext.evaluate(() => document.getElementById("log").textContent)));
+          }
+          const download = await downloadPromise;
+          const file = path.join(work, "saved.png");
+          await download.saveAs(file);
+          return readFileSync(file);
+        },
+      }),
+    };
+    await runExtensionJob(driver, server.base);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (context) await context.close();
+    if (server) server.proc.kill();
+    rmSync(work, { recursive: true, force: true });
   }
 });
 
-test("firefox: packaged MV2 extension runs its classic background script", { timeout: 60000 }, async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "dezoomify-ext-firefox-"));
+test("firefox: packaged extension runs a full job end to end", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-"));
+  let driver = null;
+  let server = null;
   try {
-    const packageDir = stagePackage("firefox", dir);
-    const context = await firefox.launchPersistentContext(path.join(dir, "profile"), {
-      headless: true,
-      addons: [packageDir],
-    });
-    try {
-      // MV2 background.scripts run in a hidden background page.
-      let page = null;
-      for (let i = 0; i < 40 && !page; i += 1) {
-        page = context.backgroundPages().at(-1) ?? null;
-        if (!page) await new Promise((r) => setTimeout(r, 500));
+    const zip = stagePackage("firefox", work);
+    const staging = path.join(work, "pkg");
+    spawnSync("python3", ["-m", "zipfile", "-e", zip, staging], { encoding: "utf8" });
+    assertClassicScripts(staging);
+    server = await startFixtureServer(work);
+
+    const binary = findFirefoxBinary();
+    assert.ok(binary, "no Firefox binary found; set DEZOOMIFY_FIREFOX_BIN");
+    const downloadsDir = path.join(work, "downloads");
+    mkdirSync(downloadsDir);
+    const options = new firefox.Options();
+    options.addArguments("-headless");
+    options.setBinary(binary);
+    options.setPreference("browser.download.dir", downloadsDir);
+    options.setPreference("browser.download.folderList", 2);
+    options.setPreference("browser.download.useDownloadDir", true);
+    options.setPreference("browser.helperApps.neverAsk.saveToDisk", "image/png");
+    driver = await new webdriver.Builder().forBrowser("firefox").setFirefoxOptions(options).build();
+
+    const addonId = await driver.installAddon(zip, true);
+    assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
+
+    // runtime.onInstalled opened the extension page as a real tab.
+    let extHandle = null;
+    for (let i = 0; i < 60 && !extHandle; i++) {
+      for (const handle of await driver.getAllWindowHandles()) {
+        await driver.switchTo().window(handle);
+        if ((await driver.getCurrentUrl()).includes("page.html")) { extHandle = handle; break; }
       }
-      assert.ok(page, "extension background page never appeared");
-      // If the classic script failed to parse, its globals are undefined.
-      const kind = await page.evaluate(() => typeof globalThis.createBackground);
-      assert.equal(kind, "function", "background/index.js did not execute (parse or runtime failure)");
-    } finally {
-      await context.close();
+      if (!extHandle) await new Promise((r) => setTimeout(r, 250));
     }
+    assert.ok(extHandle, "first-run extension page never opened");
+    await driver.wait(async () => (await driver.findElements({ css: "button[data-tabid]" })).length > 0, 15000);
+
+    const savedFile = path.join(downloadsDir, "dezoomify.png");
+    const driverApi = {
+      openTarget: async (url) => {
+        await driver.executeScript("browser.tabs.create({ url: arguments[0] });", url);
+        await driver.sleep(1500);
+        await driver.switchTo().window(extHandle);
+      },
+      extensionPage: () => ({
+        scanAndSave: async (urlPart) => {
+          const tabId = await driver.executeScript(
+            "return browser.tabs.query({}).then((tabs) => {" +
+              "const hit = tabs.find(t => typeof t.url === 'string' && t.url.includes(arguments[0]));" +
+              "if (!hit) throw new Error('target tab not visible: ' + arguments[0]);" +
+              "return hit.id; });",
+            urlPart,
+          );
+          await driver.findElement({ css: `button[data-tabid="${tabId}"]` }).click();
+          const deadline = Date.now() + 90000;
+          for (;;) {
+            const state = await driver.executeScript(
+              "return { outcome: document.body.dataset.outcome ?? null, log: document.getElementById('log')?.textContent ?? '' };",
+            );
+            if (state.outcome === "failed") assert.fail("extension job failed: " + state.log);
+            if (existsSync(savedFile)) return readFileSync(savedFile);
+            if (Date.now() > deadline) assert.fail("job did not save in time; log:\n" + state.log);
+            await new Promise((r) => setTimeout(r, 500));
+          }
+        },
+      }),
+    };
+    await runExtensionJob(driverApi, server.base);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (driver) await driver.quit();
+    if (server) server.proc.kill();
+    rmSync(work, { recursive: true, force: true });
   }
 });

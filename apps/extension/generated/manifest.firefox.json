@@ -1,28 +1,25 @@
 {
-  "_compatNote": "Firefox overlay (MV2 for ESR compat; MV3 background.service_worker vs MV2 background.scripts difference documented here). Uses browser_action instead of action, background.scripts instead of service_worker, same least-privilege set. scripting permission omitted on MV2 (tabs fallback); behavior identical. Gecko ID pinned via reviewed release config only.",
+  "action": {
+    "default_title": "Dezoomify"
+  },
   "background": {
     "scripts": [
       "background/index.js"
-    ]
-  },
-  "browser_action": {
-    "default_title": "Dezoomify"
+    ],
+    "service_worker": "background/index.js"
   },
   "browser_specific_settings": {
     "gecko": {
       "id": "dezoomify@example.com",
-      "strict_min_version": "115.0"
+      "strict_min_version": "128.0"
     }
   },
-  "content_security_policy": "script-src 'self'; object-src 'none';",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'"
+  },
   "description": "Save full-resolution zoomable images. Finite active-tab scan only; no background monitoring.",
   "host_permissions": [],
-  "icons": {
-    "128": "icons/icon128.png",
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png"
-  },
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Dezoomify",
   "optional_host_permissions": [
     "http://*/*",

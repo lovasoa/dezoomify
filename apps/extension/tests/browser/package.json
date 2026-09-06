@@ -7,8 +7,9 @@
     "test": "node --test *.test.mjs"
   },
   "devDependencies": {
+    "geckodriver": "^6.1.1",
     "playwright": "1.60.0",
-    "puppeteer-core": "^25.10.0"
+    "selenium-webdriver": "^4.48.0"
   },
   "license": "GPL-3.0-or-later"
 }

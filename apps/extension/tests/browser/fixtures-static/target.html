@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Dezoomify E2E target</title>
+  </head>
+  <body>
+    <h1>zoomable fixture page</h1>
+    <script>
+      // Simulates an embedded viewer: requests the zoomable source so the
+      // extension's traffic scan can observe it. The fixture gateway on this
+      // loopback origin serves the DZI for the virtual fixtures.test host.
+      fetch(
+        location.origin + "/fetch?url=" + encodeURIComponent("https://fixtures.test/cli/pyramid.dzi"),
+      )
+        .then((r) => {
+          if (!r.ok) throw new Error("status " + r.status);
+          window.__sourceFetched = true;
+        })
+        .catch(() => {
+          window.__sourceFetched = false;
+        });
+    </script>
+  </body>
+</html>

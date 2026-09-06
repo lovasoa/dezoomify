@@ -83,7 +83,13 @@ export function isPrivilegedUrl(url) {
  * }} deps
  */
 export function createScanner(deps) {
-  const scheduler = deps.scheduler ?? { setTimeout, clearTimeout };
+  // Wrap the globals: calling `scheduler.setTimeout(...)` detaches the
+  // native function from its receiver, which browsers reject as an
+  // "Illegal invocation" (Node tolerates it, so unit tests cannot see it).
+  const scheduler = deps.scheduler ?? {
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle),
+  };
   /** @type {ScanState} */
   let state = "idle";
   /** @type {ActiveTab | null} */
