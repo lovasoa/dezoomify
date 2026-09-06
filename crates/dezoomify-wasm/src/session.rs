@@ -668,7 +668,12 @@ impl Session {
         let started = self
             .job
             .as_mut()
-            .expect("job bound above")
+            .ok_or_else(|| {
+                AdapterError::new(
+                    AdapterErrorCode::WrongState,
+                    "internal: job missing after bind",
+                )
+            })?
             .start()
             .map_err(Self::engine_error)?;
         debug_assert!(matches!(started, Outcome::Applied));

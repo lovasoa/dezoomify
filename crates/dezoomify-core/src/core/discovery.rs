@@ -548,23 +548,32 @@ impl DiscoveryOperation {
         }
 
         let CandidateState::Waiting(id) = candidate.state else {
-            unreachable!("rejected candidates are not driven");
+            return Err(DiscoveryError::Session(
+                "internal: rejected candidate driven".into(),
+            ));
         };
         let DiscoveryProgram::Rules(routes, on_failure) = candidate.spec.program else {
-            unreachable!("immediate dezoomers never follow resources");
+            return Err(DiscoveryError::Session(
+                "internal: immediate format follows resources".into(),
+            ));
         };
-        let resource = self.resource(id).expect("ready request exists");
+        let Some(resource) = self.resource(id) else {
+            return Err(DiscoveryError::Session(
+                "internal: ready request missing".into(),
+            ));
+        };
         let request = &resource.request;
         let previous_history = &candidate.history[..candidate.history.len() - 1];
         let context = DiscoveryContext {
             history_ids: previous_history,
             requests: &self.requests,
         };
-        match resource
-            .outcome
-            .as_ref()
-            .expect("ready candidate has an outcome")
-        {
+        let Some(outcome) = resource.outcome.as_ref() else {
+            return Err(DiscoveryError::Session(
+                "internal: ready candidate lacks outcome".into(),
+            ));
+        };
+        match outcome {
             ResourceOutcome::Response(response) => dispatch_resource(
                 routes,
                 &context,

@@ -103,7 +103,8 @@ impl JobHandle {
     }
 
     pub fn emit_detail(&mut self, kind: &str, detail: BTreeMap<String, String>) {
-        self.seq = self.seq.checked_add(1).expect("seq overflow");
+        self.seq = self.seq.saturating_add(1);
+        debug_assert!(self.seq != u64::MAX, "native event seq overflow");
         self.events.push(JobEvent {
             job: self.id.clone(),
             seq: self.seq,
