@@ -28,7 +28,7 @@ remedies:
   where a request comes from and refuse everyone else. The
   [desktop app](./desktop-app.md) can introduce itself as coming from the
   site's own viewer page; on the command line, pass
-   `-H "Referer: https://the-site.example/its/viewer/page"`.
+   `-H/--header "Referer: https://the-site.example/its/viewer/page"`.
 
 Never paste passwords, cookies, or session contents into web forms,
 chat messages, or bug reports.

@@ -1,4 +1,6 @@
 usage: dezoomify-cli [options] <input-url> <output>
+  or: dezoomify-cli --bulk <file-or-url> [--outfile <file>] [options]
+  or: dezoomify-cli with no arguments prompts when a terminal is present
 options:
   --overwrite                 overwrite an existing output file
   --json                      print machine-readable JSON events on stdout
@@ -9,6 +11,8 @@ options:
   --retries <n>               tile retry budget (default 3)
   --min-interval <duration>   minimum delay between requests, e.g. 50ms, 2s (default 0)
   --tile-cache <dir>          resume folder reusing downloaded tiles
-  --outfile <file>            explicit output file (alternative to positional <output>)
+  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)
+                              or IIIF collection manifest URL; saves one output per entry
+  --outfile <file>            explicit output file, or bulk base name (bulk_1.ext, …)
   -h, --help                  show this help
   --version                   show version

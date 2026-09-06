@@ -55,7 +55,7 @@ requests that appear to come from the site's own viewer. If the save
 fails with a "forbidden" style error, tell the app which page the image
 belongs to (most image viewers open with such a page) and it will introduce
 itself as coming from there. On the command line, this is the
-`-H "Referer: …"` option; see [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
+`-H/--header "Referer: …"` option; see [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
 
 ## Choosing the file format
 

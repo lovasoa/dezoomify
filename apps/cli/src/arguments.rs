@@ -7,8 +7,8 @@ use std::time::Duration;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Args {
-    pub input: String,
-    pub output: PathBuf,
+    pub input: Option<String>,
+    pub output: Option<PathBuf>,
     pub overwrite: bool,
     pub json: bool,
     pub max_width: Option<u32>,
@@ -21,11 +21,26 @@ pub struct Args {
     /// Tile retry budget. Overrides the native default of 3.
     pub retries: u32,
     /// Minimum delay between requests. Parsed here (see `parse_duration`);
-    /// per-tile throttling needs native support (gap), so single-image runs
-    /// currently apply no delay.
+    /// per-tile throttling needs native support (gap); bulk runs delay
+    /// between images.
     pub min_interval: Duration,
     /// Resume folder wired to native `cache_dir`.
     pub tile_cache: Option<PathBuf>,
+    /// Bulk source: local text-list file or URL (including IIIF collection
+    /// manifests, best-effort). When present, one output per entry.
+    pub bulk: Option<String>,
+}
+
+impl Args {
+    #[must_use]
+    pub fn is_bulk_mode(&self) -> bool {
+        self.bulk.is_some()
+    }
+
+    #[must_use]
+    pub fn bulk_output_file(&self) -> Option<PathBuf> {
+        self.output.clone()
+    }
 }
 
 pub fn parse(args: &[String]) -> Result<Args, String> {
@@ -41,6 +56,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut retries: u32 = 3;
     let mut min_interval = Duration::ZERO;
     let mut tile_cache: Option<PathBuf> = None;
+    let mut bulk: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         let (flag, inline_value) = split_inline_value(&args[i]);
@@ -103,6 +119,16 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
                 outfile_option = Some(PathBuf::from(raw));
             }
+            "--bulk" => {
+                let raw = take_value(args, &mut i, inline_value, "--bulk")?;
+                if raw.is_empty() {
+                    return Err("missing value for --bulk".to_string());
+                }
+                if bulk.is_some() {
+                    return Err("duplicate --bulk".to_string());
+                }
+                bulk = Some(raw);
+            }
             "--help" | "-h" => return Err(help()),
             "--version" => return Err(format!("dezoomify-cli {}", env!("CARGO_PKG_VERSION"))),
             "-H" | "--header" => {
@@ -135,19 +161,38 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     if outfile_option.is_some() && positional_output.is_some() {
         return Err("--outfile conflicts with positional <output>".to_string());
     }
-    Ok(Args {
-        input: input.ok_or_else(help)?,
-        output: outfile_option.or(positional_output).ok_or_else(help)?,
-        overwrite,
-        json,
-        max_width,
-        accept_invalid_certs,
-        headers,
-        image_index,
-        retries,
-        min_interval,
-        tile_cache,
-    })
+    let output = outfile_option.or(positional_output);
+    if bulk.is_some() {
+        Ok(Args {
+            input,
+            output,
+            overwrite,
+            json,
+            max_width,
+            accept_invalid_certs,
+            headers,
+            image_index,
+            retries,
+            min_interval,
+            tile_cache,
+            bulk,
+        })
+    } else {
+        Ok(Args {
+            input: Some(input.ok_or_else(help)?),
+            output: Some(output.ok_or_else(help)?),
+            overwrite,
+            json,
+            max_width,
+            accept_invalid_certs,
+            headers,
+            image_index,
+            retries,
+            min_interval,
+            tile_cache,
+            bulk,
+        })
+    }
 }
 
 fn split_inline_value(arg: &str) -> (&str, Option<String>) {
@@ -216,9 +261,29 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
     }
 }
 
+/// Output name for bulk entry `index` (0-based) from a base file.
+/// `base_1.ext`, `base_2.ext`, …; extensionless bases gain `_<n>`.
+#[must_use]
+pub fn generate_bulk_output_name(base: &std::path::Path, index: usize) -> PathBuf {
+    let mut result = base.to_path_buf();
+    let suffix = format!("_{}", index + 1);
+    if let Some(stem) = base.file_stem().and_then(|s| s.to_str()) {
+        if let Some(ext) = base.extension().and_then(|e| e.to_str()) {
+            result.set_file_name(format!("{stem}{suffix}.{ext}"));
+        } else {
+            result.set_file_name(format!("{stem}{suffix}"));
+        }
+    } else {
+        result.set_file_name(format!("dezoomified{suffix}.png"));
+    }
+    result
+}
+
 fn help() -> String {
     [
         "usage: dezoomify-cli [options] <input-url> <output>",
+        "  or: dezoomify-cli --bulk <file-or-url> [--outfile <file>] [options]",
+        "  or: dezoomify-cli with no arguments prompts when a terminal is present",
         "options:",
         "  --overwrite                 overwrite an existing output file",
         "  --json                      print machine-readable JSON events on stdout",
@@ -229,7 +294,9 @@ fn help() -> String {
         "  --retries <n>               tile retry budget (default 3)",
         "  --min-interval <duration>   minimum delay between requests, e.g. 50ms, 2s (default 0)",
         "  --tile-cache <dir>          resume folder reusing downloaded tiles",
-        "  --outfile <file>            explicit output file (alternative to positional <output>)",
+        "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
+        "                              or IIIF collection manifest URL; saves one output per entry",
+        "  --outfile <file>            explicit output file, or bulk base name (bulk_1.ext, …)",
         "  -h, --help                  show this help",
         "  --version                   show version",
     ]
@@ -253,7 +320,7 @@ mod tests {
             args.headers.get("cookie").map(String::as_str),
             Some("js_enabled=2")
         );
-        assert_eq!(args.input, "https://example.com/x.dzi");
+        assert_eq!(args.input.as_deref(), Some("https://example.com/x.dzi"));
     }
 
     #[test]
@@ -299,8 +366,8 @@ mod tests {
         assert_eq!(args.retries, 5);
         assert_eq!(args.min_interval, Duration::from_millis(200));
         assert_eq!(args.tile_cache, Some(PathBuf::from("cache-dir")));
-        assert_eq!(args.output, PathBuf::from("explicit.png"));
-        assert_eq!(args.input, "https://example.com/x.dzi");
+        assert_eq!(args.output, Some(PathBuf::from("explicit.png")));
+        assert_eq!(args.input.as_deref(), Some("https://example.com/x.dzi"));
     }
 
     #[test]
@@ -359,5 +426,57 @@ mod tests {
         assert_eq!(args.min_interval, Duration::ZERO);
         assert_eq!(args.image_index, None);
         assert_eq!(args.tile_cache, None);
+    }
+
+    #[test]
+    fn bulk_mode_needs_no_positionals() {
+        let args = parse(&[
+            "--bulk".to_string(),
+            "list.txt".to_string(),
+            "--outfile".to_string(),
+            "base.png".to_string(),
+        ])
+        .expect("bulk parse");
+        assert!(args.is_bulk_mode());
+        assert_eq!(args.bulk.as_deref(), Some("list.txt"));
+        assert_eq!(args.bulk_output_file(), Some(PathBuf::from("base.png")));
+        assert_eq!(args.input, None);
+    }
+
+    #[test]
+    fn bulk_output_uses_second_positional_when_no_outfile_flag() {
+        let args = parse(&[
+            "--bulk".to_string(),
+            "list.txt".to_string(),
+            "ignored-input".to_string(),
+            "positional-base.png".to_string(),
+        ])
+        .expect("bulk parse");
+        assert_eq!(
+            args.bulk_output_file(),
+            Some(PathBuf::from("positional-base.png"))
+        );
+    }
+
+    #[test]
+    fn bulk_single_positional_yields_no_base_name() {
+        let args = parse(&["--bulk".to_string(), "list.txt".to_string()]).expect("bulk parse");
+        assert_eq!(args.bulk_output_file(), None);
+    }
+
+    #[test]
+    fn bulk_output_names_gain_an_index_suffix() {
+        assert_eq!(
+            generate_bulk_output_name(std::path::Path::new("collection.jpg"), 0),
+            PathBuf::from("collection_1.jpg")
+        );
+        assert_eq!(
+            generate_bulk_output_name(std::path::Path::new("collection.jpg"), 9),
+            PathBuf::from("collection_10.jpg")
+        );
+        assert_eq!(
+            generate_bulk_output_name(std::path::Path::new("out"), 0),
+            PathBuf::from("out_1")
+        );
     }
 }

@@ -87,6 +87,89 @@ fn cli_fails_honestly_on_missing_tiles() {
 }
 
 #[test]
+fn cli_max_width_flag_caps_output() {
+    // `--max-width 300` on the 512px pyramid must download the largest
+    // fitting level (256px, 1 tile) and hash to the cli-max-width golden.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-max-width");
+    let output = out_dir.join("narrow.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--max-width")
+        .arg("300")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(
+        run.status.success(),
+        "cli --max-width should succeed: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../testdata/scenarios/native/cli-max-width/expected/result.json"
+        ))
+        .expect("read max-width golden"),
+    )
+    .expect("parse max-width golden");
+    let expected_hash = golden
+        .get("outputHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("golden outputHash");
+    assert_eq!(sha256_of_file(&output), expected_hash);
+}
+
+#[test]
+fn cli_forwards_user_headers() {
+    // `-H` headers must flow into the pipeline without breaking the fetch:
+    // the output still hashes to the cli-dzi golden.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-headers");
+    let output = out_dir.join("headers.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("-H")
+        .arg("Referer: https://fixtures.test/viewer")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(
+        run.status.success(),
+        "cli -H should succeed: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../testdata/scenarios/native/cli-dzi/expected/result.json"
+        ))
+        .expect("read scenario golden"),
+    )
+    .expect("parse scenario golden");
+    let expected_hash = golden
+        .get("outputHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("golden outputHash");
+    assert_eq!(sha256_of_file(&output), expected_hash);
+}
+
+fn sha256_of_file(path: &std::path::Path) -> String {
+    use sha2::{Digest, Sha256};
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path).expect("open output");
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).expect("read output");
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+#[test]
 fn json_mode_emits_machine_events() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
@@ -168,4 +251,180 @@ fn json_mode_emits_machine_events() {
         digest, expected_hash,
         "written file hashes to the pinned digest"
     );
+}
+
+#[test]
+fn cli_bulk_saves_each_entry_with_summary() {
+    let origin = start_fixture_server();
+    let good = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-bulk");
+    let list = out_dir.join("list.txt");
+    std::fs::write(&list, format!("{good} first\n{good} second\n")).expect("bulk list");
+    let base = out_dir.join("collection.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--bulk")
+        .arg(&list)
+        .arg("--outfile")
+        .arg(&base)
+        .arg("--overwrite")
+        .output()
+        .expect("run cli bulk");
+    assert!(
+        run.status.success(),
+        "bulk should succeed: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let first = out_dir.join("collection_1.png");
+    let second = out_dir.join("collection_2.png");
+    assert!(first.exists(), "first bulk output written");
+    assert!(second.exists(), "second bulk output written");
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../testdata/scenarios/native/cli-dzi/expected/result.json"
+        ))
+        .expect("read scenario golden"),
+    )
+    .expect("parse scenario golden");
+    let expected_hash = golden
+        .get("outputHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("golden outputHash");
+    assert_eq!(sha256_of_file(&first), expected_hash);
+    assert_eq!(sha256_of_file(&second), expected_hash);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("bulk: 2 succeeded, 0 failed, 2 total"),
+        "bulk summary present: {stderr}"
+    );
+}
+
+#[test]
+fn cli_bulk_continues_after_failure() {
+    let origin = start_fixture_server();
+    let good = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let bad = format!("{origin}/fetch?url=https://fixtures.test/cli/broken.dzi");
+    let out_dir = temp_dir("e2e-bulk-partial");
+    let list = out_dir.join("list.txt");
+    std::fs::write(&list, format!("{good}\n{bad}\n")).expect("bulk list");
+    let base = out_dir.join("collection.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--bulk")
+        .arg(&list)
+        .arg("--outfile")
+        .arg(&base)
+        .arg("--overwrite")
+        .output()
+        .expect("run cli bulk");
+    assert!(!run.status.success(), "bulk with a failure must exit 1");
+    assert!(
+        out_dir.join("collection_1.png").exists(),
+        "good entry saved"
+    );
+    assert!(
+        !out_dir.join("collection_2.png").exists(),
+        "failed entry writes nothing"
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("bulk: 1 succeeded, 1 failed, 2 total"),
+        "bulk summary counts the failure: {stderr}"
+    );
+    assert!(
+        stderr.contains("tile.download-failed") || stderr.contains("failed"),
+        "per-image failure present: {stderr}"
+    );
+}
+
+#[test]
+fn cli_bulk_json_emits_item_lines() {
+    let origin = start_fixture_server();
+    let good = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-bulk-json");
+    let list = out_dir.join("list.txt");
+    std::fs::write(&list, format!("{good}\n")).expect("bulk list");
+    let base = out_dir.join("collection.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--json")
+        .arg("--bulk")
+        .arg(&list)
+        .arg("--outfile")
+        .arg(&base)
+        .arg("--overwrite")
+        .output()
+        .expect("run cli bulk");
+    assert!(run.status.success());
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let mut saw_item = false;
+    let mut saw_summary = false;
+    for line in stdout.lines() {
+        let value: serde_json::Value =
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("bulk stdout JSON: {line} ({e})"));
+        match value.get("kind").and_then(serde_json::Value::as_str) {
+            Some("bulk-item") => {
+                assert_eq!(
+                    value.get("status").and_then(serde_json::Value::as_str),
+                    Some("ok")
+                );
+                saw_item = true;
+            }
+            Some("bulk-completed") => {
+                assert_eq!(
+                    value.get("succeeded").and_then(serde_json::Value::as_u64),
+                    Some(1)
+                );
+                saw_summary = true;
+            }
+            other => panic!("unexpected bulk kind {other:?} in {line}"),
+        }
+    }
+    assert!(saw_item, "bulk-item present: {stdout}");
+    assert!(saw_summary, "bulk-completed present: {stdout}");
+}
+
+#[test]
+fn cli_full_flags_produce_golden_output() {
+    // `--header` (alias), `--retries`, `--tile-cache`, `--image-index 0`,
+    // and `--min-interval` must all flow through without breaking the fetch:
+    // the output still hashes to the cli-dzi golden.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-full-flags");
+    let output = out_dir.join("full.png");
+    let cache = out_dir.join("tiles");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--header")
+        .arg("Referer: https://fixtures.test/viewer")
+        .arg("--retries")
+        .arg("3")
+        .arg("--tile-cache")
+        .arg(&cache)
+        .arg("--image-index")
+        .arg("0")
+        .arg("--min-interval")
+        .arg("1ms")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(
+        run.status.success(),
+        "full flags should succeed: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../testdata/scenarios/native/cli-dzi/expected/result.json"
+        ))
+        .expect("read scenario golden"),
+    )
+    .expect("parse scenario golden");
+    let expected_hash = golden
+        .get("outputHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("golden outputHash");
+    assert_eq!(sha256_of_file(&output), expected_hash);
+    assert!(cache.exists(), "tile cache folder created");
 }

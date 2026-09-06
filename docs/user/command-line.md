@@ -2,12 +2,12 @@
 
 # Command-line tool
 
-The command-line tool saves one image per run. It is the right choice for
-scripts and for automating regular jobs. It supports
-[protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
+The command-line tool saves one image per run, or many with `--bulk`. It
+is the right choice for scripts and for automating regular jobs. It
+supports [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
 Each run saves one job to one output file (PNG, JPEG, TIFF, or IIIF folder
-by extension). It runs no bulk queue yet. `--tile-cache` keeps a resume
-folder so a repeated run reuses tiles instead of fetching them again; see
+by extension). `--tile-cache` keeps a resume folder so a repeated run
+reuses tiles instead of fetching them again; see
 [resuming an interrupted save](./desktop-app.md#resuming-an-interrupted-save).
 
 ## Basic use
@@ -18,8 +18,9 @@ dezoomify "https://museum.example/collection/painting" painting.png
 
 The first argument is the address of the viewer page or image description
 file; the second is the file to save (or pass `--outfile <file>` instead
-of the positional). The tool takes the largest level that fits
-`--max-width` when given, else the largest level.
+of the positional). With no arguments the tool prompts for both when a
+terminal is present, else it prints help. The tool takes the largest level
+that fits `--max-width` when given, else the largest level.
 
 ## Useful options
 
@@ -36,6 +37,31 @@ of the positional). The tool takes the largest level that fits
 | Print machine-readable records | `--json` |
 
 Run `dezoomify --help` for the full list.
+
+## Saving many images
+
+Put the addresses in a text file, one per line, with an optional title after
+each one:
+
+```text
+# my-collection.txt: lines starting with # are ignored
+https://museum.example/painting-1 Portrait of a lady
+https://museum.example/painting-2
+https://library.example/manuscript/info.json
+```
+
+Then:
+
+```sh
+dezoomify --bulk my-collection.txt --outfile collection.png
+```
+
+This saves `collection_1.png`, `collection_2.png`, and so on. A failed image
+does not stop the rest; a per-image summary plus totals are printed at the
+end and the exit is 1 when any entry fails. You can also pass a single IIIF
+collection manifest address to `--bulk` to save the entries it lists
+(best-effort: `manifests`/`members`/`items` ids; a single manifest saves its
+first image). Between images `--min-interval` paces the queue.
 
 ## Next steps
 

@@ -69,7 +69,8 @@ fn invalid_flag_fails() {
 
 #[test]
 fn no_args_prints_help_without_prompting() {
-    // No interactive prompt exists: missing positionals print help to stdout.
+    // Without a TTY there is no interactive prompt: missing positionals
+    // print help to stdout. With a TTY, main prompts for input/output.
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
         .output()
         .expect("run cli");
@@ -90,8 +91,8 @@ fn no_args_prints_help_without_prompting() {
 fn removed_flags_stay_unknown() {
     // The surface is --overwrite/--json/--max-width/--accept-invalid-certs/
     // -H/--header/--image-index/--retries/--min-interval/--tile-cache/
-    // --outfile: bulk and unrelated selection flags must fail as unknown.
-    for flag in ["--bulk", "--largest", "--zoom-level", "--parallelism"] {
+    // --bulk/--outfile: unrelated selection flags must fail as unknown.
+    for flag in ["--largest", "--zoom-level", "--parallelism"] {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
             .arg(flag)
             .output()
