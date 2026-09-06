@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
     pub input: Option<String>,
     pub output: Option<PathBuf>,
@@ -337,59 +337,34 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         return Err("--outfile conflicts with positional <output>".to_string());
     }
     let output = outfile_option.or(positional_output);
-    if bulk.is_some() {
-        Ok(Args {
-            input,
-            output,
-            overwrite,
-            json,
-            dezoomer,
-            largest,
-            max_width,
-            max_height,
-            zoom_level,
-            accept_invalid_certs,
-            headers,
-            image_index,
-            retries,
-            retry_delay,
-            compression,
-            max_idle_per_host,
-            min_interval,
-            timeout,
-            connect_timeout,
-            logging,
-            parallelism,
-            tile_cache,
-            bulk,
-        })
-    } else {
-        Ok(Args {
-            input: Some(input.ok_or_else(help)?),
-            output: Some(output.ok_or_else(help)?),
-            overwrite,
-            json,
-            dezoomer,
-            largest,
-            max_width,
-            max_height,
-            zoom_level,
-            accept_invalid_certs,
-            headers,
-            image_index,
-            retries,
-            retry_delay,
-            compression,
-            max_idle_per_host,
-            min_interval,
-            timeout,
-            connect_timeout,
-            logging,
-            parallelism,
-            tile_cache,
-            bulk,
-        })
-    }
+    // Single mode allows a missing output for title-based auto-naming;
+    // a missing input prompts when a terminal is present, else prints help.
+    // Bulk mode already allows missing positionals.
+    Ok(Args {
+        input,
+        output,
+        overwrite,
+        json,
+        dezoomer,
+        largest,
+        max_width,
+        max_height,
+        zoom_level,
+        accept_invalid_certs,
+        headers,
+        image_index,
+        retries,
+        retry_delay,
+        compression,
+        max_idle_per_host,
+        min_interval,
+        timeout,
+        connect_timeout,
+        logging,
+        parallelism,
+        tile_cache,
+        bulk,
+    })
 }
 
 fn split_flag_value(arg: &str) -> (&str, Option<String>) {
@@ -888,5 +863,13 @@ mod tests {
         let local_bulk =
             parse(&["--bulk".to_string(), "list.txt".to_string()]).expect("local bulk");
         assert_eq!(local_bulk.request_referer(), None);
+    }
+
+    #[test]
+    fn single_output_may_be_omitted_for_auto_naming() {
+        let args = parse(&["https://example.com/x.dzi".to_string()]).expect("output optional");
+        assert_eq!(args.input.as_deref(), Some("https://example.com/x.dzi"));
+        assert_eq!(args.output, None);
+        assert_eq!(args.bulk_output_file(), None);
     }
 }

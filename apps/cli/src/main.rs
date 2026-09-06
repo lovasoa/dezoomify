@@ -46,6 +46,7 @@ impl Throttler {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let has_args = !args.is_empty();
     let parsed = match arguments::parse(&args) {
         Ok(parsed) => parsed,
         Err(message) => {
@@ -61,23 +62,11 @@ fn main() {
         run_bulk(parsed);
         return;
     }
-    let (input, output) = match (parsed.input.clone(), parsed.output.clone()) {
-        (Some(input), Some(output)) => (input, output),
-        _ => match prompt_interactive() {
-            Some((input, output)) => (input, output),
-            None => {
-                // No TTY: print help to stdout, exit 0 (existing contract).
-                println!("{}", help_text());
-                std::process::exit(0);
-            }
-        },
-    };
-    let parsed = Args {
-        input: Some(input.clone()),
-        output: Some(output.clone()),
-        ..parsed
-    };
-    run_single(parsed, &input, &output);
+    if has_args {
+        run_single_from_cli(parsed);
+    } else {
+        run_interactive_loop(parsed);
+    }
 }
 
 fn help_text() -> String {
@@ -87,24 +76,145 @@ fn help_text() -> String {
     }
 }
 
-/// Prompt for input/output when a terminal is present. Returns `None` when
-/// stdin is not a TTY (caller prints help) or on EOF.
-fn prompt_interactive() -> Option<(String, PathBuf)> {
+/// One-shot single run for command-line invocation. Missing input prompts
+/// once when a terminal is present, else prints help; missing output
+/// auto-names from the fallback. Pickers prompt when no selector was given
+/// and a terminal is present.
+fn run_single_from_cli(parsed: Args) {
+    let input = match parsed.input.clone() {
+        Some(input) => input,
+        None => match prompt_input() {
+            Some(input) => input,
+            None => {
+                println!("{}", help_text());
+                std::process::exit(0);
+            }
+        },
+    };
+    if input.trim().is_empty() {
+        eprintln!("error: no input given");
+        std::process::exit(2);
+    }
+    let output = match parsed.output.clone() {
+        Some(output) => output,
+        None => single_auto_output(None, None),
+    };
+    let mut parsed = Args {
+        input: Some(input.clone()),
+        output: Some(output.clone()),
+        ..parsed
+    };
+    if !apply_pickers(&mut parsed) {
+        eprintln!("warning: Reached end of input. Exiting...");
+        std::process::exit(0);
+    }
+    let ok = run_single_inner(&parsed, &input, &output);
+    if !ok {
+        std::process::exit(1);
+    }
+}
+
+/// No-args terminal loop, mirroring the reference `main.rs:32-60`: repeat
+/// prompts until EOF, continue after failures, exit 1 when any run failed.
+fn run_interactive_loop(base: Args) {
+    use std::io::IsTerminal as _;
+    if !std::io::stdin().is_terminal() {
+        println!("{}", help_text());
+        std::process::exit(0);
+    }
+    let mut has_errors = false;
+    loop {
+        let input = match prompt_input() {
+            Some(input) => input,
+            None => {
+                eprintln!("warning: Reached end of input. Exiting...");
+                break;
+            }
+        };
+        if input.trim().is_empty() {
+            eprintln!("error: no input given");
+            has_errors = true;
+            continue;
+        }
+        let output = single_auto_output(None, None);
+        let mut parsed = Args {
+            input: Some(input.clone()),
+            output: Some(output.clone()),
+            ..base.clone()
+        };
+        if !apply_pickers(&mut parsed) {
+            eprintln!("warning: Reached end of input. Exiting...");
+            break;
+        }
+        if !run_single_inner(&parsed, &input, &output) {
+            has_errors = true;
+        }
+    }
+    if has_errors {
+        std::process::exit(1);
+    }
+}
+
+/// Prompt for pickers when no selector was given and a terminal is present.
+/// Returns false on EOF (caller exits the loop), true otherwise. Bulk mode
+/// never prompts: the first image and automatic level win.
+fn apply_pickers(parsed: &mut Args) -> bool {
+    use std::io::IsTerminal as _;
+    if parsed.is_bulk_mode() || !std::io::stdin().is_terminal() {
+        return true;
+    }
+    if parsed.image_index.is_none() {
+        match image_picker() {
+            Some(index) => parsed.image_index = Some(index),
+            None => return false,
+        }
+    }
+    if !parsed.has_level_specifying_args() && !parsed.largest {
+        match level_picker() {
+            Some(index) => parsed.zoom_level = Some(index),
+            None => return false,
+        }
+    }
+    true
+}
+
+/// Interactive image picker. The full title list needs native catalog
+/// support, so this prompts for an index without listing: any number is
+/// accepted and out-of-range uses the last image, mirroring the reference
+/// `resolve_index` fallback. Loops until a number or EOF.
+fn image_picker() -> Option<usize> {
+    loop {
+        let line = prompt_line("Which image do you want to download? ")?;
+        let trimmed = line.trim();
+        if let Ok(index) = trimmed.parse::<usize>() {
+            return Some(index);
+        }
+        eprintln!("error: '{trimmed}' is not a valid image number");
+    }
+}
+
+/// Interactive level picker, same shape as the image picker. Any number is
+/// accepted and out-of-range uses the last level.
+fn level_picker() -> Option<usize> {
+    loop {
+        let line = prompt_line("Which level do you want to download? ")?;
+        let trimmed = line.trim();
+        if let Ok(index) = trimmed.parse::<usize>() {
+            return Some(index);
+        }
+        eprintln!("error: '{trimmed}' is not a valid level number");
+    }
+}
+
+/// Prompt for the input URI when a terminal is present. Returns `None` on
+/// non-TTY or EOF. Mirrors the reference `choose_input_uri` prompt.
+fn prompt_input() -> Option<String> {
     use std::io::IsTerminal as _;
     if !std::io::stdin().is_terminal() {
         return None;
     }
     let input = prompt_line("Enter an URL or a path to a tiles.yaml file: ")?;
-    if input.trim().is_empty() {
-        eprintln!("error: no input given");
-        std::process::exit(2);
-    }
-    let output = prompt_line("Enter the output file: ")?;
-    if output.trim().is_empty() {
-        eprintln!("error: no output given");
-        std::process::exit(2);
-    }
-    Some((input.trim().to_string(), PathBuf::from(output.trim())))
+    Some(input.trim().to_string())
 }
 
 fn prompt_line(prompt: &str) -> Option<String> {
@@ -223,8 +333,8 @@ fn warn_selection_gaps(parsed: &Args) {
     }
 }
 
-fn run_single(parsed: Args, input: &str, output: &Path) {
-    warn_selection_gaps(&parsed);
+fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
+    warn_selection_gaps(parsed);
     let runtime = NativeRuntime::new(1 << 30);
     let output_str = output.to_string_lossy().into_owned();
     let mut handle = match runtime.start(JobRequest {
@@ -235,13 +345,13 @@ fn run_single(parsed: Args, input: &str, output: &Path) {
         Ok(handle) => handle,
         Err(error) => {
             eprintln!("error: {} ({})", error.message, error.code);
-            std::process::exit(1);
+            return false;
         }
     };
     handle.emit("started");
     print_event(parsed.json, handle.events().last().expect("started event"));
 
-    let config = pipeline_config_for(&parsed);
+    let config = pipeline_config_for(parsed);
     let json = parsed.json;
     let result = pipeline::run(
         input,
@@ -282,10 +392,11 @@ fn run_single(parsed: Args, input: &str, output: &Path) {
                 );
             }
             drop(result);
+            true
         }
         Err(error) => {
             eprintln!("error: {} ({})", error.message, error.code);
-            std::process::exit(1);
+            false
         }
     }
 }
@@ -368,11 +479,58 @@ fn bulk_output_for(base: Option<&Path>, title: Option<&str>, index: usize) -> Pa
     PathBuf::from(format!("dezoomified_{}.png", index + 1))
 }
 
+/// Single-image auto-naming, porting `output_file::get_outname` for the
+/// omitted-output case: sanitized title or `dezoomified` fallback, JPEG-fit
+/// extension, and `_0001` collision suffixes. The title and size are unknown
+/// before the native run, so callers pass `None` and the fallback plus PNG
+/// apply; the helper still honors titles and JPEG fit when given (tests).
+fn single_auto_output(title: Option<&str>, size: Option<(u32, u32)>) -> PathBuf {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let fits_in_jpg = size.is_some_and(|(x, y)| x.max(y) <= u16::MAX as u32);
+    let extension = if fits_in_jpg { "jpg" } else { "png" };
+    let base = title
+        .map(sanitize_title)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "dezoomified".to_string());
+    let mut path = base_dir.join(format!("{base}.{extension}"));
+    if !path.exists() {
+        return path;
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("dezoomified")
+        .to_string();
+    for i in 1.. {
+        let candidate = base_dir.join(format!("{stem}_{i:04}.{extension}"));
+        if !candidate.exists() {
+            path = candidate;
+            break;
+        }
+    }
+    path
+}
+
 fn sanitize_title(title: &str) -> String {
+    // Keep readable titles: ": " becomes " - " before sanitizing, mirroring
+    // the reference `filename_from_title`. Remaining illegal characters
+    // (path separators, Windows-reserved `<>:\"/\\|?*`, controls, NUL)
+    // become underscores.
     let dashed = title.replace(": ", " - ");
-    let mut clean = String::new();
+    let mut clean = String::with_capacity(dashed.len());
     for ch in dashed.chars() {
-        if ch == '/' || ch == '\\' || ch == '\0' || ch == ':' {
+        if ch == '/'
+            || ch == '\\'
+            || ch == ':'
+            || ch == '\0'
+            || ch == '?'
+            || ch == '"'
+            || ch == '*'
+            || ch == '<'
+            || ch == '>'
+            || ch == '|'
+            || ch.is_control()
+        {
             clean.push('_');
         } else {
             clean.push(ch);

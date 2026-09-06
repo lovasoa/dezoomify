@@ -428,3 +428,62 @@ fn cli_full_flags_produce_golden_output() {
     assert_eq!(sha256_of_file(&output), expected_hash);
     assert!(cache.exists(), "tile cache folder created");
 }
+
+#[test]
+fn cli_auto_names_output_when_omitted() {
+    // Single runs without an output auto-name to `dezoomified.png` in the
+    // working directory; the bytes still hash to the cli-dzi golden.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-auto-name");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg(&input)
+        .current_dir(&out_dir)
+        .output()
+        .expect("run cli");
+    assert!(
+        run.status.success(),
+        "auto-naming should succeed: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let output = out_dir.join("dezoomified.png");
+    assert!(output.exists(), "auto-named output written");
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../testdata/scenarios/native/cli-dzi/expected/result.json"
+        ))
+        .expect("read scenario golden"),
+    )
+    .expect("parse scenario golden");
+    let expected_hash = golden
+        .get("outputHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("golden outputHash");
+    assert_eq!(sha256_of_file(&output), expected_hash);
+}
+
+#[test]
+fn cli_auto_naming_avoids_collision() {
+    // An existing `dezoomified.png` forces a `_0001` suffix, never overwrite.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-auto-collision");
+    std::fs::write(out_dir.join("dezoomified.png"), b"existing").expect("seed collision");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg(&input)
+        .current_dir(&out_dir)
+        .output()
+        .expect("run cli");
+    assert!(
+        run.status.success(),
+        "collision run should succeed: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let output = out_dir.join("dezoomified_0001.png");
+    assert!(output.exists(), "collision suffix written");
+    assert_eq!(
+        std::fs::read(out_dir.join("dezoomified.png")).expect("seed intact"),
+        b"existing"
+    );
+}

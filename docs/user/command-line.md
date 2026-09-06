@@ -18,9 +18,14 @@ dezoomify "https://museum.example/collection/painting" painting.png
 
 The first argument is the address of the viewer page or image description
 file; the second is the file to save (or pass `--outfile <file>` instead
-of the positional). With no arguments the tool prompts for both when a
-terminal is present, else it prints help. The tool takes the largest level
-that fits `--max-width` when given, else the largest level.
+of the positional). When the output is omitted it auto-names from the
+image title when known, else `dezoomified` with a JPEG-fit extension and
+`_0001` collision suffixes. With no arguments the tool repeats prompts
+when a terminal is present until end of input, else it prints help. When
+several images or levels are found and no selector was given, a terminal
+prompts to pick one; without a terminal the first image and automatic
+level win. The tool takes the largest level that fits `--max-width` when
+given, else the largest level.
 
 ## Useful options
 

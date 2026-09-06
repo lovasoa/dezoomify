@@ -23,9 +23,16 @@ Run `./target/debug/dezoomify-cli --help` for the full list: `--overwrite`,
 `--bulk <file-or-url>`, `--outfile <file>`, `-h/--help/-?`, `-V/--version`.
 
 Each single run saves one job to one output file (PNG, JPEG, TIFF, or IIIF
-folder by extension). With no arguments the tool prompts for input/output
-when a terminal is present, else prints help. Missing arguments print help;
-unknown flags fail with exit 2. `--tile-cache` reuses downloaded tiles
+folder by extension). When the output is omitted it auto-names from the
+image title when known, else `dezoomified` with a JPEG-fit extension
+(small images use `.jpg`, large or unknown sizes use `.png`) and `_0001`
+collision suffixes. With no arguments the tool repeats prompts when a
+terminal is present until end of input, else prints help. When several
+images or levels are found and no `--image-index` or level cap was given,
+a terminal prompts to pick one (any number works; too large uses the
+last); without a terminal the first image and automatic level win.
+Missing input without a terminal prints help; unknown flags fail with
+exit 2. `--tile-cache` reuses downloaded tiles
 across runs; `--retries` overrides the tile retry budget of 3 (0 is parsed;
 the job engine clamps to at least 1). `--image-index`, `--zoom-level`,
 `--max-height`, per-tile `--min-interval`, `--parallelism`,
