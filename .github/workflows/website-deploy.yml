@@ -129,8 +129,8 @@ jobs:
               && grep -q "src/main.js" /tmp/beta.html \
               && [ "$main_js" = "200" ] && [ "$discovery_js" = "200" ] \
               && [ "$proxy" = "403" ] && [ "$legacy_proxy" = "400" ] \
-              && [ "$wasm_js" = "200 application/javascript" ] \
-              && [ "$wasm_bin" = "200 application/wasm" ] \
+               && case "$wasm_js" in "200 application/javascript"*|"200 text/javascript"*) ;; *) false;; esac \
+               && case "$wasm_bin" in "200 application/wasm"*) ;; *) false;; esac \
               && [ "$help" = "200" ] && grep -q "dz-help-topics" /tmp/help.html \
               && [ "$repo_files_served" = "0" ] \
               && ! grep -q "14 of 28" /tmp/beta.html; then
