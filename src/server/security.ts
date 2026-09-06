@@ -38,11 +38,14 @@ const STRIPPED_INBOUND = new Set([
   ...HOP_BY_HOP,
 ]);
 
-// Discovery reads both structured metadata (JSON/XML/YAML manifests) and
-// viewer HTML pages (a Google Arts & Culture asset page, a krpano embed, an
-// OpenSeadragon page). Tiles stay excluded by their own image/* content type.
+// Discovery reads both structured metadata (JSON/XML/YAML manifests,
+// JSON-LD IIIF manifests, viewer JS, vendor metadata) and viewer HTML pages
+// (a Google Arts & Culture asset page, a krpano embed, an OpenSeadragon
+// page). Tiles stay excluded by their own image/* content type.
 const ALLOWED_METADATA_TYPES = [
   "application/json",
+  "application/ld+json",
+  "application/javascript",
   "application/xml",
   "text/xml",
   "text/plain",
@@ -211,6 +214,9 @@ export function isAllowedMetadataContentType(contentType: string | null | undefi
   if (!contentType) return false;
   const base = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
   if (base.startsWith("image/")) return false;
+  // Vendor metadata (e.g. IIIF-related application/vnd.* payloads) is text-ish
+  // metadata, never tiles (tiles stay excluded via the image/* deny above).
+  if (base.startsWith("application/vnd.")) return true;
   return (ALLOWED_METADATA_TYPES as string[]).includes(base);
 }
 
