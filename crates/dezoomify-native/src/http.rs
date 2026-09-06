@@ -1,6 +1,10 @@
 //! Real HTTP egress for the native runtime: rustls-based blocking client,
 //! manual redirects with per-URL header rebuild, size/time limits, and
 //! bounded retries. This is the only place the CLI touches the network.
+//!
+//! Non-HTTP URIs never reach the network: plain local paths and `file://`
+//! URIs are read from the filesystem with the same outcome shape, so local
+//! inputs and local tile URIs work without HTTP requirements.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -121,6 +125,13 @@ pub fn fetch(
     auth: Option<&EphemeralAuthorization>,
     limits: &FetchLimits,
 ) -> Result<FetchOutcome, NativeError> {
+    // Local files intentionally ignore HTTP requirements while preserving
+    // the same URI behavior: the bytes come from the filesystem and the
+    // final URI stays the input URI (reference `network.rs:34-84`). No
+    // headers or credentials are sent anywhere on this path.
+    if !uri.starts_with("http://") && !uri.starts_with("https://") {
+        return fetch_local(uri, limits);
+    }
     let mut request = build_request(uri, extra_headers, auth)?;
     if let Some(user) = user {
         user.apply(&mut request);
@@ -166,6 +177,56 @@ pub fn fetch(
             user.apply(&mut request);
         }
     }
+}
+
+/// Map a non-HTTP URI to a filesystem path: `file://` URIs strip the
+/// scheme (`file:///abs/path` and `file://localhost/abs/path` both name an
+/// absolute path; any other `file://` host is rejected), while anything
+/// else is already a local path and passes through unchanged.
+fn local_path_for_uri(uri: &str) -> Result<&str, NativeError> {
+    if let Some(rest) = uri.strip_prefix("file://") {
+        if let Some(path) = rest.strip_prefix("localhost") {
+            if path.is_empty() {
+                return Ok("/");
+            }
+            if path.starts_with('/') {
+                return Ok(path);
+            }
+        } else if rest.starts_with('/') {
+            return Ok(rest);
+        }
+        return Err(NativeError::new(
+            "transport.bad-url",
+            "file uri must name a local absolute path",
+        ));
+    }
+    Ok(uri)
+}
+
+/// Read a local resource (single inputs, bulk-adjacent metadata, and tile
+/// URIs alike) with the same outcome shape as an HTTP 200: the final URI
+/// stays the input URI. Oversize files report `transport.size-limit`;
+/// unreadable paths report `transport.network-error` carrying only the OS
+/// message (never the path text, which may name private directories).
+fn fetch_local(uri: &str, limits: &FetchLimits) -> Result<FetchOutcome, NativeError> {
+    let path = local_path_for_uri(uri)?;
+    let body = std::fs::read(path).map_err(|e| {
+        NativeError::new(
+            "transport.network-error",
+            format!("local file read failed: {e}"),
+        )
+    })?;
+    if body.len() as u64 > limits.max_bytes {
+        return Err(NativeError::new(
+            "transport.size-limit",
+            format!("local file exceeds {}-byte limit", limits.max_bytes),
+        ));
+    }
+    Ok(FetchOutcome {
+        status: 200,
+        final_uri: uri.to_string(),
+        body,
+    })
 }
 
 fn fetch_once(

@@ -181,6 +181,54 @@ fn retries_zero_fails_without_a_second_attempt() {
     );
 }
 
+#[test]
+fn file_uri_tiles_assemble_from_a_remote_manifest() {
+    // Local tile URIs (`file://`) read from the filesystem even when the
+    // manifest itself arrives over HTTP: the assembled output matches the
+    // loopback golden exactly. (Local *inputs* still need a job-engine
+    // validation widening outside this crate; see `fetch_local`.)
+    let work = temp_dir("local-tiles");
+    for tile in ["0_0", "1_0", "0_1", "1_1"] {
+        let bytes = scenario_payload(&format!("tile-{tile}.png"));
+        std::fs::write(work.join(format!("tile-{tile}.png")), &bytes).expect("write tile");
+    }
+    let dir = work.to_str().expect("utf8 dir").to_string();
+    let yaml = format!(
+        "url_template: \"file://{dir}/tile-{{{{x}}}}_{{{{y}}}}.png\"\n\
+         x_template: \"x * tile_size\"\n\
+         y_template: \"y * tile_size\"\n\
+         variables:\n\
+         \x20 - {{ name: x, from: 0, to: 1 }}\n\
+         \x20 - {{ name: y, from: 0, to: 1 }}\n\
+         \x20 - {{ name: tile_size, value: 256 }}\n\
+         width: 512\n\
+         height: 512\n\
+         title: \"Local tiles\"\n"
+    );
+    let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let base = serve_shared_map(Arc::clone(&shared));
+    shared.lock().expect("lock").insert(
+        "/local-tiles.yaml".to_string(),
+        http_response("200 OK", "text/yaml", yaml.as_bytes()),
+    );
+    let output = work.join("local.png");
+    let outcome = pipeline::run(
+        &format!("{base}/local-tiles.yaml"),
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .unwrap_or_else(|e| panic!("file-uri tiles succeed: {} ({})", e.message, e.code));
+    assert_eq!(outcome.tile_count, 4);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    let expected = scenario_expected("cli-dzi");
+    assert_eq!(
+        outcome.output_hash,
+        expected["outputHash"].as_str().expect("outputHash")
+    );
+}
+
 fn scenario_expected(name: &str) -> serde_json::Value {
     serde_json::from_str(
         &std::fs::read_to_string(

@@ -270,3 +270,59 @@ fn exposes_http_error_status() {
     assert!(!outcome.ok());
     server.join().expect("server");
 }
+
+#[test]
+fn reads_plain_local_paths_without_http() {
+    let dir = std::env::temp_dir().join(format!("dz-local-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("meta.xml");
+    std::fs::write(&file, b"<Image/>").expect("write temp file");
+    let path = file.to_str().expect("utf8 path").to_string();
+
+    let outcome = fetch(&path, &BTreeMap::new(), None, None, &limits()).expect("local read");
+    assert_eq!(outcome.status, 200);
+    assert!(outcome.ok());
+    assert_eq!(outcome.final_uri, path);
+    assert_eq!(outcome.body, b"<Image/>");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn reads_file_uris_as_local_paths() {
+    let dir = std::env::temp_dir().join(format!("dz-file-uri-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("tile.png");
+    std::fs::write(&file, b"tile-bytes").expect("write temp file");
+    let path = file.to_str().expect("utf8 path").to_string();
+
+    for uri in [format!("file://{path}"), format!("file://localhost{path}")] {
+        let outcome = fetch(&uri, &BTreeMap::new(), None, None, &limits()).expect("file read");
+        assert_eq!(outcome.status, 200);
+        assert_eq!(outcome.final_uri, uri);
+        assert_eq!(outcome.body, b"tile-bytes");
+    }
+    // A `file://` URI naming a remote host is rejected, never fetched.
+    let error = fetch(
+        "file://other.test/tile.png",
+        &BTreeMap::new(),
+        None,
+        None,
+        &limits(),
+    )
+    .expect_err("remote file host rejected");
+    assert_eq!(error.code, "transport.bad-url");
+    // Missing local files fail honestly without a path leak.
+    let missing = dir.join("absent.png");
+    let error = fetch(
+        missing.to_str().expect("utf8 path"),
+        &BTreeMap::new(),
+        None,
+        None,
+        &limits(),
+    )
+    .expect_err("missing file fails");
+    assert_eq!(error.code, "transport.network-error");
+    let _ = std::fs::remove_dir_all(&dir);
+}
