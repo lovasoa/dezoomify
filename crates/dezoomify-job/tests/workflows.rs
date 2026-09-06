@@ -308,6 +308,48 @@ fn probe_driven_generic_level_resolves_through_observations() {
     );
 }
 
+/// Regression: core discovery is a poll - the same request stays
+/// outstanding until its outcome arrives. The engine must emit exactly
+/// one acquire-resource effect per outstanding request and return;
+/// looping on the poll until it yields `None` would allocate without
+/// bound and freeze the host. Pin the bounded shape of `start()`.
+#[test]
+fn discovery_poll_emits_one_effect_per_outstanding_request() {
+    fn acquire_resource_count(host: &ScriptedHost) -> usize {
+        host.effects
+            .iter()
+            .filter(|v| {
+                v.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-resource")
+            })
+            .count()
+    }
+    let mut host = ScriptedHost::new(&job_id(5), INPUT_URL, test_config()).unwrap();
+    host.start().unwrap();
+    // The DZI input has exactly one outstanding metadata fetch.
+    assert_eq!(
+        acquire_resource_count(&host),
+        1,
+        "one effect per outstanding core request"
+    );
+    assert_eq!(host.job().pending_effect_count(), 0);
+    assert_eq!(host.job().pending_event_count(), 0);
+    assert_eq!(host.state(), "Discovering");
+    // While the fetch is unanswered nothing new is emitted: the poll
+    // reports the same request and the engine waits instead of growing.
+    let err = host.apply(JobResponse::TileOutcome {
+        job: job_id(5),
+        tile: "tile:0".to_string(),
+        ok: true,
+    });
+    assert!(err.is_err());
+    assert_eq!(
+        acquire_resource_count(&host),
+        1,
+        "unanswered fetches emit no further effects"
+    );
+    assert_eq!(host.state(), "Discovering");
+}
+
 fn seqs_are_sorted(transcript: &[String]) -> bool {
     let seqs: Vec<u64> = transcript
         .iter()
