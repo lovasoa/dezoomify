@@ -21,3 +21,14 @@ privacy_policy_url = "https://dezoomify.ophir.dev/beta/privacy"
 # AMO listing identity is still TBD (no Mozilla account wired yet); this is a
 # placeholder shape only and must never be used as an allowlist value.
 id = "dezoomify@dezoomify.example"
+
+# Desktop updater (task 3.4): HTTPS-only allowlisted endpoints plus signed
+# metadata. The production host and public key are still TBD: the endpoint
+# below preserves the allowlist shape and never validates without the real
+# key (see the TODO in apps/desktop/src-tauri/src/updater.rs). The
+# production public key will live under release/ following the
+# release/gpg-public-key.asc pattern, never a test key.
+[updater]
+channel = "stable"
+endpoints = ["https://updates.dezoomify.example/stable/{{target}}/{{arch}}/{{current_version}}"]
+pubkey_file = "release/updater-public-key.asc"
