@@ -15,6 +15,8 @@ export interface ProxyFetchResult {
   contentType?: string;
   /** Post-redirect upstream URL reported by the relay (success only). */
   finalUrl?: string;
+  /** Parsed Retry-After delay in ms (429 only, when the relay sent one). */
+  retryAfterMs?: number;
 }
 
 export type ProxyFetchImpl = (
@@ -36,7 +38,7 @@ function safeHeaders(input: unknown): Record<string, string> {
       forEach?: (cb: (v: string, k: string) => void) => void;
     };
     if (typeof h.get === "function") {
-      for (const k of ["content-type", "content-length", PROXY_UPSTREAM_URL_HEADER]) {
+      for (const k of ["content-type", "content-length", "retry-after", PROXY_UPSTREAM_URL_HEADER]) {
         const v = h.get(k);
         if (v !== null && v !== undefined) out[k] = String(v);
       }
@@ -52,6 +54,30 @@ function safeHeaders(input: unknown): Record<string, string> {
     // ignore
   }
   return out;
+}
+
+/**
+ * Parse a Retry-After response value (delay seconds or HTTP date) into
+ * milliseconds, capped so a stale far-future date never stalls metadata.
+ * Returns undefined when absent or unparsable; callers apply their own
+ * backoff default and UX-budget cap.
+ */
+export function parseRetryAfterMs(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const v = value.trim();
+  if (v === "") return undefined;
+  if (/^\d+$/.test(v)) {
+    const secs = Number(v);
+    if (!Number.isFinite(secs) || secs < 0) return undefined;
+    return Math.min(secs * 1000, 30000);
+  }
+  const when = Date.parse(v);
+  if (Number.isFinite(when)) {
+    const delta = when - Date.now();
+    if (delta <= 0) return 0;
+    return Math.min(delta, 30000);
+  }
+  return undefined;
 }
 
 export function createProxyTransport(
@@ -121,7 +147,15 @@ export function createProxyTransport(
     if (bytes.byteLength > opts.maxBytes) {
       return { ok: false, status: response.status, code: "PROXY_BUDGET_EXCEEDED" };
     }
-    if (response.status === 429) return { ok: false, status: 429, code: "PROXY_RATE_LIMITED" };
+    if (response.status === 429) {
+      const retryAfterMs = parseRetryAfterMs(headers["retry-after"]);
+      return {
+        ok: false,
+        status: 429,
+        code: "PROXY_RATE_LIMITED",
+        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+      };
+    }
     if (response.status === 413) return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" };
     if (response.status === 403 || response.status === 422) {
       return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED" };

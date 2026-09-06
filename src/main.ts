@@ -46,11 +46,15 @@ export const REQUEST_TIMEOUT_MS = 30000;
 export const BROWSER_MAX_CANVAS_AREA = 268435456;
 
 /**
- * Short timeout for the direct metadata fetch: if the site does not answer
- * within 250 ms, the eligible metadata proxy takes over automatically.
- * Tiles keep the full 30 s timeout (they never use the proxy).
+ * Head-start window for the direct metadata fetch: if the site does not
+ * answer within 1500 ms, the eligible metadata proxy takes over
+ * automatically (first-wins: the loser is aborted via AbortController so
+ * direct and proxy bytes never overlap). 250 ms proved too aggressive on
+ * slow sites and caused false proxy fallback; 1500 ms keeps direct-first
+ * while failing over promptly. Tiles keep the full 30 s timeout (they
+ * never use the proxy).
  */
-export const DIRECT_METADATA_TIMEOUT_MS = 250;
+export const DIRECT_METADATA_TIMEOUT_MS = 1500;
 
 /**
  * Tile politeness + resilience (todo 5.2). At most 5 tile request starts per
@@ -370,17 +374,41 @@ const proxyTransport = createProxyTransport(
   { protocolVersion: 1, maxBytes: PROXY_METADATA_MAX_BYTES },
 );
 
+/**
+ * Delay before a single retry after PROXY_RATE_LIMITED (todo 5.1). Honors
+ * the relay's Retry-After hint when present (parsed by the transport as
+ * retryAfterMs), otherwise backs off 1 s. Returns null when the hint
+ * exceeds the UX budget: fail fast with extension/desktop guidance
+ * instead of stalling the job on a long throttle.
+ */
+const PROXY_RATE_LIMIT_RETRY_BASE_MS = 1000;
+const PROXY_RATE_LIMIT_RETRY_MAX_MS = 5000;
+
+function proxyRateLimitDelayMs(retryAfterMs?: number): number | null {
+  if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)) {
+    if (retryAfterMs <= 0) return 0;
+    if (retryAfterMs > PROXY_RATE_LIMIT_RETRY_MAX_MS) return null;
+    return Math.min(Math.floor(retryAfterMs), PROXY_RATE_LIMIT_RETRY_MAX_MS);
+  }
+  return PROXY_RATE_LIMIT_RETRY_BASE_MS;
+}
+
 async function fetchViaProxy(
   targetUrl: string,
   signal?: AbortSignal,
-): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; finalUrl?: string }> {
+): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; finalUrl?: string; retryAfterMs?: number }> {
   const reqId = noteRequestStart("proxy");
   const combined = timeoutSignal(signal);
   try {
     const res = await proxyTransport.fetchViaProxy(targetUrl, { signal: combined.signal });
     if (!res.ok) {
       noteRequestEnd(reqId, false);
-      return { ok: false, status: res.status, code: res.code ?? "PROXY_ERROR" };
+      return {
+        ok: false,
+        status: res.status,
+        code: res.code ?? "PROXY_ERROR",
+        ...(typeof res.retryAfterMs === "number" ? { retryAfterMs: res.retryAfterMs } : {}),
+      };
     }
     noteRequestEnd(reqId, true);
     // The relay follows upstream redirects internally; surface the
@@ -412,9 +440,17 @@ const DIRECT_LABEL = "Direct from your browser";
 const PROXY_LABEL = "Metadata proxy";
 
 /**
- * Fetch one metadata resource for discovery: direct first, then the eligible
- * metadata proxy after a classified network failure. The zoomable-content
- * classifier gates every success: generic pages fail with NO_IMAGE_FOUND.
+ * Fetch one metadata resource for discovery: direct first with a 1500 ms
+ * head start, then the eligible metadata proxy after a classified network
+ * failure (first-wins: the loser is aborted via AbortController so direct
+ * and proxy bytes never overlap). The zoomable-content classifier gates
+ * every success: generic pages fail with NO_IMAGE_FOUND.
+ *
+ * Eligibility stays owned here by the web app (isProxyEligible on a
+ * metadata request); integrations execute the supplied transport effects.
+ * Tiles never use the proxy. A transient PROXY_RATE_LIMITED retries once
+ * after Retry-After/backoff; a persistent throttle fails fast with
+ * extension/desktop guidance.
  *
  * Every thrown failure carries two layers: `message` (a plain, actionable
  * sentence for the UI) and `technical` (transport, HTTP status, proxy code,
@@ -427,7 +463,10 @@ async function fetchMetadataFor(
 ): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }> {
   const target = shortUrl(url);
   activeTransport = DIRECT_LABEL;
-  const direct = await fetchDirect(url, headers, undefined, DIRECT_METADATA_TIMEOUT_MS);
+  // AbortController dedupe: the direct loser is aborted before the proxy
+  // starts so the two transports never overlap on the same resource.
+  const directCtrl = new AbortController();
+  const direct = await fetchDirect(url, headers, directCtrl.signal, DIRECT_METADATA_TIMEOUT_MS);
   let via = "direct";
   let bytes: ArrayBuffer | null = null;
   let contentType: string | undefined;
@@ -445,9 +484,27 @@ async function fetchMetadataFor(
     direct.outcome === "network-error" &&
     isProxyEligible({ url, kind: "metadata", headers }).eligible
   ) {
+    try {
+      directCtrl.abort();
+    } catch {
+      // Abort is idempotent when the head-start timeout already fired; it
+      // must never break the automatic proxy fallback.
+    }
     activeTransport = PROXY_LABEL;
     via = "proxy";
-    const proxied = await fetchViaProxy(url);
+    let proxied = await fetchViaProxy(url);
+    // Retry-After + backoff: one bounded retry converts a transient
+    // token-bucket 429 into success. A persistent throttle, or a
+    // Retry-After beyond the UX budget, still fails fast below with the
+    // extension/desktop guidance (never tiles, never wider eligibility).
+    if (!proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
+      const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
+      if (delay !== null) {
+        pushLog(`Metadata proxy rate-limited; retrying once after ${delay} ms.`);
+        await sleep(delay);
+        proxied = await fetchViaProxy(url);
+      }
+    }
     if (!proxied.ok || !proxied.bytes) {
       if (proxied.code === "PROXY_RATE_LIMITED") {
         throw failure(

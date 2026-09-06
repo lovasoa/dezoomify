@@ -152,6 +152,30 @@ test("proxyTransport posts only targetUrl+protocolVersion, credentials omit, siz
   assert.equal(cancelled.code, "TRANSPORT_CANCELLED");
 });
 
+test("proxyTransport surfaces Retry-After on 429 so callers can back off once", async () => {
+  const withHint = createProxyTransport(async () => ({
+    status: 429,
+    headers: { get: (k) => (k.toLowerCase() === "retry-after" ? "2" : null) },
+    async arrayBuffer() {
+      return new Uint8Array([1]).buffer;
+    },
+  }), { protocolVersion: 1, maxBytes: 1024 });
+  const hinted = await withHint.fetchViaProxy("https://public.test/busy.json");
+  assert.equal(hinted.ok, false);
+  assert.equal(hinted.code, "PROXY_RATE_LIMITED");
+  assert.equal(hinted.retryAfterMs, 2000);
+  const bare = createProxyTransport(async () => ({
+    status: 429,
+    headers: { get: () => null },
+    async arrayBuffer() {
+      return new Uint8Array([1]).buffer;
+    },
+  }), { protocolVersion: 1, maxBytes: 1024 });
+  const unhinted = await bare.fetchViaProxy("https://public.test/busy.json");
+  assert.equal(unhinted.code, "PROXY_RATE_LIMITED");
+  assert.equal(unhinted.retryAfterMs, undefined);
+});
+
 test("proxyTransport surfaces the upstream URL so proxied metadata keeps its tile base", async () => {
   const fetchImpl = async () => ({
     status: 200,
@@ -209,7 +233,7 @@ test("shipped webapp uses the shared proxy policy (no inline duplicate)", () => 
   assert.ok(mainJs.includes("./proxyTransport.js"), "generated main.js must import the shared transport mirror");
 });
 
-test("proxy fallback is unconditional; no opt-out UI remains; 250 ms direct timeout", () => {
+test("proxy fallback is unconditional; no opt-out UI remains; 1500 ms direct head start", () => {
   const viewTs = fs.readFileSync(
     path.join(REPO_ROOT, "packages", "shared-ui", "src", "view.ts"),
     "utf8",
@@ -220,12 +244,20 @@ test("proxy fallback is unconditional; no opt-out UI remains; 250 ms direct time
   assert.ok(!mainTs.includes("onToggleProxyOptOut"), "webapp must not handle the toggle");
   assert.ok(!mainTs.includes("proxyOptOut"), "webapp must not keep session opt-out state");
   assert.ok(
-    mainTs.includes("DIRECT_METADATA_TIMEOUT_MS = 250"),
-    "direct metadata fetch uses a 250 ms timeout before the proxy takes over",
+    mainTs.includes("DIRECT_METADATA_TIMEOUT_MS = 1500"),
+    "direct metadata fetch uses a 1500 ms head start before the proxy takes over",
   );
   assert.ok(
-    mainTs.includes("fetchDirect(url, headers, undefined, DIRECT_METADATA_TIMEOUT_MS)"),
-    "metadata discovery applies the 250 ms direct timeout",
+    mainTs.includes("DIRECT_METADATA_TIMEOUT_MS"),
+    "metadata discovery applies the direct head-start timeout",
+  );
+  assert.ok(
+    mainTs.includes("directCtrl.abort()"),
+    "the direct loser is aborted via AbortController before the proxy starts (dedupe)",
+  );
+  assert.ok(
+    mainTs.includes("proxyRateLimitDelayMs") && mainTs.includes("retryAfterMs"),
+    "PROXY_RATE_LIMITED honors Retry-After with backoff and a single bounded retry",
   );
 });
 
