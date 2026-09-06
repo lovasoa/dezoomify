@@ -103,8 +103,8 @@ const TARGETS: &[LiveTarget] = &[
         accept_invalid_certs: true,
     },
     LiveTarget {
-        name: "iiif_liechtenstein_collections",
-        url: "https://www.liechtensteincollections.at/en/collections-online/forest-landscape",
+        name: "iiif_gallica_bnf",
+        url: "https://gallica.bnf.fr/iiif/ark:/12148/btv1b53252063t/f1/info.json",
         headers: &[],
         accept_invalid_certs: false,
     },

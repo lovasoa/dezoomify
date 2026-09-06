@@ -24,7 +24,7 @@ const TARGETS = [
   ["L03", "https://www.vangoghmuseum.nl/en/collection/s0424M1991"],
   ["L04", "https://www.londonmuseum.org.uk/collections/v/object-95380/a-country-fair/"],
   ["L05", "https://philamuseum.org/collection/object/101731"],
-  ["L06", "https://www.liechtensteincollections.at/en/collections-online/forest-landscape"],
+  ["L06", "https://gallica.bnf.fr/iiif/ark:/12148/btv1b53252063t/f1/info.json"],
   ["L07", "https://www.ngv.vic.gov.au/explore/collection/work/3867/"],
   ["L08", "https://nla.gov.au/nla.obj-152642460/view"],
   ["L09", "https://collections.csntm.org/image-service/iiif/MNTGRCGA01/default/M_NT_GRC_GA01_20250609_203r/M_NT_GRC_GA01_20250609_203r/info.json"],
