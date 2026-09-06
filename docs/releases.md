@@ -55,13 +55,21 @@ committed; `target/` is used so website builds cannot clobber them.
 The `release-build`, `release-sign`, and `release-publish` workflows chain
 these stages by run id: the build workflow runs `cargo xtask ci local` on
 the tagged revision before planning, and no artifact exists that has not
-passed the deterministic suite. Local `cargo xtask build desktop` already
-produces a real unsigned `.deb` (no paid signing) from the Tauri window
-shell behind the optional `tauri` feature; the release inventory still
-marks the desktop target unavailable until a release build recipe lands,
-and a release never claims an artifact it did not build. The operator
+passed the deterministic suite. Local `cargo xtask build desktop` produces
+a real unsigned `.deb` (no paid signing) from the Tauri window shell behind
+the optional `tauri` feature, so `desktop-linux-x86_64` is available;
+`desktop-windows-x86_64` (needs a Windows host with WebView2, WiX, NSIS, and
+`icon.ico`) and the macOS targets (need a macOS host with the Xcode Command
+Line Tools and `icon.icns`) stay unavailable, and a release never claims an
+artifact it did not build. The operator
 sequence for cutting a release is the runbook in [Operations](operations.md).
 
-Artifacts are built from a tagged revision, signed with free mechanisms only (updater keypair, store submission, GPG tags), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project. Web release notes identify the automatic metadata CORS proxy fallback and active-transport indicator; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
+Artifacts are built from a tagged revision, signed with free mechanisms only (updater ed25519 keypair, store submission, GPG-detached SHA256SUMS), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project; update payloads are self-signed with the updater ed25519 keypair. The user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install). Web release notes identify the automatic metadata CORS proxy fallback and active-transport indicator; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
+
+## Desktop updater
+
+The desktop app checks for updates over HTTPS-only allowlisted endpoints and stages only self-signed metadata. Each candidate carries a strict ed25519 signature over the canonical `dezoomify-updater-v1` message, and the app rejects unsigned, tampered, wrong-key, non-HTTPS, non-allowlisted, stale (older than 7 days), future (beyond +300s skew), rollback, and same-version candidates. A valid candidate is offered for explicit user confirmation and is never staged automatically; missing, delayed, or older metadata leaves the installed app working. The capability document grants only `updater:allow-check` so download and install stay denied until an explicit confirmed step exists.
+
+The production update host and public key are still TBD: the shipped allowlist keeps the `https://updates.dezoomify.example` placeholder shape and the updater public key follows the `release/gpg-public-key.asc` pattern (a future `release/updater-public-key.asc` file). The placeholder never validates without the real key.
 
 See [Testing](testing.md) for test structure and [Security](security.md) for trust requirements.
