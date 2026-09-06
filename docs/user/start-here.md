@@ -27,8 +27,8 @@ Choose a different app when:
   The [desktop app](./desktop-app.md) runs on your computer with an 8 GiB
   in-memory canvas limit instead of a browser tab limit, and saves one
   job to one file or IIIF tile folder ([file formats](./desktop-app.md#choosing-the-file-format)).
-- **You want to save many images at once, or from scripts.** The
-  [command-line tool](./command-line.md) does that.
+- **You want to save from scripts.** The
+  [command-line tool](./command-line.md) saves one image per run.
 
 Not sure which one applies? Try the website first: it tells you clearly when
 it cannot finish a job, and suggests the app that can.
