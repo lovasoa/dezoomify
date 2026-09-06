@@ -17,6 +17,7 @@ function createMockElement(tagName) {
 
   const el = {
     tagName: tagName.toUpperCase(),
+    ownerDocument: globalThis.document,
     style,
     dataset,
     open: false,
