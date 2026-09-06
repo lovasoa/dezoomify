@@ -100,10 +100,6 @@ export async function handleProxyRequest(
   if (!Number.isInteger(req.protocolVersion) || req.protocolVersion < 1) {
     return { status: 422, headers: baseHeaders, code: "PROXY_POLICY_DENIED", requestId };
   }
-  // Strip inbound credential/hop-by-hop headers (never forwarded).
-  const cleaned = stripUpstreamHeaders(req.headers ?? {});
-  void cleaned;
-
   const first = validateProxyTarget(req.targetUrl, { resolveHost: deps.resolveHost });
   if (!first.ok) {
     return { status: 403, headers: baseHeaders, code: "PROXY_POLICY_DENIED", requestId };
