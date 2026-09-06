@@ -3,7 +3,7 @@
 import type { TileSurface } from "./types.ts";
 
 export const DISPLAY_SAVE_GUIDANCE =
-  "This preview is display only. To keep a copy, right-click the image where your browser supports it. Programmatic save needs readable tile bytes.";
+  "Your image should appear below. To persist it as a file, right-click on it and select \"Save Image As...\". For faster downloads that automatically create files, use the desktop app.";
 
 export interface FakeImageElement {
   tagName: string;
