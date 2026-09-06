@@ -14,7 +14,7 @@ import {
 } from "./components.ts";
 
 export interface ViewCallbacks {
-  onSubmitUrl(url: string, dezoomer?: string): void;
+  onSubmitUrl(url: string): void;
   onCancel(): void;
   onReset(): void;
   /** Retry the same URL without clearing it (failed-section Try again). Optional for backward compatibility. */
@@ -49,7 +49,6 @@ export interface JobActivity {
 
 export interface ViewContext {
   capabilities?: AppCapabilities;
-  supportedDezoomers?: { id: string; name: string; description?: string }[];
   currentProgress?: { current: number; total: number; message?: string };
   completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
   originClean?: boolean;
@@ -57,26 +56,6 @@ export interface ViewContext {
   /** Prefilled URL (e.g. restored from a legacy `#url` hash). */
   initialUrl?: string;
 }
-
-export const ALL_DEZOOMERS = [
-  { id: "auto", name: "Select automatically", description: "Select automatically based on URL and page contents" },
-  { id: "zoomify", name: "Zoomify", description: "Zoomify tiles" },
-  { id: "seadragon", name: "Seadragon (Deep Zoom Image)", description: "Deep Zoom Image (.dzi)" },
-  { id: "iipimage", name: "IIPImage", description: "IIPImage protocol" },
-  { id: "xlimage", name: "XLimage", description: "XLimage protocol" },
-  { id: "topviewer", name: "TopViewer", description: "TopViewer JSON" },
-  { id: "krpano", name: "krpano", description: "krpano panorama and high-resolution viewers" },
-  { id: "iiif", name: "IIIF", description: "International Image Interoperability Framework" },
-  { id: "fsi", name: "FSI", description: "FSI Viewer" },
-  { id: "lizardtech", name: "LizardTech ImageServer", description: "LizardTech ImageServer" },
-  { id: "vls", name: "VLS", description: "Virtual Light Stage viewer" },
-  { id: "generic", name: "Generic dezoomer", description: "Custom URL tile template" },
-  { id: "arts-culture", name: "Arts & Culture", description: "Google Arts & Culture" },
-  { id: "hungaricana", name: "Hungaricana", description: "Hungaricana digital library" },
-  { id: "arcgis", name: "ArcGIS MapServer", description: "ArcGIS MapServer tiles" },
-  { id: "wmts", name: "WMTS", description: "Web Map Tile Service" },
-  { id: "pnav", name: "pnav", description: "pnav image viewer" },
-];
 
 export interface ModalHost {
   document: Document;
@@ -483,13 +462,12 @@ function mountInputSection(
   form.onsubmit = (e) => {
     e.preventDefault();
     const input = form.querySelector<HTMLInputElement>("#dz-url-input");
-    const selectedFormat = form.querySelector<HTMLInputElement>("input[name='dz-format']:checked");
     const url = input?.value.trim() ?? "";
     if (!url) {
       input?.focus();
       return;
     }
-    callbacks.onSubmitUrl(url, selectedFormat?.value);
+    callbacks.onSubmitUrl(url);
   };
 
   // Full-width URL input row
@@ -526,46 +504,8 @@ function mountInputSection(
   }
   form.appendChild(wrapper);
 
-  // Progressive Disclosure: Collapsible Format Selector
-  const dezoomers = ctx?.supportedDezoomers ?? ALL_DEZOOMERS;
-  const details = parent.ownerDocument.createElement("details");
-  details.className = "dz-format-details";
-  details.innerHTML = `
-    <summary class="dz-format-summary">
-      <div class="dz-format-summary-indicator">
-        <span id="dz-selected-format-label">Format: <strong>Select automatically</strong> (click to change)</span>
-      </div>
-      <svg class="dz-format-summary-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <polyline points="6 9 12 15 18 9"></polyline>
-      </svg>
-    </summary>
-    <div class="dz-format-content">
-      <div class="dz-format-grid" id="dz-format-list"></div>
-    </div>
-  `;
-
-  const formatList = details.querySelector("#dz-format-list");
-  const summaryLabel = details.querySelector("#dz-selected-format-label");
-  if (formatList) {
-    dezoomers.forEach((fmt, idx) => {
-      const label = parent.ownerDocument.createElement("label");
-      label.className = `dz-format-option ${idx === 0 ? "active" : ""}`;
-      label.title = fmt.description ?? fmt.name;
-      label.innerHTML = `
-        <input type="radio" name="dz-format" value="${fmt.id}" ${idx === 0 ? "checked" : ""} />
-        <span>${fmt.name}</span>
-      `;
-      label.querySelector("input")?.addEventListener("change", () => {
-        formatList.querySelectorAll(".dz-format-option").forEach((el) => el.classList.remove("active"));
-        label.classList.add("active");
-        if (summaryLabel) {
-          summaryLabel.innerHTML = `Format: <strong>${fmt.name}</strong> (click to change)`;
-        }
-      });
-      formatList.appendChild(label);
-    });
-  }
-  form.appendChild(details);
+  // Discovery detects the image format automatically from the URL and page
+  // contents; the submit path carries no manual format override.
 
   // Centered Tactile "Dezoomify !" Button
   const btnRow = parent.ownerDocument.createElement("div");
