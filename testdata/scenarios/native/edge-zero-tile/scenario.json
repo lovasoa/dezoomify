@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-zero-tile",
+  "description": "Edge zero-tile: DZI with 0x0 dimensions produces no images and fails with discovery.no-image, recovery edit-input, never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/zero-tile/empty.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

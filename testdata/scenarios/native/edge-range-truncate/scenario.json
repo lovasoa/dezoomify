@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-range-truncate",
+  "description": "Edge ranges+truncation: one tile returns 206 partial bytes and another returns truncated 200 bytes; both fail decode and the job fails with tile.download-failed, recovery retry, never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/range-truncate/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

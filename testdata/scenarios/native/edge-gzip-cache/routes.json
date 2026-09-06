@@ -1,0 +1,70 @@
+{
+  "routes": [
+    {
+      "route_id": "edge-gzip-cache-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/gzip-cache/pyramid.dzi",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/xml",
+        "Content-Encoding": "gzip",
+        "ETag": "edge-gzip-v1",
+        "Cache-Control": "max-age=60"
+      },
+      "payload": "payloads/fixtures.test/edge/gzip-cache/pyramid.dzi.gz"
+    },
+    {
+      "route_id": "edge-gzip-cache-tile-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/gzip-cache/pyramid_files/9/0_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "ETag": "edge-tile-00",
+        "Cache-Control": "max-age=60"
+      },
+      "payload": "payloads/fixtures.test/edge/gzip-cache/tile-0_0.png"
+    },
+    {
+      "route_id": "edge-gzip-cache-tile-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/gzip-cache/pyramid_files/9/1_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "ETag": "edge-tile-10",
+        "Cache-Control": "max-age=60"
+      },
+      "payload": "payloads/fixtures.test/edge/gzip-cache/tile-1_0.png"
+    },
+    {
+      "route_id": "edge-gzip-cache-tile-0-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/gzip-cache/pyramid_files/9/0_1.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "ETag": "edge-tile-01",
+        "Cache-Control": "max-age=60"
+      },
+      "payload": "payloads/fixtures.test/edge/gzip-cache/tile-0_1.png"
+    },
+    {
+      "route_id": "edge-gzip-cache-tile-1-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/gzip-cache/pyramid_files/9/1_1.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "ETag": "edge-tile-11",
+        "Cache-Control": "max-age=60"
+      },
+      "payload": "payloads/fixtures.test/edge/gzip-cache/tile-1_1.png"
+    }
+  ]
+}

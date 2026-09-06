@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "route_id": "edge-oversize-40k-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/oversize-40k/huge.dzi",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "payload": "payloads/fixtures.test/edge/oversize-40k/huge.dzi"
+    }
+  ]
+}

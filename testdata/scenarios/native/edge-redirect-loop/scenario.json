@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-redirect-loop",
+  "description": "Edge redirect loop: self-redirecting metadata exceeds the 5-redirect limit and fails with discovery.failed (underlying transport.redirect-limit), recovery edit-input, never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/redirect-loop/start"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

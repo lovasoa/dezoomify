@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-gzip-cache",
+  "description": "Edge gzip+cache-validation: gzipped DZI with ETag/Cache-Control fails honestly with discovery.failed (native does not decompress gzip metadata), recovery edit-input, never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/gzip-cache/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

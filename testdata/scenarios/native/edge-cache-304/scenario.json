@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-cache-304",
+  "description": "Edge cache-validation: one tile answers 304 Not Modified without a cached body; the job fails with tile.download-failed, recovery retry, never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/cache-304/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-redirect-chain",
+  "description": "Edge redirect chain: 5-hop metadata redirects resolve to a 512x512 DZI and assemble; proves the 5-redirect limit is followed, never generic TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/redirect-chain/start"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "routes": [
+    {
+      "route_id": "edge-throttle-429-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/throttle-429/pyramid.dzi",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "payload": "payloads/fixtures.test/edge/throttle-429/pyramid.dzi"
+    },
+    {
+      "route_id": "edge-throttle-429-tile-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/throttle-429/pyramid_files/9/0_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/edge/throttle-429/tile-0_0.png"
+    },
+    {
+      "route_id": "edge-throttle-429-tile-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/throttle-429/pyramid_files/9/1_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/edge/throttle-429/tile-1_0.png"
+    },
+    {
+      "route_id": "edge-throttle-429-tile-0-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/throttle-429/pyramid_files/9/0_1.png",
+      "status": 429,
+      "headers": {
+        "Content-Type": "text/plain",
+        "Retry-After": "1"
+      },
+      "payload": "payloads/fixtures.test/edge/throttle-429/limited.txt"
+    },
+    {
+      "route_id": "edge-throttle-429-tile-1-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/throttle-429/pyramid_files/9/1_1.png",
+      "status": 429,
+      "headers": {
+        "Content-Type": "text/plain",
+        "Retry-After": "1"
+      },
+      "payload": "payloads/fixtures.test/edge/throttle-429/limited.txt"
+    }
+  ]
+}

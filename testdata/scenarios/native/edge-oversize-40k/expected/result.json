@@ -1,0 +1,9 @@
+{
+  "outcome": "failed",
+  "code": "output.canvas-limit",
+  "recovery": "choose-output",
+  "phase": "output",
+  "retryable": false,
+  "transport": "native",
+  "resourceKind": "output"
+}

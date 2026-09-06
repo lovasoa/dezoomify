@@ -1,0 +1,9 @@
+{
+  "outcome": "failed",
+  "code": "discovery.failed",
+  "recovery": "edit-input",
+  "phase": "discovery",
+  "retryable": false,
+  "transport": "native",
+  "resourceKind": "metadata"
+}

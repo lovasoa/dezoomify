@@ -1,0 +1,114 @@
+{
+  "routes": [
+    {
+      "route_id": "edge-redirect-chain-start",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/start",
+      "status": 302,
+      "headers": {
+        "Location": "/fetch?url=https://fixtures.test/edge/redirect-chain/r1"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/empty.txt"
+    },
+    {
+      "route_id": "edge-redirect-chain-r1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/r1",
+      "status": 302,
+      "headers": {
+        "Location": "/fetch?url=https://fixtures.test/edge/redirect-chain/r2"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/empty.txt"
+    },
+    {
+      "route_id": "edge-redirect-chain-r2",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/r2",
+      "status": 302,
+      "headers": {
+        "Location": "/fetch?url=https://fixtures.test/edge/redirect-chain/r3"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/empty.txt"
+    },
+    {
+      "route_id": "edge-redirect-chain-r3",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/r3",
+      "status": 302,
+      "headers": {
+        "Location": "/fetch?url=https://fixtures.test/edge/redirect-chain/r4"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/empty.txt"
+    },
+    {
+      "route_id": "edge-redirect-chain-r4",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/r4",
+      "status": 302,
+      "headers": {
+        "Location": "/fetch?url=https://fixtures.test/edge/redirect-chain/final.dzi"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/empty.txt"
+    },
+    {
+      "route_id": "edge-redirect-chain-final",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/final.dzi",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/final.dzi"
+    },
+    {
+      "route_id": "edge-redirect-chain-tile-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/final_files/9/0_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/final_files_9_0_0.png"
+    },
+    {
+      "route_id": "edge-redirect-chain-tile-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/final_files/9/1_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/final_files_9_1_0.png"
+    },
+    {
+      "route_id": "edge-redirect-chain-tile-0-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/final_files/9/0_1.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/final_files_9_0_1.png"
+    },
+    {
+      "route_id": "edge-redirect-chain-tile-1-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-chain/final_files/9/1_1.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-chain/final_files_9_1_1.png"
+    }
+  ]
+}

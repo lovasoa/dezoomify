@@ -1,0 +1,63 @@
+{
+  "routes": [
+    {
+      "route_id": "edge-range-truncate-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/range-truncate/pyramid.dzi",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "payload": "payloads/fixtures.test/edge/range-truncate/pyramid.dzi"
+    },
+    {
+      "route_id": "edge-range-truncate-tile-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/range-truncate/pyramid_files/9/0_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "Accept-Ranges": "bytes"
+      },
+      "payload": "payloads/fixtures.test/edge/range-truncate/tile-0_0.png"
+    },
+    {
+      "route_id": "edge-range-truncate-tile-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/range-truncate/pyramid_files/9/1_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "Accept-Ranges": "bytes"
+      },
+      "payload": "payloads/fixtures.test/edge/range-truncate/tile-1_0.png"
+    },
+    {
+      "route_id": "edge-range-truncate-tile-0-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/range-truncate/pyramid_files/9/0_1.png",
+      "status": 206,
+      "headers": {
+        "Content-Type": "image/png",
+        "Content-Range": "bytes 0-99/569",
+        "Accept-Ranges": "bytes"
+      },
+      "payload": "payloads/fixtures.test/edge/range-truncate/partial-0_1.bin"
+    },
+    {
+      "route_id": "edge-range-truncate-tile-1-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/range-truncate/pyramid_files/9/1_1.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png"
+      },
+      "payload": "payloads/fixtures.test/edge/range-truncate/truncated-1_1.bin"
+    }
+  ]
+}

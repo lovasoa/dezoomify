@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-malformed-json",
+  "description": "Edge malformed JSON: truncated IIIF info.json fails discovery with discovery.failed, recovery edit-input, never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/malformed-json/info.json"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

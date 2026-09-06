@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-resume-offline",
+  "description": "Edge offline resume: identical 512x512 pyramid with tile-cache; first run populates the cache, second run reuses bodies after the server loses tiles (see pipeline_loopback tile_cache test), success never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/resume-offline/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

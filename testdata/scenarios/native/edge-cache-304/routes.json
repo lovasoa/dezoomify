@@ -1,0 +1,63 @@
+{
+  "routes": [
+    {
+      "route_id": "edge-cache-304-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/cache-304/pyramid.dzi",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/xml",
+        "ETag": "edge-meta-v1"
+      },
+      "payload": "payloads/fixtures.test/edge/cache-304/pyramid.dzi"
+    },
+    {
+      "route_id": "edge-cache-304-tile-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/cache-304/pyramid_files/9/0_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "ETag": "t00"
+      },
+      "payload": "payloads/fixtures.test/edge/cache-304/tile-0_0.png"
+    },
+    {
+      "route_id": "edge-cache-304-tile-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/cache-304/pyramid_files/9/1_0.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "ETag": "t10"
+      },
+      "payload": "payloads/fixtures.test/edge/cache-304/tile-1_0.png"
+    },
+    {
+      "route_id": "edge-cache-304-tile-0-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/cache-304/pyramid_files/9/0_1.png",
+      "status": 200,
+      "headers": {
+        "Content-Type": "image/png",
+        "ETag": "t01"
+      },
+      "payload": "payloads/fixtures.test/edge/cache-304/tile-0_1.png"
+    },
+    {
+      "route_id": "edge-cache-304-tile-1-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/cache-304/pyramid_files/9/1_1.png",
+      "status": 304,
+      "headers": {
+        "ETag": "t11"
+      },
+      "payload": "payloads/fixtures.test/edge/cache-304/empty.txt"
+    }
+  ]
+}

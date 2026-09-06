@@ -1,0 +1,11 @@
+{
+  "outputHash": "sha256:5b93e2f63fa5fcebb41306125c8afbd78f43793b960c4a052cfdd95f48fd8958",
+  "imageSize": {
+    "x": 512,
+    "y": 512
+  },
+  "tileCount": 4,
+  "outputFormat": "png",
+  "recovery": "none (success; EXIF preserved)",
+  "code": "ok"
+}

@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "route_id": "edge-redirect-loop-start",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/edge/redirect-loop/start",
+      "status": 302,
+      "headers": {
+        "Location": "/fetch?url=https://fixtures.test/edge/redirect-loop/start"
+      },
+      "payload": "payloads/fixtures.test/edge/redirect-loop/empty.txt"
+    }
+  ]
+}

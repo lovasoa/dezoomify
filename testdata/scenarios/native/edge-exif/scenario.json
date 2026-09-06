@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-exif",
+  "description": "Edge EXIF rotation: JPEG tiles carry EXIF orientation 6 (RightTop); decode preserves pixels and the PNG output carries the first tile EXIF, success never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/exif/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-malformed-xml",
+  "description": "Edge malformed XML: truncated DZI metadata fails discovery with discovery.failed, recovery edit-input, never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/malformed-xml/broken.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

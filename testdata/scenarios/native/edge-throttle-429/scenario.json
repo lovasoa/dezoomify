@@ -1,0 +1,13 @@
+{
+  "id": "native/edge-throttle-429",
+  "description": "Edge 429/throttle: throttled tiles answer 429 with Retry-After; retries exhaust and the job fails with tile.download-failed (retryable via retry), never TILE_FAILED",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/edge/throttle-429/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}
