@@ -163,6 +163,8 @@ separate protected CI operations against the verified artifact digests.
 
 ### Add or change a format
 
+Follow [Contributing a format](CONTRIBUTING-format.md). In short:
+
 1. Add core parser/plan coverage and scenario-local payloads.
 2. Run `cargo xtask fixtures verify` and `cargo xtask test core --parity`.
 3. Run `cargo xtask test scenario --scenario <scenario-id>`.

@@ -18,7 +18,7 @@ cargo xtask release plan <version> <channel>
 cargo xtask release build --plan <path>
 cargo xtask release verify --plan <path> [--artifacts <path>]
 cargo xtask protocol <generate|check> [options]
-cargo xtask fixtures <verify|serve> [options]
+cargo xtask fixtures <verify|serve|capture> [options]
 ```
 
 With no target, `test` is the fast deterministic development loop. `test all`

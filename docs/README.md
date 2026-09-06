@@ -18,6 +18,8 @@ dezoomify discovers zoomable images, lets a user choose an image and level, down
 - [Testing](testing.md): shared scenarios and runtime-specific coverage.
 - [Security](security.md): trust boundaries, credentials, and proxy controls.
 - [Development](development.md): workspace conventions and validation.
+- [Contributing a format](CONTRIBUTING-format.md): capture, parser, scenario,
+  and pull request checklist for a new site format.
 - [Releases](releases.md): coordinated versions and compatibility checks.
 
 ## System invariants
