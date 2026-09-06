@@ -116,6 +116,14 @@ pub mod wasm_api {
         super::protocol_version().to_string()
     }
 
+    /// The `rankCandidates` export: order scan URLs by core preference.
+    /// Takes a JSON array of URL strings, returns a JSON array of
+    /// `{url, format}` in try-order (unknowns last, never dropped).
+    #[wasm_bindgen(js_name = "rankCandidates")]
+    pub fn js_rank_candidates(urls_json: String) -> Result<String, JsValue> {
+        super::discovery::rank_candidates_json(&urls_json).map_err(js_error)
+    }
+
     /// The `Session` export: owns one job, one arena, one message queue.
     #[wasm_bindgen(js_name = "Session")]
     pub struct JsSession {
