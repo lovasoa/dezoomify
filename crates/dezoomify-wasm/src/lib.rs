@@ -52,11 +52,6 @@
 //!
 //! ## Deviations recorded by this phase
 //!
-//! * The crate resolves standalone (`[workspace]` in its `Cargo.toml`)
-//!   because the root workspace `members` list is frozen for this task; run
-//!   `cargo test --manifest-path crates/dezoomify-wasm/Cargo.toml` (or
-//!   `cargo test -p dezoomify-wasm` from inside `crates/dezoomify-wasm`).
-//!   Add the crate to the root `members` and drop `[workspace]` when allowed.
 //! * [`session`] delegates its whole lifecycle to `dezoomify-job`; the
 //!   adapter projects engine effects/events onto typed protocol messages.
 //!   Engine resources beyond the lean model (real format parsing, real tile

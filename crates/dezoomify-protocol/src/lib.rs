@@ -7,6 +7,7 @@
 // reason, resource kind, recovery actions); boxing them would complicate the
 // canonical JSON projection without runtime benefit.
 #![allow(clippy::result_large_err)]
+#![forbid(unsafe_code)]
 
 pub mod codec;
 pub mod dto;

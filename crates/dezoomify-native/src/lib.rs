@@ -1,6 +1,7 @@
 //! Native effect runtime: real HTTP egress (rustls), header/auth scope,
 //! bounded scheduler bookkeeping, cache helpers, output validation, progress
 //! counters, image decode/assemble/encode pipeline, and real output hashing.
+#![forbid(unsafe_code)]
 
 pub mod auth;
 pub mod cache;
