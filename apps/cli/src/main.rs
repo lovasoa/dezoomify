@@ -66,7 +66,15 @@ fn main() {
             if json {
                 println!(
                     "{}",
-                    report::machine_completed(&handle.id, handle.seq(), &outcome.output_hash)
+                    report::machine_completed(
+                        &handle.id,
+                        handle.seq(),
+                        &outcome.output_hash,
+                        &outcome.format,
+                        outcome.image_size.x,
+                        outcome.image_size.y,
+                        outcome.tile_count,
+                    )
                 );
             } else {
                 eprintln!(

@@ -307,6 +307,7 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
         let _ = std::fs::remove_file(&output);
         let mut command = Command::new(&cli);
         command
+            .arg("--json")
             .arg("--max-width")
             .arg("1200")
             .arg(target.url)
@@ -323,18 +324,19 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
                 if out.status.success()
                     && output.metadata().map(|m| m.len() > 0).unwrap_or(false) =>
             {
-                let size = output.metadata().map(|m| m.len()).unwrap_or(0);
-                println!("live {}: PASS ({} output bytes)", target.name, size);
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let (format, width, height) = parse_completed(&stdout);
+                println!("{} : {format} : {width}x{height}", target.url);
                 passed += 1;
             }
             Ok(out) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
-                let detail = stderr.lines().last().unwrap_or("").trim().to_string();
-                println!("live {}: FAIL ({})", target.name, truncate(&detail, 220));
+                let detail = last_error_message(&stderr);
+                println!("{} : {}", target.url, truncate(&detail, 220));
                 failed.push(target.name.to_string());
             }
             Err(e) => {
-                println!("live {}: FAIL (cli spawn: {e})", target.name);
+                println!("{} : cli spawn: {e}", target.url);
                 failed.push(target.name.to_string());
             }
         }
@@ -405,6 +407,47 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
+/// Extract the detected format and image dimensions from the CLI `--json`
+/// completion record. Falls back to `unknown`/`0x0` when the record is
+/// missing so a successful download still prints one stable line.
+fn parse_completed(stdout: &str) -> (String, u64, u64) {
+    for line in stdout.lines().rev() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("kind").and_then(serde_json::Value::as_str) != Some("completed") {
+            continue;
+        }
+        let format = value
+            .get("format")
+            .and_then(serde_json::Value::as_str)
+            .filter(|format| !format.is_empty())
+            .unwrap_or("unknown")
+            .to_string();
+        let width = value
+            .get("width")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let height = value
+            .get("height")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        return (format, width, height);
+    }
+    ("unknown".to_string(), 0, 0)
+}
+
+/// Last non-empty stderr line without the `error: ` prefix.
+fn last_error_message(stderr: &str) -> String {
+    let raw = stderr
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    raw.strip_prefix("error: ").unwrap_or(raw).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -421,5 +464,33 @@ mod tests {
     #[test]
     fn dry_run_validates_targets_without_network() {
         assert!(super::test_live(&["--dry-run".to_string(), "--fixtures".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn parses_completed_format_and_dimensions() {
+        let stdout = "{\"job\":\"job:native-1\",\"seq\":1,\"kind\":\"started\",\"detail\":{}}\n\
+            {\"job\":\"job:native-1\",\"seq\":5,\"kind\":\"completed\",\"outputHash\":\"sha256:abc\",\
+            \"format\":\"zoomify\",\"width\":1200,\"height\":800,\"tileCount\":4}";
+        assert_eq!(
+            super::parse_completed(stdout),
+            ("zoomify".to_string(), 1200, 800)
+        );
+    }
+
+    #[test]
+    fn completed_falls_back_without_a_record() {
+        assert_eq!(
+            super::parse_completed("{\"kind\":\"started\"}\nnot json"),
+            ("unknown".to_string(), 0, 0)
+        );
+    }
+
+    #[test]
+    fn error_message_strips_prefix_and_blanks() {
+        assert_eq!(
+            super::last_error_message("progress\nerror: tile failed (tile.download-failed)\n"),
+            "tile failed (tile.download-failed)"
+        );
+        assert_eq!(super::last_error_message(""), "");
     }
 }

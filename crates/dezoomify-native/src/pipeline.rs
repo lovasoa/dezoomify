@@ -83,6 +83,8 @@ pub struct PipelineOutcome {
     pub output_hash: String,
     pub tile_count: usize,
     pub image_size: Vec2d,
+    /// Stable id of the detected format (e.g. `zoomify`, `iiif`).
+    pub format: String,
     /// True when missing tiles were left blank under [`PartialPolicy::Keep`].
     pub partial: bool,
 }

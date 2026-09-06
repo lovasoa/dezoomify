@@ -1,6 +1,6 @@
 # Job engine
 
-`crates/dezoomify-job` is the deterministic effect/state machine used by the browser runtime through the WASM adapter. It decides what must happen next; it never performs I/O, decodes pixels, reads time, or writes output. The native runtime implements the equivalent lifecycle directly; shared scenarios assert equivalent behavior across both runtimes.
+`crates/dezoomify-job` is the deterministic effect/state machine used by the browser runtime through the WASM adapter and by the native runtime through `crates/dezoomify-native/src/job_driver.rs`. It decides what must happen next; it never performs I/O, decodes pixels, reads time, or writes output. Both runtimes execute its effects and feed results back; shared scenarios assert equivalent behavior across both runtimes.
 
 ## Model
 

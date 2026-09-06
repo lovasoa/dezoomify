@@ -45,7 +45,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use dezoomify_core::core::model::ProcessingRecipe;
+use dezoomify_core::core::adaptive::ObservationResult;
+use dezoomify_core::core::model::{ProcessingRecipe, Request};
 use dezoomify_core::Vec2d;
 use dezoomify_job::{Config as JobConfig, Job, JobResponse, State as JobState};
 
@@ -56,7 +57,6 @@ use crate::pipeline::{
     blit_onto, encode_png, fetch_and_decode, merge_headers, probe_tile_bytes, sha256_hex,
     PartialPolicy, PipelineConfig, PipelineEvent, PipelineOutcome,
 };
-use dezoomify_core::core::model::Request;
 
 /// Deferred-resolution bound: the initial discovery plus this many deferred
 /// follows, matching the legacy loop limit.
@@ -101,8 +101,10 @@ fn mint_job_id() -> String {
 /// identical on both sides so the fetch layer, not the engine, reports
 /// oversize resources; probe planning stays enabled for native.
 fn job_config_for(config: &PipelineConfig) -> Result<JobConfig, NativeError> {
-    let fetches = config.max_concurrent.clamp(1, 64) as u32;
     let tiles = config.max_tiles.clamp(1, 16_777_216) as u32;
+    // The engine requires concurrency within the tile budget; the legacy
+    // loop simply ran smaller plans through the same pool.
+    let fetches = (config.max_concurrent.clamp(1, 64) as u32).min(tiles);
     let retries = config.max_retries.clamp(1, 1024);
     let max_bytes = config.fetch.max_bytes.clamp(1024, 4_294_967_296);
     let buffers = fetches.clamp(16, 65_536);
@@ -191,21 +193,14 @@ pub(crate) fn map_failure_code(code: &str) -> &'static str {
 struct CatalogImage {
     id: String,
     ready: bool,
+    format: String,
     levels: Vec<(String, u64, u64)>,
 }
 
+#[derive(Clone, Copy)]
 struct TileGeom {
     destination: Vec2d,
     extent: Option<Vec2d>,
-}
-
-impl Clone for TileGeom {
-    fn clone(&self) -> Self {
-        Self {
-            destination: self.destination,
-            extent: self.extent,
-        }
-    }
 }
 
 struct Published {
@@ -216,7 +211,6 @@ struct Published {
 }
 
 struct Attempt<'a> {
-    job_id: String,
     config: &'a PipelineConfig,
     user: &'a UserHeaders,
     output_path: PathBuf,
@@ -263,7 +257,6 @@ fn drive_job(
     job.start()
         .map_err(|e| NativeError::new("native.internal", format!("{}: {}", e.code, e.message)))?;
     let mut attempt = Attempt {
-        job_id: job_id.clone(),
         config,
         user,
         output_path: PathBuf::from(output_path),
@@ -297,20 +290,17 @@ fn drive_job(
             handle_event(&mut attempt, &event)?;
         }
         if job.state() == JobState::AwaitingImageSelection && !attempt.catalog.is_empty() {
-            let first = &attempt.catalog[0];
-            if first.ready {
-                let image = first.id.clone();
+            if attempt.catalog[0].ready {
+                let image = attempt.catalog[0].id.clone();
                 reply(
                     &mut job,
-                    &job_id,
                     JobResponse::SelectedImage {
                         job: job_id.clone(),
                         image,
                     },
                 )?;
             } else {
-                let id = first.id.clone();
-                let uri = job.deferred_uri(&id).ok_or_else(|| {
+                let uri = job.deferred_uri(&attempt.catalog[0].id).ok_or_else(|| {
                     NativeError::new(
                         "discovery.no-image",
                         "no zoomable image found at the input url",
@@ -321,13 +311,12 @@ fn drive_job(
             continue;
         }
         if job.state() == JobState::AwaitingLevelSelection && !attempt.catalog.is_empty() {
-            let levels = attempt.catalog[0].levels.clone();
-            let level = select_level_id(&levels, attempt.config.max_width).ok_or_else(|| {
-                NativeError::new("discovery.no-level", "image has no zoom levels")
-            })?;
+            let level = select_level_id(&attempt.catalog[0].levels, attempt.config.max_width)
+                .ok_or_else(|| {
+                    NativeError::new("discovery.no-level", "image has no zoom levels")
+                })?;
             reply(
                 &mut job,
-                &job_id,
                 JobResponse::SelectedLevel {
                     job: job_id.clone(),
                     level,
@@ -360,6 +349,11 @@ fn drive_job(
                 output_hash: published.output_hash,
                 tile_count: published.tile_count,
                 image_size: published.image_size,
+                format: attempt
+                    .catalog
+                    .first()
+                    .map(|image| image.format.clone())
+                    .unwrap_or_default(),
                 partial: published.partial,
             }))
         }
@@ -404,8 +398,7 @@ fn drive_job(
     }
 }
 
-fn reply(job: &mut Job, job_id: &str, response: JobResponse) -> Result<(), NativeError> {
-    let _ = job_id;
+fn reply(job: &mut Job, response: JobResponse) -> Result<(), NativeError> {
     job.on_response(response).map_err(|e| {
         NativeError::new(
             "native.internal",
@@ -432,6 +425,11 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
                         .to_string();
                     let ready =
                         image.get("readiness").and_then(serde_json::Value::as_str) == Some("ready");
+                    let format = image
+                        .get("format")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
                     let mut levels = Vec::new();
                     if let Some(entries) = image.get("levels").and_then(serde_json::Value::as_array)
                     {
@@ -453,7 +451,12 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
                             ));
                         }
                     }
-                    catalog.push(CatalogImage { id, ready, levels });
+                    catalog.push(CatalogImage {
+                        id,
+                        ready,
+                        format,
+                        levels,
+                    });
                 }
             }
             attempt.catalog = catalog;
@@ -567,7 +570,7 @@ fn execute_effects(
     attempt: &mut Attempt<'_>,
     effects: Vec<serde_json::Value>,
 ) -> Result<(), NativeError> {
-    let job_id = attempt.job_id.clone();
+    let job_id = job.id().to_string();
     let mut tiles: Vec<TileFetch> = Vec::new();
     for effect in &effects {
         let kind = effect
@@ -587,8 +590,17 @@ fn execute_effects(
                     .unwrap_or("")
                     .to_string();
                 // Core discovery headers are empty in practice; defaults plus
-                // scoped user headers match the legacy merge exactly.
+                // scoped user headers match the legacy merge exactly. The
+                // progress event counts attempts, like the legacy loop.
                 let merged = merge_headers(&Request::new(&uri));
+                attempt.discovery_resources += 1;
+                attempt.emit(
+                    "discovery",
+                    BTreeMap::from([(
+                        "resources".to_string(),
+                        attempt.discovery_resources.to_string(),
+                    )]),
+                );
                 match fetch(
                     &uri,
                     &merged,
@@ -597,17 +609,8 @@ fn execute_effects(
                     &attempt.config.fetch,
                 ) {
                     Ok(outcome) if outcome.ok() => {
-                        attempt.discovery_resources += 1;
-                        attempt.emit(
-                            "discovery",
-                            BTreeMap::from([(
-                                "resources".to_string(),
-                                attempt.discovery_resources.to_string(),
-                            )]),
-                        );
                         reply(
                             job,
-                            &job_id,
                             JobResponse::ResourceBytes {
                                 job: job_id.clone(),
                                 request,
@@ -619,7 +622,6 @@ fn execute_effects(
                     Ok(_) => {
                         reply(
                             job,
-                            &job_id,
                             JobResponse::FetchFailure {
                                 job: job_id.clone(),
                                 request,
@@ -629,7 +631,6 @@ fn execute_effects(
                     Err(_) => {
                         reply(
                             job,
-                            &job_id,
                             JobResponse::FetchFailure {
                                 job: job_id.clone(),
                                 request,
@@ -639,31 +640,30 @@ fn execute_effects(
                 }
             }
             "acquire-tile" if is_probe(effect) => {
-                let Some(fetch) = tile_fetch(effect) else {
+                let Some(need) = tile_fetch(effect) else {
                     return Err(NativeError::new(
                         "native.internal",
                         "probe effect lacks tile identity",
                     ));
                 };
                 let read = probe_tile_bytes(
-                    &fetch.uri,
-                    &fetch.headers,
-                    &fetch.processing,
+                    &need.uri,
+                    &need.headers,
+                    &need.processing,
                     attempt.config,
                     attempt.user,
                 );
                 let (available, width, height) = match read.observation {
-                    dezoomify_core::core::adaptive::ObservationResult::Available { size } => {
+                    ObservationResult::Available { size } => {
                         (true, u64::from(size.x), u64::from(size.y))
                     }
-                    dezoomify_core::core::adaptive::ObservationResult::Missing => (false, 0, 0),
+                    ObservationResult::Missing => (false, 0, 0),
                 };
                 reply(
                     job,
-                    &job_id,
                     JobResponse::ProbeOutcome {
                         job: job_id.clone(),
-                        tile: fetch.tile,
+                        tile: need.tile,
                         available,
                         width,
                         height,
@@ -671,7 +671,7 @@ fn execute_effects(
                 )?;
             }
             "acquire-tile" => {
-                let Some(fetch) = tile_fetch(effect) else {
+                let Some(need) = tile_fetch(effect) else {
                     return Err(NativeError::new(
                         "native.internal",
                         "tile effect lacks tile identity",
@@ -680,17 +680,17 @@ fn execute_effects(
                 if let Some(canvas) = effect.get("canvas").filter(|v| !v.is_null()) {
                     attempt.canvas = attempt.canvas.or(Some(point(canvas)));
                 }
-                if !attempt.order.contains(&fetch.tile) {
-                    attempt.order.push(fetch.tile.clone());
+                if !attempt.order.contains(&need.tile) {
+                    attempt.order.push(need.tile.clone());
                     attempt.geoms.insert(
-                        fetch.tile.clone(),
+                        need.tile.clone(),
                         TileGeom {
-                            destination: fetch.destination,
-                            extent: fetch.extent,
+                            destination: need.destination,
+                            extent: need.extent,
                         },
                     );
                 }
-                tiles.push(fetch);
+                tiles.push(need);
             }
             "request-destination" => {
                 match validate_destination(
@@ -700,23 +700,20 @@ fn execute_effects(
                 ) {
                     Ok(()) => reply(
                         job,
-                        &job_id,
                         JobResponse::DestinationGranted {
                             job: job_id.clone(),
                             destination: "dst:0".to_string(),
                         },
                     )?,
-                    Err(message) => reply(
-                        job,
-                        &job_id,
-                        JobResponse::DestinationDenied {
-                            job: job_id.clone(),
-                        },
-                    )
-                    .and({
+                    Err(message) => {
                         attempt.destination_error = Some(message);
-                        Ok(())
-                    })?,
+                        reply(
+                            job,
+                            JobResponse::DestinationDenied {
+                                job: job_id.clone(),
+                            },
+                        )?;
+                    }
                 }
             }
             "request-decision" => {
@@ -728,7 +725,6 @@ fn execute_effects(
                     let keep = attempt.config.partial_policy == PartialPolicy::Keep;
                     reply(
                         job,
-                        &job_id,
                         JobResponse::PartialKeep {
                             job: job_id.clone(),
                             keep,
@@ -748,7 +744,6 @@ fn execute_effects(
                         let number = attempt.recovery_attempts;
                         reply(
                             job,
-                            &job_id,
                             JobResponse::RetryReady {
                                 job: job_id.clone(),
                                 attempt: format!("att:{number}"),
@@ -788,18 +783,18 @@ fn acquire_tiles(
     attempt: &mut Attempt<'_>,
     tiles: Vec<TileFetch>,
 ) -> Result<(), NativeError> {
-    let job_id = attempt.job_id.clone();
+    let job_id = job.id().to_string();
     let config = attempt.config;
     let user = attempt.user;
     let mut outcomes: Vec<(String, bool, Option<image::RgbaImage>)> =
         Vec::with_capacity(tiles.len());
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(tiles.len());
-        for fetch in &tiles {
+        for need in &tiles {
             handles.push((
-                fetch.tile.clone(),
+                need.tile.clone(),
                 scope.spawn(move || {
-                    fetch_and_decode(&fetch.uri, &fetch.headers, &fetch.processing, config, user)
+                    fetch_and_decode(&need.uri, &need.headers, &need.processing, config, user)
                 }),
             ));
         }
@@ -825,7 +820,6 @@ fn acquire_tiles(
         }
         reply(
             job,
-            &job_id,
             JobResponse::TileOutcome {
                 job: job_id.clone(),
                 tile,
@@ -863,12 +857,12 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
     }
     let partial = attempt.decoded.len() != attempt.order.len();
     let mut target = image::RgbaImage::new(width, height);
-    for tile in attempt.order.clone() {
-        let Some(image) = attempt.decoded.get(&tile) else {
+    for tile in &attempt.order {
+        let Some(image) = attempt.decoded.get(tile) else {
             // Kept-partial hole: the blank canvas shows through.
             continue;
         };
-        let geom = attempt.geoms.get(&tile).cloned().unwrap_or(TileGeom {
+        let geom = attempt.geoms.get(tile).copied().unwrap_or(TileGeom {
             destination: Vec2d::default(),
             extent: None,
         });

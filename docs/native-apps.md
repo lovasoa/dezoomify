@@ -1,6 +1,6 @@
 # Native apps
 
-The CLI and Tauri desktop application share `crates/dezoomify-native`. This runtime executes job effects with native HTTP, filesystem, cache, decoder, processor, and encoder implementations.
+The CLI and Tauri desktop application share `crates/dezoomify-native`. This runtime drives `crates/dezoomify-job` and executes its effects with native HTTP, filesystem, cache, decoder, processor, and encoder implementations.
 
 ## Native runtime
 
