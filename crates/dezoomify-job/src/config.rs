@@ -84,22 +84,23 @@ impl Default for Config {
 
 impl Config {
     /// Validate all bounds, rejecting zero, overflow, and unreasonable combos.
+    /// `max_retries` may be zero (no refetch: first failure fails the tile).
     ///
     /// # Errors
     ///
-    /// Returns a typed [`ConfigError`] when any bound is zero, exceeds its
-    /// documented maximum, or forms an unreasonable combination.
+    /// Returns a typed [`ConfigError`] when any bound is zero (except
+    /// `max_retries`), exceeds its documented maximum, or forms an
+    /// unreasonable combination.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.max_concurrent_fetches == 0
             || self.max_concurrent_decodes == 0
             || self.max_tiles == 0
-            || self.max_retries == 0
             || self.max_buffers == 0
             || self.max_bytes == 0
         {
             return Err(ConfigError::new(
                 "job.invalid-config",
-                "all config bounds must be non-zero".to_string(),
+                "all config bounds except max_retries must be non-zero".to_string(),
             ));
         }
         if self.max_concurrent_fetches > MAX_FETCHES {

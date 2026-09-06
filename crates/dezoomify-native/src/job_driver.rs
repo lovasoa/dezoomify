@@ -26,9 +26,8 @@
 //!   `max_concurrent`), replying `TileOutcome`; the job owns retry counting
 //!   and partial decisions while the driver paces request starts by
 //!   `min_interval` and sleeps the reference `retry_delay` + position jitter
-//!   with doubling before refetches. With `max_retries: 0` an already-failed
-//!   tile is answered without refetching (the engine floor of 1 still
-//!   consumes the retry roundtrip, but no second request is sent).
+//!   with doubling before refetches. With `max_retries: 0` the first failure
+//!   fails the tile immediately with no refetch (first attempt only).
 //!   With `PipelineConfig::cache_dir` set, tile bodies persist under the job
 //!   namespace and later runs skip refetching tiles whose bytes still decode.
 //! * `decode-pixels`/`open-encoder`/`finalize-encoder` → acknowledged from
@@ -133,13 +132,11 @@ fn job_config_for(config: &PipelineConfig) -> Result<JobConfig, NativeError> {
     // The engine requires concurrency within the tile budget; the legacy
     // loop simply ran smaller plans through the same pool.
     let fetches = (config.max_concurrent.clamp(1, 64) as u32).min(tiles);
-    // Zero retries is meaningful: the first failure fails the tile, which
+    // Zero retries is real: the first failure fails the tile with no
+    // refetch (first attempt only, immediate typed failure). The engine
+    // retry counting (`next <= max_retries`) handles `0` directly, which
     // speeds up generic probing that relies on failed loads for geometry.
-    // The engine floor is 1 (its validator rejects 0), so a configured 0
-    // is passed as 1 and the driver emulates no-retry by never refetching
-    // an already-failed tile (see `acquire_tiles`): the retry roundtrip is
-    // answered immediately without touching the network.
-    let retries = config.max_retries.clamp(0, 1024).max(1);
+    let retries = config.max_retries.clamp(0, 1024);
     let max_bytes = config.fetch.max_bytes.clamp(1024, 4_294_967_296);
     let buffers = fetches.clamp(16, 65_536);
     let job = JobConfig {
@@ -338,8 +335,7 @@ struct Attempt<'a> {
     /// the pixel buffers above).
     acquired: usize,
     /// Prior failure counts per tile id: drives the retry backoff
-    /// (`retry_delay` + jitter + doubling) and the `--retries 0` no-refetch
-    /// emulation.
+    /// (`retry_delay` + jitter + doubling).
     tile_failures: HashMap<String, u32>,
     /// Start of the most recent tile request: `--min-interval` staggering
     /// sleeps until `throttle_last + min_interval` before starting the next
@@ -931,31 +927,25 @@ fn acquire_tiles(
         .as_ref()
         .map(|(dir, namespace)| (dir.as_path(), namespace.as_str()));
     // Per-tile plan for this batch: backoff sleeps run inside the worker
-    // threads (concurrent, like the reference async loop); `--retries 0`
-    // tiles that already failed are answered without refetching.
+    // threads (concurrent, like the reference async loop). With
+    // `max_retries: 0` the engine never issues a retry, so every effect
+    // here is a first attempt that always fetches.
     struct Planned {
         tile: String,
         backoff: Duration,
-        skip_fetch: bool,
     }
     let mut planned = Vec::with_capacity(tiles.len());
     for need in &tiles {
         let failures = attempt.tile_failures.get(&need.tile).copied().unwrap_or(0);
-        let skip_fetch = config.max_retries == 0 && failures > 0;
-        let backoff = if skip_fetch {
-            Duration::ZERO
-        } else {
-            crate::pipeline::retry_wait(
-                config.retry_delay,
-                need.destination.x,
-                need.destination.y,
-                failures,
-            )
-        };
+        let backoff = crate::pipeline::retry_wait(
+            config.retry_delay,
+            need.destination.x,
+            need.destination.y,
+            failures,
+        );
         planned.push(Planned {
             tile: need.tile.clone(),
             backoff,
-            skip_fetch,
         });
     }
     let mut outcomes: Vec<(String, bool, Option<crate::pipeline::DecodedTile>)> =
@@ -974,10 +964,6 @@ fn acquire_tiles(
                     }
                 }
                 attempt.throttle_last = Some(Instant::now());
-            }
-            if plan.skip_fetch {
-                outcomes.push((plan.tile, false, None));
-                continue;
             }
             handles.push((
                 plan.tile,
