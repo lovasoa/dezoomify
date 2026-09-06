@@ -176,7 +176,19 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
     ] {
         let text = std::fs::read_to_string(super::repo_root().join(rel))
             .map_err(|e| format!("missing web source {rel}: {e}"))?;
-        for needle in ["sk-", "AKIA", "BEGIN PRIVATE KEY", "password="] {
+        for needle in [
+            "sk-",
+            "AKIA",
+            "BEGIN PRIVATE KEY",
+            "BEGIN OPENSSH PRIVATE KEY",
+            "password=",
+            "apiKey=",
+            "apikey=",
+            "api_key=",
+            "access_token",
+            "x-api-key",
+            "aws_secret_access_key",
+        ] {
             if text.contains(needle) {
                 return Err(format!("web source {rel} contains secret pattern"));
             }
