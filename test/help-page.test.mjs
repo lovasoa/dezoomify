@@ -127,7 +127,7 @@ test("app pages link the in-app docs instead of legacy doc sites", () => {
       `${source} must not link the legacy wiki`,
     );
     assert.ok(
-      code.includes("dezoomify.ophir.dev/help/troubleshooting.html"),
+      code.includes("./help/troubleshooting.html"),
       `${source} points failures at the in-app troubleshooting page`,
     );
   }

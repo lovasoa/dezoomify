@@ -1,4 +1,4 @@
-# tests/ — untracked Playwright residue, not a suite
+# tests/ -- untracked Playwright residue, not a suite
 
 This directory is not canonical and never runs in any `cargo xtask test` or
 `cargo xtask ci` lane. It holds only ignored output (`node_modules/`,
