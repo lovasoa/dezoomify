@@ -20,6 +20,8 @@ dezoomify discovers zoomable images, lets a user choose an image and level, down
 - [Development](development.md): workspace conventions and validation.
 - [Contributing a format](CONTRIBUTING-format.md): capture, parser, scenario,
   and pull request checklist for a new site format.
+- [Compatibility](compatibility.md): browsers, canvas limits, format support by
+  app, and support reports.
 - [Releases](releases.md): coordinated versions and compatibility checks.
 
 ## System invariants

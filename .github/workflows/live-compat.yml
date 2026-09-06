@@ -1,14 +1,26 @@
 name: live-compat
 on:
   schedule:
-    - cron: "0 7 * * *"
+    # Weekly public canary: two real sites only (--limit 2). Advisory, never
+    # blocking; see docs/compatibility.md.
+    - cron: "0 7 * * 1"
   workflow_dispatch: {}
 permissions:
   contents: read
 jobs:
-  live:
+  manifest:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: cargo xtask test live --dry-run --fixtures
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0 # must match rust-toolchain.toml
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo xtask test live --public --limit 2
