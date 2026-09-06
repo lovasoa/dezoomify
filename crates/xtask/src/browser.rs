@@ -210,7 +210,7 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
             }
         }
     }
-    build_site()?;
+    build_site(false)?;
     run_node(&["--test", "test/*.test.mjs"])?;
     println!(
         "build web: ok (mirrors, help, wasm glue, and dist/ assembled by scripts/build-site.mjs)"
@@ -222,10 +222,14 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
 /// mirrors, help pages, wasm glue, and the deployable `dist/` tree. The
 /// same script runs in the website-deploy GitHub Actions workflow, so
 /// local builds and deployments cannot diverge.
-fn build_site() -> Result<(), String> {
+fn build_site(no_wasm: bool) -> Result<(), String> {
     let root = super::repo_root();
-    let status = Command::new("node")
-        .arg("scripts/build-site.mjs")
+    let mut cmd = Command::new("node");
+    cmd.arg("scripts/build-site.mjs");
+    if no_wasm {
+        cmd.arg("--no-wasm");
+    }
+    let status = cmd
         .current_dir(&root)
         .status()
         .map_err(|e| format!("failed to run node scripts/build-site.mjs: {e}"))?;
@@ -237,27 +241,120 @@ fn build_site() -> Result<(), String> {
 
 pub fn dev(target: &str, args: &[String]) -> Result<(), String> {
     match target {
-        "web" => dev_web(),
-        "ui" => dev_ui(),
+        "web" => dev_web(args),
+        "ui" => dev_ui(args),
         "extension" => dev_extension(args),
         "desktop" => dev_desktop(),
         _ => Err(format!("unknown dev target '{target}'")),
     }
 }
 
+/// Only `--no-wasm` exists: reuse the existing wasm glue instead of
+/// rebuilding it (passthrough to `scripts/build-site.mjs --no-wasm`).
+fn parse_dev_site_args(label: &str, args: &[String]) -> Result<bool, String> {
+    let mut no_wasm = false;
+    for arg in args {
+        match arg.as_str() {
+            "--no-wasm" => no_wasm = true,
+            other => {
+                return Err(format!(
+                    "unknown {label} arg '{other}' (only --no-wasm exists)"
+                ));
+            }
+        }
+    }
+    Ok(no_wasm)
+}
+
+fn path_older_than(path: &std::path::Path, than: std::time::SystemTime) -> bool {
+    // Missing inputs fail closed (rebuild).
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .map(|t| t <= than)
+        .unwrap_or(false)
+}
+
+fn tree_older_than(dir: &std::path::Path, than: std::time::SystemTime) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if !tree_older_than(&path, than) {
+                return false;
+            }
+        } else if !path_older_than(&path, than) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Skip the full site build when `dist/` is newer than every watched
+/// source. The builder recreates `dist/` from scratch, so the `dist/`
+/// directory mtime marks the last build.
+fn dist_fresh() -> bool {
+    let root = super::repo_root();
+    let dist = root.join("dist");
+    if !dist.exists() {
+        return false;
+    }
+    let Ok(dist_mtime) = std::fs::metadata(&dist).and_then(|m| m.modified()) else {
+        return false;
+    };
+    for rel in [
+        "scripts/build-site.mjs",
+        "scripts/sync-web-js.mjs",
+        "scripts/build-help.mjs",
+        "index.html",
+        "privacy.html",
+        "terms.html",
+    ] {
+        if !path_older_than(&root.join(rel), dist_mtime) {
+            return false;
+        }
+    }
+    for dir in [
+        "src",
+        "packages/shared-ui/src",
+        "packages/browser-runtime/src",
+        "docs/user",
+    ] {
+        if !tree_older_than(&root.join(dir), dist_mtime) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Shared-UI and website development: build the full site (mirrors, wasm
 /// glue, dist tree) and serve it on loopback through the deterministic
 /// fixture server, exactly as deployed.
-fn dev_web() -> Result<(), String> {
-    build_site()?;
+fn dev_web(args: &[String]) -> Result<(), String> {
+    let no_wasm = parse_dev_site_args("dev web", args)?;
+    if dist_fresh() {
+        println!(
+            "dev web: dist/ is newer than sources; skipping site build (remove dist/ to force)"
+        );
+    } else {
+        build_site(no_wasm)?;
+    }
     serve_dist(8080, "dev web")
 }
 
 /// Isolated shared-UI development: same served tree, beta app origin. The
 /// shared UI renders inside the new app at /beta; iterate there, then run
 /// `cargo xtask test ui` plus the affected integration lane.
-fn dev_ui() -> Result<(), String> {
-    build_site()?;
+fn dev_ui(args: &[String]) -> Result<(), String> {
+    let no_wasm = parse_dev_site_args("dev ui", args)?;
+    if dist_fresh() {
+        println!(
+            "dev ui: dist/ is newer than sources; skipping site build (remove dist/ to force)"
+        );
+    } else {
+        build_site(no_wasm)?;
+    }
     serve_dist(8081, "dev ui")
 }
 
@@ -290,7 +387,9 @@ fn serve_dist(port: u16, label: &str) -> Result<(), String> {
         .current_dir(&root)
         .spawn()
         .map_err(|e| format!("failed to start the fixture server: {e}"))?;
-    println!("{label}: serving http://127.0.0.1:{port}/ (Ctrl-C to stop; the server exits with the task)");
+    println!(
+        "{label}: serving http://127.0.0.1:{port}/ (Ctrl-C to stop; the server exits with the task)"
+    );
     let status = child
         .wait()
         .map_err(|e| format!("server wait failed: {e}"))?;
@@ -300,10 +399,12 @@ fn serve_dist(port: u16, label: &str) -> Result<(), String> {
         .ok_or_else(|| format!("{label}: dev server exited with {status}"))
 }
 
-/// Extension development: stage an unpacked load (manifest + .ts sources
-/// mirrored to .js, syntax-checked) for the named engine, then launch the
-/// browser with an isolated throwaway profile. Chrome/Chromium engine only;
-/// other engines fail closed when their binary is not installed.
+/// Extension development: regenerate the canonical JS mirrors, stage an
+/// unpacked load (manifest, classic background entry, page entry, icons,
+/// wasm glue) exactly as packaged, syntax-checked, for the named engine,
+/// then launch the browser with an isolated throwaway profile.
+/// Chrome/Chromium engine only; other engines fail closed when their binary
+/// is not installed.
 fn dev_extension(args: &[String]) -> Result<(), String> {
     let mut browser = String::from("chromium");
     let mut i = 0;
@@ -323,6 +424,18 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
         ));
     }
     let root = super::repo_root();
+    // Regenerate the canonical browser JS mirrors with the single
+    // generator (type-strip plus `.ts` -> `.js` import rewrite) instead of
+    // a naive rename-copy. Extension sources are plain JavaScript in `.ts`
+    // files, so staging below is a plain copy afterwards.
+    let status = Command::new("node")
+        .arg("scripts/sync-web-js.mjs")
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to run node scripts/sync-web-js.mjs: {e}"))?;
+    if !status.success() {
+        return Err("sync-web-js failed (scripts/sync-web-js.mjs)".to_string());
+    }
     let staging = root.join("target/extension-unpacked");
     if staging.exists() {
         std::fs::remove_dir_all(&staging)
@@ -333,36 +446,76 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     let manifest = root.join("apps/extension/generated/manifest.chromium.json");
     std::fs::copy(&manifest, staging.join("manifest.json"))
         .map_err(|e| format!("stage manifest: {e}"))?;
-    for dir in ["icons", "background", "app", "content"] {
-        let from = src.join(dir);
-        let to = staging.join(dir);
-        std::fs::create_dir_all(&to).map_err(|e| format!("create {dir}: {e}"))?;
-        for entry in std::fs::read_dir(&from).map_err(|e| format!("read {dir}: {e}"))? {
-            let path = entry.map_err(|e| format!("{dir} entry: {e}"))?.path();
-            let name = path
-                .file_name()
-                .expect("file name")
-                .to_string_lossy()
-                .into_owned();
-            let dest = if name.ends_with(".ts") {
-                to.join(format!("{}.js", &name[..name.len() - 3]))
-            } else {
-                to.join(&name)
-            };
-            std::fs::copy(&path, &dest).map_err(|e| format!("stage {name}: {e}"))?;
-            if dest.extension().and_then(|e| e.to_str()) == Some("js") {
-                let status = Command::new("node")
-                    .arg("--check")
-                    .arg(&dest)
-                    .status()
-                    .map_err(|e| format!("failed to run node --check: {e}"))?;
-                if !status.success() {
-                    return Err(format!(
-                        "staged file failed syntax check: {}",
-                        dest.display()
-                    ));
-                }
-            }
+    // Stage exactly what apps/extension/scripts/package-store.sh ships
+    // (least privilege): background/index.js as a CLASSIC script
+    // (export-free), the page entry plus its direct imports, icons, and
+    // the wasm glue. Never app/, content/, or helper-only page files.
+    let bg_src = std::fs::read_to_string(src.join("background/index.ts"))
+        .map_err(|e| format!("read background/index.ts: {e}"))?;
+    let mut bg_out = String::new();
+    for line in bg_src.lines() {
+        bg_out.push_str(line.strip_prefix("export ").unwrap_or(line));
+        bg_out.push('\n');
+    }
+    let bg_dir = staging.join("background");
+    std::fs::create_dir_all(&bg_dir).map_err(|e| format!("create background: {e}"))?;
+    std::fs::write(bg_dir.join("index.js"), bg_out)
+        .map_err(|e| format!("stage background/index.js: {e}"))?;
+    let page_dir = staging.join("page");
+    std::fs::create_dir_all(&page_dir).map_err(|e| format!("create page: {e}"))?;
+    for name in [
+        "page.html",
+        "page.ts",
+        "scan.ts",
+        "candidates.ts",
+        "fetch.ts",
+        "nativeHandoff.ts",
+    ] {
+        let dest_name = name
+            .strip_suffix(".ts")
+            .map(|s| format!("{s}.js"))
+            .unwrap_or_else(|| name.to_string());
+        std::fs::copy(src.join("page").join(name), page_dir.join(&dest_name))
+            .map_err(|e| format!("stage {name}: {e}"))?;
+    }
+    let icons_dir = staging.join("icons");
+    std::fs::create_dir_all(&icons_dir).map_err(|e| format!("create icons: {e}"))?;
+    for icon in ["icon16.png", "icon48.png", "icon128.png"] {
+        std::fs::copy(src.join("icons").join(icon), icons_dir.join(icon))
+            .map_err(|e| format!("stage {icon}: {e}"))?;
+    }
+    let wasm_dir = staging.join("wasm");
+    std::fs::create_dir_all(&wasm_dir).map_err(|e| format!("create wasm: {e}"))?;
+    for name in ["dezoomify-wasm.js", "dezoomify-wasm_bg.wasm"] {
+        let from = root.join("wasm").join(name);
+        if !from.exists() {
+            return Err(format!(
+                "missing {} (wasm glue; run: cargo xtask build web)",
+                from.display()
+            ));
+        }
+        std::fs::copy(&from, wasm_dir.join(name)).map_err(|e| format!("stage {name}: {e}"))?;
+    }
+    for rel in [
+        "background/index.js",
+        "page/page.js",
+        "page/scan.js",
+        "page/candidates.js",
+        "page/fetch.js",
+        "page/nativeHandoff.js",
+        "wasm/dezoomify-wasm.js",
+    ] {
+        let dest = staging.join(rel);
+        let status = Command::new("node")
+            .arg("--check")
+            .arg(&dest)
+            .status()
+            .map_err(|e| format!("failed to run node --check: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "staged file failed syntax check: {}",
+                dest.display()
+            ));
         }
     }
     let profile = std::env::temp_dir().join(format!("dz-dev-extension-{}", std::process::id()));
@@ -442,5 +595,16 @@ mod tests {
     #[test]
     fn browser_build_only() {
         assert!(super::build_only_check().is_ok());
+    }
+
+    #[test]
+    fn dev_site_no_wasm_flag() {
+        assert_eq!(super::parse_dev_site_args("dev web", &[]), Ok(false));
+        assert_eq!(
+            super::parse_dev_site_args("dev web", &["--no-wasm".to_string()]),
+            Ok(true)
+        );
+        assert!(super::parse_dev_site_args("dev web", &["--bogus".to_string()]).is_err());
+        assert!(super::parse_dev_site_args("dev ui", &["--bogus".to_string()]).is_err());
     }
 }
