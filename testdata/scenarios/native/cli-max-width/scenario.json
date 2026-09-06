@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline honors max_width by downloading the largest level whose width fits (256 of 512 with a 300px cap)",
+  "id": "native/cli-max-width",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/cli/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

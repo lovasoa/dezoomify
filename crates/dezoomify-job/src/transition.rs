@@ -87,6 +87,11 @@ pub enum JobResponse {
         job: String,
         request: String,
         bytes: Vec<u8>,
+        /// Post-redirect URL the bytes were read from, when the host
+        /// followed redirects. The core resolves relative tile URLs against
+        /// it; when absent the engine falls back to the request URI.
+        #[serde(default)]
+        final_uri: Option<String>,
     },
     FetchFailure {
         job: String,

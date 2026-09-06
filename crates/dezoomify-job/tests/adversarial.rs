@@ -19,6 +19,7 @@ fn duplicate_response_is_ignored() {
         job: "job:dup".to_string(),
         request: "req:0".to_string(),
         bytes: dzi_bytes(),
+        final_uri: None,
     })
     .unwrap();
     let len = host.transcript().len();
@@ -28,6 +29,7 @@ fn duplicate_response_is_ignored() {
             job: "job:dup".to_string(),
             request: "req:0".to_string(),
             bytes: dzi_bytes(),
+            final_uri: None,
         })
         .unwrap();
     assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
@@ -79,6 +81,7 @@ fn wrong_job_is_rejected_without_corruption() {
             job: "job:other".to_string(),
             request: "req:0".to_string(),
             bytes: dzi_bytes(),
+            final_uri: None,
         })
         .unwrap_err();
     assert_eq!(err.code, "job.wrong-job");
@@ -89,6 +92,7 @@ fn wrong_job_is_rejected_without_corruption() {
         job: "job:mine".to_string(),
         request: "req:0".to_string(),
         bytes: dzi_bytes(),
+        final_uri: None,
     })
     .unwrap();
     assert_eq!(host.state(), "AwaitingImageSelection");
@@ -109,6 +113,7 @@ fn over_limit_tiles_become_typed_terminal_failure() {
         job: "job:limited".to_string(),
         request: "req:0".to_string(),
         bytes: dzi_bytes(),
+        final_uri: None,
     })
     .unwrap();
     host.apply(JobResponse::SelectedImage {
@@ -176,6 +181,7 @@ fn empty_resource_bytes_fail_without_catalog() {
         job: "job:empty".to_string(),
         request: "req:0".to_string(),
         bytes: Vec::new(),
+        final_uri: None,
     })
     .unwrap();
     assert_eq!(host.state(), "Failed");

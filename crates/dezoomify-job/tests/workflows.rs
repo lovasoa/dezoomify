@@ -30,6 +30,7 @@ fn discover_and_select(host: &mut ScriptedHost, id: u32) -> String {
         job: job_id(id),
         request: "req:0".to_string(),
         bytes: DZI.as_bytes().to_vec(),
+        final_uri: None,
     })
     .unwrap();
     let (image_id, level_ids) = host.catalog().expect("catalog event");
@@ -58,6 +59,7 @@ fn discover_success_minimal() {
         job: job_id(1),
         request: "req:0".to_string(),
         bytes: DZI.as_bytes().to_vec(),
+        final_uri: None,
     })
     .unwrap();
 

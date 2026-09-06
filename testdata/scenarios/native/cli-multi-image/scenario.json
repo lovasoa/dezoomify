@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline selects the first catalog entry when a bulk list names two images",
+  "id": "native/cli-multi-image",
+  "input": {
+    "mode": "loopback-raw",
+    "url": "loopback://bulk-list-with-two-images"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

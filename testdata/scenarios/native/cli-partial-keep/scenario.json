@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline with the keep-partial policy encodes acquired tiles and leaves the corrupt tile blank, reporting partial output",
+  "id": "native/cli-partial-keep",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/cli/corrupt.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

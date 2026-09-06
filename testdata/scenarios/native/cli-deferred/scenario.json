@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline follows a deferred bulk-list entry with a fresh bounded job and assembles the identical output",
+  "id": "native/cli-deferred",
+  "input": {
+    "mode": "loopback-raw",
+    "url": "loopback://bulk-list-then-dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

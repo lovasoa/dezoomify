@@ -5,7 +5,7 @@
 //! explicit [`JobResponse`] inputs and drain [`Job::drain_effects`] and
 //! [`Job::drain_effects`]/events. All counters use checked arithmetic.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::json;
 
@@ -13,9 +13,10 @@ use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeC
 use dezoomify_core::core::discovery::{
     DiscoveryError, DiscoveryOperation, ResourceFailure, ResourceResponse,
 };
-use dezoomify_core::core::model::{CatalogEntry, ImageCatalog};
+use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe};
 use dezoomify_core::core::registry::default_registry;
 use dezoomify_core::core::tile_plan::TileSource;
+use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::{ImageDto, Readiness};
 
 use crate::config::Config;
@@ -51,6 +52,19 @@ pub struct Job {
     tile_attempts: HashMap<String, u32>,
     /// Tile request URIs by wire tile id (planned and probe tiles).
     tile_uris: HashMap<String, String>,
+    /// Core request headers by wire tile id (sent verbatim by native hosts;
+    /// browser hosts ignore them).
+    tile_headers: HashMap<String, BTreeMap<String, String>>,
+    /// Stable byte-processing recipe names by wire tile id (`none`,
+    /// `google-arts-decrypt`).
+    tile_processing: HashMap<String, String>,
+    /// Output destinations by wire tile id.
+    tile_destinations: HashMap<String, Vec2d>,
+    /// Expected decoded extents by wire tile id (`None` while unknown).
+    tile_extents: HashMap<String, Option<Vec2d>>,
+    /// Declared canvas size for the planned level (`None` while unknown,
+    /// e.g. mid-probe or custom layouts that derive it from tiles).
+    canvas_size: Option<Vec2d>,
     /// Wire tile ids emitted as probes (answered via `ProbeOutcome`).
     probe_tiles: HashSet<String>,
     /// Pending probe continuation; exactly one probe is in flight.
@@ -125,6 +139,11 @@ impl Job {
             acquired_tiles: HashSet::new(),
             tile_attempts: HashMap::new(),
             tile_uris: HashMap::new(),
+            tile_headers: HashMap::new(),
+            tile_processing: HashMap::new(),
+            tile_destinations: HashMap::new(),
+            tile_extents: HashMap::new(),
+            canvas_size: None,
             probe_tiles: HashSet::new(),
             probe: None,
             probe_tile: None,
@@ -167,6 +186,22 @@ impl Job {
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         self.state.is_terminal()
+    }
+
+    /// Deferred follow-up URI for a wire image id, if that catalog entry is
+    /// still-deferred metadata pointing at another resource. Native hosts
+    /// follow the first catalog entry's URI with a fresh job (bounded);
+    /// the projected catalog event carries readiness but never URIs.
+    #[must_use]
+    pub fn deferred_uri(&self, image: &str) -> Option<String> {
+        let index = self
+            .catalog_images
+            .iter()
+            .position(|entry| entry.id.as_str() == image)?;
+        match self.catalog.as_ref()?.entries().get(index)? {
+            CatalogEntry::Ready(_) => None,
+            CatalogEntry::Deferred(deferred) => Some(deferred.uri.clone()),
+        }
     }
 
     /// Number of queued effects (drain does not acknowledge until called).
@@ -250,9 +285,12 @@ impl Job {
         }
         match response {
             JobResponse::Cancel { .. } => self.enter_cancelled(),
-            JobResponse::ResourceBytes { request, bytes, .. } => {
-                self.apply_resource_bytes(&request, bytes)
-            }
+            JobResponse::ResourceBytes {
+                request,
+                bytes,
+                final_uri,
+                ..
+            } => self.apply_resource_bytes(&request, bytes, final_uri),
             JobResponse::FetchFailure { request, .. } => self.apply_fetch_failure(&request),
             JobResponse::SelectedImage { image, .. } => self.apply_selected_image(&image),
             JobResponse::SelectedLevel { level, .. } => self.apply_selected_level(&level),
@@ -345,15 +383,6 @@ impl Job {
         let images = crate::projection::project_catalog(&catalog)
             .map_err(|e| JobError::new("job.catalog-invalid", e.to_string()))?
             .images;
-        if !images
-            .iter()
-            .any(|image| image.readiness == Readiness::Ready)
-        {
-            return self.fail_via_cleanup(
-                "job.no-images",
-                "catalog contains no images with fetched metadata".to_string(),
-            );
-        }
         self.catalog = Some(catalog);
         self.catalog_images = images;
         self.set_state(State::AwaitingImageSelection)?;
@@ -370,7 +399,12 @@ impl Job {
         self.fail_via_cleanup("job.discovery-failed", error.to_string())
     }
 
-    fn apply_resource_bytes(&mut self, request: &str, bytes: Vec<u8>) -> Result<Outcome, JobError> {
+    fn apply_resource_bytes(
+        &mut self,
+        request: &str,
+        bytes: Vec<u8>,
+        final_uri: Option<String>,
+    ) -> Result<Outcome, JobError> {
         if dezoomify_protocol::dto::RequestId::new(request).is_none() {
             return Err(JobError::invalid_id("request must look like req:<suffix>"));
         }
@@ -405,10 +439,16 @@ impl Job {
             let Some(operation) = self.discovery.as_mut() else {
                 return Err(JobError::invalid_state("discovery already finished"));
             };
-            operation.provide(ResourceResponse::new(
-                dezoomify_core::core::discovery::RequestId(core_id),
-                bytes,
-            ))
+            let response =
+                ResourceResponse::new(dezoomify_core::core::discovery::RequestId(core_id), bytes);
+            // Relative tile URLs resolve against the post-redirect URL the
+            // host actually read; without it the core falls back to the
+            // request URI it asked for.
+            let response = match final_uri {
+                Some(uri) => response.with_final_uri(uri),
+                None => response,
+            };
+            operation.provide(response)
         };
         if let Err(e) = outcome {
             self.pending_discovery.remove(request);
@@ -567,8 +607,14 @@ impl Job {
             image.levels[level_index].source.clone()
         };
         match source {
-            TileSource::Grid(grid) => self.plan_from_tiles(grid.tiles_row_major()),
-            TileSource::Positioned(positioned) => self.plan_from_tiles(positioned.tiles()),
+            TileSource::Grid(grid) => {
+                let canvas = Some(grid.image_size());
+                self.plan_from_tiles(grid.tiles_row_major(), canvas)
+            }
+            TileSource::Positioned(positioned) => {
+                let canvas = positioned.image_size();
+                self.plan_from_tiles(positioned.tiles(), canvas)
+            }
             TileSource::DiscoverableGrid(discoverable) => {
                 if !self.config.plan_probes {
                     return self.fail_via_cleanup(
@@ -591,6 +637,9 @@ impl Job {
     }
 
     /// Plan from a fully known tile iterator (grid or positioned source).
+    /// Probe-role tiles never reach the output plan; the host learns
+    /// geometry, headers, and processing per tile from its `acquire-tile`
+    /// effect so native assembly matches core layout exactly.
     fn plan_from_tiles(
         &mut self,
         tiles: impl Iterator<
@@ -599,13 +648,17 @@ impl Job {
                 dezoomify_core::core::tile_plan::TileSourceError,
             >,
         >,
+        canvas: Option<Vec2d>,
     ) -> Result<(), JobError> {
-        let mut planned: Vec<(String, String)> = Vec::new();
+        let mut planned: Vec<String> = Vec::new();
         for tile in tiles {
             let spec = match tile {
                 Ok(spec) => spec,
                 Err(e) => return self.fail_via_cleanup("job.plan-invalid", e.to_string()),
             };
+            if spec.role == dezoomify_core::core::model::TileRole::Probe {
+                continue;
+            }
             let ordinal =
                 u32::try_from(spec.id.ordinal).map_err(|_| JobError::overflow("tile ordinal"))?;
             if planned.len() + 1 > self.config.max_tiles as usize {
@@ -615,7 +668,14 @@ impl Job {
                 );
             }
             let wire = format!("tile:{ordinal}");
-            planned.push((wire, spec.request.uri));
+            self.tile_uris.insert(wire.clone(), spec.request.uri);
+            self.tile_headers.insert(wire.clone(), spec.request.headers);
+            self.tile_processing
+                .insert(wire.clone(), processing_name(&spec.processing).to_string());
+            self.tile_destinations
+                .insert(wire.clone(), spec.destination);
+            self.tile_extents.insert(wire.clone(), spec.expected_size);
+            planned.push(wire);
         }
         if planned.is_empty() {
             return self.fail_via_cleanup(
@@ -623,14 +683,17 @@ impl Job {
                 "the selected level has no tiles".to_string(),
             );
         }
-        let total = planned.len() as u64;
-        self.begin_acquisition(planned, Vec::new(), total)
+        self.canvas_size = canvas;
+        self.begin_acquisition(planned)
     }
 
     /// Advance the core probe step machine by one step.
     fn drive_probe(&mut self, step: DiscoverableStep) -> Result<(), JobError> {
         match step {
-            DiscoverableStep::Resolved { grid, .. } => self.plan_from_tiles(grid.tiles_row_major()),
+            DiscoverableStep::Resolved { grid, .. } => {
+                let canvas = Some(grid.image_size());
+                self.plan_from_tiles(grid.tiles_row_major(), canvas)
+            }
             DiscoverableStep::Empty => self.fail_via_cleanup(
                 "job.plan-empty",
                 "probe discovery found no tiles".to_string(),
@@ -657,37 +720,25 @@ impl Job {
                 self.probe_tiles.insert(wire.clone());
                 self.tile_uris
                     .insert(wire.clone(), tile.request.uri.clone());
+                self.tile_headers
+                    .insert(wire.clone(), tile.request.headers.clone());
+                self.tile_processing
+                    .insert(wire.clone(), processing_name(&tile.processing).to_string());
+                self.tile_destinations
+                    .insert(wire.clone(), tile.destination);
+                self.tile_extents.insert(wire.clone(), tile.expected_size);
                 self.in_flight.insert(wire.clone());
-                let effect = self.alloc_effect_id()?;
-                self.push_effect(
-                    "acquire-tile",
-                    json!({
-                        "effect": effect,
-                        "tile": wire,
-                        "uri": self.tile_uris.get(&wire).cloned().unwrap_or_default(),
-                        "probe": true,
-                    }),
-                )?;
+                self.push_acquire_tile(&wire, true)?;
                 Ok(())
             }
         }
     }
 
     /// Shared transition from a complete plan into bounded acquisition.
-    fn begin_acquisition(
-        &mut self,
-        planned: Vec<(String, String)>,
-        probes: Vec<(String, String)>,
-        total: u64,
-    ) -> Result<(), JobError> {
-        for (wire, uri) in probes {
-            self.planned_tiles.push(wire.clone());
-            self.probe_tiles.insert(wire.clone());
-            self.tile_uris.insert(wire, uri);
-        }
-        for (wire, uri) in planned {
-            self.planned_tiles.push(wire.clone());
-            self.tile_uris.insert(wire, uri);
+    fn begin_acquisition(&mut self, planned: Vec<String>) -> Result<(), JobError> {
+        let total = planned.len() as u64;
+        for wire in planned {
+            self.planned_tiles.push(wire);
         }
         self.pending_tiles = self
             .planned_tiles
@@ -754,7 +805,7 @@ impl Job {
                 .map_err(|_| JobError::overflow("acquired count"))?;
             let total = self.planned_tiles.len() as u64;
             self.push_event("progress", json!({"acquired": acquired, "total": total}))?;
-            if self.acquired_tiles.len() == self.planned_tiles.len() - self.probe_tiles.len() {
+            if self.acquired_tiles.len() == self.planned_tiles.len() {
                 self.complete_remaining(false)?;
             } else {
                 self.emit_pending_tiles()?;
@@ -997,17 +1048,43 @@ impl Job {
             }
             self.pending_tiles.remove(0);
             self.in_flight.insert(next.clone());
-            let effect = self.alloc_effect_id()?;
-            let uri = self.tile_uris.get(&next).cloned().unwrap_or_default();
-            self.push_effect(
-                "acquire-tile",
-                json!({
-                    "effect": effect,
-                    "tile": next,
-                    "uri": uri,
-                }),
-            )?;
+            self.push_acquire_tile(&next, false)?;
         }
+        Ok(())
+    }
+
+    /// Stable byte-processing recipe name for the wire. Hosts that decode
+    /// pixels (native) apply it before decoding; hosts that never decode
+    /// (browser) ignore it.
+    fn push_acquire_tile(&mut self, wire: &str, probe: bool) -> Result<(), JobError> {
+        let effect = self.alloc_effect_id()?;
+        let uri = self.tile_uris.get(wire).cloned().unwrap_or_default();
+        let headers = self.tile_headers.get(wire).cloned().unwrap_or_default();
+        let processing = self
+            .tile_processing
+            .get(wire)
+            .cloned()
+            .unwrap_or_else(|| "none".to_string());
+        let destination = self
+            .tile_destinations
+            .get(wire)
+            .copied()
+            .unwrap_or_default();
+        let extent = self.tile_extents.get(wire).copied().flatten();
+        let mut detail = json!({
+            "effect": effect,
+            "tile": wire,
+            "uri": uri,
+            "headers": headers,
+            "processing": processing,
+            "destination": {"x": destination.x, "y": destination.y},
+            "expected_size": extent.map(|size| json!({"x": size.x, "y": size.y})).unwrap_or(serde_json::Value::Null),
+            "canvas": self.canvas_size.map(|size| json!({"x": size.x, "y": size.y})).unwrap_or(serde_json::Value::Null),
+        });
+        if probe {
+            detail["probe"] = serde_json::Value::Bool(true);
+        }
+        self.push_effect("acquire-tile", detail)?;
         Ok(())
     }
 
@@ -1064,5 +1141,15 @@ impl Job {
             .ok_or_else(|| JobError::overflow("recovery id"))?;
         self.next_recovery = next;
         Ok(format!("rec:{n}"))
+    }
+}
+
+/// Stable wire name for a core byte-processing recipe. The mapping is total
+/// over the closed recipe enum; unknown recipes cannot exist without a
+/// compile error here, so hosts never mis-decode.
+fn processing_name(recipe: &ProcessingRecipe) -> &'static str {
+    match recipe {
+        ProcessingRecipe::None => "none",
+        ProcessingRecipe::GoogleArtsDecrypt => "google-arts-decrypt",
     }
 }

@@ -908,6 +908,7 @@ dependencies = [
  "axum",
  "dezoomify-core",
  "dezoomify-fixture-server",
+ "dezoomify-job",
  "dezoomify-protocol",
  "image",
  "rustls",

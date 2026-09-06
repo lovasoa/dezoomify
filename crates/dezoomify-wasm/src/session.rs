@@ -730,6 +730,10 @@ impl Session {
                     job: job.as_str().to_string(),
                     request: request.to_string(),
                     bytes,
+                    // The browser never reports the post-redirect URL, so the
+                    // engine keeps resolving against the request URI here.
+                    // Native hosts supply it; web behavior is unchanged.
+                    final_uri: None,
                 })
             }
         }

@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline reports output.canvas-limit when the composed canvas exceeds its byte budget, writing no output",
+  "id": "native/cli-canvas-limit",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/cli/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

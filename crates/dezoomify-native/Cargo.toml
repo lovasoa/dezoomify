@@ -8,6 +8,7 @@ repository = "https://github.com/lovasoa/dezoomify"
 
 [dependencies]
 dezoomify-core = { path = "../dezoomify-core" }
+dezoomify-job = { path = "../dezoomify-job" }
 dezoomify-protocol = { path = "../dezoomify-protocol" }
 serde.workspace = true
 serde_json.workspace = true

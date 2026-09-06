@@ -109,6 +109,12 @@ impl ScriptedHost {
         &self.job
     }
 
+    /// Deferred follow-up URI for a wire image id, if still deferred.
+    #[must_use]
+    pub fn deferred_uri_for_test(&self, image: &str) -> Option<String> {
+        self.job.deferred_uri(image)
+    }
+
     /// Count terminal events in the transcript (must be 0 or 1).
     #[must_use]
     pub fn terminal_count(&self) -> usize {

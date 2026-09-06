@@ -1,26 +1,33 @@
-//! Native download pipeline: core discovery → tile plan → concurrent bounded
-//! download → decode/assemble → encode → atomic write → real output digest.
+//! Native download pipeline: one [`dezoomify_job::Job`] owns discovery,
+//! selection, planning, retry, and lifecycle policy; this module executes its
+//! effects with real HTTP, decode, assemble, encode, and atomic-write fns.
 //!
 //! All network I/O goes through [`crate::http`]; all format logic stays in
-//! `dezoomify-core`. Failures are honest: the pipeline never fabricates
-//! progress, completion, or hashes.
+//! `dezoomify-core`; all lifecycle policy stays in `dezoomify-job`. Failures
+//! are honest: the pipeline never fabricates progress, completion, or hashes.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::{atomic::AtomicBool, Arc};
 
-use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult};
-use dezoomify_core::core::discovery::{DiscoveryOperation, ResourceFailure, ResourceResponse};
-use dezoomify_core::core::model::{
-    CatalogEntry, ImageCatalog, ImageDescriptor, LevelDescriptor, ProcessingRecipe, Request,
-    TileRole, TileSpec,
-};
-use dezoomify_core::core::registry::default_registry;
-use dezoomify_core::core::tile_plan::TileSource;
+use dezoomify_core::core::adaptive::ObservationResult;
+use dezoomify_core::core::model::{ProcessingRecipe, Request};
 use dezoomify_core::Vec2d;
 
 use crate::error::NativeError;
 use crate::http::{fetch, FetchLimits, UserHeaders};
-use crate::output::{validate_destination, write_atomic, OutputFormat};
+use crate::output::{validate_destination, OutputFormat};
+
+/// What to do when required tiles still fail after retries.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PartialPolicy {
+    /// Fail the job with `tile.download-failed` and write no output.
+    #[default]
+    Fail,
+    /// Encode the acquired tiles with missing regions left blank and
+    /// report success with `partial: true`.
+    Keep,
+}
 
 /// Pipeline configuration: fetch limits, tile bounds, concurrency.
 #[derive(Clone, Debug)]
@@ -37,6 +44,12 @@ pub struct PipelineConfig {
     /// Legacy parity: cap the output width. The largest level whose width
     /// fits is downloaded; when none fits, the smallest level is used.
     pub max_width: Option<u32>,
+    /// What to do when required tiles still fail after retries.
+    pub partial_policy: PartialPolicy,
+    /// Cooperative cancellation: when set, the driver stops issuing new
+    /// work at the next effect boundary, cleans up, and reports
+    /// `job.cancelled` without writing output. Clones share the flag.
+    pub cancel_flag: Arc<AtomicBool>,
 }
 
 impl Default for PipelineConfig {
@@ -49,6 +62,8 @@ impl Default for PipelineConfig {
             max_retries: 3,
             max_canvas_bytes: 1 << 30,
             max_width: None,
+            partial_policy: PartialPolicy::Fail,
+            cancel_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -68,6 +83,8 @@ pub struct PipelineOutcome {
     pub output_hash: String,
     pub tile_count: usize,
     pub image_size: Vec2d,
+    /// True when missing tiles were left blank under [`PartialPolicy::Keep`].
+    pub partial: bool,
 }
 
 fn user_headers_for(input_url: &str, config: &PipelineConfig) -> UserHeaders {
@@ -92,97 +109,14 @@ pub fn run(
     .map_err(NativeError::from)?;
 
     let user = user_headers_for(input_url, config);
-    // Deferred images point at further metadata resources; resolve them by
-    // re-running discovery on the deferred uri (bounded, honest).
-    let mut possible = choose_image(discover(input_url, config, &user, on_event)?)?;
-    let mut image = None;
-    for _ in 0..10 {
-        if let Some(ready) = possible.image {
-            image = Some(ready);
-            break;
-        }
-        let Some(uri) = possible.pending_uri.clone() else {
-            break;
-        };
-        possible = choose_image(discover(&uri, config, &user, on_event)?)?;
-    }
-    let image = image.ok_or_else(|| {
-        NativeError::new(
-            "discovery.deferred",
-            "image metadata stayed deferred after the resolution limit",
-        )
-    })?;
-    let level = choose_level(&image.levels, config.max_width)?;
-    let plan = plan_level(level, config, &user)?;
-    let canvas = download_and_assemble(plan, config, &user, on_event)?;
-
-    let encoded = encode_png(&canvas)?;
-    on_event(PipelineEvent {
-        kind: "encoding".to_string(),
-        detail: BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
-    });
-    let path = PathBuf::from(output_path);
-    write_atomic(&path, &encoded).map_err(NativeError::from)?;
-    let hash = sha256_hex(&encoded);
-    Ok(PipelineOutcome {
-        output_path: path,
-        output_hash: format!("sha256:{hash}"),
-        tile_count: canvas.tile_count,
-        image_size: canvas.size,
-    })
+    crate::job_driver::drive(input_url, output_path, overwrite, config, &user, on_event)
 }
 
 // ---------------------------------------------------------------------------
-// Discovery
+// Effect executors (pure I/O + pixels; lifecycle stays in the job engine)
 // ---------------------------------------------------------------------------
 
-fn discover(
-    input_url: &str,
-    config: &PipelineConfig,
-    user: &UserHeaders,
-    on_event: &mut dyn FnMut(PipelineEvent),
-) -> Result<ImageCatalog, NativeError> {
-    let registry = default_registry(input_url);
-    let mut operation: DiscoveryOperation = registry.start(input_url);
-    let mut fetched = 0usize;
-    while let Some(need) = operation.next_priority_need().map_err(NativeError::from)? {
-        fetched += 1;
-        on_event(PipelineEvent {
-            kind: "discovery".to_string(),
-            detail: BTreeMap::from([("resources".to_string(), fetched.to_string())]),
-        });
-        let headers = merge_headers(&need.request);
-        match fetch(&need.request.uri, &headers, Some(user), None, &config.fetch) {
-            Ok(outcome) if outcome.ok() => {
-                operation
-                    .provide(
-                        ResourceResponse::new(need.id, outcome.body)
-                            .with_final_uri(outcome.final_uri),
-                    )
-                    .map_err(NativeError::from)?;
-            }
-            Ok(outcome) => {
-                operation
-                    .provide_failure(ResourceFailure {
-                        id: need.id,
-                        message: format!("http status {}", outcome.status),
-                    })
-                    .map_err(NativeError::from)?;
-            }
-            Err(error) => {
-                operation
-                    .provide_failure(ResourceFailure {
-                        id: need.id,
-                        message: error.message,
-                    })
-                    .map_err(NativeError::from)?;
-            }
-        }
-    }
-    operation.finish().map_err(NativeError::from)
-}
-
-fn merge_headers(request: &Request) -> BTreeMap<String, String> {
+pub(crate) fn merge_headers(request: &Request) -> BTreeMap<String, String> {
     let mut merged: BTreeMap<String, String> = dezoomify_core::default_headers()
         .into_iter()
         .map(|(name, value)| (name.to_ascii_lowercase(), value))
@@ -193,384 +127,80 @@ fn merge_headers(request: &Request) -> BTreeMap<String, String> {
     merged
 }
 
-/// First catalog image: `Ready` images win; a `Deferred` image records the
-/// uri the caller must discover next.
-fn choose_image(catalog: ImageCatalog) -> Result<PossibleImage, NativeError> {
-    catalog
-        .into_entries()
-        .into_iter()
-        .map(|entry| match entry {
-            CatalogEntry::Ready(image) => PossibleImage {
-                image: Some(image),
-                pending_uri: None,
-            },
-            CatalogEntry::Deferred(deferred) => PossibleImage {
-                image: None,
-                pending_uri: Some(deferred.uri),
-            },
-        })
-        .next()
-        .filter(|possible| possible.image.is_some() || possible.pending_uri.is_some())
-        .ok_or_else(|| {
-            NativeError::new(
-                "discovery.no-image",
-                "no zoomable image found at the input url",
-            )
-        })
-}
-
-struct PossibleImage {
-    image: Option<ImageDescriptor>,
-    pending_uri: Option<String>,
-}
-
-fn choose_level(
-    levels: &[LevelDescriptor],
-    max_width: Option<u32>,
-) -> Result<&LevelDescriptor, NativeError> {
-    let area = |level: &LevelDescriptor| {
-        level
-            .source
-            .image_size()
-            .map(|size| u64::from(size.x) * u64::from(size.y))
-            .unwrap_or(0)
-    };
-    let candidates: Vec<&LevelDescriptor> = match max_width {
-        Some(cap) => {
-            let fitting: Vec<&LevelDescriptor> = levels
-                .iter()
-                .filter(|level| level.source.image_size().is_some_and(|size| size.x <= cap))
-                .collect();
-            if fitting.is_empty() {
-                // No level fits: honestly pick the narrowest one rather than
-                // silently exceeding the cap.
-                levels
-                    .iter()
-                    .min_by_key(|level| {
-                        level
-                            .source
-                            .image_size()
-                            .map(|size| size.x)
-                            .unwrap_or(u32::MAX)
-                    })
-                    .into_iter()
-                    .collect()
-            } else {
-                fitting
-            }
-        }
-        None => levels.iter().collect(),
-    };
-    candidates
-        .into_iter()
-        .max_by_key(|level| area(level))
-        .ok_or_else(|| NativeError::new("discovery.no-level", "image has no zoom levels"))
-}
-
-// ---------------------------------------------------------------------------
-// Tile plan (including generic probe resolution)
-// ---------------------------------------------------------------------------
-
-struct Blit {
-    destination: Vec2d,
-    extent: Option<Vec2d>,
-    request: Request,
-    processing: ProcessingRecipe,
-}
-
-struct Plan {
-    canvas_size: Option<Vec2d>,
-    blits: Vec<Blit>,
-}
-
-fn plan_level(
-    level: &LevelDescriptor,
-    config: &PipelineConfig,
-    user: &UserHeaders,
-) -> Result<Plan, NativeError> {
-    match &level.source {
-        TileSource::Grid(grid) => {
-            let mut blits = Vec::new();
-            for tile in grid.tiles_row_major() {
-                let tile = tile.map_err(NativeError::from)?;
-                if tile.role == TileRole::Probe {
-                    continue;
-                }
-                blits.push(Blit {
-                    destination: tile.destination,
-                    extent: tile.expected_size,
-                    request: tile.request,
-                    processing: tile.processing,
-                });
-                check_tile_budget(blits.len(), config)?;
-            }
-            Ok(Plan {
-                canvas_size: Some(grid.image_size()),
-                blits,
-            })
-        }
-        TileSource::Positioned(positioned) => {
-            let mut blits = Vec::new();
-            for tile in positioned.tiles() {
-                let tile = tile.map_err(NativeError::from)?;
-                if tile.role == TileRole::Probe {
-                    continue;
-                }
-                blits.push(Blit {
-                    destination: tile.destination,
-                    extent: None,
-                    request: tile.request,
-                    processing: tile.processing,
-                });
-                check_tile_budget(blits.len(), config)?;
-            }
-            Ok(Plan {
-                canvas_size: positioned.image_size(),
-                blits,
-            })
-        }
-        TileSource::DiscoverableGrid(discoverable) => {
-            plan_probing(discoverable.clone().start(), config, user)
-        }
-        TileSource::Adaptive(adaptive) => plan_probing(adaptive.start(), config, user),
-    }
-}
-
-fn plan_probing(
-    mut step: DiscoverableStep,
-    config: &PipelineConfig,
-    user: &UserHeaders,
-) -> Result<Plan, NativeError> {
-    let mut blits: Vec<Blit> = Vec::new();
-    let mut probed_destinations: HashSet<Vec2d> = HashSet::new();
-    loop {
-        match step {
-            DiscoverableStep::Probe { tile, continuation } => {
-                let is_output = tile.role != TileRole::Probe;
-                let destination = tile.destination;
-                let outcome = probe_tile(&tile, config, user);
-                if is_output && outcome.observed {
-                    blits.push(Blit {
-                        destination,
-                        extent: None,
-                        request: tile.request,
-                        processing: tile.processing,
-                    });
-                    probed_destinations.insert(destination);
-                }
-                step = continuation
-                    .submit(outcome.observation)
-                    .map_err(NativeError::from)?;
-                check_tile_budget(blits.len(), config)?;
-            }
-            DiscoverableStep::Resolved { grid, .. } => {
-                for tile in grid.tiles_row_major() {
-                    let tile = tile.map_err(NativeError::from)?;
-                    if tile.role == TileRole::Probe
-                        || probed_destinations.contains(&tile.destination)
-                    {
-                        continue;
-                    }
-                    blits.push(Blit {
-                        destination: tile.destination,
-                        extent: tile.expected_size,
-                        request: tile.request,
-                        processing: tile.processing,
-                    });
-                    check_tile_budget(blits.len(), config)?;
-                }
-                return Ok(Plan {
-                    canvas_size: Some(grid.image_size()),
-                    blits,
-                });
-            }
-            DiscoverableStep::Empty => {
-                return Err(NativeError::new(
-                    "discovery.no-level",
-                    "probing found no tiles for this level",
-                ));
-            }
-            DiscoverableStep::Error(error) => {
-                return Err(NativeError::new("discovery.tile-plan", error.to_string()));
-            }
-        }
-    }
-}
-
-struct ProbeOutcome {
-    observation: ObservationResult,
-    observed: bool,
-}
-
-fn probe_tile(tile: &TileSpec, config: &PipelineConfig, user: &UserHeaders) -> ProbeOutcome {
-    let missing = || ProbeOutcome {
-        observation: ObservationResult::Missing,
-        observed: false,
-    };
-    let headers = merge_headers(&tile.request);
-    let Ok(outcome) = fetch(&tile.request.uri, &headers, Some(user), None, &config.fetch) else {
-        return missing();
-    };
-    if !outcome.ok() || outcome.body.is_empty() {
-        return missing();
-    }
-    let Ok(bytes) = tile.processing.apply(outcome.body) else {
-        return missing();
-    };
-    match image::load_from_memory(&bytes) {
-        Ok(decoded) => ProbeOutcome {
-            observation: ObservationResult::Available {
-                size: Vec2d {
-                    x: decoded.width(),
-                    y: decoded.height(),
-                },
-            },
-            observed: true,
-        },
-        Err(_) => missing(),
-    }
-}
-
-fn check_tile_budget(count: usize, config: &PipelineConfig) -> Result<(), NativeError> {
-    if count > config.max_tiles {
-        return Err(NativeError::new(
-            "tile.limit",
-            format!("tile count exceeds limit of {}", config.max_tiles),
-        ));
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Download + assemble
-// ---------------------------------------------------------------------------
-
-struct Canvas {
-    image: image::RgbaImage,
-    size: Vec2d,
-    tile_count: usize,
-}
-
-fn download_and_assemble(
-    plan: Plan,
-    config: &PipelineConfig,
-    user: &UserHeaders,
-    on_event: &mut dyn FnMut(PipelineEvent),
-) -> Result<Canvas, NativeError> {
-    let total = plan.blits.len();
-    let mut decoded: Vec<Option<image::RgbaImage>> = Vec::with_capacity(total);
-    decoded.resize_with(total, || None);
-    let mut pending: Vec<usize> = (0..total).collect();
-    let mut round = 0u32;
-    while !pending.is_empty() {
-        if round > config.max_retries {
-            return Err(NativeError::new(
-                "tile.download-failed",
-                format!(
-                    "{} tile(s) still failing after {} retries",
-                    pending.len(),
-                    config.max_retries
-                ),
-            ));
-        }
-        round += 1;
-        let mut failures: Vec<usize> = Vec::new();
-        for chunk in pending.chunks(config.max_concurrent.max(1)) {
-            let blits = &plan.blits;
-            std::thread::scope(|scope| {
-                let mut handles = Vec::with_capacity(chunk.len());
-                for &index in chunk {
-                    handles.push((
-                        index,
-                        scope.spawn(move || fetch_and_decode(&blits[index], config, user)),
-                    ));
-                }
-                for (index, handle) in handles {
-                    match handle.join() {
-                        Ok(Ok(tile)) => decoded[index] = Some(tile),
-                        Ok(Err(_)) | Err(_) => failures.push(index),
-                    }
-                }
-            });
-            let acquired = decoded.iter().filter(|tile| tile.is_some()).count();
-            on_event(PipelineEvent {
-                kind: "downloading".to_string(),
-                detail: BTreeMap::from([
-                    ("acquired".to_string(), acquired.to_string()),
-                    ("total".to_string(), total.to_string()),
-                ]),
-            });
-        }
-        pending = failures;
-    }
-
-    let declared = plan.canvas_size;
-    let mut width = declared.map_or(1u32, |size| size.x.max(1));
-    let mut height = declared.map_or(1u32, |size| size.y.max(1));
-    if declared.is_none() {
-        for (index, blit) in plan.blits.iter().enumerate() {
-            let Some(tile) = &decoded[index] else {
-                continue;
-            };
-            width = width.max(blit.destination.x.saturating_add(tile.width()));
-            height = height.max(blit.destination.y.saturating_add(tile.height()));
-        }
-    }
-    if u64::from(width) * u64::from(height) * 4 > config.max_canvas_bytes {
-        return Err(NativeError::new(
-            "output.canvas-limit",
-            "composed image exceeds the canvas size limit",
-        ));
-    }
-    let mut target = image::RgbaImage::new(width, height);
-    for (index, blit) in plan.blits.iter().enumerate() {
-        let Some(tile) = decoded[index].take() else {
-            return Err(NativeError::new(
-                "tile.download-failed",
-                "tile result missing at assembly time",
-            ));
-        };
-        blit_onto(&mut target, blit, &tile);
-    }
-    Ok(Canvas {
-        image: target,
-        size: Vec2d {
-            x: width,
-            y: height,
-        },
-        tile_count: total,
-    })
-}
-
-fn fetch_and_decode(
-    blit: &Blit,
+pub(crate) fn fetch_and_decode(
+    uri: &str,
+    headers: &BTreeMap<String, String>,
+    processing: &ProcessingRecipe,
     config: &PipelineConfig,
     user: &UserHeaders,
 ) -> Result<image::RgbaImage, NativeError> {
-    let headers = merge_headers(&blit.request);
-    let outcome = fetch(&blit.request.uri, &headers, Some(user), None, &config.fetch)?;
+    let mut request = Request::new(uri);
+    request.headers = headers.clone();
+    let merged = merge_headers(&request);
+    let outcome = fetch(uri, &merged, Some(user), None, &config.fetch)?;
     if !outcome.ok() {
         return Err(NativeError::new(
             "tile.http-error",
             format!("tile request returned http status {}", outcome.status),
         ));
     }
-    let bytes = blit
-        .processing
-        .apply(outcome.body)
-        .map_err(NativeError::from)?;
+    let bytes = processing.apply(outcome.body).map_err(NativeError::from)?;
     let decoded = image::load_from_memory(&bytes)
         .map_err(|e| NativeError::new("tile.decode-failed", format!("tile decode failed: {e}")))?;
     Ok(decoded.to_rgba8())
 }
 
-fn blit_onto(target: &mut image::RgbaImage, blit: &Blit, tile: &image::RgbaImage) {
-    let extent = blit.extent.unwrap_or(Vec2d {
+pub(crate) struct ProbeRead {
+    pub observation: ObservationResult,
+}
+
+pub(crate) fn probe_tile_bytes(
+    uri: &str,
+    headers: &BTreeMap<String, String>,
+    processing: &ProcessingRecipe,
+    config: &PipelineConfig,
+    user: &UserHeaders,
+) -> ProbeRead {
+    let missing = || ProbeRead {
+        observation: ObservationResult::Missing,
+    };
+    let mut request = Request::new(uri);
+    request.headers = headers.clone();
+    let merged = merge_headers(&request);
+    let Ok(outcome) = fetch(uri, &merged, Some(user), None, &config.fetch) else {
+        return missing();
+    };
+    if !outcome.ok() || outcome.body.is_empty() {
+        return missing();
+    }
+    let Ok(bytes) = processing.apply(outcome.body) else {
+        return missing();
+    };
+    match image::load_from_memory(&bytes) {
+        Ok(decoded) => ProbeRead {
+            observation: ObservationResult::Available {
+                size: Vec2d {
+                    x: decoded.width(),
+                    y: decoded.height(),
+                },
+            },
+        },
+        Err(_) => missing(),
+    }
+}
+
+pub(crate) fn blit_onto(
+    target: &mut image::RgbaImage,
+    destination: Vec2d,
+    extent: Option<Vec2d>,
+    tile: &image::RgbaImage,
+) {
+    let extent = extent.unwrap_or(Vec2d {
         x: tile.width(),
         y: tile.height(),
     });
-    let max_w = target.width().saturating_sub(blit.destination.x);
-    let max_h = target.height().saturating_sub(blit.destination.y);
+    let max_w = target.width().saturating_sub(destination.x);
+    let max_h = target.height().saturating_sub(destination.y);
     let copy_w = extent.x.min(tile.width()).min(max_w);
     let copy_h = extent.y.min(tile.height()).min(max_h);
     if copy_w == 0 || copy_h == 0 {
@@ -580,26 +210,26 @@ fn blit_onto(target: &mut image::RgbaImage, blit: &Blit, tile: &image::RgbaImage
     image::imageops::overlay(
         target,
         &cropped,
-        i64::from(blit.destination.x),
-        i64::from(blit.destination.y),
+        i64::from(destination.x),
+        i64::from(destination.y),
     );
 }
 
-fn encode_png(canvas: &Canvas) -> Result<Vec<u8>, NativeError> {
+pub(crate) fn encode_png(image: &image::RgbaImage) -> Result<Vec<u8>, NativeError> {
     let mut bytes = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
     image::ImageEncoder::write_image(
         encoder,
-        canvas.image.as_raw(),
-        canvas.image.width(),
-        canvas.image.height(),
+        image.as_raw(),
+        image.width(),
+        image.height(),
         image::ExtendedColorType::Rgba8,
     )
     .map_err(|e| NativeError::new("output.encode-failed", format!("png encode failed: {e}")))?;
     Ok(bytes)
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(bytes)
         .iter()

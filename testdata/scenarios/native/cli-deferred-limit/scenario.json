@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline reports discovery.deferred when metadata stays deferred past the resolution limit",
+  "id": "native/cli-deferred-limit",
+  "input": {
+    "mode": "loopback-raw",
+    "url": "loopback://self-referential-bulk-list"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

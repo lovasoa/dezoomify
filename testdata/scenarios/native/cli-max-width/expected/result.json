@@ -1,0 +1,9 @@
+{
+  "outputHash": "sha256:df8cd44c1ce2cdc5af149012123e33d43dd420436880024f2ee2a7bc007d712c",
+  "imageSize": {
+    "x": 256,
+    "y": 256
+  },
+  "tileCount": 1,
+  "outputFormat": "png"
+}

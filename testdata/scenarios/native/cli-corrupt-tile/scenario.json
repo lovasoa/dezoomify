@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline fails honestly with tile.download-failed when a tile returns undecodable bytes; no output is written",
+  "id": "native/cli-corrupt-tile",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/cli/corrupt.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

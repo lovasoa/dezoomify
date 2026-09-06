@@ -1,0 +1,40 @@
+{
+  "routes": [
+    {
+      "route_id": "cli-probe-grid-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/probe/0/0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/probe/tile-0_0.png"
+    },
+    {
+      "route_id": "cli-probe-grid-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/probe/1/0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/probe/tile-1_0.png"
+    },
+    {
+      "route_id": "cli-probe-grid-0-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/probe/0/1.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/probe/tile-0_1.png"
+    },
+    {
+      "route_id": "cli-probe-grid-1-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/probe/1/1.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/probe/tile-1_1.png"
+    }
+  ]
+}

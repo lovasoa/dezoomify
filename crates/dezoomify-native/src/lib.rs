@@ -9,6 +9,7 @@ pub mod client;
 pub mod download;
 pub mod error;
 pub mod http;
+pub mod job_driver;
 pub mod output;
 pub mod pipeline;
 pub mod progress;

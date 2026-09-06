@@ -1,0 +1,22 @@
+{
+  "routes": [
+    {
+      "route_id": "cli-max-width-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/pyramid.dzi",
+      "status": 200,
+      "headers": {"Content-Type": "application/xml"},
+      "payload": "payloads/fixtures.test/cli/pyramid.dzi"
+    },
+    {
+      "route_id": "cli-max-width-level-8",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/pyramid_files/8/0_0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/pyramid_files/8/0_0.png"
+    }
+  ]
+}

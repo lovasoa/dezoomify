@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline resolves a generic tile template through job probe effects and assembles the same 512x512 output as the fixed grid",
+  "id": "native/cli-probe-grid",
+  "input": {
+    "mode": "gateway-template",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/probe/{{X}}/{{Y}}.png"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}
