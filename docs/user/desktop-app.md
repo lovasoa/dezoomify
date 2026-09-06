@@ -32,10 +32,12 @@ its image, remove the resume folder and start fresh.
 
 ## Install
 
-No installer ships yet. A future installer will appear on the
-[releases page](https://github.com/lovasoa/dezoomify/releases). Meanwhile,
-use the [website](./website.md) or the
-[command-line tool](./command-line.md).
+Build the app locally with `cargo xtask build desktop`, which produces an
+unsigned `.deb` under `target/release/bundle/deb/` (no paid signing).
+Published installers will appear on the
+[releases page](https://github.com/lovasoa/dezoomify/releases) once a
+release build recipe lands. Meanwhile, you can also use the
+[website](./website.md) or the [command-line tool](./command-line.md).
 
 ## Save an image
 

@@ -2,8 +2,9 @@
 name = "cli-linux-x86_64"
 os = "linux"
 
-# Desktop installers stay unavailable until the Tauri shell is real
-# (plan release-pipeline, owner decision 2026-09-05).
+# Desktop release stays unavailable until a release build recipe lands;
+# local `cargo xtask build desktop` already produces a real unsigned .deb
+# (no paid signing) from the Tauri window shell behind the `tauri` feature.
 [[target]]
 name = "desktop-windows-x86_64"
 os = "windows"

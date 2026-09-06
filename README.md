@@ -9,7 +9,8 @@ High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
   store listing submitted (pending review).
 - Desktop (`apps/desktop/`): real Tauri window with the five capability
   commands, native save dialog, ed25519-verified updater, and installer
-  bundling (`cargo xtask build desktop`).
+  bundling (`cargo xtask build desktop` produces an unsigned `.deb`; no
+  paid signing).
 - CLI (`apps/cli/`): real save pipeline through the native runtime,
   covering discovery, bounded tile acquisition, assembly, and output writing.
 

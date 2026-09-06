@@ -55,10 +55,12 @@ committed; `target/` is used so website builds cannot clobber them.
 The `release-build`, `release-sign`, and `release-publish` workflows chain
 these stages by run id: the build workflow runs `cargo xtask ci local` on
 the tagged revision before planning, and no artifact exists that has not
-passed the deterministic suite. Desktop installers stay an unavailable
-target until the Tauri shell is real; the inventory marks them so, and a
-release never claims an artifact it did not build. The operator sequence
-for cutting a release is the runbook in [Operations](operations.md).
+passed the deterministic suite. Local `cargo xtask build desktop` already
+produces a real unsigned `.deb` (no paid signing) from the Tauri window
+shell behind the optional `tauri` feature; the release inventory still
+marks the desktop target unavailable until a release build recipe lands,
+and a release never claims an artifact it did not build. The operator
+sequence for cutting a release is the runbook in [Operations](operations.md).
 
 Artifacts are built from a tagged revision, signed with free mechanisms only (updater keypair, store submission, GPG tags), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project. Web release notes identify the automatic metadata CORS proxy fallback and active-transport indicator; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
 
