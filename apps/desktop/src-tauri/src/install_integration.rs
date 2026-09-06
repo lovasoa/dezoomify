@@ -166,13 +166,13 @@ fn manifest_destinations(
     chromium_id: &str,
     firefox_id: &str,
 ) -> Result<Vec<(String, String, String)>, String> {
+    // Validate on every OS, including Windows (which writes no files here),
+    // so bad input fails closed before anything is written anywhere.
+    let chromium_json = chromium_manifest(host_path, chromium_id)?;
+    let firefox_json = firefox_manifest(host_path, firefox_id)?;
     let mut out = Vec::new();
     match std::env::consts::OS {
         "linux" => {
-            let chromium_json = chromium_manifest(host_path, chromium_id)?;
-            // Firefox JSON is validated even on Linux so a bad Firefox id
-            // fails closed before any file is written.
-            let firefox_json = firefox_manifest(host_path, firefox_id)?;
             out.push((
                 "chromium".to_string(),
                 linux_chromium_manifest_path(home),
@@ -190,8 +190,6 @@ fn manifest_destinations(
             ));
         }
         "macos" => {
-            let chromium_json = chromium_manifest(host_path, chromium_id)?;
-            let firefox_json = firefox_manifest(host_path, firefox_id)?;
             out.push((
                 "chromium".to_string(),
                 macos_chromium_manifest_path(home),
