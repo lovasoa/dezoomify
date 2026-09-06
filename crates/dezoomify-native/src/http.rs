@@ -68,10 +68,17 @@ pub struct TlsPolicy {
 #[derive(Clone, Debug)]
 pub struct FetchLimits {
     pub max_bytes: u64,
+    /// Max time for one logical fetch including redirects (default 30s,
+    /// matching the reference `--timeout` default).
     pub timeout: Duration,
+    /// Max time to establish a connection (default 6s, matching the
+    /// reference `--connect-timeout` default).
     pub connect_timeout: Duration,
     pub max_redirects: usize,
     pub retries: u32,
+    /// Max idle connections kept per host (default 32, matching the
+    /// reference `--max-idle-per-host` default).
+    pub max_idle_per_host: usize,
     pub tls: TlsPolicy,
 }
 
@@ -79,10 +86,11 @@ impl Default for FetchLimits {
     fn default() -> Self {
         Self {
             max_bytes: 64 << 20,
-            timeout: Duration::from_secs(60),
-            connect_timeout: Duration::from_secs(15),
+            timeout: Duration::from_secs(30),
+            connect_timeout: Duration::from_secs(6),
             max_redirects: 5,
             retries: 1,
+            max_idle_per_host: 32,
             tls: TlsPolicy::default(),
         }
     }
@@ -121,7 +129,8 @@ pub fn fetch(
     let mut redirects: usize = 0;
     let mut builder = ureq::AgentBuilder::new()
         .redirects(0)
-        .timeout_connect(limits.connect_timeout);
+        .timeout_connect(limits.connect_timeout)
+        .max_idle_connections_per_host(limits.max_idle_per_host.max(1));
     if limits.tls.accept_invalid_certs {
         builder = builder.tls_config(std::sync::Arc::new(insecure_client_config()?));
     }

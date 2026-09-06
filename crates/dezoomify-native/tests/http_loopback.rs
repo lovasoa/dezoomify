@@ -16,6 +16,7 @@ fn limits() -> FetchLimits {
         connect_timeout: std::time::Duration::from_secs(5),
         max_redirects: 5,
         retries: 1,
+        max_idle_per_host: 32,
         tls: Default::default(),
     }
 }

@@ -22,9 +22,14 @@
 //! * `acquire-tile{probe:true}` → [`probe_tile_bytes`], replying
 //!   `ProbeOutcome` with observed geometry.
 //! * `acquire-tile` → [`fetch_and_decode_cached`] under the job's concurrency
-//!   gate (one [`std::thread::scope`] pool per drained batch), replying
-//!   `TileOutcome`; the job owns retry counting and partial decisions. With
-//!   `PipelineConfig::cache_dir` set, tile bodies persist under the job
+//!   gate (one [`std::thread::scope`] pool per drained batch, sized by
+//!   `max_concurrent`), replying `TileOutcome`; the job owns retry counting
+//!   and partial decisions while the driver paces request starts by
+//!   `min_interval` and sleeps the reference `retry_delay` + position jitter
+//!   with doubling before refetches. With `max_retries: 0` an already-failed
+//!   tile is answered without refetching (the engine floor of 1 still
+//!   consumes the retry roundtrip, but no second request is sent).
+//!   With `PipelineConfig::cache_dir` set, tile bodies persist under the job
 //!   namespace and later runs skip refetching tiles whose bytes still decode.
 //! * `decode-pixels`/`open-encoder`/`finalize-encoder` → acknowledged from
 //!   the tiles already decoded during acquisition (encoders run one-shot).
@@ -58,6 +63,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use dezoomify_core::core::adaptive::ObservationResult;
 use dezoomify_core::core::model::{ProcessingRecipe, Request};
@@ -122,7 +128,13 @@ fn job_config_for(config: &PipelineConfig) -> Result<JobConfig, NativeError> {
     // The engine requires concurrency within the tile budget; the legacy
     // loop simply ran smaller plans through the same pool.
     let fetches = (config.max_concurrent.clamp(1, 64) as u32).min(tiles);
-    let retries = config.max_retries.clamp(1, 1024);
+    // Zero retries is meaningful: the first failure fails the tile, which
+    // speeds up generic probing that relies on failed loads for geometry.
+    // The engine floor is 1 (its validator rejects 0), so a configured 0
+    // is passed as 1 and the driver emulates no-retry by never refetching
+    // an already-failed tile (see `acquire_tiles`): the retry roundtrip is
+    // answered immediately without touching the network.
+    let retries = config.max_retries.clamp(0, 1024).max(1);
     let max_bytes = config.fetch.max_bytes.clamp(1024, 4_294_967_296);
     let buffers = fetches.clamp(16, 65_536);
     let job = JobConfig {
@@ -304,6 +316,14 @@ struct Attempt<'a> {
     /// Tiles acquired overall (never cleared by `release-bytes`, unlike
     /// the pixel buffers above).
     acquired: usize,
+    /// Prior failure counts per tile id: drives the retry backoff
+    /// (`retry_delay` + jitter + doubling) and the `--retries 0` no-refetch
+    /// emulation.
+    tile_failures: HashMap<String, u32>,
+    /// Start of the most recent tile request: `--min-interval` staggering
+    /// sleeps until `throttle_last + min_interval` before starting the next
+    /// request. `None` before the first request.
+    throttle_last: Option<Instant>,
     failure: Option<(String, String)>,
     published: Option<Published>,
     destination_error: Option<String>,
@@ -354,6 +374,8 @@ fn drive_job(
         geoms: HashMap::new(),
         decoded: HashMap::new(),
         acquired: 0,
+        tile_failures: HashMap::new(),
+        throttle_last: None,
         failure: None,
         published: None,
         destination_error: None,
@@ -888,14 +910,61 @@ fn acquire_tiles(
         .cache
         .as_ref()
         .map(|(dir, namespace)| (dir.as_path(), namespace.as_str()));
+    // Per-tile plan for this batch: backoff sleeps run inside the worker
+    // threads (concurrent, like the reference async loop); `--retries 0`
+    // tiles that already failed are answered without refetching.
+    struct Planned {
+        tile: String,
+        backoff: Duration,
+        skip_fetch: bool,
+    }
+    let mut planned = Vec::with_capacity(tiles.len());
+    for need in &tiles {
+        let failures = attempt.tile_failures.get(&need.tile).copied().unwrap_or(0);
+        let skip_fetch = config.max_retries == 0 && failures > 0;
+        let backoff = if skip_fetch {
+            Duration::ZERO
+        } else {
+            crate::pipeline::retry_wait(
+                config.retry_delay,
+                need.destination.x,
+                need.destination.y,
+                failures,
+            )
+        };
+        planned.push(Planned {
+            tile: need.tile.clone(),
+            backoff,
+            skip_fetch,
+        });
+    }
     let mut outcomes: Vec<(String, bool, Option<image::RgbaImage>)> =
         Vec::with_capacity(tiles.len());
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(tiles.len());
-        for need in &tiles {
+        for (need, plan) in tiles.iter().zip(planned) {
+            // Stagger request starts by `min_interval` (reference per-tile
+            // throttle); ZERO disables the sleep entirely.
+            if !config.min_interval.is_zero() {
+                if let Some(last) = attempt.throttle_last {
+                    let next = last + config.min_interval;
+                    let now = Instant::now();
+                    if next > now {
+                        std::thread::sleep(next - now);
+                    }
+                }
+                attempt.throttle_last = Some(Instant::now());
+            }
+            if plan.skip_fetch {
+                outcomes.push((plan.tile, false, None));
+                continue;
+            }
             handles.push((
-                need.tile.clone(),
+                plan.tile,
                 scope.spawn(move || {
+                    if !plan.backoff.is_zero() {
+                        std::thread::sleep(plan.backoff);
+                    }
                     fetch_and_decode_cached(
                         &need.uri,
                         &need.headers,
@@ -923,6 +992,12 @@ fn acquire_tiles(
         }
         if ok {
             attempt.acquired += 1;
+            attempt.tile_failures.remove(&tile);
+        } else {
+            let failures = attempt.tile_failures.get(&tile).copied().unwrap_or(0);
+            attempt
+                .tile_failures
+                .insert(tile.clone(), failures.saturating_add(1));
         }
         if let Some(image) = image {
             attempt.decoded.insert(tile.clone(), image);

@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc};
+use std::time::Duration;
 
 use dezoomify_core::core::adaptive::ObservationResult;
 use dezoomify_core::core::model::{ProcessingRecipe, Request};
@@ -47,8 +48,20 @@ pub struct PipelineConfig {
     pub user_headers: BTreeMap<String, String>,
     pub fetch: FetchLimits,
     pub max_tiles: usize,
+    /// Max concurrent tile fetches (scoped-thread equivalent of the
+    /// reference async `buffer_unordered(parallelism)`; default 16).
     pub max_concurrent: usize,
+    /// Tile retry budget owned by the job engine. `0` means no retries:
+    /// the first failure fails the tile (generic-probing parity).
     pub max_retries: u32,
+    /// Delay before the first tile retry; each subsequent retry doubles
+    /// (`retry_delay`, `2*retry_delay`, ...) plus deterministic per-tile
+    /// jitter from the tile position, mirroring `network.rs`. Default 2s.
+    pub retry_delay: Duration,
+    /// Minimum interval between tile request starts (per-tile throttle).
+    /// `ZERO` disables the sleep (the CLI default); the reference default
+    /// is 50ms. Applied as start staggering, not as a post-completion wait.
+    pub min_interval: Duration,
     /// Hard cap on composed canvas bytes (RGBA, 4 bytes/pixel, plus
     /// transient encode buffers). Default 8 GiB: jobs needing more fail with
     /// typed `output.canvas-limit` before any allocation.
@@ -96,8 +109,10 @@ impl Default for PipelineConfig {
             user_headers: BTreeMap::new(),
             fetch: FetchLimits::default(),
             max_tiles: 1 << 20,
-            max_concurrent: 6,
+            max_concurrent: 16,
             max_retries: 3,
+            retry_delay: Duration::from_secs(2),
+            min_interval: Duration::ZERO,
             max_canvas_bytes: 8 << 30,
             jpeg_quality: JPEG_QUALITY,
             cache_dir: None,
@@ -441,4 +456,70 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+/// Retry wait for a tile with `failures` prior failures: the base
+/// `retry_delay` plus deterministic position jitter (`idx = (x + y) % 100`
+/// of one hundredth each), doubled per retry. Mirrors `network.rs`:
+/// the first retry waits the base delay, the next twice that, and so on.
+/// `failures == 0` (first attempt) waits nothing.
+pub(crate) fn retry_wait(
+    retry_delay: Duration,
+    destination_x: u32,
+    destination_y: u32,
+    failures: u32,
+) -> Duration {
+    if failures == 0 {
+        return Duration::ZERO;
+    }
+    let idx = destination_x.wrapping_add(destination_y) % 100;
+    let jitter = retry_delay
+        .checked_div(100)
+        .and_then(|unit| unit.checked_mul(idx))
+        .unwrap_or(Duration::ZERO);
+    let mut wait = retry_delay + jitter;
+    for _ in 1..failures {
+        wait = wait.checked_mul(2).unwrap_or(Duration::MAX);
+    }
+    wait
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_attempt_never_waits() {
+        assert_eq!(
+            retry_wait(Duration::from_secs(2), 10, 20, 0),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn first_retry_waits_base_plus_position_jitter() {
+        // idx = (10 + 20) % 100 = 30 → 2s + 30 * 20ms = 2.6s.
+        assert_eq!(
+            retry_wait(Duration::from_secs(2), 10, 20, 1),
+            Duration::from_millis(2600)
+        );
+        // Origin tiles carry no jitter.
+        assert_eq!(
+            retry_wait(Duration::from_secs(2), 0, 0, 1),
+            Duration::from_secs(2)
+        );
+    }
+
+    #[test]
+    fn retries_double_each_time() {
+        let first = retry_wait(Duration::from_secs(2), 10, 20, 1);
+        assert_eq!(
+            retry_wait(Duration::from_secs(2), 10, 20, 2),
+            first.checked_mul(2).unwrap()
+        );
+        assert_eq!(
+            retry_wait(Duration::from_secs(2), 10, 20, 3),
+            first.checked_mul(4).unwrap()
+        );
+    }
 }
