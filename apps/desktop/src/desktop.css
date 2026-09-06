@@ -1,0 +1,282 @@
+/* Dezoomify Desktop visual compliance layer (Task 5.1 states + copy,
+ * Task 5.2 accessibility).
+ *
+ * Tokens (parchment light, walnut dark, sapphire/sage links, beveled
+ * buttons, 2px focus rings) live in packages/shared-ui/src/styles/theme.css.
+ * This sheet only wires desktop-only DOM (footer sibling, aux panel,
+ * settings panel, deep-link confirm) to those tokens. No pills, no nested
+ * boxes, no neon. All body copy stays left-aligned; the footer stays pinned.
+ *
+ * Contrast (verified pairs, AA for body text):
+ * - Light: primary #1c1917 on parchment #f7eded (15.6:1), secondary #44403c
+ *   on #f7eded (9.5:1), link sapphire #1d4ed8 on #f7eded (7.0:1).
+ * - Dark: primary #ece5dd on walnut #252220 (13.1:1), secondary #b8ada2 on
+ *   #252220 (7.2:1), link sage #acaf50 on #252220 (7.1:1).
+ * Focus uses only var(--dz-focus-ring): a crisp 2px outline ring with no
+ * blur spread, never a neon halo. Counts stay tabular-nums so progress
+ * digits never shift layout.
+ */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  text-align: left;
+}
+
+/* Spacious card column keeps the footer sibling pinned via margin-top: auto. */
+#root.dz-main {
+  flex: 1 0 auto;
+}
+
+/* Pinned bottom footer: single row of legal/repo links only. */
+.dz-site-footer {
+  margin-top: auto;
+}
+
+/* Desktop aux panel: plain flow inside the single status card.
+ * Transparent, no nested bordered box, only a top separator rhythm. */
+#dz-desktop-aux {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--dz-surface-border);
+  box-shadow: none;
+  border-radius: 0;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: left;
+}
+
+#dz-desktop-aux .dz-notice-title {
+  color: var(--dz-text-primary);
+  text-align: left;
+}
+
+#dz-desktop-aux .dz-notice-message {
+  text-align: left;
+}
+
+#dz-desktop-aux .dz-actions-row {
+  margin-top: 0.5rem;
+}
+
+/* Missing-tile and partial/cancel notes: plain left-aligned flow, no box. */
+#dz-desktop-aux .dz-missing-list,
+#dz-cancel-cleanup-note {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Loading view: tabular counts and a smooth architectural track.
+ * Crisp radius only, never pills. */
+#root .dz-tile-counts,
+#root .dz-progress-percent,
+#root .dz-pending-time {
+  font-variant-numeric: tabular-nums;
+}
+
+#root .dz-progress-track,
+#root .dz-remaining-track {
+  border-radius: var(--dz-radius);
+}
+
+#root .dz-progress-bar,
+#root .dz-remaining-bar {
+  border-radius: var(--dz-radius);
+  transition: width 0.25s ease;
+}
+
+#root .dz-job-detail,
+#root .dz-tile-counts,
+#root .dz-pending-line,
+#root .dz-notice-message,
+#root .dz-completed-summary,
+#root .dz-error-message {
+  text-align: left;
+}
+
+/* Deep-link confirm: reuse the shared modal geometry (backdrop + card).
+ * Architectural radius only, never pills. */
+#dz-deep-link-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(18, 16, 15, 0.7);
+}
+
+#dz-deep-link-confirm .dz-modal-card {
+  border-radius: var(--dz-radius);
+  text-align: left;
+  width: min(100%, 640px);
+}
+
+#dz-deep-link-confirm .dz-modal-title,
+#dz-deep-link-confirm .dz-notice-title {
+  text-align: left;
+}
+
+#dz-deep-link-confirm .dz-notice-message,
+#dz-deep-link-confirm .dz-modal-subtitle {
+  text-align: left;
+}
+
+/* Tabular counts stay tabular in desktop panels. */
+#dz-desktop-aux .dz-tile-counts,
+#dz-desktop-aux .dz-progress-percent {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Desktop settings panel: same flat flow as the aux panel. Transparent, no
+ * nested bordered box, only a top separator. Labels stack above their
+ * controls; every control is a native input/textarea/button reachable by
+ * Tab with a labelled name. */
+#dz-desktop-settings {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--dz-surface-border);
+  box-shadow: none;
+  border-radius: 0;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: left;
+}
+
+#dz-desktop-settings .dz-notice-title,
+#dz-desktop-settings .dz-notice-message {
+  text-align: left;
+}
+
+#dz-desktop-settings .dz-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+#dz-desktop-settings .dz-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.92rem;
+  color: var(--dz-text-primary);
+  text-align: left;
+}
+
+#dz-desktop-settings .dz-settings-field > span {
+  color: var(--dz-text-secondary);
+}
+
+#dz-desktop-settings input,
+#dz-desktop-settings textarea {
+  width: 100%;
+  font: inherit;
+  color: var(--dz-text-primary);
+  background: #ffffff;
+  border: 1.5px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  padding: 0.5rem 0.7rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  #dz-desktop-settings input,
+  #dz-desktop-settings textarea {
+    background: #1c1a18;
+  }
+}
+
+#dz-desktop-settings .dz-actions-row {
+  margin-top: 0.5rem;
+}
+
+#dz-settings-error {
+  color: var(--dz-error-text);
+  text-align: left;
+}
+
+/* Desktop Help/About (Task 5.3): link-only region, same flat flow as the
+ * aux/settings panels. Transparent, no nested box, only a top separator.
+ * Buttons wrap; body copy stays left-aligned. */
+#dz-desktop-help {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--dz-surface-border);
+  box-shadow: none;
+  border-radius: 0;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: left;
+}
+
+#dz-desktop-help .dz-notice-title,
+#dz-desktop-help .dz-notice-message {
+  text-align: left;
+}
+
+#dz-desktop-help .dz-help-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Recovery dialog wrapper: flat flow, never a nested bordered box. The
+ * role="dialog" semantics live in main.tsx; visuals stay inline. */
+#dz-desktop-aux .dz-recovery-dialog,
+#dz-desktop-aux .dz-partial-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  text-align: left;
+}
+
+/* Crisp 2px architectural focus for every desktop-only action: submit, save,
+ * cancel, reset, recovery choices, settings inputs, browse, help/about, and
+ * confirm. Shared actions (Dezoomify/Cancel/Save buttons, URL input) already
+ * use the same token in theme.css; these rules cover the desktop aux,
+ * settings, help, and deep-link DOM. One token only, no blur, no neon halo. */
+#dz-desktop-aux button:focus-visible,
+#dz-desktop-aux input:focus-visible,
+#dz-desktop-aux textarea:focus-visible,
+#dz-desktop-aux a:focus-visible,
+#dz-desktop-aux summary:focus-visible,
+#dz-desktop-settings button:focus-visible,
+#dz-desktop-settings input:focus-visible,
+#dz-desktop-settings textarea:focus-visible,
+#dz-desktop-settings a:focus-visible,
+#dz-desktop-settings summary:focus-visible,
+#dz-desktop-help button:focus-visible,
+#dz-desktop-help a:focus-visible,
+#dz-deep-link-confirm button:focus-visible,
+#dz-deep-link-confirm a:focus-visible,
+#dz-deep-link-confirm [tabindex]:focus-visible,
+.dz-site-footer a:focus-visible {
+  outline: none;
+  box-shadow: var(--dz-focus-ring);
+}
+
+#dz-desktop-settings input:focus,
+#dz-desktop-settings textarea:focus {
+  outline: none;
+  border-color: var(--dz-accent-blue);
+  box-shadow: var(--dz-focus-ring);
+}
