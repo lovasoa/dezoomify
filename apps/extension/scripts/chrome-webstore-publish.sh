@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Chrome Web Store publish helper for the Dezoomify NG extension.
+# Chrome Web Store publish helper for the Dezoomify extension.
 #
 # This script UPDATES the existing store listing
 # (release/config.toml [extension.chromium]: iapjjopjejpelnfdonefbffahmcndfbm).
@@ -8,7 +8,7 @@
 # emergency.
 #
 # Secrets policy: the OAuth client JSON stays OUTSIDE the repo at
-#   ~/.config/dezoomify-ng/secrets/chrome-webstore-oauth-client.json (mode 600)
+#   ~/.config/dezoomify/secrets/chrome-webstore-oauth-client.json (mode 600)
 # and the refresh token comes from the environment (local `.env`,
 # never committed). This script never prints secret values: no `set -x`, values
 # travel only in curl POST bodies or shell variables, and `check` reports field
@@ -26,7 +26,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # Extension ID override (emergency only); empty means "read release/config.toml".
 ENV_EXTENSION_ID="${CHROME_WS_EXTENSION_ID:-}"
 
-CLIENT_JSON="${CHROME_WS_CLIENT_JSON:-$HOME/.config/dezoomify-ng/secrets/chrome-webstore-oauth-client.json}"
+CLIENT_JSON="${CHROME_WS_CLIENT_JSON:-$HOME/.config/dezoomify/secrets/chrome-webstore-oauth-client.json}"
 TOKEN_URL="https://oauth2.googleapis.com/token"
 # Binary uploads go to the /upload/ media endpoint; publish stays on items/.
 UPLOAD_API="https://www.googleapis.com/upload/chromewebstore/v1.1/items"

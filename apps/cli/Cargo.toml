@@ -4,7 +4,7 @@ version = "3.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Command-line app composing the native runtime."
-repository = "https://github.com/lovasoa/dezoomify-ng"
+repository = "https://github.com/lovasoa/dezoomify"
 
 [[bin]]
 name = "dezoomify-cli"

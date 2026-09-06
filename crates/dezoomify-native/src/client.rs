@@ -23,7 +23,7 @@ pub fn build_request(
         }
     }
     let mut headers = BTreeMap::new();
-    headers.insert("user-agent".to_string(), "dezoomify-ng/1.0".to_string());
+    headers.insert("user-agent".to_string(), "dezoomify/1.0".to_string());
     // Header names are case-insensitive: normalize so the same name can
     // never appear twice with different cases on the wire.
     for (name, value) in extra {

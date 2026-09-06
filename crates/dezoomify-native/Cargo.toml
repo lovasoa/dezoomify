@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Native effect runtime shared by the CLI and desktop app."
-repository = "https://github.com/lovasoa/dezoomify-ng"
+repository = "https://github.com/lovasoa/dezoomify"
 
 [dependencies]
 dezoomify-core = { path = "../dezoomify-core" }

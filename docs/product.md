@@ -1,6 +1,6 @@
 # Product
 
-dezoomify-ng turns tiled, zoomable images into portable image files. A user supplies a URL, chooses a discovered image and level, reviews output constraints, and runs a job with live progress, cancellation, retry, and an explicit partial-output policy.
+dezoomify turns tiled, zoomable images into portable image files. A user supplies a URL, chooses a discovered image and level, reviews output constraints, and runs a job with live progress, cancellation, retry, and an explicit partial-output policy.
 
 ## Surfaces
 
@@ -46,4 +46,4 @@ Discovery, selection, acquisition, processing, and saving remain distinct phases
 
 The browser is optimized for interactive jobs that fit browser memory and save limits. Native apps own huge images, local input, bulk operation, resumable disk-backed work, and the complete output format set. The website sends neither cookies, `Authorization`, nor browser credentials on direct browser fetches or through the metadata CORS proxy. The extension is a distinct runtime: it obtains readable bytes under granted host permissions and the current browser session, processes them, and creates clean saves without the metadata CORS proxy.
 
-dezoomify-ng does not bypass authentication or access controls. Users are responsible for permission to retrieve and reproduce source material. Credential handling follows [Security](security.md).
+dezoomify does not bypass authentication or access controls. Users are responsible for permission to retrieve and reproduce source material. Credential handling follows [Security](security.md).

@@ -8,7 +8,7 @@ test-results/
 /target-wasm/
 /wasm-package/
 # Secrets: OAuth client JSON, tokens, and env files must never be committed.
-# Long-term storage lives outside the repo at ~/.config/dezoomify-ng/secrets/.
+# Long-term storage lives outside the repo at ~/.config/dezoomify/secrets/.
 .env
 .env.*
 !.env.example

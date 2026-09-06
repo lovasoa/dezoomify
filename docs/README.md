@@ -1,6 +1,6 @@
-# dezoomify-ng documentation
+# dezoomify documentation
 
-dezoomify-ng discovers zoomable images, lets a user choose an image and level, downloads tiles, processes them, and saves the result. The same job model and shared UI run on the website, desktop app, and extension; the CLI uses the same core and native runtime without the UI.
+dezoomify discovers zoomable images, lets a user choose an image and level, downloads tiles, processes them, and saves the result. The same job model and shared UI run on the website, desktop app, and extension; the CLI uses the same core and native runtime without the UI.
 
 ## Guides
 

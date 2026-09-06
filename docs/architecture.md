@@ -1,6 +1,6 @@
 # Architecture
 
-dezoomify-ng is one monorepo containing Rust crates, generated protocol bindings, the shared UI, browser-extension packaging, and native applications. Dependencies point inward toward pure domain libraries; hosts own all effects.
+dezoomify is one monorepo containing Rust crates, generated protocol bindings, the shared UI, browser-extension packaging, and native applications. Dependencies point inward toward pure domain libraries; hosts own all effects.
 
 ## Components
 

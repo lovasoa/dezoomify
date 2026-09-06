@@ -32,7 +32,7 @@ const genFirefox = readJson("../../generated/manifest.firefox.json");
 
 const REVIEWED_PERMS = new Set(["activeTab", "scripting", "webRequest", "downloads", "nativeMessaging", "tabs", "cookies"]);
 const REVIEWED_OPTIONAL = new Set(["cookies"]);
-const EXPECTED_GECKO_ID = "dezoomify-ng@example.com";
+const EXPECTED_GECKO_ID = "dezoomify@example.com";
 
 function allHostLike(manifest) {
   return [...(manifest.host_permissions ?? []), ...(manifest.permissions ?? []).filter((p) => p.includes("://") || p.includes("*"))];

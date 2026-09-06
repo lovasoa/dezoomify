@@ -1,12 +1,12 @@
 # Privacy
 
-dezoomify-ng is free and open source, built by volunteers and funded by
+dezoomify is free and open source, built by volunteers and funded by
 donations. There are no investors, no advertisers, and no data business
 behind it. Nobody here makes money from knowing what you look at, and
 we've built the whole thing so that we can't find out, even by accident.
 Here's what happens to your information when you use it, in plain words.
 
-## What dezoomify-ng does, in one paragraph
+## What dezoomify does, in one paragraph
 
 Museums and libraries often show very large pictures in small pieces.
 Dezoomify saves the whole picture, at full resolution, as one ordinary

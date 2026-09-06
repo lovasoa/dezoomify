@@ -3,8 +3,8 @@ name = "dezoomify-protocol"
 version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Canonical versioned protocol DTOs for dezoomify-ng hosts and shared logic."
-repository = "https://github.com/lovasoa/dezoomify-ng"
+description = "Canonical versioned protocol DTOs for dezoomify hosts and shared logic."
+repository = "https://github.com/lovasoa/dezoomify"
 
 [dependencies]
 serde.workspace = true

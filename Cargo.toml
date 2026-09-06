@@ -5,7 +5,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/lovasoa/dezoomify-ng"
+repository = "https://github.com/lovasoa/dezoomify"
 
 [workspace.dependencies]
 log = "0.4"

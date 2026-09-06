@@ -1,6 +1,6 @@
 # Security
 
-dezoomify-ng treats source websites, image metadata, tiles, handoff payloads, and output names as untrusted input. Each runtime grants only the access needed for the active user-requested job.
+dezoomify treats source websites, image metadata, tiles, handoff payloads, and output names as untrusted input. Each runtime grants only the access needed for the active user-requested job.
 
 ## Trust boundaries
 

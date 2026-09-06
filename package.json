@@ -1,5 +1,5 @@
 {
-  "name": "dezoomify-ng",
+  "name": "dezoomify",
   "private": true,
   "packageManager": "pnpm@9.12.0",
   "scripts": {

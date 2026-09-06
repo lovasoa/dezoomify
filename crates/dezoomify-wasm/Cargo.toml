@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Narrow deterministic WASM adapter over dezoomify-core and dezoomify-protocol (phase 07)."
-repository = "https://github.com/lovasoa/dezoomify-ng"
+repository = "https://github.com/lovasoa/dezoomify"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

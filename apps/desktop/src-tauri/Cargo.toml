@@ -4,7 +4,7 @@ version = "3.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Dezoomify desktop shell (phase-11 lean shell; Tauri SDK wiring deferred, config checked in)"
-repository = "https://github.com/lovasoa/dezoomify-ng"
+repository = "https://github.com/lovasoa/dezoomify"
 
 # Standalone manifest: intentionally NOT a member of the root workspace so
 # this shell stays offline with no dependencies to fetch. No Tauri SDK is

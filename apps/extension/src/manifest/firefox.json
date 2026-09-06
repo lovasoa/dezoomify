@@ -8,7 +8,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "dezoomify-ng@example.com",
+      "id": "dezoomify@example.com",
       "strict_min_version": "115.0"
     }
   },

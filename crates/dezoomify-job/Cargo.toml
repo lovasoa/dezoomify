@@ -3,8 +3,8 @@ name = "dezoomify-job"
 version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Deterministic portable job state machine for dezoomify-ng (phase 06 lean engine)."
-repository = "https://github.com/lovasoa/dezoomify-ng"
+description = "Deterministic portable job state machine for dezoomify (phase 06 lean engine)."
+repository = "https://github.com/lovasoa/dezoomify"
 
 [dependencies]
 dezoomify-core = { path = "../dezoomify-core" }

@@ -2,7 +2,7 @@
 
 ## Root license
 
-The unified dezoomify-ng tree is conveyed under **GPL-3.0-or-later**. The
+The unified dezoomify tree is conveyed under **GPL-3.0-or-later**. The
 exact license text is the root `LICENSE` file (byte-identical to the GPL-3.0
 text shipped by the imported Rust and extension sources). All newly authored
 destination code is GPL-3.0-or-later unless a file carries a narrower notice,
