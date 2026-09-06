@@ -31,6 +31,8 @@ jobs:
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
       - name: Install Linux webview system packages
         if: runner.os == 'Linux'
         run: |
