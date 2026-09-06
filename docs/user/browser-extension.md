@@ -23,8 +23,10 @@ Firefox version is on its way.
    never for all your browsing.
 4. Reload the page or zoom into the image once. A small badge shows how many
    images were found.
-5. Press the button again, pick the image, and save it, or send the job
-   to the desktop app if the image is very large.
+5. Press the button again. The extension saves the first image it found,
+   at the highest resolution that fits in a browser tab.
+   There is no list to pick from in the extension.
+   For a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).
 
 ## What the extension does with your data
 
