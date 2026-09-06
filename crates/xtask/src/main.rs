@@ -4,6 +4,7 @@
 mod browser;
 mod check;
 mod ci;
+mod content;
 mod core;
 mod desktop;
 mod extension;

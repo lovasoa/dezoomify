@@ -15,6 +15,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     ])?;
     super::fixtures::verify(&[])?;
     super::style::verify(&[])?;
+    super::content::verify(&[])?;
     println!("check: ok");
     Ok(())
 }
