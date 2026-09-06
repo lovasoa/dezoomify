@@ -28,6 +28,12 @@
   --dz-btn-hover-border: #736767;
   --dz-btn-text: #1c1917;
 
+  /* Secondary Button (Tactile & Understated) */
+  --dz-btn-secondary-bg: rgba(0, 0, 0, 0.04);
+  --dz-btn-secondary-border: var(--dz-surface-border);
+  --dz-btn-secondary-hover-bg: rgba(0, 0, 0, 0.08);
+  --dz-btn-secondary-hover-border: var(--dz-text-secondary);
+
   /* Clean architectural focus ring (No glowing neon halos) */
   --dz-accent-blue: #3c7bff;
   --dz-focus-ring: 0 0 0 2px rgba(60, 123, 255, 0.35);
@@ -80,6 +86,12 @@
     --dz-btn-hover-gradient: linear-gradient(180deg, #3d3732 0%, #2c2825 100%);
     --dz-btn-hover-border: #635850;
     --dz-btn-text: #ece5dd;
+
+    /* Secondary Button (Aged Bronze Tone) */
+    --dz-btn-secondary-bg: rgba(255, 255, 255, 0.05);
+    --dz-btn-secondary-border: var(--dz-surface-border);
+    --dz-btn-secondary-hover-bg: rgba(255, 255, 255, 0.09);
+    --dz-btn-secondary-hover-border: var(--dz-text-muted);
 
     --dz-accent-blue: #7fa9ec;
     --dz-focus-ring: 0 0 0 2px rgba(127, 169, 236, 0.4);
@@ -272,8 +284,12 @@ abbr[title] {
   margin-bottom: 1.5rem;
 }
 
+.dz-card:not([data-view-phase="idle"]) .dz-header {
+  display: none;
+}
+
 .dz-title {
-  margin: 0 0 1rem;
+  margin: 0;
   font-size: 2.1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -564,7 +580,7 @@ abbr[title] {
   transform: none;
 }
 
-/* Secondary Button - Flexible height, centered text, never overflows container */
+/* Secondary Button - Flexible height, centered text, understated hierarchy */
 .dz-btn-secondary {
   min-height: 38px;
   height: auto;
@@ -574,11 +590,11 @@ abbr[title] {
   font-weight: 500;
   line-height: 1.35;
   color: var(--dz-text-primary);
-  background: var(--dz-btn-gradient);
-  border: 1px solid var(--dz-btn-border);
+  background: var(--dz-btn-secondary-bg);
+  border: 1px solid var(--dz-btn-secondary-border);
   border-radius: var(--dz-radius);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -590,19 +606,60 @@ abbr[title] {
 }
 
 .dz-btn-secondary:hover {
-  background: var(--dz-btn-hover-gradient);
-  border-color: var(--dz-btn-hover-border);
+  background: var(--dz-btn-secondary-hover-bg);
+  border-color: var(--dz-btn-secondary-hover-border);
   color: var(--dz-text-primary);
   text-decoration: none;
 }
 
 .dz-btn-secondary:active {
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.1);
+  box-shadow: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dz-btn-secondary:active {
+    background: rgba(255, 255, 255, 0.12);
+  }
 }
 
 .dz-btn-secondary:focus-visible {
   outline: none;
   box-shadow: var(--dz-focus-ring);
+}
+
+/* Inline Link Button (e.g. Change link during downloading) */
+.dz-btn-link,
+.dz-link-button {
+  display: inline;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0 0 0 0.35rem;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  line-height: inherit;
+  color: var(--dz-link-color);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition: color 0.15s ease, text-decoration-thickness 0.15s ease;
+}
+
+.dz-btn-link:hover,
+.dz-link-button:hover {
+  color: var(--dz-link-hover);
+  text-decoration-thickness: 1.5px;
+}
+
+.dz-btn-link:focus-visible,
+.dz-link-button:focus-visible {
+  outline: none;
+  box-shadow: var(--dz-focus-ring);
+  border-radius: 2px;
 }
 
 /* Progress Area (Slender Architectural Geometry - No Pills) */
@@ -816,6 +873,21 @@ abbr[title] {
   color: var(--dz-text-muted);
 }
 
+#dz-job-change-hint {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.03);
+  border-left: 2px solid var(--dz-link-color);
+  border-radius: 0 var(--dz-radius) var(--dz-radius) 0;
+  color: var(--dz-text-secondary);
+}
+
+@media (prefers-color-scheme: dark) {
+  #dz-job-change-hint {
+    background: rgba(255, 255, 255, 0.03);
+  }
+}
+
 .dz-job-actions {
   display: flex;
   flex-wrap: wrap;
@@ -884,16 +956,17 @@ abbr[title] {
 
 .dz-error-icon {
   flex-shrink: 0;
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   color: var(--dz-error-accent);
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
 }
 
 .dz-error-title {
   margin: 0 0 0.4rem;
   font-size: 1.35rem;
   font-weight: 600;
+  line-height: 1.25;
   color: var(--dz-error-text);
   letter-spacing: -0.01em;
 }
@@ -916,7 +989,7 @@ abbr[title] {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--dz-text-muted);
-  margin: 0 0 1.15rem;
+  margin: 0 0 1rem;
 }
 
 .dz-guidance-grid {
@@ -932,21 +1005,46 @@ abbr[title] {
   text-align: left;
   background: transparent;
   border: none;
-  border-top: 1px solid var(--dz-surface-border);
-  padding: 0.95rem 0 0.5rem;
+  padding: 0.5rem 0.65rem;
+  margin: -0.5rem -0.65rem;
+  border-radius: var(--dz-radius);
   cursor: pointer;
   color: inherit;
   text-decoration: none;
   font-family: inherit;
   box-shadow: none;
-  transition: opacity 0.15s ease;
+  transition: background-color 0.15s ease;
 }
 
 .dz-guidance-item:hover,
 .dz-suggestion-card:hover {
+  background: rgba(0, 0, 0, 0.03);
   text-decoration: none;
   box-shadow: none;
   transform: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dz-guidance-item:hover,
+  .dz-suggestion-card:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.dz-guidance-item:visited,
+.dz-suggestion-card:visited {
+  color: inherit;
+}
+
+.dz-guidance-item:visited .dz-guidance-item-title,
+.dz-suggestion-card:visited .dz-suggestion-title {
+  color: var(--dz-link-color);
+}
+
+.dz-guidance-item:focus-visible,
+.dz-suggestion-card:focus-visible {
+  outline: none;
+  box-shadow: var(--dz-focus-ring);
 }
 
 .dz-guidance-item-header,
@@ -1000,11 +1098,22 @@ abbr[title] {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  list-style: none;
   transition: color 0.15s ease;
+}
+
+.dz-summary::-webkit-details-marker {
+  display: none;
 }
 
 .dz-summary:hover {
   color: var(--dz-text-primary);
+}
+
+.dz-summary:focus-visible {
+  outline: none;
+  box-shadow: var(--dz-focus-ring);
+  border-radius: var(--dz-radius);
 }
 
 .dz-summary-icon {
@@ -1024,7 +1133,8 @@ abbr[title] {
   border: 1px solid var(--dz-surface-border);
   border-radius: var(--dz-radius);
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: var(--dz-text-secondary);
   margin: 0.5rem 0;
 }
@@ -1070,16 +1180,17 @@ abbr[title] {
 
 .dz-notice-icon {
   flex-shrink: 0;
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   color: var(--dz-notice-accent);
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
 }
 
 .dz-notice-title {
   margin: 0 0 0.4rem;
   font-size: 1.35rem;
   font-weight: 600;
+  line-height: 1.25;
   color: var(--dz-notice-accent);
   letter-spacing: -0.01em;
 }
@@ -1123,10 +1234,10 @@ abbr[title] {
 .dz-completed-icon,
 .dz-completion-icon {
   flex-shrink: 0;
-  width: 2.2rem;
-  height: 2.2rem;
+  width: 1.85rem;
+  height: 1.85rem;
   color: var(--dz-success-accent);
-  margin-top: 0.1rem;
+  margin-top: 0.05rem;
 }
 
 .dz-completed-title,
@@ -1134,6 +1245,7 @@ abbr[title] {
   margin: 0 0 0.35rem;
   font-size: 1.35rem;
   font-weight: 700;
+  line-height: 1.25;
   color: var(--dz-success-text);
 }
 

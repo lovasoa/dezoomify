@@ -470,6 +470,51 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   assert.ok(!diag2.includes("no discovery candidate"), "stale detail must be replaced");
 });
 
+test("Change button during job is styled as a link button, and header visibility tracks phase", () => {
+  const container = createMockElement("div");
+  const callbacks = {
+    onSubmitUrl: () => {},
+    onCancel: () => {},
+    onReset: () => {},
+    onSave: () => {},
+  };
+
+  // 1. Idle phase: header is visible
+  renderView(container, { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 }, callbacks);
+  const card = container.querySelector(".dz-card");
+  const header = card.querySelector(".dz-header");
+  assert.ok(header, "header exists");
+  assert.equal(header.style.display, "", "header visible in idle");
+
+  // 2. Job phase: header is hidden, Change button has dz-btn-link class
+  renderView(
+    container,
+    { status: "downloading", seq: 2, sessionId: "s1", imageCount: 2, transport: "direct" },
+    callbacks,
+    {
+      currentProgress: { current: 10, total: 50 },
+      imageChoice: { width: 4000, height: 3000, tiles: 50 },
+    },
+  );
+  assert.equal(header.style.display, "none", "header hidden in job phase");
+  const changeBtn = card.querySelector("#dz-job-change");
+  assert.ok(changeBtn, "change button exists");
+  assert.ok(changeBtn.classList.contains("dz-btn-link"), "change button has dz-btn-link class");
+  assert.ok(!changeBtn.classList.contains("dz-btn-secondary"), "change button is not a huge secondary button");
+
+  // 3. Failed phase: header is hidden
+  renderView(
+    container,
+    { status: "failed", seq: 3, sessionId: "s1", imageCount: 0, error: { code: "FAILED", category: "transport", retryable: true, message: "Error" } },
+    callbacks,
+  );
+  assert.equal(header.style.display, "none", "header hidden in failed phase");
+
+  // 4. Return to idle: header reappears
+  renderView(container, { status: "idle", seq: 4, sessionId: "s1", imageCount: 0 }, callbacks);
+  assert.equal(header.style.display, "", "header reappears in idle");
+});
+
 test("CSS structural invariants prevent button clipping, container overflow, and layout shifts", () => {
   const css = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/styles/theme.css"), "utf8");
 
@@ -480,6 +525,14 @@ test("CSS structural invariants prevent button clipping, container overflow, and
   // Progress controls and job actions must wrap and avoid squeezing elements into overlapping
   assert.match(css, /\.dz-progress-controls\s*\{[^}]*flex-wrap:\s*wrap;/);
   assert.match(css, /\.dz-job-actions\s*\{[^}]*flex-wrap:\s*wrap;/);
+
+  // Link button styling for inline actions like Change button
+  assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*display:\s*inline;/);
+  assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*background:\s*transparent;/);
+  assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*text-decoration:\s*underline;/);
+
+  // Guidance items must not have broken disconnected border-top lines
+  assert.doesNotMatch(css, /\.dz-guidance-item,\s*\.dz-suggestion-card\s*\{[^}]*border-top:/);
 
   // Transport badge must be bounded and not stretch parent container
   assert.match(css, /\.dz-transport-badge\s*\{[^}]*max-width:\s*100%;/);

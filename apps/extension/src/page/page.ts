@@ -541,7 +541,7 @@ async function run(tabId) {
   setProgress(NaN, 0);
   try {
     setStep("Scanning page…");
-    setDiagnostics(["Phase: scan", "Tiles: —"]);
+    setDiagnostics(["Phase: scan", "Tiles: -"]);
     const urls = await runScan(tabId);
     throwIfCancelled();
     if (urls.length === 0) {

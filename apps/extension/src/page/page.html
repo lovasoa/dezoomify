@@ -30,6 +30,10 @@
         --dz-btn-hover-gradient: linear-gradient(180deg, #ffffff 0%, #d4cccc 100%);
         --dz-btn-hover-border: #736767;
         --dz-btn-text: #1c1917;
+        --dz-btn-secondary-bg: rgba(0, 0, 0, 0.04);
+        --dz-btn-secondary-border: var(--dz-surface-border);
+        --dz-btn-secondary-hover-bg: rgba(0, 0, 0, 0.08);
+        --dz-btn-secondary-hover-border: var(--dz-text-secondary);
         --dz-accent-blue: #3c7bff;
         --dz-focus-ring: 0 0 0 2px rgba(60, 123, 255, 0.35);
         --dz-progress-bar: linear-gradient(90deg, #3c7bff, #1d4ed8);
@@ -58,6 +62,10 @@
           --dz-btn-hover-gradient: linear-gradient(180deg, #3d3732 0%, #2c2825 100%);
           --dz-btn-hover-border: #635850;
           --dz-btn-text: #ece5dd;
+          --dz-btn-secondary-bg: rgba(255, 255, 255, 0.05);
+          --dz-btn-secondary-border: var(--dz-surface-border);
+          --dz-btn-secondary-hover-bg: rgba(255, 255, 255, 0.09);
+          --dz-btn-secondary-hover-border: var(--dz-text-muted);
           --dz-accent-blue: #7fa9ec;
           --dz-focus-ring: 0 0 0 2px rgba(127, 169, 236, 0.4);
           --dz-progress-bar: linear-gradient(90deg, #acaf50, #8a8e3e);
@@ -197,8 +205,8 @@
         font-size: 0.92rem;
         font-weight: 500;
         color: var(--dz-text-primary);
-        background: var(--dz-btn-gradient);
-        border: 1px solid var(--dz-btn-border);
+        background: var(--dz-btn-secondary-bg);
+        border: 1px solid var(--dz-btn-secondary-border);
         border-radius: var(--dz-radius);
         cursor: pointer;
         display: inline-flex;
@@ -207,26 +215,48 @@
         gap: 0.4rem;
         text-decoration: none;
         white-space: nowrap;
+        transition: background 0.15s ease, border-color 0.15s ease;
       }
-      .dz-btn-secondary:hover { background: var(--dz-btn-hover-gradient); border-color: var(--dz-btn-hover-border); }
+      .dz-btn-secondary:hover { background: var(--dz-btn-secondary-hover-bg); border-color: var(--dz-btn-secondary-hover-border); color: var(--dz-text-primary); }
       .dz-btn-secondary:focus-visible { outline: none; box-shadow: var(--dz-focus-ring); }
       .dz-btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+      .dz-btn-link, .dz-link-button {
+        display: inline;
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin: 0 0 0 0.35rem;
+        font-family: inherit;
+        font-size: inherit;
+        font-weight: 500;
+        line-height: inherit;
+        color: var(--dz-link-color);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        text-decoration-thickness: 1px;
+        cursor: pointer;
+        vertical-align: baseline;
+      }
+      .dz-btn-link:hover, .dz-link-button:hover { color: var(--dz-link-hover); text-decoration-thickness: 1.5px; }
+      .dz-btn-link:focus-visible, .dz-link-button:focus-visible { outline: none; box-shadow: var(--dz-focus-ring); border-radius: 2px; }
       .dz-actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.85rem; margin-top: 1.75rem; }
       .dz-error-section { display: flex; flex-direction: column; padding: 0.5rem 0 0; }
       .dz-error-header { display: flex; align-items: flex-start; gap: 1.15rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--dz-surface-border); }
-      .dz-error-title { margin: 0 0 0.4rem; font-size: 1.35rem; font-weight: 600; color: var(--dz-error-text); }
+      .dz-error-title { margin: 0 0 0.4rem; font-size: 1.35rem; font-weight: 600; line-height: 1.25; color: var(--dz-error-text); }
       .dz-error-message { margin: 0; font-size: 1.02rem; color: var(--dz-text-secondary); line-height: 1.6; }
       .dz-completed-section { display: flex; flex-direction: column; padding: 0.5rem 0 0; }
       .dz-completed-header { display: flex; align-items: flex-start; gap: 1.15rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--dz-surface-border); }
-      .dz-completed-title { margin: 0 0 0.35rem; font-size: 1.35rem; font-weight: 700; color: var(--dz-success-text); }
+      .dz-completed-title { margin: 0 0 0.35rem; font-size: 1.35rem; font-weight: 700; line-height: 1.25; color: var(--dz-success-text); }
       .dz-completed-summary { margin: 0; font-size: 1.02rem; color: var(--dz-text-primary); }
       .dz-notice-section { display: flex; flex-direction: column; padding: 0.5rem 0 0; }
-      .dz-notice-title { margin: 0 0 0.4rem; font-size: 1.35rem; font-weight: 600; color: var(--dz-notice-accent); }
+      .dz-notice-title { margin: 0 0 0.4rem; font-size: 1.35rem; font-weight: 600; line-height: 1.25; color: var(--dz-notice-accent); }
       .dz-notice-message { margin: 0; font-size: 1.02rem; color: var(--dz-text-primary); line-height: 1.6; }
       .dz-notice-guidance { font-size: 0.95rem; line-height: 1.65; color: var(--dz-text-secondary); margin: 1.25rem 0 0.5rem; }
       .dz-details { border: none; border-top: 1px solid var(--dz-surface-border); background: transparent; margin-top: 1.25rem; padding-top: 0.25rem; }
-      .dz-summary { padding: 0.65rem 0; font-size: 0.88rem; font-weight: 500; color: var(--dz-text-muted); cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; }
+      .dz-summary { padding: 0.65rem 0; font-size: 0.88rem; font-weight: 500; color: var(--dz-text-muted); cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; list-style: none; }
+      .dz-summary::-webkit-details-marker { display: none; }
       .dz-summary:hover { color: var(--dz-text-primary); }
+      .dz-summary:focus-visible { outline: none; box-shadow: var(--dz-focus-ring); border-radius: var(--dz-radius); }
       .dz-diagnostics {
         font-family: var(--dz-font-mono);
         font-size: 0.84rem;
@@ -236,7 +266,8 @@
         border: 1px solid var(--dz-surface-border);
         border-radius: var(--dz-radius);
         white-space: pre-wrap;
-        word-break: break-all;
+        overflow-wrap: anywhere;
+        word-break: break-word;
         color: var(--dz-text-secondary);
         margin: 0.5rem 0;
       }

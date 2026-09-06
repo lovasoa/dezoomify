@@ -355,6 +355,7 @@ export function renderView(
   // in-place updates mutate existing nodes, guaranteeing that animations do not
   // re-trigger, open details do not snap shut, and the screen NEVER flickers or blinks.
   const phase = getPhaseForStatus(state.status);
+  header.style.display = phase === "idle" ? "" : "none";
   const currentPhase = card.dataset.viewPhase;
 
   if (currentPhase !== phase) {
@@ -594,7 +595,7 @@ function mountJobSection(
     <p class="dz-tile-counts" id="dz-job-counts"></p>
     <p class="dz-job-detail" id="dz-job-images" style="display: none;">
       <span id="dz-job-images-text"></span>
-      <button type="button" class="dz-btn-secondary" id="dz-job-change">Change</button>
+      <button type="button" class="dz-btn-link" id="dz-job-change">Change</button>
     </p>
     <p class="dz-job-detail" id="dz-job-change-hint" style="display: none;"></p>
     <div class="dz-pending-box" id="dz-job-pending-box" style="display: none;">
@@ -760,7 +761,7 @@ function updateJobSection(
       if (imagesText.textContent !== notice) imagesText.textContent = notice;
       imagesEl.style.display = "";
       if (changeHint) {
-        const hint = "The website saves the first image automatically. To choose a different image, use the desktop app.";
+        const hint = "The website saves the largest image automatically. To choose a different image, use the desktop app.";
         if (changeHint.textContent !== hint) changeHint.textContent = hint;
       }
     } else {
@@ -921,7 +922,7 @@ function mountDisplayOnlySection(
   }
 
   // Display-only handoff (todo 6.2): the assembled canvas stays visible
-  // below without a programmatic save (tainted canvas, right-click where
+  // below without a programmatic save (cross-origin canvas, right-click where
   // supported). Offer the readable routes explicitly instead of failing
   // late with TILE_FAILED: extension guidance plus the desktop
   // `dezoomify://` handoff when the host supplied one.

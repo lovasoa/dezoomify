@@ -6,7 +6,7 @@
 // info.json, tour.xml, or tile-info XML); this classifier is a UI hint only
 // and never gates the core. A generic article page (no zoom viewer) still
 // ends as a structured NO_IMAGE_FOUND failure from the engine, never fake
-// tile counts — but a head without literals must still reach the core, which
+// tile counts -- but a head without literals must still reach the core, which
 // is why the website forwards every readable payload to WASM (extension
 // parity: it tries ranked candidates directly).
 //
