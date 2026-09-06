@@ -98,6 +98,28 @@ export function isProxyEligible(
   return { eligible: true, reason: "public-non-credential-metadata" };
 }
 
+/**
+ * Whether a planned tile may fall back to ordinary image display when its
+ * readable fetch fails. Only unprocessed tiles (`ProcessingRecipe::None`,
+ * serialized as `"none"`) qualify: processed tiles (decrypt, re-encode)
+ * require readable bytes, and a display fallback would silently drop the
+ * processing. Branch on the stable recipe id, never on display text.
+ */
+export function isOrdinaryImageTile(processing: unknown): boolean {
+  return processing === undefined || processing === null || processing === "" || processing === "none";
+}
+
+/**
+ * Transport label for a structured job error. Tile fetches never use the
+ * metadata CORS proxy, so a tile failure always reports the direct browser
+ * fetch even when the job's metadata arrived through the proxy; other
+ * errors report the job's active transport.
+ */
+export function errorTransportFor(code: string, activeTransport: string | null): string {
+  if (code === "TILE_FAILED") return DIRECT_TRANSPORT_LABEL;
+  return activeTransport ?? "direct";
+}
+
 export function createWebIntegration(deps: {
   direct: DirectLike;
   proxy: ProxyLike;
