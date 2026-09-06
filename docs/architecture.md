@@ -18,7 +18,7 @@ The Rust source of truth for commands, events, capabilities, errors, and browser
 
 ### `crates/dezoomify-native`
 
-The native effect implementation: HTTP transport, local-file access, persistent tile cache, image decoding, processing execution, and output encoders. Both the CLI and Tauri desktop application use it. See [Native apps](native-apps.md).
+The native effect implementation: HTTP transport, local-file access, image decoding, processing execution, and the PNG output encoder. The tile-cache helpers stay unwired (storage `none`); canvas assembly is memory-bound with a 1 GiB cap. Both the CLI and Tauri desktop application use it. See [Native apps](native-apps.md).
 
 ### `crates/dezoomify-wasm`
 
@@ -77,4 +77,4 @@ Discovery first emits resource requests. The active host acquires each resource 
 - URLs, headers, credentials, bytes, and output destinations cross boundaries only through typed values.
 - Runtime differences appear as negotiated [capabilities](protocol.md#capabilities), and automatic fallback is exposed through active-transport state rather than hidden.
 - Errors cross host boundaries as stable protocol errors with typed [recovery actions](errors.md).
-- Shared scenarios assert equivalent behavior across the native runtime, browser runtime, desktop app, extension, and CLI; see [Testing](testing.md).
+- Shared scenarios cover the native runtime and CLI (`native/cli-dzi`, `native/cli-tile-failure`); see [Testing](testing.md).
