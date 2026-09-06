@@ -1,1 +1,14 @@
-usage: dezoomify-cli [--overwrite] [--json] [--max-width <px>] [--accept-invalid-certs] [-H "Name: value"] <input-url> <output>
+usage: dezoomify-cli [options] <input-url> <output>
+options:
+  --overwrite                 overwrite an existing output file
+  --json                      print machine-readable JSON events on stdout
+  --max-width <px>            largest level whose width fits (positive integer)
+  --accept-invalid-certs      accept insecure TLS certificates (insecure)
+  -H, --header "Name: value"  HTTP header for tile requests (repeatable, last wins)
+  --image-index <n>           pick the nth image when several are found (0-based)
+  --retries <n>               tile retry budget (default 3)
+  --min-interval <duration>   minimum delay between requests, e.g. 50ms, 2s (default 0)
+  --tile-cache <dir>          resume folder reusing downloaded tiles
+  --outfile <file>            explicit output file (alternative to positional <output>)
+  -h, --help                  show this help
+  --version                   show version

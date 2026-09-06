@@ -35,9 +35,24 @@ fn main() {
     handle.emit("started");
     print_event(parsed.json, handle.events().last().expect("started event"));
 
+    if let Some(index) = parsed.image_index {
+        if index != 0 {
+            eprintln!(
+                "warning: --image-index {index} is parsed but the native driver currently resolves the first catalog entry; saving the first image"
+            );
+        }
+    }
+    if !parsed.min_interval.is_zero() {
+        eprintln!(
+            "warning: --min-interval is parsed but per-tile throttling needs native support; continuing without delay"
+        );
+    }
+
     let config = PipelineConfig {
         user_headers: parsed.headers.clone(),
         max_width: parsed.max_width,
+        max_retries: parsed.retries,
+        cache_dir: parsed.tile_cache.clone(),
         fetch: FetchLimits {
             tls: TlsPolicy {
                 accept_invalid_certs: parsed.accept_invalid_certs,
