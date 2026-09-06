@@ -12,7 +12,6 @@ import {
   SITE_BUSY_MESSAGE,
   classifyReadableBytes,
   discoveryFailedError,
-  noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import { errorTransportFor, isOrdinaryImageTile, isProxyEligible } from "./webIntegration.ts";
@@ -743,8 +742,13 @@ const PROXY_LABEL = "Metadata proxy";
  * Fetch one metadata resource for discovery: direct first with a 1500 ms
  * head start, then the eligible metadata proxy after a classified network
  * failure (first-wins: the loser is aborted via AbortController so direct
- * and proxy bytes never overlap). The zoomable-content classifier gates
- * every success: generic pages fail with NO_IMAGE_FOUND.
+ * and proxy bytes never overlap). Every readable payload is forwarded to
+ * the WASM core, which is the single authority for discovery (it follows
+ * secondary resources such as info.json, tour.xml, or tile-info XML). The
+ * substring classifier below is a UI hint only and never gates: a head
+ * without literals must still reach the core (extension parity, which tries
+ * ranked candidates directly), while a generic page still ends as
+ * NO_IMAGE_FOUND from the engine.
  *
  * Eligibility stays owned here by the web app (isProxyEligible on a
  * metadata request); integrations execute the supplied transport effects.
@@ -853,15 +857,12 @@ async function fetchMetadataFor(
       `direct fetch: no readable response (network error or blocked read) fetching ${target}`,
     );
   }
-  const verdict = classifyReadableBytes(bytes, { via, contentType });
-  if (!verdict.found) {
-    throw failure(
-      "NO_IMAGE_FOUND",
-      noImageFoundError(via).message,
-      false,
-      undefined,
-      `content classifier: no zoomable-image content in ${bytes.byteLength} bytes (${via}) from ${target}`,
-    );
+  // WASM core is authoritative: always forward readable bytes so formats
+  // whose first head carries no zoomable literal (GAC/tour/info.json reached
+  // via secondary resources) still resolve. The classifier is a UI hint only.
+  const hint = classifyReadableBytes(bytes, { via, contentType });
+  if (!hint.found) {
+    pushLog(`content hint: no zoomable marker in first bytes (${via}); running full discovery…`);
   }
   return { bytes, finalUri, via };
 }

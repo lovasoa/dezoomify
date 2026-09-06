@@ -285,12 +285,84 @@ test("entries never fabricate tile progress; negatives carry a structured error"
       assert.ok(text.includes("toBlob"), `${name} must encode real pixels before save-done`);
     }
   }
-  // Both entries must gate success on the readable-bytes classifier.
-  assert.ok(mainJs.includes("classifyReadableBytes"), "main.js gates on discovery");
-  assert.ok(mainTs.includes("classifyReadableBytes"), "main.ts gates on discovery");
+  // The WASM core is authoritative: the website forwards every readable
+  // payload and lets the engine decide. The substring classifier stays as a
+  // UI hint only and must never gate (throw) on a negative hint.
+  assert.ok(mainJs.includes("classifyReadableBytes"), "main.js keeps classifier as hint");
+  assert.ok(mainTs.includes("classifyReadableBytes"), "main.ts keeps classifier as hint");
+  assert.ok(
+    mainTs.includes("running full discovery"),
+    "main.ts logs a hint and runs WASM discovery always",
+  );
+  assert.ok(
+    !mainTs.includes("content classifier: no zoomable-image content"),
+    "main.ts must not fail the job when the first head lacks a zoomable literal",
+  );
+  for (const text of [mainTs, mainJs]) {
+    assert.ok(
+      !text.includes('throw failure(\n      "NO_IMAGE_FOUND"') &&
+        !text.includes('throw failure("NO_IMAGE_FOUND"'),
+      "website fetch must not throw NO_IMAGE_FOUND before the engine runs",
+    );
+  }
+  // NO_IMAGE_FOUND still exists as the engine's terminal discovery code
+  // (worker maps "no discovery candidate accepted" to it).
+  const workerJs = fs.readFileSync(path.join(srcDir, "src", "worker.js"), "utf8");
+  assert.ok(workerJs.includes('"NO_IMAGE_FOUND"'), "worker still reports NO_IMAGE_FOUND from the engine");
   // Negative verdict shape always carries a terminal discovery error.
   const err = noImageFoundError("direct");
   assert.equal(err.code, "NO_IMAGE_FOUND");
   assert.equal(err.retryable, false);
   assert.equal(err.phase, "discovery");
+});
+
+test("regression: heads without zoomable literals still reach WASM discovery (GAC/krpano/IIIF)", () => {
+  // Same-URL parity: the extension tries ranked candidates directly
+  // (page.ts discover loop), so these heads succeed there via secondary
+  // resources (tile-info XML, tour.xml, info.json). The website's old
+  // first-256KiB substring gate failed them with NO_IMAGE_FOUND before the
+  // engine ever ran. The classifier stays negative here (hint only); the
+  // website must still forward every payload to the WASM core.
+  const GAC_HEAD =
+    '<!doctype html><html><head><title>Artwork</title><meta charset="utf-8"></head>' +
+    '<body><img src="https://lh3.googleusercontent.com/abc123=w1600"></body></html>';
+  const KRPANO_HEAD =
+    '<!doctype html><html><head><title>Tour</title><script src="/tour/viewer.js"></script></head>' +
+    '<body><div id="pano"></div><script>embedViewer({xml:"tour.xml"})</script></body></html>';
+  const IIIF_HEAD =
+    '<!doctype html><html><head><title>Scan</title></head>' +
+    '<body><a href="https://example.test/image/42/info.json">view</a></body></html>';
+  for (const [name, head] of [
+    ["gac-lh3-head", GAC_HEAD],
+    ["krpano-tour-head", KRPANO_HEAD],
+    ["iiif-info-link-head", IIIF_HEAD],
+  ]) {
+    assert.equal(isZoomableContent(head), false, `${name} has no head literal (hint negative)`);
+    const verdict = classifyReadableBytes(textToBytes(head), {
+      via: "direct",
+      contentType: "text/html",
+    });
+    assert.equal(verdict.found, false, `${name} hint is negative`);
+    assert.equal(verdict.error.code, "NO_IMAGE_FOUND", name);
+  }
+  // The website must not gate on that negative hint: fetchMetadataFor logs
+  // and forwards to the engine, which alone reports NO_IMAGE_FOUND.
+  const thisFile = fileURLToPath(import.meta.url);
+  const srcDir = path.dirname(path.dirname(thisFile));
+  const mainTs = fs.readFileSync(path.join(srcDir, "src", "main.ts"), "utf8");
+  assert.ok(
+    mainTs.includes("running full discovery"),
+    "website forwards literal-free heads to WASM discovery",
+  );
+  // Extension parity: ranked candidates are each tried via core discovery,
+  // never dropped on a head-text pre-filter.
+  const pageTs = fs.readFileSync(
+    path.join(srcDir, "apps", "extension", "src", "page", "page.ts"),
+    "utf8",
+  );
+  assert.ok(
+    pageTs.includes("for (let i = 0; i < ranked.length; i++)") &&
+      pageTs.includes("await discover(candidate.url"),
+    "extension tries every ranked candidate directly",
+  );
 });

@@ -1,12 +1,14 @@
-// Website discovery classifier: decide whether fetched metadata bytes look
-// like a zoomable image source, or whether the job must fail without any
-// tile progress.
+// Website discovery hint: cheap substring signals for whether fetched
+// metadata bytes look like a zoomable image source.
 //
-// Pure and host-neutral: no fetch, DOM, or storage. The browser entry
-// (`main.ts` / `main.js`) fetches one metadata resource via the
-// direct-first web integration, then gates every later transition on this
-// classifier. In particular a generic article page (no zoom viewer) must
-// produce a structured NO_IMAGE_FOUND failure, never fake tile counts.
+// Pure and host-neutral: no fetch, DOM, or storage. The WASM core is the
+// single authority for discovery (it follows secondary resources such as
+// info.json, tour.xml, or tile-info XML); this classifier is a UI hint only
+// and never gates the core. A generic article page (no zoom viewer) still
+// ends as a structured NO_IMAGE_FOUND failure from the engine, never fake
+// tile counts — but a head without literals must still reach the core, which
+// is why the website forwards every readable payload to WASM (extension
+// parity: it tries ranked candidates directly).
 //
 // Keep this file erasable-syntax-only so node type-stripping can import it
 // directly in tests. The browser `./discovery.js` mirror is generated from
@@ -588,9 +590,11 @@ export function classifyDiscovery(
 }
 
 /**
- * Classify already-fetched readable bytes. Image binaries, empty bodies, and
- * generic HTML/text without any zoomable signal are all negative: they yield
- * NO_IMAGE_FOUND rather than any tile progress.
+ * Cheap UI hint over already-fetched readable bytes. Image binaries, empty
+ * bodies, and generic HTML/text without any zoomable signal are negative.
+ * Hint only: the website always forwards readable bytes to the WASM core
+ * and lets the engine decide; a negative hint never fails the job (the
+ * engine still reports NO_IMAGE_FOUND when no candidate accepts).
  */
 export function classifyReadableBytes(
   bytes: unknown,
