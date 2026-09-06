@@ -1,4 +1,4 @@
 {
   "outcome": "failed",
-  "code": "native.internal"
+  "code": "output.exists"
 }

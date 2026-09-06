@@ -81,7 +81,9 @@ use dezoomify_job::{Config as JobConfig, Job, JobResponse, State as JobState};
 
 use crate::error::NativeError;
 use crate::http::{fetch, UserHeaders};
-use crate::output::{validate_destination, write_atomic, write_iiif_dir, OutputFormat};
+use crate::output::{
+    partial_path_for, validate_destination, write_atomic, write_iiif_dir, OutputFormat,
+};
 use crate::pipeline::{
     blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
     fetch_and_decode_cached, merge_headers, probe_tile_bytes, render_iiif_dir, sha256_hex,
@@ -110,8 +112,7 @@ pub(crate) fn drive(
     on_event: &mut dyn FnMut(PipelineEvent),
 ) -> Result<PipelineOutcome, NativeError> {
     let mut url = input_url.to_string();
-    let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))
-        .map_err(NativeError::from)?;
+    let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))?;
     for _ in 0..=MAX_DEFERRED_FOLLOWS {
         match drive_job(&url, output_path, overwrite, format, config, user, on_event)? {
             AttemptDone::Done(outcome) => return Ok(outcome),
@@ -310,6 +311,7 @@ struct TileGeom {
 }
 
 struct Published {
+    output_path: PathBuf,
     output_hash: String,
     tile_count: usize,
     image_size: Vec2d,
@@ -348,7 +350,7 @@ struct Attempt<'a> {
     throttle_last: Option<Instant>,
     failure: Option<(String, String)>,
     published: Option<Published>,
-    destination_error: Option<String>,
+    destination_error: Option<NativeError>,
     recovery_attempts: u32,
     cancel_sent: bool,
 }
@@ -482,7 +484,7 @@ fn drive_job(
             })?;
             debug_assert_eq!(published.partial, partial);
             Ok(AttemptDone::Done(PipelineOutcome {
-                output_path: attempt.output_path.clone(),
+                output_path: published.output_path.clone(),
                 output_hash: published.output_hash,
                 tile_count: published.tile_count,
                 image_size: published.image_size,
@@ -496,8 +498,8 @@ fn drive_job(
             }))
         }
         Some("cancelled") => {
-            if let Some(message) = attempt.destination_error {
-                Err(NativeError::new("native.internal", message))
+            if let Some(error) = attempt.destination_error {
+                Err(error)
             } else {
                 Err(NativeError::new(
                     "job.cancelled",
@@ -846,8 +848,8 @@ fn execute_effects(
                             destination: "dst:0".to_string(),
                         },
                     )?,
-                    Err(message) => {
-                        attempt.destination_error = Some(message);
+                    Err(error) => {
+                        attempt.destination_error = Some(error);
                         reply(
                             job,
                             JobResponse::DestinationDenied {
@@ -1084,10 +1086,32 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
         ));
     }
     let partial = attempt.decoded.len() != attempt.order.len();
+    // Kept partials publish to a `.partial` sibling (`out.png` becomes
+    // `out.partial.png`) so a partial file never masquerades as a complete
+    // save on disk; `--no-partial` publishes nothing. The sibling keeps its
+    // encoder extension, so the output file name still selects the encoder.
+    // Fail-closed on collision: without `overwrite` an existing sibling
+    // refuses with typed `output.exists`, like the main destination.
+    let dest: PathBuf = if partial {
+        let sibling = partial_path_for(&attempt.output_path, attempt.format);
+        validate_destination(&sibling, &attempt.format, attempt.overwrite)?;
+        sibling
+    } else {
+        attempt.output_path.clone()
+    };
     // First-seen output metadata in plan order, mirroring the reference
     // first-tile capture (`canvas.rs:69-76`, `png_encoder.rs:97-119`): the
     // reference winner is completion order, which is nondeterministic under
     // concurrency, so plan order is the honest deterministic rule.
+    //
+    // Memory note (todo 5.5 chunked decision): the canvas stays fully
+    // assembled in memory under the 8 GiB `output.canvas-limit` fail-fast
+    // above, and each encoder below renders one transient in-memory buffer
+    // before the atomic temp-write plus rename. True row-chunked streaming
+    // would only shrink that transient buffer (the canvas itself cannot
+    // stream through PNG adaptive filtering, multi-directory TIFF, or the
+    // `iiif-dir` overview), so in-memory encode plus fail-fast is the
+    // documented trade-off; only the final bytes cross the atomic publish.
     let icc_profile = attempt
         .order
         .iter()
@@ -1122,7 +1146,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
-            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            write_atomic(&dest, &encoded)?;
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Jpeg => {
@@ -1131,7 +1155,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
-            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            write_atomic(&dest, &encoded)?;
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Tiff => {
@@ -1140,7 +1164,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
-            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            write_atomic(&dest, &encoded)?;
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Zif => {
@@ -1149,7 +1173,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
-            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            write_atomic(&dest, &encoded)?;
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Webp => {
@@ -1158,7 +1182,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 "encoding",
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
-            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            write_atomic(&dest, &encoded)?;
             format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::IiifDir => {
@@ -1175,12 +1199,12 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                     ("files".to_string(), (tiles.len() + 1).to_string()),
                 ]),
             );
-            let preimage = write_iiif_dir(&attempt.output_path, &info_json, &tiles)
-                .map_err(NativeError::from)?;
+            let preimage = write_iiif_dir(&dest, &info_json, &tiles)?;
             format!("sha256:{}", sha256_hex(&preimage))
         }
     };
     attempt.published = Some(Published {
+        output_path: dest,
         output_hash,
         tile_count: attempt.decoded.len(),
         image_size: Vec2d {

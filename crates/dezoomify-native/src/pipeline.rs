@@ -41,9 +41,10 @@ pub enum PartialPolicy {
     /// Fail the job with `tile.download-failed` and write no output.
     Fail,
     /// Encode the acquired tiles with missing regions left blank and
-    /// report success with `partial: true`. This matches the reference
-    /// `PartialDownload` file behavior (partial output kept) and is the
-    /// default; `--no-partial` selects `Fail`.
+    /// report success with `partial: true`, published to a `.partial`
+    /// sibling (see [`crate::output::partial_path_for`]). This matches the
+    /// reference `PartialDownload` file behavior (partial output kept) and
+    /// is the default; `--no-partial` selects `Fail`.
     #[default]
     Keep,
 }

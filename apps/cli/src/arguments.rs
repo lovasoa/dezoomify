@@ -62,7 +62,9 @@ pub struct Args {
     pub bulk: Option<String>,
     /// Partial output policy: keep a partial image with blank regions when
     /// some tiles fail after retries (default, reference `PartialDownload`
-    /// file behavior). `--no-partial` discards instead with
+    /// file behavior), published to a `.partial` sibling (`out.png` becomes
+    /// `out.partial.png`) so it never masquerades as a complete save.
+    /// `--no-partial` discards instead with
     /// `tile.download-failed` and no output. `--keep-partial` is the
     /// explicit opt-in spelling of the default; last flag wins.
     pub keep_partial: bool,
@@ -539,7 +541,8 @@ fn help() -> String {
         "  --connect-timeout <duration> max time to connect (default 6s)",
         "  --logging <level>           log verbosity: error, warn, info, debug, trace (default info)",
         "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
-        "  --keep-partial              keep partial output with blank regions on tile failure (default)",
+        "  --keep-partial              keep partial output with blank regions on tile failure (default,",
+        "                              saved to a .partial sibling: out.png becomes out.partial.png)",
         "  --no-partial                discard partial output on tile failure (fail with no output)",
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
         "                              or IIIF collection manifest URL; saves one output per entry",

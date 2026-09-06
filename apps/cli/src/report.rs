@@ -13,25 +13,33 @@ pub fn machine_event_detail(
     serde_json::json!({"job": job, "seq": seq, "kind": kind, "detail": detail}).to_string()
 }
 
+/// Fields for the terminal machine-readable completion record. A struct
+/// (not eight positional args) keeps `clippy::too_many_arguments` quiet
+/// while the record stays additive: `partial` distinguishes a kept
+/// `.partial` sibling (`partial-completed`) from a complete save.
+pub struct CompletedOutput<'a> {
+    pub job: &'a str,
+    pub seq: u64,
+    pub output_hash: &'a str,
+    pub format: &'a str,
+    pub width: u32,
+    pub height: u32,
+    pub tile_count: usize,
+    pub partial: bool,
+}
+
 #[must_use]
-pub fn machine_completed(
-    job: &str,
-    seq: u64,
-    output_hash: &str,
-    format: &str,
-    width: u32,
-    height: u32,
-    tile_count: usize,
-) -> String {
+pub fn machine_completed(summary: &CompletedOutput<'_>) -> String {
     serde_json::json!({
-        "job": job,
-        "seq": seq,
-        "kind": "completed",
-        "outputHash": output_hash,
-        "format": format,
-        "width": width,
-        "height": height,
-        "tileCount": tile_count,
+        "job": summary.job,
+        "seq": summary.seq,
+        "kind": if summary.partial { "partial-completed" } else { "completed" },
+        "outputHash": summary.output_hash,
+        "format": summary.format,
+        "width": summary.width,
+        "height": summary.height,
+        "tileCount": summary.tile_count,
+        "partial": summary.partial,
     })
     .to_string()
 }

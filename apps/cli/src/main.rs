@@ -361,25 +361,37 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             if json {
                 println!(
                     "{}",
-                    report::machine_completed(
-                        &handle.id,
-                        handle.seq(),
-                        &outcome.output_hash,
-                        &outcome.format,
-                        outcome.image_size.x,
-                        outcome.image_size.y,
-                        outcome.tile_count,
-                    )
+                    report::machine_completed(&report::CompletedOutput {
+                        job: &handle.id,
+                        seq: handle.seq(),
+                        output_hash: &outcome.output_hash,
+                        format: &outcome.format,
+                        width: outcome.image_size.x,
+                        height: outcome.image_size.y,
+                        tile_count: outcome.tile_count,
+                        partial: outcome.partial,
+                    })
                 );
             } else if report::show_success(level) {
-                eprintln!(
-                    "saved {} ({} tiles, {}x{}) {}",
-                    outcome.output_path.display(),
-                    outcome.tile_count,
-                    outcome.image_size.x,
-                    outcome.image_size.y,
-                    outcome.output_hash,
-                );
+                if outcome.partial {
+                    eprintln!(
+                        "kept partial {} ({} tiles, {}x{}) {} (missing tiles left blank)",
+                        outcome.output_path.display(),
+                        outcome.tile_count,
+                        outcome.image_size.x,
+                        outcome.image_size.y,
+                        outcome.output_hash,
+                    );
+                } else {
+                    eprintln!(
+                        "saved {} ({} tiles, {}x{}) {}",
+                        outcome.output_path.display(),
+                        outcome.tile_count,
+                        outcome.image_size.x,
+                        outcome.image_size.y,
+                        outcome.output_hash,
+                    );
+                }
             }
             drop(result);
             true
@@ -419,12 +431,12 @@ fn run_bulk(parsed: Args) {
         let output_str = output.to_string_lossy().into_owned();
         let outcome = run_one_bulk_image(&parsed, url, &output_str);
         match outcome {
-            Ok((hash, _tiles)) => {
-                let item = report::BulkItem::ok(index, url, &output_str, &hash);
+            Ok((hash, _tiles, actual_output)) => {
+                let item = report::BulkItem::ok(index, url, &actual_output, &hash);
                 if parsed.json {
                     println!("{}", report::machine_bulk_item(&item));
                 } else if report::show_success(&level) {
-                    eprintln!("saved {output_str} from {url} ({hash})");
+                    eprintln!("saved {actual_output} from {url} ({hash})");
                 }
                 items.push(item);
             }
@@ -534,7 +546,7 @@ fn run_one_bulk_image(
     parsed: &Args,
     url: &str,
     output: &str,
-) -> Result<(String, usize), (String, String)> {
+) -> Result<(String, usize, String), (String, String)> {
     let runtime = NativeRuntime::new(1 << 30);
     let mut handle = match runtime.start(JobRequest {
         input_url: url.to_string(),
@@ -573,7 +585,8 @@ fn run_one_bulk_image(
     match result {
         Ok(outcome) => {
             let _ = handle.finish(outcome.output_hash.clone());
-            Ok((outcome.output_hash, outcome.tile_count))
+            let actual = outcome.output_path.to_string_lossy().into_owned();
+            Ok((outcome.output_hash, outcome.tile_count, actual))
         }
         Err(error) => Err((error.code, error.message)),
     }

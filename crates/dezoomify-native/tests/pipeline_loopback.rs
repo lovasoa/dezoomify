@@ -316,8 +316,16 @@ fn partial_keep_policy_encodes_acquired_tiles() {
     assert!(outcome.partial, "kept output is marked partial");
     assert_eq!(outcome.tile_count, 3);
     assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    // Kept partials publish to a `.partial` sibling, never to the requested
+    // complete-save path: the partial stays distinguishable on disk.
+    let partial_path = out_dir.join("partial.partial.png");
+    assert_eq!(outcome.output_path, partial_path);
+    assert!(
+        !output.exists(),
+        "the requested complete-save path stays untouched on a partial"
+    );
     // The corrupt quadrant stays blank (transparent black), the rest decodes.
-    let bytes = std::fs::read(&output).expect("partial output written");
+    let bytes = std::fs::read(&partial_path).expect("partial output written");
     let decoded = image::load_from_memory(&bytes)
         .expect("partial output decodes")
         .to_rgba8();
@@ -338,7 +346,7 @@ fn partial_keep_policy_encodes_acquired_tiles() {
         outcome.output_hash,
         expected["outputHash"].as_str().expect("outputHash")
     );
-    assert_eq!(outcome.output_hash, sha256_of_file(&output));
+    assert_eq!(outcome.output_hash, sha256_of_file(&partial_path));
 }
 
 #[test]
@@ -418,7 +426,7 @@ fn existing_output_without_overwrite_is_refused() {
         &mut |_event| events += 1,
     )
     .expect_err("overwrite refusal fails");
-    assert_eq!(error.code, "native.internal");
+    assert_eq!(error.code, "output.exists");
     assert_eq!(events, 0, "refusal happens before any work");
     assert_eq!(
         std::fs::read(&output).expect("output preserved"),

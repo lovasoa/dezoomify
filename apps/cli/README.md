@@ -49,7 +49,8 @@ default info) controls human stderr verbosity while
 `docs/user/command-line.md`). The default `Referer` is the http(s) bulk source or input URL unless
 `-H "Referer: …"` overrides it; `--largest` (implied in bulk mode without
 level caps) selects the uncapped level. Tile failures after retries keep a
-partial output with blank regions by default; `--no-partial` discards
+partial output with blank regions by default, published to a `.partial`
+sibling (`out.png` becomes `out.partial.png`); `--no-partial` discards
 instead with `tile.download-failed` and no output.
 
 Bulk mode saves one output per list entry and never stops early:

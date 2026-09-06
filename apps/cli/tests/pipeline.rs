@@ -768,7 +768,14 @@ fn cli_keep_partial_default_keeps_output() {
         "keep-partial default should succeed: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
     );
-    let bytes = std::fs::read(&output).expect("partial output kept by default");
+    // Kept partials publish to a `.partial` sibling, never to the requested
+    // complete-save path.
+    let partial = out_dir.join("partial.partial.png");
+    assert!(
+        !output.exists(),
+        "the requested complete-save path stays untouched on a partial"
+    );
+    let bytes = std::fs::read(&partial).expect("partial output kept by default");
     assert!(
         bytes.len() > 100,
         "kept partial carries a real PNG body, got {} bytes",
@@ -795,6 +802,10 @@ fn cli_no_partial_discards_output() {
         "no-partial must fail on corrupt tiles"
     );
     assert!(!output.exists(), "no output when discarding partial");
+    assert!(
+        !out_dir.join("partial.partial.png").exists(),
+        "no .partial sibling when discarding partial"
+    );
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains("tile.download-failed"),
