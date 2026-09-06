@@ -1150,6 +1150,8 @@ async function runJob(url: string): Promise<void> {
   viewCtx.imageChoice = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
+  viewCtx.sourceUrl = undefined;
+  viewCtx.desktopHandoffUrl = undefined;
   writeHash(url);
   startHeartbeat();
   setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
@@ -1291,7 +1293,11 @@ async function runJob(url: string): Promise<void> {
       // save it. Show the assembled picture with its display-only guidance
       // instead of failing; the user right-clicks where the browser
       // supports it, or uses the extension/desktop app for a clean save.
+      // Tiles never use the metadata proxy; the handoff below is plain
+      // navigation to a `dezoomify://` link, not a proxied fetch.
       viewCtx.originClean = false;
+      viewCtx.sourceUrl = url;
+      viewCtx.desktopHandoffUrl = desktopHandoffLink(url);
       setStep("Displaying the image…", "This site shows its pieces without letting the browser keep a copy.");
       reportProgress(total, total, `Displaying ${total} tiles…`);
       pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
@@ -1431,6 +1437,8 @@ function update(): void {
         viewCtx.jobActivity = undefined;
         viewCtx.initialUrl = undefined;
         viewCtx.imageChoice = undefined;
+        viewCtx.sourceUrl = undefined;
+        viewCtx.desktopHandoffUrl = undefined;
         activeTransport = null;
         clearHash();
         if (resultBlobUrl) {
@@ -1445,6 +1453,8 @@ function update(): void {
         viewCtx.currentProgress = undefined;
         viewCtx.completedInfo = undefined;
         viewCtx.imageChoice = undefined;
+        viewCtx.sourceUrl = undefined;
+        viewCtx.desktopHandoffUrl = undefined;
         runJob(lastUrl);
       },
       onSave() {
@@ -1489,6 +1499,17 @@ function update(): void {
           }
         } catch {
           // Copy failures stay silent; the address bar link still works.
+        }
+      },
+      onOpenExternalLink(url: string) {
+        // Display-only desktop handoff: plain navigation to the
+        // `dezoomify://` link, never a proxied tile fetch.
+        try {
+          if (typeof window !== "undefined" && window.location) {
+            window.location.href = url;
+          }
+        } catch {
+          // Handoff navigation must never break display.
         }
       },
     },

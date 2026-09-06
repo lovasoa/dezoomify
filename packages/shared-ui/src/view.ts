@@ -62,6 +62,14 @@ export interface ViewContext {
    * No picker is offered.
    */
   imageChoice?: { width?: number; height?: number; tiles?: number };
+  /**
+   * Display-only handoff (todo 6.2): the website populates the desktop
+   * `dezoomify://` link when ordinary tiles fell back to `<img>` display.
+   * Host-neutral: the view only renders the link, never constructs it.
+   * Tiles never use the metadata proxy; this anchor is navigation, not fetch.
+   */
+  sourceUrl?: string;
+  desktopHandoffUrl?: string;
 }
 
 export interface ModalHost {
@@ -912,12 +920,68 @@ function mountDisplayOnlySection(
     section.appendChild(guidanceBox);
   }
 
+  // Display-only handoff (todo 6.2): the assembled canvas stays visible
+  // below without a programmatic save (tainted canvas, right-click where
+  // supported). Offer the readable routes explicitly instead of failing
+  // late with TILE_FAILED: extension guidance plus the desktop
+  // `dezoomify://` handoff when the host supplied one.
+  const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
+  const shownNote = parent.ownerDocument.createElement("p");
+  shownNote.className = "dz-notice-message";
+  if (handoffUrl !== "") {
+    shownNote.innerHTML = `Shown below without saving. <a id="dz-display-handoff-inline" href="${escapeHtml(handoffUrl)}">Open in desktop app</a>`;
+    shownNote.querySelector("#dz-display-handoff-inline")?.addEventListener("click", () => {
+      try {
+        callbacks.onOpenExternalLink?.(handoffUrl);
+      } catch {
+        // Handoff navigation must never break display.
+      }
+    });
+  } else {
+    shownNote.textContent = "Shown below without saving.";
+  }
+  section.appendChild(shownNote);
+
+  const guide = parent.ownerDocument.createElement("div");
+  guide.className = "dz-guidance-section";
+  guide.innerHTML = `
+    <h3 class="dz-guidance-title">Ways to save this artwork</h3>
+    <div class="dz-guidance-grid">
+      <button type="button" class="dz-guidance-item" id="dz-card-extension">
+        <div class="dz-guidance-item-header">
+          <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          <span class="dz-guidance-item-title">Browser Extension Guide</span>
+        </div>
+        <span class="dz-guidance-item-desc">For pages requiring login or session cookies. Automatically detects viewers on active pages.</span>
+      </button>
+      <button type="button" class="dz-guidance-item" id="dz-card-desktop">
+        <div class="dz-guidance-item-header">
+          <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          <span class="dz-guidance-item-title">Desktop App Guide</span>
+        </div>
+        <span class="dz-guidance-item-desc">For a clean full-size save when the browser can only show the image.</span>
+      </button>
+    </div>
+  `;
+  const hostDoc = parent.ownerDocument;
+  guide.querySelector("#dz-card-extension")?.addEventListener("click", () => showExtensionGuidance(hostDoc));
+  guide.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance(hostDoc));
+  section.appendChild(guide);
+
   const actions = parent.ownerDocument.createElement("div");
   actions.className = "dz-actions-row";
   actions.innerHTML = `
     <button type="button" class="dz-btn-secondary" id="dz-btn-reset">Start over</button>
+    ${handoffUrl !== "" ? `<a class="dz-btn-secondary" id="dz-btn-desktop-handoff" href="${escapeHtml(handoffUrl)}">Open in desktop app</a>` : ""}
   `;
   actions.querySelector("#dz-btn-reset")?.addEventListener("click", () => callbacks.onReset());
+  actions.querySelector("#dz-btn-desktop-handoff")?.addEventListener("click", () => {
+    try {
+      callbacks.onOpenExternalLink?.(handoffUrl);
+    } catch {
+      // Handoff navigation must never break display.
+    }
+  });
   section.appendChild(actions);
 
   parent.appendChild(section);
