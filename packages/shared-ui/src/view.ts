@@ -76,76 +76,109 @@ export const ALL_DEZOOMERS = [
   { id: "pnav", name: "pnav", description: "pnav image viewer" },
 ];
 
-export function openModal(title: string, subtitle: string, contentHtml: string): void {
-  if (typeof document === "undefined") return;
-  document.querySelector(".dz-modal-backdrop")?.remove();
+export interface ModalHost {
+  document: Document;
+}
 
-  const backdrop = document.createElement("div");
+export function openModal(
+  hostDocument: Document,
+  title: string,
+  subtitle: string,
+  contentHtml: string,
+): void {
+  hostDocument.querySelector(".dz-modal-backdrop")?.remove();
+
+  const backdrop = hostDocument.createElement("div");
   backdrop.className = "dz-modal-backdrop";
   backdrop.setAttribute("role", "dialog");
   backdrop.setAttribute("aria-modal", "true");
   backdrop.setAttribute("aria-labelledby", "dz-modal-title");
 
-  const card = document.createElement("div");
+  const card = hostDocument.createElement("div");
   card.className = "dz-modal-card";
-  card.innerHTML = `
-    <button type="button" class="dz-modal-close" aria-label="Close dialog" title="Close">&times;</button>
-    <h2 id="dz-modal-title" class="dz-modal-title">${title}</h2>
-    <p class="dz-modal-subtitle">${subtitle}</p>
-    <div class="dz-modal-body">${contentHtml}</div>
-    <div class="dz-modal-actions">
-      <button type="button" class="dz-btn-tactile dz-modal-ok" style="min-width: 100px;">Got it</button>
-    </div>
-  `;
+
+  const closeBtn = hostDocument.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "dz-modal-close";
+  closeBtn.setAttribute("aria-label", "Close dialog");
+  closeBtn.title = "Close";
+  closeBtn.textContent = "×";
+
+  const titleEl = hostDocument.createElement("h2");
+  titleEl.id = "dz-modal-title";
+  titleEl.className = "dz-modal-title";
+  titleEl.textContent = title;
+
+  const subtitleEl = hostDocument.createElement("p");
+  subtitleEl.className = "dz-modal-subtitle";
+  subtitleEl.textContent = subtitle;
+
+  const body = hostDocument.createElement("div");
+  body.className = "dz-modal-body";
+  body.innerHTML = contentHtml;
+
+  const actions = hostDocument.createElement("div");
+  actions.className = "dz-modal-actions";
+  const okBtn = hostDocument.createElement("button");
+  okBtn.type = "button";
+  okBtn.className = "dz-btn-tactile dz-modal-ok";
+  okBtn.setAttribute("style", "min-width: 100px;");
+  okBtn.textContent = "Got it";
+  actions.appendChild(okBtn);
+
+  card.append(closeBtn, titleEl, subtitleEl, body, actions);
 
   const close = () => {
     backdrop.remove();
-    document.removeEventListener("keydown", onKeyDown);
+    hostDocument.removeEventListener("keydown", onKeyDown);
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") close();
   };
 
-  card.querySelector(".dz-modal-close")?.addEventListener("click", close);
-  card.querySelector(".dz-modal-ok")?.addEventListener("click", close);
+  closeBtn.addEventListener("click", close);
+  okBtn.addEventListener("click", close);
   backdrop.addEventListener("click", (e) => {
     if (e.target === backdrop) close();
   });
-  document.addEventListener("keydown", onKeyDown);
+  hostDocument.addEventListener("keydown", onKeyDown);
 
   backdrop.appendChild(card);
-  document.body.appendChild(backdrop);
+  hostDocument.body.appendChild(backdrop);
 }
 
-function detectPlatform(): { name: string; file: string; label: string } {
-  if (typeof navigator === "undefined") {
-    return { name: "All Platforms", file: "latest releases", label: "Download Native App" };
-  }
-  const ua = (navigator.userAgent || "").toLowerCase();
-  const platform = (navigator.platform || "").toLowerCase();
+export interface PlatformHints {
+  userAgent?: string;
+  platform?: string;
+}
+
+function detectPlatform(hints?: PlatformHints): { name: string; file: string; label: string } {
+  const ua = (hints?.userAgent ?? "").toLowerCase();
+  const platform = (hints?.platform ?? "").toLowerCase();
   if (ua.includes("win") || platform.includes("win")) {
-    return { name: "Windows", file: ".msi / .exe", label: "Download for Windows" };
+    return { name: "Windows", file: ".msi / .exe", label: "Save for Windows" };
   }
   if (ua.includes("mac") || platform.includes("mac")) {
-    return { name: "macOS", file: ".dmg", label: "Download for macOS" };
+    return { name: "macOS", file: ".dmg", label: "Save for macOS" };
   }
   if (ua.includes("linux") || platform.includes("linux")) {
-    return { name: "Linux", file: ".AppImage / .deb", label: "Download for Linux" };
+    return { name: "Linux", file: ".AppImage / .deb", label: "Save for Linux" };
   }
-  return { name: "All Platforms", file: "latest releases", label: "Download Native App" };
+  return { name: "All Platforms", file: "latest releases", label: "Save Native App" };
 }
 
-export function showDesktopAppGuidance(): void {
-  const p = detectPlatform();
+export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformHints): void {
+  const p = detectPlatform(hints);
   openModal(
+    hostDocument,
     "Dezoomify Desktop App",
     "High-performance native application for gigapixel museum artworks and local scans",
     `
       <div class="dz-modal-download-box">
         <a class="dz-btn-download-primary" href="https://github.com/lovasoa/dezoomify/releases/latest" target="_blank" rel="noopener">
-          <span>${p.label}</span>
-          <span style="font-size: 0.82rem; font-weight: 400; opacity: 0.85;">(${p.file} from GitHub Releases)</span>
+          <span>${escapeHtml(p.label)}</span>
+          <span style="font-size: 0.82rem; font-weight: 400; opacity: 0.85;">(${escapeHtml(p.file)} from GitHub Releases)</span>
         </a>
         <div style="margin-top: 0.65rem; font-size: 0.85rem; color: var(--dz-text-muted);">
           Also available for Windows, macOS, and Linux on
@@ -157,8 +190,8 @@ export function showDesktopAppGuidance(): void {
         <div class="dz-modal-section-title">Why use the Desktop App?</div>
         <ul class="dz-modal-list">
           <li><strong>Handles Gigapixel Artworks:</strong> Web browsers enforce strict memory limits (often 2 GB per tab). The Desktop App runs natively on your machine to assemble arbitrarily large gigapixel images with zero memory ceilings.</li>
-          <li><strong>Lossless &amp; High-Quality Exports:</strong> Direct export to uncompressed TIFF, high-quality PNG, or JPEG without browser blob allocation limits.</li>
-          <li><strong>Multi-Threaded Performance:</strong> Downloads and composites tiles in parallel using native multi-core CPU scheduling.</li>
+          <li><strong>Lossless &amp; High-Quality Output:</strong> Direct output to uncompressed TIFF, high-quality PNG, or JPEG without browser blob allocation limits.</li>
+          <li><strong>Multi-Threaded Performance:</strong> Retrieves and composites tiles in parallel using native multi-core CPU scheduling.</li>
         </ul>
       </div>
 
@@ -167,7 +200,7 @@ export function showDesktopAppGuidance(): void {
         <div class="dz-modal-steps">
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">1</span>
-            <div>Download the native installer for ${p.name} from our GitHub Releases page.</div>
+            <div>Save the native installer for ${escapeHtml(p.name)} from our GitHub Releases page.</div>
           </div>
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">2</span>
@@ -185,11 +218,11 @@ export function showDesktopAppGuidance(): void {
           <strong>Need automation or batch processing? Try the Dezoomify CLI</strong>
         </div>
         <p class="dz-modal-cli-desc">
-          The CLI provides headless, scriptable downloading ideal for automated pipelines, server environments, or batch downloading hundreds of artworks from lists without a GUI.
+          The CLI provides headless, scriptable saving ideal for automated pipelines, server environments, or batch saving hundreds of artworks from lists without a GUI.
         </p>
         <div class="dz-modal-cli-links">
           <a href="https://github.com/lovasoa/dezoomify/releases/latest" target="_blank" rel="noopener" class="dz-btn-secondary" style="height: 32px; font-size: 0.85rem;">
-            Download CLI from GitHub Releases
+            Save CLI from GitHub Releases
           </a>
           <code style="font-family: var(--dz-font-mono); font-size: 0.82rem; padding: 0.35rem 0.6rem; background: rgba(0,0,0,0.04); border-radius: 4px; border: 1px solid var(--dz-surface-border);">
             cargo install dezoomify-cli
@@ -200,8 +233,9 @@ export function showDesktopAppGuidance(): void {
   );
 }
 
-export function showExtensionGuidance(): void {
+export function showExtensionGuidance(hostDocument: Document): void {
   openModal(
+    hostDocument,
     "Dezoomify Browser Extension",
     "Automatic viewer discovery for password-protected digital archives and complex pages",
     `
@@ -304,7 +338,7 @@ export function renderView(
   let card = container.querySelector<HTMLElement>(".dz-card");
   if (!card) {
     container.innerHTML = "";
-    card = document.createElement("div");
+    card = container.ownerDocument.createElement("div");
     card.className = "dz-card";
     container.appendChild(card);
   }
@@ -312,7 +346,7 @@ export function renderView(
   // Header with authentic title & icon (mounted once)
   let header = card.querySelector<HTMLElement>(".dz-header");
   if (!header) {
-    header = document.createElement("div");
+    header = container.ownerDocument.createElement("div");
     header.className = "dz-header";
     header.innerHTML = `
       <h1 class="dz-title">
@@ -422,18 +456,18 @@ function mountInputSection(
   callbacks: ViewCallbacks,
   ctx?: ViewContext,
 ): void {
-  const body = document.createElement("div");
+  const body = parent.ownerDocument.createElement("div");
   body.className = "dz-view-body dz-fade-in";
 
   // Description
-  const desc = document.createElement("div");
+  const desc = parent.ownerDocument.createElement("div");
   desc.className = "dz-description";
   desc.innerHTML = `
     <p>
-      <strong>Dezoomify</strong> allows you to download
+      <strong>Dezoomify</strong> allows you to save
       <abbr title="Large images in which you can navigate inside a webpage.">zoomable images</abbr>.
       Enter the <abbr title="Uniform Resource Locator, the address of a webpage">URL</abbr>
-      of such an image in the text field below. The image will be downloaded at maximal resolution.
+      of such an image in the text field below. The image will be saved at maximal resolution.
       You can then right-click on the image, and choose "Save As" in order to save it as a PNG file on your computer.
       If it doesn't work, read our <a href="https://dezoomify.ophir.dev/help/troubleshooting.html" target="_blank" rel="noopener">troubleshooting guide</a>.
       If you want more information, read our <a href="https://github.com/lovasoa/dezoomify#dezoomify" target="_blank" rel="noopener">project page</a>.
@@ -446,7 +480,7 @@ function mountInputSection(
   `;
   body.appendChild(desc);
 
-  const form = document.createElement("form");
+  const form = parent.ownerDocument.createElement("form");
   form.className = "dz-form";
   form.onsubmit = (e) => {
     e.preventDefault();
@@ -461,7 +495,7 @@ function mountInputSection(
   };
 
   // Full-width URL input row
-  const wrapper = document.createElement("div");
+  const wrapper = parent.ownerDocument.createElement("div");
   wrapper.className = "dz-input-wrapper";
   const prefilled = escapeHtml(ctx?.initialUrl ?? "");
   wrapper.innerHTML = `
@@ -496,7 +530,7 @@ function mountInputSection(
 
   // Progressive Disclosure: Collapsible Format Selector
   const dezoomers = ctx?.supportedDezoomers ?? ALL_DEZOOMERS;
-  const details = document.createElement("details");
+  const details = parent.ownerDocument.createElement("details");
   details.className = "dz-format-details";
   details.innerHTML = `
     <summary class="dz-format-summary">
@@ -516,7 +550,7 @@ function mountInputSection(
   const summaryLabel = details.querySelector("#dz-selected-format-label");
   if (formatList) {
     dezoomers.forEach((fmt, idx) => {
-      const label = document.createElement("label");
+      const label = parent.ownerDocument.createElement("label");
       label.className = `dz-format-option ${idx === 0 ? "active" : ""}`;
       label.title = fmt.description ?? fmt.name;
       label.innerHTML = `
@@ -536,10 +570,10 @@ function mountInputSection(
   form.appendChild(details);
 
   // Centered Tactile "Dezoomify !" Button
-  const btnRow = document.createElement("div");
+  const btnRow = parent.ownerDocument.createElement("div");
   btnRow.className = "dz-button-row";
 
-  const submitBtn = document.createElement("button");
+  const submitBtn = parent.ownerDocument.createElement("button");
   submitBtn.type = "submit";
   submitBtn.className = "dz-btn-tactile";
   submitBtn.innerHTML = `<span>Dezoomify !</span>`;
@@ -561,7 +595,7 @@ function defaultStepFor(status: ControllerState["status"]): string {
     case "preflighting":
       return "Checking the image size…";
     case "downloading":
-      return "Downloading image tiles…";
+      return "Saving image tiles…";
     case "saving":
       return "Assembling the final picture…";
     default:
@@ -583,7 +617,7 @@ function mountJobSection(
   callbacks: ViewCallbacks,
   ctx?: ViewContext,
 ): void {
-  const sec = document.createElement("div");
+  const sec = parent.ownerDocument.createElement("div");
   sec.className = "dz-view-body dz-job-section dz-fade-in";
   sec.setAttribute("role", "status");
   sec.setAttribute("aria-live", "polite");
@@ -867,7 +901,7 @@ function mountDisplayOnlySection(
   ctx?: ViewContext,
 ): void {
   const guidance = renderSaveGuidance(false);
-  const section = document.createElement("div");
+  const section = parent.ownerDocument.createElement("div");
   section.className = "dz-view-body dz-notice-section dz-fade-in";
   section.innerHTML = `
     <div class="dz-notice-header">
@@ -885,13 +919,13 @@ function mountDisplayOnlySection(
 
   if (ctx?.capabilities) {
     const appChoice = renderAppChoice(ctx.capabilities);
-    const guidanceBox = document.createElement("p");
+    const guidanceBox = parent.ownerDocument.createElement("p");
     guidanceBox.className = "dz-notice-guidance";
     guidanceBox.textContent = appChoice;
     section.appendChild(guidanceBox);
   }
 
-  const actions = document.createElement("div");
+  const actions = parent.ownerDocument.createElement("div");
   actions.className = "dz-actions-row";
   actions.innerHTML = `
     <button type="button" class="dz-btn-secondary" id="dz-btn-reset">Start over</button>
@@ -913,7 +947,7 @@ function mountCompletedSection(
   const summary = info ? renderCompletion(info.width, info.height, info.mime) : "Your image is ready.";
   const guidance = renderSaveGuidance(isClean);
 
-  const section = document.createElement("div");
+  const section = parent.ownerDocument.createElement("div");
   section.className = "dz-view-body dz-completed-section dz-fade-in";
   section.innerHTML = `
     <div class="dz-completed-header">
@@ -922,7 +956,7 @@ function mountCompletedSection(
         <polyline points="22 4 12 14.01 9 11.01"></polyline>
       </svg>
       <div>
-        <h2 class="dz-completed-title">Download complete!</h2>
+        <h2 class="dz-completed-title">Save complete!</h2>
         <p class="dz-completed-summary">${summary}</p>
       </div>
     </div>
@@ -974,10 +1008,10 @@ function mountFailedSection(
     code: "UNKNOWN",
     category: "unknown",
     retryable: true,
-    message: "Dezoomify could not find or download the zoomable image at this address.",
+    message: "Dezoomify could not find or save the zoomable image at this address.",
   };
 
-  const section = document.createElement("div");
+  const section = parent.ownerDocument.createElement("div");
   section.className = "dz-view-body dz-error-section dz-fade-in";
   section.innerHTML = `
     <div class="dz-error-header">
@@ -988,12 +1022,12 @@ function mountFailedSection(
       </svg>
       <div>
         <h2 class="dz-error-title">Could not dezoomify image</h2>
-        <p class="dz-error-message" id="dz-error-message">${error.message}</p>
+        <p class="dz-error-message" id="dz-error-message"></p>
       </div>
     </div>
 
     <div class="dz-guidance-section">
-      <h3 class="dz-guidance-title">Ways to download this artwork</h3>
+      <h3 class="dz-guidance-title">Ways to save this artwork</h3>
       <div class="dz-guidance-grid">
         <button type="button" class="dz-guidance-item" id="dz-card-extension">
           <div class="dz-guidance-item-header">
@@ -1034,13 +1068,15 @@ function mountFailedSection(
       <button type="button" class="dz-btn-tactile" id="dz-btn-try-again" style="min-width: 140px;">Try again</button>
     </div>
   `;
-  // Diagnostics are set as text content (never innerHTML): engine messages
-  // and detail diagnostics must never be interpreted as markup.
+  // Diagnostics and user message are set as text content (never innerHTML):
+  // engine messages must never be interpreted as markup.
+  section.querySelector<HTMLElement>("#dz-error-message")!.textContent = error.message;
   section.querySelector<HTMLElement>("#dz-error-diagnostics")!.textContent =
     errorDiagnosticsText(error);
 
-  section.querySelector("#dz-card-extension")?.addEventListener("click", () => showExtensionGuidance());
-  section.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
+  const hostDoc = parent.ownerDocument;
+  section.querySelector("#dz-card-extension")?.addEventListener("click", () => showExtensionGuidance(hostDoc));
+  section.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance(hostDoc));
   section.querySelector("#dz-btn-try-again")?.addEventListener("click", () => callbacks.onReset());
 
   parent.appendChild(section);
@@ -1058,7 +1094,7 @@ function updateFailedSection(
     code: "UNKNOWN",
     category: "unknown",
     retryable: true,
-    message: "Dezoomify could not find or download the zoomable image at this address.",
+    message: "Dezoomify could not find or save the zoomable image at this address.",
   };
   const msgEl = sec.querySelector<HTMLElement>("#dz-error-message");
   if (msgEl && msgEl.textContent !== error.message) {
@@ -1079,11 +1115,11 @@ function mountCancelledSection(
   callbacks: ViewCallbacks,
   _ctx?: ViewContext,
 ): void {
-  const section = document.createElement("div");
+  const section = parent.ownerDocument.createElement("div");
   section.className = "dz-view-body dz-notice-section dz-fade-in";
   section.innerHTML = `
-    <h2 class="dz-notice-title" style="color: var(--dz-text-primary);">Download cancelled</h2>
-    <p class="dz-notice-message">The image download was stopped.</p>
+    <h2 class="dz-notice-title" style="color: var(--dz-text-primary);">Save cancelled</h2>
+    <p class="dz-notice-message">The image save was stopped.</p>
     <div class="dz-actions-row">
       <button type="button" class="dz-btn-secondary" id="dz-btn-reset">Start over</button>
     </div>
@@ -1098,7 +1134,7 @@ function mountGenericState(
   callbacks: ViewCallbacks,
   _ctx?: ViewContext,
 ): void {
-  const div = document.createElement("div");
+  const div = parent.ownerDocument.createElement("div");
   div.className = "dz-view-body dz-fade-in";
   div.style.padding = "1rem 0";
   div.innerHTML = `

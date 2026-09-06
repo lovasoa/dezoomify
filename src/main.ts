@@ -1,7 +1,7 @@
 // Web application entry point (single source of truth; `./main.js` is
 // generated from this file by `scripts/sync-web-js.mjs`, never hand-edited).
 // Real pipeline: worker-hosted wasm core discovery -> direct-first transport
-// with automatic eligible metadata-proxy fallback -> tile download -> canvas
+// with automatic eligible metadata-proxy fallback -> tile acquisition -> canvas
 // assembly -> real PNG save. Nothing here fabricates progress or completion.
 import { createController } from "../packages/shared-ui/src/controller.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.ts";
@@ -422,7 +422,7 @@ async function fetchTileFor(url: string, headers: Record<string, string>): Promi
   if (direct.outcome !== "readable" || !direct.bytes) {
     throw failure(
       "TILE_FAILED",
-      "Part of the image could not be downloaded. Try again in a moment.",
+      "Part of the image could not be saved. Try again in a moment.",
       true,
       undefined,
       `tile fetch: ${direct.outcome} (HTTP ${direct.status ?? "n/a"}) from ${shortUrl(url)}`,
@@ -527,7 +527,7 @@ function pickLevel(image: { levels: Array<{ index: number; imageSize?: { x: numb
 }
 
 // Encrypted-tile processing (e.g. Google Arts & Culture XOR-free AES
-// container) goes through the single-pending worker client. Tile downloads
+// container) goes through the single-pending worker client. Tile fetches
 // run concurrently, so processing calls are serialized here: fetching stays
 // parallel, only the short decrypt step queues.
 let processQueue: Promise<unknown> = Promise.resolve();
@@ -613,8 +613,8 @@ async function runJob(url: string): Promise<void> {
     ctx2d.clearRect(0, 0, width, height);
 
     const total = plan.tiles.length;
-    setStep("Downloading image tiles…", `${total} tiles at full resolution`);
-    reportProgress(0, total, `Downloading ${total} tiles…`);
+    setStep("Saving image tiles…", `${total} tiles at full resolution`);
+    reportProgress(0, total, `Saving ${total} tiles…`);
     let done = 0;
     let failed: unknown = null;
     const queue = [...plan.tiles];
@@ -630,7 +630,7 @@ async function runJob(url: string): Promise<void> {
         }
         if (token !== jobToken) return;
         done += 1;
-        reportProgress(done, total, `Downloading ${total} tiles…`);
+        reportProgress(done, total, `Saving ${total} tiles…`);
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, Math.max(1, total)) }, tileWorker));
@@ -644,7 +644,7 @@ async function runJob(url: string): Promise<void> {
       canvas.toBlob(
         (b) => (b ? resolve(b) : reject(failure(
           "OUTPUT_ENCODE_FAILED",
-          "The final picture could not be created from the downloaded pieces.",
+          "The final picture could not be created from the saved pieces.",
           false,
           undefined,
           "canvas.toBlob returned null while encoding the PNG",
@@ -673,7 +673,7 @@ async function runJob(url: string): Promise<void> {
       technical?: string;
     };
     const code = structured?.code || "DISCOVERY_FAILED";
-    const message = structured?.message || "Could not download this zoomable image.";
+    const message = structured?.message || "Could not save this zoomable image.";
     const detail = structured?.detail ?? structured?.technical;
     // The activity log is technical: prefer the dense chain over UI copy.
     pushLog(`Failed (${code}): ${structured?.technical || message}`);
@@ -825,8 +825,11 @@ function startFromHash(): void {
 }
 
 if (appContainer) {
-  document.getElementById("dz-nav-btn-extension")?.addEventListener("click", () => showExtensionGuidance());
-  document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () => showDesktopAppGuidance());
+  document.getElementById("dz-nav-btn-extension")?.addEventListener("click", () => showExtensionGuidance(document));
+  document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () => showDesktopAppGuidance(document, {
+    userAgent: navigator.userAgent,
+    platform: (navigator as unknown as { platform?: string }).platform,
+  }));
   if (typeof window !== "undefined") {
     window.addEventListener("hashchange", () => {
       const raw = parseHash(window.location.hash);
