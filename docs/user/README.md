@@ -19,9 +19,8 @@ Rendered order (also the navigation order in the website help section):
 2. [website](website.md): the website, its abilities and limits.
 3. [browser-extension](browser-extension.md): finding images while you
    browse, including signed-in pages.
-4. [desktop-app](desktop-app.md): very large images, more formats,
-   resuming, protected pages.
-5. [command-line](command-line.md): scripts and bulk saves.
+4. [desktop-app](desktop-app.md): very large images, protected pages.
+5. [command-line](command-line.md): scripts.
 6. [finding-the-image-address](finding-the-image-address.md): what to paste
    when the image is not found.
 7. [troubleshooting](troubleshooting.md): problems and their next steps.
