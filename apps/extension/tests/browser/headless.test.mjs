@@ -297,9 +297,30 @@ test("firefox: packaged extension runs a full job end to end", { timeout: 180000
       },
       extensionPage: () => ({
         scanAndSave: async (targetTabId) => {
+          // geckodriver refuses driver.get() to moz-extension:// URLs from a
+          // content context, so open the bound page through the extension's
+          // own tabs.create (this window hosts page.html and has browser
+          // APIs), the same mechanism the toolbar click uses in production.
           const extUrl = await driver.getCurrentUrl();
           const baseExt = extUrl.split("page.html")[0];
-          await driver.get(`${baseExt}page.html?tab=${targetTabId}`);
+          const before = new Set(await driver.getAllWindowHandles());
+          await driver.executeScript(
+            "return browser.tabs.create({ url: arguments[0], active: true }).then(() => null);",
+            `${baseExt}page.html?tab=${targetTabId}`,
+          );
+          let boundHandle = null;
+          for (let i = 0; i < 60 && !boundHandle; i++) {
+            for (const handle of await driver.getAllWindowHandles()) {
+              if (before.has(handle)) continue;
+              await driver.switchTo().window(handle);
+              if ((await driver.getCurrentUrl()).includes(`page.html?tab=${targetTabId}`)) {
+                boundHandle = handle;
+                break;
+              }
+            }
+            if (!boundHandle) await new Promise((r) => setTimeout(r, 250));
+          }
+          assert.ok(boundHandle, "bound extension page never opened");
           await driver.wait(
             async () => (await driver.findElements({ css: `button[data-tabid="${targetTabId}"]` })).length > 0,
             15000,
