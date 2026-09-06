@@ -1,12 +1,14 @@
 mod support;
 
 use dezoomify_job::{Config, JobResponse};
-use support::ScriptedHost;
-
-const INPUT_URL: &str = "https://example.test/image";
+use support::{ScriptedHost, DZI, DZI_INPUT_URL};
 
 fn host_with_id(job: &str) -> ScriptedHost {
-    ScriptedHost::new(job, INPUT_URL, Config::default()).unwrap()
+    ScriptedHost::new(job, DZI_INPUT_URL, Config::default()).unwrap()
+}
+
+fn dzi_bytes() -> Vec<u8> {
+    DZI.as_bytes().to_vec()
 }
 
 #[test]
@@ -16,7 +18,7 @@ fn duplicate_response_is_ignored() {
     host.apply(JobResponse::ResourceBytes {
         job: "job:dup".to_string(),
         request: "req:0".to_string(),
-        bytes_len: 1024,
+        bytes: dzi_bytes(),
     })
     .unwrap();
     let len = host.transcript().len();
@@ -25,22 +27,23 @@ fn duplicate_response_is_ignored() {
         .apply(JobResponse::ResourceBytes {
             job: "job:dup".to_string(),
             request: "req:0".to_string(),
-            bytes_len: 1024,
+            bytes: dzi_bytes(),
         })
         .unwrap();
     assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.state(), "AwaitingImageSelection");
 
-    // Duplicate tile completion never double-completes work.
+    // Duplicate tile completion never double-completes work. The largest
+    // level is a 2x2 grid, so one tile outcome leaves acquisition running.
     host.apply(JobResponse::SelectedImage {
         job: "job:dup".to_string(),
-        image: "img:0".to_string(),
+        image: "img:dzi:0".to_string(),
     })
     .unwrap();
     host.apply(JobResponse::SelectedLevel {
         job: "job:dup".to_string(),
-        level: "lvl:0".to_string(),
+        level: "lvl:dzi:0:0".to_string(),
     })
     .unwrap();
     host.apply(JobResponse::DestinationGranted {
@@ -75,7 +78,7 @@ fn wrong_job_is_rejected_without_corruption() {
         .apply(JobResponse::ResourceBytes {
             job: "job:other".to_string(),
             request: "req:0".to_string(),
-            bytes_len: 1024,
+            bytes: dzi_bytes(),
         })
         .unwrap_err();
     assert_eq!(err.code, "job.wrong-job");
@@ -85,7 +88,7 @@ fn wrong_job_is_rejected_without_corruption() {
     host.apply(JobResponse::ResourceBytes {
         job: "job:mine".to_string(),
         request: "req:0".to_string(),
-        bytes_len: 1024,
+        bytes: dzi_bytes(),
     })
     .unwrap();
     assert_eq!(host.state(), "AwaitingImageSelection");
@@ -100,22 +103,22 @@ fn over_limit_tiles_become_typed_terminal_failure() {
         max_buffers: 4,
         ..Config::default()
     };
-    let mut host = ScriptedHost::new("job:limited", INPUT_URL, tight).unwrap();
+    let mut host = ScriptedHost::new("job:limited", DZI_INPUT_URL, tight).unwrap();
     host.start().unwrap();
     host.apply(JobResponse::ResourceBytes {
         job: "job:limited".to_string(),
         request: "req:0".to_string(),
-        bytes_len: 1024,
+        bytes: dzi_bytes(),
     })
     .unwrap();
     host.apply(JobResponse::SelectedImage {
         job: "job:limited".to_string(),
-        image: "img:0".to_string(),
+        image: "img:dzi:0".to_string(),
     })
     .unwrap();
     host.apply(JobResponse::SelectedLevel {
         job: "job:limited".to_string(),
-        level: "lvl:0".to_string(),
+        level: "lvl:dzi:0:0".to_string(),
     })
     .unwrap();
     host.apply(JobResponse::DestinationGranted {
@@ -123,8 +126,8 @@ fn over_limit_tiles_become_typed_terminal_failure() {
         destination: "dst:0".to_string(),
     })
     .unwrap();
-    // Planning two tiles against max_tiles=1 is a typed resource-limit
-    // failure, never a panic or silent truncation.
+    // Planning the four-tile largest level against max_tiles=1 is a typed
+    // resource-limit failure, never a panic or silent truncation.
     assert_eq!(host.state(), "Failed");
     assert_eq!(host.terminal_count(), 1);
     let failed: Vec<&String> = host
@@ -172,7 +175,7 @@ fn empty_resource_bytes_fail_without_catalog() {
     host.apply(JobResponse::ResourceBytes {
         job: "job:empty".to_string(),
         request: "req:0".to_string(),
-        bytes_len: 0,
+        bytes: Vec::new(),
     })
     .unwrap();
     assert_eq!(host.state(), "Failed");

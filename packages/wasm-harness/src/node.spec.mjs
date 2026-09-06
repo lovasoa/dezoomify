@@ -180,8 +180,8 @@ describe("P07-WORKFLOWS: transcript golden", () => {
       assert.equal(entry.protocol, "1.0");
     }
     const types = golden.map((entry) => entry.type);
-    assert.equal(types[0], "acquire-resource", "engine effect leads the transcript");
-    assert.ok(types.includes("job-state"), "state events present");
+    assert.equal(types[0], "job-state", "engine state event leads the transcript");
+    assert.ok(types.includes("acquire-resource"), "discovery fetch effect present");
     assert.ok(types.includes("catalog"), "catalog event present (delegation)");
     assert.ok(types.includes("progress"), "progress events present (delegation)");
     assert.ok(types.includes("acquire-tile"), "tile acquisition present (delegation)");

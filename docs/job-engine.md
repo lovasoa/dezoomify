@@ -48,27 +48,35 @@ Partial results list every missing tile and preserve the errors that caused each
 
 See [Errors](errors.md) for recovery behavior and [Testing](testing.md) for deterministic state-machine scenarios.
 
-## Phase 06 lean behavior table (implemented)
+## Behavior table (implemented)
 
-Lean `dezoomify-job` is synchronous with monotonic `seq` (checked
+`dezoomify-job` is synchronous with monotonic `seq` (checked
 arithmetic), FIFO effect/event queues, and exactly one terminal event.
 `Terminal` = `Completed` / `PartiallyCompleted` / `Failed` / `Cancelled`.
 Post-terminal inputs return stable `job.post-terminal` rejection with no work.
 Duplicates return `Outcome::Ignored` with no state change.
 
+Discovery delegates to the core registry: the engine emits one
+`acquire-resource` effect per outstanding core request and forwards host
+results to the core operation, which owns candidate ordering and fallback.
+Core discovery is a poll: the same request stays outstanding until its
+outcome is provided, so the engine never loops on unanswered fetches.
+
 | Input | Valid source state(s) | Validation | Transition | Effects | Events |
 |---|---|---|---|---|---|
-| `start()` | `Created` | Config valid, `job:*` id, `http(s)` URL | `Created` -> `Discovering` | `acquire-resource` (`req:0`, metadata, default-header provenance) | `job-state:Discovering` |
-| `ResourceBytes` | `Discovering` | `job` match, `req:*` equals outstanding, `bytes_len <= max_bytes`, not consumed | -> `AwaitingImageSelection` | none | `catalog` (`img:0`), `job-state` |
-| `ResourceBytes` over-limit | `Discovering` | `bytes_len > max_bytes` | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.resource-limit` (terminal once) |
-| `FetchFailure` | `Discovering` | `job` match, outstanding `req:*` | attempts `<= max_retries`: -> `AwaitingRecovery` (`discovery`); else -> `CleaningUp` -> `Failed` | `request-decision` (`rec:*`) or `release-bytes` | `recovery-requested` + `job-state`, or `failed:job.fetch-failed` |
-| `SelectedImage` | `AwaitingImageSelection` | `job` match, `img:0` (same id replays as `Ignored`) | -> `AwaitingLevelSelection` | none | `levels` (`lvl:0`), `job-state` |
-| `SelectedLevel` | `AwaitingLevelSelection` | `job` match, `lvl:0` (same id replays as `Ignored`) | -> `AwaitingDestination` | `request-destination` (`fx:*`, `png`) | `job-state` |
-| `DestinationGranted` | `AwaitingDestination` | `job` match, `dst:*` | -> `Planning` -> `AcquiringTiles` (`tile:0`, `tile:1`); `2 > max_tiles`: -> `CleaningUp` -> `Failed` | `acquire-tile` up to `max_concurrent_fetches` in plan order | `job-state:Planning`, `progress:0/2`, `job-state:AcquiringTiles` or `failed:job.resource-limit` |
+| `start()` | `Created` | Config valid, `job:*` id, `http(s)` URL | `Created` -> `Discovering` | `acquire-resource` per outstanding discovery request (real URIs, metadata purpose, header names) | `job-state:Discovering` |
+| `ResourceBytes` | `Discovering` | `job` match, outstanding `req:*`, `bytes.len() <= max_bytes`, non-empty | Stay (core asks for more resources) or -> `AwaitingImageSelection` | further `acquire-resource` or none | `job-state`, then `catalog` (projected real catalog) |
+| `ResourceBytes` over-limit/empty | `Discovering` | `bytes.len() > max_bytes` / empty | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.resource-limit` / `failed:job.empty-resource` (terminal once) |
+| `FetchFailure` | `Discovering` | `job` match, outstanding `req:*` | Core owns fallback: stay `Discovering` (other candidates' `acquire-resource`) or -> `CleaningUp` -> `Failed` | `acquire-resource` or `release-bytes` | `job-state`, or `failed:job.discovery-failed` |
+| `SelectedImage` | `AwaitingImageSelection` | `job` match, `img:*` in catalog and ready (same id replays as `Ignored`) | -> `AwaitingLevelSelection` | none | `levels` (real level ids), `job-state` |
+| `SelectedLevel` | `AwaitingLevelSelection` | `job` match, `lvl:*` of the selected image (same id replays as `Ignored`) | -> `AwaitingDestination` | `request-destination` (`fx:*`, `png`) | `job-state` |
+| `DestinationGranted` | `AwaitingDestination` | `job` match, `dst:*` | -> `Planning` -> `AcquiringTiles` (grid/positioned source) or stay `Planning` (probe-driven source); plan or probe count `> max_tiles`: -> `CleaningUp` -> `Failed`; probe-driven level with `plan_probes` off: -> `CleaningUp` -> `Failed` | `acquire-tile` up to `max_concurrent_fetches` in plan order, or one `acquire-tile` (`probe: true`) | `job-state:Planning`, `progress:0/total`, `job-state:AcquiringTiles`, or `failed:job.resource-limit` / `failed:job.probe-unsupported` / `failed:job.plan-invalid` / `failed:job.plan-empty` |
+| `ProbeOutcome` | `Planning` | `job` match, outstanding probe `tile:*`; available observations need positive width/height | One core probe step: next probe (stay `Planning`) or resolved plan -> `AcquiringTiles` | `acquire-tile` (next probe or first plan tiles) | `progress:0/total`, `job-state` |
+| `TileOutcome{ok:true}` on a probe tile | `AcquiringTiles` | probe tiles are answered with `ProbeOutcome` only | No transition | none | none (`Err(job.invalid-state)`) |
 | `DestinationDenied` | `AwaitingDestination` | `job` match | -> `AwaitingRecovery` (`destination`) | `request-decision` | `recovery-requested`, `job-state` |
-| `TileOutcome{ok:true}` | `AcquiringTiles` | `job` match, `tile:*` in plan; acquired replays as `Ignored` | Stay (emit next pending to fill concurrency) or last tile: `ProcessingTiles` -> `Encoding` -> `Finalizing` -> `Publishing` -> `CleaningUp` -> `Completed` | `acquire-tile` (next pending) or `decode-pixels` x2, `open-encoder`, `finalize-encoder`, `publish-output` (`out:0`), `release-bytes` | `progress:a/2`, then `job-state` chain + `completed` (terminal once) |
+| `TileOutcome{ok:true}` | `AcquiringTiles` | `job` match, `tile:*` in plan; acquired replays as `Ignored` | Stay (emit next pending to fill concurrency) or last tile: `ProcessingTiles` -> `Encoding` -> `Finalizing` -> `Publishing` -> `CleaningUp` -> `Completed` | `acquire-tile` (next pending) or `decode-pixels` per tile, `open-encoder`, `finalize-encoder`, `publish-output` (`out:0`), `release-bytes` | `progress:a/total`, then `job-state` chain + `completed` (terminal once) |
 | `TileOutcome{ok:false}` | `AcquiringTiles` | `job` match, `tile:*` in plan | attempts `<= max_retries`: stay + retry `acquire-tile`; else -> `AwaitingPartialDecision` | `acquire-tile` (retry) or `request-decision` (`partial`) | `warning` + `progress`, or `missing-work` + `job-state` |
-| `RetryReady` | `AwaitingRecovery` (`discovery`/`destination`/`tile`), `AwaitingPartialDecision` | `job` match, `att:*` | `discovery` -> `Discovering` (new `req:*`); `destination` -> `AwaitingDestination`; else -> `AcquiringTiles` | `acquire-resource` / `request-destination` / `acquire-tile` | `job-state` |
+| `RetryReady` | `AwaitingRecovery` (`destination`), `AwaitingPartialDecision` | `job` match, `att:*` | `destination` -> `AwaitingDestination`; partial -> `AcquiringTiles` (failed tiles retry) | `request-destination` / `acquire-tile` | `job-state` |
 | `PartialKeep{keep:true}` | `AwaitingPartialDecision` | `job` match | Same pipeline as success but -> `PartiallyCompleted` | Same encode/finalize/publish/release | `job-state` chain + `partial-completed` (terminal once) |
 | `PartialKeep{keep:false}` | `AwaitingPartialDecision` | `job` match | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.partial-discarded` |
 | `Cancel` | Any non-terminal (incl. transient `Planning`/`ProcessingTiles`/`Encoding`/`Finalizing`/`Publishing`) | `job` match | -> `Cancelling` -> `CleaningUp` -> `Cancelled` | `cancel-work`, `release-bytes` | `job-state` chain + `cancelled` (terminal once; second `Cancel` is `post-terminal`) |

@@ -13,9 +13,10 @@
 //! Host interaction map (every path is explicit and correlated):
 //!
 //! * `Start` creates the engine job and emits its first effects/events.
-//! * Discovery bytes: `ProvideResource` whose `request` matches the
-//!   outstanding `acquire-resource` effect. The buffer is consumed exactly
-//!   once (taken out of the arena) and forwarded as `ResourceBytes`.
+//! * Discovery bytes: `ProvideResource` whose `request` matches one of the
+//!   outstanding `acquire-resource` effects (the engine may ask for several
+//!   metadata resources). The buffer is consumed exactly once (taken out of
+//!   the arena) and forwarded as `ResourceBytes` with its bytes.
 //! * Tile bytes: each `acquire-tile` effect carries an adapter-minted
 //!   `req:tile-<n>` request id. `ProvideResource` with that id forwards a
 //!   successful `TileOutcome`; the buffer stays live and its protocol
@@ -27,12 +28,15 @@
 //!   `RetryReady`, and `PartialChoice` map 1:1 onto engine responses.
 //!   `PartialChoice` must reference the outstanding `rec:*` recovery id.
 //! * Codec outcome commands (`ProvideDecodeOutcome`, …) are accepted as
-//!   acknowledged no-ops: the lean engine does not await them.
+//!   acknowledged no-ops: this engine does not await them.
 //!
-//! Engine resources beyond its lean model (real format parsing, real tile
-//! plans) are engine limitations, not adapter limits: byte lengths pass
-//! through, never fabricated. Empty discovery resources fail the job via
-//! the engine (`job.empty-resource`); nothing here can fake completion.
+//! Engine resources beyond this model are engine limitations, not adapter
+//! limits: byte lengths pass through, never fabricated. Probe-driven
+//! planning is disabled for the session (the host never observes tile
+//! geometry here; the interactive discovery adapter owns that flow), so
+//! probe-driven levels fail with a typed `job.probe-unsupported` error.
+//! Empty discovery resources fail the job via the engine
+//! (`job.empty-resource`); nothing here can fake completion.
 
 use crate::buffer::{ArenaHandle, ByteArena, MAX_BUFFERS, MAX_BUFFER_BYTES, MAX_TOTAL_BYTES};
 use crate::codec::{decode_envelope, encode_envelope};
@@ -41,11 +45,11 @@ use crate::processing::{composite_crop, fnv1a64_hex, CropGeometry};
 use dezoomify_job::{Job as EngineJob, JobError as EngineJobError, JobResponse, Outcome};
 use dezoomify_protocol::dto::{
     negotiate_version, CatalogDto, ControlBody, ControlEnvelope, EffectId, ErrorDto, ErrorPhase,
-    HostEffect, ImageDto, JobCommand, JobEvent, JobId, LevelDto, OutputId, Readiness,
-    RecoveryAction, RecoveryId, RecoveryKind, RequestDto, RequestId, RequestPurpose, TileId,
+    HostEffect, JobCommand, JobEvent, JobId, OutputId, RecoveryAction, RecoveryId, RecoveryKind,
+    RequestDto, RequestId, RequestPurpose, TileId,
 };
 use serde::Deserialize;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Hard per-buffer ceiling (32 MiB); requested caps above this are rejected.
 pub const HARD_MAX_BUFFER_BYTES: u64 = 32 << 20;
@@ -175,8 +179,8 @@ pub struct Session {
     state: SessionState,
     disposed: bool,
     max_messages: usize,
-    /// Outstanding discovery request id from the latest acquire-resource.
-    live_discovery_request: Option<String>,
+    /// Outstanding discovery request ids from acquire-resource effects.
+    live_discovery_requests: HashSet<String>,
     /// Adapter-minted tile request id -> engine tile id.
     outstanding_tile_requests: HashMap<String, String>,
     /// Engine tile id -> live committed buffer holding its bytes.
@@ -246,7 +250,7 @@ impl Session {
             state: SessionState::Created,
             disposed: false,
             max_messages,
-            live_discovery_request: None,
+            live_discovery_requests: HashSet::new(),
             outstanding_tile_requests: HashMap::new(),
             tile_buffers: HashMap::new(),
             live_tile_buffers: Vec::new(),
@@ -644,12 +648,23 @@ impl Session {
                 "start requires an http(s) input_url up to 2048 bytes",
             ));
         }
-        let engine = EngineJob::new(job.as_str(), &input_url, dezoomify_job::Config::default())
-            .map_err(Self::engine_error)?;
+        // Probe-driven planning stays disabled: the session host never
+        // observes tile geometry, so the engine must fail those levels with
+        // a typed `job.probe-unsupported` error instead of probing.
+        let engine = EngineJob::new(
+            job.as_str(),
+            &input_url,
+            dezoomify_job::Config {
+                plan_probes: false,
+                ..dezoomify_job::Config::default()
+            },
+        )
+        .map_err(Self::engine_error)?;
         self.job_id = Some(job);
         self.job = Some(engine);
         // Start emits the Discovering state event plus one acquire-resource
-        // effect through the engine; nothing here echoes the URL anywhere.
+        // effect per outstanding discovery request; nothing here echoes the
+        // URL anywhere.
         let started = self
             .job
             .as_mut()
@@ -671,7 +686,7 @@ impl Session {
         // atomic rejections.
         let tile = if self.outstanding_tile_requests.contains_key(request) {
             Some(self.outstanding_tile_requests[request].clone())
-        } else if self.live_discovery_request.as_deref() == Some(request) {
+        } else if self.live_discovery_requests.contains(request) {
             None
         } else {
             return Err(AdapterError::new(
@@ -701,15 +716,15 @@ impl Session {
             None => {
                 self.require_engine_state(SessionState::Discovering)?;
                 // Exactly-once consumption: a replayed reference is stale
-                // afterwards. The engine treats a zero-length resource as a
-                // job failure (job.empty-resource); empty metadata can
-                // never yield a fake success.
+                // afterwards. The engine takes the real bytes; a zero-length
+                // resource fails the job (job.empty-resource) and empty
+                // metadata can never yield a fake success.
                 let bytes = self.arena.take_buffer(handle)?;
-                self.live_discovery_request = None;
+                self.live_discovery_requests.remove(request);
                 self.forward(JobResponse::ResourceBytes {
                     job: job.as_str().to_string(),
                     request: request.to_string(),
-                    bytes_len: bytes.len() as u64,
+                    bytes,
                 })
             }
         }
@@ -724,7 +739,7 @@ impl Session {
         self.require_job(&job)?;
         let tile = if let Some(tile_id) = self.outstanding_tile_requests.get(request) {
             Some(tile_id.clone())
-        } else if self.live_discovery_request.as_deref() == Some(request) {
+        } else if self.live_discovery_requests.contains(request) {
             None
         } else {
             return Err(AdapterError::new(
@@ -744,7 +759,7 @@ impl Session {
             }
             None => {
                 self.require_engine_state(SessionState::Discovering)?;
-                self.live_discovery_request = None;
+                self.live_discovery_requests.remove(request);
                 let _ = error;
                 self.forward(JobResponse::FetchFailure {
                     job: job.as_str().to_string(),
@@ -826,7 +841,8 @@ impl Session {
         let body = match kind {
             "acquire-resource" => {
                 let request = self.project_discovery_request(value)?;
-                self.live_discovery_request = Some(request.id.as_str().to_string());
+                self.live_discovery_requests
+                    .insert(request.id.as_str().to_string());
                 HostEffect::AcquireResource {
                     effect,
                     job: job_id,
@@ -1072,47 +1088,17 @@ impl Session {
     }
 
     fn project_catalog(&self, value: &serde_json::Value) -> Result<CatalogDto, AdapterError> {
-        let empty = Vec::new();
-        let images = value
-            .get("images")
-            .and_then(serde_json::Value::as_array)
-            .unwrap_or(&empty);
-        let mut projected = Vec::new();
-        for image in images {
-            let id = image
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("img:0");
-            let levels = image
-                .get("levels")
-                .and_then(serde_json::Value::as_array)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            projected.push(ImageDto {
-                id: dezoomify_protocol::dto::ImageId::new(id).ok_or_else(|| {
-                    AdapterError::new(AdapterErrorCode::Malformed, "engine image id")
-                })?,
-                label: id.to_string(),
-                format: "lean".to_string(),
-                width: 0,
-                height: 0,
-                readiness: Readiness::Ready,
-                source_kind: "lean".to_string(),
-                levels: levels
-                    .iter()
-                    .filter_map(|level| level.as_str())
-                    .filter_map(dezoomify_protocol::dto::LevelId::new)
-                    .map(|id| LevelDto {
-                        id,
-                        width: 0,
-                        height: 0,
-                        tile_width: 0,
-                        tile_height: 0,
-                    })
-                    .collect(),
-            });
-        }
-        Ok(CatalogDto { images: projected })
+        // The engine emits the real projected catalog: a `CatalogDto`-shaped
+        // payload with stable wire ids, geometry, and readiness.
+        serde_json::from_value(value.clone()).map_err(|detail| {
+            AdapterError::new(
+                AdapterErrorCode::Malformed,
+                format!(
+                    "engine catalog does not project: {}",
+                    redact(&detail.to_string())
+                ),
+            )
+        })
     }
 
     fn project_warning(&self, kind: &str, value: &serde_json::Value) -> ErrorDto {
@@ -1183,7 +1169,7 @@ mod tests {
     fn start_bytes(job: &str) -> Vec<u8> {
         let command = JobCommand::Start {
             job: job.parse().unwrap(),
-            input_url: "https://example.com/item/1".to_string(),
+            input_url: "https://example.com/image.dzi".to_string(),
         };
         let envelope = ControlEnvelope::new(ControlBody::Command(command)).unwrap();
         encode_envelope(&envelope).unwrap()

@@ -9,17 +9,20 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
 
+use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeContinuation};
+use dezoomify_core::core::discovery::{
+    DiscoveryError, DiscoveryOperation, ResourceFailure, ResourceResponse,
+};
+use dezoomify_core::core::model::{CatalogEntry, ImageCatalog};
+use dezoomify_core::core::registry::default_registry;
+use dezoomify_core::core::tile_plan::TileSource;
+use dezoomify_protocol::dto::{ImageDto, Readiness};
+
 use crate::config::Config;
 use crate::state::State;
 use crate::transition::{make_effect, make_event, JobError, JobResponse, Outcome};
 
-/// Number of tiles in the lean fixed grid (`tile:0`, `tile:1`).
-const LEAN_TILE_COUNT: usize = 2;
-/// Lean tile ids in deterministic plan order.
-const LEAN_TILES: [&str; LEAN_TILE_COUNT] = ["tile:0", "tile:1"];
-
 /// One end-to-end user request driven synchronously by explicit host inputs.
-#[derive(Debug)]
 pub struct Job {
     id: String,
     input_url: String,
@@ -28,23 +31,52 @@ pub struct Job {
     seq: u64,
     effects: Vec<serde_json::Value>,
     events: Vec<serde_json::Value>,
-    pending_request: Option<String>,
-    consumed_requests: HashSet<String>,
+    /// Outstanding discovery resource fetches: wire request id -> core id.
+    pending_discovery: HashMap<String, usize>,
+    /// Core discovery operation while discovery is in flight.
+    discovery: Option<DiscoveryOperation>,
+    /// Finished core catalog.
+    catalog: Option<ImageCatalog>,
+    /// Projected wire catalog (same order as `catalog` entries).
+    catalog_images: Vec<ImageDto>,
     selected_image: Option<String>,
+    selected_image_index: Option<usize>,
     selected_level: Option<String>,
+    selected_level_index: Option<usize>,
     destination: Option<String>,
     planned_tiles: Vec<String>,
     pending_tiles: Vec<String>,
     in_flight: HashSet<String>,
     acquired_tiles: HashSet<String>,
     tile_attempts: HashMap<String, u32>,
-    discovery_attempts: u32,
+    /// Tile request URIs by wire tile id (planned and probe tiles).
+    tile_uris: HashMap<String, String>,
+    /// Wire tile ids emitted as probes (answered via `ProbeOutcome`).
+    probe_tiles: HashSet<String>,
+    /// Pending probe continuation; exactly one probe is in flight.
+    probe: Option<ProbeContinuation>,
+    probe_tile: Option<String>,
+    probes_emitted: u32,
     recovery_reason: Option<String>,
     failed_tiles: Vec<String>,
     terminal: Option<String>,
     next_request: u32,
     next_effect: u32,
     next_recovery: u32,
+    next_probe: u32,
+}
+
+impl std::fmt::Debug for Job {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The core discovery operation is not `Debug`; the machine summary
+        // stays informative without it.
+        f.debug_struct("Job")
+            .field("id", &self.id)
+            .field("state", &self.state)
+            .field("seq", &self.seq)
+            .field("terminal", &self.terminal)
+            .finish()
+    }
 }
 
 impl Job {
@@ -78,23 +110,32 @@ impl Job {
             seq: 0,
             effects: Vec::new(),
             events: Vec::new(),
-            pending_request: None,
-            consumed_requests: HashSet::new(),
+            pending_discovery: HashMap::new(),
+            discovery: None,
+            catalog: None,
+            catalog_images: Vec::new(),
             selected_image: None,
+            selected_image_index: None,
             selected_level: None,
+            selected_level_index: None,
             destination: None,
             planned_tiles: Vec::new(),
             pending_tiles: Vec::new(),
             in_flight: HashSet::new(),
             acquired_tiles: HashSet::new(),
             tile_attempts: HashMap::new(),
-            discovery_attempts: 0,
+            tile_uris: HashMap::new(),
+            probe_tiles: HashSet::new(),
+            probe: None,
+            probe_tile: None,
+            probes_emitted: 0,
             recovery_reason: None,
             failed_tiles: Vec::new(),
             terminal: None,
             next_request: 0,
             next_effect: 0,
             next_recovery: 0,
+            next_probe: 0,
         })
     }
 
@@ -176,26 +217,13 @@ impl Job {
         if self.state != State::Created {
             return Err(JobError::invalid_state("start is valid only in Created"));
         }
-        // Genuine core use: default browser-like headers seed the fetch effect
-        // provenance without performing I/O.
-        let headers = dezoomify_core::default_headers();
-        let mut names: Vec<String> = headers.keys().cloned().collect();
-        names.sort();
-        let request = self.alloc_request_id()?;
-        let effect = self.alloc_effect_id()?;
-        self.pending_request = Some(request.clone());
+        // Genuine core use: the default registry orders candidates by URL
+        // preference; the operation stays pure and deterministic.
+        let registry = default_registry(&self.input_url);
+        self.discovery = Some(registry.start(self.input_url.clone()));
         self.set_state(State::Discovering)?;
-        self.push_effect(
-            "acquire-resource",
-            json!({
-                "effect": effect,
-                "request": request,
-                "uri": self.input_url.clone(),
-                "purpose": "metadata",
-                "header_names": names,
-            }),
-        )?;
         self.push_event("job-state", json!({"state": State::Discovering.name()}))?;
+        self.drive_discovery()?;
         Ok(Outcome::Applied)
     }
 
@@ -222,9 +250,9 @@ impl Job {
         }
         match response {
             JobResponse::Cancel { .. } => self.enter_cancelled(),
-            JobResponse::ResourceBytes {
-                request, bytes_len, ..
-            } => self.apply_resource_bytes(&request, bytes_len),
+            JobResponse::ResourceBytes { request, bytes, .. } => {
+                self.apply_resource_bytes(&request, bytes)
+            }
             JobResponse::FetchFailure { request, .. } => self.apply_fetch_failure(&request),
             JobResponse::SelectedImage { image, .. } => self.apply_selected_image(&image),
             JobResponse::SelectedLevel { level, .. } => self.apply_selected_level(&level),
@@ -233,52 +261,163 @@ impl Job {
             }
             JobResponse::DestinationDenied { .. } => self.apply_destination_denied(),
             JobResponse::TileOutcome { tile, ok, .. } => self.apply_tile_outcome(&tile, ok),
+            JobResponse::ProbeOutcome {
+                tile,
+                available,
+                width,
+                height,
+                ..
+            } => self.apply_probe_outcome(&tile, available, width, height),
             JobResponse::RetryReady { attempt, .. } => self.apply_retry_ready(&attempt),
             JobResponse::PartialKeep { keep, .. } => self.apply_partial_keep(keep),
         }
     }
 
-    fn apply_resource_bytes(&mut self, request: &str, bytes_len: u64) -> Result<Outcome, JobError> {
+    /// Emit one acquire-resource effect per outstanding core discovery
+    /// request, or finish the discovery and emit the real catalog when the
+    /// core needs nothing more. Core discovery is a poll: the same request
+    /// is reported until its outcome is provided, so this must never loop
+    /// on `next_priority_need` waiting for an unanswered fetch. The batch
+    /// form returns every outstanding request at once; an empty batch means
+    /// the catalog is complete.
+    fn drive_discovery(&mut self) -> Result<(), JobError> {
+        let needs = {
+            let Some(operation) = self.discovery.as_mut() else {
+                return Ok(());
+            };
+            match operation.missing_resources() {
+                Ok(needs) => needs,
+                Err(e) => return self.discovery_failed(e),
+            }
+        };
+        if needs.is_empty() {
+            return self.finish_discovery();
+        }
+        for need in needs {
+            // One wire request per core request: re-driving after one
+            // response must not duplicate effects for fetches that are
+            // still outstanding.
+            if self
+                .pending_discovery
+                .values()
+                .any(|&core_id| core_id == need.id.0)
+            {
+                continue;
+            }
+            let wire = self.alloc_request_id()?;
+            self.pending_discovery.insert(wire.clone(), need.id.0);
+            let effect = self.alloc_effect_id()?;
+            let mut header_names: Vec<String> = need.request.headers.keys().cloned().collect();
+            header_names.sort();
+            self.push_effect(
+                "acquire-resource",
+                json!({
+                    "effect": effect,
+                    "request": wire,
+                    "uri": need.request.uri,
+                    "purpose": "metadata",
+                    "header_names": header_names,
+                }),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Finish the core discovery and project the real catalog.
+    fn finish_discovery(&mut self) -> Result<(), JobError> {
+        let Some(operation) = self.discovery.take() else {
+            return Ok(());
+        };
+        let catalog = match operation.finish() {
+            Ok(catalog) => catalog,
+            Err(e) => return self.discovery_failed(e),
+        };
+        let catalog = match catalog.normalize() {
+            Ok(catalog) => catalog,
+            Err(e) => {
+                return self.fail_via_cleanup("job.catalog-invalid", e.to_string());
+            }
+        };
+        if catalog.is_empty() {
+            return self
+                .fail_via_cleanup("job.no-images", "discovery produced no images".to_string());
+        }
+        let images = crate::projection::project_catalog(&catalog)
+            .map_err(|e| JobError::new("job.catalog-invalid", e.to_string()))?
+            .images;
+        if !images
+            .iter()
+            .any(|image| image.readiness == Readiness::Ready)
+        {
+            return self.fail_via_cleanup(
+                "job.no-images",
+                "catalog contains no images with fetched metadata".to_string(),
+            );
+        }
+        self.catalog = Some(catalog);
+        self.catalog_images = images;
+        self.set_state(State::AwaitingImageSelection)?;
+        let payload = serde_json::json!({ "images": self.catalog_images });
+        self.push_event("catalog", payload)?;
+        self.push_event(
+            "job-state",
+            json!({"state": State::AwaitingImageSelection.name()}),
+        )?;
+        Ok(())
+    }
+
+    fn discovery_failed(&mut self, error: DiscoveryError) -> Result<(), JobError> {
+        self.fail_via_cleanup("job.discovery-failed", error.to_string())
+    }
+
+    fn apply_resource_bytes(&mut self, request: &str, bytes: Vec<u8>) -> Result<Outcome, JobError> {
         if dezoomify_protocol::dto::RequestId::new(request).is_none() {
             return Err(JobError::invalid_id("request must look like req:<suffix>"));
         }
-        if self.consumed_requests.contains(request) {
+        let Some(&core_id) = self.pending_discovery.get(request) else {
             return Ok(Outcome::Ignored);
-        }
-        if self.state != State::Discovering || self.pending_request.as_deref() != Some(request) {
+        };
+        if self.state != State::Discovering {
             return Err(JobError::invalid_state(
-                "resource bytes valid only for the outstanding discovery request",
+                "resource bytes valid only while Discovering",
             ));
         }
-        if bytes_len > self.config.max_bytes {
-            self.consumed_requests.insert(request.to_string());
-            self.pending_request = None;
+        let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if len > self.config.max_bytes {
+            self.pending_discovery.remove(request);
+            self.discovery = None;
             self.fail_via_cleanup(
                 "job.resource-limit",
-                format!("resource bytes {bytes_len} exceed max_bytes"),
+                format!("resource bytes {len} exceed max_bytes"),
             )?;
             return Ok(Outcome::Applied);
         }
-        if bytes_len == 0 {
-            self.consumed_requests.insert(request.to_string());
-            self.pending_request = None;
+        if bytes.is_empty() {
+            self.pending_discovery.remove(request);
+            self.discovery = None;
             self.fail_via_cleanup(
                 "job.empty-resource",
                 "empty resource cannot yield a catalog".to_string(),
             )?;
             return Ok(Outcome::Applied);
         }
-        self.consumed_requests.insert(request.to_string());
-        self.pending_request = None;
-        self.set_state(State::AwaitingImageSelection)?;
-        self.push_event(
-            "catalog",
-            json!({"images": [{"id": "img:0", "levels": ["lvl:0"]}]}),
-        )?;
-        self.push_event(
-            "job-state",
-            json!({"state": State::AwaitingImageSelection.name()}),
-        )?;
+        let outcome = {
+            let Some(operation) = self.discovery.as_mut() else {
+                return Err(JobError::invalid_state("discovery already finished"));
+            };
+            operation.provide(ResourceResponse::new(
+                dezoomify_core::core::discovery::RequestId(core_id),
+                bytes,
+            ))
+        };
+        if let Err(e) = outcome {
+            self.pending_discovery.remove(request);
+            self.discovery = None;
+            self.discovery_failed(e)?;
+            return Ok(Outcome::Applied);
+        }
+        self.pending_discovery.remove(request);
+        self.drive_discovery()?;
         Ok(Outcome::Applied)
     }
 
@@ -286,44 +425,32 @@ impl Job {
         if dezoomify_protocol::dto::RequestId::new(request).is_none() {
             return Err(JobError::invalid_id("request must look like req:<suffix>"));
         }
-        if self.consumed_requests.contains(request) {
+        let Some(&core_id) = self.pending_discovery.get(request) else {
             return Ok(Outcome::Ignored);
-        }
-        if self.state != State::Discovering || self.pending_request.as_deref() != Some(request) {
+        };
+        if self.state != State::Discovering {
             return Err(JobError::invalid_state(
-                "fetch failure valid only for the outstanding discovery request",
+                "fetch failure valid only while Discovering",
             ));
         }
-        let attempts = self
-            .discovery_attempts
-            .checked_add(1)
-            .ok_or_else(|| JobError::overflow("discovery attempts"))?;
-        self.discovery_attempts = attempts;
-        self.consumed_requests.insert(request.to_string());
-        self.pending_request = None;
-        if attempts <= self.config.max_retries {
-            self.recovery_reason = Some("discovery".to_string());
-            let effect = self.alloc_effect_id()?;
-            let recovery = self.alloc_recovery_id()?;
-            self.set_state(State::AwaitingRecovery)?;
-            self.push_effect(
-                "request-decision",
-                json!({"effect": effect, "recovery": recovery, "reason": "discovery"}),
-            )?;
-            self.push_event(
-                "recovery-requested",
-                json!({"reason": "discovery", "attempt": attempts}),
-            )?;
-            self.push_event(
-                "job-state",
-                json!({"state": State::AwaitingRecovery.name()}),
-            )?;
+        // The core owns candidate fallback on failure: it may surface another
+        // need (a different candidate) or end discovery with a typed error.
+        let outcome = {
+            let Some(operation) = self.discovery.as_mut() else {
+                return Err(JobError::invalid_state("discovery already finished"));
+            };
+            operation.provide_failure(ResourceFailure {
+                id: dezoomify_core::core::discovery::RequestId(core_id),
+                message: "host fetch failed".to_string(),
+            })
+        };
+        self.pending_discovery.remove(request);
+        if let Err(e) = outcome {
+            self.discovery = None;
+            self.discovery_failed(e)?;
             return Ok(Outcome::Applied);
         }
-        self.fail_via_cleanup(
-            "job.fetch-failed",
-            "discovery retries exhausted".to_string(),
-        )?;
+        self.drive_discovery()?;
         Ok(Outcome::Applied)
     }
 
@@ -339,12 +466,25 @@ impl Job {
                 "image selection valid only in AwaitingImageSelection",
             ));
         }
-        if image != "img:0" {
-            return Err(JobError::invalid_state("unknown image id"));
+        let index = self
+            .catalog_images
+            .iter()
+            .position(|entry| entry.id.as_str() == image)
+            .ok_or_else(|| JobError::invalid_state("unknown image id"))?;
+        if self.catalog_images[index].readiness != Readiness::Ready {
+            return Err(JobError::invalid_state(
+                "image metadata was not fetched; the image cannot be selected",
+            ));
         }
         self.selected_image = Some(image.to_string());
+        self.selected_image_index = Some(index);
         self.set_state(State::AwaitingLevelSelection)?;
-        self.push_event("levels", json!({"image": image, "levels": ["lvl:0"]}))?;
+        let levels: Vec<String> = self.catalog_images[index]
+            .levels
+            .iter()
+            .map(|level| level.id.as_str().to_string())
+            .collect();
+        self.push_event("levels", json!({"image": image, "levels": levels}))?;
         self.push_event(
             "job-state",
             json!({"state": State::AwaitingLevelSelection.name()}),
@@ -364,10 +504,16 @@ impl Job {
                 "level selection valid only in AwaitingLevelSelection",
             ));
         }
-        if level != "lvl:0" {
-            return Err(JobError::invalid_state("unknown level id"));
-        }
+        let image_index = self
+            .selected_image_index
+            .ok_or_else(|| JobError::invalid_state("no image selected"))?;
+        let level_index = self.catalog_images[image_index]
+            .levels
+            .iter()
+            .position(|entry| entry.id.as_str() == level)
+            .ok_or_else(|| JobError::invalid_state("unknown level id for the selected image"))?;
         self.selected_level = Some(level.to_string());
+        self.selected_level_index = Some(level_index);
         let effect = self.alloc_effect_id()?;
         self.set_state(State::AwaitingDestination)?;
         self.push_effect(
@@ -395,25 +541,167 @@ impl Job {
         self.destination = Some(destination.to_string());
         self.set_state(State::Planning)?;
         self.push_event("job-state", json!({"state": State::Planning.name()}))?;
-        if (LEAN_TILE_COUNT as u32) > self.config.max_tiles {
-            self.fail_via_cleanup(
-                "job.resource-limit",
-                format!(
-                    "tile plan {} exceeds max_tiles {}",
-                    LEAN_TILE_COUNT, self.config.max_tiles
-                ),
-            )?;
-            return Ok(Outcome::Applied);
+        self.plan_selected_level()?;
+        Ok(Outcome::Applied)
+    }
+
+    /// Plan the selected level from its real core tile source.
+    fn plan_selected_level(&mut self) -> Result<(), JobError> {
+        let source = {
+            let catalog = self
+                .catalog
+                .as_ref()
+                .ok_or_else(|| JobError::invalid_state("no catalog"))?;
+            let image_index = self
+                .selected_image_index
+                .ok_or_else(|| JobError::invalid_state("no image selected"))?;
+            let level_index = self
+                .selected_level_index
+                .ok_or_else(|| JobError::invalid_state("no level selected"))?;
+            let CatalogEntry::Ready(image) = &catalog.entries()[image_index] else {
+                return self.fail_via_cleanup(
+                    "job.plan-invalid",
+                    "selected image metadata was not fetched".to_string(),
+                );
+            };
+            image.levels[level_index].source.clone()
+        };
+        match source {
+            TileSource::Grid(grid) => self.plan_from_tiles(grid.tiles_row_major()),
+            TileSource::Positioned(positioned) => self.plan_from_tiles(positioned.tiles()),
+            TileSource::DiscoverableGrid(discoverable) => {
+                if !self.config.plan_probes {
+                    return self.fail_via_cleanup(
+                        "job.probe-unsupported",
+                        "probe-driven planning is disabled for this host; use the interactive discovery adapter".to_string(),
+                    );
+                }
+                self.drive_probe(discoverable.start())
+            }
+            TileSource::Adaptive(adaptive) => {
+                if !self.config.plan_probes {
+                    return self.fail_via_cleanup(
+                        "job.probe-unsupported",
+                        "probe-driven planning is disabled for this host; use the interactive discovery adapter".to_string(),
+                    );
+                }
+                self.drive_probe(adaptive.start())
+            }
         }
-        self.planned_tiles = LEAN_TILES.iter().map(ToString::to_string).collect();
-        self.pending_tiles = self.planned_tiles.clone();
+    }
+
+    /// Plan from a fully known tile iterator (grid or positioned source).
+    fn plan_from_tiles(
+        &mut self,
+        tiles: impl Iterator<
+            Item = Result<
+                dezoomify_core::core::model::TileSpec,
+                dezoomify_core::core::tile_plan::TileSourceError,
+            >,
+        >,
+    ) -> Result<(), JobError> {
+        let mut planned: Vec<(String, String)> = Vec::new();
+        for tile in tiles {
+            let spec = match tile {
+                Ok(spec) => spec,
+                Err(e) => return self.fail_via_cleanup("job.plan-invalid", e.to_string()),
+            };
+            let ordinal =
+                u32::try_from(spec.id.ordinal).map_err(|_| JobError::overflow("tile ordinal"))?;
+            if planned.len() + 1 > self.config.max_tiles as usize {
+                return self.fail_via_cleanup(
+                    "job.resource-limit",
+                    format!("tile plan exceeds max_tiles {}", self.config.max_tiles),
+                );
+            }
+            let wire = format!("tile:{ordinal}");
+            planned.push((wire, spec.request.uri));
+        }
+        if planned.is_empty() {
+            return self.fail_via_cleanup(
+                "job.plan-empty",
+                "the selected level has no tiles".to_string(),
+            );
+        }
+        let total = planned.len() as u64;
+        self.begin_acquisition(planned, Vec::new(), total)
+    }
+
+    /// Advance the core probe step machine by one step.
+    fn drive_probe(&mut self, step: DiscoverableStep) -> Result<(), JobError> {
+        match step {
+            DiscoverableStep::Resolved { grid, .. } => self.plan_from_tiles(grid.tiles_row_major()),
+            DiscoverableStep::Empty => self.fail_via_cleanup(
+                "job.plan-empty",
+                "probe discovery found no tiles".to_string(),
+            ),
+            DiscoverableStep::Error(e) => self.fail_via_cleanup("job.plan-invalid", e.to_string()),
+            DiscoverableStep::Probe { tile, continuation } => {
+                self.probes_emitted = self
+                    .probes_emitted
+                    .checked_add(1)
+                    .ok_or_else(|| JobError::overflow("probe count"))?;
+                if self.probes_emitted > self.config.max_tiles {
+                    return self.fail_via_cleanup(
+                        "job.resource-limit",
+                        format!("probe count exceeds max_tiles {}", self.config.max_tiles),
+                    );
+                }
+                let wire = format!("tile:probe-{}", self.next_probe);
+                self.next_probe = self
+                    .next_probe
+                    .checked_add(1)
+                    .ok_or_else(|| JobError::overflow("probe id"))?;
+                self.probe = Some(continuation);
+                self.probe_tile = Some(wire.clone());
+                self.probe_tiles.insert(wire.clone());
+                self.tile_uris
+                    .insert(wire.clone(), tile.request.uri.clone());
+                self.in_flight.insert(wire.clone());
+                let effect = self.alloc_effect_id()?;
+                self.push_effect(
+                    "acquire-tile",
+                    json!({
+                        "effect": effect,
+                        "tile": wire,
+                        "uri": self.tile_uris.get(&wire).cloned().unwrap_or_default(),
+                        "probe": true,
+                    }),
+                )?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Shared transition from a complete plan into bounded acquisition.
+    fn begin_acquisition(
+        &mut self,
+        planned: Vec<(String, String)>,
+        probes: Vec<(String, String)>,
+        total: u64,
+    ) -> Result<(), JobError> {
+        for (wire, uri) in probes {
+            self.planned_tiles.push(wire.clone());
+            self.probe_tiles.insert(wire.clone());
+            self.tile_uris.insert(wire, uri);
+        }
+        for (wire, uri) in planned {
+            self.planned_tiles.push(wire.clone());
+            self.tile_uris.insert(wire, uri);
+        }
+        self.pending_tiles = self
+            .planned_tiles
+            .iter()
+            .filter(|wire| !self.probe_tiles.contains(*wire))
+            .cloned()
+            .collect();
         self.in_flight.clear();
         self.acquired_tiles.clear();
         self.set_state(State::AcquiringTiles)?;
-        self.push_event("progress", json!({"acquired": 0, "total": 2}))?;
+        self.push_event("progress", json!({"acquired": 0, "total": total}))?;
         self.push_event("job-state", json!({"state": State::AcquiringTiles.name()}))?;
         self.emit_pending_tiles()?;
-        Ok(Outcome::Applied)
+        Ok(())
     }
 
     fn apply_destination_denied(&mut self) -> Result<Outcome, JobError> {
@@ -442,6 +730,11 @@ impl Job {
         if dezoomify_protocol::dto::TileId::new(tile).is_none() {
             return Err(JobError::invalid_id("tile must look like tile:<suffix>"));
         }
+        if self.probe_tiles.contains(tile) {
+            return Err(JobError::invalid_state(
+                "probe tiles are answered with a probe outcome, not a tile outcome",
+            ));
+        }
         if self.state != State::AcquiringTiles {
             return Err(JobError::invalid_state(
                 "tile outcome valid only in AcquiringTiles",
@@ -459,8 +752,9 @@ impl Job {
             self.acquired_tiles.insert(tile.to_string());
             let acquired = u64::try_from(self.acquired_tiles.len())
                 .map_err(|_| JobError::overflow("acquired count"))?;
-            self.push_event("progress", json!({"acquired": acquired, "total": 2}))?;
-            if self.acquired_tiles.len() == self.planned_tiles.len() {
+            let total = self.planned_tiles.len() as u64;
+            self.push_event("progress", json!({"acquired": acquired, "total": total}))?;
+            if self.acquired_tiles.len() == self.planned_tiles.len() - self.probe_tiles.len() {
                 self.complete_remaining(false)?;
             } else {
                 self.emit_pending_tiles()?;
@@ -502,6 +796,50 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
+    fn apply_probe_outcome(
+        &mut self,
+        tile: &str,
+        available: bool,
+        width: u64,
+        height: u64,
+    ) -> Result<Outcome, JobError> {
+        if dezoomify_protocol::dto::TileId::new(tile).is_none() {
+            return Err(JobError::invalid_id("tile must look like tile:<suffix>"));
+        }
+        if self.state != State::Planning || self.probe_tile.as_deref() != Some(tile) {
+            return Err(JobError::invalid_state(
+                "probe outcome valid only for the outstanding probe while Planning",
+            ));
+        }
+        if !self.probe_tiles.contains(tile) {
+            return Err(JobError::invalid_state("unknown probe tile id"));
+        }
+        let observation = if available {
+            if width == 0 || height == 0 {
+                return Err(JobError::invalid_state(
+                    "available probe observations need positive width and height",
+                ));
+            }
+            let x = u32::try_from(width).map_err(|_| JobError::overflow("probe width"))?;
+            let y = u32::try_from(height).map_err(|_| JobError::overflow("probe height"))?;
+            ObservationResult::Available {
+                size: dezoomify_core::Vec2d { x, y },
+            }
+        } else {
+            ObservationResult::Missing
+        };
+        self.probe_tile = None;
+        self.in_flight.remove(tile);
+        let Some(continuation) = self.probe.take() else {
+            return Err(JobError::invalid_state("no probe continuation pending"));
+        };
+        let step = continuation
+            .submit(observation)
+            .map_err(|e| JobError::new("job.plan-invalid", e.to_string()))?;
+        self.drive_probe(step)?;
+        Ok(Outcome::Applied)
+    }
+
     fn apply_retry_ready(&mut self, attempt: &str) -> Result<Outcome, JobError> {
         if dezoomify_protocol::dto::AttemptId::new(attempt).is_none() {
             return Err(JobError::invalid_id("attempt must look like att:<suffix>"));
@@ -513,24 +851,6 @@ impl Job {
                     .clone()
                     .ok_or_else(|| JobError::invalid_state("no recovery pending for retry"))?;
                 match reason.as_str() {
-                    "discovery" => {
-                        let request = self.alloc_request_id()?;
-                        let effect = self.alloc_effect_id()?;
-                        self.pending_request = Some(request.clone());
-                        self.recovery_reason = None;
-                        self.set_state(State::Discovering)?;
-                        self.push_effect(
-                            "acquire-resource",
-                            json!({
-                                "effect": effect,
-                                "request": request,
-                                "uri": self.input_url.clone(),
-                                "purpose": "metadata",
-                            }),
-                        )?;
-                        self.push_event("job-state", json!({"state": State::Discovering.name()}))?;
-                        Ok(Outcome::Applied)
-                    }
                     "destination" => {
                         let effect = self.alloc_effect_id()?;
                         self.recovery_reason = None;
@@ -678,12 +998,13 @@ impl Job {
             self.pending_tiles.remove(0);
             self.in_flight.insert(next.clone());
             let effect = self.alloc_effect_id()?;
+            let uri = self.tile_uris.get(&next).cloned().unwrap_or_default();
             self.push_effect(
                 "acquire-tile",
                 json!({
                     "effect": effect,
                     "tile": next,
-                    "uri": format!("{}/tiles/{next}", self.input_url),
+                    "uri": uri,
                 }),
             )?;
         }

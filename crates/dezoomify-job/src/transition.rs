@@ -76,15 +76,15 @@ pub enum Outcome {
 /// Deterministic host/user input driving the state machine.
 ///
 /// Every variant carries the owning `job` id for correlation. The enum is
-/// synchronous and carries no bytes, clocks, or I/O handles, only ids, sizes,
-/// and decisions.
+/// synchronous and carries no clocks, I/O handles, or effect powers, only
+/// ids, host-supplied bytes, observed tile geometry, and decisions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum JobResponse {
     ResourceBytes {
         job: String,
         request: String,
-        bytes_len: u64,
+        bytes: Vec<u8>,
     },
     FetchFailure {
         job: String,
@@ -109,6 +109,13 @@ pub enum JobResponse {
         job: String,
         tile: String,
         ok: bool,
+    },
+    ProbeOutcome {
+        job: String,
+        tile: String,
+        available: bool,
+        width: u64,
+        height: u64,
     },
     RetryReady {
         job: String,
@@ -135,6 +142,7 @@ impl JobResponse {
             | Self::DestinationGranted { job, .. }
             | Self::DestinationDenied { job }
             | Self::TileOutcome { job, .. }
+            | Self::ProbeOutcome { job, .. }
             | Self::RetryReady { job, .. }
             | Self::PartialKeep { job, .. }
             | Self::Cancel { job } => job,

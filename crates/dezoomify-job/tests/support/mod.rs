@@ -8,11 +8,29 @@
 
 use dezoomify_job::{Config, Job, JobError, JobResponse, Outcome};
 
+/// Recognizable Deep Zoom input URL: the registry's deepzoom candidate
+/// accepts it and asks for the `.dzi` document at `req:0`.
+pub const DZI_INPUT_URL: &str = "https://example.test/image.dzi";
+
+/// A real Deep Zoom metadata document: 512x512, 256px tiles, no overlap.
+/// The core parses it into a deepzoom catalog with ten grid levels ordered
+/// ascending by size; the largest (`lvl:dzi:0:0`, last in the list) carries
+/// four tiles with deterministic `image_files` URIs.
+pub const DZI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
+  <Size Width="512" Height="512"/>
+</Image>
+"#;
+
 /// Deterministic host wrapping one [`Job`] plus an ordered transcript.
 #[derive(Debug)]
 pub struct ScriptedHost {
     job: Job,
     transcript: Vec<String>,
+    /// Raw effect objects in arrival order (for id extraction in tests).
+    pub effects: Vec<serde_json::Value>,
+    /// Raw event objects in arrival order (for id extraction in tests).
+    pub events: Vec<serde_json::Value>,
     last_state: String,
 }
 
@@ -28,6 +46,8 @@ impl ScriptedHost {
         let mut host = Self {
             job,
             transcript: Vec::new(),
+            effects: Vec::new(),
+            events: Vec::new(),
             last_state: String::new(),
         };
         host.transcript.push(format!("state:{last_state}"));
@@ -109,12 +129,56 @@ impl ScriptedHost {
         serde_json::to_string_pretty(&self.transcript).unwrap_or_else(|_| "[]".to_string()) + "\n"
     }
 
+    /// Ids of a `catalog` event image: `(image id, level ids)`.
+    pub fn catalog(&self) -> Option<(String, Vec<String>)> {
+        let event = self
+            .events
+            .iter()
+            .rev()
+            .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("catalog"))?;
+        let image = event.get("images")?.get(0)?;
+        let id = image.get("id")?.as_str()?.to_string();
+        let levels = image
+            .get("levels")?
+            .as_array()?
+            .iter()
+            .filter_map(|l| l.get("id").and_then(serde_json::Value::as_str))
+            .map(ToString::to_string)
+            .collect();
+        Some((id, levels))
+    }
+
+    /// Every `acquire-tile` effect as `(tile id, uri, probe flag)` in seq order.
+    pub fn tile_effects(&self) -> Vec<(String, String, bool)> {
+        self.effects
+            .iter()
+            .filter(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-tile"))
+            .map(|v| {
+                (
+                    v.get("tile")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    v.get("uri")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    v.get("probe")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                )
+            })
+            .collect()
+    }
+
     fn record(&mut self) {
         let mut pending: Vec<(u64, String)> = Vec::new();
         for effect in self.job.drain_effects() {
+            self.effects.push(effect.clone());
             pending.push(format_effect(&effect));
         }
         for event in self.job.drain_events() {
+            self.events.push(event.clone());
             pending.push(format_event(&event));
         }
         pending.sort_by_key(|(seq, _)| *seq);

@@ -5,9 +5,9 @@
 //! Representation note: [`Session`] delegates its lifecycle to
 //! `dezoomify-job`; the golden pins the delegated basic-success transcript,
 //! canonical `ControlEnvelope` messages projected from engine effects and
-//! events in engine `seq` order. Engine resources beyond the lean model are
-//! engine limits, not adapter limits. Empty buffers and mismatched request
-//! IDs fail or are rejected without fabricating success (see negative tests).
+//! events in engine `seq` order. Engine resources are engine limits, not
+//! adapter limits. Empty buffers and mismatched request IDs fail or are
+//! rejected without fabricating success (see negative tests).
 
 use dezoomify_protocol::codec;
 use dezoomify_protocol::dto::{
@@ -19,6 +19,17 @@ use dezoomify_wasm::{
 };
 
 const JOB_A: &str = "job:wasm-basic-1";
+/// Recognizable Deep Zoom input URL: the registry's deepzoom candidate
+/// accepts it and asks for the `.dzi` document.
+const INPUT_URL: &str = "https://example.com/image.dzi";
+/// Real Deep Zoom metadata document: 512x512, 256px tiles, no overlap. The
+/// engine parses it into a deepzoom catalog whose largest level
+/// (`lvl:dzi:0:0`) is a 2x2 grid.
+const DZI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
+  <Size Width="512" Height="512"/>
+</Image>
+"#;
 /// Golden transcript, anchored to the crate manifest so the test passes
 /// regardless of the cargo invocation directory.
 const GOLDEN_PATH: &str = concat!(
@@ -38,7 +49,7 @@ fn envelope_bytes(body: ControlBody) -> Vec<u8> {
 fn start_bytes(job: &str) -> Vec<u8> {
     envelope_bytes(ControlBody::Command(JobCommand::Start {
         job: job.parse().expect("job id"),
-        input_url: "https://example.com/item/1".to_string(),
+        input_url: INPUT_URL.to_string(),
     }))
 }
 
@@ -266,19 +277,19 @@ fn start_dispatch_and_drain_are_fifo_and_once_only() {
     assert_eq!(messages.len(), 2);
     let decoded = decode_all(&messages);
     match &decoded[0].body {
-        ControlBody::Effect(HostEffect::AcquireResource { job, request, .. }) => {
-            assert_eq!(job.as_str(), JOB_A);
-            assert_eq!(request.uri, "https://example.com/item/1");
-            assert_eq!(request.purpose, RequestPurpose::Metadata);
-        }
-        other => panic!("first message must be acquire-resource, got {other:?}"),
-    }
-    match &decoded[1].body {
         ControlBody::Event(JobEvent::JobState { job, state }) => {
             assert_eq!(job.as_str(), JOB_A);
             assert_eq!(state, "Discovering");
         }
-        other => panic!("second message must be job-state, got {other:?}"),
+        other => panic!("first message must be job-state, got {other:?}"),
+    }
+    match &decoded[1].body {
+        ControlBody::Effect(HostEffect::AcquireResource { job, request, .. }) => {
+            assert_eq!(job.as_str(), JOB_A);
+            assert_eq!(request.uri, INPUT_URL);
+            assert_eq!(request.purpose, RequestPurpose::Metadata);
+        }
+        other => panic!("second message must be acquire-resource, got {other:?}"),
     }
     // Draining is exactly-once.
     assert!(session.drain_messages().is_empty());
@@ -293,7 +304,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     let start_messages = session.drain_messages();
     let request = discovery_request(&start_messages);
 
-    let handle = seal(&mut session, b"metadata-bytes");
+    let handle = seal(&mut session, DZI.as_bytes());
     let meta_reference = session
         .protocol_handle(handle)
         .expect("live handle projects");
@@ -306,6 +317,8 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
         ControlBody::Event(JobEvent::Catalog { job, catalog }) => {
             assert_eq!(job.as_str(), JOB_A);
             assert_eq!(catalog.images.len(), 1);
+            assert_eq!(catalog.images[0].id.as_str(), "img:dzi:0");
+            assert_eq!(catalog.images[0].format, "deepzoom");
         }
         other => panic!("expected catalog, got {other:?}"),
     }
@@ -313,7 +326,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     session
         .dispatch(&command_bytes(JobCommand::SelectImage {
             job: JOB_A.parse().unwrap(),
-            image: "img:0".parse().unwrap(),
+            image: "img:dzi:0".parse().unwrap(),
         }))
         .expect("select image");
     assert_eq!(session.state().as_str(), "AwaitingLevelSelection");
@@ -322,7 +335,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     session
         .dispatch(&command_bytes(JobCommand::SelectLevel {
             job: JOB_A.parse().unwrap(),
-            level: "lvl:0".parse().unwrap(),
+            level: "lvl:dzi:0:0".parse().unwrap(),
         }))
         .expect("select level");
     assert_eq!(session.state().as_str(), "AwaitingDestination");
@@ -343,7 +356,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
             tile_requests.push(request.id);
         }
     }
-    assert_eq!(tile_requests.len(), 2, "lean engine plans two tiles");
+    assert_eq!(tile_requests.len(), 4, "the largest level is a 2x2 grid");
 
     for (index, request) in tile_requests.iter().enumerate() {
         let bytes = format!("tile-bytes-{index}");
@@ -382,60 +395,29 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
 }
 
 #[test]
-fn failure_recovery_and_cancel_paths_follow_the_engine() {
-    // One fetch failure enters recovery (bounded retries), not failure.
+fn discovery_failure_and_cancel_paths_follow_the_engine() {
+    // A discovery fetch failure is delegated to the core, which owns
+    // candidate fallback: with no candidate left the job fails honestly
+    // with a typed error. Host-supplied error text never reaches the
+    // transcript.
     let mut failing = new_session();
     failing.dispatch(&start_bytes("job:fail-1")).expect("start");
     let first_request = discovery_request(&failing.drain_messages());
     let failure = envelope_bytes(ControlBody::Command(JobCommand::ProvideFetchFailure {
         job: "job:fail-1".parse().unwrap(),
         request: first_request,
-        error: ErrorDto::new("acquisition", ErrorPhase::Acquisition, "boom"),
+        error: ErrorDto::new(
+            "acquisition",
+            ErrorPhase::Acquisition,
+            "fetch https://h/?apiKey=CANARY failed",
+        ),
     }));
     failing.dispatch(&failure).expect("failure accepted");
-    assert_eq!(failing.state().as_str(), "AwaitingRecovery");
-    let messages = failing.drain_messages();
-    match &decode_all(&messages)[0].body {
-        ControlBody::Effect(HostEffect::RequestDecision { recovery, .. }) => {
-            assert!(recovery.as_str().starts_with("rec:"));
-        }
-        other => panic!("expected request-decision, got {other:?}"),
-    }
-    match &decode_all(&messages)[1].body {
-        ControlBody::Event(JobEvent::RecoveryRequest { actions, .. }) => {
-            assert_eq!(actions.len(), 1);
-        }
-        other => panic!("expected recovery-requested, got {other:?}"),
-    }
-
-    // Retry then exhaust the retries: the engine fails honestly.
-    for attempt in 0..3u32 {
-        let attempt_id: dezoomify_protocol::dto::AttemptId =
-            format!("att:{attempt}").parse().unwrap();
-        failing
-            .dispatch(&command_bytes(JobCommand::RetryReady {
-                job: "job:fail-1".parse().unwrap(),
-                attempt: attempt_id,
-            }))
-            .expect("retry ready");
-        assert_eq!(failing.state().as_str(), "Discovering");
-        let request = discovery_request(&failing.drain_messages());
-        let failure = envelope_bytes(ControlBody::Command(JobCommand::ProvideFetchFailure {
-            job: "job:fail-1".parse().unwrap(),
-            request,
-            error: ErrorDto::new("acquisition", ErrorPhase::Acquisition, "boom again"),
-        }));
-        failing.dispatch(&failure).expect("failure accepted");
-        if attempt < 2 {
-            assert_eq!(failing.state().as_str(), "AwaitingRecovery");
-            failing.drain_messages();
-        }
-    }
     assert_eq!(failing.state().as_str(), "Failed");
     let messages = failing.drain_messages();
     match &decode_all(&messages).last().expect("messages").body {
         ControlBody::Event(JobEvent::Failed { error, .. }) => {
-            assert_eq!(error.code, "job.fetch-failed");
+            assert_eq!(error.code, "job.discovery-failed");
             assert!(!error.message.contains("CANARY"));
         }
         other => panic!("expected failed, got {other:?}"),
@@ -661,7 +643,8 @@ fn host_error_text_never_reaches_transcripts() {
 
 /// P07-WORKFLOWS: the delegated basic-success replay must equal the
 /// checked-in golden transcript byte-for-byte (canonical re-encoding of
-/// each entry).
+/// each entry). Set `UPDATE_GOLDEN=1` to rewrite the checked-in golden
+/// from the current engine transcript.
 #[test]
 fn basic_success_transcript_matches_golden() {
     let mut session = new_session();
@@ -671,7 +654,7 @@ fn basic_success_transcript_matches_golden() {
     let start_messages = session.drain_messages();
     let request = discovery_request(&start_messages);
     transcript.extend(start_messages);
-    let handle = seal(&mut session, b"metadata-bytes");
+    let handle = seal(&mut session, DZI.as_bytes());
     session
         .dispatch(&provide_resource_bytes(&session, JOB_A, handle, &request))
         .expect("provide");
@@ -680,13 +663,13 @@ fn basic_success_transcript_matches_golden() {
     session
         .dispatch(&command_bytes(JobCommand::SelectImage {
             job: JOB_A.parse().unwrap(),
-            image: "img:0".parse().unwrap(),
+            image: "img:dzi:0".parse().unwrap(),
         }))
         .expect("select image");
     session
         .dispatch(&command_bytes(JobCommand::SelectLevel {
             job: JOB_A.parse().unwrap(),
-            level: "lvl:0".parse().unwrap(),
+            level: "lvl:dzi:0:0".parse().unwrap(),
         }))
         .expect("select level");
     session
@@ -713,6 +696,15 @@ fn basic_success_transcript_matches_golden() {
         transcript.extend(session.drain_messages());
     }
 
+    let actual: Vec<serde_json::Value> = transcript
+        .iter()
+        .map(|bytes| serde_json::from_slice(bytes).expect("message is JSON"))
+        .collect();
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        let updated = serde_json::to_string_pretty(&actual).expect("golden serializes");
+        std::fs::write(GOLDEN_PATH, format!("{updated}\n")).expect("golden rewritten");
+        return;
+    }
     let golden_text = std::fs::read_to_string(GOLDEN_PATH).expect("golden wasm.json is checked in");
     let golden: Vec<serde_json::Value> =
         serde_json::from_str(&golden_text).expect("golden parses as an array");

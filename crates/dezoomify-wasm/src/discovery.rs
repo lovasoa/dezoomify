@@ -450,8 +450,11 @@ struct RankedCandidateDto<'a> {
 ///
 /// `malformed` when `urls_json` is not a JSON array of strings.
 pub fn rank_candidates_json(urls_json: &str) -> Result<String, AdapterError> {
-    let urls: Vec<String> =
-        serde_json::from_str(urls_json).map_err(|error| malformed(format!("rankCandidates needs a JSON array of URLs: {error}")))?;
+    let urls: Vec<String> = serde_json::from_str(urls_json).map_err(|error| {
+        malformed(format!(
+            "rankCandidates needs a JSON array of URLs: {error}"
+        ))
+    })?;
     let borrowed: Vec<&str> = urls.iter().map(String::as_str).collect();
     let ranked = dezoomify_core::core::registry::rank_candidate_urls(&borrowed);
     let dtos: Vec<RankedCandidateDto<'_>> = ranked
@@ -461,7 +464,8 @@ pub fn rank_candidates_json(urls_json: &str) -> Result<String, AdapterError> {
             format: candidate.format,
         })
         .collect();
-    serde_json::to_string(&dtos).map_err(|error| malformed(format!("rank projection failed: {error}")))
+    serde_json::to_string(&dtos)
+        .map_err(|error| malformed(format!("rank projection failed: {error}")))
 }
 
 fn discovery_error(error: dezoomify_core::core::discovery::DiscoveryError) -> AdapterError {

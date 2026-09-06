@@ -4,11 +4,12 @@
 //! performs I/O, decodes pixels, reads clocks, or writes output. See
 //! `docs/job-engine.md` for the behavior table.
 //!
-//! Lean scope (honest): discovery accepts a resource by byte length only
-//! (hosts own byte validation), catalog/levels are the fixed `img:0`/`lvl:0`
-//! pair, and tile plans are the fixed `tile:0`/`tile:1` pair. Real format
-//! parsing lives in `dezoomify-core`; wiring `ResourceBytes` bytes through
-//! core discovery is future work, not claimed here.
+//! Discovery and planning are format-aware: metadata bytes are parsed by
+//! `dezoomify-core` (pure and deterministic), the projected catalog is
+//! emitted on the `catalog` event, selection is explicit over real catalog
+//! ids, and tile plans are the real per-level plans (fixed-geometry grids
+//! directly; probe-driven sources through the core probe step machine when
+//! `config.plan_probes` allows it).
 
 #![forbid(unsafe_code)]
 

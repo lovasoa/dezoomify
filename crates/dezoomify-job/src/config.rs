@@ -55,6 +55,17 @@ pub struct Config {
     pub max_retries: u32,
     pub max_buffers: u32,
     pub max_bytes: u64,
+    /// Whether the machine may plan probe-driven levels (generic/adaptive
+    /// sources) by emitting probe tile effects and waiting for observed
+    /// geometry. Hosts that cannot observe tile geometry (e.g. the WASM
+    /// session, which never decodes pixels) disable this and receive a
+    /// typed `job.probe-unsupported` planning failure instead.
+    #[serde(default = "default_true")]
+    pub plan_probes: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -66,6 +77,7 @@ impl Default for Config {
             max_retries: 3,
             max_buffers: 16,
             max_bytes: 67_108_864,
+            plan_probes: true,
         }
     }
 }

@@ -30,13 +30,18 @@ fn session_lifecycle_via_js_surface() {
     session
         .dispatch(&envelope_bytes(ControlBody::Command(JobCommand::Start {
             job: "job:wasm-pack-1".parse().expect("job id"),
-            input_url: "https://example.com/item/1".to_string(),
+            input_url: "https://example.com/image.dzi".to_string(),
         })))
         .expect("start");
     let messages = session.drain_messages();
-    assert_eq!(messages.len(), 2, "acquire-resource + job-state");
-    let transcript = String::from_utf8_lossy(&messages[0]);
-    assert!(transcript.contains("acquire-resource"));
+    assert_eq!(messages.len(), 2, "job-state + acquire-resource");
+    let state = String::from_utf8_lossy(&messages[0]);
+    assert!(state.contains("job-state"), "state leads: {state}");
+    let effect = String::from_utf8_lossy(&messages[1]);
+    assert!(
+        effect.contains("acquire-resource"),
+        "effect follows: {effect}"
+    );
     assert_eq!(session.state().as_str(), "Discovering");
 }
 
