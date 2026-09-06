@@ -69,6 +69,37 @@ Use the narrowest owning target first. Focus with supported flags such as
 accept no options (for example `native`, `extension`, `scenario`) reject unknown
 flags instead of silently widening or skipping coverage.
 
+## Test locations
+
+`test/` (singular, repository root) is the canonical fast website unit suite:
+10 `node:test` files (`test/*.test.mjs`). It runs via
+`node --test test/*.test.mjs` and the `web`, `ui` (controller only), and
+`build web` gates. It is tracked and always present.
+
+`tests/` (plural, repository root) is not a suite and never runs in any
+`cargo xtask test` or `cargo xtask ci` lane. It holds only untracked
+Playwright residue: ignored `node_modules/` and
+`test-results/.last-run.json` plus an empty `fixtures/remote/` directory
+tree with no fixture bytes. It has no `package.json`, no specs, and no
+Playwright config. Do not add files here; the canonical suites are `test/`
+and `crates/fixture-server/tests/`. See `tests/README.md`. Real fixtures
+live in `testdata/scenarios`.
+
+`crates/fixture-server/tests/` is the canonical fixture-server gate:
+`http_contract.rs` and `security.rs` (plus `common/mod.rs`) are Rust
+integration tests over loopback and run via
+`cargo test -p dezoomify-fixture-server` (also in bare `cargo xtask test`
+via the `cargo-test` step); `webapp-e2e/` is the Playwright real-Chromium
+job (`webapp.spec.js`, `playwright.config.js`, `package.json`) with its own
+ignored `node_modules/`, `test-results/`, and `downloads/`, and runs via
+`cargo xtask test web --e2e` and the `--browser` legs of `test browser` and
+`test wasm`.
+
+Other suites keep their own directories and never use root `tests/`:
+`packages/browser-runtime/test/`, `packages/protocol-ts/test/`,
+`apps/*/tests/`, `legacy/tests/`, `crates/*/tests/`, and the shared corpus
+in `testdata/scenarios`.
+
 ## Test layers
 
 - **Core fixtures** verify recognition, parsing, catalogs, tile plans, and
