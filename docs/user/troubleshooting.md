@@ -28,34 +28,47 @@ remedies:
   where a request comes from and refuse everyone else. The
   [desktop app](./desktop-app.md) can introduce itself as coming from the
   site's own viewer page; on the command line, pass
-  `--header "Referer: https://the-site.example/its/viewer/page"`.
+   `-H "Referer: https://the-site.example/its/viewer/page"`.
 
 Never paste passwords, cookies, or session contents into web forms,
 chat messages, or bug reports.
 
 ## The image appears blank, or the browser slows to a halt
 
-Very large pictures can exceed what a browser tab is allowed to hold. When
-Dezoomify sees this coming, it offers to save a scaled-down copy. Options:
+Very large pictures can exceed what a browser tab is allowed to hold. The
+website stops the job with an error and points to the
+[desktop app](./desktop-app.md). Options:
 
-- Accept the smaller copy, often perfectly usable on screen.
-- Use the [desktop app](./desktop-app.md), which writes the image to disk
-  piece by piece and has no such ceiling. This is the honest fix for
-  gigapixel images.
+- Use the desktop app, which assembles the image in memory (up to its
+  1 GiB canvas limit) and writes the finished PNG to disk. This
+  is the fix for images that exceed browser limits but fit that cap.
+- To save a smaller copy, use the [command-line tool](./command-line.md)
+  with `--max-width`.
 
 ## The image is visible but the browser cannot save it
 
 Some browsers fail to save very large pictures even when they can display
 them. Nothing on the website can bypass that browser limit. Use the
-[browser extension](./browser-extension.md) (it saves through a different,
-cleaner route) or the [desktop app](./desktop-app.md).
+[desktop app](./desktop-app.md), which assembles the image in memory (up
+to its 1 GiB canvas limit) and writes the finished PNG to disk. The
+browser extension stays inside the same browser memory and save
+limits and never fixes this case.
 
 ## The save stopped partway
 
 Small network interruptions are retried automatically. If the job stops
-anyway, run it again, and on the desktop app use a resume folder
-(`--tile-cache`) so already-saved pieces are kept:
-see [resuming an interrupted save](./desktop-app.md#resuming-an-interrupted-save).
+anyway, run it again from the start. The app keeps no resume cache, so
+already-saved pieces are never reused.
+
+## The output name is rejected
+
+The output name selects the format: `.png` saves PNG, `.jpg` or `.jpeg`
+saves JPEG, `.tif` or `.tiff` saves TIFF, and a name with no extension
+saves a IIIF tile folder. Any other extension stops the job before
+anything is saved. Rename the output to one of the supported forms and run
+again. A JPEG save of an image larger than 65535 pixels per side also
+stops with a typed error; save such images as PNG, TIFF, or a IIIF tile
+folder instead.
 
 ## The site only works without encryption
 

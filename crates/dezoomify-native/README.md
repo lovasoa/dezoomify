@@ -4,9 +4,11 @@ Real native egress and output: a rustls-based HTTP client with per-redirect
 header rebuild, size/time limits and bounded retries; the job-driven download
 pipeline (`dezoomify-job` owns discovery, selection, planning, retry, and
 lifecycle policy while `pipeline`/`job_driver` execute fetch, probe, decode,
-assemble, PNG encode, atomic write, and real sha256); plus auth/header scope
+assemble, output encode (PNG, JPEG, TIFF, static `iiif-dir` tile trees),
+atomic write, and real sha256); plus auth/header scope
 (credentials redacted from every error, log, and snapshot), bounded scheduler
-counters, cache helpers, and output validation.
+counters, unwired tile-cache helpers (storage `none`: the pipeline refetches
+every run and keeps no resume cache), and output validation.
 
 ```sh
 cargo xtask test native     # runtime + CLI suites, loopback egress tests

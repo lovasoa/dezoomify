@@ -136,7 +136,15 @@ fn output_refuses_mismatch_without_overwrite_and_replaces_stale_temp() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("out.png");
-    assert!(output::validate_destination(&path, &OutputFormat::Jpeg, false).is_err());
+    // Each single-file format only validates its own extensions.
+    let jpg = dir.join("out.jpg");
+    assert!(output::validate_destination(&jpg, &OutputFormat::Png, false).is_err());
+    assert!(output::validate_destination(&jpg, &OutputFormat::Png, true).is_err());
+    assert!(output::validate_destination(&jpg, &OutputFormat::Jpeg, false).is_ok());
+    assert!(output::validate_destination(&path, &OutputFormat::Jpeg, true).is_err());
+    let tif = dir.join("out.tif");
+    assert!(output::validate_destination(&tif, &OutputFormat::Tiff, false).is_ok());
+    assert!(output::validate_destination(&tif, &OutputFormat::Png, true).is_err());
     // A stale temp file left by an interrupted write must not leak into the
     // next write: the atomic write replaces both the temp and the output.
     let stale_tmp = path.with_extension("tmp");
@@ -147,4 +155,92 @@ fn output_refuses_mismatch_without_overwrite_and_replaces_stale_temp() {
     assert!(output::validate_destination(&path, &OutputFormat::Png, false).is_err());
     assert!(output::validate_destination(&path, &OutputFormat::Png, true).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn output_format_follows_the_destination_extension() {
+    use std::path::Path;
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.png")),
+        Ok(output::OutputFormat::Png)
+    );
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.jpg")),
+        Ok(output::OutputFormat::Jpeg)
+    );
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.jpeg")),
+        Ok(output::OutputFormat::Jpeg)
+    );
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.tif")),
+        Ok(output::OutputFormat::Tiff)
+    );
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.tiff")),
+        Ok(output::OutputFormat::Tiff)
+    );
+    // Extensionless paths name an iiif-dir directory destination.
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting")),
+        Ok(output::OutputFormat::IiifDir)
+    );
+    // Unknown extensions fail before any work starts, instead of writing a
+    // mislabeled file.
+    assert!(output::OutputFormat::infer_from_path(Path::new("painting.bmp")).is_err());
+    assert!(output::OutputFormat::infer_from_path(Path::new("painting.webp")).is_err());
+    // An existing directory is always an iiif-dir destination.
+    let dir = std::env::temp_dir().join(format!("dz-infer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(
+        output::OutputFormat::infer_from_path(&dir),
+        Ok(output::OutputFormat::IiifDir)
+    );
+    // An image extension never validates as a directory destination and a
+    // directory never validates as a single file.
+    assert!(
+        output::validate_destination(&dir.join("x.png"), &output::OutputFormat::IiifDir, true)
+            .is_err()
+    );
+    assert!(output::validate_destination(&dir, &output::OutputFormat::Png, true).is_err());
+    // A non-empty directory refuses without overwrite, like a file does.
+    std::fs::write(dir.join("info.json"), b"{}").unwrap();
+    assert!(output::validate_destination(&dir, &output::OutputFormat::IiifDir, false).is_err());
+    assert!(output::validate_destination(&dir, &output::OutputFormat::IiifDir, true).is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jpeg_and_tiff_encode_and_decode_round_trip() {
+    use dezoomify_native::pipeline::{encode_jpeg, encode_tiff, JPEG_QUALITY};
+    let mut image = image::RgbaImage::new(16, 16);
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        *pixel = image::Rgba([(x * 16) as u8, (y * 16) as u8, 128, 255]);
+    }
+    let jpeg = encode_jpeg(&image, JPEG_QUALITY).expect("jpeg encodes");
+    assert!(
+        jpeg.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "jpeg output carries the SOI marker"
+    );
+    let decoded = image::load_from_memory(&jpeg)
+        .expect("jpeg decodes")
+        .to_rgba8();
+    assert_eq!((decoded.width(), decoded.height()), (16, 16));
+    let tiff = encode_tiff(&image).expect("tiff encodes");
+    let decoded = image::load_from_memory(&tiff)
+        .expect("tiff decodes")
+        .to_rgba8();
+    assert_eq!((decoded.width(), decoded.height()), (16, 16));
+    assert_eq!(decoded.get_pixel(3, 5), image.get_pixel(3, 5));
+}
+
+#[test]
+fn jpeg_rejects_canvases_beyond_its_side_limit() {
+    use dezoomify_native::pipeline::encode_jpeg;
+    // A 1x1 stand-in cannot allocate gigapixels; assert the guard directly
+    // through the dimension check on a wide image instead.
+    let wide = image::RgbaImage::new(65_536, 1);
+    let error = encode_jpeg(&wide, 92).expect_err("jpeg side limit applies");
+    assert_eq!(error.code, "output.encode-failed");
 }

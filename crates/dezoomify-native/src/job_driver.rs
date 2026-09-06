@@ -22,14 +22,21 @@
 //!   gate (one [`std::thread::scope`] pool per drained batch), replying
 //!   `TileOutcome`; the job owns retry counting and partial decisions.
 //! * `decode-pixels`/`open-encoder`/`finalize-encoder` → acknowledged from
-//!   the tiles already decoded during acquisition (PNG encodes one-shot).
+//!   the tiles already decoded during acquisition (encoders run one-shot).
 //! * `publish-output` → canvas-limit check, assemble with [`blit_onto`],
-//!   [`encode_png`], atomic [`write_atomic`], real [`sha256_hex`] digest.
+//!   encode per the inferred [`OutputFormat`] (PNG, JPEG at quality 92,
+//!   TIFF, or an `iiif-dir` tile tree), atomic write, real [`sha256_hex`]
+//!   digest (over the file bytes, or over `info.json` plus tile bytes in
+//!   sorted path order for directories).
 //! * `release-bytes`/`cancel-work` → drop decoded buffers; no output is
 //!   written on the cancel path.
 //! * `request-decision{partial}` → [`PartialPolicy`]: fail (discard, honest
 //!   `tile.download-failed`) or keep (blank missing regions, marked
 //!   partial output).
+//!
+//! The output format is inferred once from the destination path extension
+//! ([`OutputFormat::infer_from_path`]): `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`,
+//! or an extensionless path (or existing directory) for `iiif-dir`.
 //!
 //! [`fetch`]: crate::http::fetch
 //! [`merge_headers`]: crate::pipeline::merge_headers
@@ -37,7 +44,9 @@
 //! [`probe_tile_bytes`]: crate::pipeline::probe_tile_bytes
 //! [`fetch_and_decode`]: crate::pipeline::fetch_and_decode
 //! [`blit_onto`]: crate::pipeline::blit_onto
-//! [`encode_png`]: crate::pipeline::encode_png
+//! [`OutputFormat`]: crate::output::OutputFormat
+//! [`OutputFormat::infer_from_path`]: crate::output::OutputFormat::infer_from_path
+//! [`render_iiif_dir`]: crate::pipeline::render_iiif_dir
 //! [`write_atomic`]: crate::output::write_atomic
 //! [`sha256_hex`]: crate::pipeline::sha256_hex
 
@@ -52,10 +61,11 @@ use dezoomify_job::{Config as JobConfig, Job, JobResponse, State as JobState};
 
 use crate::error::NativeError;
 use crate::http::{fetch, UserHeaders};
-use crate::output::{validate_destination, write_atomic, OutputFormat};
+use crate::output::{validate_destination, write_atomic, write_iiif_dir, OutputFormat};
 use crate::pipeline::{
-    blit_onto, encode_png, fetch_and_decode, merge_headers, probe_tile_bytes, sha256_hex,
-    PartialPolicy, PipelineConfig, PipelineEvent, PipelineOutcome,
+    blit_onto, encode_jpeg, encode_png, encode_tiff, fetch_and_decode, merge_headers,
+    probe_tile_bytes, render_iiif_dir, sha256_hex, PartialPolicy, PipelineConfig, PipelineEvent,
+    PipelineOutcome,
 };
 
 /// Deferred-resolution bound: the initial discovery plus this many deferred
@@ -80,8 +90,10 @@ pub(crate) fn drive(
     on_event: &mut dyn FnMut(PipelineEvent),
 ) -> Result<PipelineOutcome, NativeError> {
     let mut url = input_url.to_string();
+    let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))
+        .map_err(NativeError::from)?;
     for _ in 0..=MAX_DEFERRED_FOLLOWS {
-        match drive_job(&url, output_path, overwrite, config, user, on_event)? {
+        match drive_job(&url, output_path, overwrite, format, config, user, on_event)? {
             AttemptDone::Done(outcome) => return Ok(outcome),
             AttemptDone::Deferred(next) => url = next,
         }
@@ -215,6 +227,7 @@ struct Attempt<'a> {
     user: &'a UserHeaders,
     output_path: PathBuf,
     overwrite: bool,
+    format: OutputFormat,
     on_event: &'a mut dyn FnMut(PipelineEvent),
     discovery_resources: usize,
     catalog: Vec<CatalogImage>,
@@ -246,6 +259,7 @@ fn drive_job(
     input_url: &str,
     output_path: &str,
     overwrite: bool,
+    format: OutputFormat,
     config: &PipelineConfig,
     user: &UserHeaders,
     on_event: &mut dyn FnMut(PipelineEvent),
@@ -261,6 +275,7 @@ fn drive_job(
         user,
         output_path: PathBuf::from(output_path),
         overwrite,
+        format,
         on_event,
         discovery_resources: 0,
         catalog: Vec::new(),
@@ -699,11 +714,8 @@ fn execute_effects(
                 tiles.push(need);
             }
             "request-destination" => {
-                match validate_destination(
-                    &attempt.output_path,
-                    &OutputFormat::Png,
-                    attempt.overwrite,
-                ) {
+                match validate_destination(&attempt.output_path, &attempt.format, attempt.overwrite)
+                {
                     Ok(()) => reply(
                         job,
                         JobResponse::DestinationGranted {
@@ -874,14 +886,55 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
         });
         blit_onto(&mut target, geom.destination, geom.extent, image);
     }
-    let encoded = encode_png(&target)?;
-    attempt.emit(
-        "encoding",
-        BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
-    );
-    write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+    let output_hash = match attempt.format {
+        OutputFormat::Png => {
+            let encoded = encode_png(&target)?;
+            attempt.emit(
+                "encoding",
+                BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
+            );
+            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            format!("sha256:{}", sha256_hex(&encoded))
+        }
+        OutputFormat::Jpeg => {
+            let encoded = encode_jpeg(&target, attempt.config.jpeg_quality)?;
+            attempt.emit(
+                "encoding",
+                BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
+            );
+            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            format!("sha256:{}", sha256_hex(&encoded))
+        }
+        OutputFormat::Tiff => {
+            let encoded = encode_tiff(&target)?;
+            attempt.emit(
+                "encoding",
+                BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
+            );
+            write_atomic(&attempt.output_path, &encoded).map_err(NativeError::from)?;
+            format!("sha256:{}", sha256_hex(&encoded))
+        }
+        OutputFormat::IiifDir => {
+            let id = attempt
+                .output_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("image");
+            let (info_json, tiles) = render_iiif_dir(&target, id, attempt.config.jpeg_quality)?;
+            attempt.emit(
+                "encoding",
+                BTreeMap::from([
+                    ("bytes".to_string(), info_json.len().to_string()),
+                    ("files".to_string(), (tiles.len() + 1).to_string()),
+                ]),
+            );
+            let preimage = write_iiif_dir(&attempt.output_path, &info_json, &tiles)
+                .map_err(NativeError::from)?;
+            format!("sha256:{}", sha256_hex(&preimage))
+        }
+    };
     attempt.published = Some(Published {
-        output_hash: format!("sha256:{}", sha256_hex(&encoded)),
+        output_hash,
         tile_count: attempt.decoded.len(),
         image_size: Vec2d {
             x: width,
@@ -891,7 +944,6 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
     });
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,21 +1,20 @@
 # Native apps
 
-The CLI and Tauri desktop application share `crates/dezoomify-native`. This runtime drives `crates/dezoomify-job` and executes its effects with native HTTP, filesystem, cache, decoder, processor, and encoder implementations.
+The CLI and Tauri desktop application share `crates/dezoomify-native`. This runtime drives `crates/dezoomify-job` and executes its effects with native HTTP, filesystem, decoder, processor, and output encoder implementations (PNG, JPEG, TIFF, and static IIIF tile trees).
 
 ## Native runtime
 
 `crates/dezoomify-native` provides:
 
 - HTTP requests with redirects, user headers, authentication, bounded concurrency, and cancellation;
-- local metadata, tile, archive, and output access;
-- a persistent, content-aware tile cache with validation and eviction;
-- streaming decode and processing with bounded memory;
-- the complete encoder set and atomic final publication;
-- disk-backed plans for images larger than available memory.
+- remote metadata and tile fetch with local output file access;
+- in-memory tile decode and canvas assembly bounded by a 1 GiB canvas cap;
+- PNG, JPEG (quality 92), TIFF, and `iiif-dir` encode with atomic final publication;
+- no resume cache: the tile-cache helpers exist but stay unwired (storage `none`), so an interrupted job restarts from the start.
 
-Temporary files are job-scoped. Successful output is moved into place atomically where the filesystem permits. Cancellation and failure remove uncommitted output while retaining cache entries that are safe to reuse.
+Temporary files are job-scoped. Successful output is moved into place atomically where the filesystem permits. Cancellation and failure remove uncommitted output and keep no tile bytes for resume.
 
-Native is the authoritative runtime for huge images, local sources, bulk queues, resumable long-running work, and full output support. Capability negotiation exposes actual codec and resource limits to callers; see [Protocol](protocol.md#capabilities).
+Native is the authoritative runtime for images larger than a browser tab and local sources, within a 1 GiB in-memory canvas cap, with single-job file and `iiif-dir` output. The output file name selects the encoder: `.png` saves PNG, `.jpg`/`.jpeg` saves JPEG at quality 92, `.tif`/`.tiff` saves TIFF, and an extensionless path (or an existing directory) saves an `iiif-dir` tile tree. Any other extension fails with a typed error before any work starts. JPEG addresses at most 65535 px per side, so larger canvases save as PNG, TIFF, or `iiif-dir`. An `iiif-dir` destination holds an IIIF Image API v2 `info.json` plus JPEG tiles stored at their real IIIF request paths (`{x},{y},{w},{h}/{tw},/0/default.jpg`, size by width) with one `full/max/0/default.jpg` overview, so a plain static file server answers IIIF URLs; its output digest hashes `info.json` plus tile bytes in sorted path order. The native baseline reports encoders `[png, jpeg, tiff]`, destination modes `[file, iiif-dir]`, storage modes `[none]`, and `bulk_supported` false, with no pause or resume command. Capability negotiation exposes actual codec and resource limits to callers; see [Protocol](protocol.md#capabilities).
 
 ## Desktop
 
@@ -25,6 +24,6 @@ Desktop treats website and deep-link [handoffs](protocol.md#handoff) as bounded,
 
 ## CLI
 
-The CLI maps arguments to the same commands and prints the same typed events as human-readable progress or machine-readable records. Interactive selection and recovery use terminal prompts; non-interactive mode requires explicit selection and recovery policies. Bulk mode runs isolated jobs with bounded shared transport and cache resources.
+The CLI maps arguments to the same commands and prints the same typed events as human-readable progress or machine-readable records. It runs non-interactively: missing arguments print help, retries use a fixed budget of 3, and failures exit with the final typed error class. Flags are `--overwrite`, `--json`, `--max-width <px>`, `--accept-invalid-certs`, and `-H "Name: value"` with two positionals (`<input-url> <output>`). Each run saves one job to one PNG file.
 
 Exit status reflects the final typed error class. A kept partial output remains distinguishable from complete success. See [Errors](errors.md) and [Job engine](job-engine.md).

@@ -3,28 +3,25 @@
 # Desktop app
 
 The desktop app runs Dezoomify natively on Windows, macOS, and Linux,
-without a browser's limits. Use it when:
+beyond what a browser tab can hold, within a 1 GiB in-memory canvas cap.
+Use it when:
 
 - the image is **very large**: a browser may refuse to display or save
-  images beyond a certain size; the desktop app assembles images of any size
-  and writes them directly to disk;
+  images beyond a certain size; the desktop app assembles larger images
+  than a browser tab (up to the 1 GiB canvas limit) and writes the
+  finished output directly to disk;
 - the site **refuses visitors from other pages**: the app can introduce
-  itself as coming from the site's own viewer page;
-- you need a **specific file format**: the website saves PNG; the desktop
-  app saves PNG, JPEG, TIFF, and more, including a local zoomable copy for
-  gigantic pictures;
-- a save **got interrupted**: with the resume option, already-fetched
-  pieces are kept and the job continues where it stopped.
+  itself as coming from the site's own viewer page.
+
+Each run saves one job to one output file or IIIF tile folder. It keeps
+no resume cache and runs no bulk queue.
 
 ## Install
 
-1. Go to the [releases page](https://github.com/lovasoa/dezoomify/releases)
-   and save the version for your operating system.
-2. Unpack it and start the program.
-3. Depending on your system, you may need to confirm that you trust the app:
-   on macOS, use *System Settings → Privacy & Security → Open Anyway* the
-   first time you start it. The app is not professionally signed because
-   Dezoomify is a free project without a paid signing certificate.
+No installer ships yet. A future installer will appear on the
+[releases page](https://github.com/lovasoa/dezoomify/releases). Meanwhile,
+use the [website](./website.md) or the
+[command-line tool](./command-line.md).
 
 ## Save an image
 
@@ -44,33 +41,26 @@ requests that appear to come from the site's own viewer. If the save
 fails with a "forbidden" style error, tell the app which page the image
 belongs to (most image viewers open with such a page) and it will introduce
 itself as coming from there. On the command line, this is the
-`--header "Referer: …"` option; see [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
+`-H "Referer: …"` option; see [protected pages](./troubleshooting.md#forbidden-or-unauthorized-errors).
 
 ## Choosing the file format
 
-The format follows the file name you choose: `picture.jpg` saves a JPEG,
-`picture.png` a PNG, `picture.iiif` a local zoomable copy you can open in a
-browser.
+The output name selects the format. The app saves PNG for names ending in
+`.png`, JPEG at quality 92 for `.jpg` or `.jpeg`, TIFF for `.tif` or
+`.tiff`, and a IIIF tile folder for a name with no extension. Any other
+extension stops the job with a typed error before anything is saved, so
+rename the output instead.
 
-- **JPEG** is the common choice and produces small files, but pictures are
-  limited to 65,535 pixels per side and the whole picture must fit in your
-  computer's memory.
-- **PNG** is lossless (no quality loss) and works even for gigantic
-  pictures: it is written to disk as it goes, without needing to hold the
-  whole image in memory. It produces much larger files.
-- **A local zoomable copy** (`.iiif`) is best for images of hundreds of
-  megapixels or more: regular image viewers struggle with files that large,
-  but a zoomable copy stays comfortable to explore.
+JPEG versions stay small and suit on-screen viewing; TIFF and PNG suit
+archiving and further editing. JPEG cannot address images larger than
+65535 pixels per side; such images save as PNG, TIFF, or a IIIF tile
+folder. The IIIF tile folder holds an `info.json` file plus JPEG tiles and
+suits viewers that read IIIF image folders.
 
-## Resuming an interrupted save
-
-Start the app with a resume folder (`--tile-cache <folder>` on the command
-line). Every saved piece is kept there; if the save stops, run the
-same command again and it picks up where it left off. The folder also
-contains the individual pieces if you prefer to assemble them with other
-tools.
+If a save stops partway, run it again from the start. The app keeps no
+resume cache, so already-saved pieces are never reused.
 
 ## Next steps
 
-- [Command-line usage and bulk saves](./command-line.md)
+- [Command-line usage](./command-line.md)
 - [Troubleshooting](./troubleshooting.md)

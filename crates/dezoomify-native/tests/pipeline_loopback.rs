@@ -338,6 +338,125 @@ fn existing_output_without_overwrite_is_refused() {
 }
 
 #[test]
+fn jpg_output_decodes_at_full_size() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("jpg");
+    let output = out_dir.join("pyramid.jpg");
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .expect("jpeg pipeline succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    assert!(!outcome.partial);
+    let bytes = std::fs::read(&output).expect("jpeg output written");
+    assert!(
+        bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "jpeg output carries the SOI marker"
+    );
+    let decoded = image::load_from_memory(&bytes)
+        .expect("jpeg output decodes")
+        .to_rgba8();
+    assert_eq!((decoded.width(), decoded.height()), (512, 512));
+    assert_eq!(outcome.output_hash, sha256_of_file(&output));
+    assert_eq!(
+        outcome.output_hash,
+        "sha256:474715c2ea1a569aab318058cb49002b800c09c223fcb20288edb75a30946349",
+        "jpeg bytes are deterministic; pin the golden"
+    );
+}
+
+#[test]
+fn tiff_output_decodes_losslessly() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("tiff");
+    let output = out_dir.join("pyramid.tif");
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .expect("tiff pipeline succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    let bytes = std::fs::read(&output).expect("tiff output written");
+    let decoded = image::load_from_memory(&bytes)
+        .expect("tiff output decodes")
+        .to_rgba8();
+    assert_eq!((decoded.width(), decoded.height()), (512, 512));
+    let pixel = |x: u32, y: u32| {
+        let p = decoded.get_pixel(x, y).0;
+        (p[0], p[1], p[2])
+    };
+    assert_eq!(pixel(64, 64), (196, 48, 48), "top-left quadrant red");
+    assert_eq!(
+        pixel(448, 448),
+        (232, 220, 96),
+        "bottom-right quadrant yellow"
+    );
+    assert_eq!(outcome.output_hash, sha256_of_file(&output));
+    assert_eq!(
+        outcome.output_hash,
+        "sha256:00332ec92fd2380ed6edc188227e4a05639d2be6c72416e83a65f9110ee69081",
+        "tiff bytes are deterministic; pin the golden"
+    );
+}
+
+#[test]
+fn iiif_dir_writes_manifest_and_addressable_tiles() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("iiif-dir");
+    let output = out_dir.join("pyramid");
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .expect("iiif-dir pipeline succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    assert!(!outcome.partial);
+    // The manifest is spec-shaped: v2 context, real dimensions, one tile
+    // block matching the files on disk.
+    let info: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(output.join("info.json")).expect("info.json written"),
+    )
+    .expect("info.json parses");
+    assert_eq!(info["width"], 512);
+    assert_eq!(info["height"], 512);
+    assert_eq!(info["tiles"][0]["width"], 512);
+    assert_eq!(info["tiles"][0]["scaleFactors"], serde_json::json!([1]));
+    // Each tile sits at its real IIIF request path, so a plain static file
+    // server answers IIIF URLs, plus one full-image overview.
+    let tile = output.join("0,0,512,512/512,/0/default.jpg");
+    let overview = output.join("full/max/0/default.jpg");
+    for path in [&tile, &overview] {
+        let bytes = std::fs::read(path).expect("tile file written");
+        assert!(bytes.starts_with(&[0xFF, 0xD8, 0xFF]), "tile is jpeg");
+        let decoded = image::load_from_memory(&bytes)
+            .expect("tile decodes")
+            .to_rgba8();
+        assert_eq!((decoded.width(), decoded.height()), (512, 512));
+    }
+    assert_eq!(
+        outcome.output_hash,
+        "sha256:4a18d893a4a85c7ebc5ecb23f03564e90123af3b5abca540b9546ba0e9a1c3a3",
+        "iiif-dir bytes are deterministic; pin the golden"
+    );
+}
+
+#[test]
 fn tiny_canvas_budget_fails_before_any_write() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
