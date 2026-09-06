@@ -2954,9 +2954,9 @@
     },
     {
       "content_type": "application/json",
-      "id": "web/iiif-discovery/payloads/gallica.bnf.fr/iiif/ark:/12148/btv1b10500000/f1/info.json",
+      "id": "web/iiif-discovery/payloads/gallica.bnf.fr/iiif/ark%3A/12148/btv1b10500000/f1/info.json",
       "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/iiif-discovery/payloads/gallica.bnf.fr/iiif/ark:/12148/btv1b10500000/f1/info.json",
+      "path": "web/iiif-discovery/payloads/gallica.bnf.fr/iiif/ark%3A/12148/btv1b10500000/f1/info.json",
       "sensitive": false,
       "served_urls": [],
       "sha256": "ec1bb372634ac6676b0a5f704fc43d138ac7a25dcf3082f6e2632de0a8ca00d1",
@@ -3007,8 +3007,8 @@
       "path": "web/iiif-discovery/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "8ebc34450ac3f59e48c52a865a2e4a68852fe6c31c63eae2544a7edb86c759a0",
-      "size": 8973,
+      "sha256": "dc9b415a73cda467f40953300db78c6cef0c9becdc1b271d8fa72623f36f3374",
+      "size": 8975,
       "source_path": "tests/dezoomers.spec.js iiifCases",
       "source_snapshot": "f7caa07"
     },

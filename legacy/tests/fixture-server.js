@@ -95,7 +95,11 @@ function safeJoin(base, pathname) {
 }
 
 function fixtureFile(hostname, pathname) {
-  const basePath = safeJoin(path.join(remoteFixtureRoot, hostname), `.${pathname}`);
+  // On-disk fixture names percent-encode ':' (e.g. 'ark:' is stored as
+  // 'ark%3A') because ':' cannot be checked out on Windows. Served URLs keep
+  // the colon; only the filesystem lookup is encoded.
+  const encodedPathname = pathname.replaceAll(":", "%3A");
+  const basePath = safeJoin(path.join(remoteFixtureRoot, hostname), `.${encodedPathname}`);
   if (!basePath) return null;
 
   const extensions = [".html", ".json", ".xml", ".txt"];

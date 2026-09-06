@@ -197,7 +197,7 @@
       "host": "gallica.bnf.fr",
       "method": "GET",
       "path": "/iiif/ark:/12148/btv1b10500000/f1/info.json",
-      "payload": "payloads/gallica.bnf.fr/iiif/ark:/12148/btv1b10500000/f1/info.json",
+      "payload": "payloads/gallica.bnf.fr/iiif/ark%3A/12148/btv1b10500000/f1/info.json",
       "route_id": "gallica-bnf-fr-iiif-ark:-12148-btv1b10500000-f1-info-json",
       "status": 200
     },
