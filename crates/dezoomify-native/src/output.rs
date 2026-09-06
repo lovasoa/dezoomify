@@ -42,9 +42,19 @@ impl OutputFormat {
     ///
     /// * `.png` becomes PNG, `.jpg`/`.jpeg` becomes JPEG, `.tif`/`.tiff`
     ///   becomes TIFF;
+    /// * `.zif` becomes TIFF as well (single-image re-encode; the reference
+    ///   byte-preserving passthrough and source-pyramid multi-level encode
+    ///   are documented gaps, never silent behavior changes);
+    /// * `.iiif` becomes `iiif-dir` (a directory written at the `.iiif`
+    ///   path, mirroring the reference trigger) alongside the native
+    ///   extensionless-or-existing-directory `iiif-dir` trigger;
     /// * an extensionless path, or a path that already exists as a
     ///   directory, becomes `iiif-dir`;
     /// * any other extension is a typed error (no output is attempted).
+    ///   The reference generic canvas would write whatever `image` infers
+    ///   from the extension; native stays fail-closed here because only the
+    ///   PNG/JPEG/TIFF codecs are compiled in and the capability manifest
+    ///   promises exactly those encoders.
     ///
     /// Track C consumes this rule for the `--tile-cache`-sibling CLI surface:
     /// the output file name alone selects the encoder.
@@ -60,17 +70,19 @@ impl OutputFormat {
         match ext.as_str() {
             "png" => Ok(OutputFormat::Png),
             "jpg" | "jpeg" => Ok(OutputFormat::Jpeg),
-            "tif" | "tiff" => Ok(OutputFormat::Tiff),
+            "tif" | "tiff" | "zif" => Ok(OutputFormat::Tiff),
+            "iiif" => Ok(OutputFormat::IiifDir),
             "" => Ok(OutputFormat::IiifDir),
             other => Err(format!(
-                "unsupported output extension .{other}; use .png, .jpg, .tif, or an extensionless directory path for iiif-dir"
+                "unsupported output extension .{other}; use .png, .jpg, .tif, .zif, .iiif, or an extensionless directory path for iiif-dir"
             )),
         }
     }
 }
 
 /// Image extensions that always name a single file, never an `iiif-dir`
-/// directory destination.
+/// directory destination. `.zif` names a single TIFF file; `.iiif` names a
+/// directory and is intentionally absent here.
 fn is_single_file_extension(path: &Path) -> bool {
     matches!(
         path.extension()
@@ -78,7 +90,7 @@ fn is_single_file_extension(path: &Path) -> bool {
             .unwrap_or("")
             .to_ascii_lowercase()
             .as_str(),
-        "png" | "jpg" | "jpeg" | "tif" | "tiff"
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "zif"
     )
 }
 
@@ -116,12 +128,15 @@ pub fn validate_destination(
                 return Err("destination is a directory, not a tiff file".to_string());
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !(ext.eq_ignore_ascii_case("tif") || ext.eq_ignore_ascii_case("tiff")) {
+            if !(ext.eq_ignore_ascii_case("tif")
+                || ext.eq_ignore_ascii_case("tiff")
+                || ext.eq_ignore_ascii_case("zif"))
+            {
                 return Err("extension does not match format".to_string());
             }
         }
         OutputFormat::IiifDir => {
-            if path.is_file() {
+            if path.is_file() && !overwrite {
                 return Err("destination is a file, not a directory".to_string());
             }
             if is_single_file_extension(path) && !path.is_dir() {
@@ -162,6 +177,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 /// Returns the digest preimage (`info.json` bytes followed by tile bytes in
 /// the given order) for the caller to hash.
 pub fn write_iiif_dir(dir: &Path, info_json: &[u8], tiles: &IiifTiles) -> Result<Vec<u8>, String> {
+    // Validation granted overwrite before this runs: a stale file at the
+    // directory path (e.g. from a previous `.iiif` file output) is replaced,
+    // mirroring the reference encoder removing the destination file first.
+    if dir.is_file() {
+        std::fs::remove_file(dir).map_err(|e| e.to_string())?;
+    }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let mut preimage = Vec::with_capacity(info_json.len());
     preimage.extend_from_slice(info_json);

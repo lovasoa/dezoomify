@@ -207,6 +207,21 @@ fn output_format_follows_the_destination_extension() {
         output::OutputFormat::infer_from_path(Path::new("painting.tiff")),
         Ok(output::OutputFormat::Tiff)
     );
+    // `.zif` selects the TIFF encoder (single-image re-encode); `.iiif`
+    // selects an `iiif-dir` tree at that path. Both triggers mirror the
+    // reference extensions while `iiif-dir` keeps working too.
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.zif")),
+        Ok(output::OutputFormat::Tiff)
+    );
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.ZIF")),
+        Ok(output::OutputFormat::Tiff)
+    );
+    assert_eq!(
+        output::OutputFormat::infer_from_path(Path::new("painting.iiif")),
+        Ok(output::OutputFormat::IiifDir)
+    );
     // Extensionless paths name an iiif-dir directory destination.
     assert_eq!(
         output::OutputFormat::infer_from_path(Path::new("painting")),
@@ -235,6 +250,22 @@ fn output_format_follows_the_destination_extension() {
     std::fs::write(dir.join("info.json"), b"{}").unwrap();
     assert!(output::validate_destination(&dir, &output::OutputFormat::IiifDir, false).is_err());
     assert!(output::validate_destination(&dir, &output::OutputFormat::IiifDir, true).is_ok());
+    // A `.zif` path validates as TIFF; a `.iiif` path validates as a
+    // directory destination and never as a single file.
+    let zif = dir.join("out.zif");
+    assert!(output::validate_destination(&zif, &output::OutputFormat::Tiff, false).is_ok());
+    assert!(output::validate_destination(&zif, &output::OutputFormat::Png, true).is_err());
+    let iiif = dir.join("out.iiif");
+    assert!(output::validate_destination(&iiif, &output::OutputFormat::IiifDir, false).is_ok());
+    assert!(output::validate_destination(&iiif, &output::OutputFormat::Tiff, true).is_err());
+    // A stale file at a `.iiif` path refuses without overwrite but is
+    // replaced with overwrite (reference removes the file first).
+    std::fs::write(&iiif, b"stale").unwrap();
+    assert!(output::validate_destination(&iiif, &output::OutputFormat::IiifDir, false).is_err());
+    assert!(output::validate_destination(&iiif, &output::OutputFormat::IiifDir, true).is_ok());
+    output::write_iiif_dir(&iiif, b"{}", &Vec::new()).unwrap();
+    assert!(iiif.is_dir());
+    assert!(iiif.join("info.json").is_file());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

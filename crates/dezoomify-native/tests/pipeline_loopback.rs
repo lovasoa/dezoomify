@@ -487,6 +487,64 @@ fn tiff_output_decodes_losslessly() {
 }
 
 #[test]
+fn zif_output_writes_tiff_bytes() {
+    // `.zif` selects the TIFF encoder: the bytes decode losslessly to the
+    // full canvas (single-image re-encode; no passthrough fast path).
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("zif");
+    let output = out_dir.join("pyramid.zif");
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .expect("zif pipeline succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    let bytes = std::fs::read(&output).expect("zif output written");
+    let decoded = image::load_from_memory(&bytes)
+        .expect("zif output decodes")
+        .to_rgba8();
+    assert_eq!((decoded.width(), decoded.height()), (512, 512));
+    let pixel = decoded.get_pixel(64, 64).0;
+    assert_eq!((pixel[0], pixel[1], pixel[2]), (196, 48, 48));
+    assert_eq!(outcome.output_hash, sha256_of_file(&output));
+}
+
+#[test]
+fn iiif_extension_writes_a_directory_at_that_path() {
+    // `.iiif` selects an `iiif-dir` tree written at the `.iiif` path,
+    // mirroring the reference trigger.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("iiif-ext");
+    let output = out_dir.join("pyramid.iiif");
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .expect("iiif pipeline succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    assert!(output.is_dir());
+    let info: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(output.join("info.json")).expect("info.json written"),
+    )
+    .expect("info.json parses");
+    assert_eq!(info["width"], 512);
+    assert_eq!(info["height"], 512);
+    assert!(
+        outcome.output_hash.starts_with("sha256:"),
+        "iiif-dir output carries a real digest"
+    );
+}
+
+#[test]
 fn iiif_dir_writes_manifest_and_addressable_tiles() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
