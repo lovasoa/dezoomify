@@ -173,18 +173,35 @@ async function discover(sourceUrl, tabOrigin) {
 }
 
 async function planLevel(session, image, tabOrigin) {
-  // Largest declared level wins; undeclared sizes keep the last level
-  // (same rule as the webapp job).
+  // Largest declared level that fits the browser canvas wins (same rule as
+  // the webapp job: 16384 x 16384). Planning a gigapixel level would exhaust
+  // memory serializing trillions of tiles, so when nothing fits the smallest
+  // declared level is planned and the canvas check below fails it cheaply.
+  const MAX_CANVAS_AREA = 16384 * 16384;
   let level = null;
   let bestArea = -1;
+  let smallest = null;
+  let smallestArea = Number.POSITIVE_INFINITY;
+  let sawDeclared = false;
+  let lastUndeclared = null;
   for (const candidate of image.levels) {
     const size = candidate.imageSize;
-    const area = size ? size.x * size.y : -1;
-    if (area >= bestArea) {
+    if (!size) {
+      lastUndeclared = candidate;
+      continue;
+    }
+    sawDeclared = true;
+    const area = size.x * size.y;
+    if (area <= MAX_CANVAS_AREA && area >= bestArea) {
       level = candidate;
       bestArea = area;
     }
+    if (area < smallestArea) {
+      smallest = candidate;
+      smallestArea = area;
+    }
   }
+  if (!level) level = sawDeclared ? smallest : lastUndeclared;
   let plan = JSON.parse(session.levelTiles(image.id, level.index));
   const fetcher = makeTabFetcher(tabOrigin);
   let guard = 0;

@@ -18,6 +18,30 @@ fn malformed(message: impl Into<String>) -> AdapterError {
     AdapterError::new(AdapterErrorCode::Malformed, message.into())
 }
 
+/// Upper bound on tiles materialized into one JSON plan. Browser workers
+/// serialize every tile into a single message; without a bound, a gigapixel
+/// level (e.g. the deepest WMTS matrix of a global imagery service, with tens
+/// of trillions of tiles) exhausts worker memory and traps as `unreachable
+/// executed` instead of failing with a typed error. Hosts pick a smaller
+/// level; this is allocation protection only, not a canvas policy.
+const MAX_PLAN_TILES: u64 = 100_000;
+
+fn plan_too_large(count: u64) -> AdapterError {
+    AdapterError::new(
+        AdapterErrorCode::LimitExceeded,
+        format!(
+            "tile plan has {count} tiles, exceeding the {MAX_PLAN_TILES}-tile browser plan limit; choose a smaller level or use the desktop app"
+        ),
+    )
+}
+
+fn check_plan_size(count: u64) -> Result<(), AdapterError> {
+    if count > MAX_PLAN_TILES {
+        return Err(plan_too_large(count));
+    }
+    Ok(())
+}
+
 /// One host fetch the core needs. `headers` are extra request headers the
 /// format layer requires (e.g. legacy Referer parity); the host merges its
 /// own defaults.
@@ -245,7 +269,9 @@ impl DiscoverySession {
     ///
     /// # Errors
     ///
-    /// `wrong-state` before [`Self::finish`]; `malformed` for bad indexes.
+    /// `wrong-state` before [`Self::finish`]; `malformed` for bad indexes;
+    /// `limit-exceeded` when the level's tile plan exceeds
+    /// [`MAX_PLAN_TILES`] tiles.
     pub fn level_tiles(&mut self, image: usize, level: usize) -> Result<String, AdapterError> {
         let catalog = self.catalog.as_ref().ok_or_else(|| {
             AdapterError::new(AdapterErrorCode::WrongState, "discovery not finished")
@@ -270,6 +296,7 @@ impl DiscoverySession {
         match source {
             TileSource::Grid(grid) => self.project_grid(grid),
             TileSource::Positioned(positioned) => {
+                check_plan_size(positioned.count())?;
                 let canvas = positioned.image_size();
                 let mut tiles = Vec::new();
                 for tile in positioned.tiles() {
@@ -364,6 +391,7 @@ impl DiscoverySession {
     }
 
     fn project_grid(&self, grid: Grid) -> Result<String, AdapterError> {
+        check_plan_size(grid.count())?;
         let canvas = grid.image_size();
         let mut tiles = Vec::new();
         for tile in grid.tiles_row_major() {
@@ -582,5 +610,70 @@ mod tests {
                 .expect("parses"),
             serde_json::json!([])
         );
+    }
+
+    /// Regression: a gigapixel WMTS matrix (e.g. the deepest matrix of a
+    /// global imagery service, with trillions of tiles) must fail planning
+    /// with `limit-exceeded`, not exhaust worker memory and trap as
+    /// `unreachable executed`. Small levels from the same document keep
+    /// planning normally.
+    #[test]
+    fn gigapixel_wmts_level_plan_is_rejected_before_allocation() {
+        let xml = br#"
+            <Capabilities>
+              <Contents>
+                <Layer>
+                  <Identifier>huge-layer</Identifier>
+                  <Format>image/jpeg</Format>
+                  <ResourceURL resourceType="tile" format="image/jpeg"
+                    template="tiles/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.jpg" />
+                </Layer>
+                <TileMatrixSet>
+                  <Identifier>set</Identifier>
+                  <SupportedCRS>EPSG:3857</SupportedCRS>
+                  <TileMatrix>
+                    <Identifier>small</Identifier>
+                    <ScaleDenominator>1</ScaleDenominator>
+                    <TopLeftCorner>0 0</TopLeftCorner>
+                    <TileWidth>256</TileWidth><TileHeight>256</TileHeight>
+                    <MatrixWidth>2</MatrixWidth><MatrixHeight>2</MatrixHeight>
+                  </TileMatrix>
+                  <TileMatrix>
+                    <Identifier>huge</Identifier>
+                    <ScaleDenominator>1</ScaleDenominator>
+                    <TopLeftCorner>0 0</TopLeftCorner>
+                    <TileWidth>256</TileWidth><TileHeight>256</TileHeight>
+                    <MatrixWidth>100000</MatrixWidth><MatrixHeight>100000</MatrixHeight>
+                  </TileMatrix>
+                </TileMatrixSet>
+              </Contents>
+            </Capabilities>
+        "#;
+        let mut session =
+            DiscoverySession::new("https://example.com/wmts/capabilities.xml").expect("session");
+        let need = session.next_need().expect("need json");
+        let need: serde_json::Value = serde_json::from_str(&need).expect("need parses");
+        session
+            .provide(need["id"].as_u64().unwrap() as usize, xml.to_vec(), None)
+            .expect("provide");
+        assert!(session.next_need().is_none(), "core is satisfied");
+        let catalog = session.finish().expect("catalog");
+        let catalog: serde_json::Value = serde_json::from_str(&catalog).expect("catalog parses");
+        assert_eq!(catalog["images"][0]["format"], "wmts");
+        let levels = catalog["images"][0]["levels"].as_array().expect("levels");
+        assert_eq!(levels.len(), 2);
+        // Levels normalize ascending by area: small (512x512) first.
+        assert_eq!(
+            levels[0]["image_size"],
+            serde_json::json!({"x": 512, "y": 512})
+        );
+
+        let small: serde_json::Value =
+            serde_json::from_str(&session.level_tiles(0, 0).expect("small plan"))
+                .expect("small plan parses");
+        assert_eq!(small["tiles"].as_array().expect("tiles").len(), 4);
+
+        let error = session.level_tiles(0, 1).unwrap_err();
+        assert_eq!(error.code(), AdapterErrorCode::LimitExceeded);
     }
 }

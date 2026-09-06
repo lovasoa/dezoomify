@@ -36,6 +36,16 @@ let resultBlobUrl: string | null = null;
 export const REQUEST_TIMEOUT_MS = 30000;
 
 /**
+ * Largest canvas a browser tab can hold (16384 x 16384, legacy
+ * MAX_CANVAS_AREA parity). Level picking never plans above this: gigapixel
+ * services (e.g. the 2-gigapixel deepest WMTS matrix of global imagery)
+ * would otherwise exhaust worker memory while serializing trillions of
+ * tiles and trap the engine. The post-plan canvas check below enforces the
+ * same bound for levels without declared sizes.
+ */
+export const BROWSER_MAX_CANVAS_AREA = 268435456;
+
+/**
  * Short timeout for the direct metadata fetch: if the site does not answer
  * within 250 ms, the eligible metadata proxy takes over automatically.
  * Tiles keep the full 30 s timeout (they never use the proxy).
@@ -505,19 +515,40 @@ interface PickedLevel {
   index: number;
 }
 
-/** Largest declared level wins; undeclared sizes keep the last level. */
-function pickLevel(image: { levels: Array<{ index: number; imageSize?: { x: number; y: number } }> }): PickedLevel {
+/**
+ * Largest declared level that fits the browser canvas wins. Levels without
+ * a declared size keep the old behavior (area -1, last wins). When declared
+ * levels exist but none fits, the smallest declared level is returned so the
+ * post-plan canvas check fails cheaply with desktop-app guidance instead of
+ * planning a gigapixel level that exhausts worker memory.
+ */
+export function pickLevel(image: { levels: Array<{ index: number; imageSize?: { x: number; y: number } }> }): PickedLevel {
   let best: PickedLevel | null = null;
   let bestArea = -1;
+  let smallest: PickedLevel | null = null;
+  let smallestArea = Number.POSITIVE_INFINITY;
+  let sawDeclared = false;
+  let lastUndeclared: PickedLevel | null = null;
   for (const level of image.levels) {
     const size = level.imageSize;
-    const area = size ? size.x * size.y : -1;
-    if (area >= bestArea) {
+    if (!size) {
+      lastUndeclared = { index: level.index };
+      continue;
+    }
+    sawDeclared = true;
+    const area = size.x * size.y;
+    if (area <= BROWSER_MAX_CANVAS_AREA && area >= bestArea) {
       best = { index: level.index };
       bestArea = area;
     }
+    if (area < smallestArea) {
+      smallest = { index: level.index };
+      smallestArea = area;
+    }
   }
-  return best ?? { index: 0 };
+  if (best) return best;
+  if (sawDeclared) return smallest ?? { index: 0 };
+  return lastUndeclared ?? { index: 0 };
 }
 
 // Encrypted-tile processing (e.g. Google Arts & Culture XOR-free AES
