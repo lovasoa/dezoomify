@@ -101,6 +101,11 @@ pub struct PipelineConfig {
     /// level-specifying arg was given (`should_use_largest`); uncapped width
     /// already selects the largest level emergently.
     pub largest: bool,
+    /// Format selector (`--dezoomer`): `None` auto-detects via
+    /// `default_registry`; `Some(name)` selects the single named program via
+    /// `registry_for` (case-insensitive, `auto` also means auto-detect).
+    /// Unknown names fail with typed `discovery.unknown-dezoomer`.
+    pub format: Option<String>,
     /// What to do when required tiles still fail after retries.
     pub partial_policy: PartialPolicy,
     /// Cooperative cancellation: when set, the driver stops issuing new
@@ -127,6 +132,7 @@ impl Default for PipelineConfig {
             zoom_level: None,
             image_index: None,
             largest: false,
+            format: None,
             partial_policy: PartialPolicy::Fail,
             cancel_flag: Arc::new(AtomicBool::new(false)),
         }

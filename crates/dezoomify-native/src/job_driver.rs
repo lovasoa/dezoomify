@@ -266,11 +266,27 @@ pub(crate) fn map_failure_code(code: &str) -> &'static str {
     match code {
         "job.discovery-failed" | "job.catalog-invalid" | "job.empty-resource" => "discovery.failed",
         "job.no-images" => "discovery.no-image",
+        "job.unknown-dezoomer" => "discovery.unknown-dezoomer",
         "job.resource-limit" => "tile.limit",
         "job.plan-invalid" | "job.probe-unsupported" => "discovery.tile-plan",
         "job.plan-empty" => "discovery.no-level",
         "job.partial-discarded" => "tile.download-failed",
         _ => "native.internal",
+    }
+}
+
+/// Map a job setup error (`Job::new`/`Job::start`) onto a typed native error
+/// by stable code, never by display-string matching.
+fn map_setup_error(error: &dezoomify_job::JobError) -> NativeError {
+    match error.code.as_str() {
+        "job.unknown-dezoomer" => {
+            NativeError::new("discovery.unknown-dezoomer", error.message.clone())
+        }
+        "job.invalid-input" => NativeError::new("discovery.failed", error.message.clone()),
+        _ => NativeError::new(
+            "native.internal",
+            format!("{}: {}", error.code, error.message),
+        ),
     }
 }
 
@@ -356,10 +372,9 @@ fn drive_job(
 ) -> Result<AttemptDone, NativeError> {
     let job_id = mint_job_id();
     let job_config = job_config_for(config)?;
-    let mut job = Job::new(&job_id, input_url, job_config)
-        .map_err(|e| NativeError::new("native.internal", format!("{}: {}", e.code, e.message)))?;
-    job.start()
-        .map_err(|e| NativeError::new("native.internal", format!("{}: {}", e.code, e.message)))?;
+    let mut job = Job::new(&job_id, input_url, job_config).map_err(|e| map_setup_error(&e))?;
+    job.set_format(config.format.clone());
+    job.start().map_err(|e| map_setup_error(&e))?;
     let mut attempt = Attempt {
         config,
         user,

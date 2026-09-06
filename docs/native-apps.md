@@ -7,6 +7,7 @@ The CLI and Tauri desktop application share `crates/dezoomify-native`. This runt
 `crates/dezoomify-native` provides:
 
 - HTTP requests with redirects, user headers, authentication, bounded concurrency (16 tile fetches), per-tile throttling, retry backoff (2s base delay with doubling, `--retries 0` means no retries), 30s request and 6s connect timeouts, 32 idle connections per host, and cancellation;
+- format selection via `PipelineConfig::format` (`None`/`auto` auto-detects through `default_registry`; a named format selects the single program through `registry_for`, unknown names fail with typed `discovery.unknown-dezoomer`);
 - remote metadata and tile fetch with local output file access, plus filesystem reads for plain local paths and `file://` tile URIs;
 - level selection with `--largest`, exact `--zoom-level` (out-of-range uses the last level), width and height caps, and exact `--image-index` (out-of-range uses the last image);
 - in-memory tile decode and canvas assembly bounded by an 8 GiB canvas cap;

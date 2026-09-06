@@ -14,7 +14,7 @@ use dezoomify_core::core::discovery::{
     DiscoveryError, DiscoveryOperation, ResourceFailure, ResourceResponse,
 };
 use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe};
-use dezoomify_core::core::registry::default_registry;
+use dezoomify_core::core::registry::{default_registry, registry_for};
 use dezoomify_core::core::tile_plan::TileSource;
 use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::{ImageDto, Readiness};
@@ -28,6 +28,11 @@ pub struct Job {
     id: String,
     input_url: String,
     config: Config,
+    /// Format selector: `None` auto-detects via `default_registry`;
+    /// `Some(name)` selects the single named program via `registry_for`
+    /// (`auto` also means auto-detect). Unknown names fail `start()` with
+    /// typed `job.unknown-dezoomer`.
+    format: Option<String>,
     state: State,
     seq: u64,
     effects: Vec<serde_json::Value>,
@@ -120,6 +125,7 @@ impl Job {
             id: job_id.to_string(),
             input_url: input_url.to_string(),
             config,
+            format: None,
             state: State::Created,
             seq: 0,
             effects: Vec::new(),
@@ -240,11 +246,20 @@ impl Job {
         &self.events
     }
 
+    /// Set the format selector before [`Job::start`]: `None` auto-detects,
+    /// `Some("auto")` also auto-detects, otherwise the single named program
+    /// is selected (case-insensitive, matching the core `registry_for`).
+    /// Unknown names fail `start()` with typed `job.unknown-dezoomer`.
+    pub fn set_format(&mut self, format: Option<String>) {
+        self.format = format;
+    }
+
     /// Validate start and enter `Discovering` with one metadata fetch effect.
     ///
     /// # Errors
     ///
-    /// Returns [`JobError`] when called outside `Created` or on overflow.
+    /// Returns [`JobError`] when called outside `Created`, on overflow, or
+    /// for an unknown named format (`job.unknown-dezoomer`).
     pub fn start(&mut self) -> Result<Outcome, JobError> {
         if self.terminal.is_some() {
             return Err(JobError::post_terminal());
@@ -252,9 +267,15 @@ impl Job {
         if self.state != State::Created {
             return Err(JobError::invalid_state("start is valid only in Created"));
         }
-        // Genuine core use: the default registry orders candidates by URL
-        // preference; the operation stays pure and deterministic.
-        let registry = default_registry(&self.input_url);
+        // Genuine core use: `None`/`auto` orders candidates by URL
+        // preference via `default_registry`; a named format selects the
+        // single program via `registry_for`. Unknown names fail typed.
+        let registry = match self.format.as_deref() {
+            None | Some("auto") => default_registry(&self.input_url),
+            Some(name) => registry_for(name).ok_or_else(|| {
+                JobError::new("job.unknown-dezoomer", format!("unknown dezoomer '{name}'"))
+            })?,
+        };
         self.discovery = Some(registry.start(self.input_url.clone()));
         self.set_state(State::Discovering)?;
         self.push_event("job-state", json!({"state": State::Discovering.name()}))?;
