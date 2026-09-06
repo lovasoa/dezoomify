@@ -384,9 +384,10 @@ fn cli_bulk_json_emits_item_lines() {
 
 #[test]
 fn cli_full_flags_produce_golden_output() {
-    // `--header` (alias), `--retries`, `--tile-cache`, `--image-index 0`,
-    // and `--min-interval` must all flow through without breaking the fetch:
-    // the output still hashes to the cli-dzi golden.
+    // Every wired flag must flow through without breaking the fetch: the
+    // output still hashes to the cli-dzi golden. Values are chosen to
+    // preserve the largest level (wide caps, out-of-range zoom-level falls
+    // back to last, explicit defaults for timing/pooling/compression).
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("e2e-full-flags");
@@ -397,6 +398,29 @@ fn cli_full_flags_produce_golden_output() {
         .arg("Referer: https://fixtures.test/viewer")
         .arg("--retries")
         .arg("3")
+        .arg("--retry-delay")
+        .arg("500ms")
+        .arg("--compression")
+        .arg("5")
+        .arg("--max-idle-per-host")
+        .arg("8")
+        .arg("--timeout")
+        .arg("10s")
+        .arg("--connect-timeout")
+        .arg("3s")
+        .arg("--logging")
+        .arg("info")
+        .arg("--dezoomer")
+        .arg("auto")
+        .arg("--parallelism")
+        .arg("8")
+        .arg("--max-width")
+        .arg("10000")
+        .arg("--max-height")
+        .arg("10000")
+        .arg("--zoom-level")
+        .arg("100")
+        .arg("--largest")
         .arg("--tile-cache")
         .arg(&cache)
         .arg("--image-index")
@@ -413,6 +437,25 @@ fn cli_full_flags_produce_golden_output() {
         "full flags should succeed: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
     );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    for stale in [
+        "needs native support",
+        "quality 92",
+        "60s timeout",
+        "15s connect",
+        "first catalog",
+        "per-tile throttling needs",
+        "width-only",
+        "automatic level",
+        "6 concurrent",
+        "engine defaults",
+        "ignoring the height",
+    ] {
+        assert!(
+            !stderr.contains(stale),
+            "wired flags must not warn with stale gap text {stale:?}: {stderr}"
+        );
+    }
     let golden: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -427,6 +470,61 @@ fn cli_full_flags_produce_golden_output() {
         .expect("golden outputHash");
     assert_eq!(sha256_of_file(&output), expected_hash);
     assert!(cache.exists(), "tile cache folder created");
+}
+
+#[test]
+fn cli_fallback_flags_warn_honestly() {
+    // `--dezoomer <named>`, `--logging <non-info>`, and `--retries 0` are
+    // the only remaining fallbacks: each warns, yet the fetch still
+    // succeeds via auto-detect, fixed human/json reporting, and the
+    // no-refetch emulation.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("e2e-fallback-warnings");
+    let output = out_dir.join("fallback.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg("--dezoomer")
+        .arg("iiif")
+        .arg("--logging")
+        .arg("debug")
+        .arg("--retries")
+        .arg("0")
+        .arg("--overwrite")
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(
+        run.status.success(),
+        "fallback flags should still succeed: stderr={:?}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("--dezoomer iiif") && stderr.contains("auto-detecting instead"),
+        "dezoomer fallback warns: {stderr}"
+    );
+    assert!(
+        stderr.contains("--logging debug") && stderr.contains("human lines on stderr"),
+        "logging fallback warns with human/json mapping: {stderr}"
+    );
+    assert!(
+        stderr.contains("--retries 0") && stderr.contains("no refetch"),
+        "retries 0 warns with no-refetch emulation: {stderr}"
+    );
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../testdata/scenarios/native/cli-dzi/expected/result.json"
+        ))
+        .expect("read scenario golden"),
+    )
+    .expect("parse scenario golden");
+    let expected_hash = golden
+        .get("outputHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("golden outputHash");
+    assert_eq!(sha256_of_file(&output), expected_hash);
 }
 
 #[test]
