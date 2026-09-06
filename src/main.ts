@@ -15,7 +15,7 @@ import {
   noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
-import { isProxyEligible } from "./webIntegration.ts";
+import { errorTransportFor, isOrdinaryImageTile, isProxyEligible } from "./webIntegration.ts";
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 import {
   createDiscoveryClient,
@@ -24,6 +24,8 @@ import {
   type PlanTile,
   type WebCatalog,
 } from "../packages/browser-runtime/src/session.ts";
+import { probeLimits, safeArea } from "../packages/browser-runtime/src/limits.ts";
+import type { BrowserLimits } from "../packages/browser-runtime/src/types.ts";
 
 let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
@@ -41,10 +43,72 @@ export const REQUEST_TIMEOUT_MS = 30000;
  * MAX_CANVAS_AREA parity). Level picking never plans above this: gigapixel
  * services (e.g. the 2-gigapixel deepest WMTS matrix of global imagery)
  * would otherwise exhaust worker memory while serializing trillions of
- * tiles and trap the engine. The post-plan canvas check below enforces the
- * same bound for levels without declared sizes.
+ * tiles and trap the engine. The pre-plan declared-size check below fails
+ * fast without calling `client.plan`; the post-plan canvas check enforces
+ * the same bound (via `probeLimits`) for levels without declared sizes.
  */
 export const BROWSER_MAX_CANVAS_AREA = 268435456;
+
+/**
+ * Browser canvas limits (todo 5.3, overflow-safe). `probeLimits` is the
+ * single canvas check: pickLevel, the pre-plan declared-size gate, and the
+ * post-plan canvas gate all call it instead of duplicating `width * height`
+ * arithmetic (which overflows past MAX_SAFE_INTEGER for gigapixel sizes).
+ * No policy widening: 16384 px per side with the legacy area bound.
+ */
+export const BROWSER_MAX_CANVAS_SIDE = 16384;
+export const BROWSER_LIMITS: BrowserLimits = {
+  maxWidth: BROWSER_MAX_CANVAS_SIDE,
+  maxHeight: BROWSER_MAX_CANVAS_SIDE,
+  maxArea: BROWSER_MAX_CANVAS_AREA,
+  maxBytes: BROWSER_MAX_CANVAS_AREA * 4,
+};
+
+/**
+ * Upper bound on tiles materialized into one website plan (todo 5.3).
+ * Mirrors the wasm `MAX_PLAN_TILES` allocation guard: the worker rejects
+ * larger plans with `limit-exceeded` before serializing them, and the
+ * website's pre-plan estimate plus post-plan cap fail with the same
+ * desktop-app guidance. Allocation protection only, not a canvas policy.
+ */
+export const BROWSER_MAX_PLAN_TILES = 100_000;
+
+/** Desktop handoff link for images beyond the browser tab (`dezoomify://`). */
+export function desktopHandoffLink(sourceUrl: string): string {
+  return `dezoomify://open?v=2&src=${encodeURIComponent(sourceUrl)}`;
+}
+
+/**
+ * Tile-count estimate for a declared size assuming 256 px tiles (todo 5.3).
+ * 256 px is the smallest common tile, so the estimate is a conservative
+ * upper bound: when it already exceeds `BROWSER_MAX_PLAN_TILES`, any real
+ * tile size would still need the desktop app. Overflow-safe: returns null
+ * for invalid sizes or when the multiply would exceed MAX_SAFE_INTEGER,
+ * which callers treat as over-limit (fail fast, never plan).
+ */
+export function estimateTileCount(width: number, height: number, tileSide: number = 256): number | null {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return null;
+  if (!Number.isInteger(tileSide) || tileSide <= 0) return null;
+  const cols = Math.floor((width + tileSide - 1) / tileSide);
+  const rows = Math.floor((height + tileSide - 1) / tileSide);
+  if (!Number.isSafeInteger(cols) || !Number.isSafeInteger(rows) || cols <= 0 || rows <= 0) return null;
+  if (cols > Number.MAX_SAFE_INTEGER / rows) return null;
+  return cols * rows;
+}
+
+function canvasTooLargeFailure(width: number, height: number, sourceUrl: string, extra?: string) {
+  const handoff = desktopHandoffLink(sourceUrl);
+  const technical = extra
+    ? `canvas ${width}x${height} exceeds the browser limit (${extra}); desktop handoff ${handoff}`
+    : `canvas ${width}x${height} exceeds the browser limit; desktop handoff ${handoff}`;
+  return failure(
+    "PLAN_INVALID",
+    "This image is too large for this browser tab. Use the desktop app for the full-size image.",
+    false,
+    `Open in the desktop app: ${handoff}`,
+    technical,
+  );
+}
 
 /**
  * Head-start window for the direct metadata fetch: if the site does not
@@ -58,18 +122,216 @@ export const BROWSER_MAX_CANVAS_AREA = 268435456;
 export const DIRECT_METADATA_TIMEOUT_MS = 1500;
 
 /**
- * Tile politeness + resilience (todo 5.2). At most 5 tile request starts per
- * second per host (legacy ZoomManager.MAX_REQUESTS_PER_SECOND parity:
- * 1000/5 ms spacing between starts). The 4-worker pool below is unchanged;
- * starts for the same host are staggered through a per-host chain so the
- * 4 parallel workers still cap at 5/s combined, they do not each get 5/s.
- * Each tile retries twice (3 attempts) with exponential backoff + jitter;
- * the exhausted failure still maps to TILE_FAILED (never a display string).
+ * Tile politeness + resilience (todo 5.2) plus adaptive website concurrency
+ * (todo 5.4). At most 5 tile request starts per second per host (legacy
+ * ZoomManager.MAX_REQUESTS_PER_SECOND parity: 1000/5 ms spacing between
+ * starts). The website pool below is adaptive 6-12 from hardwareConcurrency
+ * plus RTT within the capability cap, never below the floor of 4; starts for
+ * the same host are staggered through a per-host chain so the parallel
+ * workers still cap at 5/s combined, they do not each get 5/s. Each tile
+ * retries twice (3 attempts) with exponential backoff + jitter; the
+ * exhausted failure still maps to TILE_FAILED (never a display string).
+ * Native/CLI keep their own max_concurrent of 16 (protocol native baseline);
+ * only the website path uses the adaptive 6-12 range.
  */
 export const TILE_MAX_REQUESTS_PER_SECOND = 5;
 export const TILE_MIN_INTERVAL_MS = 1000 / TILE_MAX_REQUESTS_PER_SECOND;
 export const TILE_MAX_RETRIES = 2;
 export const TILE_RETRY_BASE_MS = 250;
+
+/**
+ * Website tile concurrency bounds (todo 5.4). The adaptive range is 6-12;
+ * 4 is the absolute floor for unknown or constrained hosts. The website cap
+ * is 12; native/CLI stay at their own 16 and never read this cap.
+ */
+export const TILE_CONCURRENCY_FLOOR = 4;
+export const TILE_CONCURRENCY_MIN = 6;
+export const TILE_CONCURRENCY_MAX = 12;
+export const TILE_CONCURRENCY_CAP = 12;
+export const TILE_RTT_MEDIUM_MS = 400;
+export const TILE_RTT_SLOW_MS = 800;
+
+/**
+ * Pure adaptive concurrency: base from core count, minus for slow RTT,
+ * clamped to 6-12, then within the capability cap with a floor of 4.
+ * Slow networks back off so extra workers do not pile onto timeouts.
+ */
+export function pickTileConcurrency(opts?: {
+  hardwareConcurrency?: unknown;
+  rttMs?: unknown;
+  capabilityCap?: unknown;
+}): number {
+  let cap = TILE_CONCURRENCY_CAP;
+  if (typeof opts?.capabilityCap === "number" && Number.isFinite(opts.capabilityCap as number)) {
+    cap = Math.floor(opts.capabilityCap as number);
+  }
+  let cores = 4;
+  if (
+    typeof opts?.hardwareConcurrency === "number" &&
+    Number.isFinite(opts.hardwareConcurrency as number)
+  ) {
+    cores = Math.floor(opts.hardwareConcurrency as number);
+  }
+  let base: number;
+  if (cores <= 2) base = TILE_CONCURRENCY_MIN;
+  else if (cores <= 4) base = 8;
+  else if (cores <= 8) base = 10;
+  else base = TILE_CONCURRENCY_MAX;
+  const rtt = opts?.rttMs;
+  if (typeof rtt === "number" && Number.isFinite(rtt)) {
+    if (rtt >= TILE_RTT_SLOW_MS) base -= 2;
+    else if (rtt >= TILE_RTT_MEDIUM_MS) base -= 1;
+  }
+  const clamped = Math.min(Math.max(base, TILE_CONCURRENCY_MIN), TILE_CONCURRENCY_MAX);
+  return Math.max(TILE_CONCURRENCY_FLOOR, Math.min(clamped, cap));
+}
+
+/**
+ * Website concurrency from host hints. hardwareConcurrency sizes the pool;
+ * NetworkInformation.rtt (ms, when present) backs off slow links. Every read
+ * is best-effort: unknown hosts get the deterministic default (4 cores, no
+ * RTT), which still respects the floor.
+ */
+export function websiteTileConcurrency(): number {
+  let cores = 4;
+  let rtt: number | undefined;
+  try {
+    if (typeof navigator !== "undefined") {
+      const nav = navigator as unknown as {
+        hardwareConcurrency?: unknown;
+        connection?: { rtt?: unknown };
+      };
+      if (typeof nav.hardwareConcurrency === "number" && Number.isFinite(nav.hardwareConcurrency)) {
+        cores = Math.floor(nav.hardwareConcurrency);
+      }
+      const connRtt = nav.connection?.rtt;
+      if (typeof connRtt === "number" && Number.isFinite(connRtt)) rtt = connRtt;
+    }
+  } catch {
+    // Host globals are best-effort; defaults keep the floor.
+  }
+  return pickTileConcurrency({ hardwareConcurrency: cores, rttMs: rtt, capabilityCap: TILE_CONCURRENCY_CAP });
+}
+
+/**
+ * Off-main-thread tile decode (todo 5.4). When Worker plus OffscreenCanvas
+ * exist, createImageBitmap plus drawImage run in a singleton decode worker
+ * (Blob URL, no extra file) and the ImageBitmap is transferred back; the
+ * main thread only paints the finished bitmap. Otherwise this falls back to
+ * main-thread createImageBitmap. Full transferControlToOffscreen drawing
+ * stays out: it would break the ordinary <img> display-only fallback and the
+ * canvas.toBlob save path, while decode offload already removes the costly
+ * raster from the main thread.
+ */
+let tileDecodeWorker: Worker | null = null;
+let tileDecodeSeq = 0;
+let tileDecodeUnavailable = false;
+const tileDecodePending = new Map<number, { resolve: (b: ImageBitmap) => void; reject: (e: unknown) => void }>();
+
+function tileDecodeWorkerCode(): string {
+  return (
+    "self.onmessage = async (e) => {\n" +
+    "  const data = e.data || {};\n" +
+    "  const id = data.id;\n" +
+    "  try {\n" +
+    "    const bitmap = await createImageBitmap(new Blob([data.bytes]));\n" +
+    "    let out = bitmap;\n" +
+    "    try {\n" +
+    '      if (typeof OffscreenCanvas !== "undefined") {\n' +
+    "        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);\n" +
+    '        const ctx = canvas.getContext("2d");\n' +
+    "        if (ctx) {\n" +
+    "          ctx.drawImage(bitmap, 0, 0);\n" +
+    "          out = canvas.transferToImageBitmap();\n" +
+    "          try { bitmap.close(); } catch (err) {}\n" +
+    "        }\n" +
+    "      }\n" +
+    "    } catch (err) {}\n" +
+    "    self.postMessage({ id, ok: true, bitmap: out }, [out]);\n" +
+    "  } catch (err) {\n" +
+    "    self.postMessage({ id, ok: false, error: String((err && err.message) || err) });\n" +
+    "  }\n" +
+    "};\n"
+  );
+}
+
+function getTileDecodeWorker(): Worker | null {
+  if (tileDecodeUnavailable) return null;
+  if (tileDecodeWorker) return tileDecodeWorker;
+  try {
+    if (typeof Worker === "undefined" || typeof OffscreenCanvas === "undefined") {
+      tileDecodeUnavailable = true;
+      return null;
+    }
+    if (typeof Blob === "undefined" || typeof URL === "undefined") {
+      tileDecodeUnavailable = true;
+      return null;
+    }
+    const createUrl = (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+    if (typeof createUrl !== "function") {
+      tileDecodeUnavailable = true;
+      return null;
+    }
+    const worker = new Worker(
+      (createUrl as (b: Blob) => string).call(URL, new Blob([tileDecodeWorkerCode()], { type: "text/javascript" })),
+    );
+    worker.onmessage = (e: MessageEvent) => {
+      const data = (e as MessageEvent & { data?: { id?: unknown; ok?: unknown; bitmap?: unknown; error?: unknown } }).data ?? {};
+      const id = typeof data.id === "number" ? data.id : -1;
+      const pending = tileDecodePending.get(id);
+      if (!pending) return;
+      tileDecodePending.delete(id);
+      if (data.ok === true && data.bitmap) {
+        pending.resolve(data.bitmap as ImageBitmap);
+      } else {
+        pending.reject(new Error(typeof data.error === "string" ? data.error : "tile decode failed"));
+      }
+    };
+    worker.onerror = () => {
+      tileDecodeUnavailable = true;
+      for (const [, pending] of tileDecodePending) {
+        try {
+          pending.reject(new Error("tile decode worker failed"));
+        } catch {
+          // Rejecting must never throw.
+        }
+      }
+      tileDecodePending.clear();
+      try {
+        worker.terminate();
+      } catch {
+        // Termination is best-effort.
+      }
+      tileDecodeWorker = null;
+    };
+    tileDecodeWorker = worker;
+    return worker;
+  } catch {
+    tileDecodeUnavailable = true;
+    return null;
+  }
+}
+
+function decodeTileBitmap(bytes: ArrayBuffer): Promise<ImageBitmap> {
+  const worker = getTileDecodeWorker();
+  if (!worker) return createImageBitmap(new Blob([bytes]));
+  try {
+    const id = ++tileDecodeSeq;
+    const copy = bytes.slice(0);
+    const pending = new Promise<ImageBitmap>((resolve, reject) => {
+      tileDecodePending.set(id, { resolve, reject });
+    });
+    try {
+      worker.postMessage({ id, bytes: copy }, [copy]);
+    } catch {
+      tileDecodePending.delete(id);
+      return createImageBitmap(new Blob([bytes]));
+    }
+    return pending.catch(() => createImageBitmap(new Blob([bytes])));
+  } catch {
+    return createImageBitmap(new Blob([bytes]));
+  }
+}
 
 function tileHostOf(url: string): string {
   try {
@@ -121,6 +383,37 @@ const pendingStarts = new Map<number, { startedAt: number; label: string }>();
 let completedRequests = 0;
 let failedRequests = 0;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let batchedUpdateQueued = false;
+let lastHeartbeatKey = "";
+
+/**
+ * Coalesce burst progress into one paint per frame (todo 5.4): tile
+ * completions call this instead of update(), so N tiles finishing in the
+ * same frame render once. Falls back to a zero-delay timer where rAF is
+ * unavailable (e.g. node test imports).
+ */
+function scheduleBatchedUpdate(): void {
+  if (batchedUpdateQueued) return;
+  batchedUpdateQueued = true;
+  const flush = () => {
+    batchedUpdateQueued = false;
+    update();
+  };
+  try {
+    if (typeof requestAnimationFrame !== "function") throw new Error("no-rAF");
+    requestAnimationFrame(flush);
+  } catch {
+    setTimeout(flush, 0);
+  }
+}
+
+/** Delta key for the heartbeat: only a real change schedules a paint. */
+function heartbeatKey(): string {
+  const a = viewCtx.jobActivity;
+  if (!a) return "";
+  const longest = typeof a.longestPendingMs === "number" ? Math.floor(a.longestPendingMs / 250) : 0;
+  return `${pendingStarts.size}:${completedRequests}:${failedRequests}:${longest}:${Math.floor(Date.now() / 1000)}`;
+}
 
 function activity(): NonNullable<ViewContext["jobActivity"]> {
   if (!viewCtx.jobActivity) viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
@@ -202,9 +495,15 @@ function refreshLongestPending(): void {
 
 function startHeartbeat(): void {
   stopHeartbeat();
+  lastHeartbeatKey = heartbeatKey();
+  // 500 ms cadence refreshes the data, but the paint is delta-gated and
+  // rAF-batched (todo 5.4): idle ticks with no change render nothing.
   heartbeatTimer = setInterval(() => {
     refreshLongestPending();
-    update();
+    const key = heartbeatKey();
+    if (key === lastHeartbeatKey) return;
+    lastHeartbeatKey = key;
+    scheduleBatchedUpdate();
   }, 500);
   const t = heartbeatTimer as unknown as { unref?: () => void };
   if (t && typeof t.unref === "function") {
@@ -598,12 +897,69 @@ async function probeSizeFor(
 ): Promise<{ ok: boolean; width: number; height: number }> {
   try {
     const { bytes } = await fetchTileFor(url, headers);
-    const bitmap = await createImageBitmap(new Blob([bytes]));
+    const bitmap = await decodeTileBitmap(bytes);
     const size = { ok: bitmap.width > 0 && bitmap.height > 0, width: bitmap.width, height: bitmap.height };
     bitmap.close();
     return size;
   } catch {
-    return { ok: false, width: 0, height: 0 };
+    // Readable bytes are unavailable (e.g. no CORS grant). Probing only
+    // needs dimensions, which a plain <img> reports without byte access.
+    try {
+      const img = await loadTileImage(url);
+      return { ok: img.naturalWidth > 0 && img.naturalHeight > 0, width: img.naturalWidth, height: img.naturalHeight };
+    } catch {
+      return { ok: false, width: 0, height: 0 };
+    }
+  }
+}
+
+/**
+ * Load one tile as an ordinary image element: visible, but with no byte
+ * access. Deliberately leaves the CORS opt-in unset, so no CORS grant is
+ * needed; drawing the result taints the canvas (legacy ZoomManager.addTile
+ * parity). The caller must treat a tainted canvas as display-only: no pixel
+ * reads, no toBlob/toDataURL, no programmatic save.
+ */
+function loadTileImage(url: string, ms: number = REQUEST_TIMEOUT_MS): Promise<HTMLImageElement> {
+  const reqId = noteRequestStart("img");
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const done = (ok: boolean, value: HTMLImageElement | Error) => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      noteRequestEnd(reqId, ok);
+      update();
+      if (ok) resolve(value as HTMLImageElement);
+      else reject(value);
+    };
+    img.addEventListener("load", () => done(true, img), { once: true });
+    img.addEventListener(
+      "error",
+      () => done(false, new Error(`tile image failed to load: ${shortUrl(url)}`)),
+      { once: true },
+    );
+    timer = setTimeout(() => {
+      try {
+        img.src = "";
+      } catch {
+        // Cancelling a hung load must never throw.
+      }
+      done(false, new Error(`tile image timed out after ${ms / 1000}s: ${shortUrl(url)}`));
+    }, ms);
+    // Don't tell the tile host the request comes from dezoomify (legacy parity).
+    img.referrerPolicy = "no-referrer";
+    img.src = url;
+  });
+}
+
+function setCanvasVisible(visible: boolean): void {
+  if (typeof document === "undefined") return;
+  try {
+    const wrapper = document.getElementById("canvas-wrapper");
+    if (wrapper) wrapper.style.display = visible ? "" : "none";
+  } catch {
+    // Canvas visibility must never break the job.
   }
 }
 
@@ -630,7 +986,7 @@ function disposeClient(): void {
 function reportProgress(current: number, total: number, message: string): void {
   viewCtx.currentProgress = { current, total, message };
   touchProgress();
-  update();
+  scheduleBatchedUpdate();
 }
 
 function writeHash(url: string): void {
@@ -673,11 +1029,14 @@ interface PickedLevel {
 }
 
 /**
- * Largest declared level that fits the browser canvas wins. Levels without
- * a declared size keep the old behavior (area -1, last wins). When declared
- * levels exist but none fits, the smallest declared level is returned so the
- * post-plan canvas check fails cheaply with desktop-app guidance instead of
- * planning a gigapixel level that exhausts worker memory.
+ * Largest declared level that fits the browser canvas wins (overflow-safe
+ * via `probeLimits`; same 16384-px / area bound, no policy widening).
+ * Levels without a declared size keep the old behavior (last wins): their
+ * size is only known after probing, so the pre-plan estimate cannot run
+ * and the post-plan `probeLimits` + tile-count cap enforces the bound.
+ * When declared levels exist but none fits, the smallest declared level is
+ * returned so the pre-plan gate fails fast with desktop-app guidance
+ * instead of planning a gigapixel level that exhausts worker memory.
  */
 export function pickLevel(image: { levels: Array<{ index: number; imageSize?: { x: number; y: number } }> }): PickedLevel {
   let best: PickedLevel | null = null;
@@ -693,8 +1052,9 @@ export function pickLevel(image: { levels: Array<{ index: number; imageSize?: { 
       continue;
     }
     sawDeclared = true;
-    const area = size.x * size.y;
-    if (area <= BROWSER_MAX_CANVAS_AREA && area >= bestArea) {
+    const fits = probeLimits({ width: size.x, height: size.y }, BROWSER_LIMITS).verdict === "ok";
+    const area = safeArea(size.x, size.y) ?? Number.POSITIVE_INFINITY;
+    if (fits && area >= bestArea) {
       best = { index: level.index };
       bestArea = area;
     }
@@ -720,26 +1080,72 @@ function enqueueProcess(client2: DiscoveryClient, recipe: string, bytes: ArrayBu
   return run;
 }
 
-async function drawTile(client2: DiscoveryClient, ctx2d: CanvasRenderingContext2D, tile: PlanTile): Promise<void> {
-  let { bytes } = await fetchTileFor(tile.uri, tile.headers ?? {});
-  if (tile.processing && tile.processing !== "none") {
-    bytes = await enqueueProcess(client2, tile.processing, bytes);
-  }
-  const bitmap = await createImageBitmap(new Blob([bytes]));
-  try {
-    const w = Math.min(tile.w ?? bitmap.width, bitmap.width);
-    const h = Math.min(tile.h ?? bitmap.height, bitmap.height);
-    if (w > 0 && h > 0) {
-      ctx2d.drawImage(bitmap, 0, 0, w, h, tile.x, tile.y, w, h);
+/**
+ * Draw one planned tile. Returns true when the tile was painted through
+ * ordinary image display (canvas now tainted, display-only); false when it
+ * arrived as readable bytes (canvas stays clean).
+ *
+ * Readable bytes come first so CORS-granting sites keep the clean save.
+ * After the readable retries are exhausted, an unprocessed tile falls back
+ * to a plain <img> (no CORS needed): the user sees the picture and can
+ * right-click it, but scripts can no longer read or save the canvas.
+ * Processed tiles rethrow: decrypt/re-encode needs readable bytes.
+ * When the <img> also fails, the original readable failure (with its
+ * technical chain) is what the job reports.
+ */
+async function drawTile(
+  client2: DiscoveryClient,
+  ctx2d: CanvasRenderingContext2D,
+  tile: PlanTile,
+): Promise<boolean> {
+  const drawBitmap = async (source: ImageBitmap | HTMLImageElement): Promise<void> => {
+    const fullW = source instanceof ImageBitmap ? source.width : source.naturalWidth;
+    const fullH = source instanceof ImageBitmap ? source.height : source.naturalHeight;
+    // Trust the plan for placement: the canvas layout must stay seamless even
+    // when a tile decodes at an unexpected size. Log the mismatch and scale
+    // the decoded bytes to the planned extent so no gap appears.
+    const planW = tile.w ?? fullW;
+    const planH = tile.h ?? fullH;
+    if (planW !== fullW || planH !== fullH) {
+      pushLog(
+        `tile size mismatch at ${tile.x},${tile.y}: plan ${planW}x${planH}, decoded ${fullW}x${fullH} from ${shortUrl(tile.uri)}`,
+      );
     }
-  } finally {
-    bitmap.close();
+    if (planW > 0 && planH > 0 && fullW > 0 && fullH > 0) {
+      ctx2d.drawImage(source, 0, 0, fullW, fullH, tile.x, tile.y, planW, planH);
+    }
+  };
+  let readableFailure: unknown = null;
+  try {
+    let { bytes } = await fetchTileFor(tile.uri, tile.headers ?? {});
+    if (tile.processing && tile.processing !== "none") {
+      bytes = await enqueueProcess(client2, tile.processing, bytes);
+    }
+    const bitmap = await decodeTileBitmap(bytes);
+    try {
+      await drawBitmap(bitmap);
+    } finally {
+      bitmap.close();
+    }
+    return false;
+  } catch (error) {
+    readableFailure = error;
+  }
+  if (!isOrdinaryImageTile(tile.processing)) throw readableFailure;
+  try {
+    await throttleTileStart(tile.uri);
+    const img = await loadTileImage(tile.uri);
+    await drawBitmap(img);
+    return true;
+  } catch {
+    throw readableFailure;
   }
 }
 
 async function runJob(url: string): Promise<void> {
   const token = ++jobToken;
   resetActivity(url);
+  setCanvasVisible(false);
   viewCtx.imageChoice = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
@@ -816,13 +1222,15 @@ async function runJob(url: string): Promise<void> {
     reportProgress(0, total, `Saving ${total} tiles…`);
     let done = 0;
     let failed: unknown = null;
+    let tainted = false;
     const queue = [...plan.tiles];
     const tileWorker = async (): Promise<void> => {
       while (queue.length && !failed) {
         const tile = queue.shift();
         if (!tile) return;
         try {
-          await drawTile(client as DiscoveryClient, ctx2d, tile);
+          const tileTainted = await drawTile(client as DiscoveryClient, ctx2d, tile);
+          if (tileTainted) tainted = true;
         } catch (error) {
           failed = error;
           return;
@@ -832,9 +1240,26 @@ async function runJob(url: string): Promise<void> {
         reportProgress(done, total, `Saving ${total} tiles…`);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(4, Math.max(1, total)) }, tileWorker));
+    const concurrency = Math.min(websiteTileConcurrency(), Math.max(1, total));
+    await Promise.all(Array.from({ length: concurrency }, tileWorker));
     if (failed) throw failed;
     if (token !== jobToken) return;
+
+    if (tainted) {
+      // Tiles without a readable grant painted through ordinary <img>
+      // display: the canvas is tainted, so scripts can neither read nor
+      // save it. Show the assembled picture with its display-only guidance
+      // instead of failing; the user right-clicks where the browser
+      // supports it, or uses the extension/desktop app for a clean save.
+      viewCtx.originClean = false;
+      setStep("Displaying the image…", "This site shows its pieces without letting the browser keep a copy.");
+      reportProgress(total, total, `Displaying ${total} tiles…`);
+      pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
+      setCanvasVisible(true);
+      controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
+      update();
+      return;
+    }
 
     controller.dispatch(nextEvent("save-start") as never);
     setStep("Assembling the final picture…", "Encoding PNG in your browser");
@@ -861,6 +1286,10 @@ async function runJob(url: string): Promise<void> {
     };
     viewCtx.originClean = true;
     pushLog(`Done: ${width}×${height} PNG (${total} tiles)`);
+    // The browser canvas path (createImageBitmap -> drawImage -> toBlob) never
+    // preserves the source ICC color profile or EXIF metadata (native keeps
+    // the first tile's profile); warn so archived colors are not trusted blindly.
+    pushLog("Colors may shift slightly: the browser save does not keep the original color profile. For exact colors, use the desktop app.");
     controller.dispatch(nextEvent("save-done") as never);
     update();
   } catch (error) {
@@ -883,7 +1312,10 @@ async function runJob(url: string): Promise<void> {
           category: categoryFor(code),
           retryable: structured?.retryable ?? code !== "NO_IMAGE_FOUND",
           message,
-          transport: activeTransport ?? "direct",
+          // Tiles never use the metadata CORS proxy: a tile failure always
+          // reports the direct browser fetch, even when the job's metadata
+          // arrived through the proxy.
+          transport: errorTransportFor(code, activeTransport),
           phase: phaseFor(code),
           ...(detail ? { detail } : {}),
         },
@@ -950,6 +1382,7 @@ function update(): void {
         jobToken += 1;
         stopHeartbeat();
         disposeClient();
+        setCanvasVisible(false);
         sessionId = `sess:web-${Date.now()}`;
         controller.reset(sessionId);
         currentSeq = 0;
