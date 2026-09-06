@@ -159,7 +159,8 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
     args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
 }
 
-#[cfg(not(feature = "tauri"))]
+// Shared by the lean shell and the Tauri window shell (best-effort
+// per-user registration on startup); must build under both feature sets.
 fn home_dir() -> Option<String> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
