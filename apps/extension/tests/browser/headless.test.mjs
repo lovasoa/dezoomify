@@ -161,12 +161,15 @@ function assertSavedPyramid(bytes) {
 }
 
 // --- the shared E2E body ---
-// driver.extensionPage().scanAndSave(urlPart) runs the whole flow and
-// resolves with the saved PNG bytes.
+// driver.openTarget(url) creates the fixture target tab via a single
+// `tabs.create` (returns the new tab id, no enumeration) and
+// driver.extensionPage().scanAndSave(targetId) navigates the extension page
+// to the bound `page.html?tab=<id>` flow, the same bound-tab flow the
+// toolbar click uses in production. Shipped code never calls `tabs.query`.
 async function runExtensionJob(driver, base) {
-  await driver.openTarget(`${base}/target.html`);
+  const targetId = await driver.openTarget(`${base}/target.html`);
   const page = await driver.extensionPage();
-  const saved = await page.scanAndSave("target.html");
+  const saved = await page.scanAndSave(targetId);
   assertSavedPyramid(saved);
 }
 
@@ -191,27 +194,30 @@ test("chromium: packaged extension runs a full job end to end", { timeout: 18000
       if (!ext) await new Promise((r) => setTimeout(r, 250));
     }
     assert.ok(ext, "first-run extension page never opened");
-    await ext.waitForSelector("button[data-tabid]", { timeout: 15000 });
+    // Unbound first-run page shows guidance only (never a tab list).
+    await ext.waitForSelector("#tabs p", { timeout: 15000 });
 
     const driver = {
       openTarget: async (url) => {
-        const target = await context.newPage();
-        await target.goto(url, { timeout: 20000 });
+        // Single-tab creation from the extension page context: returns the
+        // new tab id directly, no `tabs.query` enumeration anywhere.
+        const targetTabId = await ext.evaluate(
+          (u) => browser.tabs.create({ url: u, active: false }).then((t) => t.id),
+          url,
+        );
+        assert.ok(Number.isInteger(targetTabId), "tabs.create must return a tab id");
+        return targetTabId;
       },
       extensionPage: () => ({
-        scanAndSave: async (urlPart) => {
+        scanAndSave: async (targetTabId) => {
+          // Navigate to the bound flow the toolbar click uses in production.
+          const baseExt = ext.url().split("page.html")[0];
+          await ext.goto(`${baseExt}page.html?tab=${targetTabId}`, { timeout: 20000 });
+          await ext.waitForSelector(`button[data-tabid="${targetTabId}"]`, { timeout: 15000 });
           // Attach the download waiter before clicking so the event cannot
           // slip past between save and listener registration.
           const downloadPromise = ext.waitForEvent("download", { timeout: 90000 });
-          const tabId = await ext.evaluate(
-            (part) => browser.tabs.query({}).then((tabs) => {
-              const hit = tabs.find((t) => typeof t.url === "string" && t.url.includes(part));
-              if (!hit) throw new Error("target tab not visible to the page: " + part);
-              return hit.id;
-            }),
-            urlPart,
-          );
-          await ext.click(`button[data-tabid="${tabId}"]`);
+          await ext.click(`button[data-tabid="${targetTabId}"]`);
           await ext.waitForFunction(
             () => document.body.dataset.outcome === "saved" || document.body.dataset.outcome === "failed",
             null,
@@ -273,25 +279,32 @@ test("firefox: packaged extension runs a full job end to end", { timeout: 180000
       if (!extHandle) await new Promise((r) => setTimeout(r, 250));
     }
     assert.ok(extHandle, "first-run extension page never opened");
-    await driver.wait(async () => (await driver.findElements({ css: "button[data-tabid]" })).length > 0, 15000);
+    // Unbound first-run page shows guidance only (never a tab list).
+    await driver.wait(async () => (await driver.findElements({ css: "#tabs p" })).length > 0, 15000);
 
     const savedFile = path.join(downloadsDir, "dezoomify.png");
     const driverApi = {
       openTarget: async (url) => {
-        await driver.executeScript("browser.tabs.create({ url: arguments[0] });", url);
+        // Single-tab creation: returns the new tab id directly, no `tabs.query`.
+        const targetTabId = await driver.executeScript(
+          "return browser.tabs.create({ url: arguments[0], active: false }).then((t) => t.id);",
+          url,
+        );
+        assert.ok(Number.isInteger(targetTabId), "tabs.create must return a tab id");
         await driver.sleep(1500);
         await driver.switchTo().window(extHandle);
+        return targetTabId;
       },
       extensionPage: () => ({
-        scanAndSave: async (urlPart) => {
-          const tabId = await driver.executeScript(
-            "return browser.tabs.query({}).then((tabs) => {" +
-              "const hit = tabs.find(t => typeof t.url === 'string' && t.url.includes(arguments[0]));" +
-              "if (!hit) throw new Error('target tab not visible: ' + arguments[0]);" +
-              "return hit.id; });",
-            urlPart,
+        scanAndSave: async (targetTabId) => {
+          const extUrl = await driver.getCurrentUrl();
+          const baseExt = extUrl.split("page.html")[0];
+          await driver.get(`${baseExt}page.html?tab=${targetTabId}`);
+          await driver.wait(
+            async () => (await driver.findElements({ css: `button[data-tabid="${targetTabId}"]` })).length > 0,
+            15000,
           );
-          await driver.findElement({ css: `button[data-tabid="${tabId}"]` }).click();
+          await driver.findElement({ css: `button[data-tabid="${targetTabId}"]` }).click();
           const deadline = Date.now() + 90000;
           for (;;) {
             const state = await driver.executeScript(

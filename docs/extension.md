@@ -1,21 +1,24 @@
 # Browser extension
 
-The extension is MV3 in both browsers with one shared manifest: Chromium runs
-the background as a service worker, Firefox as an event page (`background`
-declares both `service_worker` and `scripts`; Chrome 121+ ignores the scripts
-key, Firefox ignores the service worker key). The background is one-shot and
-dormant by construction: the toolbar action opens the extension page bound to
-the clicked tab, and install opens it once for first-run guidance. The page
+The extension is MV3 in both browsers with one shared manifest base:
+Chromium runs the background as a service worker, Firefox as an event page
+(the per-browser overlay declares only its own `background` entry; Chrome
+121+ for `wasm-unsafe-eval`). The background is one-shot and dormant by
+construction: the toolbar action opens the extension page bound to the
+clicked tab, and install opens it once for first-run guidance. The page
 hosts the job. The extension does not use the metadata CORS proxy.
 
 ## Discovery
 
 The extension does not scan pages in the background. Scanning begins only
 after an explicit action: the toolbar button (activeTab grant on the clicked
-tab) or a tab chosen in the extension page's tab list. The page registers a
-bounded webRequest collector filtered to the exact target tab before at most
+tab), which opens the extension page bound to exactly that tab
+(`page.html?tab=<id>`). The page never enumerates tabs: it touches only the
+bound tab via `tabs.get`/`tabs.reload` plus a bounded webRequest collector
+filtered to the exact target tab and the `http(s)` schemes before at most
 one reload, observes through a finite settle period and hard deadline, then
-stops. A reload never rearms scanning.
+stops. The unbound first-run page shows guidance only and makes zero tabs
+API calls. A reload never rearms scanning.
 
 Candidates are the observed request URLs; `crates/dezoomify-core` (wasm,
 loaded inline in the page) performs format recognition and discovery on the
@@ -34,8 +37,8 @@ fetch channel.
 
 The wasm core decodes and processes the bytes, and the page assembles them on
 an origin-clean canvas. Page cookies follow browser extension permission and
-credential rules. The saved image is written through the downloads API via a
-blob anchor.
+credential rules. The saved image is written via a blob-anchor download, which
+needs no `downloads` permission.
 
 ## Native handoff
 
@@ -58,14 +61,19 @@ recovery choices. See [Protocol](protocol.md#handoff) and
 
 `scripts/generate-manifests.mjs` produces `generated/manifest.{chromium,firefox}.json`
 as deterministic merges of `src/manifest/base.json` plus a minimal
-per-browser overlay (Chromium: minimum version; Firefox: gecko id and minimum
-version); underscore-prefixed overlay keys never ship. `scripts/package-store.sh`
-stages background/ and content/ as classic scripts (export statements
-stripped; they must parse without module syntax) and page/ as ES modules,
-copies the generated wasm glue, and ships only reviewed store shapes. The
-`DEZOOMIFY_TEST_HOST_PERMISSIONS=1` variant injects loopback host permissions
-plus the tabs permission for the headless E2E only (the drivers cannot click
-browser chrome to grant activeTab) and is never used for store payloads.
+per-browser overlay (Chromium: service worker + minimum version; Firefox:
+event-page scripts + gecko id and minimum version); underscore-prefixed
+overlay keys never ship. `scripts/package-store.sh` stages only the loaded
+entry points (background/index.js as a classic script with export statements
+stripped, the page entry plus its direct imports as ES modules, declared
+icons) plus the generated wasm glue, and ships only reviewed store shapes;
+unit-tested libs that the manifest/page never load (background handoff/native
+helpers, content reload marker, page redaction, app integration) stay in `src`
+for tests and never ship. The `DEZOOMIFY_TEST_HOST_PERMISSIONS=1` variant
+injects loopback host permissions for the headless E2E only (the drivers
+cannot click browser chrome to grant activeTab; the harness creates its target
+via a single `tabs.create` and drives the bound `?tab=` flow, never
+enumerating tabs) and is never used for store payloads.
 
 User-facing job behavior comes from the same protocol and scenarios as web
 and desktop. See [Testing](testing.md) and [Releases](releases.md).

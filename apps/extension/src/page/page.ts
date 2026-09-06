@@ -1,11 +1,18 @@
 /**
  * Extension page: the whole job lives here.
  *
- * Flow (v1): pick a tab -> finite reload scan (webRequest observed from this
- * page; the tab's origin is covered by the activeTab grant from the action
- * click, or by granted host permissions) -> pick a candidate source URL ->
- * run the wasm discovery core inline -> plan -> fetch tiles with the
- * browser session -> assemble on canvas -> save via a blob anchor.
+ * Flow (v1): the toolbar click opens this page bound to exactly that tab
+ * (`page.html?tab=<id>` from the activeTab grant) -> finite reload scan
+ * (webRequest observed from this page; the tab's origin is covered by the
+ * activeTab grant from the action click, or by granted host permissions) ->
+ * pick a candidate source URL -> run the wasm discovery core inline -> plan
+ * -> fetch tiles with the browser session -> assemble on canvas -> save via
+ * a blob anchor.
+ *
+ * Least privilege: this page never enumerates tabs. It touches only the
+ * bound tab via `tabs.get(boundId)`/`tabs.reload(boundId)` plus a webRequest
+ * filter scoped to that tab id. The unbound first-run page shows guidance
+ * only and makes zero tabs API calls.
  *
  * Module document: imports the staged `scan.js`/`candidates.js` and the wasm
  * glue. Every failure is logged into the visible log (the E2E asserts on it).
@@ -39,11 +46,22 @@ function pickedUrlFor(tab) {
   return typeof tab.url === "string" && tab.url ? tab.url : "http://unknown/";
 }
 
+async function getBoundTab(tabId) {
+  // Single-tab access only: never enumerate tabs (`tabs.query`). The bound
+  // id comes from the toolbar click (`?tab=`). `tabs.get` exposes only that
+  // tab; its URL is visible under the activeTab grant or a granted host
+  // permission, otherwise this degrades to an id-only label and the scan
+  // still enforces the privileged-URL guard when the URL is known.
+  const tab = await api.tabs.get(tabId);
+  if (!tab || typeof tab.id !== "number") {
+    throw Object.assign(new Error("target tab vanished"), { code: "no-target-tab" });
+  }
+  return tab;
+}
+
 async function runScan(tabId) {
   const store = { urls: [] };
-  const tabs = await api.tabs.query({});
-  const tab = tabs.find((t) => t.id === tabId);
-  if (!tab) throw Object.assign(new Error("target tab vanished"), { code: "no-target-tab" });
+  const tab = await getBoundTab(tabId);
   const url = pickedUrlFor(tab);
   if (isPrivilegedUrl(url)) {
     throw Object.assign(new Error("privileged URL: " + JSON.stringify(url)), { code: "privileged-url" });
@@ -64,7 +82,7 @@ async function runScan(tabId) {
         }
       };
       api.webRequest.onBeforeRequest.addListener(listener.ref, {
-        urls: ["<all_urls>"],
+        urls: ["http://*/*", "https://*/*"],
         tabId: id,
       });
     },
@@ -236,8 +254,7 @@ async function run(tabId) {
     }
     let tabOrigin = "";
     try {
-      const tabs = await api.tabs.query({});
-      const tab = tabs.find((t) => t.id === tabId);
+      const tab = await api.tabs.get(tabId);
       if (tab?.url) tabOrigin = tabOriginOf(tab.url);
     } catch {
       tabOrigin = "";
@@ -281,14 +298,13 @@ async function run(tabId) {
   }
 }
 
-function tabButton(tab) {
+function tabButton(tabId, label) {
   const b = document.createElement("button");
-  b.dataset.tabid = String(tab.id);
-  const label = typeof tab.url === "string" && tab.url ? tab.url : "tab " + tab.id;
+  b.dataset.tabid = String(tabId);
   b.textContent = "Scan " + label;
   b.addEventListener("click", () => {
     document.getElementById("tabs").replaceChildren();
-    run(tab.id);
+    run(tabId);
   });
   return b;
 }
@@ -400,16 +416,28 @@ async function render() {
   const params = new URLSearchParams(location.search);
   const bound = params.get("tab");
   const tabsEl = document.getElementById("tabs");
-  if (bound) {
-    tabsEl.replaceChildren(tabButton({ id: Number(bound) }));
+  const boundId = bound !== null ? Number(bound) : NaN;
+  if (bound !== null && Number.isInteger(boundId)) {
+    // Bound to the clicked tab: single `tabs.get`, never `tabs.query`.
+    let label = "tab " + boundId;
+    try {
+      const tab = await api.tabs.get(boundId);
+      if (typeof tab.url === "string" && tab.url) label = tab.url;
+    } catch {
+      // Keep the generic label; run() reports a vanished tab on click.
+    }
+    tabsEl.replaceChildren(tabButton(boundId, label));
     return;
   }
-  const tabs = await api.tabs.query({});
-  tabsEl.replaceChildren(...tabs.filter((t) => t.id !== undefined).map(tabButton));
+  // Unbound first-run / manual open: guidance only, zero tabs API calls.
+  // The user scans by clicking the toolbar button on a zoomable page,
+  // which opens a bound page for exactly that tab.
+  tabsEl.replaceChildren();
+  const hint = document.createElement("p");
+  hint.textContent =
+    "Open a page with a zoomable image, then click the Dezoomify toolbar button to scan that tab.";
+  tabsEl.appendChild(hint);
+  log("ready: click the toolbar button on a zoomable page");
 }
 
 render();
-// Keep the tab list live: tabs opened after the page loaded (including the
-// first-run flow itself) must become scannable without a manual reload.
-api.tabs.onCreated.addListener(render);
-api.tabs.onRemoved.addListener(render);

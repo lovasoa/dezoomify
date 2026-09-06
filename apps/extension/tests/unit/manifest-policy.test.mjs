@@ -32,7 +32,7 @@ const firefoxOverlay = readJson("../../src/manifest/firefox.json");
 const genChromium = readJson("../../generated/manifest.chromium.json");
 const genFirefox = readJson("../../generated/manifest.firefox.json");
 
-const REVIEWED_PERMS = new Set(["activeTab", "scripting", "webRequest", "nativeMessaging", "tabs", "cookies"]);
+const REVIEWED_PERMS = new Set(["activeTab", "webRequest", "nativeMessaging"]);
 const REVIEWED_OPTIONAL = new Set(["cookies"]);
 const EXPECTED_GECKO_ID = "dezoomify@example.com";
 
@@ -53,10 +53,15 @@ function backgroundUrls(manifest) {
 }
 
 for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
-  test(`${name}: MV3 with the dual cross-browser background`, () => {
+  test(`${name}: MV3 with the per-browser background entry`, () => {
     assert.equal(manifest.manifest_version, 3);
-    assert.equal(manifest.background?.service_worker, "background/index.js");
-    assert.deepEqual(manifest.background?.scripts, ["background/index.js"]);
+    if (name === "chromium") {
+      assert.equal(manifest.background?.service_worker, "background/index.js");
+      assert.equal(manifest.background?.scripts, undefined, "chromium must not ship Firefox event-page scripts key");
+    } else {
+      assert.deepEqual(manifest.background?.scripts, ["background/index.js"]);
+      assert.equal(manifest.background?.service_worker, undefined, "firefox must not ship Chromium service_worker key");
+    }
   });
 
   test(`${name}: no wildcard permanent hosts`, () => {
@@ -97,11 +102,25 @@ for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefo
     // Chrome Web Store rejects unused permissions: the page saves via a blob
     // anchor, which needs no `downloads` permission, so it must stay absent.
     assert.ok(!(manifest.permissions ?? []).includes("downloads"), `${name} unused downloads permission`);
+    // Least privilege: the page works on the bound tab only (`tabs.get`),
+    // never enumerates tabs, so `tabs`/`scripting` must stay absent.
+    assert.ok(!(manifest.permissions ?? []).includes("tabs"), `${name} tabs permission forbids tab enumeration`);
+    assert.ok(!(manifest.permissions ?? []).includes("scripting"), `${name} scripting permission unused`);
+    assert.equal(manifest.content_scripts, undefined, `${name} no content scripts declared`);
+  });
+
+  test(`${name}: declared icons exist`, () => {
+    for (const [size, path] of Object.entries(manifest.icons ?? {})) {
+      assert.ok(["16", "48", "128"].includes(size), `${name} unexpected icon size ${size}`);
+      assert.ok(path.startsWith("icons/"), `${name} icon must be bundled ${path}`);
+    }
+    assert.deepEqual(Object.keys(manifest.icons ?? {}).sort(), ["128", "16", "48"]);
+    assert.deepEqual(manifest.action?.default_icon, manifest.icons, `${name} action icon must match icons`);
   });
 }
 
-test("chromium: minimum version supports the dual background (121+)", () => {
-  assert.ok(Number(genChromium.minimum_chrome_version) >= 121, "Chrome ignores background.scripts before 121");
+test("chromium: minimum version supports wasm-unsafe-eval (121+)", () => {
+  assert.ok(Number(genChromium.minimum_chrome_version) >= 121, "wasm-unsafe-eval CSP needs Chrome 121+");
 });
 
 test("firefox: gecko id matches reviewed release config; min version is MV3-capable", () => {
@@ -123,6 +142,36 @@ test("declared permissions are used by shipped code", () => {
   assert.ok(page.includes("api.cookies.getAll"), "cookies must be used by consented handoff");
   assert.ok(page.includes("api.webRequest.onBeforeRequest"), "webRequest must be used by scan");
   assert.ok(!page.includes("chrome.downloads"), "downloads API must stay unused (blob anchor save)");
+});
+
+test("bound-tab least privilege: no tab enumeration, narrow webRequest filter", () => {
+  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
+  const code = page
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+    .join("\n");
+  assert.ok(!code.includes("tabs.query"), "shipped page must never enumerate tabs (bound tabs.get only)");
+  assert.ok(!code.includes("onCreated"), "shipped page must not track tab creation");
+  assert.ok(!code.includes("onRemoved"), "shipped page must not track tab removal");
+  assert.ok(!code.includes("<all_urls>"), "webRequest filter must be http/https, never <all_urls>");
+  assert.ok(code.includes('"http://*/*"'), "webRequest filter must cover http");
+  assert.ok(code.includes('"https://*/*"'), "webRequest filter must cover https");
+  assert.ok(code.includes("api.tabs.get"), "bound tab must use single tabs.get");
+  assert.ok(code.includes("api.tabs.reload"), "scan reloads only the bound tab");
+});
+
+test("store package ships only loaded files (no dead code)", () => {
+  const script = readFileSync(new URL("../../scripts/package-store.sh", import.meta.url), "utf8");
+  // No content_scripts declared, so content/ must never be zipped.
+  assert.ok(!script.includes(" page content wasm"), "package must not zip content/ (no content_scripts)");
+  assert.ok(script.includes("icons background page wasm"), "package must zip icons+background+page+wasm");
+  // E2E-only manifest variant must not inject a tabs permission: shipped
+  // code (and the harness) never enumerates tabs.
+  assert.ok(!script.includes('"tabs"'), "package must never inject tabs permission");
+  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
+  for (const dead of ["redaction.js", "handoff.js", "native.js", "reload-marker"]) {
+    assert.ok(!page.includes(dead), `page must not import dead ${dead}`);
+  }
 });
 
 test("generated manifests are the deterministic generator output (base+overlay, no underscore keys)", () => {

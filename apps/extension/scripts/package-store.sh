@@ -4,13 +4,21 @@
 #
 # Extension sources are plain JavaScript with JSDoc kept in `.ts` files
 # (no TypeScript syntax; unit tests import them as text/javascript).
-# Staging rules:
-# - background/ and content/ are loaded as CLASSIC scripts in both browsers
-#   (Chromium MV3 service worker is declared without type:module; Firefox MV3
-#   event pages do not support modules), so `export` is stripped and the
-#   result must parse as a classic script.
-# - page/ ships verbatim as ES modules (the page is a module document; it
-#   imports the wasm glue).
+# Staging rules (least privilege: ship only what the manifest loads):
+# - background/ ships ONLY background/index.js as a CLASSIC script in both
+#   browsers (Chromium MV3 service worker is declared without type:module;
+#   Firefox MV3 event pages do not support modules), so `export` is stripped
+#   and the result must parse as a classic script. background/handoff.ts and
+#   background/native.ts are pure unit-tested libraries, never loaded by the
+#   manifest, and never shipped.
+# - No content scripts ship: the manifest declares no content_scripts and the
+#   scan runs from the extension page via webRequest, so content/ is never
+#   staged. src/content/* remains for unit tests only.
+# - page/ ships verbatim as ES modules ONLY the files page.js imports
+#   (page.html + page/scan/candidates/fetch/nativeHandoff): the page is a
+#   module document and imports the wasm glue. page/redaction.ts and app/*
+#   are unit-tested helpers, never imported by the page, and never shipped.
+# - icons/ ships the declared manifest icons.
 # - wasm/ artifacts are copied from the repository build output (generated;
 #   run `cargo xtask build web` or `cargo xtask build extension` first).
 #
@@ -47,40 +55,31 @@ staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
 cp "$manifest" "$staging/manifest.json"
 
-# background/ and content/ must parse as classic scripts: strip `export`.
+# background/index.js ships as a CLASSIC script (service worker / event page):
+# strip `export` so it parses without module syntax.
 strip_exports() {
   sed -E 's/^export[[:space:]]+//' "$1"
 }
 
-stage_classic_dir() {
-  local dir="$1"
-  test -d "$SRC/$dir" || { echo "missing $SRC/$dir"; exit 1; }
-  mkdir -p "$staging/$dir"
-  for f in "$SRC/$dir"/*; do
-    base="$(basename "$f")"
-    case "$base" in
-      *.ts) strip_exports "$f" > "$staging/$dir/${base%.ts}.js" ;;
-      *) cp "$f" "$staging/$dir/$base" ;;
-    esac
-  done
-}
-
-stage_module_dir() {
-  local dir="$1"
-  test -d "$SRC/$dir" || { echo "missing $SRC/$dir"; exit 1; }
-  mkdir -p "$staging/$dir"
-  for f in "$SRC/$dir"/*; do
-    base="$(basename "$f")"
-    case "$base" in
-      *.ts) cp "$f" "$staging/$dir/${base%.ts}.js" ;;
-      *) cp "$f" "$staging/$dir/$base" ;;
-    esac
-  done
-}
-
-stage_classic_dir background
-stage_classic_dir content
-stage_module_dir page
+# Ship only the background entry the manifest loads (never handoff/native libs).
+mkdir -p "$staging/background"
+strip_exports "$SRC/background/index.ts" > "$staging/background/index.js"
+# Ship only the page entry + its direct imports (never redaction/app libs).
+mkdir -p "$staging/page"
+for f in page.html page.ts scan.ts candidates.ts fetch.ts nativeHandoff.ts; do
+  src="$SRC/page/$f"
+  test -f "$src" || { echo "missing $src"; exit 1; }
+  case "$f" in
+    *.ts) cp "$src" "$staging/page/${f%.ts}.js" ;;
+    *) cp "$src" "$staging/page/$f" ;;
+  esac
+done
+# Ship the declared manifest icons.
+mkdir -p "$staging/icons"
+for icon in icon16.png icon48.png icon128.png; do
+  test -f "$SRC/icons/$icon" || { echo "missing $SRC/icons/$icon"; exit 1; }
+  cp "$SRC/icons/$icon" "$staging/icons/$icon"
+done
 
 mkdir -p "$staging/wasm"
 cp "$WASM/dezoomify-wasm.js" "$WASM/dezoomify-wasm_bg.wasm" "$staging/wasm/"
@@ -91,31 +90,39 @@ import json, sys
 path = sys.argv[1]
 d = json.load(open(path))
 # E2E-only variant: headless drivers cannot click browser chrome to grant
-# activeTab, so the staged manifest grants loopback hosts directly plus the
-# tabs permission (needed to show tab URLs in the page's tab list).
+# activeTab, so the staged manifest grants loopback hosts directly. Shipped
+# code never enumerates tabs (bound `tabs.get` only), so no `tabs`
+# permission is ever injected: the harness creates its target via a single
+# `tabs.create` returning one id and drives the bound `?tab=` flow.
 d["host_permissions"] = ["http://127.0.0.1/*", "http://localhost/*"]
-if "tabs" not in d["permissions"]:
-    d["permissions"].append("tabs")
 json.dump(d, open(path, "w"), indent=2)
-print("staged manifest: loopback host permissions + tabs injected (E2E only)")
+print("staged manifest: loopback host permissions injected (E2E only, no tabs)")
 PY
 fi
 
-# Every staged .js in classic contexts must parse as a CLASSIC script.
-while IFS= read -r js; do node --check "$js" || { echo "syntax error: $js"; exit 1; }; done \
-  < <(find "$staging/background" "$staging/content" -name '*.js')
+# The shipped background entry must parse as a CLASSIC script.
+node --check "$staging/background/index.js" || { echo "syntax error: background/index.js"; exit 1; }
 
 (cd "$staging" && python3 -c '
 import json, os, sys
 d = json.load(open("manifest.json"))
 need = list(d.get("icons", {}).values())
+need += list(d.get("action", {}).get("default_icon", {}).values())
 bg = d.get("background", {})
 need += ([bg["service_worker"]] if "service_worker" in bg else []) + bg.get("scripts", [])
 need += ["page/page.html", "page/page.js", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
 missing = [p for p in need if not os.path.exists(p)]
 sys.exit(f"missing in package: {missing}") if missing else print(f"package contents: ok ({len(need)} referenced files present)")
+# Least-privilege ship guard: fail on dead/never-loaded files.
+import glob
+shipped = set(glob.glob("background/*.js") + glob.glob("page/*.js") + glob.glob("content/**/*.js", recursive=True))
+allowed = {"background/index.js", "page/page.js", "page/scan.js", "page/candidates.js", "page/fetch.js", "page/nativeHandoff.js"}
+extra = shipped - allowed
+sys.exit(f"dead files shipped (never loaded by manifest/page): {sorted(extra)}") if extra else print("package contents: no dead files")
+if os.path.exists("content"):
+    sys.exit("content/ must not ship (no content_scripts declared)")
 ') || exit 1
 
 rm -f "$out_zip"
-(cd "$staging" && zip -qr "$out_zip" manifest.json icons background page content wasm)
+(cd "$staging" && zip -qr "$out_zip" manifest.json icons background page wasm)
 echo "package: $name v$version ($browser) -> $out_zip"

@@ -1,11 +1,13 @@
 {
   "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
     "default_title": "Dezoomify"
   },
   "background": {
-    "scripts": [
-      "background/index.js"
-    ],
     "service_worker": "background/index.js"
   },
   "content_security_policy": {
@@ -13,6 +15,11 @@
   },
   "description": "Save full-resolution zoomable images. Finite active-tab scan only; no background monitoring.",
   "host_permissions": [],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "manifest_version": 3,
   "minimum_chrome_version": "121",
   "name": "Dezoomify",
@@ -26,7 +33,6 @@
   "permissions": [
     "activeTab",
     "webRequest",
-    "downloads",
     "nativeMessaging"
   ],
   "version": "3.0.0"
