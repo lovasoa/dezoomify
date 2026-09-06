@@ -35,8 +35,12 @@ import zlib from "node:zlib";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../..");
 const SCENARIOS_DIR = path.join(REPO_ROOT, "testdata/scenarios");
-const FIXTURE_SERVER_BIN = path.join(REPO_ROOT, "target/debug/dezoomify-fixture-server");
-const CLI_BIN = path.join(REPO_ROOT, "target/debug/dezoomify-cli");
+function binaryPath(name) {
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  return path.join(REPO_ROOT, `target/debug/${name}${suffix}`);
+}
+const FIXTURE_SERVER_BIN = binaryPath("dezoomify-fixture-server");
+const CLI_BIN = binaryPath("dezoomify-cli");
 // Deterministic seed marker for the report. Inputs below are fixed; no
 // run reads clocks or random sources for assertions.
 const SEED = 20260906;
