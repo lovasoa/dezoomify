@@ -41,17 +41,43 @@
           a metadata proxy. The proxy never receives cookies,
           authorization headers, or credentials of any kind.</li>
           <li><strong>Browser extension.</strong> Runs only when you explicitly
-          invoke it on a tab, with per-site permissions you grant. It uses your
-          browser's existing session for that site; it never sends your cookies
-          anywhere except, with your explicit consent, to the Dezoomify desktop
-          app on your own machine, kept in memory only and never stored.</li>
+          invoke it on a tab, with per-site permissions you grant. See
+          <a href="#extension-cookies">the section below</a> for exactly how it
+          handles cookies.</li>
           <li><strong>Desktop app and CLI.</strong> Process images locally on
           your machine. Any credentials you provide stay in memory and are never
           written to disk or logs.</li>
         </ul>
 
+        <h2 id="extension-cookies">The browser extension and cookies</h2>
+        <p>The extension only acts when you explicitly invoke it on a tab, and
+        only for sites whose host permissions you have granted. It performs no
+        background scanning and collects nothing while idle.</p>
+        <ul>
+          <li><strong>Your session, not ours.</strong> When downloading image
+          data, the extension fetches from the site you are viewing using your
+          browser's existing session under the host permissions you granted.
+          Your browser attaches that site's own cookies to those requests,
+          exactly as it would when you open the files yourself; the extension
+          does not read, copy, or transmit those cookie values.</li>
+          <li><strong>Cookies never leave your browser.</strong> The extension
+          has no Dezoomify-side endpoint: it never sends cookies or image
+          data to our servers, to the metadata proxy, or to any third
+          party.</li>
+          <li><strong>Optional cookie permission.</strong> The
+          <code>cookies</code> permission is optional and is only requested
+          when you choose to hand a job off to the Dezoomify desktop app on
+          your own machine. The consent dialog names the destination sites and
+          which cookies are shared before anything happens. Declining keeps
+          the job running in the extension without any cookie access.</li>
+          <li><strong>In memory only.</strong> Cookies shared with the desktop
+          app travel over Chrome's native messaging to that app, are used to
+          fetch the same site's images locally, and are held in memory only,
+          never written to disk, logs, diagnostics, or crash reports.</li>
+        </ul>
+
         <h2>What we store</h2>
-        <p>Nothing about you.Jobs run in your browser or on your machine; source
+        <p>Nothing about you. Jobs run in your browser or on your machine; source
         URLs, cookies, authorization headers, and image bytes never enter
         telemetry, crash reports, or document titles. Proxy access logs carry
         request IDs and coarse policy codes only, never target URLs or query
