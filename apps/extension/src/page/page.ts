@@ -353,6 +353,155 @@ function offerNativeHandoff(sourceUrl) {
 }
 
 /**
+ * Handoff consent dialog (todo 4.5): non-blocking DOM modal, never `confirm()`.
+ *
+ * Reuses the shared modal geometry from `openModal()` (shared-ui `view.ts`):
+ * one `.dz-modal-backdrop` (role=dialog, aria-modal) holding a
+ * `.dz-modal-card` (close button, title, subtitle, body, actions), plus the
+ * desktop deep-link confirm behavior (explicit confirm/decline actions,
+ * Escape and backdrop dismiss as decline, Tab trapped inside, focus returns
+ * to the opener). A literal shared-ui import is impossible here: this page
+ * ships verbatim as `page.js` with no bundler (see `package-store.sh`), so
+ * the geometry is replicated, not imported.
+ *
+ * All labels use `textContent` (never `innerHTML`): origins and cookie names
+ * are site-influenced and must never parse as markup. Names/scopes only;
+ * cookie values are unread at consent time and never shown. Initial focus is
+ * the decline action so an accidental Enter fails safe (stays in extension).
+ * @param {{ host: string, origins: string[], cookieNames: string[], jobId: string }} details
+ * @returns {Promise<boolean>} true only on explicit confirm.
+ */
+function requestHandoffConsent(details) {
+  return new Promise((resolve) => {
+    const doc = document;
+    // Like openModal(): a single modal at a time, drop a stale backdrop first.
+    doc.querySelector(".dz-modal-backdrop")?.remove();
+    const opener = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
+    const origins = Array.isArray(details.origins) ? details.origins : [];
+    const cookieNames = Array.isArray(details.cookieNames) ? details.cookieNames : [];
+
+    const backdrop = doc.createElement("div");
+    backdrop.className = "dz-modal-backdrop";
+    backdrop.setAttribute("role", "dialog");
+    backdrop.setAttribute("aria-modal", "true");
+    backdrop.setAttribute("aria-labelledby", "dz-handoff-title");
+    backdrop.setAttribute("aria-describedby", "dz-handoff-desc");
+    // Structural overlay only (the page ships no stylesheet): class names
+    // stay shared-themed for consistency if styles are ever added.
+    backdrop.setAttribute(
+      "style",
+      "position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45);",
+    );
+
+    const card = doc.createElement("div");
+    card.className = "dz-modal-card";
+    card.setAttribute(
+      "style",
+      "max-width:min(92vw,480px);background:#fff;color:#000;padding:1.25rem;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,0.3);",
+    );
+
+    const closeBtn = doc.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "dz-modal-close";
+    closeBtn.setAttribute("aria-label", "Close dialog");
+    closeBtn.title = "Close";
+    closeBtn.textContent = "×";
+
+    const title = doc.createElement("h2");
+    title.id = "dz-handoff-title";
+    title.className = "dz-modal-title";
+    title.tabIndex = -1;
+    title.textContent = "Send to desktop app?";
+
+    const subtitle = doc.createElement("p");
+    subtitle.id = "dz-handoff-desc";
+    subtitle.className = "dz-modal-subtitle";
+    subtitle.textContent = "Host: " + details.host;
+
+    const body = doc.createElement("div");
+    body.className = "dz-modal-body";
+    const originsLine = doc.createElement("p");
+    originsLine.textContent = "Origins: " + (origins.join(", ") || "(none)");
+    const cookiesLine = doc.createElement("p");
+    cookiesLine.textContent = "Cookies: " + (cookieNames.join(", ") || "(none)");
+    const jobLine = doc.createElement("p");
+    jobLine.textContent = "Job: " + details.jobId;
+    const note = doc.createElement("p");
+    note.textContent = "Nothing is sent until you confirm. Declining keeps the job in the extension.";
+    body.append(originsLine, cookiesLine, jobLine, note);
+
+    const actions = doc.createElement("div");
+    actions.className = "dz-modal-actions";
+    actions.setAttribute("style", "display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem;");
+    const declineBtn = doc.createElement("button");
+    declineBtn.type = "button";
+    declineBtn.className = "dz-btn-secondary";
+    declineBtn.textContent = "Stay in extension";
+    const confirmBtn = doc.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "dz-btn-tactile";
+    confirmBtn.textContent = "Send to desktop app";
+    actions.append(declineBtn, confirmBtn);
+
+    card.append(closeBtn, title, subtitle, body, actions);
+    backdrop.appendChild(card);
+
+    let settled = false;
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      doc.removeEventListener("keydown", onKeyDown, true);
+      backdrop.remove();
+      if (opener && typeof opener.focus === "function") {
+        try {
+          opener.focus();
+        } catch {
+          // Focus return is best-effort only.
+        }
+      }
+      resolve(value);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        settle(false);
+        return;
+      }
+      // Focus trap (desktop confirm pattern): Tab cycles inside the dialog.
+      if (e.key !== "Tab") return;
+      const focusables = [...backdrop.querySelectorAll("button")].filter((el) => !el.disabled);
+      if (focusables.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = doc.activeElement;
+      if (e.shiftKey) {
+        if (active === first || !backdrop.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    closeBtn.addEventListener("click", () => settle(false));
+    declineBtn.addEventListener("click", () => settle(false));
+    confirmBtn.addEventListener("click", () => settle(true));
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) settle(false);
+    });
+    doc.addEventListener("keydown", onKeyDown, true);
+
+    doc.body.appendChild(backdrop);
+    declineBtn.focus();
+  });
+}
+
+/**
  * Run one consented handoff via Native Messaging + cookies permission.
  * @param {string} sourceUrl
  * @param {string} origin exact consented scope (`scheme://host[:port]/`)
@@ -404,20 +553,9 @@ async function handoffToDesktop(sourceUrl, origin) {
       const all = await api.cookies.getAll({ url: scope });
       return all.map((c) => ({ name: c.name, value: c.value }));
     },
-    showConsent: async (details) => {
-      const lines = [
-        "Send to desktop app?",
-        "Host: " + details.host,
-        "Origins: " + details.origins.join(", "),
-        "Cookies: " + (details.cookieNames.join(", ") || "(none)"),
-        "Job: " + details.jobId,
-      ];
-      try {
-        return confirm(lines.join("\n")) === true;
-      } catch {
-        return false;
-      }
-    },
+    // Non-blocking consent modal (todo 4.5); decline/dismiss resolves false
+    // and requestNativeHandoff keeps the job cookieless in the extension.
+    showConsent: (details) => requestHandoffConsent(details),
   });
   if (result.ok && result.continuedCookieless) {
     log("handoff declined, continuing in extension");
