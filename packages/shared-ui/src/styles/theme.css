@@ -118,6 +118,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   height: 100%;
   margin: 0;
@@ -284,7 +288,7 @@ abbr[title] {
   margin-bottom: 1.5rem;
 }
 
-.dz-card:not([data-view-phase="idle"]) .dz-header {
+.dz-card[data-view-phase]:not([data-view-phase="idle"]) .dz-header {
   display: none;
 }
 
@@ -300,6 +304,11 @@ abbr[title] {
   gap: 0.6rem;
 }
 
+.dz-title span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .dz-description {
   text-align: left;
   font-size: 0.98rem;
@@ -310,6 +319,103 @@ abbr[title] {
 
 .dz-description strong {
   font-weight: 700;
+}
+
+/* First-run extension guidance is generated from docs/user and rendered
+ * inside the same parchment surface as the job UI. */
+.dz-extension-guide {
+  text-align: left;
+  color: var(--dz-text-primary);
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.dz-extension-guide h2 {
+  margin: 0;
+  padding: 0;
+  font-size: 1.02rem;
+  color: var(--dz-text-primary);
+}
+
+.dz-guide-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.dz-guide-step {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  background: rgba(161, 151, 151, 0.08);
+}
+
+.dz-guide-screenshot {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #292624;
+  border-bottom: 1px solid var(--dz-surface-border);
+}
+
+.dz-guide-step h2,
+.dz-guide-step p {
+  margin-left: 0.9rem;
+  margin-right: 0.9rem;
+}
+
+.dz-guide-step h2 {
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+  margin-top: 0.85rem;
+}
+
+.dz-extension-guide p,
+.dz-extension-guide li {
+  line-height: 1.5;
+}
+
+.dz-extension-guide p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+
+.dz-guide-note {
+  margin-top: 0.9rem;
+  padding: 0.55rem 0.8rem;
+  border-top: 1px solid var(--dz-surface-border);
+  color: var(--dz-text-secondary);
+  font-size: 0.82rem;
+}
+
+.dz-guide-note h2 {
+  display: inline;
+  margin-right: 0.3rem;
+  font-size: inherit;
+  color: var(--dz-text-primary);
+}
+
+.dz-extension-guide strong {
+  font-weight: 700;
+}
+
+.dz-extension-guide a {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .dz-guide-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .dz-guide-screenshot {
+    aspect-ratio: 16 / 8;
+  }
 }
 
 .dz-license-text {
@@ -1712,7 +1818,10 @@ abbr[title] {
   }
 
   .dz-title {
-    font-size: 1.65rem;
+    max-width: 100%;
+    font-size: 1.4rem;
+    display: block;
+    line-height: 1.2;
   }
 
   .dz-input {
@@ -1803,7 +1912,7 @@ abbr[title] {
   }
 
   .dz-title {
-    font-size: 1.45rem;
+    font-size: 1.3rem;
   }
 
   .dz-job-actions {

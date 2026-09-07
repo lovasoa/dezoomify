@@ -895,6 +895,20 @@ function tabButton(tabId, label) {
   return b;
 }
 
+async function renderExtensionGuide(tabsEl) {
+  try {
+    const response = await fetch("guide.html", { cache: "no-store" });
+    if (!response.ok) throw new Error("guide response " + response.status);
+    const guide = document.createElement("article");
+    guide.className = "dz-extension-guide";
+    guide.innerHTML = await response.text();
+    tabsEl.replaceChildren(guide);
+  } catch (error) {
+    tabsEl.replaceChildren();
+    log("guide unavailable: " + (error && error.message ? error.message : "unknown error"));
+  }
+}
+
 /**
  * Offer native handoff for the discovered source (huge outputs, local
  * destinations, durable jobs). The button lives in the shared completed
@@ -1162,6 +1176,8 @@ async function render() {
     tabsEl.replaceChildren(tabButton(boundId, label));
     const job = uiEl("dz-job");
     if (job) job.hidden = false;
+    const logwrap = uiEl("dz-logwrap");
+    if (logwrap) logwrap.hidden = false;
     setStep("Ready to scan");
     renderExtHistory();
     return;
@@ -1169,12 +1185,10 @@ async function render() {
   // Unbound first-run / manual open: guidance only, zero tabs API calls.
   // The user scans by clicking the toolbar button on a zoomable page,
   // which opens a bound page for exactly that tab.
-  tabsEl.replaceChildren();
-  const hint = document.createElement("p");
-  hint.textContent =
-    "Open a page with a zoomable image, then click the Dezoomify toolbar button to scan that tab.";
-  tabsEl.appendChild(hint);
-  log("ready: click the toolbar button on a zoomable page");
+  const logwrap = uiEl("dz-logwrap");
+  if (logwrap) logwrap.hidden = true;
+  await renderExtensionGuide(tabsEl);
+  log("ready: usage guide loaded; click the toolbar button on a zoomable page");
 }
 
 render();

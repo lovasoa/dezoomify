@@ -446,8 +446,8 @@ fn serve_dist(port: u16, label: &str) -> Result<(), String> {
 /// unpacked load (manifest, classic background entry, page entry, icons,
 /// wasm glue) exactly as packaged, syntax-checked, for the named engine,
 /// then launch the browser with an isolated throwaway profile.
-/// Chrome/Chromium engine only; other engines fail closed when their binary
-/// is not installed.
+/// Unbranded Chromium only; Google Chrome rejects the command-line loading
+/// switches, and other engines fail closed when their binary is not installed.
 fn dev_extension(args: &[String]) -> Result<(), String> {
     let mut browser = String::from("chromium");
     let mut i = 0;
@@ -521,6 +521,28 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
         std::fs::copy(src.join("page").join(name), page_dir.join(&dest_name))
             .map_err(|e| format!("stage {name}: {e}"))?;
     }
+    let vendor_dir = page_dir.join("vendor");
+    std::fs::create_dir_all(&vendor_dir).map_err(|e| format!("create page/vendor: {e}"))?;
+    for name in ["limits.js", "theme.css"] {
+        std::fs::copy(src.join("page/vendor").join(name), vendor_dir.join(name))
+            .map_err(|e| format!("stage page/vendor/{name}: {e}"))?;
+    }
+    let guide = page_dir.join("guide.html");
+    let status = Command::new("node")
+        .args([
+            "scripts/build-extension-guide.mjs",
+            &guide.display().to_string(),
+        ])
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to build extension guide: {e}"))?;
+    if !status.success() {
+        return Err("extension guide build failed (scripts/build-extension-guide.mjs)".to_string());
+    }
+    for name in ["guide-step-1.png", "guide-step-2.png", "guide-step-3.png"] {
+        std::fs::copy(src.join("page").join(name), page_dir.join(name))
+            .map_err(|e| format!("stage page/{name}: {e}"))?;
+    }
     let icons_dir = staging.join("icons");
     std::fs::create_dir_all(&icons_dir).map_err(|e| format!("create icons: {e}"))?;
     for icon in ["icon16.png", "icon48.png", "icon128.png"] {
@@ -546,6 +568,7 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
         "page/candidates.js",
         "page/fetch.js",
         "page/nativeHandoff.js",
+        "page/vendor/limits.js",
         "wasm/dezoomify-wasm.js",
     ] {
         let dest = staging.join(rel);
@@ -563,7 +586,11 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     }
     let profile = std::env::temp_dir().join(format!("dz-dev-extension-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
-    let binary = ["chromium", "google-chrome", "chromium-browser"]
+    // Google Chrome 137+ deliberately rejects both command-line extension
+    // switches. Use an unbranded Chromium binary for unpacked development;
+    // silently falling back to google-chrome makes the browser open while
+    // ignoring the extension entirely.
+    let binary = ["chromium", "chromium-browser"]
         .iter()
         .find(|name| {
             Command::new(name)
@@ -573,9 +600,24 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
                 .unwrap_or(false)
         })
         .copied()
-        .ok_or(
-            "no chromium-engine browser binary found (chromium, google-chrome, chromium-browser)",
-        )?;
+        .ok_or_else(|| {
+            let chrome_installed = ["google-chrome", "google-chrome-stable"]
+                .iter()
+                .any(|name| {
+                    Command::new(name)
+                        .arg("--version")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+                });
+            if chrome_installed {
+                "Google Chrome is installed, but it rejects --load-extension for unpacked development; install/use an unbranded Chromium binary (chromium or chromium-browser)"
+                    .to_string()
+            } else {
+                "no Chromium browser binary found (chromium, chromium-browser); Google Chrome is not supported for unpacked extension development"
+                    .to_string()
+            }
+        })?;
     println!(
         "dev extension: unpacked package staged at {}",
         staging.display()
@@ -587,6 +629,10 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     let status = Command::new(binary)
         .args([
             &format!("--user-data-dir={}", profile.display()),
+            // Keep the development profile's extension set deterministic.
+            // Chromium can otherwise retain an extension-disabled startup
+            // state for a fresh profile and silently omit --load-extension.
+            &format!("--disable-extensions-except={}", staging.display()),
             &format!("--load-extension={}", staging.display()),
             "--no-first-run",
             "--no-default-browser-check",

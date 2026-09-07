@@ -2,10 +2,13 @@
 
 # Browser extension
 
-The extension adds Dezoomify to your browser. While you look at a zoomable
-image, it can find the image behind the viewer automatically, including on
-pages where you are signed in, such as library portals, museum
-subscriptions, and academic archives.
+Find the full image behind a museum, library, or archive viewer—even when the
+page requires you to sign in.
+
+## 1. Click the Dezoomify icon
+
+On the page with the image, click Dezoomify in the browser toolbar. If it is
+hidden, open the puzzle-piece menu and pin it.
 
 ## Install
 
@@ -14,19 +17,28 @@ Install it from the
 (works with Chrome, Edge, Brave, and other Chromium-based browsers). A
 Firefox version is on its way.
 
-## Save an image
+## 2. Let the page settle
 
-1. Open the page that shows the zoomable image.
-2. Press the Dezoomify magnifying-glass button in the browser toolbar.
-3. The first time on a new site, the browser asks for permission to look at
-   that site. Approve it. Dezoomify only asks for the sites you use it on,
-   never for all your browsing.
-4. Reload the page or zoom into the image once. A small badge shows how many
-   images were found.
-5. Press the button again. The extension saves the first image it found,
-   at the highest resolution that fits in a browser tab.
-   There is no list to pick from in the extension.
-   For a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).
+The page reloads so Dezoomify can see the viewer. Wait for it to finish, then
+zoom in on the image once.
+
+## 3. Start dezooming
+
+Dezoomify opens a new tab and starts dezooming automatically. Leave it open
+until your image is ready, then save it.
+
+## Tiled or static?
+
+Use the browser's normal save action when **Save image as** gives you the
+complete artwork. Use Dezoomify when zooming stays sharp and the viewer loads
+many tiles or strips instead of one image.
+
+## Extension limits
+
+The extension saves the first image it finds and does not offer an image list.
+For a different image, the full resolution, or an image too large for a
+browser tab, use the [desktop app](./desktop-app.md) or the
+[command-line tool](./command-line.md).
 
 ## What the extension does with your data
 
