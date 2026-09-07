@@ -200,13 +200,12 @@ export const it = {
   "view.job.countsFull": "{current} riquadri su {total}",
   "view.job.countsElapsed": "{current} riquadri su {total} · {elapsed} trascorsi",
   "view.job.elapsedOnly": "{elapsed} trascorsi",
-  // Recent-jobs history (todo 5.2): local-only ledger with one-click reopen.
+  // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Immagini recenti",
   "view.history.empty": "Ancora nessuna immagine recente. Le immagini salvate appaiono qui.",
   "view.history.localOnly": "Conservate solo su questo dispositivo.",
   "view.history.open": "Riapri",
   "view.history.clear": "Cancella la cronologia",
-  "view.history.optIn": "Conserva gli indirizzi completi per riaprire con un clic (solo pagine ordinarie)",
   "view.history.sensitiveNote": "Indirizzo nascosto per privacy",
   "view.history.dims": "{w} per {h} pixel",
   // Failure "What happened" explainer.

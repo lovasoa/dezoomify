@@ -25,12 +25,8 @@ export interface ViewCallbacks {
   onSelectLevel?(level: number): void;
   onOpenExternalLink?(url: string): void;
   onCopyShareLink?(): void;
-  /** Reopen one history entry by its stored URL. Absent hides per-entry reopen. */
-  onOpenHistory?(url: string): void;
   /** Clear the local history ledger. Absent hides the clear action. */
   onClearHistory?(): void;
-  /** Toggle full-URL history opt-in. Absent hides the opt-in control. */
-  onToggleHistoryOptIn?(enabled: boolean): void;
   /** Pause the active job (suspend-acquisition). Absent hides the pause control. */
   onPause?(): void;
   /** Resume a paused job (re-drive). Absent hides the resume control. */
@@ -93,13 +89,10 @@ export interface ViewContext {
   desktopHandoffUrl?: string;
   /**
    * Recent-jobs history (todo 5.2): local-only ledger, newest first, at most
-   * 20 entries. Each entry carries a redacted origin plus a path hash and,
-   * only for non-sensitive URLs with user opt-in, the full reopenable URL.
-   * The view only renders; hosts own storage and reopen effects.
+   * 20 entries. Each entry carries only a redacted origin plus a path hash.
+   * The view only renders; hosts own storage.
    */
   history?: Array<HistoryEntry>;
-  /** Whether full-URL history opt-in is enabled. Renders the opt-in control state. */
-  historyOptIn?: boolean;
   /**
    * Pause v1 (todo 5.7, suspend-acquisition): true while the active job has
    * stopped scheduling new tiles. In-flight work finishes, decoded output is
@@ -786,26 +779,6 @@ function updateHistorySection(
   note.className = "dz-history-note";
   note.textContent = "Kept only on this device.";
   section.appendChild(note);
-  if (typeof callbacks.onToggleHistoryOptIn === "function") {
-    const optRow = doc.createElement("label");
-    optRow.className = "dz-history-optin";
-    const box = doc.createElement("input");
-    (box as HTMLInputElement).type = "checkbox";
-    (box as HTMLInputElement).checked = ctx?.historyOptIn === true;
-    box.setAttribute("aria-label", "Keep full addresses for one-click reopen (non-sensitive only)");
-    box.addEventListener("change", () => {
-      try {
-        callbacks.onToggleHistoryOptIn?.((box as HTMLInputElement).checked);
-      } catch {
-        // Opt-in toggle must never break the view.
-      }
-    });
-    const label = doc.createElement("span");
-    label.textContent = "Keep full addresses for one-click reopen (non-sensitive only)";
-    optRow.appendChild(box);
-    optRow.appendChild(label);
-    section.appendChild(optRow);
-  }
   if (entries.length === 0) {
     const empty = doc.createElement("p");
     empty.className = "dz-history-empty";
@@ -828,26 +801,10 @@ function updateHistorySection(
     if (date !== "") parts.push(date);
     main.textContent = parts.join(" ");
     item.appendChild(main);
-    if (typeof entry.url === "string" && entry.url !== "" && typeof callbacks.onOpenHistory === "function") {
-      const openBtn = doc.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "dz-btn-secondary";
-      openBtn.textContent = "Open again";
-      const target = entry.url;
-      openBtn.addEventListener("click", () => {
-        try {
-          callbacks.onOpenHistory?.(target);
-        } catch {
-          // Reopen must never break the view.
-        }
-      });
-      item.appendChild(openBtn);
-    } else {
-      const hidden = doc.createElement("span");
-      hidden.className = "dz-history-hidden";
-      hidden.textContent = "Address hidden for privacy";
-      item.appendChild(hidden);
-    }
+    const hidden = doc.createElement("span");
+    hidden.className = "dz-history-hidden";
+    hidden.textContent = "Address hidden for privacy";
+    item.appendChild(hidden);
     list.appendChild(item);
   }
   section.appendChild(list);

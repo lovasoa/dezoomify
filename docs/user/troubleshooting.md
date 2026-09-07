@@ -65,7 +65,7 @@ command line):
 see [resuming an interrupted save](./desktop-app.md#resuming-an-interrupted-save).
 If the site changed its image since the first attempt, remove the resume
 folder and start fresh. On the website, reloading stops the current run;
-reopen it from [recent pictures](./website.md#recent-pictures).
+enter the address again to restart it.
 
 ## The output name is rejected
 

@@ -50,12 +50,9 @@ that is running now. To save many addresses at once from a list, use the
 ## Recent pictures
 
 The start page keeps your last 20 saves on this device only. Each entry
-shows the site, the picture size, the format, and the date, with an
-**Open again** action that runs the same job without retyping the address.
-A **Clear history** button removes all entries. Full addresses stay only
-for ordinary pages when you tick the opt-in box; addresses with sign-in
-details never keep their full text, only the site plus a short reference.
-Reloading the page stops the current run; reopen it from the list.
+shows only the site, the picture size, the format, and the date. A **Clear
+history** button removes all entries. The address itself is never kept.
+Reloading the page stops the current run; enter the address again to restart it.
 
 ## Language
 

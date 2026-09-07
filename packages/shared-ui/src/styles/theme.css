@@ -1288,16 +1288,6 @@ abbr[title] {
   margin: 0 0 0.75rem;
 }
 
-.dz-history-optin {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  font-size: 0.88rem;
-  color: var(--dz-text-secondary);
-  margin: 0 0 0.75rem;
-  cursor: pointer;
-}
-
 .dz-history-list {
   list-style: none;
   margin: 0 0 0.75rem;

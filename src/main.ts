@@ -6,13 +6,10 @@
 import { createController } from "../packages/shared-ui/src/controller.ts";
 import {
   HISTORY_KEY_WEBSITE,
-  HISTORY_OPTIN_KEY_WEBSITE,
   clearHistory as clearHistoryStore,
   loadHistory as loadHistoryStore,
-  loadHistoryOptIn,
   pushHistory,
   saveHistory as saveHistoryStore,
-  saveHistoryOptIn,
   toHistoryEntry,
 } from "../packages/shared-ui/src/history.ts";
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
@@ -317,8 +314,7 @@ let resultBlobUrl: string | null = null;
 let jobPaused = false;
 
 // Recent-jobs history (todo 5.2): local-only ledger, newest first, at most
-// 20 entries. Only a redacted origin plus a path hash persists by default;
-// the full URL persists only for non-sensitive URLs when the user opts in.
+// 20 entries. Only a redacted origin plus a path hash persists.
 const memoryHistoryFallback = new Map<string, string>();
 const webHistoryStore = {
   getItem(key: string): string | null {
@@ -354,15 +350,13 @@ const webHistoryStore = {
   },
 };
 let webHistory: Array<HistoryEntry> = loadHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE);
-let webHistoryOptIn = loadHistoryOptIn(webHistoryStore, HISTORY_OPTIN_KEY_WEBSITE);
 
 function recordWebHistory(url: string, width: number, height: number, format: string): void {
-  const entry = toHistoryEntry(url, { width, height, format, at: Date.now() }, webHistoryOptIn);
+  const entry = toHistoryEntry(url, { width, height, format, at: Date.now() });
   if (!entry) return;
   webHistory = pushHistory(webHistory, entry);
   saveHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE, webHistory);
   viewCtx.history = [...webHistory];
-  viewCtx.historyOptIn = webHistoryOptIn;
 }
 
 // Website single-queue (todo 5.3): enqueue while a job runs, sequential. The
@@ -1875,7 +1869,6 @@ let viewCtx: ViewContext = {
   originClean: true,
   initialUrl: undefined,
   history: [...webHistory],
-  historyOptIn: webHistoryOptIn,
 };
 
 function update(): void {
@@ -2064,52 +2057,10 @@ function update(): void {
           // Handoff navigation must never break display.
         }
       },
-      onOpenHistory(url: string) {
-        if (isLocalFileUrl(url)) {
-          viewCtx.initialUrl = url;
-          viewCtx.sourceUrl = url;
-          viewCtx.desktopHandoffUrl = undefined;
-          controller.dispatch(
-            nextEvent("fail", {
-              error: {
-                code: "INVALID_URL",
-                category: "validation",
-                retryable: false,
-                message: "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
-                transport: "direct",
-                phase: "discovery",
-                detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
-              },
-            }) as never,
-          );
-          update();
-          return;
-        }
-        if (!isAllowedSourceUrl(url)) return;
-        submitQueuedUrl(url);
-      },
       onClearHistory() {
         webHistory = [];
         clearHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE);
         viewCtx.history = [];
-        update();
-      },
-      onToggleHistoryOptIn(enabled: boolean) {
-        webHistoryOptIn = enabled === true;
-        saveHistoryOptIn(webHistoryStore, HISTORY_OPTIN_KEY_WEBSITE, webHistoryOptIn);
-        if (!webHistoryOptIn) {
-          webHistory = webHistory.map((entry) => ({
-            origin: entry.origin,
-            pathHash: entry.pathHash,
-            ...(typeof entry.width === "number" ? { width: entry.width } : {}),
-            ...(typeof entry.height === "number" ? { height: entry.height } : {}),
-            ...(typeof entry.format === "string" ? { format: entry.format } : {}),
-            at: entry.at,
-          }));
-          saveHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE, webHistory);
-        }
-        viewCtx.history = [...webHistory];
-        viewCtx.historyOptIn = webHistoryOptIn;
         update();
       },
     },

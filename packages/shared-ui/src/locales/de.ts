@@ -200,13 +200,12 @@ export const de = {
   "view.job.countsFull": "{current} von {total} Kacheln",
   "view.job.countsElapsed": "{current} von {total} Kacheln · {elapsed} vergangen",
   "view.job.elapsedOnly": "{elapsed} vergangen",
-  // Recent-jobs history (todo 5.2): local-only ledger with one-click reopen.
+  // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Zuletzt gespeicherte Bilder",
   "view.history.empty": "Noch keine gespeicherten Bilder. Gespeicherte Bilder erscheinen hier.",
   "view.history.localOnly": "Nur auf diesem Gerat behalten.",
   "view.history.open": "Erneut offnen",
   "view.history.clear": "Verlauf loschen",
-  "view.history.optIn": "Volle Adressen fuer einmaliges Wiederholen behalten (nur unbedenkliche)",
   "view.history.sensitiveNote": "Adresse aus Datenschutz verborgen",
   "view.history.dims": "{w} mal {h} Pixel",
   // Failure "What happened" explainer.

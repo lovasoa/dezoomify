@@ -200,13 +200,12 @@ export const fr = {
   "view.job.countsFull": "{current} tuiles sur {total}",
   "view.job.countsElapsed": "{current} tuiles sur {total} · {elapsed} ecoulees",
   "view.job.elapsedOnly": "{elapsed} ecoulees",
-  // Recent-jobs history (todo 5.2): local-only ledger with one-click reopen.
+  // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Images recentes",
   "view.history.empty": "Aucune image recente pour le moment. Les images enregistrees apparaissent ici.",
   "view.history.localOnly": "Conserve uniquement sur cet appareil.",
   "view.history.open": "Rouvrir",
   "view.history.clear": "Effacer l historique",
-  "view.history.optIn": "Conserver les adresses completes pour rouvrir en un clic (pages ordinaires seulement)",
   "view.history.sensitiveNote": "Adresse masquee pour confidentialite",
   "view.history.dims": "{w} par {h} pixels",
   // Failure "What happened" explainer.

@@ -305,13 +305,12 @@ const en = {
   "view.job.countsFull": "{current} of {total} tiles",
   "view.job.countsElapsed": "{current} of {total} tiles · {elapsed} elapsed",
   "view.job.elapsedOnly": "{elapsed} elapsed",
-  // Recent-jobs history (todo 5.2): local-only ledger with one-click reopen.
+  // Recent-jobs history (todo 5.2): local-only ledger.
   "view.history.title": "Recent pictures",
   "view.history.empty": "No recent pictures yet. Saved pictures appear here.",
   "view.history.localOnly": "Kept only on this device.",
   "view.history.open": "Open again",
   "view.history.clear": "Clear history",
-  "view.history.optIn": "Keep full addresses for one-click reopen (non-sensitive only)",
   "view.history.sensitiveNote": "Address hidden for privacy",
   "view.history.dims": "{w} by {h} pixels",
   // Failure "What happened" explainer.

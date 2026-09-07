@@ -20,15 +20,12 @@
 // PartialKeep), request_destination, and requestHandoff.
 import {
   HISTORY_KEY_DESKTOP,
-  HISTORY_OPTIN_KEY_DESKTOP,
   clearHistory as clearHistoryStore,
   createController,
   loadHistory as loadHistoryStore,
-  loadHistoryOptIn,
   pushHistory,
   renderView,
   saveHistory as saveHistoryStore,
-  saveHistoryOptIn,
   t,
   toHistoryEntry,
 } from "@dezoomify/shared-ui";
@@ -178,9 +175,8 @@ function desktopQueueEnabled(): boolean {
 }
 
 // Recent-jobs history (todo 5.2): local-only ledger on this device, newest
-// first, at most 20 entries. Only a redacted origin plus a path hash
-// persists by default; the full URL persists only for non-sensitive URLs
-// when the user opts in. Credentials never enter history.
+// first, at most 20 entries. Only a redacted origin plus a path hash persists.
+// Credentials never enter history.
 const desktopMemoryFallback = new Map<string, string>();
 const desktopHistoryStore = {
   getItem(key: string): string | null {
@@ -225,7 +221,6 @@ const desktopHistoryStore = {
   },
 };
 let desktopHistory: Array<HistoryEntry> = loadHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP);
-let desktopHistoryOptIn = loadHistoryOptIn(desktopHistoryStore, HISTORY_OPTIN_KEY_DESKTOP);
 
 function recordDesktopHistory(url: string, width?: number, height?: number, format?: string): void {
   const entry = toHistoryEntry(
@@ -236,7 +231,6 @@ function recordDesktopHistory(url: string, width?: number, height?: number, form
       ...(typeof format === "string" ? { format } : {}),
       at: Date.now(),
     },
-    desktopHistoryOptIn,
   );
   if (!entry) return;
   desktopHistory = pushHistory(desktopHistory, entry);
@@ -2396,28 +2390,9 @@ function update() {
       onOpenExternalLink(url: string) {
         handleOpenExternalLink(url);
       },
-      onOpenHistory(url: string) {
-        handleSubmitUrl(url);
-      },
       onClearHistory() {
         desktopHistory = [];
         clearHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP);
-        update();
-      },
-      onToggleHistoryOptIn(enabled: boolean) {
-        desktopHistoryOptIn = enabled === true;
-        saveHistoryOptIn(desktopHistoryStore, HISTORY_OPTIN_KEY_DESKTOP, desktopHistoryOptIn);
-        if (!desktopHistoryOptIn) {
-          desktopHistory = desktopHistory.map((entry) => ({
-            origin: entry.origin,
-            pathHash: entry.pathHash,
-            ...(typeof entry.width === "number" ? { width: entry.width } : {}),
-            ...(typeof entry.height === "number" ? { height: entry.height } : {}),
-            ...(typeof entry.format === "string" ? { format: entry.format } : {}),
-            at: entry.at,
-          }));
-          saveHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP, desktopHistory);
-        }
         update();
       },
     },
@@ -2434,7 +2409,6 @@ function update() {
       ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
       ...(auxChoice ? { imageChoice: auxChoice } : {}),
       history: [...desktopHistory],
-      historyOptIn: desktopHistoryOptIn,
     },
   );
   ensureDesktopAuxPanel();
