@@ -40,9 +40,9 @@ Skip it for internal refactors with no user-visible change.
 - A filename stem is the page identity and its web address
   (`help/<stem>.html`). Renaming a page breaks links from error messages
   and other apps; update every reference in the same change.
-- Write in the constrained markdown the help generator understands:
-  headings (`#`–`###`), paragraphs, bullet and numbered lists, tables,
-  fenced code, blockquotes, links, `**bold**`, and `code`.
+- Write in standard Markdown (headings, paragraphs, bullet and numbered
+  lists, tables, fenced code, blockquotes, links, bold, and code). The
+  help generator renders it with the markdown-it dependency.
 - Links between pages are relative to this directory (`./website.md`);
   links to site pages use the same `./` form (`./index.html`). The
   generator rewrites both for the published pages.

@@ -139,10 +139,29 @@ pub fn test_web(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Help pages render through the markdown-it workspace dependency, so the
+/// workspace must be installed first (`pnpm install --frozen-lockfile`).
+/// Fail closed here instead of surfacing a bare module-not-found from
+/// node; the install itself stays an explicit workflow step, never an
+/// implicit network fetch inside the deterministic test.
+fn ensure_help_deps() -> Result<(), String> {
+    if !super::repo_root()
+        .join("node_modules/markdown-it/package.json")
+        .is_file()
+    {
+        return Err(
+            "workspace dependencies missing (node_modules/markdown-it): run `pnpm install --frozen-lockfile` first"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// Regenerate the untracked web artifacts (browser JS mirrors, help pages)
 /// the node test suites read. The generated files are never committed:
 /// deployments build them via `scripts/build-site.mjs`.
 fn generate_web_artifacts() -> Result<(), String> {
+    ensure_help_deps()?;
     let root = super::repo_root();
     for script in ["scripts/sync-web-js.mjs", "scripts/build-help.mjs"] {
         let status = Command::new("node")
@@ -257,6 +276,7 @@ fn dir_size(dir: &std::path::Path) -> Result<u64, String> {
 /// same script runs in the website-deploy GitHub Actions workflow, so
 /// local builds and deployments cannot diverge.
 fn build_site(no_wasm: bool) -> Result<(), String> {
+    ensure_help_deps()?;
     let root = super::repo_root();
     let mut cmd = Command::new("node");
     cmd.arg("scripts/build-site.mjs");

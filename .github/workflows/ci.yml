@@ -38,6 +38,8 @@ jobs:
         with:
           version: 9.12.0 # must match packageManager in package.json
           standalone: true
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml

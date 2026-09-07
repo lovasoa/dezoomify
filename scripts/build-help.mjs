@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import MarkdownIt from "markdown-it";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const srcDir = path.join(root, "docs", "user");
@@ -46,129 +47,47 @@ function rewriteHref(href) {
   return { href };
 }
 
-function renderInline(text) {
-  let s = escapeHtml(text);
-  const codes = [];
-  s = s.replace(/`([^`]+)`/g, (_, code) => {
-    codes.push(code);
-    return `\u0000${codes.length - 1}\u0000`;
-  });
-  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, href) => {
-    const { href: out, external } = rewriteHref(href);
-    const attrs = external ? ' target="_blank" rel="noopener"' : "";
-    return `<a href="${out}"${attrs}>${label}</a>`;
-  });
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`);
-}
+// Markdown rendering is the markdown-it dependency (deterministic:
+// same inputs produce byte-identical output). Headings get stable ids
+// from slugify so error messages and apps can deep-link to
+// help/<page>.html#<heading-slug>; links are rewritten for publication
+// under /help/ with external targets opened in a new tab.
+const mdIt = new MarkdownIt({ html: false, linkify: false, typographer: false });
 
-// Minimal deterministic markdown: headings, paragraphs, lists, tables,
-// fenced code, blockquotes, hr. See docs/user/README.md for the contract.
-function renderMarkdown(md) {
-  const lines = md.split("\n");
-  const out = [];
-  let i = 0;
-  let para = [];
-  const flushPara = () => {
-    if (para.length) {
-      out.push(`<p>${renderInline(para.join(" "))}</p>`);
-      para = [];
-    }
-  };
-  while (i < lines.length) {
-    const line = lines[i];
-    if (/^```/.test(line)) {
-      flushPara();
-      const body = [];
-      i += 1;
-      while (i < lines.length && !/^```/.test(lines[i])) {
-        body.push(lines[i]);
-        i += 1;
-      }
-      out.push(`<pre><code>${escapeHtml(body.join("\n"))}\n</code></pre>`);
-      i += 1;
-      continue;
-    }
-    const h = line.match(/^(#{1,4})\s+(.*)$/);
-    if (h) {
-      flushPara();
-      const level = h[1].length;
-      const text = h[2].trim();
-      const id = slugify(text);
-      out.push(`<h${level} id="${id}">${renderInline(text)}</h${level}>`);
-      i += 1;
-      continue;
-    }
-    if (/^\s*$/.test(line)) {
-      flushPara();
-      i += 1;
-      continue;
-    }
-    if (/^-{3,}$/.test(line.trim())) {
-      flushPara();
-      out.push("<hr>");
-      i += 1;
-      continue;
-    }
-    if (/^>/.test(line)) {
-      flushPara();
-      const body = [];
-      while (i < lines.length && /^>/.test(lines[i])) {
-        body.push(lines[i].replace(/^>\s?/, ""));
-        i += 1;
-      }
-      out.push(`<blockquote><p>${renderInline(body.join(" "))}</p></blockquote>`);
-      continue;
-    }
-    if (/^\|/.test(line)) {
-      flushPara();
-      const rows = [];
-      while (i < lines.length && /^\|/.test(lines[i])) {
-        rows.push(
-          lines[i]
-            .trim()
-            .replace(/^\|/, "")
-            .replace(/\|$/, "")
-            .split("|")
-            .map((c) => c.trim()),
-        );
-        i += 1;
-      }
-      const [head, , ...body] = rows;
-      out.push("<table><thead><tr>" + head.map((c) => `<th>${renderInline(c)}</th>`).join("") + "</tr></thead><tbody>");
-      for (const row of body) {
-        out.push("<tr>" + row.map((c) => `<td>${renderInline(c)}</td>`).join("") + "</tr>");
-      }
-      out.push("</tbody></table>");
-      continue;
-    }
-    const ul = line.match(/^[-*]\s+(.*)$/);
-    if (ul) {
-      flushPara();
-      const items = [];
-      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^[-*]\s+/, ""));
-        i += 1;
-      }
-      out.push("<ul>" + items.map((t) => `<li>${renderInline(t)}</li>`).join("") + "</ul>");
-      continue;
-    }
-    const ol = line.match(/^\d+\.\s+(.*)$/);
-    if (ol) {
-      flushPara();
-      const items = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\d+\.\s+/, ""));
-        i += 1;
-      }
-      out.push("<ol>" + items.map((t) => `<li>${renderInline(t)}</li>`).join("") + "</ol>");
-      continue;
-    }
-    para.push(line.trim());
-    i += 1;
+const defaultHeadingOpen = mdIt.renderer.rules.heading_open;
+mdIt.renderer.rules.heading_open = (tokens, idx, options, env, self) => {
+  const next = tokens[idx + 1];
+  let title = "";
+  if (next && next.type === "inline" && Array.isArray(next.children)) {
+    title = next.children
+      .filter((t) => t.type === "text" || t.type === "code_inline")
+      .map((t) => t.content)
+      .join(" ");
+  } else if (next && next.type === "inline") {
+    title = next.content;
   }
-  flushPara();
-  return out.join("\n");
+  tokens[idx].attrSet("id", slugify(title));
+  if (defaultHeadingOpen) return defaultHeadingOpen(tokens, idx, options, env, self);
+  return self.renderToken(tokens, idx, options);
+};
+
+const defaultLinkOpen = mdIt.renderer.rules.link_open;
+mdIt.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const href = tokens[idx].attrGet("href");
+  if (href) {
+    const { href: out, external } = rewriteHref(href);
+    tokens[idx].attrSet("href", out);
+    if (external) {
+      tokens[idx].attrSet("target", "_blank");
+      tokens[idx].attrSet("rel", "noopener");
+    }
+  }
+  if (defaultLinkOpen) return defaultLinkOpen(tokens, idx, options, env, self);
+  return self.renderToken(tokens, idx, options);
+};
+
+function renderMarkdown(src) {
+  return mdIt.render(src).trim();
 }
 
 const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 355 355" width="20" height="20" aria-hidden="true" style="vertical-align: middle;">
