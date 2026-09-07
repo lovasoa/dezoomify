@@ -411,3 +411,71 @@ test("hermetic desktop job: submit, choose, save, deep-link confirm, cancel", { 
     rmSync(work, { recursive: true, force: true });
   }
 });
+
+test("desktop settings: outputFormat is a validated first-class persisted setting", { timeout: 60000 }, async () => {
+  const settings = await import("../src/settings.ts");
+  // Registry parity: the picker (NATIVE_FORMATS) plus the default that
+  // seeds the encoder choice at boot.
+  assert.deepEqual([...settings.OUTPUT_FORMATS].sort(), ["jpeg", "png", "tiff"]);
+  assert.equal(settings.DEFAULT_OUTPUT_FORMAT, "png");
+  assert.equal(settings.defaultSettings().outputFormat, "png");
+  // Validation bounds: known encoders pass (case-insensitive, snake_case
+  // alias accepted); missing/null falls back to the PNG default.
+  for (const ok of ["png", "jpeg", "tiff", "PNG", "Jpeg"]) {
+    const validated = settings.validateSettings({ outputFormat: ok });
+    assert.equal(validated.ok, true, `${ok} validates`);
+    assert.equal(validated.settings.outputFormat, ok.toLowerCase());
+  }
+  assert.equal(
+    settings.validateSettings({ outputFormat: "jpeg", output_format: "png" }).settings.outputFormat,
+    "jpeg",
+    "camelCase wins over the alias",
+  );
+  assert.equal(settings.validateSettings({}).settings.outputFormat, "png", "missing format defaults to PNG");
+  assert.equal(
+    settings.validateSettings({ outputFormat: null }).settings.outputFormat,
+    "png",
+    "null format defaults to PNG",
+  );
+  // Anything else fails closed with no settings (never a silent fallback).
+  for (const bad of ["exe", "webp", "zif", "iiif-dir", "jpg", "", 42]) {
+    const validated = settings.validateSettings({ outputFormat: bad });
+    assert.equal(validated.ok, false, `${JSON.stringify(bad)} fails closed`);
+    assert.equal(validated.settings, null);
+  }
+  // Reload round-trip through an isolated storage stub: save then load
+  // reads back the same choice, an invalid draft keeps the last good
+  // payload, and corrupt storage fails closed to the PNG default.
+  const savedStorage = globalThis.localStorage;
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => {
+      store.set(key, String(value));
+    },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+  };
+  try {
+    assert.deepEqual(settings.saveSettings({ ...settings.defaultSettings(), outputFormat: "jpeg" }), []);
+    assert.equal(settings.loadSettings().outputFormat, "jpeg", "encoder choice survives reload");
+    assert.deepEqual(settings.saveSettings({ ...settings.defaultSettings(), outputFormat: "tiff" }), []);
+    assert.equal(settings.loadSettings().outputFormat, "tiff", "encoder change survives reload");
+    const before = settings.loadSettings();
+    assert.ok(
+      settings.saveSettings({ ...settings.defaultSettings(), outputFormat: "exe" }).length > 0,
+      "invalid draft reports errors",
+    );
+    assert.equal(
+      settings.loadSettings().outputFormat,
+      before.outputFormat,
+      "invalid draft keeps the last good payload",
+    );
+    store.set(settings.SETTINGS_STORAGE_KEY, "{corrupt");
+    assert.equal(settings.loadSettings().outputFormat, "png", "corrupt storage falls back to PNG");
+  } finally {
+    if (savedStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = savedStorage;
+  }
+});

@@ -25,7 +25,7 @@ export function getEffectiveSettings(
   if (typeof document === "undefined" || !root) {
     const validated = validateSettings({
       outputDir: fallback.outputDir,
-      outputFormat: (fallback as unknown as { outputFormat?: string }).outputFormat,
+      outputFormat: fallback.outputFormat,
       compression: fallback.compression,
       maxWidth: fallback.maxWidth,
       maxHeight: fallback.maxHeight,
@@ -51,7 +51,7 @@ export function getEffectiveSettings(
     // The output format picker lives in the aux panel (radio group), not in
     // this settings form: preserve the persisted choice here so saving
     // download settings never clobbers the chosen encoder.
-    outputFormat: (fallback as unknown as { outputFormat?: string }).outputFormat,
+    outputFormat: fallback.outputFormat,
     compression: readInput("dz-settings-compression"),
     maxWidth: readInput("dz-settings-max-width"),
     maxHeight: readInput("dz-settings-max-height"),

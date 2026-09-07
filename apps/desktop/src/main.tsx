@@ -238,13 +238,10 @@ function recordDesktopHistory(url: string, width?: number, height?: number, form
 }
 
 // Native output formats (todo 4.4, todo 5.1): single source is
-// NATIVE_FORMATS in desktopIntegration.ts
-// (png/jpeg/tiff/zif/webp/iiif-dir), matching SUPPORTED_FORMATS in
-// commands.rs and the tauri_shell.rs dialog filters. The 6-radio selector
-// below writes grantedFormat (file encoders plus the `iiif-dir` tree mode);
-// requestOutputAndResume reads it so the Save and choose-output paths never
-// hard-code a format. `iiif-dir` suggests a `.iiif` name (extensionless also
-// validates natively) and the shell writes the tile tree at that path.
+// NATIVE_FORMATS in desktopIntegration.ts (png/jpeg/tiff), a subset of
+// SUPPORTED_FORMATS in commands.rs and the tauri_shell.rs dialog filters.
+// The 3-radio selector below writes grantedFormat; requestOutputAndResume
+// reads it so the Save and choose-output paths never hard-code a format.
 function normalizeNativeFormat(value: unknown): NativeFormat {
   if (typeof value === "string") {
     const lower = value.toLowerCase();
@@ -266,9 +263,10 @@ function suggestedNameForFormat(
 
 // Minimal settings (task 3.5): persisted locally, validated with fail-closed
 // bounds, and sent on the next start_job. Header values never enter logs;
-// use describeSettingsForLog for any diagnostics. Todo 5.1: the persisted
-// outputFormat seeds the encoder picker so ZIF/WebP/`iiif-dir` survive
-// reloads; download settings still travel via settingsToInvokeArgs only.
+// use describeSettingsForLog for any diagnostics. The persisted outputFormat
+// (todo 5.1, first-class in settings.ts) seeds the encoder picker below so
+// the chosen encoder survives reloads; download settings still travel via
+// settingsToInvokeArgs only.
 let desktopSettings: DesktopSettings = loadSettings();
 grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
 
@@ -620,7 +618,9 @@ function clearJobViewState(): void {
   catalogNotice = null;
   completedPartial = false;
   completedMissing = [];
-  grantedFormat = "png";
+  // The encoder choice is a persisted preference (settings.ts outputFormat,
+  // seeded into grantedFormat at boot): a new submit must not reset it to
+  // png, or the reloaded choice would never reach the picker.
   stopHeartbeat();
 }
 
@@ -1644,10 +1644,17 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
       dispatchFail(failEnv, "OUTPUT_DENIED", t("desktop.output.deniedFallback"));
       return;
     }
+    // Adopt the granted format only when the payload names a real format
+    // id. Lifecycle texts also match this branch ("AwaitingDestination"),
+    // and normalizeNativeFormat falls back to png for anything unknown, so
+    // adopting blindly would clobber the persisted encoder choice with png
+    // on every job before the picker is even shown.
     const format = strField(payload, ["format"]) ?? detailRaw;
     if (format) {
-      const normalized = normalizeNativeFormat(format);
-      if ((NATIVE_FORMATS as readonly string[]).includes(normalized)) grantedFormat = normalized;
+      const lower = format.toLowerCase();
+      if ((NATIVE_FORMATS as readonly string[]).includes(lower)) {
+        grantedFormat = lower as NativeFormat;
+      }
     }
     if (text.indexOf("awaiting") >= 0 || text.indexOf("request-destination") >= 0) {
       if (!pendingDecision) {
@@ -1903,14 +1910,14 @@ function syncInitialUrlFromLocation(): void {
   }
 }
 
-// Output format selector (todo 4.4, todo 5.1): 6 native radios
-// (PNG/JPEG/TIFF/ZIF/WebP/IIIF folder) bound to grantedFormat. Flat flow
+// Output format selector (todo 4.4, todo 5.1): 3 native radios
+// (PNG/JPEG/TIFF, NATIVE_FORMATS) bound to grantedFormat. Flat flow
 // inside the aux panel, native inputs so Tab and screen readers work; the
-// crisp 2px focus ring comes from desktop.css. Changing a radio only updates
-// grantedFormat; requestOutputAndResume reads it when building
-// { format, suggestedName } for requestSaveDestination. The `iiif-dir` radio
-// is the directory mode: it suggests a `.iiif` name and the shell writes the
-// IIIF tile tree at that path (extensionless also validates natively).
+// crisp 2px focus ring comes from desktop.css. Changing a radio updates
+// grantedFormat and persists it via persistOutputFormat (settings.ts
+// outputFormat) so the choice survives reloads; requestOutputAndResume
+// reads grantedFormat when building { format, suggestedName } for
+// requestSaveDestination.
 function appendOutputFormatRadios(parent: HTMLElement, doc: Document): void {
   const group = doc.createElement("fieldset");
   group.id = "dz-output-format-group";

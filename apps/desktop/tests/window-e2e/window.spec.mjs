@@ -478,6 +478,7 @@ test("real window: settings persist across relaunch; invalid draft blocked", { t
         assert.equal(parsed.outputDir, outDir, "output dir round-trips in storage");
         assert.equal(parsed.compression, 42, "compression round-trips in storage");
         assert.equal(parsed.retries, 7, "retries round-trip in storage");
+        assert.equal(parsed.outputFormat, "png", "output format defaults to PNG in storage");
         firstStored = text;
         const snap = await snapshot(driver);
         assert.equal(snap.settingsError, null, "no settings error for the valid draft");
@@ -496,6 +497,7 @@ test("real window: settings persist across relaunch; invalid draft blocked", { t
         assert.equal(await panelInputValue(driver, SEL.settingsOutputDir), JSON.parse(firstStored).outputDir);
         assert.equal(await panelInputValue(driver, SEL.settingsCompression), "42");
         assert.equal(await panelInputValue(driver, SEL.settingsRetries), "7");
+        assert.equal(JSON.parse(firstStored).outputFormat, "png", "default encoder persisted");
         assert.equal(await readStoredSettingsText(driver), firstStored, "storage identical after relaunch");
         // Invalid draft via change: inline role=alert, last good kept,
         // still idle with no job.
@@ -864,6 +866,8 @@ test("real window: JPEG save pins quality 100-compression (default 95)", { timeo
         assert.equal(bytes[bytes.length - 2], 0xff, "JPEG EOI marker");
         assert.equal(bytes[bytes.length - 1], 0xd9, "JPEG EOI marker");
         reads.push(bytes);
+        const stored = await readStoredSettingsText(driver);
+        assert.equal(JSON.parse(stored).outputFormat, "jpeg", "JPEG choice persisted to storage");
         const text = redactedReport("jpeg-default", {
           scenario: "native/cli-dzi",
           origin: redactedOriginOnly(input),
@@ -881,7 +885,11 @@ test("real window: JPEG save pins quality 100-compression (default 95)", { timeo
         await submitUrl(driver, input);
         await waitFor(driver, (s) => s.jobSection, 60000, "job section");
         await waitFor(driver, (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Choose output")), 60000, "destination request");
-        await driver.findElement({ css: 'input[name="dz-output-format"][value="jpeg"]' }).click();
+        // Reload round-trip: step 1 persisted the JPEG choice on the shared
+        // profile, so the relaunched picker seeds JPEG without a click.
+        const jpegRadio = await driver.findElement({ css: 'input[name="dz-output-format"][value="jpeg"]' });
+        assert.equal(await jpegRadio.isSelected(), true, "persisted JPEG choice seeds the picker after relaunch");
+        await jpegRadio.click();
         assert.equal(await clickChooseOutput(driver), true, "choose-output action clicked");
         const terminal = await waitFor(driver, (s) => s.completed || s.error, 150000, "jpeg terminal");
         assert.equal(terminal.error, false, "no error section on the recompressed save");

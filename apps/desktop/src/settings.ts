@@ -2,6 +2,7 @@
 //
 // Fields:
 // - output dir (native dir picker; text input plus Browse button)
+// - output format (encoder picker: png/jpeg/tiff, default png)
 // - compression 0-100, default 5 (JPEG quality 100-x, PNG tier)
 // - max-width / max-height caps, optional positive ints
 // - retries, default 3 (0 allowed = no retries), bounded 0-100
@@ -18,6 +19,7 @@
 
 export interface DesktopSettings {
   readonly outputDir: string | null;
+  readonly outputFormat: DesktopOutputFormat;
   readonly compression: number;
   readonly maxWidth: number | null;
   readonly maxHeight: number | null;
@@ -27,6 +29,12 @@ export interface DesktopSettings {
 }
 
 export const SETTINGS_STORAGE_KEY = "dezoomify.desktop.settings.v1" as const;
+// Encoder picker choices. Must stay identical to NATIVE_FORMATS in
+// desktopIntegration.ts (the radio group) and a subset of SUPPORTED_FORMATS
+// in apps/desktop/src-tauri/src/commands.rs (the grant gate).
+export type DesktopOutputFormat = "png" | "jpeg" | "tiff";
+export const OUTPUT_FORMATS: ReadonlyArray<DesktopOutputFormat> = ["png", "jpeg", "tiff"] as const;
+export const DEFAULT_OUTPUT_FORMAT: DesktopOutputFormat = "png" as const;
 export const DEFAULT_COMPRESSION = 5 as const;
 export const DEFAULT_RETRIES = 3 as const;
 export const MAX_RETRIES = 100 as const;
@@ -37,6 +45,7 @@ export const MAX_HEADERS = 32 as const;
 export function defaultSettings(): DesktopSettings {
   return {
     outputDir: null,
+    outputFormat: DEFAULT_OUTPUT_FORMAT,
     compression: DEFAULT_COMPRESSION,
     maxWidth: null,
     maxHeight: null,
@@ -161,6 +170,18 @@ function parseOptionalDimension(
   return undefined;
 }
 
+function parseOutputFormat(raw: unknown, errors: Array<string>): DesktopOutputFormat | undefined {
+  if (raw === undefined || raw === null) return DEFAULT_OUTPUT_FORMAT;
+  if (typeof raw === "string") {
+    const lower = raw.trim().toLowerCase();
+    if ((OUTPUT_FORMATS as ReadonlyArray<string>).includes(lower)) {
+      return lower as DesktopOutputFormat;
+    }
+  }
+  errors.push("output format must be one of png, jpeg, tiff");
+  return undefined;
+}
+
 function parseCompression(raw: unknown, errors: Array<string>): number | undefined {
   if (raw === undefined) return DEFAULT_COMPRESSION;
   let n: number | null = null;
@@ -254,6 +275,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
     return { ok: false, settings: null, errors: ["settings must be an object"] };
   }
   const obj = raw as Record<string, unknown>;
+  const outputFormat = parseOutputFormat(obj["outputFormat"] ?? obj["output_format"], errors);
   const compression = parseCompression(obj["compression"], errors);
   const retries = parseRetries(obj["retries"], errors);
   const maxWidth = parseOptionalDimension(obj["maxWidth"] ?? obj["max_width"], "max-width", errors);
@@ -266,6 +288,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
   );
   const headers = parseHeadersValue(obj["headers"], errors);
   if (
+    outputFormat === undefined ||
     compression === undefined ||
     retries === undefined ||
     maxWidth === undefined ||
@@ -283,6 +306,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
     ok: true,
     settings: {
       outputDir,
+      outputFormat,
       compression,
       maxWidth,
       maxHeight,
@@ -349,6 +373,7 @@ export function loadSettings(): DesktopSettings {
 export function saveSettings(settings: DesktopSettings): Array<string> {
   const validated = validateSettings({
     outputDir: settings.outputDir,
+    outputFormat: settings.outputFormat,
     compression: settings.compression,
     maxWidth: settings.maxWidth,
     maxHeight: settings.maxHeight,
@@ -388,7 +413,7 @@ export function describeSettingsForLog(settings: DesktopSettings): string {
   const outputDir = settings.outputDir === null ? "unset" : "set";
   const cacheDir = settings.cacheDir === null ? "unset" : "set";
   return (
-    `compression=${settings.compression} retries=${settings.retries} ` +
+    `output_format=${settings.outputFormat} compression=${settings.compression} retries=${settings.retries} ` +
     `max_width=${maxWidth} max_height=${maxHeight} output_dir=${outputDir} ` +
     `cache_dir=${cacheDir} headers=${names.length} [${names.join(",")}]`
   );
