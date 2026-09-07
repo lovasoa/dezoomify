@@ -4,6 +4,18 @@
 // with automatic eligible metadata-proxy fallback -> tile acquisition -> canvas
 // assembly -> real PNG save. Nothing here fabricates progress or completion.
 import { createController } from "../packages/shared-ui/src/controller.ts";
+import {
+  HISTORY_KEY_WEBSITE,
+  HISTORY_OPTIN_KEY_WEBSITE,
+  clearHistory as clearHistoryStore,
+  loadHistory as loadHistoryStore,
+  loadHistoryOptIn,
+  pushHistory,
+  saveHistory as saveHistoryStore,
+  saveHistoryOptIn,
+  toHistoryEntry,
+} from "../packages/shared-ui/src/history.ts";
+import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.ts";
 import type { ViewContext } from "../packages/shared-ui/src/view.ts";
 import { suggestedNameFor } from "../packages/shared-ui/src/saveName.ts";
@@ -25,6 +37,271 @@ import {
 } from "../packages/browser-runtime/src/session.ts";
 import { probeLimits, safeArea } from "../packages/browser-runtime/src/limits.ts";
 import type { BrowserLimits } from "../packages/browser-runtime/src/types.ts";
+import {
+  cancelAllWeb,
+  createWebQueue,
+  enqueueWebQueue,
+  finishActiveWebEntry,
+  isWebQueueAvailable,
+  summarizeWebQueue,
+} from "../packages/browser-runtime/src/queue.ts";
+import {
+  createPreviewControls,
+} from "../packages/browser-runtime/src/preview.ts";
+import {
+  PREVIEW_MAX_SCALE,
+  PREVIEW_MIN_SCALE,
+  PREVIEW_ZOOM_STEP,
+  clampPreviewScale,
+} from "../packages/browser-runtime/src/preview.ts";
+import {
+  clampCrop,
+  cropByteEstimate,
+  cropSizeLabel,
+  parseCrop,
+  screenRectToLevel,
+  subsetPlanForCrop,
+} from "../packages/browser-runtime/src/crop.ts";
+import type { CropRect } from "../packages/browser-runtime/src/crop.ts";
+
+// Re-export the shared browser limits plus the preview transform helpers for
+// existing website test imports (`test/pick-level.test.mjs` and
+// `test/preview.test.mjs` import from `src/main.ts`).
+export {
+  PREVIEW_MAX_SCALE,
+  PREVIEW_MIN_SCALE,
+  PREVIEW_ZOOM_STEP,
+  clampPreviewScale,
+};
+
+const preview = createPreviewControls();
+
+// Crop / region selection (todo 5.4): drag-rect on the preview plus exact
+// numeric inputs. Transform-only and tainted-safe: the drag maps screen
+// pixels to level pixels through the preview transform (scale/tx/ty) and
+// subsets the tile plan (`subsetPlanForCrop`); no pixel reads, no
+// `getImageData`/`toBlob`/`toDataURL` for selection. Empty or
+// out-of-bounds crops fail before acquisition with a typed error naming
+// the fix. `pendingCrop` applies to the next run; Apply re-runs the last
+// URL with the subset plan, Clear restores the full image.
+let pendingCrop: CropRect | null = null;
+let cropMode = false;
+let lastJobUrl: string | null = null;
+let lastCanvasSize: { x: number; y: number } | null = null;
+
+function readCropInputs(): CropRect | null {
+  if (typeof document === "undefined") return null;
+  try {
+    const get = (id: string): string => {
+      const el = document.getElementById(id) as HTMLInputElement | null;
+      return el && typeof el.value === "string" ? el.value.trim() : "";
+    };
+    const xText = get("crop-x");
+    const yText = get("crop-y");
+    const wText = get("crop-w");
+    const hText = get("crop-h");
+    if (xText === "" && yText === "" && wText === "" && hText === "") return null;
+    if (xText === "" || yText === "" || wText === "" || hText === "") return null;
+    return parseCrop(`${xText},${yText},${wText},${hText}`);
+  } catch {
+    return null;
+  }
+}
+
+function writeCropInputs(rect: CropRect | null): void {
+  if (typeof document === "undefined") return;
+  try {
+    const set = (id: string, value: string): void => {
+      const el = document.getElementById(id) as HTMLInputElement | null;
+      if (el) el.value = value;
+    };
+    set("crop-x", rect ? String(rect.x) : "");
+    set("crop-y", rect ? String(rect.y) : "");
+    set("crop-w", rect ? String(rect.w) : "");
+    set("crop-h", rect ? String(rect.h) : "");
+  } catch {
+    // Crop inputs are best-effort.
+  }
+}
+
+function updateCropEstimate(): void {
+  if (typeof document === "undefined") return;
+  try {
+    const el = document.getElementById("crop-estimate");
+    if (!el) return;
+    const rect = readCropInputs();
+    if (!rect) {
+      el.textContent = "";
+      return;
+    }
+    const canvas = lastCanvasSize;
+    const clamped = canvas ? clampCrop(rect, canvas) : rect;
+    if (!clamped) {
+      el.textContent = "That region is empty or outside the image.";
+      return;
+    }
+    const bytes = cropByteEstimate(clamped);
+    const approx = bytes !== null && bytes >= 1048576 ? ` (~${(bytes / 1048576).toFixed(1)} MiB)` : "";
+    el.textContent = `Region: ${cropSizeLabel(clamped)}${approx}`;
+  } catch {
+    // Estimate must never break the job.
+  }
+}
+
+function updateCropOverlay(rect: CropRect | null): void {
+  if (typeof document === "undefined") return;
+  try {
+    const overlay = document.getElementById("crop-overlay");
+    const box = document.getElementById("crop-rect");
+    const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
+    if (!overlay || !box || !canvas) return;
+    if (!rect || !lastCanvasSize) {
+      box.hidden = true;
+      return;
+    }
+    // Map level pixels back to screen pixels through the preview transform
+    // for the overlay rect (inverse of `screenRectToLevel`).
+    let scale = 1;
+    let tx = 0;
+    let ty = 0;
+    try {
+      const t = preview.getTransform();
+      if (Number.isFinite(t.scale) && t.scale > 0) scale = t.scale;
+      if (Number.isFinite(t.tx)) tx = t.tx;
+      if (Number.isFinite(t.ty)) ty = t.ty;
+    } catch {
+      // Identity fallback keeps the drag honest without the transform.
+    }
+    const canvasRect = canvas.getBoundingClientRect();
+    void canvasRect;
+    box.hidden = false;
+    box.style.left = `${rect.x * scale + tx}px`;
+    box.style.top = `${rect.y * scale + ty}px`;
+    box.style.width = `${rect.w * scale}px`;
+    box.style.height = `${rect.h * scale}px`;
+    void overlay;
+  } catch {
+    // Overlay must never break the job.
+  }
+}
+
+function setCropMode(enabled: boolean): void {
+  cropMode = enabled;
+  if (typeof document === "undefined") return;
+  try {
+    const toggle = document.getElementById("preview-crop-toggle");
+    if (toggle) toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+    const panel = document.getElementById("crop-panel");
+    if (panel) (panel as HTMLElement & { hidden: boolean }).hidden = false;
+    const overlay = document.getElementById("crop-overlay");
+    if (overlay) (overlay as HTMLElement & { hidden: boolean }).hidden = !enabled;
+    const canvas = document.getElementById("rendering-canvas");
+    if (canvas) (canvas as HTMLElement).style.cursor = enabled ? "crosshair" : "";
+  } catch {
+    // Crop mode toggle must never break the job.
+  }
+}
+
+function initCropControls(): void {
+  if (typeof document === "undefined") return;
+  try {
+    document.getElementById("preview-crop-toggle")?.addEventListener("click", () => {
+      setCropMode(!cropMode);
+    });
+    for (const id of ["crop-x", "crop-y", "crop-w", "crop-h"]) {
+      document.getElementById(id)?.addEventListener("input", () => {
+        try {
+          const rect = readCropInputs();
+          pendingCrop = rect;
+          updateCropEstimate();
+          updateCropOverlay(rect);
+        } catch {
+          // Input handling must never throw.
+        }
+      });
+    }
+    document.getElementById("crop-apply")?.addEventListener("click", () => {
+      const rect = readCropInputs();
+      if (!rect) return;
+      pendingCrop = rect;
+      updateCropEstimate();
+      updateCropOverlay(rect);
+      if (lastJobUrl) void runJob(lastJobUrl);
+    });
+    document.getElementById("crop-clear")?.addEventListener("click", () => {
+      pendingCrop = null;
+      writeCropInputs(null);
+      updateCropEstimate();
+      updateCropOverlay(null);
+      if (lastJobUrl) void runJob(lastJobUrl);
+    });
+    // Drag-rect on the preview overlay: pointer capture, screen-to-level
+    // through the preview transform, live inputs plus estimate. No pixel
+    // reads, only plan arithmetic.
+    const overlay = document.getElementById("crop-overlay");
+    const canvas = document.getElementById("rendering-canvas");
+    if (overlay && canvas) {
+      let dragging = false;
+      let startX = 0;
+      let startY = 0;
+      overlay.addEventListener("pointerdown", (ev) => {
+        if (!cropMode) return;
+        const e = ev as PointerEvent;
+        dragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        try {
+          (overlay as Element & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(e.pointerId ?? 0);
+        } catch {
+          // Best-effort.
+        }
+        (e as PointerEvent).preventDefault?.();
+      });
+      overlay.addEventListener("pointermove", (ev) => {
+        if (!dragging || !cropMode || !lastCanvasSize) return;
+        const e = ev as PointerEvent;
+        let transform = { scale: 1, tx: 0, ty: 0 };
+        try {
+          transform = preview.getTransform();
+        } catch {
+          // Identity fallback.
+        }
+        // Overlay coordinates are viewport-relative; the canvas may be
+        // scrolled inside its wrapper, so subtract the canvas origin.
+        let originX = 0;
+        let originY = 0;
+        try {
+          const r = (canvas as HTMLCanvasElement).getBoundingClientRect();
+          originX = r.left;
+          originY = r.top;
+        } catch {
+          // Origin fallback keeps the drag inside the image.
+        }
+        const rect = screenRectToLevel(
+          startX - originX,
+          startY - originY,
+          e.clientX - originX,
+          e.clientY - originY,
+          transform,
+          lastCanvasSize,
+        );
+        if (rect) {
+          writeCropInputs(rect);
+          pendingCrop = rect;
+          updateCropEstimate();
+          updateCropOverlay(rect);
+        }
+      });
+      const endDrag = (): void => {
+        dragging = false;
+      };
+      overlay.addEventListener("pointerup", endDrag);
+      overlay.addEventListener("pointercancel", endDrag);
+    }
+  } catch {
+    // Crop wiring must never break the job.
+  }
+}
 
 let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
@@ -33,6 +310,74 @@ let activeTransport: string | null = null;
 let client: DiscoveryClient | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
+// Pause v1 (todo 5.7, suspend-acquisition): the website stops scheduling new
+// tiles while paused, finishes in-flight work, retains the canvas, and
+// re-drives on resume. Integration-layer only; the engine pause lives in
+// `dezoomify-job` for native hosts.
+let jobPaused = false;
+
+// Recent-jobs history (todo 5.2): local-only ledger, newest first, at most
+// 20 entries. Only a redacted origin plus a path hash persists by default;
+// the full URL persists only for non-sensitive URLs when the user opts in.
+const memoryHistoryFallback = new Map<string, string>();
+const webHistoryStore = {
+  getItem(key: string): string | null {
+    try {
+      if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
+        return localStorage.getItem(key);
+      }
+    } catch {
+      // Storage unavailable; fall through to the memory fallback.
+    }
+    return memoryHistoryFallback.get(key) ?? null;
+  },
+  setItem(key: string, value: string): void {
+    try {
+      if (typeof localStorage !== "undefined" && typeof localStorage.setItem === "function") {
+        localStorage.setItem(key, value);
+        return;
+      }
+    } catch {
+      // Storage unavailable; fall through to the memory fallback.
+    }
+    memoryHistoryFallback.set(key, value);
+  },
+  removeItem(key: string): void {
+    try {
+      if (typeof localStorage !== "undefined" && typeof localStorage.removeItem === "function") {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // Removal must never throw.
+    }
+    memoryHistoryFallback.delete(key);
+  },
+};
+let webHistory: Array<HistoryEntry> = loadHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE);
+let webHistoryOptIn = loadHistoryOptIn(webHistoryStore, HISTORY_OPTIN_KEY_WEBSITE);
+
+function recordWebHistory(url: string, width: number, height: number, format: string): void {
+  const entry = toHistoryEntry(url, { width, height, format, at: Date.now() }, webHistoryOptIn);
+  if (!entry) return;
+  webHistory = pushHistory(webHistory, entry);
+  saveHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE, webHistory);
+  viewCtx.history = [...webHistory];
+  viewCtx.historyOptIn = webHistoryOptIn;
+}
+
+// Website single-queue (todo 5.3): enqueue while a job runs, sequential. The
+// engine stays single-job; this queue lives in the integration layer (here),
+// never in the engine. One active job at a time; further submits wait FIFO.
+// A failed entry never stops the rest. Hash writes stay active-only: only the
+// running job owns `window.location.hash`, queued URLs never do.
+let webQueue = createWebQueue();
+// Negotiated queue availability: the website baseline offers the queue
+// (`bulk_supported` true); an N-1 peer without it falls back to the legacy
+// cancel-previous behavior.
+const WEB_QUEUE_CAPS = { bulkSupported: true };
+function webQueueEnabled(): boolean {
+  return isWebQueueAvailable(WEB_QUEUE_CAPS);
+}
 
 /** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
@@ -72,9 +417,29 @@ export const BROWSER_LIMITS: BrowserLimits = {
  */
 export const BROWSER_MAX_PLAN_TILES = 100_000;
 
-/** Desktop handoff link for images beyond the browser tab (`dezoomify://`). */
+/** Desktop handoff link for images beyond the browser tab (`dezoomify://`).
+ * Returns "" for non-http(s) sources (for example local `file:` URLs): the
+ * desktop deep link only carries bounded http(s) input, so local files show
+ * the local-only note instead of a broken link. */
 export function desktopHandoffLink(sourceUrl: string): string {
+  try {
+    const u = new URL(String(sourceUrl ?? "").trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+  } catch {
+    return "";
+  }
   return `dezoomify://open?v=2&src=${encodeURIComponent(sourceUrl)}`;
+}
+
+/** True for `file:` URLs pasted into the website input. Local files stay on
+ * this computer, so the failed view shows the local-only note (nothing is
+ * sent) instead of a deep link. */
+function isLocalFileUrl(urlString: string): boolean {
+  try {
+    return new URL(String(urlString ?? "").trim()).protocol === "file:";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -959,6 +1324,16 @@ function setCanvasVisible(visible: boolean): void {
   try {
     const wrapper = document.getElementById("canvas-wrapper");
     if (wrapper) wrapper.style.display = visible ? "" : "none";
+    const controls = document.getElementById("preview-controls");
+    if (controls && "hidden" in controls) (controls as { hidden: boolean }).hidden = !visible;
+    if (!visible) {
+      try {
+        preview.resetTransform(document);
+      } catch {
+        // Preview reset must never break the job.
+      }
+      updateCropOverlay(null);
+    }
   } catch {
     // Canvas visibility must never break the job.
   }
@@ -1145,14 +1520,20 @@ async function drawTile(
 
 async function runJob(url: string): Promise<void> {
   const token = ++jobToken;
+  lastJobUrl = url;
   resetActivity(url);
   setCanvasVisible(false);
+  jobPaused = false;
+  viewCtx.paused = false;
   viewCtx.imageChoice = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.sourceUrl = undefined;
   viewCtx.desktopHandoffUrl = undefined;
+  // Hash owns the active job only: queued URLs never touch the hash until
+  // they become active and reach this point.
   writeHash(url);
+  let queueOutcome: "done" | "failed" | "cancelled" = "done";
   startHeartbeat();
   setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
   controller.dispatch(nextEvent("start-discovery", { transport: "direct" }) as never);
@@ -1220,6 +1601,20 @@ async function runJob(url: string): Promise<void> {
       throw error;
     }
     if (token !== jobToken) return;
+    // Crop subset (plan_from_tiles subset in level pixels, clamped,
+    // overflow-safe): keep only intersecting tiles with destinations
+    // shifted into the cropped canvas. Empty or out-of-bounds crops fail
+    // before acquisition with a typed error naming the fix. Tainted-safe:
+    // plan arithmetic only, never pixel reads.
+    if (pendingCrop) {
+      try {
+        plan = subsetPlanForCrop(plan, pendingCrop);
+        pushLog(`Crop ${pendingCrop.w}x${pendingCrop.h} at ${pendingCrop.x},${pendingCrop.y}: planning ${plan.tiles.length} tiles`);
+      } catch (error) {
+        const message = (error as Error)?.message ?? "That region is empty or outside the image.";
+        throw failure("CROP_INVALID", "That region is empty or outside the image. Choose x,y,w,h inside the level size.", false, undefined, message);
+      }
+    }
     pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
     const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
     if (!canvas) {
@@ -1255,6 +1650,14 @@ async function runJob(url: string): Promise<void> {
     }
     canvas.width = width;
     canvas.height = height;
+    lastCanvasSize = { x: width, y: height };
+    try {
+      preview.resetTransform(document);
+    } catch {
+      // Preview reset must never break the job.
+    }
+    updateCropEstimate();
+    updateCropOverlay(pendingCrop);
     const ctx2d = canvas.getContext("2d") as CanvasRenderingContext2D;
     ctx2d.clearRect(0, 0, width, height);
     // Reveal the canvas before the first tile paints (legacy parity): tiles
@@ -1272,6 +1675,15 @@ async function runJob(url: string): Promise<void> {
     const queue = [...plan.tiles];
     const tileWorker = async (): Promise<void> => {
       while (queue.length && !failed) {
+        // Pause v1: suspend scheduling new tiles while paused; in-flight
+        // `drawTile` calls finish, the canvas is retained, and resume
+        // re-drives the same FIFO queue.
+        while (jobPaused) {
+          if (token !== jobToken) return;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          if (failed) return;
+        }
+        if (token !== jobToken) return;
         const tile = queue.shift();
         if (!tile) return;
         try {
@@ -1307,6 +1719,7 @@ async function runJob(url: string): Promise<void> {
       pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
       setCanvasVisible(true);
       controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
+      recordWebHistory(url, width, height, "display");
       update();
       return;
     }
@@ -1341,9 +1754,11 @@ async function runJob(url: string): Promise<void> {
     // the first tile's profile); warn so archived colors are not trusted blindly.
     pushLog("Colors may shift slightly: the browser save does not keep the original color profile. For exact colors, use the desktop app.");
     controller.dispatch(nextEvent("save-done") as never);
+    recordWebHistory(url, width, height, "png");
     update();
   } catch (error) {
     if (token !== jobToken) return;
+    queueOutcome = "failed";
     const structured = error as {
       code?: string;
       message?: string;
@@ -1355,6 +1770,17 @@ async function runJob(url: string): Promise<void> {
     const detail = structured?.detail ?? structured?.technical;
     // The activity log is technical: prefer the dense chain over UI copy.
     pushLog(`Failed (${code}): ${structured?.technical || message}`);
+    // One-click desktop handoff (todo 5.5): too-large plans fail with the
+    // `dezoomify://` link in the view context, so the failed view offers the
+    // Send button with the origin/scope consent summary. Only http(s)
+    // sources get a link; the deep link never carries credentials.
+    if (code === "PLAN_INVALID") {
+      const link = desktopHandoffLink(url);
+      if (link !== "") {
+        viewCtx.sourceUrl = url;
+        viewCtx.desktopHandoffUrl = link;
+      }
+    }
     controller.dispatch(
       nextEvent("fail", {
         error: {
@@ -1377,8 +1803,65 @@ async function runJob(url: string): Promise<void> {
       stopHeartbeat();
       refreshLongestPending();
       disposeClient();
+      // Sequential queue: the active entry settles, then the first waiting
+      // entry (if any) becomes active and starts. A failed entry never stops
+      // the rest. Engine stays single-job throughout.
+      if (webQueueEnabled()) {
+        const settled = finishActiveWebEntry(webQueue, queueOutcome);
+        webQueue = settled.queue;
+        const next = settled.next;
+        if (next) {
+          const status = controller.getState().status;
+          if (
+            status === "completed" ||
+            status === "cancelled" ||
+            status === "failed" ||
+            status === "display-only"
+          ) {
+            controller.reset(sessionId);
+            currentSeq = 0;
+          }
+          const summary = summarizeWebQueue(webQueue);
+          pushLog(
+            `Queue: ${summary.succeeded} done, ${summary.failed} failed, ${summary.pending} waiting`,
+          );
+          void runJob(next.url);
+        }
+      }
     }
   }
+}
+
+function submitQueuedUrl(url: string): void {
+  if (!webQueueEnabled()) {
+    void runJob(url);
+    return;
+  }
+  const res = enqueueWebQueue(webQueue, url);
+  webQueue = res.queue;
+  if (res.code !== "ok" || !res.entry) {
+    controller.dispatch(
+      nextEvent("fail", {
+        error: {
+          code: "INVALID_URL",
+          category: "validation",
+          retryable: false,
+          message: "Please enter a valid web address starting with http:// or https://",
+        },
+      }) as never,
+    );
+    update();
+    return;
+  }
+  if (res.entry.status === "active") {
+    void runJob(res.entry.url);
+    return;
+  }
+  // Queued behind the active job: no hash write, no cancel of the running
+  // job. The hash stays owned by the active URL until it settles.
+  const position = webQueue.entries.filter((e) => e.status === "queued").length;
+  pushLog(`Queued ${shortUrl(url)} (position ${position} in queue)`);
+  update();
 }
 
 const appContainer = typeof document !== "undefined" ? document.getElementById("app") : null;
@@ -1391,6 +1874,8 @@ let viewCtx: ViewContext = {
   },
   originClean: true,
   initialUrl: undefined,
+  history: [...webHistory],
+  historyOptIn: webHistoryOptIn,
 };
 
 function update(): void {
@@ -1405,6 +1890,26 @@ function update(): void {
     state,
     {
       onSubmitUrl(url: string) {
+        if (isLocalFileUrl(url)) {
+          viewCtx.initialUrl = url;
+          viewCtx.sourceUrl = url;
+          viewCtx.desktopHandoffUrl = undefined;
+          controller.dispatch(
+            nextEvent("fail", {
+              error: {
+                code: "INVALID_URL",
+                category: "validation",
+                retryable: false,
+                message: "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
+                transport: "direct",
+                phase: "discovery",
+                detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
+              },
+            }) as never,
+          );
+          update();
+          return;
+        }
         if (!isAllowedSourceUrl(url)) {
           controller.dispatch(
             nextEvent("fail", {
@@ -1419,23 +1924,66 @@ function update(): void {
           update();
           return;
         }
-        runJob(url);
+        submitQueuedUrl(url);
+      },
+      onPause() {
+        // Pause v1: stop scheduling new tiles; in-flight finishes, the
+        // canvas is retained, resume re-drives the FIFO queue.
+        if (jobPaused) return;
+        jobPaused = true;
+        viewCtx.paused = true;
+        if (viewCtx.jobActivity) viewCtx.jobActivity.paused = true;
+        pushLog("Paused: no new pieces are being fetched.");
+        update();
+      },
+      onResume() {
+        if (!jobPaused) return;
+        jobPaused = false;
+        viewCtx.paused = false;
+        if (viewCtx.jobActivity) viewCtx.jobActivity.paused = false;
+        pushLog("Resumed: fetching queued pieces again.");
+        update();
       },
       onCancel() {
         jobToken += 1;
+        jobPaused = false;
+        viewCtx.paused = false;
         stopHeartbeat();
         disposeClient();
         controller.dispatch(nextEvent("cancel") as never);
+        // Queue: the active entry is cancelled, then the first waiting entry
+        // (if any) starts. Cancellation never issues new work beyond the
+        // already-queued line.
+        if (webQueueEnabled()) {
+          const settled = finishActiveWebEntry(webQueue, "cancelled");
+          webQueue = settled.queue;
+          const next = settled.next;
+          if (next) {
+            controller.reset(sessionId);
+            currentSeq = 0;
+            pushLog(`Queue: starting next queued job (${shortUrl(next.url)})`);
+            void runJob(next.url);
+            update();
+            return;
+          }
+        }
         update();
       },
       onReset() {
         jobToken += 1;
+        jobPaused = false;
+        viewCtx.paused = false;
         stopHeartbeat();
         disposeClient();
         setCanvasVisible(false);
         sessionId = `sess:web-${Date.now()}`;
         controller.reset(sessionId);
         currentSeq = 0;
+        // Reset clears the whole queue: no new work is issued afterwards.
+        if (webQueueEnabled()) {
+          webQueue = cancelAllWeb(webQueue);
+          webQueue = createWebQueue();
+        }
         viewCtx.currentProgress = undefined;
         viewCtx.completedInfo = undefined;
         viewCtx.jobActivity = undefined;
@@ -1459,7 +2007,7 @@ function update(): void {
         viewCtx.imageChoice = undefined;
         viewCtx.sourceUrl = undefined;
         viewCtx.desktopHandoffUrl = undefined;
-        runJob(lastUrl);
+        submitQueuedUrl(lastUrl);
       },
       onSave() {
         if (!resultBlobUrl) return;
@@ -1516,6 +2064,54 @@ function update(): void {
           // Handoff navigation must never break display.
         }
       },
+      onOpenHistory(url: string) {
+        if (isLocalFileUrl(url)) {
+          viewCtx.initialUrl = url;
+          viewCtx.sourceUrl = url;
+          viewCtx.desktopHandoffUrl = undefined;
+          controller.dispatch(
+            nextEvent("fail", {
+              error: {
+                code: "INVALID_URL",
+                category: "validation",
+                retryable: false,
+                message: "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
+                transport: "direct",
+                phase: "discovery",
+                detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
+              },
+            }) as never,
+          );
+          update();
+          return;
+        }
+        if (!isAllowedSourceUrl(url)) return;
+        submitQueuedUrl(url);
+      },
+      onClearHistory() {
+        webHistory = [];
+        clearHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE);
+        viewCtx.history = [];
+        update();
+      },
+      onToggleHistoryOptIn(enabled: boolean) {
+        webHistoryOptIn = enabled === true;
+        saveHistoryOptIn(webHistoryStore, HISTORY_OPTIN_KEY_WEBSITE, webHistoryOptIn);
+        if (!webHistoryOptIn) {
+          webHistory = webHistory.map((entry) => ({
+            origin: entry.origin,
+            pathHash: entry.pathHash,
+            ...(typeof entry.width === "number" ? { width: entry.width } : {}),
+            ...(typeof entry.height === "number" ? { height: entry.height } : {}),
+            ...(typeof entry.format === "string" ? { format: entry.format } : {}),
+            at: entry.at,
+          }));
+          saveHistoryStore(webHistoryStore, HISTORY_KEY_WEBSITE, webHistory);
+        }
+        viewCtx.history = [...webHistory];
+        viewCtx.historyOptIn = webHistoryOptIn;
+        update();
+      },
     },
     viewCtx,
   );
@@ -1535,6 +2131,14 @@ function startFromHash(): void {
 }
 
 if (appContainer) {
+  if (typeof document !== "undefined") {
+    try {
+      preview.initControls(document);
+    } catch {
+      // Preview wiring must never break the job.
+    }
+    initCropControls();
+  }
   document.getElementById("dz-nav-btn-extension")?.addEventListener("click", () => showExtensionGuidance(document));
   document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () => showDesktopAppGuidance(document, {
     userAgent: navigator.userAgent,
