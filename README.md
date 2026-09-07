@@ -8,9 +8,9 @@ High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
 - Extension (`apps/extension/`): explicit-action scan with unit coverage;
   store listing submitted (pending review).
 - Desktop (`apps/desktop/`): real Tauri window with the five capability
-  commands, native save dialog, ed25519-verified updater, and installer
-  bundling (`cargo xtask build desktop` produces an unsigned `.deb`; no
-  paid signing).
+  commands, native save dialog, and installer bundling
+  (`cargo xtask build desktop` produces an unsigned Linux `.deb`; no paid
+  signing; automatic updates are disabled, check GitHub Releases manually).
 - CLI (`apps/cli/`): real save pipeline through the native runtime,
   covering discovery, bounded tile acquisition, assembly, and output writing.
 
@@ -41,7 +41,7 @@ including `build`, `dev`, `ci`, `release`, `protocol`, and `fixtures`. See
 
 ## How fetching works
 
-The website always tries a direct browser fetch first, with a short 250 ms
+The website always tries a direct browser fetch first, with a short 1500 ms
 window. If the direct fetch does not complete in time, it automatically retries
 eligible public metadata (never image tiles) through a same-origin metadata
 proxy. This proxy is visible in the UI and never carries cookies or

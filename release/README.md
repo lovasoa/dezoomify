@@ -7,11 +7,14 @@ material in the repository. Promotion steps (build → sign → verify →
 publish) run through `cargo xtask release` and the `release-*` workflows
 with digest verification at every transition; each stage fails closed.
 
-- `config.toml`: the release version, channel, protocol range, and store
-  identities. The plan stage freezes these into the release contract.
+- `config.toml`: the release version, channel, protocol range, store
+  identities, and the disabled `[updater]` section (`enabled = false`, empty
+  endpoints, no key file). The plan stage freezes these into the release
+  contract.
 - `targets.toml`: the artifact target inventory. A target marked
-  `available = false` refuses to build (desktop installers stay
-  unavailable until the Tauri shell is real).
+  `available = false` refuses to build (only the Linux desktop `.deb` is
+  available; Windows and macOS stay unavailable until a matching host builds
+  them; installers ship unsigned and automatic updates are disabled).
 - `compatibility.toml`: the supported protocol version matrix.
 - `checksums/<version>/SHA256SUMS`: the digest inventory of published
   releases, recorded by the publish stage and committed.

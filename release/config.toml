@@ -22,13 +22,16 @@ privacy_policy_url = "https://dezoomify.ophir.dev/beta/privacy"
 # placeholder shape only and must never be used as an allowlist value.
 id = "dezoomify@dezoomify.example"
 
-# Desktop updater (task 3.4): HTTPS-only allowlisted endpoints plus signed
-# metadata. The production host and public key are still TBD: the endpoint
-# below preserves the allowlist shape and never validates without the real
-# key (see the TODO in apps/desktop/src-tauri/src/updater.rs). The
-# production public key will live under release/ following the
-# release/gpg-public-key.asc pattern, never a test key.
+# Desktop updater decision (todo 5.8): automatic in-app updates are
+# disabled for this free project. No update host is deployed and no updater
+# key exists; users check GitHub Releases manually. Release integrity comes
+# from GPG-detached SHA256SUMS (release/gpg-public-key.asc), verified at
+# sign and publish time with fail-closed secrets. The retained
+# apps/desktop/src-tauri/src/updater.rs validator stays disabled
+# (UPDATER_ENABLED = false, empty endpoints/allowlist/key) and every
+# candidate fails with `updater.disabled`.
 [updater]
+enabled = false
 channel = "stable"
-endpoints = ["https://updates.dezoomify.example/stable/{{target}}/{{arch}}/{{current_version}}"]
-pubkey_file = "release/updater-public-key.asc"
+endpoints = []
+pubkey_file = ""

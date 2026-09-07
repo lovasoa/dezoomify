@@ -13,8 +13,15 @@ Use it when:
 - the site **refuses visitors from other pages**: the app can introduce
   itself as coming from the site's own viewer page.
 
-Each run saves one job to one output file or IIIF tile folder. It runs
-no bulk queue. The app holds the full image in memory while it works (4
+Each job saves to one output file or IIIF tile folder. You can queue
+several jobs: an address submitted while a job runs waits in the queue table
+instead of replacing the running job, and jobs save one at a time in the
+order they were added. Each row shows its site, status, and progress; one
+entry can be cancelled without touching the rest, **Cancel all** stops new
+work, and failed jobs offer **Retry**. A failed job never stops the rest,
+and the totals read like the command line
+(`bulk: X succeeded, Y failed, Z total`). The app holds the full image in
+memory while it works (4
 bytes per pixel plus working space), so very large saves need matching
 free memory; when the image exceeds the 8 GiB canvas limit the save stops
 with a typed error before anything is written, and saving a smaller level
@@ -22,23 +29,44 @@ fits the budget.
 
 ## Resuming an interrupted save
 
-Small network interruptions are retried automatically. When a save stops
-anyway, running the same job again with the same resume folder reuses the
-tiles already saved instead of fetching them again. On the command line,
-the resume folder is the `--tile-cache` option pointing at a folder.
+Small network interruptions are retried automatically. The tile cache stays
+on by default, so running the same job again reuses the tiles already saved
+instead of fetching them again, without passing any extra option. A custom
+resume folder remains available with `--tile-cache` on the command line and
+the cache directory setting in the app; reuse the same folder to resume.
 Tiles are keyed by digest of their address, so only response bytes persist
 there, never passwords, cookies, or session contents. If the site changes
 its image, remove the resume folder and start fresh.
 
+## Recent pictures
+
+The app keeps your last 20 saves on this device only. Each entry shows the
+site, the picture size, the format, and the date, with an **Open again**
+action that starts the same job again. A **Clear history** button removes
+all entries. Full addresses stay only for ordinary pages when you tick the
+opt-in box; addresses with sign-in details never keep their full text.
+
 ## Install
 
-Build the app locally with `cargo xtask build desktop`, which produces an
-unsigned installer for the matching host under `target/release/bundle/`
-(Linux `.deb`, Windows `.msi`/`.exe`, macOS `.dmg`; no paid Apple/Azure signing).
-Published installers will appear on the
-[releases page](https://github.com/lovasoa/dezoomify/releases) once a
-release build recipe lands. Meanwhile, you can also use the
-[website](./website.md) or the [command-line tool](./command-line.md).
+Linux ships an unsigned `.deb` on the [releases
+page](https://github.com/lovasoa/dezoomify/releases) (`desktop-linux-x86_64`;
+no paid Apple/Azure signing anywhere). Windows and macOS ship no installer
+in this wave: their bundles build only on their matching hosts, so use the
+[website](./website.md) or the [command-line tool](./command-line.md) there
+and check the releases page for news.
+
+There is no automatic in-app update: when a new version appears on the
+releases page, download it manually and install it yourself. Before
+installing, verify the download: compare its SHA256 against `SHA256SUMS`
+and check the GPG signatures (`SHA256SUMS.sig` plus the per-artifact
+`.sig`) with the key in `release/gpg-public-key.asc`. A mismatch or missing
+signature means do not install.
+
+You can also build the app locally with `cargo xtask build desktop`, which
+produces an unsigned installer for the matching host under
+`target/release/bundle/` (Linux `.deb` on a Linux host with the webview
+system packages; Windows `.msi` and macOS `.dmg` only on their matching
+hosts).
 
 ## Save an image
 
@@ -53,6 +81,12 @@ image address with the [browser extension](./browser-extension.md) and send
 the job to the desktop app; the extension asks for your consent before
 passing the site's credentials, which stay in memory only.
 
+**From the website or extension:** the **Send to desktop app** button carries
+only the image address, never passwords or cookies in the link. The app
+validates the link (http(s) only, no userinfo, no sensitive query or
+fragment keys) and shows the source plus provenance for explicit
+confirmation. Nothing runs until confirmation; declining does nothing.
+
 **Sites that refuse visitors:** some servers only send their image to
 requests that appear to come from the site's own viewer. If the save
 fails with a "forbidden" style error, tell the app which page the image
@@ -63,7 +97,7 @@ itself as coming from there. On the command line, this is the
 ## Choosing the file format
 
 The output name selects the format. The app saves PNG for names ending in
-`.png`, JPEG at quality 92 for `.jpg` or `.jpeg`, TIFF for `.tif` or
+`.png`, JPEG at quality 95 for `.jpg` or `.jpeg`, TIFF for `.tif` or
 `.tiff`, and a IIIF tile folder for a name with no extension. Any other
 extension stops the job with a typed error before anything is saved, so
 rename the output instead.

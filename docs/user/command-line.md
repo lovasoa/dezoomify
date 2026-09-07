@@ -40,6 +40,7 @@ ignores caps).
 | Cap the height | `-h, --max-height 800` |
 | Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
 | Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
+| Save only part of the picture | `--crop 100,100,800,600` (`x,y,w,h` in level pixels; only intersecting tiles run; empty or outside regions fail with `output.crop-invalid`) |
 | Keep a partial image when some tiles fail | `--keep-partial` (default; missing regions stay blank, saved to a `.partial` sibling: `out.png` becomes `out.partial.png`) |
 | Discard partial output on tile failure | `--no-partial` (fails with `tile.download-failed` and no output) |
 | Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries) |
@@ -78,7 +79,8 @@ dezoomify --bulk my-collection.txt --outfile collection.png
 
 This saves `collection_1.png`, `collection_2.png`, and so on. A failed image
 does not stop the rest; a per-image summary plus totals are printed at the
-end and the exit is 1 when any entry fails. You can also pass a single IIIF
+end and the exit is 1 when any entry fails. The totals read the same as the
+desktop app queue (`bulk: X succeeded, Y failed, Z total`). You can also pass a single IIIF
 collection manifest address to `--bulk` to save the entries it lists
 (best-effort: `manifests`/`members`/`items` ids; a single manifest saves its
 first image). Between images `--min-interval` paces the queue.

@@ -58,12 +58,14 @@ limits and never fixes this case.
 
 ## The save stopped partway
 
-Small network interruptions are retried automatically. If the job stops
-anyway, run it again with the same resume folder (`--tile-cache` on the
-command line) so already-saved tiles are reused instead of fetched again:
+Small network interruptions are retried automatically. The tile cache stays
+on by default, so run the job again and already-saved tiles are reused
+instead of fetched again (a custom folder uses `--tile-cache` on the
+command line):
 see [resuming an interrupted save](./desktop-app.md#resuming-an-interrupted-save).
 If the site changed its image since the first attempt, remove the resume
-folder and start fresh.
+folder and start fresh. On the website, reloading stops the current run;
+reopen it from [recent pictures](./website.md#recent-pictures).
 
 ## The output name is rejected
 

@@ -40,6 +40,16 @@ Firefox version is on its way.
   passes the site's credentials directly to the desktop app on your own
   computer. They stay in memory only.
 
+## Send to desktop app
+
+Saved results and display-only previews both offer a one-click
+**Send to desktop app** button in the result section. The button names the
+image origin; the approval dialog then names the destination origins, the
+cookie names (never the values), and the job, and notes that nothing is
+sent until confirmation. Declining keeps the job in the extension. Consent
+covers one job only and never carries over. The desktop app confirms again
+before anything runs.
+
 ## Next steps
 
 - [The extension found nothing? See troubleshooting](./troubleshooting.md)

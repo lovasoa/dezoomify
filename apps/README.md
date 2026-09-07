@@ -10,8 +10,8 @@ no app imports another app, and reusable logic lives below, not in apps.
   using your browser session.
 - [`desktop/`](desktop/): Tauri desktop app for local files, deep links, and
   the native messaging host.
-- [`cli/`](cli/): the `dezoomify` command for scripting, single-PNG output, and exit
-  codes.
+- [`cli/`](cli/): the `dezoomify` command for scripting, six output formats
+  (PNG, JPEG, TIFF, ZIF, WebP, IIIF tile trees), and exit codes.
 
 Contributing: an app owns its entry point, config, smoke tests, and packaging.
 Put reusable domain logic in a crate/package instead.
