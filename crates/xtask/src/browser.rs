@@ -84,7 +84,17 @@ fn build_only_check() -> Result<(), String> {
 
 pub fn test_ui(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("test ui", args)?;
-    run_node(&["--test", "test/controller.test.mjs"])?;
+    // Documented ui gate (docs/testing.md): controller, view rendering,
+    // accessibility, i18n, and mobile suites.
+    for suite in [
+        "test/controller.test.mjs",
+        "test/view-rendering.test.mjs",
+        "test/ui-i18n.test.mjs",
+        "test/ui-a11y.test.mjs",
+        "test/ui-mobile.test.mjs",
+    ] {
+        run_node(&["--test", suite])?;
+    }
     println!("test ui: ok");
     Ok(())
 }
@@ -197,11 +207,49 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
         }
     }
     build_site(false)?;
+    check_dist_budget()?;
     run_node(&["--test", "test/*.test.mjs"])?;
     println!(
         "build web: ok (mirrors, help, wasm glue, and dist/ assembled by scripts/build-site.mjs)"
     );
     Ok(())
+}
+
+/// Deployable-tree size budget (bytes): `dist/` is exactly what the
+/// website-deploy workflow uploads, so unbounded growth ships to users. This
+/// is the coarse whole-tree backstop; the fine-grained lines (served JS,
+/// wasm binary, theme) live in `super::content::verify_sizes` and run under
+/// `check`. Generous multiple of the current ~5 MiB tree; a breach means
+/// generated assets grew unexpectedly and must be reviewed before deploying.
+const DIST_BUDGET_BYTES: u64 = 32 * 1024 * 1024;
+
+fn check_dist_budget() -> Result<(), String> {
+    let dist = super::repo_root().join("dist");
+    let size = dir_size(&dist)?;
+    if size > DIST_BUDGET_BYTES {
+        return Err(format!(
+            "dist/ is {size} bytes, over the {DIST_BUDGET_BYTES}-byte budget; review generated assets before deploying"
+        ));
+    }
+    println!("build web: dist/ {size} bytes (budget {DIST_BUDGET_BYTES})");
+    Ok(())
+}
+
+fn dir_size(dir: &std::path::Path) -> Result<u64, String> {
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| format!("cannot list {}: {e}", dir.display()))?;
+    let mut total = 0u64;
+    for entry in entries {
+        let path = entry.map_err(|e| format!("dir entry: {e}"))?.path();
+        if path.is_dir() {
+            total += dir_size(&path)?;
+        } else {
+            total += std::fs::metadata(&path)
+                .map_err(|e| format!("cannot stat {}: {e}", path.display()))?
+                .len();
+        }
+    }
+    Ok(total)
 }
 
 /// Build the entire website via `scripts/build-site.mjs`: browser JS
@@ -542,7 +590,12 @@ fn run_node(args: &[&str]) -> Result<(), String> {
     for arg in args {
         if arg.contains('*') {
             let pattern = super::repo_root().join(arg);
-            let dir = pattern.parent().expect("parent").to_path_buf();
+            // `repo_root()` is absolute, so a parent always exists; a
+            // missing one is a usage error, not a panic (6.1 unwrap policy).
+            let Some(dir) = pattern.parent() else {
+                return Err(format!("bad glob pattern '{arg}'"));
+            };
+            let dir = dir.to_path_buf();
             for entry in std::fs::read_dir(&dir).map_err(|e| format!("read dir: {e}"))? {
                 let path = entry.map_err(|e| format!("dir entry: {e}"))?.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("mjs") {

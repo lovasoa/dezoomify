@@ -4,7 +4,29 @@
 //! headless browser gate (real store packages loaded in headless Chromium and
 //! Firefox; requires browsers, see apps/extension/tests/browser).
 
+use super::content::{EXT_ZIP_FAIL_BYTES, WASM_FAIL_BYTES};
 use std::process::Command;
+
+/// Glue-JS size budget (bytes): the wasm glue has no `check` equivalent
+/// (it ships inside the `dist/beta` JS budget there) so its build-time line
+/// stays local. Zip and wasm-binary budgets reuse the `check` fail lines
+/// above so a build never produces what `check` rejects (see
+/// `check_size_budget` uses below).
+const WASM_JS_BUDGET_BYTES: u64 = 512 * 1024;
+
+fn check_size_budget(path: &std::path::Path, budget: u64, label: &str) -> Result<(), String> {
+    let size = std::fs::metadata(path)
+        .map_err(|e| format!("missing {label} {}: {e}", path.display()))?
+        .len();
+    if size > budget {
+        return Err(format!(
+            "{label} {} is {size} bytes, over the {budget}-byte budget; review vendored bytes before shipping",
+            path.display()
+        ));
+    }
+    println!("{label}: {size} bytes (budget {budget})");
+    Ok(())
+}
 
 pub fn build_extension(_args: &[String]) -> Result<(), String> {
     for rel in [
@@ -41,6 +63,12 @@ pub fn build_extension(_args: &[String]) -> Result<(), String> {
         let size = std::fs::metadata(&zip)
             .map_err(|e| format!("missing package {}: {e}", zip.display()))?
             .len();
+        if size > EXT_ZIP_FAIL_BYTES {
+            return Err(format!(
+                "store package {} is {size} bytes, over the {EXT_ZIP_FAIL_BYTES}-byte budget; review vendored bytes before shipping",
+                zip.display()
+            ));
+        }
         println!(
             "build extension: packaged {} ({} bytes)",
             zip.display(),
@@ -58,45 +86,49 @@ fn ensure_wasm_glue() -> Result<(), String> {
     let root = super::repo_root();
     let glue = root.join("wasm/dezoomify-wasm.js");
     let wasm = root.join("wasm/dezoomify-wasm_bg.wasm");
-    if glue.exists() && wasm.exists() {
-        return Ok(());
+    if !(glue.exists() && wasm.exists()) {
+        let status = Command::new("cargo")
+            .args([
+                "build",
+                "-p",
+                "dezoomify-wasm",
+                "--release",
+                "--target",
+                "wasm32-unknown-unknown",
+            ])
+            .current_dir(&root)
+            .status()
+            .map_err(|e| format!("failed to run cargo: {e}"))?;
+        if !status.success() {
+            return Err("wasm core build failed".to_string());
+        }
+        let status = Command::new("wasm-bindgen")
+            .args([
+                "--target",
+                "web",
+                "--out-dir",
+                "wasm",
+                "--out-name",
+                "dezoomify-wasm",
+                "target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm",
+            ])
+            .current_dir(&root)
+            .status()
+            .map_err(|e| {
+                format!("failed to run wasm-bindgen (is wasm-bindgen-cli installed?): {e}")
+            })?;
+        if !status.success() {
+            return Err("wasm-bindgen failed".to_string());
+        }
     }
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "-p",
-            "dezoomify-wasm",
-            "--release",
-            "--target",
-            "wasm32-unknown-unknown",
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to run cargo: {e}"))?;
-    if !status.success() {
-        return Err("wasm core build failed".to_string());
-    }
-    let status = Command::new("wasm-bindgen")
-        .args([
-            "--target",
-            "web",
-            "--out-dir",
-            "wasm",
-            "--out-name",
-            "dezoomify-wasm",
-            "target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm",
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to run wasm-bindgen (is wasm-bindgen-cli installed?): {e}"))?;
-    if !status.success() {
-        return Err("wasm-bindgen failed".to_string());
-    }
+    check_size_budget(&glue, WASM_JS_BUDGET_BYTES, "wasm glue JS")?;
+    check_size_budget(&wasm, WASM_FAIL_BYTES, "wasm binary")?;
     Ok(())
 }
 
 pub fn test_extension(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("test extension", args)?;
+    generate_vendor_mirrors()?;
     run_node_glob("apps/extension/tests/unit")?;
     test_headless_browser()?;
     // The unit glob already ran above; skip it inside the composed
@@ -279,6 +311,22 @@ fn test_install_round_trip() -> Result<(), String> {
         written.len()
     );
     Ok(())
+}
+
+/// Regenerate the canonical browser JS mirrors plus the no-bundler
+/// extension vendor copies before the unit glob, so the parity gates read
+/// fresh output. Same generator the `web` lane runs; generated trees are
+/// never committed.
+fn generate_vendor_mirrors() -> Result<(), String> {
+    let status = Command::new("node")
+        .arg("scripts/sync-web-js.mjs")
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|e| format!("failed to run node scripts/sync-web-js.mjs: {e}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "sync-web-js failed (scripts/sync-web-js.mjs)".to_string())
 }
 
 fn run_node_glob(dir: &str) -> Result<(), String> {

@@ -212,12 +212,10 @@ fn stage_e2e_artifact(
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
+    let src_arg = src.to_string_lossy();
+    let dst_arg = dst.to_string_lossy();
     let status = Command::new("cp")
-        .args([
-            "-r",
-            &src.to_string_lossy().into_owned(),
-            &dst.to_string_lossy().into_owned(),
-        ])
+        .args(["-r", src_arg.as_ref(), dst_arg.as_ref()])
         .status()
         .map_err(|e| format!("failed to run cp: {e}"))?;
     if !status.success() || !dst.exists() {
@@ -238,18 +236,18 @@ fn ensure_window_e2e_deps() -> Result<(), String> {
     if marker.is_file() {
         return Ok(());
     }
-    println!("test desktop --e2e-window: installing harness dependencies (npm install)");
+    println!("test desktop --e2e-window: installing harness dependencies (npm ci)");
     let status = Command::new("npm")
-        .args(["install", "--no-audit", "--no-fund"])
+        .args(["ci", "--no-audit", "--no-fund"])
         .current_dir(root.join("apps/desktop/tests/window-e2e"))
         .status()
-        .map_err(|e| format!("failed to run npm install: {e}"))?;
+        .map_err(|e| format!("failed to run npm ci: {e}"))?;
     status
         .success()
         .then_some(())
-        .ok_or_else(|| "window harness dependency install failed (npm install)".to_string())?;
+        .ok_or_else(|| "window harness dependency install failed (npm ci)".to_string())?;
     if !marker.is_file() {
-        return Err("window harness dependencies still missing after npm install".to_string());
+        return Err("window harness dependencies still missing after npm ci".to_string());
     }
     Ok(())
 }

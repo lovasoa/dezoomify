@@ -10,10 +10,10 @@ processes, temporary profiles, servers, and integration registrations.
 ```text
 cargo xtask setup
 cargo xtask check
-cargo xtask test [core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|live|all] [options]
+cargo xtask test [core|protocol|job|wasm|browser|ui|web|native|scenario|desktop|extension|perf|native-messaging|live|all] [options]
 cargo xtask build <wasm|web|cli|desktop|extension> [options]
 cargo xtask dev <ui|web|desktop|extension> [options]
-cargo xtask ci <rust|wasm|browser|web|native|desktop|extension|protocol|security|local>
+cargo xtask ci <rust|wasm|browser|web|native|desktop|extension|protocol|security|local|digest> [--check <hex>]
 cargo xtask release plan <version> <channel>
 cargo xtask release build --plan <path>
 cargo xtask release verify --plan <path> [--artifacts <path>]
@@ -46,6 +46,30 @@ cargo xtask ci local
 cargo xtask protocol generate --check
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
+
+## Stable CLI surface
+
+The task, target, lane, and flag vocabulary above is stable: scripts and
+workflows may rely on it. Unknown tasks, targets, lanes, and flags always
+fail with a usage error instead of succeeding as no-ops or silently
+widening coverage (for example `cargo xtask build bogus`,
+`cargo xtask test core --bogus`, and `cargo xtask ci bogus` all fail).
+`crates/xtask/tests/cli_surface.rs` pins this contract end to end against
+the built binary; unit tests in `src/main.rs` pin the dispatcher.
+
+## Package managers
+
+The pnpm workspace (`packageManager` in the root `package.json`,
+`pnpm-workspace.yaml`) owns every workspace app and package. The only
+exception is the isolated npm E2E harnesses, each with its own lockfile and
+never part of the workspace: `crates/fixture-server/tests/webapp-e2e`,
+`apps/extension/tests/browser`, and `apps/desktop/tests/window-e2e`. They
+install deterministically with `npm ci` (never `npm install`, never pnpm)
+so a workspace-wide `pnpm -r` can never absorb browser binaries; the
+supply-chain gate (`docs/security.md`) audits the workspace plus each
+isolated lockfile. `wasm-bindgen-cli` is version-coupled to `Cargo.lock`
+in every workflow via `.github/actions/setup-wasm-bindgen`, and
+`cargo xtask setup` verifies the installed version matches.
 
 ## Boundaries
 

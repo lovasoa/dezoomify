@@ -16,6 +16,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     super::fixtures::verify(&[])?;
     super::style::verify(&[])?;
     super::content::verify(&[])?;
+    super::architecture::verify(&[])?;
+    super::protocol::run(&["generate".to_string(), "--check".to_string()])?;
+    super::supply::check_deny()?;
     println!("check: ok");
     Ok(())
 }

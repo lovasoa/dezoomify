@@ -1,6 +1,11 @@
 //! Repository task runner. Unknown commands fail instead of succeeding as
 //! no-ops.
 
+// 6.1 unwrap policy: task failures return `Err(String)` with a usage message
+// instead of panicking (see the workspace `clippy.toml` + root `Cargo.toml`
+// policy note).
+#![deny(clippy::unwrap_used)]
+
 mod architecture;
 mod browser;
 mod check;
@@ -26,7 +31,8 @@ mod wasm;
 
 use std::process::ExitCode;
 
-const HELP: &str = "cargo xtask <task>\n\nAvailable tasks:\n  setup                 verify pinned tools\n  check                 formatting, lint, prose hygiene, and read-only artifact validation\n  fixtures verify       verify scenario schemas, routes, payloads, and manifest\n  fixtures serve [--port <n>] [--write-address <path>]\n                        serve deterministic fixtures on loopback\n  fixtures capture --url <url> --out <scenario> --redact [--also <url>...]\n                        fetch public metadata and save redacted routes.json and payloads\n  protocol generate [--check]\n                        write Rust-derived TypeScript/schema artifacts\n  protocol check        verify generated artifacts, vectors, and portability\n  build wasm|web|cli|desktop|extension\n                        build app artifacts\n  build desktop [--unsigned-test]\n                        desktop shell + bundle (no bundle with --unsigned-test)\n  dev ui|web|desktop|extension\n                        run the named app's development environment\n  dev extension [--browser <name>]\n                        extension dev with named engine (chromium only)\n  ci <lane>|local       run CI lanes locally\n  release plan|build|sign|verify|publish\n                        release orchestration\n  test                  run all fast deterministic suites\n  test core [--purity|--parity]\n                        pure discovery core suites\n  test protocol         versioned protocol contract suites\n  test job [--transcripts]\n                        portable job-engine suites\n  test wasm [--transcripts|--browser <name>]\n                        WASM adapter suites\n  test browser [--build-only|--browser <name>|--scenario <id>]\n                        browser-runtime suites\n  test ui               shared-UI controller, view, accessibility, i18n, and mobile suites\n  test web [--e2e|--no-e2e|--skip-browser-matrix|--no-unit|--browser <chromium|firefox|webkit|all>]\n                        website integration suites\n  test native           native runtime + CLI suites\n  test scenario         scenario file suites\n  test desktop [--e2e-window]   desktop shell suites (real window under tauri-driver on Linux)\n  test extension        extension unit + manifest suites\n  test native-messaging [--browser <name>|--cleanup-only] [--skip-unit|--no-unit]\n                        Native Messaging suites\n  test all              full deterministic aggregate\n  test live --dry-run --fixtures\n                        live-compat dry run (no public targets)\n  test live --public [--limit <n>] [--site <id>]\n                        low-volume public download check (real bytes, opt-in)\n  test live --webapp    live webapp check in Chromium (opt-in, diagnostic)\n";
+const HELP: &str = "cargo xtask <task>\n\nAvailable tasks:\n  setup                 verify pinned tools\n  check                 formatting, lint, prose hygiene, and read-only artifact validation\n  fixtures verify       verify scenario schemas, routes, payloads, and manifest\n  fixtures serve [--port <n>] [--write-address <path>]\n                        serve deterministic fixtures on loopback\n  fixtures capture --url <url> --out <scenario> --redact [--also <url>...]\n                        fetch public metadata and save redacted routes.json and payloads\n  protocol generate [--check]\n                        write Rust-derived TypeScript/schema artifacts\n  protocol check        verify generated artifacts, vectors, and portability\n  build wasm|web|cli|desktop|extension\n                        build app artifacts\n  build desktop [--unsigned-test]\n                        desktop shell + bundle (no bundle with --unsigned-test)\n  dev ui|web|desktop|extension\n                        run the named app's development environment\n  dev extension [--browser <name>]\n                        extension dev with named engine (chromium only)\n  ci <lane>|local|digest [--check <hex>] run CI lanes locally; digest attests release inputs\n  release plan|build|sign|verify|publish\n                        release orchestration\n  test                  run all fast deterministic suites\n  test core [--purity|--parity]\n                        pure discovery core suites\n  test protocol         versioned protocol contract suites\n  test job [--transcripts]\n                        portable job-engine suites\n  test wasm [--transcripts|--browser <name>]\n                        WASM adapter suites\n  test browser [--build-only|--browser <name>|--scenario <id>]\n                        browser-runtime suites\n  test ui               shared-UI controller, view, accessibility, i18n, and mobile suites\n  test web [--e2e|--no-e2e|--skip-browser-matrix|--no-unit|--browser <chromium|firefox|webkit|all>]\n                        website integration suites\n  test native           native runtime + CLI suites\n  test scenario         scenario file suites\n  test desktop [--e2e-window]   desktop shell suites (real window under tauri-driver on Linux)\n  test extension        extension unit + manifest suites
+  test perf [--smoke]     native pipeline perf smoke + benches (opt-in, tracked)\n  test native-messaging [--browser <name>|--cleanup-only] [--skip-unit|--no-unit]\n                        Native Messaging suites\n  test all              full deterministic aggregate\n  test live --dry-run --fixtures\n                        live-compat dry run (no public targets)\n  test live --public [--limit <n>] [--site <id>]\n                        low-volume public download check (real bytes, opt-in)\n  test live --webapp    live webapp check in Chromium (opt-in, diagnostic)\n";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -69,7 +75,12 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         },
         "dev" => match args.get(1).map(String::as_str) {
             Some("ui") | Some("web") | Some("desktop") | Some("extension") => {
-                browser::dev(args.get(1).expect("target"), &args[2..])
+                // `Some` by the match guard above; bind it instead of
+                // re-indexing (6.1 unwrap policy: no panics on argv).
+                let Some(target) = args.get(1) else {
+                    return Err("usage: cargo xtask dev <ui|web|desktop|extension>".to_string());
+                };
+                browser::dev(target, &args[2..])
             }
             Some(other) => Err(format!("unknown dev target '{other}'")),
             None => Err("usage: cargo xtask dev <ui|web|desktop|extension>".to_string()),
