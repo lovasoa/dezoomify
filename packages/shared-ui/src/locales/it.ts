@@ -206,7 +206,6 @@ export const it = {
   "view.history.localOnly": "Conservate solo su questo dispositivo.",
   "view.history.open": "Riapri",
   "view.history.clear": "Cancella la cronologia",
-  "view.history.sensitiveNote": "Indirizzo nascosto per privacy",
   "view.history.dims": "{w} per {h} pixel",
   // Failure "What happened" explainer.
   "view.fail.whatHappened": "Cosa e successo",

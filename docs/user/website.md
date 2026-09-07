@@ -38,8 +38,8 @@ that is running now. To save many addresses at once from a list, use the
 ## Recent pictures
 
 The start page keeps your last 20 saves on this device only. Each entry
-shows only the site, the picture size, the format, and the date. A **Clear
-history** button removes all entries. The address itself is never kept.
+shows the full address, the picture size, the format, and the date. A **Clear
+history** button removes all entries.
 Reloading the page stops the current run; enter the address again to restart it.
 
 ## Language

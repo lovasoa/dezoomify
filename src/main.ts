@@ -78,7 +78,7 @@ let resultBlobUrl: string | null = null;
 let jobPaused = false;
 
 // Recent-jobs history (todo 5.2): local-only ledger, newest first, at most
-// 20 entries. Only a redacted origin plus a path hash persists.
+// 20 entries. Each entry keeps its full source address.
 const memoryHistoryFallback = new Map<string, string>();
 const webHistoryStore = {
   getItem(key: string): string | null {

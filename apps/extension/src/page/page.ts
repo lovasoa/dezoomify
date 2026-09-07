@@ -40,38 +40,10 @@ const EXT_TILE_MIN_INTERVAL_MS = 50;
 
 // Local history helpers (todo 5.2): mirror of `packages/shared-ui/src/history.ts`
 // for the no-bundler page. The page ships verbatim, so shared-ui cannot be
-// imported here; this compact copy keeps the same redaction rule (origin plus
-// path hash by default, full URL only for non-sensitive sources). Keep the
-// sensitive vocabulary in sync with the canonical module.
-const HISTORY_KEY_EXTENSION = "dezoomify.ext.history.v1";
+// imported here; this compact copy keeps the same rule (each entry keeps its
+// full source address).
+const HISTORY_KEY_EXTENSION = "dezoomify.ext.history.v2";
 const HISTORY_MAX = 20;
-const EXT_SENSITIVE_PARTS = ["apikey", "api_key", "token", "auth", "session", "signature", "secret", "password", "cookie"];
-const EXT_SENSITIVE_EXACT = new Set(["cookie", "cookies", "authorization", "proxy-authorization", "bearer", "token", "signature", "sig", "auth", "secret", "password", "session", "sid", "apikey", "api_key", "key"]);
-
-function extSensitiveKey(name) {
-  const lower = String(name ?? "").toLowerCase();
-  if (lower === "") return false;
-  if (EXT_SENSITIVE_EXACT.has(lower)) return true;
-  return EXT_SENSITIVE_PARTS.some((part) => lower.includes(part));
-}
-
-function extIsSensitiveUrl(url) {
-  let parsed;
-  try {
-    parsed = new URL(String(url ?? "").trim());
-  } catch {
-    return true;
-  }
-  if (parsed.username !== "" || parsed.password !== "") return true;
-  try {
-    for (const key of parsed.searchParams.keys()) {
-      if (extSensitiveKey(key)) return true;
-    }
-  } catch {
-    return true;
-  }
-  return false;
-}
 
 function extHistoryOrigin(url) {
   try {
@@ -84,24 +56,11 @@ function extHistoryOrigin(url) {
   }
 }
 
-function extPathHash(url) {
-  const text = String(url ?? "");
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
 function extToHistoryEntry(url, width, height) {
   const origin = extHistoryOrigin(url);
   const trimmed = String(url ?? "").trim();
   if (origin === "" || trimmed === "" || trimmed.length > 2048) return null;
-  if (extIsSensitiveUrl(trimmed)) {
-    return { origin, pathHash: extPathHash(trimmed), at: Date.now() };
-  }
-  const entry = { origin, pathHash: extPathHash(trimmed), url: trimmed, at: Date.now() };
+  const entry = { origin, url: trimmed, at: Date.now() };
   if (Number.isFinite(width) && width > 0) entry.width = Math.floor(width);
   if (Number.isFinite(height) && height > 0) entry.height = Math.floor(height);
   entry.format = "png";
@@ -110,7 +69,7 @@ function extToHistoryEntry(url, width, height) {
 
 function extPushHistory(list, entry) {
   const kept = (Array.isArray(list) ? list : []).filter((item) => {
-    return item && !(item.origin === entry.origin && item.pathHash === entry.pathHash);
+    return item && item.url !== entry.url;
   });
   kept.unshift(entry);
   return kept.slice(0, HISTORY_MAX);
@@ -122,7 +81,7 @@ function extParseHistory(text) {
     const parsed = JSON.parse(text);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item) => {
-      return item && typeof item.origin === "string" && typeof item.pathHash === "string" && typeof item.at === "number";
+      return item && typeof item.origin === "string" && typeof item.url === "string" && typeof item.at === "number";
     }).slice(0, HISTORY_MAX);
   } catch {
     return [];
@@ -163,9 +122,7 @@ const uiState = { cancelRequested: false, lastTabId: null };
 
 // Recent-jobs history per tab (todo 5.2): local-only ledger for this page
 // instance (one page per bound tab, so session storage is already per-tab).
-// Only a redacted origin plus a path hash persists by default; the full
-// source URL persists only for non-sensitive URLs (the explicit scan click
-// is the opt-in). Credentials never enter history.
+// Each entry keeps its full source address.
 const extMemoryFallback = new Map();
 const extHistoryStore = {
   getItem(key) {
@@ -270,12 +227,12 @@ function renderExtHistory() {
       const dims = typeof entry.width === "number" && typeof entry.height === "number"
         ? entry.width + " by " + entry.height + " pixels"
         : "";
-      const parts = [entry.origin];
+      const parts = [entry.url || entry.origin];
       if (dims !== "") parts.push(dims);
       if (typeof entry.format === "string" && entry.format !== "") parts.push(entry.format);
       main.textContent = parts.join(" ");
       item.appendChild(main);
-      if (typeof entry.url === "string" && entry.url !== "" && uiState.lastTabId !== null) {
+      if (uiState.lastTabId !== null) {
         const openBtn = document.createElement("button");
         openBtn.type = "button";
         openBtn.className = "dz-btn-secondary";
@@ -284,11 +241,6 @@ function renderExtHistory() {
           if (uiState.lastTabId !== null) run(uiState.lastTabId);
         });
         item.appendChild(openBtn);
-      } else {
-        const hidden = document.createElement("span");
-        hidden.className = "dz-history-hidden";
-        hidden.textContent = "Address hidden for privacy";
-        item.appendChild(hidden);
       }
       list.appendChild(item);
     }

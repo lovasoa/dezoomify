@@ -5,7 +5,6 @@ import {
   HISTORY_KEY_WEBSITE,
   clearHistory,
   historyOriginOf,
-  historyPathHash,
   loadHistory,
   parseHistoryJson,
   pushHistory,
@@ -27,7 +26,7 @@ function memoryStore() {
   };
 }
 
-test("history redacts origins", () => {
+test("history derives origins", () => {
   assert.equal(historyOriginOf("https://museum.example.org/painting/1?view=2#frag"), "https://museum.example.org");
   assert.equal(historyOriginOf("http://localhost:8080/x"), "http://localhost:8080");
   assert.equal(historyOriginOf("https://museum.example.org:443/x"), "https://museum.example.org");
@@ -35,26 +34,18 @@ test("history redacts origins", () => {
   assert.equal(historyOriginOf("not a url"), "");
 });
 
-test("history path hashes are stable, short, and distinct", () => {
-  const a = historyPathHash("https://example.com/a");
-  const b = historyPathHash("https://example.com/b");
-  assert.match(a, /^[0-9a-f]{8}$/);
-  assert.equal(historyPathHash("https://example.com/a"), a);
-  assert.notEqual(a, b);
-});
-
-test("history entries never retain full URLs", () => {
+test("history entries keep the full address", () => {
   const clean = "https://museum.example.org/painting/1";
   const entry = toHistoryEntry(clean, { width: 512, height: 512, format: "png", at: 1700000000000 });
   assert.ok(entry);
   assert.equal(entry.origin, "https://museum.example.org");
-  assert.equal(entry.url, undefined);
+  assert.equal(entry.url, clean);
   assert.equal(entry.width, 512);
   assert.equal(entry.format, "png");
   assert.equal(toHistoryEntry("file:///etc/passwd", {}), null);
 });
 
-test("history push dedupes by origin plus hash and caps at 20", () => {
+test("history push dedupes by full address and caps at 20", () => {
   assert.equal(HISTORY_MAX, 20);
   let list = [];
   const first = toHistoryEntry("https://a.example/1", { at: 1 });
@@ -69,7 +60,7 @@ test("history push dedupes by origin plus hash and caps at 20", () => {
     list = pushHistory(list, entry);
   }
   assert.equal(list.length, 20);
-  assert.equal(list[0].pathHash, historyPathHash("https://a.example/29"));
+  assert.equal(list[0].url, "https://a.example/29");
 });
 
 test("history serialize and parse round-trip and reject bad entries", () => {
@@ -78,17 +69,17 @@ test("history serialize and parse round-trip and reject bad entries", () => {
   assert.deepEqual(parseHistoryJson(text), [clean]);
   assert.deepEqual(parseHistoryJson("not json"), []);
   assert.deepEqual(parseHistoryJson(null), []);
-  // Legacy full URLs are ignored when old entries are loaded.
+  // Entries without a usable address are ignored when old entries are loaded.
   const sneaky = JSON.stringify([
-    { origin: "https://example.com", pathHash: "12345678", at: 1, url: "https://example.com/x?token=abc" },
-    { origin: "https://example.com", pathHash: "bad", at: 1 },
-    { origin: "", pathHash: "12345678", at: 1 },
+    { origin: "https://example.com", url: "https://example.com/x?token=abc", at: 1 },
+    { origin: "https://example.com", url: "", at: 1 },
+    { origin: "", url: "https://example.com/x", at: 1 },
     clean,
   ]);
   const parsed = parseHistoryJson(sneaky);
   assert.equal(parsed.length, 2);
-  assert.equal(parsed[0].url, undefined);
-  assert.equal(parsed[1].url, undefined);
+  assert.equal(parsed[0].url, "https://example.com/x?token=abc");
+  assert.equal(parsed[1].url, clean.url);
 });
 
 test("history store load, save, and clear are best-effort", () => {

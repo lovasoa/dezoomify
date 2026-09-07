@@ -1278,8 +1278,7 @@ abbr[title] {
 }
 
 .dz-history-note,
-.dz-history-empty,
-.dz-history-hidden {
+.dz-history-empty {
   font-size: 0.88rem;
   color: var(--dz-text-muted);
 }

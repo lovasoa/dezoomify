@@ -311,7 +311,6 @@ const en = {
   "view.history.localOnly": "Kept only on this device.",
   "view.history.open": "Open again",
   "view.history.clear": "Clear history",
-  "view.history.sensitiveNote": "Address hidden for privacy",
   "view.history.dims": "{w} by {h} pixels",
   // Failure "What happened" explainer.
   "view.fail.whatHappened": "What happened",

@@ -89,7 +89,7 @@ export interface ViewContext {
   desktopHandoffUrl?: string;
   /**
    * Recent-jobs history (todo 5.2): local-only ledger, newest first, at most
-   * 20 entries. Each entry carries only a redacted origin plus a path hash.
+   * 20 entries. Each entry keeps its full source address.
    * The view only renders; hosts own storage.
    */
   history?: Array<HistoryEntry>;
@@ -795,16 +795,12 @@ function updateHistorySection(
     main.className = "dz-history-main";
     const dims = historyDimsLabel(entry);
     const date = historyDateLabel(entry.at);
-    const parts: Array<string> = [entry.origin];
+    const parts: Array<string> = [entry.url || entry.origin];
     if (dims !== "") parts.push(dims);
     if (typeof entry.format === "string" && entry.format !== "") parts.push(entry.format);
     if (date !== "") parts.push(date);
     main.textContent = parts.join(" ");
     item.appendChild(main);
-    const hidden = doc.createElement("span");
-    hidden.className = "dz-history-hidden";
-    hidden.textContent = "Address hidden for privacy";
-    item.appendChild(hidden);
     list.appendChild(item);
   }
   section.appendChild(list);

@@ -41,8 +41,8 @@ its image, remove the resume folder and start fresh.
 ## Recent pictures
 
 The app keeps your last 20 saves on this device only. Each entry shows the
-site, the picture size, the format, and the date. A **Clear history** button
-removes all entries. The address itself is never kept.
+full address, the picture size, the format, and the date. A **Clear history** button
+removes all entries.
 
 ## Install
 

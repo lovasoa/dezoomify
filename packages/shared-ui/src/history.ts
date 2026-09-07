@@ -1,9 +1,10 @@
-// Job history ledger (todo 5.2): last-20 jobs, redacted by default.
+// Job history ledger (todo 5.2): last-20 jobs with their full addresses.
 //
 // Pure and host-neutral: no host globals, no I/O. Hosts inject a
 // key-value store (localStorage, sessionStorage, or an in-memory map) and
-// render through `view.ts`. Only redacted origins plus a path hash persist.
-// Credentials, headers, cookies, and signed query values never enter history.
+// render through `view.ts`. Each entry keeps the full source address plus
+// its origin for display. History never leaves the device; clearing removes
+// every entry.
 //
 // This module is erasable-syntax-only TypeScript so
 // `scripts/sync-web-js.mjs` can mirror it to `history.js` exactly like the
@@ -11,15 +12,15 @@
 
 export const HISTORY_MAX = 20;
 
-export const HISTORY_KEY_WEBSITE = "dezoomify.history.v1";
+export const HISTORY_KEY_WEBSITE = "dezoomify.history.v2";
 
-export const HISTORY_KEY_DESKTOP = "dezoomify.desktop.history.v1";
+export const HISTORY_KEY_DESKTOP = "dezoomify.desktop.history.v2";
 
-export const HISTORY_KEY_EXTENSION = "dezoomify.ext.history.v1";
+export const HISTORY_KEY_EXTENSION = "dezoomify.ext.history.v2";
 
 export interface HistoryEntry {
   origin: string;
-  pathHash: string;
+  url: string;
   width?: number;
   height?: number;
   format?: string;
@@ -32,7 +33,7 @@ export interface HistoryStore {
   removeItem(key: string): void;
 }
 
-/** Redacted origin (`scheme://host[:port]`, lowercased host). Empty when unparseable or non-http(s). */
+/** Origin (`scheme://host[:port]`, lowercased host) derived from a source address. Empty when unparseable or non-http(s). */
 export function historyOriginOf(url: string): string {
   try {
     const parsed = new URL(String(url ?? "").trim());
@@ -47,17 +48,6 @@ export function historyOriginOf(url: string): string {
   }
 }
 
-/** Stable non-crypto path hash (FNV-1a 32-bit, 8 hex chars) for dedup. One-way: the hash reveals no URL text. */
-export function historyPathHash(url: string): string {
-  const text = String(url ?? "");
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
 export interface HistoryDetails {
   width?: number;
   height?: number;
@@ -65,7 +55,7 @@ export interface HistoryDetails {
   at?: number;
 }
 
-/** Build one ledger entry without retaining the source URL. */
+/** Build one ledger entry keeping the full source address. */
 export function toHistoryEntry(url: string, details: HistoryDetails): HistoryEntry | null {
   const origin = historyOriginOf(url);
   if (origin === "") return null;
@@ -73,7 +63,7 @@ export function toHistoryEntry(url: string, details: HistoryDetails): HistoryEnt
   if (trimmed === "" || trimmed.length > 2048) return null;
   const entry: HistoryEntry = {
     origin,
-    pathHash: historyPathHash(trimmed),
+    url: trimmed,
     at: typeof details.at === "number" && Number.isFinite(details.at) ? Math.floor(details.at) : Date.now(),
   };
   if (typeof details.width === "number" && Number.isFinite(details.width) && details.width > 0) {
@@ -88,12 +78,12 @@ export function toHistoryEntry(url: string, details: HistoryDetails): HistoryEnt
   return entry;
 }
 
-/** Insert one entry at the front, deduped by origin plus path hash, capped at HISTORY_MAX. */
+/** Insert one entry at the front, deduped by full address, capped at HISTORY_MAX. */
 export function pushHistory(entries: Array<HistoryEntry>, entry: HistoryEntry): Array<HistoryEntry> {
   const list = Array.isArray(entries) ? entries.slice() : [];
   const kept = list.filter((item) => {
     if (!item || typeof item !== "object") return false;
-    return !(item.origin === entry.origin && item.pathHash === entry.pathHash);
+    return !((item as HistoryEntry).url === entry.url);
   });
   kept.unshift(entry);
   return kept.slice(0, HISTORY_MAX);
@@ -109,7 +99,11 @@ function isValidEntry(raw: unknown): raw is HistoryEntry {
   } catch {
     return false;
   }
-  if (typeof entry["pathHash"] !== "string" || !/^[0-9a-f]{8}$/.test(entry["pathHash"] as string)) {
+  if (typeof entry["url"] !== "string" || (entry["url"] as string).trim() === "") return false;
+  try {
+    const parsedUrl = new URL((entry["url"] as string).trim());
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") return false;
+  } catch {
     return false;
   }
   if (typeof entry["at"] !== "number" || !Number.isFinite(entry["at"] as number)) return false;
@@ -134,7 +128,7 @@ export function parseHistoryJson(text: string | null | undefined): Array<History
       if (isValidEntry(item)) {
         const entry: HistoryEntry = {
           origin: (item as HistoryEntry).origin,
-          pathHash: (item as HistoryEntry).pathHash,
+          url: String((item as HistoryEntry).url).trim(),
           at: Math.floor((item as HistoryEntry).at),
         };
         const typed = item as HistoryEntry;

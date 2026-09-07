@@ -206,7 +206,6 @@ export const de = {
   "view.history.localOnly": "Nur auf diesem Gerat behalten.",
   "view.history.open": "Erneut offnen",
   "view.history.clear": "Verlauf loschen",
-  "view.history.sensitiveNote": "Adresse aus Datenschutz verborgen",
   "view.history.dims": "{w} mal {h} Pixel",
   // Failure "What happened" explainer.
   "view.fail.whatHappened": "Was geschehen ist",

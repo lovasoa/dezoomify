@@ -206,7 +206,6 @@ export const fr = {
   "view.history.localOnly": "Conserve uniquement sur cet appareil.",
   "view.history.open": "Rouvrir",
   "view.history.clear": "Effacer l historique",
-  "view.history.sensitiveNote": "Adresse masquee pour confidentialite",
   "view.history.dims": "{w} par {h} pixels",
   // Failure "What happened" explainer.
   "view.fail.whatHappened": "Ce qui s est passe",
