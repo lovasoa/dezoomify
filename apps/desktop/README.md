@@ -75,21 +75,25 @@ packages above; each missing piece fails closed naming it. The lane and
 harness run on Linux; macOS/Windows lane support (native-driver discovery
 plus lane preflight) is a later wave.
 
-CI (`.github/workflows/desktop.yml`, matrix ubuntu/macos/windows,
-`fail-fast: false`) proves the app per platform: every leg builds and tests
-the shells, Linux runs the lane for real under Xvfb (apt
-`webkit2gtk-driver`, pinned tauri-driver, lane log uploaded as
-`desktop-e2e-ubuntu-latest`), macOS enables `safaridriver` and Windows
-installs `msedgedriver` pinned to the runner's Edge and each records the
-lane's Linux-only guard as block evidence (pass on a real lane pass or that
-exact guard, fail closed otherwise). Every leg then bundle-smokes:
+CI (`.github/workflows/desktop.yml`, path-gated to desktop-relevant changes)
+proves the app per platform in two parallel jobs. The `window-e2e` job
+(ubuntu) runs the lane for real under Xvfb (apt `webkit2gtk-driver`, pinned
+tauri-driver, each spec under a hard deadline so a leaked child fails with
+logs instead of hanging) and uploads the lane log as `desktop-e2e-ubuntu`.
+The `bundle-smoke` job matrixes ubuntu/macos/windows (`fail-fast: false`):
+macOS enables `safaridriver` and Windows installs `msedgedriver` pinned to
+the runner's Edge, and each records the lane's Linux-only guard as block
+evidence (pass on a real lane pass or that exact guard, fail closed
+otherwise). Every smoke leg then bundle-smokes:
 Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under
 Xvfb (a 20 s stay-alive proves install + launch + webview init; the window
 shell has no `--version` flag), macOS mounts the `dmg` and execs the binary
 directly (unsigned local build, Gatekeeper/SIP untouched), Windows installs
 silently (`nsis` `/S`, or the direct-exe fallback when WiX/NSIS are absent).
-Smoke logs upload as `desktop-bundle-smoke-<os>`; smokes never precede the
-E2E legs. No update flow is exercised anywhere (updater inert).
+Smoke logs upload as `desktop-bundle-smoke-<os>`; smokes run in their own
+job, so a smoke failure cannot fail the E2E signal spuriously. The desktop
+crate's lean unit tests also run in the `rust` lane of `ci.yml`. No update
+flow is exercised anywhere (updater inert).
 
 ## Bundles
 
