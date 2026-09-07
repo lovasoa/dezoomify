@@ -2178,9 +2178,16 @@ mod tests {
         let path = dir.join("out.jpg");
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table
-            .request_destination(&id, &path, "jpeg", false)
-            .unwrap();
+        // Stop the discovery worker before setting up the cancellation-only
+        // fixture. The production destination path starts another worker,
+        // which could legitimately finish before this synchronous assertion.
+        let handle = table.driver_handles.remove(&id).unwrap();
+        handle.join().unwrap();
+        if let Some(record) = table.jobs.get_mut(&id) {
+            record.destination = Some(path.clone());
+            record.destination_format = Some("jpeg".to_string());
+            record.destination_overwrite = false;
+        }
         // Simulate uncommitted output plus its atomic-write temp sibling.
         std::fs::write(&path, b"partial").unwrap();
         std::fs::write(path.with_extension("tmp"), b"temp").unwrap();
@@ -2648,6 +2655,10 @@ mod tests {
         assert_eq!(table.len(), before);
         // Bad formats and mismatched extensions fail before any work.
         let id = table.start_job("https://example.com/item").unwrap();
+        let handle = table.driver_handles.remove(&id).unwrap();
+        handle.join().unwrap();
+        table.pump_drivers();
+        assert_eq!(table.state_of(&id), Some(JobState::AwaitingDestination));
         let events_before = table.events_for(&id).len();
         let bad_ext = scratch_path("validation", "out.bmp");
         assert!(table
