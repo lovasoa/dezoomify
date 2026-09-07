@@ -163,7 +163,8 @@ test("declared permissions are used by shipped code", () => {
   assert.ok(!page.includes("chrome.downloads"), "downloads API must stay unused (blob anchor save)");
   // The background click-to-monitor owns the exact-tabId observer, the
   // single reload, and the grey<->blue+dot icon transitions, and injects
-  // the in-tab modal on the clicked tab only, after detection.
+  // the in-tab modal on the clicked tab only, after its monitored reload
+  // completes (pre-reload injection would be wiped by the reload).
   const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
   assert.ok(background.includes("onBeforeRequest"), "webRequest observer must live in the background monitor");
   assert.ok(background.includes("tabs.reload"), "background must perform the single monitored reload");

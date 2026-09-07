@@ -1,22 +1,23 @@
 /**
  * Click-to-monitor background: the toolbar action arms indefinite monitoring
- * on exactly the clicked tab; on detection the in-tab modal is injected
- * there. Nothing runs before that explicit click (no background monitoring,
- * no tab enumeration, no timers, no polling) and nothing opens until
- * detection (no new tab, no modal).
+ * on exactly the clicked tab. Nothing runs before that explicit click (no
+ * background monitoring, no tab enumeration, no timers, no polling).
  *
  * On click (activeTab grant on the clicked tab only):
  * 1. Privileged pages (chrome://, about:, stores) are rejected before any
  *    observer or reload, mirroring the scan state machine.
- * 2. A bounded pre-injection webRequest collector (exact tab id, http/https
- *    only, first-seen first window of 100, proxy-forbidden) is armed BEFORE
- *    the single reload; exactly one reload runs.
+ * 2. A bounded webRequest collector (exact tab id, http/https only,
+ *    first-seen first window of 100, proxy-forbidden) is armed BEFORE the
+ *    single reload; exactly one reload runs.
  * 3. The toolbar icon reports state (grey idle, blue while monitoring, badge
  *    dot) via `action.setIcon`/`setBadgeText`.
+ * 4. The in-tab monitor (`content/modal.js` + `content/modal.css`) is
+ *    injected via `scripting.executeScript`/`scripting.insertCSS` - the only
+ *    use of the `scripting` permission - AFTER the monitored reload
+ *    completes. Injecting before the reload would be wiped by it (content
+ *    scripts do not survive navigation), so pre-reload injection is
+ *    forbidden here; the `tabs.onUpdated` `complete` handler owns injection.
  *
- * On click the in-tab monitor (`content/modal.js` + `content/modal.css`) is
- * injected immediately via `scripting.executeScript`/`scripting.insertCSS` -
- * the only use of the `scripting` permission - and the single reload fires.
  * The background streams candidate URLs (`dezoomify-monitor-update`) while
  * armed; it never declares detection from URL text. The modal iframe fetches
  * each candidate's bytes tab-side (cookies/auth carried) and confirms via
@@ -59,9 +60,12 @@ const ACTIVE_ICON = {
   128: "icons/icon128.png",
 };
 
-// tabId -> { urls: string[], seen: Set<string>, confirmed: boolean } for
-// armed monitors. Memory only: never persisted, never restored, dropped
-// when the context suspends/unloads (fail closed).
+// tabId -> { urls, seen, confirmed, url, injected } for armed monitors.
+// `url` is the clicked-tab URL at arm time (fragment stripped): the monitor
+// survives its OWN reload (same URL reported back by tabs.onUpdated) and
+// stops only on navigation to a DIFFERENT page. `injected` gates the
+// post-reload modal injection (exactly once). Memory only: never persisted,
+// never restored, dropped when the context suspends/unloads (fail closed).
 // URL collection alone is NEVER detection: many formats require actual
 // response bytes (DiscoverySession) to confirm an image. The background only
 // streams candidate URLs; byte confirmation runs tab-side in the modal
@@ -86,13 +90,29 @@ function isCollectableUrl(raw) {
   return raw.startsWith("http://") || raw.startsWith("https://");
 }
 
+/**
+ * Compare page URLs ignoring the fragment: zoom viewers routinely rewrite
+ * `#zoom=...` in place, which is not a navigation away. A reload reports
+ * the same unfragmented URL and must never disarm the monitor it triggered.
+ */
+function samePage(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  return a.split("#", 1)[0] === b.split("#", 1)[0];
+}
+
 function setArmedBadge(tabId, active) {
   try {
     if (api.action && typeof api.action.setIcon === "function") {
-      api.action.setIcon({ tabId, path: active ? ACTIVE_ICON : IDLE_ICON });
+      // MV3 returns a promise: a tab that is navigating or already gone
+      // rejects with e.g. "Failed to fetch". Icon state is cosmetic only,
+      // so swallow the rejection like sendToTab does (try/catch alone
+      // cannot catch it: it surfaces as Uncaught (in promise)).
+      const iconPending = api.action.setIcon({ tabId, path: active ? ACTIVE_ICON : IDLE_ICON });
+      if (iconPending && typeof iconPending.catch === "function") iconPending.catch(() => {});
     }
     if (api.action && typeof api.action.setBadgeText === "function") {
-      api.action.setBadgeText({ tabId, text: active ? "•" : "" });
+      const badgePending = api.action.setBadgeText({ tabId, text: active ? "•" : "" });
+      if (badgePending && typeof badgePending.catch === "function") badgePending.catch(() => {});
     }
   } catch {
     // Icon/badge state is cosmetic only; monitoring never depends on it.
@@ -175,19 +195,11 @@ function wire() {
       setArmedBadge(tabId, false);
       return;
     }
-    // Arm BEFORE injection + single reload so pre-reload traffic is
-    // observed. The monitoring card is injected immediately (activity
-    // feedback); the job UI appears only after tab-side byte confirmation.
-    armed.set(tabId, { urls: [], seen: new Set(), confirmed: false });
+    // Arm BEFORE the single reload so pre-reload traffic is observed.
+    // Injection happens after the reload completes (see the tabs.onUpdated
+    // handler): anything injected now would be wiped by the reload.
+    armed.set(tabId, { urls: [], seen: new Set(), confirmed: false, url, injected: false });
     setArmedBadge(tabId, true);
-    try {
-      await injectModal(tabId);
-    } catch {
-      // Injection can fail (navigated away, privileged target): disarm so
-      // the icon never claims a monitor that has no modal.
-      disarm(tabId, false);
-      return;
-    }
     try {
       // Exactly one reload of exactly that tab.
       await api.tabs.reload(tabId);
@@ -202,10 +214,31 @@ function wire() {
     disarm(tabId, false);
   });
 
-  // Navigation away stops monitoring (no stale-tab results); changeInfo.url
-  // is visible without any tabs permission.
+  // Tab updates while armed (no tab enumeration: only known armed ids):
+  // - navigation to a DIFFERENT page stops monitoring (no stale-tab
+  //   results); changeInfo.url is visible without any tabs permission.
+  //   The armed tab's own reload (same page, fragment ignored) NEVER
+  //   disarms: disarming on it was the blue-then-instantly-grey bug.
+  // - the monitored reload completing injects the modal exactly once (a
+  //   pre-reload injection would have been wiped by the reload itself).
   api.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo && typeof changeInfo.url === "string") disarm(tabId, false);
+    const entry = armed.get(tabId);
+    if (!entry) return;
+    if (changeInfo && typeof changeInfo.url === "string" && !samePage(changeInfo.url, entry.url)) {
+      disarm(tabId, false);
+      return;
+    }
+    if (changeInfo && changeInfo.status === "complete" && !entry.injected) {
+      entry.injected = true;
+      injectModal(tabId).then(() => {
+        // Deliver the pre-reload traffic to the fresh content script.
+        reportUpdate(tabId, entry);
+      }, () => {
+        // Injection can fail (navigated away, privileged target): disarm so
+        // the icon never claims a monitor that has no modal.
+        disarm(tabId, false);
+      });
+    }
   });
 
   api.runtime.onMessage.addListener((message, sender, sendResponse) => {

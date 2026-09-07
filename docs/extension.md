@@ -6,9 +6,9 @@ Chromium runs the background as a service worker, Firefox as an event page
 121+ for `wasm-unsafe-eval`). The background is one-shot and dormant by
 construction: the toolbar click arms indefinite explicit-action monitoring
 on exactly the clicked tab (grey icon becomes blue with a dot), performs at
-most one reload, and opens nothing until detection. On detection the job
-hosts in a modal in the same tab. The extension does not use the metadata
-CORS proxy.
+most one reload, shows a monitoring card in the same tab once that reload
+completes, and reveals the job UI only after byte confirmation. The
+extension does not use the metadata CORS proxy.
 
 ## Discovery
 
@@ -25,14 +25,19 @@ schemes before at most one reload. The unbound first-run page shows guidance
 only and makes zero tabs API calls.
 
 Candidates are the observed request URLs; `crates/dezoomify-core` (wasm,
-loaded inline) performs format recognition and discovery on the
-chosen candidate. Detection stops monitoring and opens the modal: a
-Shadow-DOM host in the same tab holds a `chrome.runtime.getURL` iframe
-(`modal/modal.html`, web-accessible on http/https only) that runs the job
-through the shared-ui `renderView` geometry with tab-origin direct fetch,
-origin-clean save or `<img>` display-only, blob-anchor save, and the native
-handoff offer. Closing the modal disposes the collector, revokes object
-URLs, and restores the grey icon. The scan state machine is shared code
+loaded inline in the tab) performs format recognition and discovery on
+each candidate's fetched bytes, since URL text alone cannot recognize most
+formats. The first candidate whose bytes yield an image is the detection:
+it stops URL collection and reveals the job UI. A Shadow-DOM host in the
+same tab holds a `chrome.runtime.getURL` iframe (`modal/modal.html`,
+web-accessible on http/https only) that runs the job through the shared-ui
+`renderView` geometry with tab-origin direct fetch, origin-clean save or
+`<img>` display-only, blob-anchor save, and the native handoff offer.
+The monitor survives its own reload (same-page updates never disarm it;
+only navigation to a different page stops it), and injection always happens
+after the reload completes, since a reload wipes anything injected before
+it. Closing the modal disposes the collector, revokes object URLs, and
+restores the grey icon. The scan state machine is shared code
 (`apps/extension/src/page/scan.ts`) exercised by unit tests and by the
 headless E2E in both engines. The modal-in-tab UI hosts the job in the
 detected tab itself; it never opens a new tab for results.
