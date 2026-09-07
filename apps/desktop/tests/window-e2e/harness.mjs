@@ -158,6 +158,31 @@ export function freePort() {
   });
 }
 
+// SIGKILL a spawned process tree: the driver is spawned detached (its own
+// group leader), so killing the group reaps the driver, the app, and every
+// webview subprocess at once. A plain kill of the driver could orphan a
+// half-booted app that keeps its devUrl connection (and our pipes) open;
+// the group kill guarantees nothing of the flow survives into the next
+// flow or past the spec process. Only call this on processes spawned
+// detached (group leaders): on a non-leader the negative pid would not
+// match its group. Windows has no POSIX groups; killing the process there
+// is the best available (the later Windows wave can revisit).
+export function killTree(detachedProc) {
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-detachedProc.pid, "SIGKILL");
+      return;
+    } catch {
+      // Not a group leader (or already gone): fall through to a direct kill.
+    }
+  }
+  try {
+    detachedProc.kill("SIGKILL");
+  } catch {
+    // Already gone.
+  }
+}
+
 // Same binary and flags the `cargo xtask fixtures serve --port 0` path
 // spawns: loopback only, kernel-allocated port, address readiness file.
 export async function startFixtureServer(workDir) {
@@ -227,13 +252,29 @@ export async function startFrontendServer() {
   return server;
 }
 
+// Tear the shared frontend server down without ever hanging the spec
+// process: idle keep-alive sockets (a webview that leaked its flow) would
+// otherwise make `close()` wait forever and node never exit. All
+// connections are dropped, then `close()` resolves within a bound.
+export async function closeFrontend(server) {
+  if (typeof server.closeAllConnections === "function") server.closeAllConnections();
+  await new Promise((resolve) => {
+    const done = () => resolve();
+    server.close(done);
+    setTimeout(done, 5000).unref?.();
+  });
+}
+
 export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, env) {
   const driverBin = resolveTauriDriver();
+  // Detached on POSIX so the driver leads its own process group and the
+  // flow teardown can SIGKILL the whole tree (driver + app + webview
+  // subprocesses); see killTree.
   const proc = spawn(driverBin, [
     "--port", String(tauriPort),
     "--native-port", String(nativePort),
     "--native-driver", nativeDriverBin,
-  ], { env, stdio: ["ignore", "ignore", "pipe"] });
+  ], { env, stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32" });
   let logged = "";
   proc.stderr.on("data", (chunk) => {
     logged += chunk.toString();
@@ -249,7 +290,7 @@ export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, e
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  proc.kill();
+  killTree(proc);
   throw new Error(`tauri-driver never became ready on 127.0.0.1:${tauriPort}`);
 }
 
@@ -372,7 +413,16 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
     const resolvedArgs = typeof appArgs === "function"
       ? appArgs({ base: fixture.base, fixedDest, work })
       : appArgs;
-    driver = await launchApp({ tauriPort, appArgs: resolvedArgs });
+    try {
+      driver = await launchApp({ tauriPort, appArgs: resolvedArgs });
+    } catch (err) {
+      // A failed launch is the least diagnosed failure mode (no body ran),
+      // so carry the driver's own stderr tail as evidence. The app inherits
+      // tauri-driver's stderr, so the tail shows why the session never
+      // formed (or that nothing ever spoke).
+      const tail = String(driverProc.logged()).trim().split("\n").slice(-15).join("\n");
+      throw new Error(`${err.message}\napp log tail:\n${tail || "(empty)"}`);
+    }
     try {
       return await body({ driver, work, home, fixedDest, base: fixture.base, appEnv });
     } catch (err) {
@@ -393,8 +443,13 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
       throw new Error(`${err.message}${note}${fixtureNote}`);
     }
   } finally {
+    // SIGKILL the whole driver tree, never a bare driver kill: an app that
+    // outlives its flow would hold the single devUrl connection (and this
+    // process's pipes) open, blocking the spec's server close and node's
+    // exit after the last test. The fixture server is a single process
+    // (spawned in this group, not detached), so a plain kill reaps it.
     if (driver) await driver.quit().catch(() => {});
-    if (driverProc) driverProc.proc.kill();
+    if (driverProc) killTree(driverProc.proc);
     if (fixture) fixture.proc.kill();
     rmSync(work, { recursive: true, force: true });
   }

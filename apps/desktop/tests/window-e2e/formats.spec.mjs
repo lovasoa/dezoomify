@@ -70,6 +70,7 @@ import {
   gatewayInput,
   redactedOriginOnly,
   assertReportRedacted,
+  closeFrontend,
 } from "./harness.mjs";
 import { goldenOutputHash, sha256Hex, assertSavedPyramid, decodePngSize } from "./png-assert.mjs";
 
@@ -359,7 +360,7 @@ before(async () => {
 });
 
 after(async () => {
-  if (sharedOwner && shared) shared.frontend.close();
+  if (sharedOwner && shared) await closeFrontend(shared.frontend);
   if (sharedOwner) globalThis.__dezoomifyWindowE2eShared = null;
   shared = null;
   sharedOwner = false;

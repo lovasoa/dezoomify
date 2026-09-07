@@ -182,7 +182,14 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // first. `window.spec.mjs` covers the native-feature flows;
     // `formats.spec.mjs` covers the data-driven full-download matrix
     // (4 byte-exact passes, remainder documented skips).
-    run_node_with_env(
+    // Each spec runs under a hard deadline: a leaked child holding node's
+    // pipes or the frontend server open would otherwise hang this lane
+    // forever (observed as a 55-minute CI zombie after launch failures).
+    // 30 minutes is far above the longest green spec (~15) but bounds any
+    // pathological run, and the killed process fails the lane with the
+    // evidence already on the log.
+    run_node_with_deadline(
+        std::time::Duration::from_secs(30 * 60),
         &["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"],
         &[
             (
@@ -194,8 +201,10 @@ fn test_desktop_e2e_window() -> Result<(), String> {
                 dist_copy.to_str().unwrap_or(""),
             ),
         ],
+        "window.spec.mjs",
     )?;
-    run_node_with_env(
+    run_node_with_deadline(
+        std::time::Duration::from_secs(30 * 60),
         &["--test", "apps/desktop/tests/window-e2e/formats.spec.mjs"],
         &[
             (
@@ -207,6 +216,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
                 dist_copy.to_str().unwrap_or(""),
             ),
         ],
+        "formats.spec.mjs",
     )?;
     println!("test desktop --e2e-window: ok (real window, hermetic loopback)");
     Ok(())
@@ -574,6 +584,49 @@ fn run_cargo(args: &[&str]) -> Result<(), String> {
 
 fn run_node(args: &[&str]) -> Result<(), String> {
     run_node_with_env(args, &[])
+}
+
+/// Run node under a hard deadline: when the child outlives it, the process
+/// is killed and the lane fails naming the spec. Guards the real-window
+/// specs against leaked children (a dead app instance can keep node's pipes
+/// or the frontend server open indefinitely), which would otherwise hang CI
+/// until the job timeout instead of failing with the log as evidence.
+fn run_node_with_deadline(
+    deadline: std::time::Duration,
+    args: &[&str],
+    env: &[(&str, &str)],
+    label: &str,
+) -> Result<(), String> {
+    let mut child = Command::new("node")
+        .args(args)
+        .envs(env.iter().copied())
+        .current_dir(super::repo_root())
+        .spawn()
+        .map_err(|e| format!("failed to run node: {e}"))?;
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    return Ok(());
+                }
+                return Err(format!("desktop node tests failed ({label})"));
+            }
+            Ok(None) => {
+                if start.elapsed() > deadline {
+                    child.kill().ok();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "desktop node tests killed after {:.0} s ({label}): the spec process did not exit; \
+                         a leaked child is holding its pipes or the frontend server open",
+                        deadline.as_secs_f32()
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            Err(e) => return Err(format!("failed to wait for node ({label}): {e}")),
+        }
+    }
 }
 
 fn run_node_with_env(args: &[&str], env: &[(&str, &str)]) -> Result<(), String> {

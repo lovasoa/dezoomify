@@ -1,19 +1,180 @@
 name: desktop
 on:
-  pull_request: {}
+  pull_request:
+    # Path gate: the full desktop suite (real-window E2E plus per-OS
+    # bundle-install smokes) only runs when something the desktop app
+    # consumes changed. Unrelated pushes (website, extension, docs) skip
+    # this workflow entirely; the lean gate for the desktop crate stays on
+    # every run via the rust lane in ci.yml. Keep this list in sync with
+    # the crate and package boundaries that feed apps/desktop.
+    paths:
+      - apps/desktop/**
+      - crates/**
+      - packages/shared-ui/**
+      - packages/browser-runtime/**
+      - packages/protocol-ts/**
+      - testdata/**
+      - scripts/**
+      - installer/**
+      - generated/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - clippy.toml
+      - deny.toml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .node-version
+      - .github/workflows/desktop.yml
   push:
     branches: [master]
+    # Same gate as pull_request (see above). A desktop-relevant push pays
+    # the full suite; anything else pays nothing here.
+    paths:
+      - apps/desktop/**
+      - crates/**
+      - packages/shared-ui/**
+      - packages/browser-runtime/**
+      - packages/protocol-ts/**
+      - testdata/**
+      - scripts/**
+      - installer/**
+      - generated/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - clippy.toml
+      - deny.toml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .node-version
+      - .github/workflows/desktop.yml
 permissions:
   contents: read
 concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  desktop:
-    name: desktop (${{ matrix.os }})
+  # Real-window E2E on Linux only. This is the longest single step of the
+  # suite (~20 min green); it runs in its own job so the per-OS bundle
+  # smokes below never queue behind it (and vice versa). macOS/Windows
+  # carry no E2E by code (the lane is Linux-only in this wave); their
+  # compile gates and native-driver block evidence live in bundle-smoke.
+  window-e2e:
+    name: Window E2E (real window, ubuntu)
+    runs-on: ubuntu-latest
+    # Green ~25 min; the per-spec deadlines in the lane (~30 min each) are
+    # the real bound. Generous so slow legs fail on signal, never on clock.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
+        with:
+          node-version-file: .node-version
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0: sets PATH on Windows too (corepack shims are not found there)
+        with:
+          version: 9.12.0 # must match packageManager in package.json
+          standalone: true
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0 # must match rust-toolchain.toml
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+      # WebKit system packages are the slowest Linux step (minutes of apt
+      # downloads on every cold run): cache the .deb archives keyed by this
+      # workflow file (the package list lives here), so repeats only pay the
+      # local install. The cache lives under $HOME so the runner user can
+      # read it without sudo; apt is pointed at it explicitly.
+      - name: Cache webkit apt archives
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/apt-cache
+          key: webkit-apt-${{ runner.os }}-${{ hashFiles('.github/workflows/desktop.yml') }}
+          restore-keys: |
+            webkit-apt-${{ runner.os }}-
+      - name: Install Linux webview system packages
+        run: |
+          mkdir -p "$HOME/apt-cache"
+          sudo apt-get update
+          # webkit2gtk-driver provides WebKitWebDriver (the lane's native
+          # driver, resolved from PATH); xvfb provides xvfb-run (the lane
+          # needs a display and fails closed without one).
+          sudo apt-get -o Dir::Cache::Archives="$HOME/apt-cache" install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential webkit2gtk-driver xvfb
+          # Driver pin evidence: record exactly what apt provided for the run log.
+          dpkg -s webkit2gtk-driver | grep -E '^(Package|Version)'
+          command -v WebKitWebDriver
+          command -v xvfb-run
+      - name: Test desktop shell
+        run: cargo xtask test desktop
+      - name: Build desktop window shell (no bundle)
+        run: cargo xtask build desktop --unsigned-test
+      - name: Cache tauri-driver 2.0.6
+        id: driver-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.tauri-driver-2.0.6
+          key: tauri-driver-2.0.6-${{ runner.os }}
+      - name: Install tauri-driver 2.0.6 (unix)
+        run: |
+          set -euo pipefail
+          # Pinned exact: must match TAURI_DRIVER_PIN in
+          # apps/desktop/tests/window-e2e/harness.mjs and the lane message in
+          # crates/xtask/src/desktop.rs (tauri 2 window shell per
+          # apps/desktop/src-tauri/Cargo.toml). Re-pin deliberately, never float.
+          ROOT="$HOME/.tauri-driver-2.0.6"
+          if [ ! -x "$ROOT/bin/tauri-driver" ]; then
+            cargo install tauri-driver --version "=2.0.6" --root "$ROOT"
+          fi
+          echo "$ROOT/bin" >> "$GITHUB_PATH"
+          # GITHUB_PATH only takes effect in later steps, so verify by
+          # absolute path here (later steps resolve it from PATH).
+          test -x "$ROOT/bin/tauri-driver"
+      # Save the driver cache right after the install, not at job end:
+      # cancel-in-progress kills post steps, and an uncached cold install
+      # (~1-10 min of cargo) would then be re-paid by every cancelled run
+      # in a push burst. Best-effort: on a concurrent-save conflict the
+      # warning is harmless (the entry already exists).
+      - name: Save tauri-driver 2.0.6 cache (early)
+        if: steps.driver-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.tauri-driver-2.0.6
+          key: tauri-driver-2.0.6-${{ runner.os }}
+      # Real-window E2E. The lane (`cargo xtask test desktop --e2e-window`)
+      # runs window.spec.mjs then formats.spec.mjs sequentially against
+      # hermetic loopback fixtures, each under its own hard deadline; it
+      # never contacts public source sites. The updater stays inert
+      # throughout (empty pubkey, plugin not registered): no update flow is
+      # exercised, only install + launch + version/identify, unsigned, no
+      # stores. No bundling here: the bundle smoke owns the release build.
+      - name: Real-window E2E (Linux under Xvfb)
+        run: |
+          set -euo pipefail
+          # DISPLAY comes from xvfb-run; the lane fails closed without it.
+          # pipefail keeps the lane's exit code (tee only records the log).
+          xvfb-run -a cargo xtask test desktop --e2e-window 2>&1 | tee e2e-window.log
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-e2e-ubuntu
+          path: e2e-window.log
+          retention-days: 30
+  # Per-OS release bundle, install, and launch smoke. Ubuntu runs the
+  # bundler only (its compile gates and E2E live in window-e2e, which runs
+  # in parallel); macOS and Windows additionally carry the cross-OS lean
+  # compile gates plus the native-driver block-evidence steps. The lane
+  # needs no tauri-cli (`--unsigned-test` stops before the bundler); only
+  # these bundle steps do.
+  bundle-smoke:
+    name: Bundle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # The E2E lane plus a per-leg release bundle are slow (Tauri builds,
-    # driver installs); generous so slow legs fail on signal, never on clock.
+    # Release Tauri builds plus (cold) tauri-cli installs; generous so slow
+    # legs fail on signal, never on clock.
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -37,11 +198,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
-      # WebKit system packages are the slowest desktop-leg step (minutes of
-      # apt downloads on every Linux run): cache the .deb archives keyed by
-      # this workflow file (the package list lives here), so repeats only pay
-      # the local install. The cache lives under $HOME so the runner user can
-      # read it without sudo; apt is pointed at it explicitly.
+      # WebKit system packages (Linux): the window shell's release build and
+      # the deb bundle both need them. Same .deb archive cache as the E2E
+      # job (same key, shared repo cache), so cold apt is paid once.
       - name: Cache webkit apt archives
         if: runner.os == 'Linux'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -55,31 +214,31 @@ jobs:
         run: |
           mkdir -p "$HOME/apt-cache"
           sudo apt-get update
-          # webkit2gtk-driver provides WebKitWebDriver (the lane's native
-          # driver, resolved from PATH); xvfb provides xvfb-run (the lane
-          # needs a display and fails closed without one).
-          sudo apt-get -o Dir::Cache::Archives="$HOME/apt-cache" install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential webkit2gtk-driver xvfb
-          # Driver pin evidence: record exactly what apt provided for the run log.
-          dpkg -s webkit2gtk-driver | grep -E '^(Package|Version)'
-          command -v WebKitWebDriver
+          # libwebkit2gtk-4.1-dev and friends drive the window shell compile;
+          # xvfb drives the launch smoke.
+          sudo apt-get -o Dir::Cache::Archives="$HOME/apt-cache" install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential xvfb
+          dpkg -s libwebkit2gtk-4.1-dev | grep -E '^(Package|Version)'
           command -v xvfb-run
+      # Cross-OS compile gates. Ubuntu's copy runs in the window-e2e job
+      # (parallel), so only macOS and Windows repeat them here; the bundle
+      # steps below are the only ubuntu work in this job.
       - name: Test desktop shell
+        if: runner.os != 'Linux'
         run: cargo xtask test desktop
       - name: Build desktop window shell (no bundle)
+        if: runner.os != 'Linux'
         run: cargo xtask build desktop --unsigned-test
-      # Real-window E2E plus per-OS bundle-install smokes. The lane itself
-      # (`cargo xtask test desktop --e2e-window`) runs window.spec.mjs then
-      # formats.spec.mjs sequentially against hermetic loopback fixtures; it
-      # never contacts public source sites. The updater stays inert throughout
-      # (empty pubkey, plugin not registered): no update flow is exercised,
-      # only install + launch + version/identify, unsigned, no stores.
+      # Native-driver slots (macOS/Windows only): block evidence that the
+      # E2E lane is Linux-only by code, as documented in the steps.
       - name: Cache tauri-driver 2.0.6
+        if: runner.os != 'Linux'
+        id: driver-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.tauri-driver-2.0.6
           key: tauri-driver-2.0.6-${{ runner.os }}
       - name: Install tauri-driver 2.0.6 (unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && runner.os != 'Linux'
         run: |
           set -euo pipefail
           # Pinned exact: must match TAURI_DRIVER_PIN in
@@ -94,6 +253,13 @@ jobs:
           # GITHUB_PATH only takes effect in later steps, so verify by
           # absolute path here (later steps resolve it from PATH).
           test -x "$ROOT/bin/tauri-driver"
+      - name: Save tauri-driver 2.0.6 cache (early)
+        if: runner.os != 'Linux' && steps.driver-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.tauri-driver-2.0.6
+          key: tauri-driver-2.0.6-${{ runner.os }}
       - name: Install tauri-driver 2.0.6 (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -109,13 +275,6 @@ jobs:
           # GITHUB_PATH only takes effect in later steps, so verify by
           # absolute path here (later steps resolve it from PATH).
           if (-not (Test-Path "$ROOT\bin\tauri-driver.exe")) { throw "tauri-driver missing after install" }
-      - name: Real-window E2E (Linux under Xvfb)
-        if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          # DISPLAY comes from xvfb-run; the lane fails closed without it.
-          # pipefail keeps the lane's exit code (tee only records the log).
-          xvfb-run -a cargo xtask test desktop --e2e-window 2>&1 | tee e2e-window.log
       - name: Enable safaridriver (macOS native driver slot)
         if: runner.os == 'macOS'
         run: |
@@ -190,19 +349,15 @@ jobs:
           } else {
             throw "UNEXPECTED lane failure on Windows (see e2e-window-block.log)"
           }
-      - name: Upload E2E evidence
-        if: always()
+      - name: Upload E2E block evidence
+        if: always() && runner.os != 'Linux'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: desktop-e2e-${{ matrix.os }}
-          path: e2e-window*.log
+          name: desktop-e2e-block-${{ matrix.os }}
+          path: e2e-window-block.log
           retention-days: 30
-      # Bundle-install smokes below never run before the E2E legs, so a smoke
-      # failure can never fail the E2E signal spuriously; each leg's E2E and
-      # smoke results stay independently visible per step. The lane needs no
-      # tauri-cli (--unsigned-test stops before the bundler); only these
-      # bundle steps do.
       - name: Cache tauri-cli 2.11.4
+        id: cli-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.tauri-cli-2.11.4
@@ -222,6 +377,16 @@ jobs:
           echo "$ROOT/bin" >> "$GITHUB_PATH"
           # Same-step PATH note as the tauri-driver leg: verify absolute.
           "$ROOT/bin/cargo-tauri" tauri --version
+      # Save right after the install (see the tauri-driver early-save note):
+      # the ~10 min cold cargo install of tauri-cli must not be re-paid by
+      # every run a push burst cancels.
+      - name: Save tauri-cli 2.11.4 cache (early)
+        if: runner.os != 'Windows' && steps.cli-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.tauri-cli-2.11.4
+          key: tauri-cli-2.11.4-${{ runner.os }}
       - name: Install tauri-cli 2.11.4 (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -237,6 +402,16 @@ jobs:
           # Same-step PATH note as the tauri-driver leg: verify absolute.
           & "$ROOT\bin\cargo-tauri.exe" tauri --version
           if ($LASTEXITCODE -ne 0) { throw "cargo tauri --version failed" }
+      - name: Save tauri-cli 2.11.4 cache (early, windows)
+        if: runner.os == 'Windows' && steps.cli-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.tauri-cli-2.11.4
+          key: tauri-cli-2.11.4-${{ runner.os }}
+      # Bundle-install smokes. Bundle results stay independently visible per
+      # step; a smoke failure can never fail the E2E signal spuriously (the
+      # E2E runs in its own parallel job).
       - name: Bundle, install, and launch smoke (Linux deb)
         if: runner.os == 'Linux'
         run: |

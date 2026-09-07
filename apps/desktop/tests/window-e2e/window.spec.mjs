@@ -30,6 +30,7 @@ import {
   deepLinkArgv,
   redactedOriginOnly,
   assertReportRedacted,
+  closeFrontend,
 } from "./harness.mjs";
 import { goldenOutputHash, assertSavedPyramid, decodePngSize } from "./png-assert.mjs";
 
@@ -43,7 +44,7 @@ before(async () => {
 
 after(async () => {
   if (shared) {
-    shared.frontend.close();
+    await closeFrontend(shared.frontend);
     shared = null;
   }
 });

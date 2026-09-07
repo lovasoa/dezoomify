@@ -255,22 +255,29 @@ server for the built frontend, which the debug window shell loads from its
 embedded devUrl address. Reports carry origins, hashes, and codes only.
 See [Native apps](native-apps.md#desktop) for the hook contract.
 
-CI runs the lane in `.github/workflows/desktop.yml` (matrix
-ubuntu/macos/windows, `fail-fast: false`). Linux runs the lane for real
-under Xvfb with the `webkit2gtk-driver` apt package and pinned tauri-driver
-2.0.6, and uploads the lane log (redacted reports included) as the
-`desktop-e2e-ubuntu-latest` artifact. macOS enables `safaridriver` and
-Windows installs `msedgedriver` pinned to the runner's Edge (fail closed on
-mismatch, both versions named), then each runs the lane as a block-evidence
+CI runs the lane in `.github/workflows/desktop.yml` as two parallel jobs.
+The workflow is path-gated: it only starts when a desktop-relevant path
+changed (`apps/desktop`, `crates`, the shared packages it imports, fixtures,
+lockfiles, the workflow itself); unrelated pushes skip it, with the desktop
+crate's lean unit tests still covered by the `rust` lane in `ci.yml`. The
+`window-e2e` job (ubuntu) runs the real lane under Xvfb with the
+`webkit2gtk-driver` apt package and pinned tauri-driver 2.0.6, and uploads
+the lane log (redacted reports included) as the `desktop-e2e-ubuntu`
+artifact. Each spec file runs under its own hard deadline in the lane, so a
+leaked child can never hang the job (it fails with the log as evidence
+instead). The parallel `bundle-smoke` job matrixes ubuntu/macos/windows
+(`fail-fast: false`): macOS enables `safaridriver` and Windows installs
+`msedgedriver` pinned to the runner's Edge (fail closed on mismatch, both
+versions named), then each of those legs runs the lane as a block-evidence
 gate: the lane and harness are Linux-only by code, so those legs pass on a
 real lane pass or on that exact documented guard and fail closed on anything
 else. The macOS/Windows wave must teach the lane preflight plus the harness
-native-driver slot. The same workflow then bundle-smokes every leg (Linux
-`dpkg -i` with sudo plus a timed stay-alive launch, macOS `dmg` mount plus
+native-driver slot. Every smoke leg then bundle-smokes (Linux `dpkg -i`
+with sudo plus a timed stay-alive launch, macOS `dmg` mount plus
 direct-binary exec with Gatekeeper/SIP untouched, Windows `nsis` `/S`
 silent install or the documented direct-exe fallback) and uploads the
-`desktop-bundle-smoke-<os>` logs; smokes never run before the E2E legs, so a
-smoke failure cannot fail the E2E signal spuriously. The updater stays inert
+`desktop-bundle-smoke-<os>` logs; smokes run in their own job, so a smoke
+failure cannot fail the E2E signal spuriously. The updater stays inert
 in all of this (empty pubkey, plugin not registered): no update flow is
 exercised.
 

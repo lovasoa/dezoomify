@@ -27,7 +27,6 @@ jobs:
           - wasm
           - browser+web
           - native+scenario
-          - desktop
           - extension
           - protocol+security
     steps:
@@ -96,9 +95,10 @@ jobs:
       - name: CI lane (scenario)
         if: matrix.lane-group == 'native+scenario'
         run: cargo xtask test scenario
-      - name: CI lane (desktop)
-        if: matrix.lane-group == 'desktop'
-        run: cargo xtask ci desktop
+      # No desktop lane-group here: desktop.yml owns the desktop suite on
+      # three OSes (path-gated to desktop-relevant changes); the rust lane
+      # above still compiles and unit-tests the dezoomify-desktop crate on
+      # every run as the ubiquitous lean gate.
       - name: CI lane (extension)
         if: matrix.lane-group == 'extension'
         run: cargo xtask ci extension
