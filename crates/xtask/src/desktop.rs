@@ -110,48 +110,32 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Real-window E2E: the window shell under tauri-driver on Linux,
-/// hermetic loopback fixtures, byte-exact save verification. Owns the full
-/// lifecycle through the node harness (preflight, window-shell build,
-/// fixture server, frontend server, tauri-driver, app launches, isolated
-/// profiles with cleanup). Opt-in only: bare `test desktop` (plus `test`,
-/// `test all`, and `ci`) stays lean and display-free.
+/// Real-window E2E: the window shell under tauri-driver plus the platform
+/// native driver (Linux WebKitWebDriver, macOS safaridriver, Windows
+/// msedgedriver), hermetic loopback fixtures, byte-exact save verification.
+/// Owns the full lifecycle through the node harness (preflight,
+/// window-shell build, fixture server, frontend server, tauri-driver, app
+/// launches, isolated profiles with cleanup). Opt-in only: bare
+/// `test desktop` (plus `test`, `test all`, and `ci`) stays lean and
+/// display-free.
 fn test_desktop_e2e_window() -> Result<(), String> {
-    if !cfg!(target_os = "linux") {
-        return Err(
-            "test desktop --e2e-window runs on Linux in this wave; macOS/Windows CI wiring (native driver, signed runner) is a later wave"
-                .to_string(),
-        );
-    }
-    if std::env::var_os("DISPLAY").is_none() {
+    // Display: Linux needs Xvfb (the lane fails closed without DISPLAY);
+    // macOS and Windows CI runners provide a GUI session, so no DISPLAY
+    // gate applies there.
+    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
         return Err(
             "test desktop --e2e-window needs a display (DISPLAY is unset); rerun under `xvfb-run -a`"
                 .to_string(),
         );
     }
     // Fail-closed driver discovery, mirroring the harness rules.
-    if std::env::var("TAURI_DRIVER_BIN")
-        .ok()
-        .filter(|p| std::path::Path::new(p).exists())
-        .or_else(|| path_on_path("tauri-driver").map(|p| p.to_string_lossy().into_owned()))
-        .is_none()
-    {
+    if resolve_tauri_driver().is_none() {
         return Err(
             "test desktop --e2e-window needs tauri-driver 2.x (or TAURI_DRIVER_BIN=...); install with `cargo install tauri-driver --version \"=2.0.6\"`"
                 .to_string(),
         );
     }
-    if std::env::var("WEBKIT_DRIVER_BIN")
-        .ok()
-        .filter(|p| std::path::Path::new(p).exists())
-        .or_else(|| path_on_path("WebKitWebDriver").map(|p| p.to_string_lossy().into_owned()))
-        .is_none()
-    {
-        return Err(
-            "test desktop --e2e-window needs WebKitWebDriver on PATH (or WEBKIT_DRIVER_BIN=...)"
-                .to_string(),
-        );
-    }
+    check_native_driver()?;
     ensure_window_e2e_deps()?;
     // The harness launches this exact binary, so build it first: lean
     // shell, frontend, and window shell with no bundle. `build_desktop`
@@ -180,8 +164,10 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // Sequential runs: each spec owns the fixed frontend port (1420) in
     // its own process, so a second lane file cannot collide with the
     // first. `window.spec.mjs` covers the native-feature flows;
-    // `formats.spec.mjs` covers the data-driven full-download matrix
-    // (4 byte-exact passes, remainder documented skips).
+    // `formats.spec.mjs` covers the data-driven full-download matrix: the
+    // 17 PNG cases share one window session (one launch, back-to-back
+    // saves via the product reset path), JPEG/TIFF/iiif-dir keep one
+    // single launch each, so the matrix pays 4 lifecycles, not 20.
     // Each spec runs under a hard deadline: a leaked child holding node's
     // pipes or the frontend server open would otherwise hang this lane
     // forever (observed as a 55-minute CI zombie after launch failures).
@@ -286,8 +272,101 @@ fn path_on_path(name: &str) -> Option<std::path::PathBuf> {
         if candidate.exists() {
             return Some(candidate);
         }
+        // Windows: CreateProcess resolves `.exe` but a bare stem lookup
+        // does not, so probe the suffixed binary too (mirrors the harness
+        // resolveOnPath behavior on win32).
+        if cfg!(windows) {
+            let exe = dir.join(format!("{name}.exe"));
+            if exe.exists() {
+                return Some(exe);
+            }
+        }
     }
     None
+}
+
+/// tauri-driver discovery shared by all OSes: TAURI_DRIVER_BIN override,
+/// else `tauri-driver` (or `tauri-driver.exe` on Windows) on PATH.
+fn resolve_tauri_driver() -> Option<String> {
+    std::env::var("TAURI_DRIVER_BIN")
+        .ok()
+        .filter(|p| std::path::Path::new(p).exists())
+        .or_else(|| path_on_path("tauri-driver").map(|p| p.to_string_lossy().into_owned()))
+}
+
+/// Platform native-driver gate, mirroring the harness
+/// `resolveNativeDriver` slots. Linux keeps its exact prior message;
+/// macOS expects safaridriver (enabled via `sudo safaridriver --enable`);
+/// Windows expects msedgedriver exact-matched to the runner Edge version
+/// (the workflow installs it fail-closed naming both versions).
+fn check_native_driver() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("WEBKIT_DRIVER_BIN")
+            .ok()
+            .filter(|p| std::path::Path::new(p).exists())
+            .or_else(|| path_on_path("WebKitWebDriver").map(|p| p.to_string_lossy().into_owned()))
+            .is_none()
+        {
+            return Err(
+                "test desktop --e2e-window needs WebKitWebDriver on PATH (or WEBKIT_DRIVER_BIN=...)"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // SAFARI_DRIVER_BIN is the canonical override; WEBKIT_DRIVER_BIN
+        // stays accepted so a shared CI env keeps working.
+        let found = std::env::var("SAFARI_DRIVER_BIN")
+            .ok()
+            .filter(|p| std::path::Path::new(p).exists())
+            .or_else(|| {
+                std::env::var("WEBKIT_DRIVER_BIN")
+                    .ok()
+                    .filter(|p| std::path::Path::new(p).exists())
+            })
+            .or_else(|| {
+                let builtin = std::path::PathBuf::from("/usr/bin/safaridriver");
+                builtin
+                    .exists()
+                    .then(|| builtin.to_string_lossy().into_owned())
+            })
+            .or_else(|| path_on_path("safaridriver").map(|p| p.to_string_lossy().into_owned()));
+        if found.is_none() {
+            return Err(
+                "test desktop --e2e-window needs safaridriver (or SAFARI_DRIVER_BIN=...); enable with `sudo safaridriver --enable`"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // EDGE_DRIVER_BIN is the canonical override; WEBKIT_DRIVER_BIN
+        // stays accepted so a shared CI env keeps working.
+        let found = std::env::var("EDGE_DRIVER_BIN")
+            .ok()
+            .filter(|p| std::path::Path::new(p).exists())
+            .or_else(|| {
+                std::env::var("WEBKIT_DRIVER_BIN")
+                    .ok()
+                    .filter(|p| std::path::Path::new(p).exists())
+            })
+            .or_else(|| path_on_path("msedgedriver").map(|p| p.to_string_lossy().into_owned()));
+        if found.is_none() {
+            return Err(
+                "test desktop --e2e-window needs msedgedriver on PATH (or EDGE_DRIVER_BIN=...) exact-matched to the runner Edge version (install from https://msedgedriver.microsoft.com/<edge-version>/edgedriver_win64.zip)"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        Err("test desktop --e2e-window runs on Linux, macOS, or Windows only".to_string())
+    }
 }
 
 /// Desktop development: run the real Tauri development application. Needs
@@ -738,12 +817,14 @@ mod tests {
         assert!(found.1, "pnpm.BAT needs cmd /c");
         // Nothing installed: no resolution, so the caller fails closed.
         let empty = pnpm_resolve_fixture("empty", &[]);
-        assert!(super::resolve_windows_program(
-            "pnpm",
-            std::slice::from_ref(&empty),
-            ".COM;.EXE;.BAT;.CMD"
-        )
-        .is_none());
+        assert!(
+            super::resolve_windows_program(
+                "pnpm",
+                std::slice::from_ref(&empty),
+                ".COM;.EXE;.BAT;.CMD"
+            )
+            .is_none()
+        );
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&empty);
     }
