@@ -261,6 +261,31 @@ export function createProxyRequestId(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Per-origin bucket key (todo 3.2): redacted origin only (`scheme://host`
+ * with a non-default port). Paths, queries, fragments, userinfo, and case
+ * never enter the key, so token-bucket accounting cannot retain secrets.
+ * Returns null for unparseable URLs.
+ */
+export function proxyOriginKey(targetUrl: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(targetUrl);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  if (host === "") return null;
+  const isDefaultPort =
+    u.port === "" ||
+    (u.protocol === "https:" && u.port === "443") ||
+    (u.protocol === "http:" && u.port === "80");
+  const hostPart = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  const authority = isDefaultPort ? hostPart : `${hostPart}:${u.port}`;
+  return `${u.protocol}//${authority}`;
+}
+
 export interface TargetValidation {
   ok: boolean;
   code?: string;

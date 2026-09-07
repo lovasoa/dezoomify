@@ -6,6 +6,7 @@ import {
   cacheControlForProxy,
   createProxyRequestId,
   isAllowedMetadataContentType,
+  proxyOriginKey,
   stripUpstreamHeaders,
   validateProxyTarget,
 } from "./security.ts";
@@ -16,6 +17,8 @@ export interface IncomingProxyRequest {
   protocolVersion: number;
   headers?: Record<string, string>;
   origin?: string;
+  ifNoneMatch?: string;
+  ifModifiedSince?: string;
 }
 
 export interface ProxyRelayDeps {
@@ -34,6 +37,10 @@ export interface ProxyRelayDeps {
   resolveHost?: (host: string) => string[] | null;
   /** Test seam: delay before the single 429 retry (production default below). */
   rateLimitRetryDelayMs?: number;
+  /** Test seam: millisecond clock for the per-origin token bucket. */
+  nowMs?: () => number;
+  /** Test seam: bypass the per-origin bucket (unit tests for validators). */
+  disableOriginBucket?: boolean;
 }
 
 /**
@@ -45,6 +52,43 @@ export interface ProxyRelayDeps {
 export const RATE_LIMIT_RETRY_DELAY_MS = 750;
 
 export const PROXY_UPSTREAM_URL_HEADER = "x-proxy-upstream-url";
+
+/** Per-origin token bucket (todo 3.2): burst 20, refill 5/s per origin. */
+const ORIGIN_BUCKET_CAPACITY = 20;
+const ORIGIN_BUCKET_REFILL_PER_SEC = 5;
+
+interface OriginBucket {
+  tokens: number;
+  updatedMs: number;
+}
+
+const originBuckets = new Map<string, OriginBucket>();
+
+/** Test seam: reset per-origin bucket accounting. */
+export function clearProxyOriginBuckets(): void {
+  originBuckets.clear();
+}
+
+function takeOriginToken(originKey: string, nowMs: number): boolean {
+  const existing = originBuckets.get(originKey);
+  const bucket: OriginBucket = existing ?? {
+    tokens: ORIGIN_BUCKET_CAPACITY,
+    updatedMs: nowMs,
+  };
+  if (existing) {
+    const elapsedMs = Math.max(0, nowMs - bucket.updatedMs);
+    const refill = (elapsedMs / 1000) * ORIGIN_BUCKET_REFILL_PER_SEC;
+    bucket.tokens = Math.min(ORIGIN_BUCKET_CAPACITY, bucket.tokens + refill);
+    bucket.updatedMs = nowMs;
+  }
+  if (bucket.tokens < 1) {
+    originBuckets.set(originKey, bucket);
+    return false;
+  }
+  bucket.tokens -= 1;
+  originBuckets.set(originKey, bucket);
+  return true;
+}
 
 export interface ProxyRelayResult {
   status: number;
@@ -107,6 +151,16 @@ export async function handleProxyRequest(
   if (!first.ok) {
     return { status: 403, headers: baseHeaders, code: "PROXY_POLICY_DENIED", requestId };
   }
+  if (!deps.disableOriginBucket) {
+    const key = proxyOriginKey(req.targetUrl);
+    if (key === null) {
+      return { status: 403, headers: baseHeaders, code: "PROXY_POLICY_DENIED", requestId };
+    }
+    const nowMs = deps.nowMs?.() ?? Date.now();
+    if (!takeOriginToken(key, nowMs)) {
+      return { status: 429, headers: baseHeaders, code: "PROXY_RATE_LIMITED", requestId };
+    }
+  }
 
   let current = req.targetUrl;
   let hops = 0;
@@ -117,6 +171,11 @@ export async function handleProxyRequest(
     const upstreamHeaders = stripUpstreamHeaders({
       accept: headerCase(req.headers ?? {}, "accept") ?? "application/json",
     });
+    const ifNoneMatch = req.ifNoneMatch ?? headerCase(req.headers ?? {}, "if-none-match");
+    if (ifNoneMatch) upstreamHeaders["if-none-match"] = ifNoneMatch;
+    const ifModifiedSince =
+      req.ifModifiedSince ?? headerCase(req.headers ?? {}, "if-modified-since");
+    if (ifModifiedSince) upstreamHeaders["if-modified-since"] = ifModifiedSince;
     let res: {
       status: number;
       headers: { get(name: string): string | null };
@@ -136,6 +195,25 @@ export async function handleProxyRequest(
       if (deps.signal?.aborted) {
         return { status: 499, headers: baseHeaders, code: "TRANSPORT_CANCELLED", requestId };
       }
+    }
+    // Upstream revalidation: a 304 stays a 304 with validators, no body.
+    if (res.status === 304) {
+      const notModifiedHeaders: Record<string, string> = { ...baseHeaders };
+      const notModifiedExposed: string[] = [];
+      const notModifiedEtag = res.headers.get("etag");
+      if (notModifiedEtag) {
+        notModifiedHeaders["etag"] = notModifiedEtag;
+        notModifiedExposed.push("etag");
+      }
+      const notModifiedLastModified = res.headers.get("last-modified");
+      if (notModifiedLastModified) {
+        notModifiedHeaders["last-modified"] = notModifiedLastModified;
+        notModifiedExposed.push("last-modified");
+      }
+      if (notModifiedExposed.length > 0) {
+        notModifiedHeaders["access-control-expose-headers"] = notModifiedExposed.join(", ");
+      }
+      return { status: 304, headers: notModifiedHeaders, requestId };
     }
     // Redirect handling with per-hop revalidation.
     if (res.status >= 300 && res.status <= 399) {
@@ -192,6 +270,18 @@ export async function handleProxyRequest(
       [PROXY_UPSTREAM_URL_HEADER]: current,
       "access-control-expose-headers": PROXY_UPSTREAM_URL_HEADER,
     };
+    const exposed = [PROXY_UPSTREAM_URL_HEADER];
+    const etag = res.headers.get("etag");
+    if (etag) {
+      outHeaders["etag"] = etag;
+      exposed.push("etag");
+    }
+    const lastModified = res.headers.get("last-modified");
+    if (lastModified) {
+      outHeaders["last-modified"] = lastModified;
+      exposed.push("last-modified");
+    }
+    outHeaders["access-control-expose-headers"] = exposed.join(", ");
     return { status: 200, headers: outHeaders, body, requestId, upstreamUrl: current };
   }
 }
