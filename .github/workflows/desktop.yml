@@ -257,7 +257,10 @@ jobs:
           # opens the window), so the smoke launches it briefly under Xvfb.
           # Staying alive until the timeout proves install + launch + webview
           # init; timeout exit 124 is the pass, anything else fails with logs.
-          xvfb-run -a timeout 20 "$BIN" >smoke-launch.log 2>&1; code=$?
+          # (`||` shields the capture from `set -e`: a bare `cmd; code=$?`
+          # would exit the step on cmd's nonzero code before reading it.)
+          code=0
+          xvfb-run -a timeout 20 "$BIN" >smoke-launch.log 2>&1 || code=$?
           echo "launch exit: $code (124 means still running at timeout: pass)"
           if [ "$code" -ne 124 ]; then echo "smoke launch failed:"; cat smoke-launch.log; exit 1; fi
       - name: Bundle, install, and launch smoke (macOS dmg)
@@ -275,10 +278,16 @@ jobs:
           # GPL text to mount our own just-built image. Gatekeeper and SIP
           # are never touched here.
           printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT" | tee -a bundle.log
-          APP_BIN="$MNT/Dezoomify.app/Contents/MacOS/Dezoomify"
+          # Discover the app layout from the image instead of hardcoding it:
+          # exactly one .app, binary name from its own Info.plist.
+          ls "$MNT" | tee -a bundle.log
+          APP_DIR="$(ls -d "$MNT"/*.app | head -n 1)"
+          test -d "$APP_DIR"
+          APP_BIN="$APP_DIR/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP_DIR/Contents/Info.plist")"
+          echo "installed binary: $APP_BIN"
           test -x "$APP_BIN"
           # Identify: the bundle version from the mounted app metadata.
-          /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$MNT/Dezoomify.app/Contents/Info.plist" | tee -a bundle.log
+          /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_DIR/Contents/Info.plist" | tee -a bundle.log
           # Unsigned and locally built, so the image carries no quarantine
           # attribute: direct-binary exec from the mounted image works.
           # Gatekeeper and SIP are never touched here. Alive after 15 s
