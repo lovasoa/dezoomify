@@ -38,10 +38,11 @@
 //   `desktop/basic-iiif-dir` pipeline scenario) but the window UI in this
 //   tree exposes only png/jpeg/tiff radios, so no DOM path can request it.
 //
-// Lane wiring note: `cargo xtask test desktop --e2e-window` currently runs
-// `window.spec.mjs` only (hardcoded in `crates/xtask/src/desktop.rs`, which
-// this change must not touch). This file runs standalone with the same
-// staged environment the lane prepares:
+// Lane wiring: `cargo xtask test desktop --e2e-window` runs
+// `window.spec.mjs` then this file sequentially (`crates/xtask/src/desktop.rs`),
+// each in its own process so the fixed frontend port is never double-bound.
+// This file also runs standalone with the same staged environment the lane
+// prepares:
 //   DISPLAY=:99 DEZOOMIFY_WINDOW_E2E_APP_BIN=$PWD/target/e2e-window/dezoomify-desktop \
 //     DEZOOMIFY_WINDOW_E2E_DIST=$PWD/target/e2e-window/dist \
 //     node --test apps/desktop/tests/window-e2e/formats.spec.mjs

@@ -177,8 +177,26 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         &super::repo_root().join("apps/desktop/dist"),
         &e2e_dir.join("dist"),
     )?;
+    // Sequential runs: each spec owns the fixed frontend port (1420) in
+    // its own process, so a second lane file cannot collide with the
+    // first. `window.spec.mjs` covers the native-feature flows;
+    // `formats.spec.mjs` covers the data-driven full-download matrix
+    // (4 byte-exact passes, remainder documented skips).
     run_node_with_env(
         &["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"],
+        &[
+            (
+                "DEZOOMIFY_WINDOW_E2E_APP_BIN",
+                app_copy.to_str().unwrap_or(""),
+            ),
+            (
+                "DEZOOMIFY_WINDOW_E2E_DIST",
+                dist_copy.to_str().unwrap_or(""),
+            ),
+        ],
+    )?;
+    run_node_with_env(
+        &["--test", "apps/desktop/tests/window-e2e/formats.spec.mjs"],
         &[
             (
                 "DEZOOMIFY_WINDOW_E2E_APP_BIN",
