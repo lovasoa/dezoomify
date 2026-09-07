@@ -46,6 +46,16 @@
 // plus manifest.json entries (all consumers benefit; `cargo xtask fixtures
 // verify` stays green).
 //
+// Lifecycle: the 17 PNG cases share one window session (one fixture
+// server, one tauri-driver, one app launch) via runSharedWindowSession,
+// resetting through the product "Dezoomify another image" path between
+// saves; JPEG, TIFF, and iiif-dir keep one single launch each (distinct
+// fixed-destination extensions). One launch per extension, not one per
+// format: the ~30 s harness lifecycle (temp profile, fixture server,
+// driver, WebKitGTK launch, idle wait, teardown) dominates the sub-10 s
+// download/assembly/encode work, so sharing cuts the matrix from ~20
+// launches to 4.
+//
 // Lane wiring: `cargo xtask test desktop --e2e-window` runs
 // `window.spec.mjs` then this file sequentially (`crates/xtask/src/desktop.rs`),
 // each in its own process so the fixed frontend port is never double-bound.
@@ -60,13 +70,14 @@
 // fixed frontend port.
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import {
   SEED,
   SCENARIOS_DIR,
   preflight,
   runWindowFlow,
+  runSharedWindowSession,
   gatewayInput,
   redactedOriginOnly,
   assertReportRedacted,
@@ -367,35 +378,116 @@ after(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// PASS: deepzoom (PNG): the reference byte-exact window save.
+// PASS: PNG matrix in one shared window (one launch, back-to-back saves).
+// Every case is the same completed-save shape, so one fixture server, one
+// tauri-driver, and one app launch serve all 17 PNG cases: between cases
+// the product "Dezoomify another image" reset returns to idle and the fixed
+// destination is cleared, so the next grant succeeds. The E2E fixed
+// destination is one .png path per launch, hence JPEG/TIFF/iiif-dir keep
+// their own single launches below.
 // ---------------------------------------------------------------------------
 
-test("formats: deepzoom saves a byte-exact PNG", { timeout: 180000 }, async () => {
+function e2eGolden(name) {
   const raw = readFileSync(
-    path.join(SCENARIOS_DIR, "native/cli-dzi/expected/result.json"),
+    path.join(SCENARIOS_DIR, `desktop/e2e-formats/expected/${name}.json`),
     "utf8",
   );
-  const hash = JSON.parse(raw).outputHash;
-  assert.match(hash, /^sha256:[0-9a-f]{64}$/, "golden pins a real digest");
-  assert.equal(hash, goldenOutputHash(SCENARIOS_DIR), "window golden matches the pinned scenario golden");
-  await runWindowFlow({
+  const expected = JSON.parse(raw);
+  assert.match(expected.outputHash, /^sha256:[0-9a-f]{64}$/, `${name} golden pins a real digest`);
+  return expected;
+}
+
+const PNG_MATRIX = [
+  { format: "deepzoom", kind: "gateway-dzi", geometry: /512 by 512/ },
+  { format: "generic", kind: "gateway-probe", geometry: /512 by 512/ },
+  { format: "custom", inputPath: "/custom/tiles.yaml", geometry: /512 by 512/ },
+  { format: "zoomify", inputPath: "/zoomify/ImageProperties.xml", geometry: /512 by 512/ },
+  { format: "xlimage", inputPath: "/xl/sample.imgi?cmd=info", geometry: /512 by 512/ },
+  { format: "fsi", inputPath: "/fsi/server?type=info&source=image&image=image", geometry: /512 by 512/ },
+  { format: "vls", inputPath: "/vls/zoom/1", geometry: /512 by 512/ },
+  { format: "arcgis", inputPath: "/arcgis/MapServer", geometry: /768 by 768/ },
+  { format: "iiif", inputPath: "/fixtures/iiif-v2/info.json", geometry: /512 by 512/ },
+  { format: "krpano", inputPath: "/krpano/pano.xml", geometry: /512 by 512/ },
+  { format: "iipimage", inputPath: "/iip?FIF=/image.tif", geometry: /512 by 512/ },
+  { format: "topviewer", inputPath: "/topviewer/data.json", geometry: /512 by 512/ },
+  { format: "lizardtech", inputPath: "/lizardtech/iserv/calcrgn?cat=test&item=test&wid=500&hei=400", geometry: /1024 by 1024/ },
+  { format: "hungaricana", inputPath: "/hungaricana/imagesize/sample.ecw", geometry: /512 by 512/ },
+  { format: "wmts", inputPath: "/wmts/WMTSCapabilities.xml", geometry: /2816 by 2816/ },
+  { format: "pnav", inputPath: "/entity/OBJECT/1", geometry: /256 by 256/ },
+  { format: "bulk_text", inputPath: "/bulk/list.txt", geometry: /512 by 512/ },
+];
+
+async function resetSharedPngForNext(driver, fixedDest) {
+  // Product reset path: the completed section offers "Dezoomify another
+  // image" (onReset -> idle with the URL input). Then clear the fixed
+  // destination (plus any partial sibling) so the next grant succeeds
+  // instead of refusing output.exists.
+  await driver.findElement({ css: "#dz-btn-another" }).click();
+  await waitFor(
+    driver,
+    (s) => !s.jobSection && !s.completed && !s.error,
+    60000,
+    "idle after reset",
+  );
+  rmSync(fixedDest, { force: true });
+  rmSync(fixedDest.replace(/\.png$/, ".partial.png"), { force: true });
+}
+
+test("formats: PNG matrix saves byte-exact output in one window", { timeout: 1200000 }, async (t) => {
+  const dziHash = JSON.parse(
+    readFileSync(path.join(SCENARIOS_DIR, "native/cli-dzi/expected/result.json"), "utf8"),
+  ).outputHash;
+  assert.match(dziHash, /^sha256:[0-9a-f]{64}$/, "golden pins a real digest");
+  assert.equal(dziHash, goldenOutputHash(SCENARIOS_DIR), "window golden matches the pinned scenario golden");
+  assert.equal(e2eGolden("custom").outputHash, dziHash, "custom shares the DZI pyramid golden");
+  assert.equal(e2eGolden("bulk_text").outputHash, e2eGolden("iiif").outputHash, "bulk shares the iiif stub golden");
+  const probeHash = probeGridGoldenHash();
+  await runSharedWindowSession({
     nativeDriverBin: shared.nativeDriverBin,
-    fixedName: "format-deepzoom.png",
+    fixedName: "format-matrix.png",
     body: async ({ driver, base, fixedDest, work }) => {
-      const input = gatewayInput(base, GATEWAY_DZI);
-      const terminal = await saveFlow(driver, { input });
-      assert.equal(terminal.error, false, "no error section on the deepzoom save");
-      assert.match(terminal.completedSummary ?? "", /512 by 512/, "completed summary names the geometry");
-      assert.ok(existsSync(fixedDest), "output written to the fixed destination");
-      assertSavedPyramid(readFileSync(fixedDest), hash);
-      const text = redactedReport("format", {
-        format: "deepzoom",
-        scenario: "native/cli-dzi",
-        origin: redactedOriginOnly(input),
-        save: { width: EXPECTED_WIDTH, height: EXPECTED_HEIGHT, outputHash: hash },
-      });
-      assert.ok(!text.includes(work), "no absolute profile paths in the report");
-      console.log(`formats deepzoom/png: 512x512 ${hash} (seed ${SEED})`);
+      let first = true;
+      for (const c of PNG_MATRIX) {
+        await t.test(`formats: ${c.format} saves a byte-exact PNG`, { timeout: 240000 }, async () => {
+          if (!first) await resetSharedPngForNext(driver, fixedDest);
+          first = false;
+          const input = c.kind === "gateway-dzi"
+            ? gatewayInput(base, GATEWAY_DZI)
+            : c.kind === "gateway-probe"
+              ? gatewayInput(base, GATEWAY_PROBE_TEMPLATE)
+              : `${base}${c.inputPath}`;
+          const terminal = await saveFlow(driver, { input });
+          assert.equal(terminal.error, false, `no error section on the ${c.format} save`);
+          assert.match(terminal.completedSummary ?? "", c.geometry, "completed summary names the geometry");
+          assert.ok(existsSync(fixedDest), "output written to the fixed destination");
+          const bytes = readFileSync(fixedDest);
+          if (c.format === "deepzoom") {
+            assertSavedPyramid(bytes, dziHash);
+          } else if (c.format === "generic") {
+            assertSavedPyramid(bytes, probeHash);
+          } else {
+            const expected = e2eGolden(c.format);
+            const { width, height } = decodePngSize(bytes);
+            assert.equal(width, expected.imageSize.x, `${c.format} width`);
+            assert.equal(height, expected.imageSize.y, `${c.format} height`);
+            assert.equal(sha256Hex(bytes), expected.outputHash, `saved ${c.format} bytes pin the golden`);
+          }
+          const expectedHash = c.format === "deepzoom"
+            ? dziHash
+            : c.format === "generic"
+              ? probeHash
+              : e2eGolden(c.format).outputHash;
+          const { width, height } = decodePngSize(bytes);
+          const text = redactedReport("format", {
+            format: c.format,
+            scenario: c.kind ? (c.format === "deepzoom" ? "native/cli-dzi" : "native/cli-probe-grid") : "desktop/e2e-formats",
+            origin: redactedOriginOnly(input),
+            save: { width, height, outputHash: expectedHash },
+          });
+          assert.ok(!text.includes(work), "no absolute profile paths in the report");
+          console.log(`formats ${c.format}/png: ${width}x${height} ${expectedHash} (seed ${SEED})`);
+        });
+      }
     },
   });
 });
@@ -458,153 +550,6 @@ test("formats: deepzoom saves a byte-exact TIFF", { timeout: 180000 }, async () 
       console.log(`formats deepzoom/tiff: 512x512 ${EXPECTED_TIFF_HASH} (seed ${SEED})`);
     },
   });
-});
-
-// ---------------------------------------------------------------------------
-// PASS: generic (probed X/Y template): byte-exact PNG, same quadrant tiles.
-// ---------------------------------------------------------------------------
-
-test("formats: generic template saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  const hash = probeGridGoldenHash();
-  await runWindowFlow({
-    nativeDriverBin: shared.nativeDriverBin,
-    fixedName: "format-generic.png",
-    body: async ({ driver, base, fixedDest, work }) => {
-      const input = gatewayInput(base, GATEWAY_PROBE_TEMPLATE);
-      const terminal = await saveFlow(driver, { input });
-      assert.equal(terminal.error, false, "no error section on the generic save");
-      assert.match(terminal.completedSummary ?? "", /512 by 512/, "completed summary names the geometry");
-      assert.ok(existsSync(fixedDest), "output written to the fixed destination");
-      assertSavedPyramid(readFileSync(fixedDest), hash);
-      const text = redactedReport("format", {
-        format: "generic",
-        scenario: "native/cli-probe-grid",
-        origin: redactedOriginOnly(input),
-        save: { width: EXPECTED_WIDTH, height: EXPECTED_HEIGHT, outputHash: hash },
-      });
-      assert.ok(!text.includes(work), "no absolute profile paths in the report");
-      console.log(`formats generic/png: 512x512 ${hash} (seed ${SEED})`);
-    },
-  });
-});
-
-// ---------------------------------------------------------------------------
-// PASS: every other site format via direct loopback fixtures (host
-// 127.0.0.1, no gateway). Each case submits a direct `${base}/<path>`
-// input, saves PNG through the real window shell, and asserts byte-exact
-// sha256 plus dimensions against
-// `testdata/scenarios/desktop/e2e-formats/expected/<format>.json` (pinned
-// via the CLI against the same fixture server; shared stub goldens are
-// documented per case).
-// ---------------------------------------------------------------------------
-
-function e2eGolden(name) {
-  const raw = readFileSync(
-    path.join(SCENARIOS_DIR, `desktop/e2e-formats/expected/${name}.json`),
-    "utf8",
-  );
-  const expected = JSON.parse(raw);
-  assert.match(expected.outputHash, /^sha256:[0-9a-f]{64}$/, `${name} golden pins a real digest`);
-  return expected;
-}
-
-async function directFormatCase({ format, inputPath, fixedName, geometry, scenario = "desktop/e2e-formats" }) {
-  const expected = e2eGolden(format);
-  await runWindowFlow({
-    nativeDriverBin: shared.nativeDriverBin,
-    fixedName,
-    body: async ({ driver, base, fixedDest, work }) => {
-      const input = `${base}${inputPath}`;
-      const terminal = await saveFlow(driver, { input });
-      assert.equal(terminal.error, false, `no error section on the ${format} save`);
-      assert.match(terminal.completedSummary ?? "", geometry, "completed summary names the geometry");
-      assert.ok(existsSync(fixedDest), "output written to the fixed destination");
-      const bytes = readFileSync(fixedDest);
-      const { width, height } = decodePngSize(bytes);
-      assert.equal(width, expected.imageSize.x, `${format} width`);
-      assert.equal(height, expected.imageSize.y, `${format} height`);
-      assert.equal(sha256Hex(bytes), expected.outputHash, `saved ${format} bytes pin the golden`);
-      const text = redactedReport("format", {
-        format,
-        scenario,
-        origin: redactedOriginOnly(input),
-        save: { width, height, outputHash: expected.outputHash },
-      });
-      assert.ok(!text.includes(work), "no absolute profile paths in the report");
-      console.log(`formats ${format}/png: ${width}x${height} ${expected.outputHash} (seed ${SEED})`);
-    },
-  });
-}
-
-test("formats: custom saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  // Shares the deepzoom PNG golden byte-for-byte: same 4 quadrant tiles in
-  // the same 2x2 layout (see native/cli-dzi).
-  const expected = e2eGolden("custom");
-  assert.equal(expected.outputHash, goldenOutputHash(SCENARIOS_DIR), "custom shares the DZI pyramid golden");
-  await directFormatCase({ format: "custom", inputPath: "/custom/tiles.yaml", fixedName: "format-custom.png", geometry: /512 by 512/ });
-});
-
-test("formats: zoomify saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "zoomify", inputPath: "/zoomify/ImageProperties.xml", fixedName: "format-zoomify.png", geometry: /512 by 512/ });
-});
-
-test("formats: xlimage saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "xlimage", inputPath: "/xl/sample.imgi?cmd=info", fixedName: "format-xlimage.png", geometry: /512 by 512/ });
-});
-
-test("formats: fsi saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "fsi", inputPath: "/fsi/server?type=info&source=image&image=image", fixedName: "format-fsi.png", geometry: /512 by 512/ });
-});
-
-test("formats: vls saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "vls", inputPath: "/vls/zoom/1", fixedName: "format-vls.png", geometry: /512 by 512/ });
-});
-
-test("formats: arcgis saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "arcgis", inputPath: "/arcgis/MapServer", fixedName: "format-arcgis.png", geometry: /768 by 768/ });
-});
-
-test("formats: iiif saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  // Served by the existing web/core-discovery 127.0.0.1 fixtures
-  // (`/fixtures/iiif-v2/info.json` plus the `/iiif/` jpeg-stub tile
-  // prefix); golden pinned in desktop/e2e-formats for the window matrix.
-  await directFormatCase({ format: "iiif", inputPath: "/fixtures/iiif-v2/info.json", fixedName: "format-iiif.png", geometry: /512 by 512/ });
-});
-
-test("formats: krpano saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "krpano", inputPath: "/krpano/pano.xml", fixedName: "format-krpano.png", geometry: /512 by 512/ });
-});
-
-test("formats: iipimage saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "iipimage", inputPath: "/iip?FIF=/image.tif", fixedName: "format-iipimage.png", geometry: /512 by 512/ });
-});
-
-test("formats: topviewer saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "topviewer", inputPath: "/topviewer/data.json", fixedName: "format-topviewer.png", geometry: /512 by 512/ });
-});
-
-test("formats: lizardtech saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "lizardtech", inputPath: "/lizardtech/iserv/calcrgn?cat=test&item=test&wid=500&hei=400", fixedName: "format-lizardtech.png", geometry: /1024 by 1024/ });
-});
-
-test("formats: hungaricana saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "hungaricana", inputPath: "/hungaricana/imagesize/sample.ecw", fixedName: "format-hungaricana.png", geometry: /512 by 512/ });
-});
-
-test("formats: wmts saves a byte-exact PNG", { timeout: 240000 }, async () => {
-  await directFormatCase({ format: "wmts", inputPath: "/wmts/WMTSCapabilities.xml", fixedName: "format-wmts.png", geometry: /2816 by 2816/ });
-});
-
-test("formats: pnav saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  await directFormatCase({ format: "pnav", inputPath: "/entity/OBJECT/1", fixedName: "format-pnav.png", geometry: /256 by 256/ });
-});
-
-test("formats: bulk_text saves a byte-exact PNG", { timeout: 180000 }, async () => {
-  // Single-entry deferred follow to the direct IIIF fixture; shares the
-  // iiif stub golden (same 4 tiles).
-  const expected = e2eGolden("bulk_text");
-  assert.equal(expected.outputHash, e2eGolden("iiif").outputHash, "bulk shares the iiif stub golden");
-  await directFormatCase({ format: "bulk_text", inputPath: "/bulk/list.txt", fixedName: "format-bulk.png", geometry: /512 by 512/ });
 });
 
 // SKIP with proof (not an excuse): google_arts_and_culture has no
