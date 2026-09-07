@@ -1263,6 +1263,76 @@ abbr[title] {
   line-height: 1.6;
 }
 
+/* Recent-jobs history (local-only ledger, idle view) */
+.dz-history-section {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--dz-surface-border);
+}
+
+.dz-history-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--dz-text-primary);
+}
+
+.dz-history-note,
+.dz-history-empty,
+.dz-history-hidden {
+  font-size: 0.88rem;
+  color: var(--dz-text-muted);
+}
+
+.dz-history-note {
+  margin: 0 0 0.75rem;
+}
+
+.dz-history-optin {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  color: var(--dz-text-secondary);
+  margin: 0 0 0.75rem;
+  cursor: pointer;
+}
+
+.dz-history-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dz-history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+@media (prefers-color-scheme: dark) {
+  .dz-history-item {
+    background: rgba(255, 255, 255, 0.02);
+  }
+}
+
+.dz-history-main {
+  font-size: 0.88rem;
+  color: var(--dz-text-secondary);
+  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* Guidance Modal Dialog */
 .dz-modal-backdrop {
   position: fixed;
@@ -1538,11 +1608,88 @@ abbr[title] {
   }
 }
 
+.dz-preview-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--dz-surface-border);
+  background: var(--dz-surface-gradient);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.dz-preview-controls .dz-btn-secondary {
+  min-height: 32px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.88rem;
+}
+
+.dz-preview-zoom-label {
+  min-width: 3.2rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.88rem;
+  color: var(--dz-text-secondary);
+}
+
 .dz-canvas-container canvas {
   display: block;
-  max-width: 100%;
+  max-width: none;
   height: auto;
-  cursor: zoom-in;
+  margin: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.dz-canvas-container canvas:active {
+  cursor: grabbing;
+}
+
+.dz-crop-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--dz-surface-border);
+  background: var(--dz-surface-gradient);
+}
+
+.dz-crop-panel label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.88rem;
+}
+
+.dz-crop-panel input {
+  width: 5.5rem;
+}
+
+.dz-crop-estimate {
+  font-size: 0.88rem;
+  color: var(--dz-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dz-canvas-stack {
+  position: relative;
+  overflow: auto;
+}
+
+.dz-crop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+.dz-crop-rect {
+  position: absolute;
+  border: 2px solid #3c7bff;
+  background: rgba(60, 123, 255, 0.12);
+  border-radius: var(--dz-radius);
 }
 
 /* Pinned Site Footer */
@@ -1709,4 +1856,22 @@ abbr[title] {
   .dz-job-actions .dz-btn-secondary {
     width: 100%;
   }
+}
+
+/* Generic view section wrapper (shared-ui view.ts, extension page chrome). */
+.dz-view-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Modal dialog body (shared-ui openModal/pickers/confirm). */
+.dz-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
 }

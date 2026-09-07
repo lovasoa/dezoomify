@@ -3,6 +3,7 @@
 
 import type { ControllerState, StructuredError, AppCapabilities } from "./controller.ts";
 import { renderAppChoice } from "./controller.ts";
+import type { HistoryEntry } from "./history.ts";
 import {
   renderTransportLabel,
   renderSaveGuidance,
@@ -24,6 +25,16 @@ export interface ViewCallbacks {
   onSelectLevel?(level: number): void;
   onOpenExternalLink?(url: string): void;
   onCopyShareLink?(): void;
+  /** Reopen one history entry by its stored URL. Absent hides per-entry reopen. */
+  onOpenHistory?(url: string): void;
+  /** Clear the local history ledger. Absent hides the clear action. */
+  onClearHistory?(): void;
+  /** Toggle full-URL history opt-in. Absent hides the opt-in control. */
+  onToggleHistoryOptIn?(enabled: boolean): void;
+  /** Pause the active job (suspend-acquisition). Absent hides the pause control. */
+  onPause?(): void;
+  /** Resume a paused job (re-drive). Absent hides the resume control. */
+  onResume?(): void;
 }
 
 export interface JobActivity {
@@ -45,12 +56,22 @@ export interface JobActivity {
   lastProgressAt?: number;
   /** Capped technical log lines (oldest first). Never rendered unescaped. */
   log?: string[];
+  /** Pause v1 overlay (todo 5.7): true while acquisition is suspended. */
+  paused?: boolean;
 }
 
 export interface ViewContext {
   capabilities?: AppCapabilities;
   currentProgress?: { current: number; total: number; message?: string };
   completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
+  savedOutput?: {
+    name: string;
+    width: number;
+    height: number;
+    doneTiles: number;
+    totalTiles: number;
+    failedTiles: number;
+  };
   originClean?: boolean;
   jobActivity?: JobActivity;
   /** Prefilled URL (e.g. restored from a legacy `#url` hash). */
@@ -70,6 +91,22 @@ export interface ViewContext {
    */
   sourceUrl?: string;
   desktopHandoffUrl?: string;
+  /**
+   * Recent-jobs history (todo 5.2): local-only ledger, newest first, at most
+   * 20 entries. Each entry carries a redacted origin plus a path hash and,
+   * only for non-sensitive URLs with user opt-in, the full reopenable URL.
+   * The view only renders; hosts own storage and reopen effects.
+   */
+  history?: Array<HistoryEntry>;
+  /** Whether full-URL history opt-in is enabled. Renders the opt-in control state. */
+  historyOptIn?: boolean;
+  /**
+   * Pause v1 (todo 5.7, suspend-acquisition): true while the active job has
+   * stopped scheduling new tiles. In-flight work finishes, decoded output is
+   * retained, and resume re-drives the pending queue. Host-neutral: the view
+   * only renders the state, hosts own the pause effect.
+   */
+  paused?: boolean;
 }
 
 export interface ModalHost {
@@ -144,28 +181,222 @@ export function openModal(
   hostDocument.body.appendChild(backdrop);
 }
 
+export interface ImagePickerOption {
+  index: number;
+  title?: string;
+  width?: number;
+  height?: number;
+  tiles?: number;
+}
+
+export interface ImagePickerArgs {
+  options: ImagePickerOption[];
+  onPick(index: number): void;
+}
+
+/** Image picker dialog: explicit choice among discovered images. */
+export function openImagePicker(hostDocument: Document, args: ImagePickerArgs): boolean {
+  hostDocument.querySelector(".dz-modal-backdrop")?.remove();
+  const backdrop = hostDocument.createElement("div");
+  backdrop.className = "dz-modal-backdrop";
+  backdrop.setAttribute("role", "dialog");
+  backdrop.setAttribute("aria-modal", "true");
+  backdrop.setAttribute("aria-labelledby", "dz-modal-title");
+  const card = hostDocument.createElement("div");
+  card.className = "dz-modal-card";
+  const titleEl = hostDocument.createElement("h2");
+  titleEl.id = "dz-modal-title";
+  titleEl.className = "dz-modal-title";
+  titleEl.textContent = "Choose an image";
+  const group = hostDocument.createElement("div");
+  group.className = "dz-choice-group";
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-label", "Choose an image to save");
+  for (const option of args.options) {
+    const btn = hostDocument.createElement("button");
+    btn.type = "button";
+    btn.className = "dz-btn-secondary dz-choice-option";
+    const label =
+      option.title ??
+      `Image ${option.index + 1}${option.width && option.height ? ` (${option.width}x${option.height})` : ""}`;
+    btn.textContent = label;
+    btn.setAttribute("aria-label", label);
+    btn.addEventListener("click", () => {
+      backdrop.remove();
+      args.onPick(option.index);
+    });
+    group.appendChild(btn);
+  }
+  const closeBtn = hostDocument.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "dz-modal-close";
+  closeBtn.setAttribute("aria-label", "Close dialog");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", () => backdrop.remove());
+  card.append(closeBtn, titleEl, group);
+  backdrop.appendChild(card);
+  hostDocument.body.appendChild(backdrop);
+  return true;
+}
+
+export interface LevelPickerOption {
+  index: number;
+  width: number;
+  height: number;
+  tiles: number;
+  fits: boolean;
+}
+
+export interface LevelPickerArgs {
+  options: LevelPickerOption[];
+  onPick(index: number): void;
+}
+
+/** Level picker dialog: explicit choice among resolutions. */
+export function openLevelPicker(hostDocument: Document, args: LevelPickerArgs): boolean {
+  hostDocument.querySelector(".dz-modal-backdrop")?.remove();
+  const backdrop = hostDocument.createElement("div");
+  backdrop.className = "dz-modal-backdrop";
+  backdrop.setAttribute("role", "dialog");
+  backdrop.setAttribute("aria-modal", "true");
+  backdrop.setAttribute("aria-labelledby", "dz-modal-title");
+  const card = hostDocument.createElement("div");
+  card.className = "dz-modal-card";
+  const titleEl = hostDocument.createElement("h2");
+  titleEl.id = "dz-modal-title";
+  titleEl.className = "dz-modal-title";
+  titleEl.textContent = "Choose a resolution";
+  const group = hostDocument.createElement("div");
+  group.className = "dz-choice-group";
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-label", "Choose a resolution to save");
+  for (const option of args.options) {
+    const btn = hostDocument.createElement("button");
+    btn.type = "button";
+    btn.className = "dz-btn-secondary dz-choice-option";
+    const label = `Level ${option.index + 1} (${option.width}x${option.height}, ${option.tiles} tiles${option.fits ? "" : ", too large"})`;
+    btn.textContent = label;
+    btn.setAttribute("aria-label", label);
+    btn.addEventListener("click", () => {
+      backdrop.remove();
+      args.onPick(option.index);
+    });
+    group.appendChild(btn);
+  }
+  const closeBtn = hostDocument.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "dz-modal-close";
+  closeBtn.setAttribute("aria-label", "Close dialog");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", () => backdrop.remove());
+  card.append(closeBtn, titleEl, group);
+  backdrop.appendChild(card);
+  hostDocument.body.appendChild(backdrop);
+  return true;
+}
+
+export interface ConfirmModalArgs {
+  title: string;
+  subtitle: string;
+  bodyLines: string[];
+  confirmLabel: string;
+  declineLabel: string;
+}
+
+/**
+ * Explicit confirm/decline dialog (extension handoff consent). Site-influenced
+ * lines render as text, never markup. Initial focus fails safe on decline.
+ */
+export function openConfirmModal(
+  hostDocument: Document,
+  args: ConfirmModalArgs,
+): Promise<boolean> {
+  hostDocument.querySelector(".dz-modal-backdrop")?.remove();
+  const backdrop = hostDocument.createElement("div");
+  backdrop.className = "dz-modal-backdrop";
+  backdrop.setAttribute("role", "dialog");
+  backdrop.setAttribute("aria-modal", "true");
+  backdrop.setAttribute("aria-labelledby", "dz-modal-title");
+  const card = hostDocument.createElement("div");
+  card.className = "dz-modal-card";
+  const titleEl = hostDocument.createElement("h2");
+  titleEl.id = "dz-modal-title";
+  titleEl.className = "dz-modal-title";
+  titleEl.textContent = args.title;
+  const subtitleEl = hostDocument.createElement("p");
+  subtitleEl.className = "dz-modal-subtitle";
+  subtitleEl.textContent = args.subtitle;
+  const body = hostDocument.createElement("div");
+  body.className = "dz-modal-body";
+  for (const line of args.bodyLines) {
+    const p = hostDocument.createElement("p");
+    p.textContent = line;
+    body.appendChild(p);
+  }
+  const actions = hostDocument.createElement("div");
+  actions.className = "dz-modal-actions";
+  const declineBtn = hostDocument.createElement("button");
+  declineBtn.type = "button";
+  declineBtn.className = "dz-btn-secondary dz-modal-decline";
+  declineBtn.textContent = args.declineLabel;
+  const confirmBtn = hostDocument.createElement("button");
+  confirmBtn.type = "button";
+  confirmBtn.className = "dz-btn-tactile dz-modal-confirm";
+  confirmBtn.textContent = args.confirmLabel;
+  actions.append(declineBtn, confirmBtn);
+  card.append(titleEl, subtitleEl, body, actions);
+  backdrop.appendChild(card);
+  hostDocument.body.appendChild(backdrop);
+  return new Promise<boolean>((resolve) => {
+    declineBtn.addEventListener("click", () => {
+      backdrop.remove();
+      resolve(false);
+    });
+    confirmBtn.addEventListener("click", () => {
+      backdrop.remove();
+      resolve(true);
+    });
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) {
+        backdrop.remove();
+        resolve(false);
+      }
+    });
+    declineBtn.focus();
+  });
+}
+
 export interface PlatformHints {
   userAgent?: string;
   platform?: string;
 }
 
-function detectPlatform(hints?: PlatformHints): { name: string; file: string; label: string } {
+function detectPlatform(hints?: PlatformHints): { name: string; file: string; label: string; hasInstaller: boolean } {
   const ua = (hints?.userAgent ?? "").toLowerCase();
   const platform = (hints?.platform ?? "").toLowerCase();
   if (ua.includes("win") || platform.includes("win")) {
-    return { name: "Windows", file: ".msi / .exe", label: "Save for Windows" };
+    return { name: "Windows", file: "no installer yet", label: "Desktop App for Windows", hasInstaller: false };
   }
   if (ua.includes("mac") || platform.includes("mac")) {
-    return { name: "macOS", file: ".dmg", label: "Save for macOS" };
+    return { name: "macOS", file: "no installer yet", label: "Desktop App for macOS", hasInstaller: false };
   }
   if (ua.includes("linux") || platform.includes("linux")) {
-    return { name: "Linux", file: ".AppImage / .deb", label: "Save for Linux" };
+    return { name: "Linux", file: ".deb (unsigned)", label: "Save for Linux", hasInstaller: true };
   }
-  return { name: "All Platforms", file: "latest releases", label: "Save Native App" };
+  return { name: "All Platforms", file: "Linux .deb only", label: "Save Native App", hasInstaller: false };
 }
 
 export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformHints): void {
   const p = detectPlatform(hints);
+  const downloadNote = p.hasInstaller
+    ? `Linux installer (.deb, unsigned) is on
+          <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">GitHub Releases</a>.
+          Verify SHA256SUMS and GPG signatures before installing. No auto-update; check Releases manually.`
+    : `No installer ships for ${escapeHtml(p.name)} yet. Only Linux has a .deb (unsigned) on
+          <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">GitHub Releases</a>.`;
+  const stepOne = p.hasInstaller
+    ? `Save the Linux .deb (unsigned) from our GitHub Releases page, verify SHA256SUMS and signatures, then install it. There is no auto-update.`
+    : `No installer ships for ${escapeHtml(p.name)} yet; only Linux has an unsigned .deb on our GitHub Releases page. Meanwhile use the website or CLI.`;
   openModal(
     hostDocument,
     "Dezoomify Desktop App",
@@ -173,8 +404,7 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
     `
       <div class="dz-modal-download-box">
         <div style="font-size: 0.9rem; color: var(--dz-text-muted);">
-          No installer ships yet. A future installer for ${escapeHtml(p.name)} will appear on
-          <a href="https://github.com/lovasoa/dezoomify/releases" target="_blank" rel="noopener">GitHub Releases</a>.
+          ${downloadNote}
         </div>
       </div>
 
@@ -182,7 +412,7 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
         <div class="dz-modal-section-title">Why use the Desktop App?</div>
         <ul class="dz-modal-list">
           <li><strong>Handles Larger Artworks:</strong> A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory (up to its 8 GiB canvas limit, needing matching free memory) and writes the finished output to disk.</li>
-          <li><strong>Saves the Finished Picture:</strong> Each run saves one job to one output file on your computer.</li>
+          <li><strong>Saves the Finished Picture:</strong> Each job saves to one output file on your computer. You can queue several jobs; they save one at a time.</li>
           <li><strong>When the Website Cannot Finish:</strong> The website stops the job with an error and points to the desktop app for the full-size image.</li>
         </ul>
       </div>
@@ -192,7 +422,7 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
         <div class="dz-modal-steps">
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">1</span>
-            <div>No installer ships yet; a future installer for ${escapeHtml(p.name)} will appear on our GitHub Releases page.</div>
+            <div>${stepOne}</div>
           </div>
           <div class="dz-modal-step">
             <span class="dz-modal-step-num">2</span>
@@ -395,7 +625,7 @@ export function renderView(
     // Same phase: mutate existing DOM elements in place
     switch (phase) {
       case "idle":
-        updateInputSection(card, ctx);
+        updateInputSection(card, ctx, callbacks);
         break;
       case "job":
         updateJobSection(card, state, callbacks, ctx);
@@ -431,15 +661,210 @@ function hostFromUrl(url: string | undefined): string {
   }
 }
 
+/**
+ * Redacted origin (`scheme://host[:port]/`) for the one-click desktop handoff
+ * summary (todo 5.5). Prefers the original source URL; falls back to the
+ * `src` query inside the `dezoomify://` link. Returns "" for local files or
+ * unparseable input so callers show the local-file note instead. Never
+ * includes userinfo, path, query, or fragment; origins only, never values.
+ * Copy matches `view.handoff.*` in `i18n.ts` verbatim (current view renders
+ * hardcoded English; the dictionary stays the single source for the next
+ * locale).
+ */
+export function handoffOriginFor(handoffUrl?: string, sourceUrl?: string): string {
+  const candidates: Array<string> = [];
+  if (typeof sourceUrl === "string" && sourceUrl !== "") candidates.push(sourceUrl);
+  if (typeof handoffUrl === "string" && handoffUrl !== "") {
+    try {
+      const query = handoffUrl.split("?")[1]?.split("#")[0] ?? "";
+      for (const pair of query.split("&")) {
+        if (pair.startsWith("src=")) {
+          try {
+            candidates.push(decodeURIComponent(pair.slice(4).replace(/\+/g, " ")));
+          } catch {
+            // A malformed src never blocks the summary; try the next candidate.
+          }
+          break;
+        }
+      }
+    } catch {
+      // A malformed handoff link never blocks the summary.
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      const trimmed = String(candidate).trim();
+      if (trimmed.toLowerCase().startsWith("file:")) return "";
+      const u = new URL(trimmed);
+      if (u.protocol !== "http:" && u.protocol !== "https:") continue;
+      if (!u.hostname) continue;
+      return `${u.protocol}//${u.host}/`;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return "";
+}
+
+/** True for local-file sources: handoff carries no link, only the local note. */
+export function isFileHandoffSource(sourceUrl?: string): boolean {
+  try {
+    return new URL(String(sourceUrl ?? "").trim()).protocol === "file:";
+  } catch {
+    return false;
+  }
+}
+
 function updateInputSection(
   card: HTMLElement,
   ctx?: ViewContext,
+  callbacks?: ViewCallbacks,
 ): void {
   const input = card.querySelector<HTMLInputElement>("#dz-url-input");
   if (input && !input.value && ctx?.initialUrl) {
     input.value = ctx.initialUrl;
     const clearBtn = card.querySelector<HTMLButtonElement>("#dz-btn-clear");
     if (clearBtn) clearBtn.style.display = "flex";
+  }
+  const history = card.querySelector<HTMLElement>("#dz-history");
+  if (history && callbacks) {
+    updateHistorySection(history, callbacks, ctx);
+  }
+}
+
+function historyDimsLabel(entry: HistoryEntry): string {
+  if (
+    typeof entry.width === "number" &&
+    typeof entry.height === "number" &&
+    entry.width > 0 &&
+    entry.height > 0
+  ) {
+    return `${entry.width} by ${entry.height} pixels`;
+  }
+  return "";
+}
+
+function historyDateLabel(at: number): string {
+  try {
+    const date = new Date(at);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleDateString();
+  } catch {
+    return "";
+  }
+}
+
+function mountHistorySection(
+  body: HTMLElement,
+  callbacks: ViewCallbacks,
+  ctx?: ViewContext,
+): void {
+  const doc = body.ownerDocument;
+  const section = doc.createElement("div");
+  section.className = "dz-history-section";
+  section.id = "dz-history";
+  body.appendChild(section);
+  updateHistorySection(section, callbacks, ctx);
+}
+
+function updateHistorySection(
+  section: HTMLElement,
+  callbacks: ViewCallbacks,
+  ctx?: ViewContext,
+): void {
+  const doc = section.ownerDocument;
+  while (section.firstElementChild) {
+    section.firstElementChild.remove();
+  }
+  const entries = Array.isArray(ctx?.history) ? (ctx as ViewContext).history as Array<HistoryEntry> : undefined;
+  if (entries === undefined) return;
+  const title = doc.createElement("h2");
+  title.className = "dz-history-title";
+  title.textContent = "Recent pictures";
+  section.appendChild(title);
+  const note = doc.createElement("p");
+  note.className = "dz-history-note";
+  note.textContent = "Kept only on this device.";
+  section.appendChild(note);
+  if (typeof callbacks.onToggleHistoryOptIn === "function") {
+    const optRow = doc.createElement("label");
+    optRow.className = "dz-history-optin";
+    const box = doc.createElement("input");
+    (box as HTMLInputElement).type = "checkbox";
+    (box as HTMLInputElement).checked = ctx?.historyOptIn === true;
+    box.setAttribute("aria-label", "Keep full addresses for one-click reopen (non-sensitive only)");
+    box.addEventListener("change", () => {
+      try {
+        callbacks.onToggleHistoryOptIn?.((box as HTMLInputElement).checked);
+      } catch {
+        // Opt-in toggle must never break the view.
+      }
+    });
+    const label = doc.createElement("span");
+    label.textContent = "Keep full addresses for one-click reopen (non-sensitive only)";
+    optRow.appendChild(box);
+    optRow.appendChild(label);
+    section.appendChild(optRow);
+  }
+  if (entries.length === 0) {
+    const empty = doc.createElement("p");
+    empty.className = "dz-history-empty";
+    empty.textContent = "No recent pictures yet. Saved pictures appear here.";
+    section.appendChild(empty);
+    return;
+  }
+  const list = doc.createElement("ul");
+  list.className = "dz-history-list";
+  for (const entry of entries.slice(0, 20)) {
+    const item = doc.createElement("li");
+    item.className = "dz-history-item";
+    const main = doc.createElement("span");
+    main.className = "dz-history-main";
+    const dims = historyDimsLabel(entry);
+    const date = historyDateLabel(entry.at);
+    const parts: Array<string> = [entry.origin];
+    if (dims !== "") parts.push(dims);
+    if (typeof entry.format === "string" && entry.format !== "") parts.push(entry.format);
+    if (date !== "") parts.push(date);
+    main.textContent = parts.join(" ");
+    item.appendChild(main);
+    if (typeof entry.url === "string" && entry.url !== "" && typeof callbacks.onOpenHistory === "function") {
+      const openBtn = doc.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "dz-btn-secondary";
+      openBtn.textContent = "Open again";
+      const target = entry.url;
+      openBtn.addEventListener("click", () => {
+        try {
+          callbacks.onOpenHistory?.(target);
+        } catch {
+          // Reopen must never break the view.
+        }
+      });
+      item.appendChild(openBtn);
+    } else {
+      const hidden = doc.createElement("span");
+      hidden.className = "dz-history-hidden";
+      hidden.textContent = "Address hidden for privacy";
+      item.appendChild(hidden);
+    }
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+  if (typeof callbacks.onClearHistory === "function" && entries.length > 0) {
+    const clearBtn = doc.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "dz-btn-secondary";
+    clearBtn.id = "dz-history-clear";
+    clearBtn.textContent = "Clear history";
+    clearBtn.addEventListener("click", () => {
+      try {
+        callbacks.onClearHistory?.();
+      } catch {
+        // Clearing must never break the view.
+      }
+    });
+    section.appendChild(clearBtn);
   }
 }
 
@@ -534,6 +959,7 @@ function mountInputSection(
   form.appendChild(btnRow);
 
   body.appendChild(form);
+  mountHistorySection(body, callbacks, ctx);
   parent.appendChild(body);
 }
 
@@ -613,6 +1039,8 @@ function mountJobSection(
       <span class="dz-transport-badge" id="dz-job-transport">Direct from your browser</span>
       <div class="dz-job-actions">
         <button type="button" class="dz-btn-secondary" id="dz-btn-share" style="display: none;">Copy shareable link</button>
+        <button type="button" class="dz-btn-secondary" id="dz-btn-pause" style="display: none;">Pause</button>
+        <button type="button" class="dz-btn-secondary" id="dz-btn-resume" style="display: none;">Resume</button>
         <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel</button>
       </div>
     </div>
@@ -629,6 +1057,14 @@ function mountJobSection(
   sec.querySelector("#dz-btn-cancel")?.addEventListener("click", () => {
     const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
     cb?.onCancel();
+  });
+  sec.querySelector("#dz-btn-pause")?.addEventListener("click", () => {
+    const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
+    cb?.onPause?.();
+  });
+  sec.querySelector("#dz-btn-resume")?.addEventListener("click", () => {
+    const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
+    cb?.onResume?.();
   });
   sec.querySelector("#dz-btn-share")?.addEventListener("click", () => {
     const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
@@ -663,7 +1099,10 @@ function updateJobSection(
   const determinate = total > 0;
   const pct = determinate ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
   const transport = state.transport ? renderTransportLabel(state.transport) : "Direct from your browser";
-  const step = activity.stepLabel || ctx?.currentProgress?.message || defaultStepFor(state.status);
+  const paused = ctx?.paused === true || activity.paused === true;
+  const step = paused
+    ? "Paused. No new pieces are being fetched."
+    : activity.stepLabel || ctx?.currentProgress?.message || defaultStepFor(state.status);
   const now = activity.now ?? Date.now();
   const startedAt = activity.startedAt ?? now;
   const elapsedMs = Math.max(0, now - startedAt);
@@ -833,6 +1272,20 @@ function updateJobSection(
     shareBtn.style.display = callbacks.onCopyShareLink ? "" : "none";
   }
 
+  // Pause v1 (todo 5.7): suspend-acquisition controls. Pause shows while
+  // running with a pause handler; Resume shows while paused with a resume
+  // handler. Hosts own the effect; the view only renders the overlay.
+  const pauseBtn = sec.querySelector<HTMLElement>("#dz-btn-pause");
+  if (pauseBtn) {
+    const showPause = !paused && typeof callbacks.onPause === "function";
+    pauseBtn.style.display = showPause ? "" : "none";
+  }
+  const resumeBtn = sec.querySelector<HTMLElement>("#dz-btn-resume");
+  if (resumeBtn) {
+    const showResume = paused && typeof callbacks.onResume === "function";
+    resumeBtn.style.display = showResume ? "" : "none";
+  }
+
   // 9. Diagnostics & Logs (preserved in-place, keeping details open state intact)
   const diagEl = sec.querySelector<HTMLElement>("#dz-job-diagnostics");
   if (diagEl) {
@@ -921,12 +1374,17 @@ function mountDisplayOnlySection(
     section.appendChild(guidanceBox);
   }
 
-  // Display-only handoff (todo 6.2): the assembled canvas stays visible
-  // below without a programmatic save (cross-origin canvas, right-click where
-  // supported). Offer the readable routes explicitly instead of failing
-  // late with TILE_FAILED: extension guidance plus the desktop
-  // `dezoomify://` handoff when the host supplied one.
+  // Display-only handoff (todo 6.2, one-click in 5.5): the assembled canvas
+  // stays visible below without a programmatic save (cross-origin canvas,
+  // right-click where supported). Offer the readable routes explicitly
+  // instead of failing late with TILE_FAILED: extension guidance plus the
+  // desktop `dezoomify://` handoff when the host supplied one. The summary
+  // names origin/scope/recipient/job memory-only (extension consent pattern);
+  // the desktop app confirms again before any effect.
   const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
+  const handoffSource = typeof ctx?.sourceUrl === "string" ? ctx.sourceUrl : "";
+  const handoffOrigin = handoffOriginFor(handoffUrl, handoffSource);
+  const handoffLabel = handoffOrigin !== "" ? `Send to desktop app (${handoffOrigin})` : "Send to desktop app";
   const shownNote = parent.ownerDocument.createElement("p");
   shownNote.className = "dz-notice-message";
   if (handoffUrl !== "") {
@@ -942,6 +1400,14 @@ function mountDisplayOnlySection(
     shownNote.textContent = "Shown below without saving.";
   }
   section.appendChild(shownNote);
+
+  if (handoffUrl !== "" && handoffOrigin !== "") {
+    const consent = parent.ownerDocument.createElement("p");
+    consent.className = "dz-notice-message";
+    consent.id = "dz-handoff-consent";
+    consent.textContent = `Sends ${handoffOrigin} to the desktop app. No sign-in details travel; one job only, kept in memory.`;
+    section.appendChild(consent);
+  }
 
   const guide = parent.ownerDocument.createElement("div");
   guide.className = "dz-guidance-section";
@@ -973,7 +1439,7 @@ function mountDisplayOnlySection(
   actions.className = "dz-actions-row";
   actions.innerHTML = `
     <button type="button" class="dz-btn-secondary" id="dz-btn-reset">Start over</button>
-    ${handoffUrl !== "" ? `<a class="dz-btn-secondary" id="dz-btn-desktop-handoff" href="${escapeHtml(handoffUrl)}">Open in desktop app</a>` : ""}
+    ${handoffUrl !== "" ? `<a class="dz-btn-secondary" id="dz-btn-desktop-handoff" href="${escapeHtml(handoffUrl)}">${escapeHtml(handoffLabel)}</a>` : ""}
   `;
   actions.querySelector("#dz-btn-reset")?.addEventListener("click", () => callbacks.onReset());
   actions.querySelector("#dz-btn-desktop-handoff")?.addEventListener("click", () => {
@@ -995,8 +1461,21 @@ function mountCompletedSection(
   ctx?: ViewContext,
 ): void {
   const info = ctx?.completedInfo;
+  const saved = ctx?.savedOutput;
   const isClean = ctx?.originClean ?? true;
-  const summary = info ? renderCompletion(info.width, info.height, info.mime) : "Your image is ready.";
+  // Canonical Save copy (i18n view.done.*): extension parity expects
+  // "Saved" / "Saved with gaps" with the file name, never a second save.
+  let title = "Save complete!";
+  let summary = info ? renderCompletion(info.width, info.height, info.mime) : "Your image is ready.";
+  let showSaveButton = isClean;
+  if (saved) {
+    const partial = saved.failedTiles > 0;
+    title = partial ? "Saved with gaps" : "Saved";
+    summary = partial
+      ? `Saved ${saved.name} (${saved.width}x${saved.height}, ${saved.doneTiles} of ${saved.totalTiles} tiles; ${saved.failedTiles} tile(s) missing).`
+      : `Saved ${saved.name} (${saved.width}x${saved.height}).`;
+    showSaveButton = false;
+  }
   const guidance = renderSaveGuidance(isClean);
 
   const section = parent.ownerDocument.createElement("div");
@@ -1008,13 +1487,13 @@ function mountCompletedSection(
         <polyline points="22 4 12 14.01 9 11.01"></polyline>
       </svg>
       <div>
-        <h2 class="dz-completed-title">Save complete!</h2>
+        <h2 class="dz-completed-title">${title}</h2>
         <p class="dz-completed-summary">${summary}</p>
       </div>
     </div>
     <p class="dz-completed-guidance">${guidance}</p>
     <div class="dz-actions-row">
-      ${isClean ? `<button type="button" class="dz-btn-tactile" id="dz-btn-save" style="min-width: 180px;">
+      ${showSaveButton ? `<button type="button" class="dz-btn-tactile" id="dz-btn-save" style="min-width: 180px;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="7 10 12 15 17 10"></polyline>
@@ -1054,7 +1533,7 @@ function mountFailedSection(
   parent: HTMLElement,
   state: ControllerState,
   callbacks: ViewCallbacks,
-  _ctx?: ViewContext,
+  ctx?: ViewContext,
 ): void {
   const error: StructuredError = state.error ?? {
     code: "UNKNOWN",
@@ -1062,6 +1541,17 @@ function mountFailedSection(
     retryable: true,
     message: "Dezoomify could not find or save the zoomable image at this address.",
   };
+  // One-click desktop handoff (todo 5.5): too-large plans and other failed
+  // jobs with a `dezoomify://` link offer the same Send button plus the
+  // origin/scope consent summary as display-only. Local files carry no link:
+  // they show the local-only note instead (nothing is sent).
+  const failedHandoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
+  const failedSource = typeof ctx?.sourceUrl === "string"
+    ? ctx.sourceUrl
+    : (typeof ctx?.jobActivity?.url === "string" ? ctx.jobActivity.url : "");
+  const failedIsFile = isFileHandoffSource(failedSource);
+  const failedOrigin = failedIsFile ? "" : handoffOriginFor(failedHandoffUrl, failedSource);
+  const failedLabel = failedOrigin !== "" ? `Send to desktop app (${failedOrigin})` : "Send to desktop app";
 
   const section = parent.ownerDocument.createElement("div");
   section.className = "dz-view-body dz-error-section dz-fade-in";
@@ -1119,7 +1609,10 @@ function mountFailedSection(
     <div class="dz-actions-row">
       <button type="button" class="dz-btn-tactile" id="dz-btn-try-again" style="min-width: 140px;">Try again</button>
       <button type="button" class="dz-btn-secondary" id="dz-btn-start-over">Start over</button>
+      ${failedHandoffUrl !== "" && !failedIsFile ? `<a class="dz-btn-secondary" id="dz-btn-desktop-handoff" href="${escapeHtml(failedHandoffUrl)}">${escapeHtml(failedLabel)}</a>` : ""}
     </div>
+    ${failedHandoffUrl !== "" && !failedIsFile && failedOrigin !== "" ? `<p class="dz-notice-message" id="dz-handoff-consent">${escapeHtml(`Sends ${failedOrigin} to the desktop app. No sign-in details travel; one job only, kept in memory.`)}</p>` : ""}
+    ${failedIsFile ? `<p class="dz-notice-message" id="dz-handoff-local">Local files stay on this computer. Open the desktop app and choose the file there; nothing is sent.</p>` : ""}
   `;
   // Diagnostics and user message are set as text content (never innerHTML):
   // engine messages must never be interpreted as markup.
@@ -1132,6 +1625,13 @@ function mountFailedSection(
   section.querySelector("#dz-card-desktop")?.addEventListener("click", () => showDesktopAppGuidance(hostDoc));
   section.querySelector("#dz-btn-try-again")?.addEventListener("click", () => (callbacks.onRetrySameUrl ?? callbacks.onReset)());
   section.querySelector("#dz-btn-start-over")?.addEventListener("click", () => callbacks.onReset());
+  section.querySelector("#dz-btn-desktop-handoff")?.addEventListener("click", () => {
+    try {
+      callbacks.onOpenExternalLink?.(failedHandoffUrl);
+    } catch {
+      // Handoff navigation must never break the error view.
+    }
+  });
 
   parent.appendChild(section);
 }
