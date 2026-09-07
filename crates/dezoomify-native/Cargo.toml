@@ -23,3 +23,16 @@ tiff = "0.11"
 tokio.workspace = true
 dezoomify-fixture-server = { path = "../fixture-server" }
 axum.workspace = true
+criterion = "0.5"
+
+[[bench]]
+name = "native_pipeline"
+harness = false
+
+# 6.1 debt (unblocked for cargo 1.98): runtime docs and pedantic cleanups
+# pending.
+[lints.rust]
+missing_docs = "allow"
+
+[lints.clippy]
+pedantic = "allow"

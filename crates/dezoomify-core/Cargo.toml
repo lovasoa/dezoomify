@@ -7,6 +7,19 @@ description = "Pure discovery core for dezoomify-rs: describes zoomable image re
 repository = "https://github.com/lovasoa/dezoomify-rs"
 keywords = ["image", "download"]
 
+# 6.1 debt (unblocked for cargo 1.98: `workspace=true` plus overrides does
+# not parse here; manual tables preserve the allows without inheritance):
+# the public format surface (SPECs, model types) is largely undocumented;
+# document it before re-tightening to the workspace warn.
+[lints.rust]
+missing_docs = "allow"
+# 6.1 debt: legacy format parsers use `.expect("static ...")` on
+# by-construction invariants (~100 sites). Migrate them to fallible
+# constructors returning typed errors before denying `unwrap_used` here.
+# (`pedantic` stays denied via the crate-root attribute.)
+[lints.clippy]
+unwrap_used = "allow"
+
 [dependencies]
 log.workspace = true
 serde.workspace = true

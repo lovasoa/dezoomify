@@ -19,3 +19,10 @@ wasm-bindgen.workspace = true
 
 [dev-dependencies]
 wasm-bindgen-test.workspace = true
+
+# 6.1 debt (unblocked for cargo 1.98): adapter docs pending.
+[lints.rust]
+missing_docs = "allow"
+
+[lints.clippy]
+pedantic = "allow"

@@ -25,6 +25,13 @@ path = "src/main.rs"
 name = "dezoomify-native-host"
 path = "src/bin/dezoomify-native-host.rs"
 
+# 6.1 debt (unblocked for cargo 1.98): shell docs pending.
+[lints.rust]
+missing_docs = "allow"
+
+[lints.clippy]
+pedantic = "allow"
+
 [dependencies]
 # Engine deps (inward only: core -> job -> native runtime + protocol DTOs).
 # All pure Rust via dezoomify-native (ureq/rustls/image/url/sha2); no webview

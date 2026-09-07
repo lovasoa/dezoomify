@@ -15,3 +15,7 @@ sha2.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+
+# 6.1 (unblocked for cargo 1.98): pedantic cleanups pending.
+[lints.clippy]
+pedantic = "allow"

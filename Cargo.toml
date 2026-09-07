@@ -7,6 +7,25 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/lovasoa/dezoomify"
 
+# Shared lint policy (todo 6.1): `[workspace.lints]` is the authored default
+# (`missing_docs`/`pedantic` warn so legacy debt stays visible; `nursery`
+# stays allowed until audited). NOTE (cargo 1.98): `[lints] workspace = true`
+# cannot be combined with per-lint overrides in the same manifest, so only
+# debt-free crates inherit it bare; crates with legacy debt carry manual
+# `[lints.*]` tables mirroring this policy plus dated `allow` notes, and
+# switch back to `workspace = true` once their debt clears.
+# `clippy::unwrap_used` is deliberately NOT in this table: a workspace deny
+# would also lint integration `tests/` targets, while the policy is "deny
+# in shipped `src`, allow in tests". Each crate therefore denies it at its
+# own crate roots (`lib.rs`/`main.rs`/bins, which never cover `tests/`),
+# and unit tests are exempt via `allow-unwrap-in-tests` in `clippy.toml`.
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+pedantic = "warn"
+nursery = "allow"
+
 [workspace.dependencies]
 ed25519-dalek = { version = "3", default-features = false }
 log = "0.4"

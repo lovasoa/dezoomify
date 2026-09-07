@@ -1,0 +1,8 @@
+# Clippy configuration for the dezoomify workspace.
+#
+# - `allow-unwrap-in-tests`: `clippy::unwrap_used` still fires in shipped
+#   code (denied per crate through `[workspace.lints]`), but test code may
+#   use `unwrap`/`expect` for fixture setup and assertions. Shipped code
+#   must map failures to typed errors (`JobError`, `NativeError`,
+#   `AdapterError`, `handoff.rejected` / `protocol.*`) instead of panicking.
+allow-unwrap-in-tests = true

@@ -9,3 +9,14 @@ repository = "https://github.com/lovasoa/dezoomify"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+
+# 6.1 debt (unblocked for cargo 1.98): DTO docs pending.
+[lints.rust]
+missing_docs = "allow"
+
+# 6.1 debt: `missing_errors_doc`, `unreadable_literal`, `redundant_clone`
+# and doc-formatting lints fire across the DTO/codec surface; fix them
+# before re-tightening to the workspace warn. (`unwrap_used` is denied at
+# the crate root instead, so shipped code stays panic-free.)
+[lints.clippy]
+pedantic = "allow"
