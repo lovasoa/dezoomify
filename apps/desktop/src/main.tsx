@@ -13,8 +13,10 @@
 // Controller mapping (TRANSITIONS in packages/shared-ui/src/controller.ts):
 // discovering -> images-found -> image-chosen -> level-chosen ->
 // preflight-ok -> progress -> save-start -> save-done -> completed, plus
-// preflight-display-only -> display-only, fail -> failed, cancel ->
-// cancelled, reset -> idle. Recovery-requested (destination/partial) events
+// fail -> failed, cancel -> cancelled, reset -> idle. The display-only
+// transition exists only in the shared controller for browser paths; the
+// desktop frontend never dispatches preflight-display-only (no native
+// emitter). Recovery-requested (destination/partial) events
 // surface typed choices (retry / choose-output / keep-partial /
 // discard-partial / handoff-to-native) wired to answer_choice (RetryReady /
 // PartialKeep), request_destination, and requestHandoff.
@@ -1701,18 +1703,12 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     return;
   }
 
-  // Display-only preview: no bytes will be readable, so no save is offered.
-  if (text.indexOf("display-only") >= 0 || text.indexOf("display_only") >= 0) {
-    if (isTerminalStatus(controller.getState().status)) return;
-    preflightThrough(
-      numField(payload, detailRaw, ["imageCount", "images", "count"]),
-    );
-    controller.dispatch({ seq: nextSeq(), sessionId, kind: "preflight-display-only" });
-    setStep(t("desktop.step.displayPreview"), t("desktop.step.displayDetail"));
-    pushLog("Display-only preview");
-    update();
-    return;
-  }
+  // No display-only branch: only the browser tainted-canvas path produces
+  // it (ordinary <img> display with no readable bytes). The native pipeline
+  // always yields readable bytes or a typed failure, so no native event
+  // carries display-only/display_only; the shared view's display-only
+  // section stays for other apps. The progress flow's "no display-only
+  // branch on the native path" window assertion pins this.
 
   // Progress snapshots: discovery (resources), downloading (acquired/total),
   // encoding. Each ensures the selection chain first so a progress signal
