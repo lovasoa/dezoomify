@@ -25,7 +25,7 @@ import { chromium } from "playwright";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
 const PACKAGE_SCRIPT = path.join(REPO_ROOT, "apps/extension/scripts/package-store.sh");
-const GECKO_ID = "dezoomify@example.com";
+const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 
 function stagePackage(browser, dir) {

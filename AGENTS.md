@@ -105,11 +105,12 @@ Use these terms consistently in docs, code, and user-facing copy.
   `lovasoa/dezoomify`; never force-push; never touch another branch without
   a fresh explicit instruction.
 - As extension work completes, package the store payload
-  (`apps/extension/scripts/package-store.sh`) and keep the Chromium listing
-  (`iapjjopjejpelnfdonefbffahmcndfbm` in `release/config.toml`) compliant
-  and resubmitted via the `store-submit` workflow, without per-step
-  confirmation. Never create a new store item, never publish to
-  Firefox/AMO, fail closed when store secrets are absent.
+  (`apps/extension/scripts/package-store.sh`) and keep both existing
+  listings compliant and resubmitted via the `store-submit` workflow,
+  without per-step confirmation: Chromium
+  (`iapjjopjejpelnfdonefbffahmcndfbm`) and Firefox AMO
+  (`{14074c89-8a5f-4813-98df-a7117f062871}` in `release/config.toml`).
+  Never create a new store item; fail closed when store secrets are absent.
 - Keep commits atomic; inspect `git status` and the diff before declaring
   completion; never use destructive Git commands to clean a working tree.
 

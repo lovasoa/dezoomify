@@ -18,9 +18,11 @@ store_url = "https://chrome.google.com/webstore/detail/dezoomify/iapjjopjejpelnf
 privacy_policy_url = "https://dezoomify.ophir.dev/beta/privacy"
 
 [extension.firefox]
-# AMO listing identity is still TBD (no Mozilla account wired yet); this is a
-# placeholder shape only and must never be used as an allowlist value.
-id = "dezoomify@dezoomify.example"
+# AMO listing identity: the EXISTING addons.mozilla.org listing for Dezoomify
+# (public guid from the AMO API). Updates go to that listing in place; never
+# create a new store item.
+id = "{14074c89-8a5f-4813-98df-a7117f062871}"
+store_url = "https://addons.mozilla.org/en-US/firefox/addon/dezoomify/"
 
 # Desktop updater decision (todo 5.8): automatic in-app updates are
 # disabled for this free project. No update host is deployed and no updater

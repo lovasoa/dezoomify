@@ -1,15 +1,19 @@
 name: store-submit
-# Update the EXISTING Chrome Web Store listing (release/config.toml
-# [extension.chromium]: iapjjopjejpelnfdonefbffahmcndfbm). Never create a new
-# store item: the extension ID is public and comes from release/config.toml.
+# Update the EXISTING store listings (release/config.toml [extension.*]).
+# Never create a new store item: the extension IDs are public and come from
+# release/config.toml (Chromium id + Firefox/AMO guid).
 # Default is dry-run: package the store payload, validate it, and upload it
-# as a workflow artifact. Pass upload=true to push a draft to the existing
-# listing (chromium only; firefox/AMO credentials are not wired yet), and
-# publish=true to publish that draft after upload. Draft upload and publish
-# fail closed with a clear message when any required secret is missing.
-# Required secrets (OAuth only, no IDs): CHROME_WS_CLIENT_ID,
+# as a workflow artifact. Pass upload=true to push to the existing listing
+# (Chromium: draft upload; Firefox/AMO: listed-channel version upload, which
+# auto-submits for review), and publish=true to publish the Chromium draft
+# after upload. Draft upload and publish fail closed with a clear message
+# when any required secret is missing.
+# Chromium secrets (OAuth only, no IDs): CHROME_WS_CLIENT_ID,
 # CHROME_WS_CLIENT_SECRET, CHROME_WS_REFRESH_TOKEN (one-time owner authorize).
 # Uploads use the /upload/ media endpoint; publish uses the items endpoint.
+# Firefox/AMO secrets (AMO API keys from the developer hub):
+# AMO_JWT_ISSUER, AMO_JWT_SECRET. Auth is a short-lived HS256 JWT per
+# https://addons-server.readthedocs.io/en/latest/topics/api/auth.html.
 # Optional override secret: CHROME_WS_EXTENSION_ID (emergency only; must match
 # release/config.toml unless deliberately overridden).
 on:
@@ -190,6 +194,43 @@ jobs:
           printf '%s\n' "$pub_out" | head -n -1
           echo "http: $pub_code"
           [ "$(printf '%s' "$pub_out" | tail -n1)" = "OK" ] || { echo "publish not accepted (see response above)"; exit 1; }
-      - name: Firefox upload guard
-        if: inputs.browser == 'firefox' && (inputs.upload == true || inputs.publish == true)
-        run: echo "firefox/AMO credentials are not wired yet (no Mozilla account); package validated, upload skipped" && exit 1
+      - name: Upload listed version to AMO (existing listing)
+        if: inputs.browser == 'firefox' && inputs.upload == true
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          for v in AMO_JWT_ISSUER AMO_JWT_SECRET; do
+            [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
+          done
+          guid=$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["extension"]["firefox"]["id"])')
+          case "$guid" in
+            \{*\}) : ;;
+            *) echo "bad AMO guid in release/config.toml: $guid"; exit 1 ;;
+          esac
+          zip=$(ls dezoomify-extension-firefox-*.zip)
+          version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "apps/extension/generated/manifest.firefox.json")
+          enc=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$guid")
+          auth=$(AMO_JWT_ISSUER="$AMO_JWT_ISSUER" AMO_JWT_SECRET="$AMO_JWT_SECRET" python3 -c '
+          import base64, hashlib, hmac, json, os, time, uuid
+          header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b"=")
+          now = int(time.time())
+          payload = base64.urlsafe_b64encode(json.dumps({"iss": os.environ["AMO_JWT_ISSUER"], "jti": str(uuid.uuid4()), "iat": now, "exp": now + 300}).encode()).rstrip(b"=")
+          sig = base64.urlsafe_b64encode(hmac.new(os.environ["AMO_JWT_SECRET"].encode(), header + b"." + payload, hashlib.sha256).digest()).rstrip(b"=")
+          print((header + b"." + payload + b"." + sig).decode())
+          ')
+          resp=$(curl -sS --proto '=https' --max-time 300 -w '\n%{http_code}' \
+            -H "Authorization: JWT ${auth}" \
+            -F "upload=@${zip}" -F "channel=listed" \
+            -X PUT "https://addons.mozilla.org/api/v5/addons/${enc}/versions/${version}/") \
+            || { echo "AMO endpoint unreachable"; exit 1; }
+          http_code=$(printf '%s' "$resp" | tail -n1)
+          body=$(printf '%s' "$resp" | head -n -1)
+          echo "http: $http_code"
+          case "$http_code" in
+            200|201|202) : ;;
+            409) echo "version ${version} already exists on the listing; bump the version and re-run"; exit 1 ;;
+            *) echo "AMO upload failed: $(printf '%s' "$body" | head -c 500)"; exit 1 ;;
+          esac
+          echo "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("version:", d.get("version","?")); print("review url:", d.get("url","?")); print("status: submitted for review (listed channel)")' || printf '%s\n' "$body"

@@ -15,4 +15,5 @@ using your browser's own session so logged-in and interactive viewers work.
 Contributing: narrow manifest permissions, explicit-action scans with cleanup,
 no private signing keys in shipped JS. Tests: `cargo xtask test extension`.
 Store publishing: `apps/extension/scripts/chrome-webstore-publish.sh`
-(see `.env.example`); CI packages every push via `store-submit`.
+(see `.env.example`); CI packages every push via `store-submit`, which
+updates the existing Chromium and Firefox (AMO) listings in place.

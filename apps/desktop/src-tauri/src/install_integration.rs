@@ -16,8 +16,11 @@ pub const NATIVE_HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 /// This is the EXISTING Chrome Web Store listing for Dezoomify; store updates
 /// reuse this public id, never a new item. Reviewed in release/config.toml.
 pub const CHROMIUM_RELEASE_EXTENSION_ID: &str = "iapjjopjejpelnfdonefbffahmcndfbm";
-/// Example Firefox extension id (exact, no wildcards).
-pub const FIREFOX_RELEASE_EXTENSION_ID: &str = "dezoomify@dezoomify.example";
+/// Release Firefox extension id (exact, no wildcards).
+/// This is the EXISTING addons.mozilla.org listing for Dezoomify; store
+/// updates reuse this public guid, never a new item. Reviewed in
+/// release/config.toml.
+pub const FIREFOX_RELEASE_EXTENSION_ID: &str = "{14074c89-8a5f-4813-98df-a7117f062871}";
 /// Protocol scheme handled by the desktop app.
 pub const PROTOCOL_SCHEME: &str = "dezoomify";
 
@@ -514,7 +517,7 @@ mod tests {
             FIREFOX_RELEASE_EXTENSION_ID,
         )
         .unwrap();
-        assert!(json.contains("dezoomify@dezoomify.example"));
+        assert!(json.contains(FIREFOX_RELEASE_EXTENSION_ID));
         assert!(!json.contains('*'));
         assert!(firefox_manifest("/opt/host", "chrome-extension://*/").is_err());
     }

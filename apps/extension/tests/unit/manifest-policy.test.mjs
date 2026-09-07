@@ -34,7 +34,7 @@ const genFirefox = readJson("../../generated/manifest.firefox.json");
 
 const REVIEWED_PERMS = new Set(["activeTab", "webRequest", "nativeMessaging"]);
 const REVIEWED_OPTIONAL = new Set(["cookies"]);
-const EXPECTED_GECKO_ID = "dezoomify@example.com";
+const EXPECTED_GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 
 function cspText(manifest) {
   const csp = manifest.content_security_policy;
