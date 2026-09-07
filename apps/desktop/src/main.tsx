@@ -339,8 +339,11 @@ function recoveryKeyFor(decision: PendingDecision | null): string | null {
 // Marked partial completion: a kept partial output stays distinguishable
 // from a complete save. Set only on a partial-completed event; cleared on
 // submit and reset. The missing list is redacted tile ids only, never URLs.
+// The sibling basename names the `.partial` file actually written (never the
+// granted path), so the UI can never claim a complete save for partial bytes.
 let completedPartial = false;
 let completedMissing: Array<string> = [];
+let completedSibling: string | null = null;
 
 // Live heartbeat for the loading view: advances now and longestPendingMs
 // so the pending box and smooth track stay current between IPC snapshots.
@@ -563,6 +566,12 @@ const jobEnv = {
   update: () => update(),
 };
 
+// Sibling basename for the honest partial note. Set alongside
+// `completedPartial` on a partial-completed event; cleared on submit/reset.
+function setCompletedSibling(name: string | null): void {
+  completedSibling = name && name.length > 0 && name.length <= 256 ? name : null;
+}
+
 const settingsEnv: SettingsPanelEnv = {
   root,
   getSettings: () => desktopSettings,
@@ -622,6 +631,7 @@ function clearJobViewState(): void {
   catalogNotice = null;
   completedPartial = false;
   completedMissing = [];
+  completedSibling = null;
   // The encoder choice is a persisted preference (settings.ts outputFormat,
   // seeded into grantedFormat at boot): a new submit must not reset it to
   // png, or the reloaded choice would never reach the picker.
@@ -1616,9 +1626,26 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     );
     const outputHash = strField(payload, ["outputHash", "output_hash", "output", "digest"]);
     const missing = isPartial ? extractMissingTiles(payload, detailObj, detailRaw) : [];
+    // Sibling basename for the honest partial note (never the granted path;
+    // basenames contain no slashes, so a path can never slip through).
+    const siblingRaw =
+      strField(payload, ["sibling", "siblingName", "partialName", "fileName"]) ??
+      (detailObj ? strField(detailObj, ["sibling", "siblingName", "partialName", "fileName"]) : undefined);
+    const sibling =
+      typeof siblingRaw === "string" &&
+      siblingRaw.length > 0 &&
+      siblingRaw.length <= 256 &&
+      siblingRaw.indexOf("/") < 0 &&
+      siblingRaw.indexOf("\\") < 0
+        ? siblingRaw
+        : null;
+    setCompletedSibling(isPartial ? sibling : null);
     if (outputHash) {
       const short = outputHash.slice(0, 24);
       pushLog(isPartial ? `Partial output ready (${short}…)` : `Output ready (${short}…)`);
+    }
+    if (isPartial && sibling) {
+      pushLog(`Partial file: ${sibling}`);
     }
     completeJob(jobEnv,
       typeof width === "number" && typeof height === "number" && width > 0 && height > 0
@@ -2106,7 +2133,10 @@ function ensureDesktopAuxPanel(): void {
     const desc = doc.createElement("p");
     desc.className = "dz-notice-message";
     const summary = formatMissingSummary(completedMissing, completedMissing.length);
-    desc.textContent = t("desktop.done.partialDesc", { summary });
+    // Honest sibling basename (never the granted path) rides the existing
+    // translated sentence as a literal: no new copy, no shared-ui change.
+    const summaryWithFile = completedSibling ? `${summary} File: ${completedSibling}.` : summary;
+    desc.textContent = t("desktop.done.partialDesc", { summary: summaryWithFile });
     doneBox.append(title, desc);
     if (completedMissing.length > 0) {
       const list = doc.createElement("p");
@@ -2440,6 +2470,10 @@ function getCompletedMissing(): Array<string> {
   return [...completedMissing];
 }
 
+function getCompletedSibling(): string | null {
+  return completedSibling;
+}
+
 function getRemoteSeq(jobId: string): number {
   return remoteSeqByJob[jobId] ?? 0;
 }
@@ -2455,6 +2489,7 @@ export {
   getCatalogNotice,
   getCompletedPartial,
   getCompletedMissing,
+  getCompletedSibling,
   getRemoteSeq,
   getEffectiveSettings,
   buildCopyDiagnostics,

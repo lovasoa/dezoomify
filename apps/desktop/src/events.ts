@@ -36,6 +36,12 @@ export interface JobStatePayload {
   state: string;
   detail: string;
   origin: string;
+  reason?: string;
+  missing?: Array<string>;
+  missingTiles?: Array<string>;
+  failed?: number;
+  total?: number;
+  recovery?: string;
 }
 
 export interface JobProgressPayload {
@@ -63,6 +69,9 @@ export interface JobOutputPayload {
   tileCount: number;
   detail: string;
   origin: string;
+  missing?: Array<string>;
+  missingTiles?: Array<string>;
+  sibling?: string;
 }
 
 export interface JobErrorPayload {
