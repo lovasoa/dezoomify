@@ -137,9 +137,6 @@ function renderMarkdown(source) {
 }
 
 function guideSource(source) {
-  // Every `##` section renders (the user doc owns the wording and may add
-  // or rename sections freely); titled walkthrough steps additionally get
-  // the steps wrapper and screenshots in `renderMarkdown`.
   const lines = source.split(/\r?\n/);
   const selected = [];
   let section = "skip";
@@ -147,9 +144,9 @@ function guideSource(source) {
     if (/^#\s+/.test(line)) continue;
     const heading = line.match(/^##\s+(.+)$/);
     if (heading) {
-      section = heading[1];
+      section = GUIDE_STEPS.has(heading[1]) || heading[1] === GUIDE_NOTE ? heading[1] : "skip";
     }
-    if (section !== "skip") selected.push(line);
+    if (GUIDE_STEPS.has(section) || section === GUIDE_NOTE) selected.push(line);
   }
   return selected.join("\n");
 }
