@@ -75,7 +75,15 @@ jobs:
           # user agent, like real users.
           UA="Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0"
           curl() { command curl -sS -A "$UA" "$@"; }
-          for i in $(seq 1 24); do
+          # Content-hash fast path: dist/beta/index.html is copied verbatim
+          # by scripts/build-site.mjs, so the served /beta/ bytes must hash
+          # identically once THIS build is live (never a stale deploy).
+          # Backoff keeps early retries cheap while preserving the ~12min
+          # budget for slow Pages propagation: 10s, 20s, 40s, then 60s.
+          expected_beta_hash="$(sha256sum dist/beta/index.html | cut -d' ' -f1)"
+          echo "expected beta content hash: $expected_beta_hash (dist/beta/index.html)"
+          delay=10
+          for i in $(seq 1 15); do
             # / is the legacy site: the dezoomify-web app, served verbatim.
             legacy=$(curl -sS -o /tmp/legacy.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/" || true)
             # /beta/ is the new app: honest gate on HTTP 200 plus real app
@@ -114,10 +122,12 @@ jobs:
             repo_files_served=0
             if grep -q "next-generation rewrite" <<<"$readme"; then repo_files_served=1; fi
             if [ "$cargo_toml_ct" = "application/toml" ]; then repo_files_served=1; fi
+            served_beta_hash="$(sha256sum /tmp/beta.html 2>/dev/null | cut -d' ' -f1 || true)"
             if [ "$legacy" = "200" ] \
               && grep -q "rendering-canvas" /tmp/legacy.html \
               && grep -q "zoommanager.js" /tmp/legacy.html \
               && [ "$beta" = "200" ] \
+              && [ "$served_beta_hash" = "$expected_beta_hash" ] \
               && grep -q "dz-url-input\|id=\"app\"" /tmp/beta.html \
               && grep -q "src/main.js" /tmp/beta.html \
               && [ "$main_js" = "200" ] && [ "$discovery_js" = "200" ] \
@@ -127,11 +137,12 @@ jobs:
               && [ "$help" = "200" ] && grep -q "dz-help-topics" /tmp/help.html \
               && [ "$repo_files_served" = "0" ] \
               && ! grep -q "14 of 28" /tmp/beta.html; then
-              echo "deployment live: legacy=$legacy beta=$beta main.js=$main_js discovery.js=$discovery_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served"
+              echo "deployment live: legacy=$legacy beta=$beta main.js=$main_js discovery.js=$discovery_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served beta_hash=$served_beta_hash"
               exit 0
             fi
-            echo "attempt $i: legacy=$legacy beta=$beta main.js=$main_js discovery.js=$discovery_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served; retrying in 30s"
-            sleep 30
+            echo "attempt $i: legacy=$legacy beta=$beta main.js=$main_js discovery.js=$discovery_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served beta_hash=${served_beta_hash:-none} (want $expected_beta_hash); retrying in ${delay}s"
+            sleep "$delay"
+            delay=$(( delay * 2 > 60 ? 60 : delay * 2 ))
           done
           echo "deployment did not serve expected content in time"
           exit 1

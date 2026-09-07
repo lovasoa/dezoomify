@@ -24,15 +24,68 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - id: bindgen
+        # Version-coupled to Cargo.lock (see the action): the same
+        # wasm-bindgen-cli release as sharded CI, cached by that version.
         uses: ./.github/actions/setup-wasm-bindgen
+      - name: Install cargo-deny 0.20.2
+        uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          # Same single JS lockfile set as sharded CI (see ci.yml).
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'crates/fixture-server/tests/webapp-e2e/package-lock.json', 'apps/extension/tests/browser/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
       - name: Install Playwright Chromium (webapp E2E)
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
         working-directory: crates/fixture-server/tests/webapp-e2e
-      # Release gate (docs/releases.md): the full deterministic suite must
-      # pass on the tagged revision before any artifact is produced.
-      - run: cargo xtask ci local
+      # Release gate (docs/releases.md): the tagged revision must have passed
+      # the full deterministic suite. The sharded `ci` workflow already ran it
+      # in parallel; when its `attest` job vouches for this exact commit AND
+      # the inputs digest still matches, the serial `ci local` rerun is
+      # skipped in favor of the fast release gate. Anything else (no
+      # successful sharded run, missing digest, changed inputs, gh failure)
+      # falls back to the full serial rerun: slow, but never a silent pass.
+      - name: Attest sharded CI for the tag commit
+        id: attest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          echo "tag commit: $sha"
+          attested="false"
+          run_id="$(gh run list --workflow ci.yml --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)"
+          if [ -n "$run_id" ]; then
+            if gh run download "$run_id" -n ci-inputs-digest -D /tmp/attested-ci 2>/dev/null \
+              && cargo xtask ci digest --check "$(cat /tmp/attested-ci/ci.digest)"; then
+              attested="true"
+              echo "sharded CI run $run_id vouches for $sha with a matching inputs digest"
+            else
+              echo "attestation unusable (missing digest or inputs changed since CI); falling back to serial ci local"
+            fi
+          else
+            echo "no successful sharded CI run for $sha; falling back to serial ci local"
+          fi
+          echo "attested=$attested" >> "$GITHUB_OUTPUT"
+      - name: Fast release gate (attested inputs)
+        if: steps.attest.outputs.attested == 'true'
+        run: |
+          cargo xtask fixtures verify
+          cargo xtask protocol check
+      - name: Full deterministic gate (unattested fallback)
+        if: steps.attest.outputs.attested != 'true'
+        run: cargo xtask ci local
       - run: cargo xtask release plan
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -41,18 +41,38 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - id: bindgen
+        # Version-coupled to Cargo.lock (see the action): every workflow
+        # resolves the same wasm-bindgen-cli release, and the installer
+        # caches it by that version, so no workflow drifts or re-downloads.
         uses: ./.github/actions/setup-wasm-bindgen
+      - name: Install cargo-deny 0.20.2
+        uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
+        with:
+          tool: cargo-deny@0.20.2
       - name: Cache Playwright Chromium
+        id: playwright-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('crates/fixture-server/tests/webapp-e2e/package-lock.json', 'apps/extension/tests/browser/package-lock.json') }}
+          # Single JS lockfile set (enforced by the supply gate in
+          # crates/xtask/src/supply.rs): the pnpm workspace lock plus both
+          # isolated npm profile locks. Any JS change invalidates browsers.
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'crates/fixture-server/tests/webapp-e2e/package-lock.json', 'apps/extension/tests/browser/package-lock.json') }}
           restore-keys: |
             playwright-${{ runner.os }}-
+      # Browser binaries are only needed on the legs that drive real
+      # browsers (browser+web E2E, extension headless gate): every other leg
+      # skips the npm install and the download entirely. On a cache hit only
+      # the OS dependencies are (re)ensured, never the browsers.
       - name: Install Playwright Chromium (webapp E2E)
+        if: matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
         working-directory: crates/fixture-server/tests/webapp-e2e
       - name: CI lane (rust)
         if: matrix.lane-group == 'rust'
@@ -84,3 +104,21 @@ jobs:
       - name: CI lane (security)
         if: matrix.lane-group == 'protocol+security'
         run: cargo xtask ci security
+  attest:
+    # Release attestation gate (todo 6.2): after every sharded lane is green,
+    # publish the deterministic release-inputs digest. `release-build`
+    # re-computes it on the tagged revision with
+    # `cargo xtask ci digest --check`; a match skips the serial `ci local`
+    # rerun, anything else falls back to it. Never a silent pass.
+    name: attest release inputs digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [deterministic]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: cargo xtask ci digest | tee ci.digest
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-inputs-digest
+          path: ci.digest
+          retention-days: 30
