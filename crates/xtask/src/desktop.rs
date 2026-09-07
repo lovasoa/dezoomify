@@ -414,7 +414,7 @@ fn check_bundle_prereqs() -> Result<(), String> {
 }
 
 fn build_frontend() -> Result<(), String> {
-    let status = Command::new("pnpm")
+    let status = pnpm_command()?
         .args(["--filter", "./apps/desktop", "build"])
         .current_dir(super::repo_root())
         .status()
@@ -434,6 +434,75 @@ fn build_frontend() -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Build the pnpm invocation for the desktop frontend.
+///
+/// On Linux/macOS this is `pnpm` exactly as before. On Windows, Rust's
+/// `Command` (CreateProcess) only resolves `.exe` on PATH, not the
+/// `.cmd` shims a pnpm install leaves behind, so resolve explicitly: a
+/// real `pnpm.exe` runs directly, otherwise the resolved PATHEXT shim runs
+/// via `cmd /c` (batch files need the command interpreter). A truly absent
+/// pnpm fails closed naming the program and the fix.
+fn pnpm_command() -> Result<Command, String> {
+    if cfg!(windows) {
+        pnpm_command_windows()
+    } else {
+        Ok(Command::new("pnpm"))
+    }
+}
+
+fn pnpm_command_windows() -> Result<Command, String> {
+    let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    match resolve_windows_program("pnpm", &dirs, &pathext) {
+        Some((exe, false)) => Ok(Command::new(exe)),
+        Some((shim, true)) => {
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/c").arg(shim);
+            Ok(cmd)
+        }
+        None => Err("pnpm not found on PATH (install the pnpm version pinned in the packageManager field of package.json and ensure it is on PATH)".to_string()),
+    }
+}
+
+/// Resolve `stem` against `dirs` honoring `pathext`, preferring a real
+/// `.exe` (CreateProcess runs it directly) over shell shims. Returns the
+/// resolved path plus whether it needs a shell (`cmd /c`): batch shims
+/// such as `pnpm.cmd` cannot run directly. `.exe` wins even from a later
+/// directory so a directly-runnable binary is never routed through a
+/// shell. Extension case follows the `pathext` entry as written; the
+/// Windows filesystem matches it case-insensitively.
+fn resolve_windows_program(
+    stem: &str,
+    dirs: &[std::path::PathBuf],
+    pathext: &str,
+) -> Option<(std::path::PathBuf, bool)> {
+    for dir in dirs {
+        let exe = dir.join(format!("{stem}.exe"));
+        if exe.is_file() {
+            return Some((exe, false));
+        }
+    }
+    for ext in pathext
+        .split(';')
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+    {
+        if ext.eq_ignore_ascii_case(".exe") {
+            continue;
+        }
+        let ext = ext.strip_prefix('.').unwrap_or(ext);
+        for dir in dirs {
+            let candidate = dir.join(format!("{stem}.{ext}"));
+            if candidate.is_file() {
+                return Some((candidate, true));
+            }
+        }
+    }
+    None
 }
 
 fn bundle() -> Result<(), String> {
@@ -543,5 +612,78 @@ mod tests {
         ] {
             assert!(root.join(name).is_file(), "missing generated icon {name}");
         }
+    }
+
+    /// Scratch PATH tree for the Windows pnpm resolver tests: `files` are
+    /// `(subdir, filename)` pairs. Filenames use the exact case the test's
+    /// PATHEXT entry produces (Windows matches case-insensitively; the
+    /// Linux/macOS test runner does not).
+    fn pnpm_resolve_fixture(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "dezoomify-pnpm-resolve-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        for (dir, file) in files {
+            let dir = root.join(dir);
+            std::fs::create_dir_all(&dir).expect("create fixture dir");
+            std::fs::write(dir.join(file), "fixture").expect("write fixture file");
+        }
+        root
+    }
+
+    #[test]
+    fn pnpm_resolve_prefers_exe() {
+        // A real pnpm.exe wins over a .CMD shim even from a later PATH
+        // directory, and runs directly (no shell).
+        let root = pnpm_resolve_fixture("exe", &[("bin", "pnpm.CMD"), ("tools", "pnpm.exe")]);
+        let dirs = vec![root.join("bin"), root.join("tools")];
+        let found = super::resolve_windows_program("pnpm", &dirs, ".COM;.EXE;.BAT;.CMD")
+            .expect("pnpm must resolve");
+        assert_eq!(found.0, root.join("tools").join("pnpm.exe"));
+        assert!(!found.1, "pnpm.exe must run directly, not via a shell");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pnpm_resolve_falls_back_to_cmd_shim() {
+        // Shim-only install (the failing Windows CI layout): resolves the
+        // .CMD shim and marks it as needing `cmd /c`.
+        let root = pnpm_resolve_fixture("cmd", &[("bin", "pnpm.CMD")]);
+        let dirs = vec![root.join("bin")];
+        let found = super::resolve_windows_program("pnpm", &dirs, ".COM;.EXE;.BAT;.CMD")
+            .expect("pnpm.CMD must resolve");
+        assert_eq!(found.0, root.join("bin").join("pnpm.CMD"));
+        assert!(found.1, "pnpm.CMD needs cmd /c");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pnpm_resolve_honors_pathext_and_reports_missing() {
+        // PATHEXT without .CMD skips pnpm.CMD and takes pnpm.BAT instead.
+        let root = pnpm_resolve_fixture("pathext", &[("bin", "pnpm.CMD"), ("bin", "pnpm.BAT")]);
+        let dirs = vec![root.join("bin")];
+        let found = super::resolve_windows_program("pnpm", &dirs, ".COM;.EXE;.BAT")
+            .expect("pnpm.BAT must resolve");
+        assert_eq!(found.0, root.join("bin").join("pnpm.BAT"));
+        assert!(found.1, "pnpm.BAT needs cmd /c");
+        // Nothing installed: no resolution, so the caller fails closed.
+        let empty = pnpm_resolve_fixture("empty", &[]);
+        assert!(super::resolve_windows_program(
+            "pnpm",
+            std::slice::from_ref(&empty),
+            ".COM;.EXE;.BAT;.CMD"
+        )
+        .is_none());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn pnpm_command_unix_is_bare_pnpm() {
+        // Linux/macOS behavior stays byte-identical: a bare `pnpm` lookup.
+        let cmd = super::pnpm_command().expect("pnpm command builds");
+        assert_eq!(cmd.get_program(), "pnpm");
     }
 }
