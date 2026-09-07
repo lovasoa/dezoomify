@@ -1,0 +1,43 @@
+{
+  "@context": "http://iiif.io/api/presentation/3/context.json",
+  "id": "https://fixtures.test/iiif/uv/manifest.json",
+  "type": "Manifest",
+  "label": "UV variant",
+  "items": [
+    {
+      "id": "https://fixtures.test/iiif/uv/canvas/1",
+      "type": "Canvas",
+      "label": "Folio 1",
+      "items": [
+        {
+          "id": "https://fixtures.test/iiif/uv/page/1",
+          "type": "AnnotationPage",
+          "items": [
+            {
+              "id": "https://fixtures.test/iiif/uv/anno/1",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": [
+                {
+                  "id": "https://fixtures.test/iiif/uv/thumb.jpg",
+                  "type": "Image",
+                  "format": "image/jpeg"
+                },
+                {
+                  "id": "https://fixtures.test/iiif/uv/full.jpg",
+                  "type": "Image",
+                  "service": [
+                    {
+                      "id": "https://fixtures.test/iiif/uv/service",
+                      "type": "ImageService2"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

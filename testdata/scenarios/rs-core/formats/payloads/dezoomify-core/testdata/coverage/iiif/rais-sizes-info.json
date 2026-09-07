@@ -1,0 +1,16 @@
+{
+  "@context": "http://iiif.io/api/image/3/context.json",
+  "id": "https://fixtures.test/iiif/rais/image",
+  "type": "ImageService3",
+  "protocol": "http://iiif.io/api/image",
+  "width": 6000,
+  "height": 4000,
+  "profile": "level2",
+  "sizes": [
+    { "width": 375, "height": 250 },
+    { "width": 750, "height": 500 },
+    { "width": 1500, "height": 1000 },
+    { "width": 3000, "height": 2000 },
+    { "width": 6000, "height": 4000 }
+  ]
+}

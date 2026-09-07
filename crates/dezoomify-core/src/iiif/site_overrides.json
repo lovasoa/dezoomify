@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "iiif-site-overrides",
+  "description": "Data-driven IIIF site shims. Each entry documents one viewer/site integration that folds a former per-site code file into a declarative row plus a generic loader (site_overrides.rs). The JSON is the source of truth for match patterns, URL templates, and matrix-test examples; the loader implements the generic rewrites so behavior stays identical.",
+  "overrides": [
+    {
+      "id": "onb",
+      "kind": "url_to_manifest",
+      "description": "Austrian National Library viewers rewrite to the ONB v3 presentation manifest.",
+      "url_hint": "viewer.onb.ac.at or digital.onb.ac.at/RepViewer/viewer.faces?doc=",
+      "template": "https://api.onb.ac.at/iiif/presentation/v3/manifest/{identifier}",
+      "examples": [
+        {
+          "input": "https://viewer.onb.ac.at/10048A37/",
+          "expected": "https://api.onb.ac.at/iiif/presentation/v3/manifest/10048A37"
+        },
+        {
+          "input": "https://viewer.onb.ac.at/10048A37/137",
+          "expected": "https://api.onb.ac.at/iiif/presentation/v3/manifest/10048A37"
+        },
+        {
+          "input": "https://digital.onb.ac.at/RepViewer/viewer.faces?doc=10048A37&order=1",
+          "expected": "https://api.onb.ac.at/iiif/presentation/v3/manifest/10048A37"
+        }
+      ]
+    },
+    {
+      "id": "contentdm_record",
+      "kind": "url_rewrite",
+      "description": "CONTENTdm record pages rewrite to the single-item metadata API.",
+      "url_hint": "/digital/collection/<collection>/id/<numeric-id>",
+      "template": "{origin}/digital/api/singleitem/collection/{collection}/id/{identifier}",
+      "examples": [
+        {
+          "input": "https://fixtures.test/digital/collection/OKMaps/id/6483/rec/6",
+          "expected": "https://fixtures.test/digital/api/singleitem/collection/OKMaps/id/6483"
+        },
+        {
+          "input": "https://dc.library.okstate.edu/digital/collection/OKMaps/id/6483/rec/6",
+          "expected": "https://dc.library.okstate.edu/digital/api/singleitem/collection/OKMaps/id/6483"
+        }
+      ]
+    },
+    {
+      "id": "contentdm_metadata",
+      "kind": "json_field",
+      "description": "CONTENTdm single-item metadata carries iiifInfoUri; resolve it against the metadata origin (absolute URLs pass through, /digital/ roots join directly, bare paths join under /digital/).",
+      "url_hint": "/digital/api/singleitem/collection/<collection>/id/<id>",
+      "json_field": "iiifInfoUri",
+      "template": "{origin-joined-iiifInfoUri}",
+      "examples": [
+        {
+          "input": "{\"iiifInfoUri\": \"/iiif/OKMaps/6483/info.json\"}",
+          "expected": "https://fixtures.test/digital/iiif/OKMaps/6483/info.json"
+        }
+      ]
+    },
+    {
+      "id": "micrio",
+      "kind": "content_regex",
+      "description": "Micrio custom element <micr-io id=XXXXX> maps to the Micrio IIIF info.json.",
+      "content_pattern": "(?is)<micr-io\\b[^>]*\\bid\\s*=\\s*[\"'](?P<id>[A-Za-z0-9]{5})[\"']",
+      "capture_group": "id",
+      "template": "https://i.micr.io/{id}/info.json",
+      "examples": [
+        {
+          "input": "<micr-io data-view=\"default\" id=\"KEimL\"></micr-io>",
+          "expected": "https://i.micr.io/KEimL/info.json"
+        }
+      ]
+    },
+    {
+      "id": "national_gallery",
+      "kind": "content_transform",
+      "description": "National Gallery pages embed a ?IIIF= image URL with /full/; strip from /full/ and append /info.json.",
+      "content_pattern": "(?is)(?P<image>(?:https?://|/|\\./|\\.\\./)[^\"'\\s<>]+\\?IIIF=[^\"'\\s<>]+?/full/[^\"'\\s<>]+)",
+      "capture_group": "image",
+      "transform": "strip-from-/full/-then-/info.json",
+      "template": "{service}/info.json",
+      "examples": [
+        {
+          "input": "<img src=\"/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/full/!80,50/0/default.jpg\">",
+          "expected": "/server.iip?IIIF=/fronts/N-6660-00-000003-FS-PYR.tif/info.json"
+        }
+      ]
+    },
+    {
+      "id": "philadelphia",
+      "kind": "content_regex",
+      "description": "Philadelphia Museum pages embed a Micrio shortId; map it to the Micrio IIIF info.json.",
+      "content_pattern": "(?is)(?:philamuseum|philadelphia museum).*?\\\\?\"shortId\\\\?\"\\s*:\\s*\\\\?\"(?P<id>[A-Za-z0-9_-]{3,32})\\\\?\"",
+      "capture_group": "id",
+      "template": "https://i.micr.io/{id}/info.json",
+      "examples": [
+        {
+          "input": "philamuseum.org \"shortId\":\"QYRjM\"",
+          "expected": "https://i.micr.io/QYRjM/info.json"
+        },
+        {
+          "input": "Philadelphia Museum {\"shortId\":\"Raw01\"}",
+          "expected": "https://i.micr.io/Raw01/info.json"
+        }
+      ]
+    }
+  ]
+}

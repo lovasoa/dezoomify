@@ -1,0 +1,17 @@
+<krpano version="1.20">
+  <scene name="droplet_pano">
+    <image type="CUBE" multires="true" tilesize="512" baseindex="1">
+      <level tiledimagewidth="2048" tiledimageheight="2048">
+        <cube url="droplet.tiles/mres_%s/l1/%v/l1_%s_%v_%h.jpg" tilesize="256" />
+      </level>
+      <level tiledimagewidth="1024" tiledimageheight="1024">
+        <cube url="droplet.tiles/mres_%s/l0/%v/l0_%s_%v_%h.jpg" />
+      </level>
+    </image>
+  </scene>
+  <scene name="droplet_flat">
+    <image>
+      <flat url="droplet_flat.tiles/l%l/c%0x_r%0y.jpg" multires="512,1024x768,2048x1536" tilesize="512" />
+    </image>
+  </scene>
+</krpano>
