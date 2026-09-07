@@ -77,7 +77,7 @@ unit-tested. `node scripts/sync-web-js.mjs` regenerates the served `.js`
 mirrors from them; never hand-edit a generated mirror. The mirrors, the wasm
 glue under `wasm/`, and the pages under `help/` are generated artifacts and
 are never committed: the `website-deploy` workflow builds them on every push
-to `ng` (see the deployment contract below), `cargo xtask build web` builds
+to `master` (see the deployment contract below), `cargo xtask build web` builds
 them locally, and the web test lanes regenerate what they read.
 
 ## Website deployment contract

@@ -3,3 +3,22 @@
 Roll back only the affected channel to its previous immutable artifact; never
 rebuild under an existing version. Verify with the same packaged parity
 commands, preserve user output/settings, and record RTO and digests.
+
+## Steps (todo 5.8: no auto-update, manual reinstall)
+
+1. Pick the previous immutable GitHub Release tag (never rebuild under the
+   existing version; `cargo xtask release publish` refuses to republish a tag).
+2. Download the previous artifacts plus `SHA256SUMS` and every `.sig` from
+   that release.
+3. Verify before use: `sha256sum -c SHA256SUMS`, then `gpg --verify
+   SHA256SUMS.sig` (and per-artifact `.sig` files) against
+   `release/gpg-public-key.asc`. A mismatch or missing signature stops the
+   rollback.
+4. Reinstall manually: Linux `.deb` via the package manager; there is no
+   in-app updater to pull the rollback (automatic updates are disabled) and
+   no Windows/macOS installer in this wave.
+5. Extension rollback is a resubmit of the previous Chromium zip to the
+   existing listing (`iapjjopjejpelnfdonefbffahmcndfbm`) via `store-submit`;
+   never create a new store item and never publish to Firefox/AMO.
+6. Preserve user output and settings; record the RTO, the verified digests,
+   and the release tags involved in the incident record.

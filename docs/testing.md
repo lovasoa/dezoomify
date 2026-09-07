@@ -60,10 +60,10 @@ Focused targets are:
 | `job` | commands, effects, retries, progress, cancellation, and cleanup |
 | `wasm` | WASM portability, bindings, transcripts, and memory ownership |
 | `browser` | workers, transports, decoding, canvases, caching, and browser harness |
-| `ui` | shared UI controller, view rendering, accessibility gate, English message dictionary, and mobile CSS parity |
+| `ui` | shared UI controller, view rendering, accessibility gate, four-locale message dictionary, and mobile CSS parity |
 | `web` | website direct-first transport, metadata CORS proxy fallback, and cross-browser end-to-end behavior |
 | `native` | native runtime, CLI, encoders, cache, and scenario parity |
-| `desktop` | Tauri integration, integration registration, updater fixtures, and E2E |
+| `desktop` | Tauri integration, integration registration, disabled-updater fixtures, and E2E |
 | `extension` | manifests, scanning, browser-session fetch, permissions, shared-UI vendoring with web-vs-extension job-card parity, store size gate, and browser E2E |
 | `native-messaging` | framing, handoff consent, cookie scope, registration, and cleanup |
 | `scenario` | scenario-corpus gates: native pipeline scenarios over loopback plus CLI snapshots |
@@ -84,8 +84,9 @@ flags instead of silently widening or skipping coverage.
 gate runs the shared-UI subset plus its gates: `test/controller.test.mjs`,
 `test/view-rendering.test.mjs`, `test/ui-a11y.test.mjs` (static
 accessibility gate over rendered views, theme CSS, the extension page shell,
-and the shared confirm dialog), `test/ui-i18n.test.mjs` (English dictionary
-coverage; the extension renders through its vendored dictionary mirror with
+and the shared confirm dialog), `test/ui-i18n.test.mjs` (four-locale
+dictionary coverage with per-key English fallback; the extension renders
+through its vendored dictionary mirror with
 no local replica), and `test/ui-mobile.test.mjs` (560/380px parity over the
 canonical theme the extension page links, and 360px reachability). It is
 tracked and always present.

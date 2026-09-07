@@ -27,9 +27,12 @@ bindings, schema fingerprints, compatibility fixtures, and this matrix (see
 | Desktop app | Windows, macOS, and Linux through the Tauri shell (WebView2 on Windows, WebKit on macOS, webkit2gtk on Linux) | `cargo xtask test desktop`; the Linux `.deb` builds on a Linux host while Windows and macOS bundles build only on their matching hosts |
 | CLI | Native binary (Linux `cli-linux-x86_64` target; the same native runtime as the desktop app) | `cargo xtask test native` plus scenario parity |
 
-Desktop installers ship unsigned (no paid Apple or Azure signing); update
-payloads are self-signed with the updater ed25519 keypair. The user-facing
-install note lives in the [Desktop app guide](user/desktop-app.md#install).
+Desktop installers ship unsigned (no paid Apple or Azure signing); only the
+Linux `.deb` is buildable while Windows and macOS targets stay unavailable
+(see [Releases](releases.md)). Automatic in-app updates are disabled: there
+is no update host or key, so users check GitHub Releases manually. The
+user-facing install note lives in the [Desktop app
+guide](user/desktop-app.md#install).
 
 ## Canvas and save limits
 
@@ -43,7 +46,7 @@ Encoder side caps apply on top of the canvas budget: JPEG addresses at most
 65535 pixels per side and WebP at most 16383 pixels per side, so larger canvases
 save as PNG, TIFF, ZIF, or an `iiif-dir` tile tree. The native baseline reports
 encoders `[png, jpeg, tiff, zif, webp]`, destination modes `[file, iiif-dir]`,
-storage modes `[cache]`, and `bulk_supported` false.
+storage modes `[cache]`, and `bulk_supported` true.
 
 ## Ordinary display without readable bytes
 
@@ -83,7 +86,7 @@ formats](user/supported-formats.md) for what to paste per format.
 | pnav | Yes | Yes | Yes | Yes |
 | Generic tile pattern | Yes | Yes | Yes | Yes |
 | Custom tiles (`tiles.yaml`) | Yes, over http(s) tile URLs | Yes, over http(s) tile URLs | Yes, plus local files | Yes, plus local files |
-| Bulk text (URL list) | Deferred entries, one at a time | Deferred entries, one at a time | Deferred entries, one at a time | `--bulk` loop, one bounded run per entry |
+| Bulk text (URL list) | Single-queue, one at a time | Deferred entries, one at a time | Multi-job queue, one at a time | `--bulk` loop, one bounded run per entry |
 
 ### Authentication
 
@@ -112,12 +115,16 @@ canvas taint.
 
 ### Bulk
 
-No runtime executes a multi-output bulk queue: `bulk_supported` is false on
-every baseline, and each desktop run saves one job to one output. The CLI
-`--bulk` loop runs one bounded single-job run per list entry (a failed entry
-never stops the rest; a per-image summary plus totals print at the end and the
-exit is 1 when any entry fails). Bulk text discovery yields deferred entries
-that resolve one at a time.
+Queues run sequential single-job runs in the integration layer over the
+single-job engine, never in the engine: `bulk_supported` is true on the
+website (single-queue: an address submitted while a job runs waits its turn)
+and native (multi-job queue with progress per job, cancel one or all, and
+retry of failed jobs) baselines. Each job still saves one output, and a
+failed entry never stops the rest. The CLI `--bulk` loop runs one bounded
+single-job run per list entry (a failed entry never stops the rest; a
+per-image summary plus totals print at the end and the exit is 1 when any
+entry fails). Bulk text discovery yields deferred entries that resolve one
+at a time.
 
 ## Reporting a problem
 

@@ -23,6 +23,27 @@ Run from the tagged revision:
 4. `cargo xtask release verify --plan target/release-dist/<version>/plan.json --artifacts target/release-dist/<version>` (recomputes every digest, checks artifact names against the plan, and validates every signature).
 5. `cargo xtask release publish --plan ... --artifacts ...`, then commit and push the recorded `release/checksums/<version>/SHA256SUMS`.
 
-Signing uses free mechanisms only: GPG-detached `SHA256SUMS`, the updater ed25519 keypair, and store submission. Desktop installers remain unsigned with no paid Apple/Azure signing; update payloads are self-signed. Working trees under `target/release-dist/<version>/` are never committed; only the recorded `release/checksums/<version>/SHA256SUMS` inventory is committed. The user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install).
+Signing uses free mechanisms only: GPG-detached `SHA256SUMS` plus per-artifact `.sig` files, and store submission to the existing Chromium listing. Desktop installers remain unsigned with no paid Apple/Azure signing; only the Linux `.deb` is buildable. Automatic in-app updates are disabled (no update host or key); users check GitHub Releases manually. Working trees under `target/release-dist/<version>/` are never committed; only the recorded `release/checksums/<version>/SHA256SUMS` inventory is committed. The user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install).
 
-Steps 1 and 2 also run in CI: dispatch `release-build` with the tag, then `release-sign` and `release-publish` with the run ids; in CI the signing key comes from the `release-signing` environment secret. The Chromium artifact from step 2 is the store payload for the existing listing, submitted through the `store-submit` workflow.
+Steps 1 and 2 also run in CI: dispatch `release-build` with the tag, then `release-sign` and `release-publish` with the run ids; in CI the signing key comes from the `release-signing` environment secret, and every stage fails closed when the key, digests, or signatures are missing. The Chromium artifact from step 2 is the store payload for the existing listing (`iapjjopjejpelnfdonefbffahmcndfbm`), submitted through the `store-submit` workflow; never create a new store item and never publish to Firefox/AMO.
+
+## Update and installer truth
+
+- No auto-update endpoint exists: `release/config.toml` sets `[updater] enabled = false` with empty endpoints, `tauri.conf.json` ships empty updater endpoints, and the desktop capability sets `updater.enabled: false` with an empty allowlist.
+- Verify a download before use: `sha256sum -c SHA256SUMS` plus `gpg --verify SHA256SUMS.sig` against `release/gpg-public-key.asc`; a mismatch or missing signature stops the install.
+- Windows and macOS ship no installer in this wave; the compatibility matrix and the desktop guide name Linux as the only desktop bundle.
+
+## Service levels
+
+Dezoomify runs as a volunteer best-effort project with no uptime, latency,
+or support-response SLO: the website, the metadata CORS proxy, and the
+release pipeline carry no availability target, and issue reports receive
+volunteer triage per [Incident response](incident-response.md). What holds
+instead is reproducibility: every release artifact is immutable,
+checksummed, and signed (see [Releases](releases.md)), so an operator
+verifies `SHA256SUMS` before use and reinstalls the previous immutable
+release on failure (see `docs/rollback-runbook.md`).
+
+## Rollback
+
+Rollback is a manual reinstall of the previous immutable GitHub Release artifact (never a rebuild under an existing version); see `docs/rollback-runbook.md`. There is no update rollout to pause and no staged-percentage deploy: releases publish at once, and the store draft path is Chromium-only. Expected operator timing: plan plus per-target builds in minutes on their matching hosts, sign plus verify in under a minute once the key is present, publish plus checksum-inventory commit in minutes; any missing secret, digest, or signature fails the stage immediately rather than shipping partial artifacts.

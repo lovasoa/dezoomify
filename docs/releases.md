@@ -53,9 +53,14 @@ release trees live under `target/release-dist/<version>/` and are never
 committed; `target/` is used so website builds cannot clobber them.
 
 The `release-build`, `release-sign`, and `release-publish` workflows chain
-these stages by run id: the build workflow runs `cargo xtask ci local` on
-the tagged revision before planning, and no artifact exists that has not
-passed the deterministic suite. Local `cargo xtask build desktop` produces
+these stages by run id: the build workflow gates the tagged revision on the
+deterministic suite before planning, and no artifact exists that has not
+passed it. When the sharded `ci` workflow vouches for the exact tag commit
+(its `attest` job uploads `cargo xtask ci digest`, recomputed and compared
+with `--check` on the tag), the serial `ci local` rerun is skipped in favor
+of the fast release gate (`fixtures verify` plus `protocol check`); any
+missing attestation or digest mismatch falls back to the full `ci local`
+rerun, never to a silent pass. Local `cargo xtask build desktop` produces
 a real unsigned `.deb` (no paid signing) from the Tauri window shell behind
 the optional `tauri` feature, so `desktop-linux-x86_64` is available;
 `desktop-windows-x86_64` (needs a Windows host with WebView2, WiX, NSIS, and
@@ -64,12 +69,12 @@ Line Tools and `icon.icns`) stay unavailable, and a release never claims an
 artifact it did not build. The operator
 sequence for cutting a release is the runbook in [Operations](operations.md).
 
-Artifacts are built from a tagged revision, signed with free mechanisms only (updater ed25519 keypair, store submission, GPG-detached SHA256SUMS), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project; update payloads are self-signed with the updater ed25519 keypair. The user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install). Web release notes identify the automatic metadata CORS proxy fallback and active-transport indicator; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
+Artifacts are built from a tagged revision, signed with free mechanisms only (GPG-detached SHA256SUMS plus store submission for the existing Chromium listing), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project. Only the Linux `.deb` (`desktop-linux-x86_64`) is buildable; Windows and macOS targets stay unavailable until a matching host builds them, and a release never claims an artifact it did not build. The user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install). Web release notes identify the automatic metadata CORS proxy fallback and active-transport indicator; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
 
 ## Desktop updater
 
-The desktop app checks for updates over HTTPS-only allowlisted endpoints and stages only self-signed metadata. Each candidate carries a strict ed25519 signature over the canonical `dezoomify-updater-v1` message, and the app rejects unsigned, tampered, wrong-key, non-HTTPS, non-allowlisted, stale (older than 7 days), future (beyond +300s skew), rollback, and same-version candidates. A valid candidate is offered for explicit user confirmation and is never staged automatically; missing, delayed, or older metadata leaves the installed app working. The capability document grants only `updater:allow-check` so download and install stay denied until an explicit confirmed step exists.
+Automatic in-app updates are disabled (todo 5.8 decision): no update host is deployed and no updater key exists. Users check [GitHub Releases](https://github.com/lovasoa/dezoomify/releases) manually for new versions. The shipped desktop capability sets `updater.enabled: false` with an empty allowlist, `tauri.conf.json` ships empty `plugins.updater.endpoints`, `release/config.toml` sets `[updater] enabled = false` with empty endpoints and no key file, and `UPDATER_PUBKEY` stays empty so the plugin never validates (fail closed).
 
-The production update host and public key are still TBD: the shipped allowlist keeps the `https://updates.dezoomify.example` placeholder shape and the updater public key follows the `release/gpg-public-key.asc` pattern (a future `release/updater-public-key.asc` file). The placeholder never validates without the real key.
+The retained `apps/desktop/src-tauri/src/updater.rs` validator documents the policy a future self-hosted updater would enforce (strict ed25519 over the canonical `dezoomify-updater-v1` message, HTTPS allowlist, 7-day stale bound, +300s future skew, anti-rollback, explicit user confirmation, never auto-stage) and stays unit-tested via `validate_candidate`; the production `validate_update` entry rejects every candidate with `updater.disabled` and the installed app keeps working. The capability document grants only `updater:allow-check` so download and install stay denied.
 
 See [Testing](testing.md) for test structure and [Security](security.md) for trust requirements.

@@ -29,7 +29,7 @@ Object URLs are scoped to the job and revoked after use. The optional browser ca
 The website uses this order:
 
 1. Direct browser fetch with cookies, `Authorization`, and browser credentials omitted.
-2. After a classified CORS or network failure, or a direct fetch that does not complete within the 250 ms metadata window, automatic metadata CORS proxy fallback when the metadata request is public and non-credential.
+2. After a classified CORS or network failure, or a direct fetch that does not complete within the 1500 ms metadata window, automatic metadata CORS proxy fallback when the metadata request is public and non-credential.
 3. For unprocessed ordinary tiles, an `<img>` element when display is possible without readable bytes.
 4. A typed recovery action offering the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route can supply readable bytes.
 

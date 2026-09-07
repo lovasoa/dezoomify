@@ -25,7 +25,7 @@ Selection is explicit when discovery returns multiple images or levels. Headless
 Retry policy defines attempts, backoff inputs, and retryable error classes. The
 engine schedules retries; the host implements the delay and request. The web
 integration evaluates the first classified direct CORS or network failure, or a
-direct fetch that does not complete within the 250 ms metadata window, as an
+direct fetch that does not complete within the 1500 ms metadata window, as an
 application-specific transport transition before ordinary same-transport retry:
 an eligible public, non-credential metadata request supplies a metadata CORS
 proxy effect, and the active-transport event makes
@@ -48,6 +48,26 @@ The selected partial policy is one of:
 Partial results list every missing tile and preserve the errors that caused each omission. The engine publishes a kept partial only after successful encoding and finalization; otherwise it directs cleanup. The policy never converts metadata, permission, destination, encoding, or publication failures into partial success.
 
 See [Errors](errors.md) for recovery behavior and [Testing](testing.md) for deterministic state-machine scenarios.
+
+## Pause v1 (suspend-acquisition)
+
+Pause is an orthogonal overlay, not new states: the 19 `State` variants are
+unchanged and `Job::is_paused` reports the overlay. `Pause` is valid in any
+non-terminal state (post-terminal inputs stay `job.post-terminal`);
+duplicate pause returns `Ignored`; `Resume` without pause is
+`job.invalid-state`. Cancel wins while paused.
+
+While paused the engine stops scheduling new `acquire-tile` effects,
+finishes in-flight work, retains decoded output, preserves FIFO
+effect/event queues, preserves retry wakeups (deferred in `pending_tiles`
+until resume), and still lets hosts own clocks. `TileOutcome{ok:true}` while
+paused records progress but defers completion; retry-eligible failures queue
+their retry without emitting; retry-exhausted failures still transition to
+`AwaitingPartialDecision`. Probe planning and discovery continue while
+paused (documented limit: only tile acquisition suspends). `Resume` clears
+the overlay, emits `resumed`, and re-drives: pending tiles up to the
+concurrency gate, or completion when every tile already arrived while
+paused.
 
 ## Behavior table (implemented)
 
@@ -83,5 +103,8 @@ outcome is provided, so the engine never loops on unanswered fetches.
 | `PartialKeep{keep:true}` | `AwaitingPartialDecision` | `job` match | Same pipeline as success but -> `PartiallyCompleted` | Same encode/finalize/publish/release | `job-state` chain + `partial-completed` (terminal once) |
 | `PartialKeep{keep:false}` | `AwaitingPartialDecision` | `job` match | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.partial-discarded` |
 | `Cancel` | Any non-terminal (incl. transient `Planning`/`ProcessingTiles`/`Encoding`/`Finalizing`/`Publishing`) | `job` match | -> `Cancelling` -> `CleaningUp` -> `Cancelled` | `cancel-work`, `release-bytes` | `job-state` chain + `cancelled` (terminal once; second `Cancel` is `post-terminal`) |
+| `Pause` | Any non-terminal | `job` match | Overlay on (no state change) | none | `paused` (replayable; duplicate is `Ignored`) |
+| `Resume` | Paused only | `job` match, paused | Overlay off, re-drive pending or complete | `acquire-tile` (pending) or full encode/finalize/publish chain when all arrived paused | `resumed`, then `progress`/`job-state` chain |
+| `TileOutcome{ok:true}` while paused | `AcquiringTiles` + paused | `job` match, `tile:*` in plan | Stay (no new scheduling, completion deferred) | none | `progress:a/total` only |
 | Duplicate/stale | Same state, already-consumed `req:*` or acquired `tile:*` / same selection | Correlation already settled | No transition | none | none (`Ok(Ignored)`) |
-| Wrong-job / wrong-state / bad id / post-terminal | Any | `job` mismatch, unknown id, invalid state, or terminal set | No transition, no work | none | none (`Err(job.wrong-job | job.invalid-state | job.invalid-id | job.post-terminal)`) |
+| Wrong-job / wrong-state / bad id / post-terminal | Any | `job` mismatch, unknown id, invalid state, resume-without-pause, or terminal set | No transition, no work | none | none (`Err(job.wrong-job | job.invalid-state | job.invalid-id | job.post-terminal)`) |
