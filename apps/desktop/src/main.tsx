@@ -278,11 +278,13 @@ function persistOutputFormat(format: NativeFormat): void {
 let settingsError: string | null = null;
 let pendingDecision: PendingDecision | null = null;
 
-// Catalog auto-choice notice (todo 4.3): reuses the pendingDecision aux
-// pattern as local-only state, never a new protocol event. The native
-// pipeline auto-saves images[0] at the largest fitting level; the shared job
-// view renders this honestly from controller imageCount plus this aux
-// (WxH/K tiles). No picker is offered.
+// Catalog aux (todo 4.3): local-only completion geometry (WxH/K tiles) for
+// the save-name suggestion and the aux choice summary, in the
+// pendingDecision aux pattern, never a new protocol event. The native
+// pipeline auto-saves images[0] at the largest fitting level and emits no
+// imageCount, so no multi-image notice is rendered here; the shared job
+// view's choiceCount notice stays for other apps. `docs/user/desktop-app.md`
+// documents single-output saves only.
 let catalogNotice: CatalogNotice | null = null;
 
 // Accessibility (Task 5.2): dialog focus state. Each modal stores the element
@@ -1674,48 +1676,15 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     return;
   }
 
-  // Catalog / image selection: the native pipeline auto-saves images[0] at
-  // the largest fitting level. Record the honest auto-choice notice in local
-  // aux (pendingDecision pattern, no protocol event); the shared job view
-  // renders "Found N images, saving largest that fits (WxH, K tiles)".
-  if (
-    kind === "catalog" ||
-    kind === "images-found" ||
-    text.indexOf("images-found") >= 0 ||
-    text.indexOf("awaiting-choice") >= 0 ||
-    flat.indexOf("awaitingchoice") >= 0 ||
-    text.indexOf("awaiting-image") >= 0 ||
-    flat.indexOf("awaitingimage") >= 0 ||
-    flat.indexOf("awaitingimageselection") >= 0 ||
-    text.indexOf("choosing") >= 0
-  ) {
-    const found = numField(payload, detailRaw, ["imageCount", "images", "count"]);
-    controller.dispatch({
-      seq: nextSeq(),
-      sessionId,
-      kind: "images-found",
-      ...(found !== undefined ? { imageCount: found } : {}),
-      transport: NATIVE_TRANSPORT,
-    });
-    if (found !== undefined) {
-      catalogNotice = { ...(catalogNotice ?? {}), imageCount: found };
-    } else if (!catalogNotice && controller.getState().imageCount > 0) {
-      catalogNotice = { imageCount: controller.getState().imageCount };
-    }
-    const nounCount = catalogNotice?.imageCount ?? found ?? 0;
-    const noun = nounCount === 1 ? t("view.job.oneImage") : t("view.job.manyImages", { count: nounCount });
-    if ((catalogNotice?.imageCount ?? found ?? 0) > 0) {
-      pushLog(`Found ${noun}; auto-saving largest that fits`);
-      setStep(
-        t("desktop.step.foundFits", { noun }),
-        t("desktop.step.appAutoDetail"),
-      );
-    } else {
-      setStep(t("view.step.choosingImage"));
-    }
-    update();
-    return;
-  }
+  // No catalog / image-selection branch: the native pipeline never emits
+  // one. The driver folds the catalog internally (job_driver.rs
+  // handle_event "catalog" only fills the attempt; PipelineEvent kinds are
+  // discovery/downloading/encoding), jobs.rs projects no imageCount (the
+  // progress allowlist is acquired/total/resources/bytes/files), and the
+  // shell selects images[0] at the largest fitting level by default. The
+  // shared view's choiceCount notice stays for other apps (website
+  // discovery sets imageCount); desktop walks choosing-image transiently
+  // via preflightThrough with no count, so the notice never renders here.
 
   // Level selection offered: record image-chosen (legal from
   // choosing-image), then wait for the running signal before level-chosen.
