@@ -33,6 +33,7 @@ test("website preview wires wheel, drag, and buttons without pixel reads", () =>
   assert.ok(start >= 0, "preview block present in packages/browser-runtime/src/preview.ts");
   const block = src.slice(start, start + 8000);
   assert.ok(block.includes("wheel"), "wheel zoom wired");
+  assert.ok(block.includes("PREVIEW_WHEEL_STEP_PIXELS"), "wheel zoom uses a continuous sensitivity");
   assert.ok(block.includes("pointerdown"), "drag pan wired");
   assert.ok(block.includes("preview-zoom-in"), "zoom-in button wired");
   assert.ok(block.includes("preview-zoom-out"), "zoom-out button wired");

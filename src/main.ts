@@ -1403,6 +1403,7 @@ async function runJob(url: string): Promise<void> {
     // assemble visibly as they arrive, and the picture stays right-clickable
     // throughout acquisition, whichever finish follows.
     setCanvasVisible(true);
+    preview.resetTransform(document);
 
     const total = plan.tiles.length;
     viewCtx.imageChoice = { width, height, tiles: total };
@@ -1457,6 +1458,7 @@ async function runJob(url: string): Promise<void> {
       reportProgress(total, total, `Displaying ${total} tiles…`);
       pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
       setCanvasVisible(true);
+      preview.resetTransform(document);
       controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
       recordWebHistory(url, width, height, "display");
       update();

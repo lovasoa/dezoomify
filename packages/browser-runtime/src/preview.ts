@@ -10,6 +10,7 @@
 export const PREVIEW_MIN_SCALE = 0.1;
 export const PREVIEW_MAX_SCALE = 8;
 export const PREVIEW_ZOOM_STEP = 1.25;
+const PREVIEW_WHEEL_STEP_PIXELS = 100;
 
 export interface PreviewTransform {
   scale: number;
@@ -26,6 +27,10 @@ export interface PreviewStyleLike {
 
 export interface PreviewElementLike {
   style: PreviewStyleLike;
+  width?: number;
+  height?: number;
+  clientWidth?: number;
+  clientHeight?: number;
   addEventListener(type: string, listener: (event: unknown) => void, opts?: unknown): void;
   setPointerCapture?: (id: number) => void;
   isConnected?: boolean;
@@ -71,8 +76,24 @@ export function createPreviewControls(): PreviewControls {
     }
   }
 
+  function fitScale(doc?: PreviewDocumentLike | null): number {
+    if (!doc) return 1;
+    try {
+      const wrapper = doc.getElementById("canvas-wrapper");
+      const canvas = doc.getElementById("rendering-canvas");
+      const width = canvas?.width ?? 0;
+      const height = canvas?.height ?? 0;
+      const viewportWidth = wrapper?.clientWidth ?? 0;
+      const viewportHeight = wrapper?.clientHeight ?? 0;
+      if (!(width > 0 && height > 0 && viewportWidth > 0 && viewportHeight > 0)) return 1;
+      return clampPreviewScale(Math.min(1, viewportWidth / width, viewportHeight / height));
+    } catch {
+      return 1;
+    }
+  }
+
   function resetTransform(doc?: PreviewDocumentLike | null): PreviewTransform {
-    transform = { scale: 1, tx: 0, ty: 0 };
+    transform = { scale: fitScale(doc), tx: 0, ty: 0 };
     applyTransform(doc);
     return getTransform();
   }
@@ -119,7 +140,11 @@ export function createPreviewControls(): PreviewControls {
           if (wrapper.style.display === "none") return;
           (event as { preventDefault?: () => void }).preventDefault?.();
           const delta = (event as { deltaY?: number }).deltaY ?? 0;
-          const factor = delta < 0 ? PREVIEW_ZOOM_STEP : 1 / PREVIEW_ZOOM_STEP;
+          if (!Number.isFinite(delta) || delta === 0) return;
+          // Use a continuous curve so high-frequency trackpad events do not
+          // apply a full button-sized zoom step each time.
+          const boundedDelta = Math.max(-PREVIEW_WHEEL_STEP_PIXELS, Math.min(PREVIEW_WHEEL_STEP_PIXELS, delta));
+          const factor = Math.pow(PREVIEW_ZOOM_STEP, -boundedDelta / PREVIEW_WHEEL_STEP_PIXELS);
           zoomBy(factor, doc);
         },
         { passive: false },

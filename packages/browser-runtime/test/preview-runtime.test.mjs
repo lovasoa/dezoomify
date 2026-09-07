@@ -9,9 +9,10 @@ import {
   setCanvasVisible,
 } from "../src/preview.ts";
 
-function element() {
+function element(dimensions = {}) {
   return {
     style: { transformOrigin: "", transform: "", display: "", cursor: "" },
+    ...dimensions,
     listeners: {},
     textContent: null,
     hidden: false,
@@ -22,8 +23,8 @@ function element() {
 
 function doc() {
   const ids = {
-    "canvas-wrapper": element(),
-    "rendering-canvas": element(),
+    "canvas-wrapper": element({ clientWidth: 800, clientHeight: 600 }),
+    "rendering-canvas": element({ width: 1600, height: 1200 }),
     "preview-zoom-in": element(),
     "preview-zoom-out": element(),
     "preview-zoom-reset": element(),
@@ -51,11 +52,11 @@ test("zoom and reset apply transform-only styles", () => {
   preview.initControls(d);
   const canvas = d.ids["rendering-canvas"];
   preview.zoomBy(2, d);
-  assert.match(canvas.style.transform, /scale\(2\)/);
-  assert.equal(d.ids["preview-zoom-label"].textContent, "200%");
-  preview.resetTransform(d);
-  assert.deepEqual(preview.getTransform(), { scale: 1, tx: 0, ty: 0 });
   assert.match(canvas.style.transform, /scale\(1\)/);
+  assert.equal(d.ids["preview-zoom-label"].textContent, "100%");
+  preview.resetTransform(d);
+  assert.deepEqual(preview.getTransform(), { scale: 0.5, tx: 0, ty: 0 });
+  assert.match(canvas.style.transform, /scale\(0.5\)/);
 });
 
 test("controls wire buttons, wheel, and drag without pixel reads", () => {
@@ -64,11 +65,11 @@ test("controls wire buttons, wheel, and drag without pixel reads", () => {
   preview.initControls(d);
   const canvas = d.ids["rendering-canvas"];
   d.ids["preview-zoom-in"].fire("click");
-  assert.equal(preview.getTransform().scale, 1.25);
+  assert.equal(preview.getTransform().scale, 0.625);
   d.ids["preview-zoom-out"].fire("click");
-  assert.equal(preview.getTransform().scale, 1);
+  assert.equal(preview.getTransform().scale, 0.5);
   d.ids["canvas-wrapper"].fire("wheel", { deltaY: -100, preventDefault: () => {} });
-  assert.equal(preview.getTransform().scale, 1.25);
+  assert.equal(preview.getTransform().scale, 0.625);
   d.ids["preview-zoom-reset"].fire("click");
   canvas.fire("pointerdown", { clientX: 10, clientY: 20, pointerId: 1 });
   canvas.fire("pointermove", { clientX: 15, clientY: 30 });
