@@ -83,10 +83,24 @@ jobs:
           # Content-hash fast path: dist/beta/index.html is copied verbatim
           # by scripts/build-site.mjs, so the served /beta/ bytes must hash
           # identically once THIS build is live (never a stale deploy).
-          # Backoff keeps early retries cheap while preserving the ~12min
-          # budget for slow Pages propagation: 10s, 20s, 40s, then 60s.
+          # Cloudflare Pages injects its Pages Analytics beacon into served
+          # HTML at the edge, so the served bytes never equal the uploaded
+          # ones: strip that injection before hashing (see normalize_beta
+          # below). Backoff keeps early retries cheap while preserving the
+          # ~12min budget for slow Pages propagation: 10s, 20s, 40s, then 60s.
           expected_beta_hash="$(sha256sum dist/beta/index.html | cut -d' ' -f1)"
           echo "expected beta content hash: $expected_beta_hash (dist/beta/index.html)"
+          # Served HTML arrives with Cloudflare Pages Analytics injected at the
+          # edge (the project's analytics toggle); drop every beacon script and
+          # its marker comments so the remaining bytes must be exactly the
+          # uploaded dist/beta/index.html. Any other served difference still
+          # fails the gate.
+          normalize_beta() {
+            sed -E \
+              -e "s#<!-- Cloudflare Pages Analytics -->##g" \
+              -e "s#<script[^>]*static\.cloudflareinsights\.com/beacon\.min\.js[^>]*></script>##g" \
+              "$1"
+          }
           delay=10
           for i in $(seq 1 15); do
             # / is the legacy site: the dezoomify-web app, served verbatim.
@@ -127,7 +141,7 @@ jobs:
             repo_files_served=0
             if grep -q "next-generation rewrite" <<<"$readme"; then repo_files_served=1; fi
             if [ "$cargo_toml_ct" = "application/toml" ]; then repo_files_served=1; fi
-            served_beta_hash="$(sha256sum /tmp/beta.html 2>/dev/null | cut -d' ' -f1 || true)"
+            served_beta_hash="$(normalize_beta /tmp/beta.html 2>/dev/null | sha256sum | cut -d' ' -f1 || true)"
             if [ "$legacy" = "200" ] \
               && grep -q "rendering-canvas" /tmp/legacy.html \
               && grep -q "zoommanager.js" /tmp/legacy.html \
