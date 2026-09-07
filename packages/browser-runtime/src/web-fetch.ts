@@ -25,6 +25,173 @@ import {
   PROXY_TRANSPORT_LABEL,
 } from "./transport-labels.ts";
 
+/**
+ * Frontend guard for the Cloudflare metadata CORS proxy: at most 4 proxy
+ * requests in flight at a time and at most 4 proxy request starts per
+ * second, shared globally across every fetcher on the page (metadata
+ * discovery fan-out plus any tile-image fetches that also use the proxy).
+ * Direct tile requests never go through this gate and keep their own more
+ * generous politeness policy. Mirrors the gate in
+ * `src/proxyTransport.ts`, which stays authoritative for the actual POST;
+ * this wrapper keeps standalone runtime users within the same budget even
+ * when the injected transport is unlimited.
+ */
+export const PROXY_MAX_INFLIGHT = 4;
+export const PROXY_MAX_REQUESTS_PER_SECOND = 4;
+export const PROXY_RATE_WINDOW_MS = 1000;
+
+let proxyInflight = 0;
+let proxyStarts: number[] = [];
+let proxyMutex: Promise<void> = Promise.resolve();
+const proxyInflightWaiters = new Set<() => void>();
+
+function proxyWithMutex<T>(fn: () => T): Promise<T> {
+  const prev = proxyMutex;
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  proxyMutex = current;
+  const run = (async () => {
+    await prev;
+    try {
+      return fn();
+    } finally {
+      release();
+    }
+  })();
+  return run;
+}
+
+function proxyNotifyInflight(): void {
+  for (const w of Array.from(proxyInflightWaiters)) {
+    try {
+      w();
+    } catch {
+      // A broken waiter must never stall the gate.
+    }
+  }
+}
+
+function proxyAbortableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(true);
+  if (ms <= 0) return Promise.resolve(signal?.aborted ?? false);
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (aborted: boolean) => {
+      if (settled) return;
+      settled = true;
+      try {
+        signal?.removeEventListener("abort", onAbort);
+      } catch {
+        // Detach is best-effort.
+      }
+      resolve(aborted);
+    };
+    const onAbort = () => done(true);
+    try {
+      signal?.addEventListener("abort", onAbort, { once: true });
+    } catch {
+      // Signals without addEventListener stay non-abortable here.
+    }
+    try {
+      Promise.resolve(sleep(ms)).then(
+        () => done(signal?.aborted ?? false),
+        () => done(signal?.aborted ?? false),
+      );
+    } catch {
+      done(signal?.aborted ?? false);
+    }
+  });
+}
+
+function proxyWaitForInflight(signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const onNotify = () => {
+      cleanup();
+      resolve(false);
+    };
+    const onAbort = () => {
+      cleanup();
+      resolve(true);
+    };
+    const cleanup = () => {
+      proxyInflightWaiters.delete(onNotify);
+      try {
+        signal?.removeEventListener("abort", onAbort);
+      } catch {
+        // Detach is best-effort.
+      }
+    };
+    proxyInflightWaiters.add(onNotify);
+    try {
+      signal?.addEventListener("abort", onAbort, { once: true });
+    } catch {
+      // Signals without addEventListener stay non-abortable here.
+    }
+  });
+}
+
+async function acquireProxySlot(signal?: AbortSignal): Promise<(() => void) | null> {
+  if (signal?.aborted) return null;
+  for (;;) {
+    const step = await proxyWithMutex((): { kind: string; ms?: number } => {
+      if (signal?.aborted) return { kind: "abort" };
+      const now = Date.now();
+      while (proxyStarts.length > 0 && (proxyStarts[0] as number) <= now - PROXY_RATE_WINDOW_MS) {
+        proxyStarts.shift();
+      }
+      if (proxyInflight >= PROXY_MAX_INFLIGHT) return { kind: "wait-inflight" };
+      if (proxyStarts.length >= PROXY_MAX_REQUESTS_PER_SECOND) {
+        const waitMs = (proxyStarts[0] as number) + PROXY_RATE_WINDOW_MS - Date.now();
+        return { kind: "wait-rate", ms: waitMs > 0 ? waitMs : 0 };
+      }
+      proxyStarts.push(Date.now());
+      proxyInflight += 1;
+      return { kind: "admit" };
+    });
+    if (step.kind === "admit") {
+      if (signal?.aborted) {
+        await proxyWithMutex(() => {
+          proxyInflight = Math.max(0, proxyInflight - 1);
+        });
+        proxyNotifyInflight();
+        return null;
+      }
+      let done = false;
+      return () => {
+        if (done) return;
+        done = true;
+        proxyInflight = Math.max(0, proxyInflight - 1);
+        proxyNotifyInflight();
+      };
+    }
+    if (step.kind === "abort") return null;
+    if (step.kind === "wait-rate") {
+      const aborted = await proxyAbortableSleep(step.ms ?? 0, signal);
+      if (aborted || signal?.aborted) return null;
+      continue;
+    }
+    const aborted = await proxyWaitForInflight(signal);
+    if (aborted || signal?.aborted) return null;
+  }
+}
+
+/** Test seam: drop global proxy rate state between isolated checks. */
+export function resetProxyRateLimit(): void {
+  proxyInflight = 0;
+  proxyStarts = [];
+  for (const w of Array.from(proxyInflightWaiters)) {
+    try {
+      w();
+    } catch {
+      // Reset must never throw.
+    }
+  }
+  proxyInflightWaiters.clear();
+}
+
 export interface DirectOutcome {
   outcome: "readable" | "http-error" | "network-error" | "cancelled";
   finalUrl?: string;
@@ -183,6 +350,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     signal?: AbortSignal,
   ): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; finalUrl?: string; retryAfterMs?: number }> {
     if (!deps.proxyTransport) return { ok: false, status: 502, code: "PROXY_ERROR" };
+    if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+    const slot = await acquireProxySlot(signal);
+    if (!slot) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     const reqId = hooks.onRequestStart("proxy");
     const combined = combineTimeout(signal, requestMs);
     try {
@@ -214,6 +384,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
       return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
     } finally {
+      slot();
       combined.cleanup();
       hooks.onUpdate();
     }

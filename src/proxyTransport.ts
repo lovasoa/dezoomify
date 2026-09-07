@@ -80,9 +80,229 @@ export function parseRetryAfterMs(value: string | undefined): number | undefined
   return undefined;
 }
 
+/**
+ * Frontend guard for the Cloudflare metadata CORS proxy: at most 4 proxy
+ * requests in flight at a time and at most 4 proxy request starts per
+ * second. The backend enforces its own limit; this client-side gate keeps a
+ * single page (discovery fan-out plus any tile-image fetches that also use
+ * the proxy, e.g. Google Arts encrypted tiles) from bursting against it.
+ * Direct tile requests never go through this gate and keep their own more
+ * generous politeness policy.
+ */
+export const PROXY_MAX_INFLIGHT = 4;
+export const PROXY_MAX_REQUESTS_PER_SECOND = 4;
+export const PROXY_RATE_WINDOW_MS = 1000;
+
+export interface ProxyRateClock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+
+export interface ProxyRateLimiter {
+  acquire(signal?: AbortSignal): Promise<(() => void) | null>;
+  reset(): void;
+}
+
+function defaultProxySleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Shared admission gate: one mutex serializes the check-and-reserve step so
+ * concurrent callers cannot both observe a free slot, while the actual waits
+ * happen outside the mutex. Start timestamps are recorded at admission, and
+ * the caller starts its fetch synchronously after (no awaited delay in
+ * between), so observed network starts honor the same window.
+ */
+export function createProxyRateLimiter(clock?: ProxyRateClock): ProxyRateLimiter {
+  const nowFn = clock?.now ?? Date.now;
+  const sleepFn = clock?.sleep ?? defaultProxySleep;
+  let inflight = 0;
+  let starts: number[] = [];
+  let mutex: Promise<void> = Promise.resolve();
+  const inflightWaiters = new Set<() => void>();
+
+  function withMutex<T>(fn: () => T): Promise<T> {
+    const prev = mutex;
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mutex = current;
+    const run = (async () => {
+      await prev;
+      try {
+        return fn();
+      } finally {
+        release();
+      }
+    })();
+    return run;
+  }
+
+  function notifyInflight(): void {
+    for (const w of Array.from(inflightWaiters)) {
+      try {
+        w();
+      } catch {
+        // A broken waiter must never stall the gate.
+      }
+    }
+  }
+
+  function abortableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(true);
+    if (ms <= 0) return Promise.resolve(signal?.aborted ?? false);
+    // Race the injectable clock against caller aborts. On abort the sleep
+    // promise still settles underneath, but its late completion is ignored.
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (aborted: boolean) => {
+        if (settled) return;
+        settled = true;
+        try {
+          signal?.removeEventListener("abort", onAbort);
+        } catch {
+          // Detach is best-effort.
+        }
+        resolve(aborted);
+      };
+      const onAbort = () => done(true);
+      try {
+        signal?.addEventListener("abort", onAbort, { once: true });
+      } catch {
+        // Signals without addEventListener stay non-abortable here.
+      }
+      try {
+        const waited = sleepFn(ms);
+        Promise.resolve(waited).then(
+          () => done(signal?.aborted ?? false),
+          () => done(signal?.aborted ?? false),
+        );
+      } catch {
+        done(signal?.aborted ?? false);
+      }
+    });
+  }
+
+  function waitForInflight(signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const onNotify = () => {
+        cleanup();
+        resolve(false);
+      };
+      const onAbort = () => {
+        cleanup();
+        resolve(true);
+      };
+      const cleanup = () => {
+        inflightWaiters.delete(onNotify);
+        try {
+          signal?.removeEventListener("abort", onAbort);
+        } catch {
+          // Detach is best-effort.
+        }
+      };
+      inflightWaiters.add(onNotify);
+      try {
+        signal?.addEventListener("abort", onAbort, { once: true });
+      } catch {
+        // Signals without addEventListener stay non-abortable here.
+      }
+    });
+  }
+
+  async function acquire(signal?: AbortSignal): Promise<(() => void) | null> {
+    if (signal?.aborted) return null;
+    for (;;) {
+      type Step = { kind: "admit" } | { kind: "abort" } | { kind: "wait-rate"; ms: number } | { kind: "wait-inflight" };
+      const step: Step = await withMutex((): Step => {
+        if (signal?.aborted) return { kind: "abort" };
+        const now = nowFn();
+        while (starts.length > 0 && (starts[0] as number) <= now - PROXY_RATE_WINDOW_MS) {
+          starts.shift();
+        }
+        if (inflight >= PROXY_MAX_INFLIGHT) return { kind: "wait-inflight" };
+        if (starts.length >= PROXY_MAX_REQUESTS_PER_SECOND) {
+          const waitMs = (starts[0] as number) + PROXY_RATE_WINDOW_MS - nowFn();
+          return { kind: "wait-rate", ms: waitMs > 0 ? waitMs : 0 };
+        }
+        starts.push(nowFn());
+        inflight += 1;
+        return { kind: "admit" };
+      });
+      if (step.kind === "admit") {
+        if (signal?.aborted) {
+          await withMutex(() => {
+            inflight = Math.max(0, inflight - 1);
+          });
+          notifyInflight();
+          return null;
+        }
+        let done = false;
+        return () => {
+          if (done) return;
+          done = true;
+          inflight = Math.max(0, inflight - 1);
+          notifyInflight();
+        };
+      }
+      if (step.kind === "abort") return null;
+      if (step.kind === "wait-rate") {
+        const aborted = await abortableSleep(step.ms, signal);
+        if (aborted || signal?.aborted) return null;
+        continue;
+      }
+      const aborted = await waitForInflight(signal);
+      if (aborted || signal?.aborted) return null;
+    }
+  }
+
+  function reset(): void {
+    inflight = 0;
+    starts = [];
+    for (const w of Array.from(inflightWaiters)) {
+      try {
+        w();
+      } catch {
+        // Reset must never throw.
+      }
+    }
+    inflightWaiters.clear();
+  }
+
+  return { acquire, reset };
+}
+
+// Global gate: every proxyTransport instance on the page shares one limiter,
+// so metadata discovery fan-out and tile-image fetches through the proxy
+// draw from the same 4-inflight / 4-qps budget. Direct tile requests never
+// touch this gate.
+let globalProxyRateLimiter: ProxyRateLimiter | null = null;
+
+function globalLimiter(): ProxyRateLimiter {
+  if (!globalProxyRateLimiter) globalProxyRateLimiter = createProxyRateLimiter();
+  return globalProxyRateLimiter;
+}
+
+/** Test seam: drop global proxy rate state between isolated checks. */
+export function resetProxyRateLimit(): void {
+  try {
+    globalProxyRateLimiter?.reset();
+  } catch {
+    // Reset must never throw.
+  }
+}
+
 export function createProxyTransport(
   fetchImpl: ProxyFetchImpl,
-  opts: { protocolVersion: number; maxBytes: number; proxyPath?: string },
+  opts: {
+    protocolVersion: number;
+    maxBytes: number;
+    proxyPath?: string;
+    rateLimiter?: ProxyRateLimiter;
+  },
 ): {
   fetchViaProxy(
     targetUrl: string,
@@ -90,6 +310,7 @@ export function createProxyTransport(
   ): Promise<ProxyFetchResult>;
 } {
   const proxyPath = opts.proxyPath ?? "/api/proxy";
+  const limiter = opts.rateLimiter ?? globalLimiter();
 
   async function fetchViaProxy(
     targetUrl: string,
@@ -106,6 +327,10 @@ export function createProxyTransport(
       return { ok: false, status: 0, code: "PROXY_POLICY_DENIED" };
     }
     if (callOpts?.signal?.aborted) {
+      return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+    }
+    const release = await limiter.acquire(callOpts?.signal);
+    if (!release) {
       return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     }
     let response: {
@@ -128,6 +353,8 @@ export function createProxyTransport(
       }
       void err;
       return { ok: false, status: 0, code: "TRANSPORT_NETWORK_ERROR" };
+    } finally {
+      release();
     }
     if (callOpts?.signal?.aborted) {
       return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };

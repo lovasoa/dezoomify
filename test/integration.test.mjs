@@ -4,7 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createWebIntegration, errorTransportFor, isOrdinaryImageTile, isProxyEligible } from "../src/webIntegration.ts";
-import { createProxyTransport } from "../src/proxyTransport.ts";
+import {
+  PROXY_MAX_INFLIGHT,
+  PROXY_MAX_REQUESTS_PER_SECOND,
+  createProxyRateLimiter,
+  createProxyTransport,
+} from "../src/proxyTransport.ts";
 import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/types.ts";
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -174,6 +179,38 @@ test("proxyTransport surfaces Retry-After on 429 so callers can back off once", 
   const unhinted = await bare.fetchViaProxy("https://public.test/busy.json");
   assert.equal(unhinted.code, "PROXY_RATE_LIMITED");
   assert.equal(unhinted.retryAfterMs, undefined);
+});
+
+test("proxyTransport caps proxy load at 4 inflight and 4 starts per second", async () => {
+  assert.equal(PROXY_MAX_INFLIGHT, 4);
+  assert.equal(PROXY_MAX_REQUESTS_PER_SECOND, 4);
+  // Isolated limiter so this burst never borrows quota from other tests.
+  const limiter = createProxyRateLimiter();
+  let inflight = 0;
+  let maxInflight = 0;
+  const fetchImpl = async () => {
+    inflight += 1;
+    maxInflight = Math.max(maxInflight, inflight);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    inflight -= 1;
+    return {
+      status: 200,
+      headers: { get: () => null },
+      async arrayBuffer() {
+        return new Uint8Array([1]).buffer;
+      },
+    };
+  };
+  const pt = createProxyTransport(fetchImpl, { protocolVersion: 1, maxBytes: 1024, rateLimiter: limiter });
+  const started = Date.now();
+  const results = await Promise.all(
+    Array.from({ length: 8 }, (_, i) => pt.fetchViaProxy(`https://public.test/burst-${i}.json`)),
+  );
+  const elapsed = Date.now() - started;
+  assert.ok(results.every((r) => r.ok), "every limited request still succeeds");
+  assert.ok(maxInflight <= 4, `at most 4 proxy requests in flight (saw ${maxInflight})`);
+  // 8 starts at 4/s need a second window: the tail must wait out the window.
+  assert.ok(elapsed >= 900, `8 starts at 4/s take >= ~1s (took ${elapsed}ms)`);
 });
 
 test("proxyTransport surfaces the upstream URL so proxied metadata keeps its tile base", async () => {

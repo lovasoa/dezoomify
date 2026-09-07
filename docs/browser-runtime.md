@@ -35,7 +35,7 @@ The website uses this order:
 
 The website always shows the active transport as direct browser fetch or the metadata CORS proxy, including an automatic transition after the classified direct failure. Proxy fallback requires no per-attempt consent.
 
-The proxy is not a general relay and serves metadata only, never tiles. Both the browser-to-proxy request and the proxy's upstream request omit cookies, `Authorization`, and browser credentials. The proxy accepts only validated metadata requests for eligible public resources, blocks private and local networks, follows bounded redirects, limits size and duration, strips headers outside its allowlist, and returns explicit CORS headers. Details are in [Security](security.md).
+The proxy is not a general relay and serves metadata only, never tiles. Both the browser-to-proxy request and the proxy's upstream request omit cookies, `Authorization`, and browser credentials. The proxy accepts only validated metadata requests for eligible public resources, blocks private and local networks, follows bounded redirects, limits size and duration, strips headers outside its allowlist, and returns explicit CORS headers. The frontend additionally holds every proxy request (metadata and any tile images fetched through the proxy) to a single global budget of at most 4 requests in flight and at most 4 request starts per second; direct tile requests never draw from that budget and keep their own per-host pacing. Details are in [Security](security.md).
 
 ## Limits and capabilities
 
