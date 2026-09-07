@@ -259,11 +259,9 @@ fn window_shell_bin(base: &std::path::Path) -> std::path::PathBuf {
 }
 
 fn copy_e2e_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
-    let meta = std::fs::metadata(src)
-        .map_err(|e| format!("cannot stat {}: {e}", src.display()))?;
+    let meta = std::fs::metadata(src).map_err(|e| format!("cannot stat {}: {e}", src.display()))?;
     if meta.is_file() {
-        std::fs::copy(src, dst)
-            .map_err(|e| format!("cannot copy {}: {e}", src.display()))?;
+        std::fs::copy(src, dst).map_err(|e| format!("cannot copy {}: {e}", src.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -273,8 +271,7 @@ fn copy_e2e_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), Str
         }
         return Ok(());
     }
-    std::fs::create_dir_all(dst)
-        .map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
+    std::fs::create_dir_all(dst).map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
     let entries =
         std::fs::read_dir(src).map_err(|e| format!("cannot list {}: {e}", src.display()))?;
     for entry in entries {
@@ -891,14 +888,12 @@ mod tests {
         assert!(found.1, "pnpm.BAT needs cmd /c");
         // Nothing installed: no resolution, so the caller fails closed.
         let empty = pnpm_resolve_fixture("empty", &[]);
-        assert!(
-            super::resolve_windows_program(
-                "pnpm",
-                std::slice::from_ref(&empty),
-                ".COM;.EXE;.BAT;.CMD"
-            )
-            .is_none()
-        );
+        assert!(super::resolve_windows_program(
+            "pnpm",
+            std::slice::from_ref(&empty),
+            ".COM;.EXE;.BAT;.CMD"
+        )
+        .is_none());
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&empty);
     }

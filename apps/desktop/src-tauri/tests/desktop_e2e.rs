@@ -482,8 +482,13 @@ fn desktop_e2e_partial_keep_is_honest_with_sibling() {
     );
     // Explicit keep: the `.partial` sibling carries the bytes and geometry
     // while the granted path stays untouched.
-    commands::dispatch(&mut table, "answer_choice", Some(&job), Some("partial:keep"))
-        .expect("keep choice accepted");
+    commands::dispatch(
+        &mut table,
+        "answer_choice",
+        Some(&job),
+        Some("partial:keep"),
+    )
+    .expect("keep choice accepted");
     let state = wait_for_terminal(&mut table, &job, Duration::from_secs(90));
     assert_eq!(
         state,

@@ -1267,6 +1267,10 @@ impl JobTable {
     /// Honest kept-partial publish for tests: stores the digest, geometry,
     /// missing ledger, and sibling basename, then emits `partial-completed`
     /// with the honest JSON detail (never the granted path).
+    /// Test seam with explicit scalar params mirroring the production
+    /// publish shape; grouping them would diverge the seam from the call
+    /// shape it exercises.
+    #[allow(clippy::too_many_arguments)]
     #[cfg(test)]
     pub fn complete_partial_with_ledger_for_test(
         &mut self,
