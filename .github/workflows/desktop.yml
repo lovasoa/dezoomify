@@ -167,9 +167,11 @@ jobs:
   # Per-OS release bundle, install, and launch smoke. Ubuntu runs the
   # bundler only (its compile gates and E2E live in window-e2e, which runs
   # in parallel); macOS and Windows additionally carry the cross-OS lean
-  # compile gates plus the real-window E2E legs (same lane as window-e2e,
-  # after native-driver provisioning). The lane needs no tauri-cli
-  # (`--unsigned-test` stops before the bundler); only these bundle steps do.
+  # compile gates plus their window-E2E legs after native-driver
+  # provisioning: Windows runs the real lane; macOS runs the same lane to
+  # record the upstream tauri-driver block evidence (no darwin server).
+  # The lane needs no tauri-cli (`--unsigned-test` stops before the
+  # bundler); only these bundle steps do.
   bundle-smoke:
     name: Bundle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -290,8 +292,25 @@ jobs:
           set -euo pipefail
           command -v tauri-driver | tee -a e2e-window.log
           # Same lane as ubuntu (no Xvfb: runners provide a GUI session).
-          # pipefail keeps the lane's exit code (tee only records the log).
+          # Upstream block (log evidence below): tauri-driver 2.0.6 ships no
+          # darwin server (`#[cfg(any(target_os = "linux", windows))]` in
+          # its main.rs; any invocation prints `tauri-driver is not
+          # supported on this platform` and exits 1), so no lane change can
+          # drive the window until upstream ships macOS support. This gate
+          # passes on a real lane pass (that support landing) or on that
+          # exact driver message, and fails closed on anything else.
+          set +e
           cargo xtask test desktop --e2e-window 2>&1 | tee -a e2e-window.log
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "e2e-window passed on macOS (tauri-driver macOS support landed)" | tee -a e2e-window.log
+          elif grep -q "tauri-driver is not supported on this platform" e2e-window.log; then
+            echo "BLOCKED (expected): tauri-driver 2.0.6 has no macOS server; macOS coverage stays lean/unit + window-shell compile + dmg smoke until upstream support lands." | tee -a e2e-window.log
+          else
+            echo "UNEXPECTED lane failure on macOS (see e2e-window.log)" | tee -a e2e-window.log
+            exit 1
+          fi
       - name: Install msedgedriver pinned to Edge (Windows native driver slot)
         if: runner.os == 'Windows'
         shell: pwsh

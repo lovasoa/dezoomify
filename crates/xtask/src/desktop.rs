@@ -360,7 +360,12 @@ fn check_native_driver() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         // SAFARI_DRIVER_BIN is the canonical override; WEBKIT_DRIVER_BIN
-        // stays accepted so a shared CI env keeps working.
+        // stays accepted so a shared CI env keeps working. Note: this gate
+        // only checks the native driver is provisioned; tauri-driver 2.0.6
+        // itself ships no darwin server (its main.rs gates the server on
+        // `any(target_os = "linux", windows)`), so the harness surfaces the
+        // driver's own `not supported on this platform` there until
+        // upstream ships macOS support.
         let found = std::env::var("SAFARI_DRIVER_BIN")
             .ok()
             .filter(|p| std::path::Path::new(p).exists())

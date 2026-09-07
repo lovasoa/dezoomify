@@ -224,8 +224,8 @@ export function freePort() {
 // the group kill guarantees nothing of the flow survives into the next
 // flow or past the spec process. Only call this on processes spawned
 // detached (group leaders): on a non-leader the negative pid would not
-// match its group. Windows has no POSIX groups; killing the process there
-// is the best available (the later Windows wave can revisit).
+// match its group. Windows has no POSIX groups, so the tree kill goes
+// through `taskkill /T /F` with a direct-kill fallback.
 export function killTree(detachedProc) {
   if (process.platform !== "win32") {
     try {
@@ -233,6 +233,20 @@ export function killTree(detachedProc) {
       return;
     } catch {
       // Not a group leader (or already gone): fall through to a direct kill.
+    }
+  } else {
+    // Windows has no POSIX groups: a bare kill would orphan the app and
+    // WebView2 children (their Edge profile locks then break later flows
+    // with `DevToolsActivePort` session failures), so kill the tree via
+    // taskkill and fall back to a direct kill only when taskkill itself
+    // cannot run.
+    try {
+      const done = spawnSync("taskkill", ["/pid", String(detachedProc.pid), "/T", "/F"], {
+        stdio: "ignore",
+      });
+      if (done.status === 0) return;
+    } catch {
+      // Fall through to a direct kill.
     }
   }
   try {
@@ -373,9 +387,14 @@ function waitForProcExit(proc, timeoutMs) {
 // shared caches) plus the explicit E2E flag pair. Mesa shader-cache writes
 // are disabled so teardown never races a late cache flush (the observed
 // Ubuntu `mesa_shader_cache` cleanup race); the directory override stays
-// as belt-and-braces for drivers that ignore the disable flag.
+// as belt-and-braces for drivers that ignore the disable flag. On Windows
+// the POSIX HOME/XDG pair is irrelevant to Edge/WebView2, so the Windows
+// profile roots move under the temp home too (fresh writable profile per
+// flow: a shared or locked profile surfaces as `DevToolsActivePort file
+// doesn't exist` / `Chrome instance exited` session failures), including
+// the explicit WebView2 user-data override.
 function laneAppEnv(home, fixedDest) {
-  return {
+  const env = {
     ...process.env,
     HOME: home,
     XDG_CONFIG_HOME: path.join(home, ".config"),
@@ -386,6 +405,21 @@ function laneAppEnv(home, fixedDest) {
     DEZOOMIFY_E2E_WINDOW: "1",
     DEZOOMIFY_E2E_FIXED_DESTINATION: fixedDest,
   };
+  if (process.platform === "win32") {
+    const localAppData = path.join(home, "AppData", "Local");
+    const roamingAppData = path.join(home, "AppData", "Roaming");
+    const tempDir = path.join(home, "Temp");
+    mkdirSync(localAppData, { recursive: true });
+    mkdirSync(roamingAppData, { recursive: true });
+    mkdirSync(tempDir, { recursive: true });
+    env.USERPROFILE = home;
+    env.APPDATA = roamingAppData;
+    env.LOCALAPPDATA = localAppData;
+    env.TEMP = tempDir;
+    env.TMP = tempDir;
+    env.WEBVIEW2_USER_DATA_FOLDER = path.join(localAppData, "WebView2");
+  }
+  return env;
 }
 
 // Deterministic temp-tree removal: a SIGKILLed webview can still hold a
