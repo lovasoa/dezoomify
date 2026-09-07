@@ -34,6 +34,9 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
         with:
           node-version-file: .node-version
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 9.12.0 # must match packageManager in package.json
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
@@ -41,6 +44,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - id: bindgen
         uses: ./.github/actions/setup-wasm-bindgen
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
       - name: Build the site (mirrors, help, wasm glue, dist/)
         run: node scripts/build-site.mjs
       - name: Check deploy credentials

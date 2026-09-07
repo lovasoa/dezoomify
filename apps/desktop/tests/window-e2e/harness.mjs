@@ -469,10 +469,6 @@ async function stopDriverProc(driverProc) {
 
 export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, env) {
   const driverBin = resolveTauriDriver();
-  // Verbose driver forwarding logs on Windows only (Linux behavior stays
-  // byte-identical): the /session stall needs intermediary↔native
-  // evidence, which the default log level never prints.
-  const driverEnv = process.platform === "win32" ? { ...env, RUST_LOG: "debug" } : env;
   // Detached on POSIX so the driver leads its own process group and the
   // flow teardown can SIGKILL the whole tree (driver + app + webview
   // subprocesses); see killTree.
@@ -480,7 +476,7 @@ export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, e
     "--port", String(tauriPort),
     "--native-port", String(nativePort),
     "--native-driver", nativeDriverBin,
-  ], { env: driverEnv, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+  ], { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
   let logged = "";
   const capture = (chunk) => {
     logged += chunk.toString();
