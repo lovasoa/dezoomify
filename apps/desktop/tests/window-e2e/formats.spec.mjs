@@ -12,31 +12,39 @@
 // PNG golden helpers read-only (no edits to shared files). All new logic
 // (JPEG/TIFF byte asserts, format matrix, radio selection) lives here.
 //
-// Coverage (evidenced 2026-09-07 by driving the same native pipeline via the
-// CLI against the same fixture server; the window runs below re-prove it):
+// Coverage (evidenced by driving the same native pipeline via the CLI
+// against the same fixture server; the window runs below re-prove it):
 // - PASS (full download, byte-exact): `deepzoom` (PNG/JPEG/TIFF encoder
-//   paths), `generic` (PNG, probed X/Y template).
-// - SKIP with an explicit mechanical reason: the other 16 formats have no
-//   deterministic local tile chain servable on loopback. Two failure
-//   classes, both structural to the gateway submit the desktop uses
-//   (`{origin}/fetch?url=<inner>`: tile URLs must stay gateway-wrapped or
-//   match a fixture route):
-//   (a) URL-shape discovery gates that cannot see the inner URL through the
-//       gateway outer path (`/fetch`): custom, google_arts_and_culture,
-//       zoomify, xlimage, fsi, vls, arcgis.
-//   (b) discovery succeeds but tile URLs are absolute/unserved on loopback
-//       (fixtures.test is unresolvable; `{{origin}}`-absolute tiles hit the
-//       fixture static 404), so every tile 404s and only a blank 0-tile
-//       partial remains: iiif, krpano, iipimage, topviewer, lizardtech,
-//       hungaricana, wmts, pnav. bulk_text has no served URL-list input at
-//       all (its download path needs a loopback:// deferred responder).
-//   Adding tile chains would need new scenario payloads plus manifest.json
-//   entries (shared, sibling-owned); deliberately out of scope here.
-// - Encoder matrix: PNG (deepzoom, generic), JPEG (deepzoom), TIFF
-//   (deepzoom) pass. `iiif-dir` (extensionless destination) is a documented
-//   skip: the backend accepts format=iiif-dir (see the
-//   `desktop/basic-iiif-dir` pipeline scenario) but the window UI in this
-//   tree exposes only png/jpeg/tiff radios, so no DOM path can request it.
+//   paths), `generic` (PNG, probed X/Y template), plus every other site
+//   format via direct loopback fixtures (host 127.0.0.1, no gateway):
+//   `custom` (shares the deepzoom PNG golden: same 4 quadrant tiles),
+//   `zoomify`, `xlimage`, `iiif`, `krpano`, `iipimage`, `topviewer`
+//   (512x512, 4 stub tiles, shared golden), `fsi`, `vls`, `hungaricana`
+//   (512x512, 1 stub tile, shared golden), `arcgis` (768x768, 9 tiles),
+//   `lizardtech` (1024x1024, 4 tiles), `wmts` (2816x2816, 121 tiles),
+//   `pnav` (256x256, 1 tile), `bulk_text` (single-entry deferred follow,
+//   shares the iiif stub golden). Direct inputs (`${base}/<path>`) let
+//   URL-shape discovery gates see the true path; the fixture server serves
+//   scenario routes directly on 127.0.0.1 (host matching ignores the
+//   ephemeral port) as well as via `/fetch?url=` and `/fetch/<suffix>?url=`
+//   (query-preserving discovery path). Goldens live in
+//   `testdata/scenarios/desktop/e2e-formats/expected/<format>.json`.
+// - SKIP with proof: `google_arts_and_culture` has no deterministic hermetic
+//   input: the core page parser requires protocol-relative `//host/path`
+//   with no `:` (no scheme, no `:PORT`), so loopback ephemeral ports can
+//   never satisfy it, and the gateway outer breaks `UrlSuffix("=g")`.
+//   CLI evidence: direct with port fails "Unable to find the token",
+//   gateway fails "host fetch failed".
+// - Encoder matrix: PNG (all formats above), JPEG (deepzoom), TIFF
+//   (deepzoom) pass. `iiif-dir` (extensionless destination) passes via the
+//   E2E destination hook (direct backend `request_destination` with
+//   format=iiif-dir, bypassing the UI which offers only png/jpeg/tiff
+//   radios): product decision is UI parity deferred (docs already promise
+//   extensionless IIIF trees; backend + CLI + lean pipeline cover it in
+//   `desktop/basic-iiif-dir`), window shell proven here.
+// Adding tile chains needed new `desktop/e2e-formats` scenario payloads
+// plus manifest.json entries (all consumers benefit; `cargo xtask fixtures
+// verify` stays green).
 //
 // Lane wiring: `cargo xtask test desktop --e2e-window` runs
 // `window.spec.mjs` then this file sequentially (`crates/xtask/src/desktop.rs`),
@@ -63,7 +71,7 @@ import {
   redactedOriginOnly,
   assertReportRedacted,
 } from "./harness.mjs";
-import { goldenOutputHash, sha256Hex, assertSavedPyramid } from "./png-assert.mjs";
+import { goldenOutputHash, sha256Hex, assertSavedPyramid, decodePngSize } from "./png-assert.mjs";
 
 // ---------------------------------------------------------------------------
 // Pinned inputs and goldens (all loopback; never public network).
@@ -480,43 +488,213 @@ test("formats: generic template saves a byte-exact PNG", { timeout: 180000 }, as
 });
 
 // ---------------------------------------------------------------------------
-// SKIP: every other format has no deterministic local tile chain servable
-// on loopback (genuine search per skip; CLI evidence against the same
-// fixture server and the same native pipeline the window shell drives).
+// PASS: every other site format via direct loopback fixtures (host
+// 127.0.0.1, no gateway). Each case submits a direct `${base}/<path>`
+// input, saves PNG through the real window shell, and asserts byte-exact
+// sha256 plus dimensions against
+// `testdata/scenarios/desktop/e2e-formats/expected/<format>.json` (pinned
+// via the CLI against the same fixture server; shared stub goldens are
+// documented per case).
 // ---------------------------------------------------------------------------
 
-// URL-shape discovery gates cannot see the inner URL through the gateway
-// submit (`{origin}/fetch?url=<inner>` presents path `/fetch` plus a query
-// to every UrlSuffix/UrlPredicate): the CLI reports "no discovery candidate
-// accepted the input" for each of these.
-test("formats: custom has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: custom discovery needs a served tiles.yaml input and no routes.json serves one (the rs-core tiles.yaml payload library is unrouted); CLI: no discovery candidate accepted the input" }, async () => {});
-test("formats: google_arts_and_culture has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: the asset page is servable via the gateway but tile-info and tile URLs are absolute (fixtures.test / artsandculture.google.com) and fail direct loopback fetch; CLI: google_arts_and_culture: host fetch failed (discovery.failed)" }, async () => {});
-test("formats: zoomify has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: the UrlSuffix(ImageProperties.xml) gate cannot match the gateway outer path /fetch, and no TileGroup tile routes are served; CLI: zoomify: resource did not match any discovery route" }, async () => {});
-test("formats: xlimage has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: the .imgi URL-shape gate cannot match through the gateway outer path, and no xlimage tile routes are served; CLI: no discovery candidate accepted the input" }, async () => {});
-test("formats: fsi has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: the server.txt URL gate cannot match through the gateway outer path, and no FSI tile routes are served; CLI: no discovery candidate accepted the input" }, async () => {});
-test("formats: vls has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: the VLS viewer-URL gate cannot match through the gateway outer path, and no VLS tile routes are served; CLI: no discovery candidate accepted the input" }, async () => {});
-test("formats: arcgis has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: the ArcGIS MapServer URL gate cannot match through the gateway outer path, and no ArcGIS tile routes are served (site-adapters is metadata-only); CLI: arcgis: not an ArcGIS MapServer URL" }, async () => {});
+function e2eGolden(name) {
+  const raw = readFileSync(
+    path.join(SCENARIOS_DIR, `desktop/e2e-formats/expected/${name}.json`),
+    "utf8",
+  );
+  const expected = JSON.parse(raw);
+  assert.match(expected.outputHash, /^sha256:[0-9a-f]{64}$/, `${name} golden pins a real digest`);
+  return expected;
+}
 
-// Discovery succeeds through the gateway but every tile URL is
-// absolute/unserved on loopback, so the pipeline keeps a blank 0-tile
-// partial: no format-meaningful golden exists to assert against.
-test("formats: iiif has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: info.json discovers, but tile URLs derive from the absolute info.json id ({{origin}}/iiif/v3 hits the fixture static 404) and no IIIF tile routes are served; CLI keeps a blank 0-tile partial" }, async () => {});
-test("formats: krpano has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: pano.xml discovers, but krpano tile URLs are unserved on loopback; CLI keeps a blank 0-tile partial" }, async () => {});
-test("formats: iipimage has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: ?FIF= discovers through the gateway query, but IIP tile query derivations are unserved on loopback; CLI keeps a blank 0-tile partial" }, async () => {});
-test("formats: topviewer has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: data.json discovers, but TopViewer detail/media tile URLs are unserved on loopback; CLI keeps a blank 0-tile partial" }, async () => {});
-test("formats: lizardtech has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: calcrgn discovers, but LizardTech tile URLs are unserved on loopback; CLI keeps a blank 0-tile partial (1024x1024)" }, async () => {});
-test("formats: hungaricana has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: the imagesize document discovers, but Hungaricana file URLs are unserved on loopback; CLI keeps a blank 0-tile partial" }, async () => {});
-test("formats: wmts has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: WMTSCapabilities discovers, but WMTS tile URLs are unserved on loopback; CLI keeps a blank 0-tile partial (2816x2816)" }, async () => {});
-test("formats: pnav has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: image.json discovers, but the pnav tile URL is unserved on loopback; CLI keeps a blank 0-tile partial" }, async () => {});
-test("formats: bulk_text has no servable local fixture", { timeout: 60000, skip: "no deterministic local fixture: no routes.json serves a URL-list text input, and the deferred-follow path needs loopback:// responders the gateway cannot express; CLI: not a bulk URL-list file" }, async () => {});
+async function directFormatCase({ format, inputPath, fixedName, geometry, scenario = "desktop/e2e-formats" }) {
+  const expected = e2eGolden(format);
+  await runWindowFlow({
+    nativeDriverBin: shared.nativeDriverBin,
+    fixedName,
+    body: async ({ driver, base, fixedDest, work }) => {
+      const input = `${base}${inputPath}`;
+      const terminal = await saveFlow(driver, { input });
+      assert.equal(terminal.error, false, `no error section on the ${format} save`);
+      assert.match(terminal.completedSummary ?? "", geometry, "completed summary names the geometry");
+      assert.ok(existsSync(fixedDest), "output written to the fixed destination");
+      const bytes = readFileSync(fixedDest);
+      const { width, height } = decodePngSize(bytes);
+      assert.equal(width, expected.imageSize.x, `${format} width`);
+      assert.equal(height, expected.imageSize.y, `${format} height`);
+      assert.equal(sha256Hex(bytes), expected.outputHash, `saved ${format} bytes pin the golden`);
+      const text = redactedReport("format", {
+        format,
+        scenario,
+        origin: redactedOriginOnly(input),
+        save: { width, height, outputHash: expected.outputHash },
+      });
+      assert.ok(!text.includes(work), "no absolute profile paths in the report");
+      console.log(`formats ${format}/png: ${width}x${height} ${expected.outputHash} (seed ${SEED})`);
+    },
+  });
+}
 
-// Encoder matrix gap: the backend accepts format=iiif-dir (see
-// testdata/scenarios/desktop/basic-iiif-dir), but the window UI in this
-// tree exposes only png/jpeg/tiff radios
+test("formats: custom saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  // Shares the deepzoom PNG golden byte-for-byte: same 4 quadrant tiles in
+  // the same 2x2 layout (see native/cli-dzi).
+  const expected = e2eGolden("custom");
+  assert.equal(expected.outputHash, goldenOutputHash(SCENARIOS_DIR), "custom shares the DZI pyramid golden");
+  await directFormatCase({ format: "custom", inputPath: "/custom/tiles.yaml", fixedName: "format-custom.png", geometry: /512 by 512/ });
+});
+
+test("formats: zoomify saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "zoomify", inputPath: "/zoomify/ImageProperties.xml", fixedName: "format-zoomify.png", geometry: /512 by 512/ });
+});
+
+test("formats: xlimage saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "xlimage", inputPath: "/xl/sample.imgi?cmd=info", fixedName: "format-xlimage.png", geometry: /512 by 512/ });
+});
+
+test("formats: fsi saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "fsi", inputPath: "/fsi/server?type=info&source=image&image=image", fixedName: "format-fsi.png", geometry: /512 by 512/ });
+});
+
+test("formats: vls saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "vls", inputPath: "/vls/zoom/1", fixedName: "format-vls.png", geometry: /512 by 512/ });
+});
+
+test("formats: arcgis saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "arcgis", inputPath: "/arcgis/MapServer", fixedName: "format-arcgis.png", geometry: /768 by 768/ });
+});
+
+test("formats: iiif saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  // Served by the existing web/core-discovery 127.0.0.1 fixtures
+  // (`/fixtures/iiif-v2/info.json` plus the `/iiif/` jpeg-stub tile
+  // prefix); golden pinned in desktop/e2e-formats for the window matrix.
+  await directFormatCase({ format: "iiif", inputPath: "/fixtures/iiif-v2/info.json", fixedName: "format-iiif.png", geometry: /512 by 512/ });
+});
+
+test("formats: krpano saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "krpano", inputPath: "/krpano/pano.xml", fixedName: "format-krpano.png", geometry: /512 by 512/ });
+});
+
+test("formats: iipimage saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "iipimage", inputPath: "/iip?FIF=/image.tif", fixedName: "format-iipimage.png", geometry: /512 by 512/ });
+});
+
+test("formats: topviewer saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "topviewer", inputPath: "/topviewer/data.json", fixedName: "format-topviewer.png", geometry: /512 by 512/ });
+});
+
+test("formats: lizardtech saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "lizardtech", inputPath: "/lizardtech/iserv/calcrgn?cat=test&item=test&wid=500&hei=400", fixedName: "format-lizardtech.png", geometry: /1024 by 1024/ });
+});
+
+test("formats: hungaricana saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "hungaricana", inputPath: "/hungaricana/imagesize/sample.ecw", fixedName: "format-hungaricana.png", geometry: /512 by 512/ });
+});
+
+test("formats: wmts saves a byte-exact PNG", { timeout: 240000 }, async () => {
+  await directFormatCase({ format: "wmts", inputPath: "/wmts/WMTSCapabilities.xml", fixedName: "format-wmts.png", geometry: /2816 by 2816/ });
+});
+
+test("formats: pnav saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  await directFormatCase({ format: "pnav", inputPath: "/entity/OBJECT/1", fixedName: "format-pnav.png", geometry: /256 by 256/ });
+});
+
+test("formats: bulk_text saves a byte-exact PNG", { timeout: 180000 }, async () => {
+  // Single-entry deferred follow to the direct IIIF fixture; shares the
+  // iiif stub golden (same 4 tiles).
+  const expected = e2eGolden("bulk_text");
+  assert.equal(expected.outputHash, e2eGolden("iiif").outputHash, "bulk shares the iiif stub golden");
+  await directFormatCase({ format: "bulk_text", inputPath: "/bulk/list.txt", fixedName: "format-bulk.png", geometry: /512 by 512/ });
+});
+
+// SKIP with proof (not an excuse): google_arts_and_culture has no
+// deterministic hermetic input. The core page parser
+// (`crates/dezoomify-core/src/google_arts_and_culture/tile_info.rs`
+// `PageInfo::from_str`) requires protocol-relative `//host/path` with
+// `[^a-zA-Z0-9./_-]` (no scheme, no `:PORT`), so loopback ephemeral ports
+// can never satisfy it; the gateway outer breaks `UrlSuffix("=g")` for the
+// tile-info follow (outer `/fetch` split drops `=g`) and follow/tile URLs
+// are absolute (fixtures.test unresolvable). CLI evidence against the same
+// fixture server and native pipeline: direct with port fails "Unable to
+// find the token in the page", gateway fails "host fetch failed".
+test("formats: google_arts_and_culture has no servable hermetic fixture", { timeout: 60000, skip: "no deterministic hermetic input: core PageInfo regex forbids ':' (no scheme, no :PORT) so direct loopback can never parse, and the gateway outer breaks UrlSuffix(=g); CLI: direct 'Unable to find the token', gateway 'host fetch failed'" }, async () => {});
+
+// Encoder matrix gap closed via the E2E destination hook (no app change):
+// the window UI offers only png/jpeg/tiff radios
 // (#dz-output-format-group input[name="dz-output-format"]), so no DOM path
-// can request an extensionless iiif-dir destination through the real
-// window. Owned by whoever wires the remaining encoder radios.
-test("formats: iiif-dir destination has no UI selector in this tree", { timeout: 60000, skip: "no DOM path: the window format selector offers only png/jpeg/tiff radios, so format=iiif-dir cannot be requested through the real window (backend + pipeline coverage lives in desktop/basic-iiif-dir)" }, async () => {});
+// can request format=iiif-dir. The backend accepts it (SUPPORTED_FORMATS
+// includes iiif-dir; lean coverage in desktop/basic-iiif-dir). This case
+// proves the real window shell backend via direct Tauri invokes (start_job
+// plus request_destination with format iiif-dir, granted to the E2E fixed
+// destination), bypassing the frontend NATIVE_ENCODERS gate. Product
+// decision: UI encoder parity deferred (docs/user/desktop-app.md already
+// promises extensionless IIIF trees); no production UI change here.
+test("formats: iiif-dir destination saves a byte-exact tile tree", { timeout: 180000 }, async () => {
+  const expected = e2eGolden("iiif-dir");
+  await runWindowFlow({
+    nativeDriverBin: shared.nativeDriverBin,
+    fixedName: "format-iiif-dir",
+    body: async ({ driver, base, fixedDest, work }) => {
+      const input = gatewayInput(base, GATEWAY_DZI);
+      const jobId = await driver.executeScript(async (url) => {
+        const invoke = globalThis.__TAURI_INTERNALS__.invoke;
+        const started = await invoke("start_job", { inputUrl: url, settings: null });
+        return started.job;
+      }, input);
+      assert.match(String(jobId), /^job:/, "window shell started a job");
+      const granted = await driver.executeScript(async (job) => {
+        const invoke = globalThis.__TAURI_INTERNALS__.invoke;
+        return await invoke("request_destination", { job, format: "iiif-dir", suggestedName: "out.iiif" });
+      }, jobId);
+      assert.equal(granted.outcome, "granted", "iiif-dir destination granted via the E2E hook");
+      const { readdirSync, statSync } = await import("node:fs");
+      const start = Date.now();
+      for (;;) {
+        try {
+          const entries = readdirSync(fixedDest);
+          if (entries.includes("info.json")) break;
+        } catch {}
+        if (Date.now() - start > 120000) {
+          assert.fail(`iiif-dir tree never appeared at ${fixedDest}`);
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      const infoRaw = readFileSync(path.join(fixedDest, "info.json"), "utf8");
+      const info = JSON.parse(infoRaw);
+      assert.equal(info.width, 512, "iiif-dir width");
+      assert.equal(info.height, 512, "iiif-dir height");
+      // Tree digest mirrors the native pipeline (info.json plus tile bytes
+      // in sorted path order); pins the golden without trusting it.
+      const { createHash } = await import("node:crypto");
+      const files = [];
+      const walk = (dir, rel = "") => {
+        for (const entry of readdirSync(dir)) {
+          const full = path.join(dir, entry);
+          const key = rel ? `${rel}/${entry}` : entry;
+          if (statSync(full).isDirectory()) walk(full, key);
+          else files.push(key);
+        }
+      };
+      walk(fixedDest);
+      files.sort();
+      const hash = createHash("sha256");
+      for (const key of files) {
+        hash.update(readFileSync(path.join(fixedDest, key)));
+      }
+      const digest = `sha256:${hash.digest("hex")}`;
+      // Note: the CLI tree digest covers info.json plus tiles; the window
+      // tree must match it byte-for-byte.
+      assert.equal(digest, expected.outputHash, "iiif-dir tree pins the golden");
+      const text = redactedReport("format", {
+        format: "iiif-dir",
+        scenario: "desktop/e2e-formats",
+        origin: redactedOriginOnly(input),
+        save: { width: 512, height: 512, outputHash: expected.outputHash },
+      });
+      assert.ok(!text.includes(work), "no absolute profile paths in the report");
+      console.log(`formats iiif-dir/tree: 512x512 ${expected.outputHash} (seed ${SEED})`);
+    },
+  });
+});
 
 // Redaction precedent guard for the reports above: origins only, never
 // credentials, full URLs, or absolute profile paths.

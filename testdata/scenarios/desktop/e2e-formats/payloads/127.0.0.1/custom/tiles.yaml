@@ -1,0 +1,10 @@
+url_template: "{{origin}}/custom/tile-{{x}}-{{y}}.png"
+x_template: "x * tile_size"
+y_template: "y * tile_size"
+variables:
+  - { name: x, from: 0, to: 1 }
+  - { name: y, from: 0, to: 1 }
+  - { name: tile_size, value: 256 }
+width: 512
+height: 512
+title: "E2E custom 2x2"

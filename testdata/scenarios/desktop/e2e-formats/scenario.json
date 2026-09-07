@@ -1,0 +1,13 @@
+{
+  "description": "Desktop window E2E full-download matrix: direct loopback fixtures for every site format (host 127.0.0.1, no gateway), hermetic deterministic tiles, byte-exact goldens per format",
+  "id": "desktop/e2e-formats",
+  "input": {
+    "mode": "explicit",
+    "url": "http://{{origin}}/fixtures/iiif-v2/info.json"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "apps/desktop/tests/window-e2e/formats.spec.mjs",
+    "snapshot": "local"
+  }
+}

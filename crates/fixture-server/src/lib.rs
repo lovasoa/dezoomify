@@ -40,6 +40,13 @@ struct FetchParams {
 pub fn router(state: AppState) -> axum::Router {
     axum::Router::new()
         .route("/fetch", any(handle_fetch))
+        // Test-only query-preserving discovery path: the outer path after
+        // `/fetch/` is ignored for serving (the inner `url` query param
+        // selects the fixture), but it stays visible to URL-shape discovery
+        // gates (`UrlSuffix`/`UrlPredicate`) that cannot see through the
+        // bare `/fetch` outer path. Deterministic, loopback-only,
+        // fail-closed (missing `url` still 400s like bare `/fetch`).
+        .route("/fetch/{*path}", any(handle_fetch))
         .route("/proxy", any(handle_proxy))
         .route("/", any(handle_static_root))
         .route("/{*path}", any(handle_static))
@@ -337,25 +344,94 @@ fn text_response(status: StatusCode, text: &str, head_only: bool) -> Response {
     (status, headers, body).into_response()
 }
 
-async fn handle_static_root(State(state): State<AppState>, method: Method) -> Response {
-    serve_static(&state, method, String::new()).await
+async fn handle_static_root(
+    State(state): State<AppState>,
+    method: Method,
+    headers: HeaderMap,
+    raw_query: axum::extract::RawQuery,
+) -> Response {
+    serve_static(&state, method, String::new(), &headers, raw_query).await
 }
 
 async fn handle_static(
     State(state): State<AppState>,
     method: Method,
     axum::extract::Path(path): axum::extract::Path<String>,
+    headers: HeaderMap,
+    raw_query: axum::extract::RawQuery,
 ) -> Response {
-    serve_static(&state, method, path).await
+    serve_static(&state, method, path, &headers, raw_query).await
 }
 
-async fn serve_static(state: &AppState, method: Method, path: String) -> Response {
+async fn serve_static(
+    state: &AppState,
+    method: Method,
+    path: String,
+    headers: &HeaderMap,
+    raw_query: axum::extract::RawQuery,
+) -> Response {
     let head_only = method == Method::HEAD;
     if method != Method::GET && method != Method::HEAD {
         return text_response(
             StatusCode::METHOD_NOT_ALLOWED,
             "method not allowed",
             head_only,
+        );
+    }
+    // Direct deterministic route serving (loopback only): scenario routes
+    // with host `127.0.0.1` are servable without the `/fetch?url=` gateway,
+    // so URL-shape discovery gates see the true path (`/zoomify/...`,
+    // `/xl/*.imgi`, `/arcgis/MapServer`, ...) and tile URLs derived as
+    // direct `{{origin}}/...` stay fetchable. Host matching ignores the
+    // ephemeral port, mirroring the gateway path. Routes win over static
+    // files (no `dist/` path collides with scenario tile paths); unknown
+    // direct paths fall through to the static handler below, preserving
+    // the stable `not found` contract.
+    {
+        let host = headers
+            .get("host")
+            .and_then(|v| v.to_str().ok())
+            .map(|authority| match authority.rsplit_once(':') {
+                Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => h,
+                _ => authority,
+            })
+            .unwrap_or("127.0.0.1")
+            .to_lowercase();
+        let full_path = if path.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{path}")
+        };
+        let query = raw_query.0.clone();
+        if let Some(hit) = state.routes.lookup(&host, &full_path, query.as_deref()) {
+            let parts = UrlParts {
+                host: host.clone(),
+                port: None,
+                path: full_path.clone(),
+                query: query.clone(),
+            };
+            let body = match hit.route.render(state, hit.scenario, &parts) {
+                Ok(b) => b,
+                Err(status) => {
+                    record(
+                        state,
+                        serde_json::json!({"via": "direct", "host": host, "path": full_path, "status": status.as_u16(), "route": hit.route.route_id, "scenario": hit.scenario}),
+                    );
+                    return text_response(status, "fixture error", head_only);
+                }
+            };
+            record(
+                state,
+                serde_json::json!({"via": "direct", "host": host, "path": full_path, "query": query, "status": hit.route.status, "route": hit.route.route_id, "scenario": hit.scenario}),
+            );
+            return bytes_response(hit.route.status, body.headers, body.bytes, head_only);
+        }
+        // Log direct misses like gateway misses so hermetic E2E failures
+        // name the unserved tile URL (the static fallback below still
+        // returns the stable `not found` contract).
+        record(
+            state,
+            serde_json::json!({"via": "direct", "host": host, "path": full_path, "query": query, "status": 404, "route": null}),
         );
     }
     let Some(dir) = &state.static_dir else {
