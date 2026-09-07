@@ -5,7 +5,8 @@
     "decoders": [
       "png",
       "jpeg",
-      "tiff"
+      "tiff",
+      "webp"
     ],
     "destinationModes": [
       "file",
@@ -14,7 +15,9 @@
     "encoders": [
       "png",
       "jpeg",
-      "tiff"
+      "tiff",
+      "zif",
+      "webp"
     ],
     "handoff": true,
     "maxConcurrency": 16,
@@ -22,16 +25,16 @@
       "cache"
     ]
   },
-  "code": "output.exists",
+  "code": "output.destination-denied",
   "commands": [
     "start_job",
     "request_destination"
   ],
-  "description": "Desktop destination denied: an existing output without overwrite confirmation is refused before any fetch, decode, or write.",
+  "description": "Desktop encoder mismatch: a ZIF grant for a .png path is denied before any fetch, decode, or write; recovery is choose-output.",
   "effects": [],
   "error": {
-    "code": "output.exists",
-    "message": "output exists (refusing overwrite); choose a different destination or confirm overwrite",
+    "code": "output.destination-denied",
+    "message": "extension does not match format",
     "phase": "output",
     "recovery": "choose-output",
     "resourceKind": "output",
@@ -66,7 +69,7 @@
       "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
     }
   ],
-  "scenario": "desktop/destination-denied",
+  "scenario": "desktop/edge-encoder-mismatch",
   "states": [
     "idle",
     "awaiting-destination",

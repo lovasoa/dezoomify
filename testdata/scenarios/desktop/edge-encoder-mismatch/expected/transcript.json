@@ -1,0 +1,39 @@
+{
+  "description": "Desktop encoder mismatch transcript: start_job then a mismatched request_destination is denied with no tile fetch.",
+  "expected": {
+    "existingBytesPreserved": true,
+    "networkCalls": 0,
+    "progressEvents": 0,
+    "recovery": "choose-output"
+  },
+  "scenario": "desktop/edge-encoder-mismatch",
+  "transcript": [
+    {
+      "event": "command",
+      "name": "start_job",
+      "step": 1
+    },
+    {
+      "event": "job-state",
+      "state": "Discovering",
+      "step": 2
+    },
+    {
+      "event": "command",
+      "name": "request_destination",
+      "overwrite": false,
+      "step": 3
+    },
+    {
+      "event": "command-rejected",
+      "code": "output.exists",
+      "step": 4
+    },
+    {
+      "event": "recovery-requested",
+      "recovery": "choose-output",
+      "state": "AwaitingRecovery",
+      "step": 5
+    }
+  ]
+}

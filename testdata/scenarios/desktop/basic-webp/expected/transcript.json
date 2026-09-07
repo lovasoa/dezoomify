@@ -1,0 +1,123 @@
+{
+  "description": "Desktop basic-webp transcript: ordered commands, fixture requests, and terminal publish. Request order is discovery metadata first, then tiles in plan order; tile_requests are sorted.",
+  "expected": {
+    "candidates": [],
+    "channels": [
+      "dezoomify://job-state",
+      "dezoomify://job-progress",
+      "dezoomify://job-output"
+    ],
+    "commands": [
+      "start_job",
+      "request_destination"
+    ],
+    "destination": {
+      "format": "webp",
+      "mode": "file"
+    },
+    "excluded": [],
+    "imageSize": {
+      "x": 512,
+      "y": 512
+    },
+    "listeners": {
+      "tabs": 0,
+      "timers": 0,
+      "webRequest": 0
+    },
+    "outputFormat": "webp",
+    "outputHash": "sha256:ca857af61a00c1a0aacf3940bcfb16e5cfc6bc10d93a40e7b54f1fa54c41ec93",
+    "partial": false,
+    "pixels": {
+      "bottomLeft": [
+        48,
+        72,
+        200
+      ],
+      "bottomRight": [
+        232,
+        220,
+        96
+      ],
+      "topLeft": [
+        196,
+        48,
+        48
+      ],
+      "topRight": [
+        48,
+        168,
+        64
+      ]
+    },
+    "proxyRequests": 0,
+    "tileCount": 4,
+    "tile_requests": [
+      "https://fixtures.test/desktop/basic-webp/pyramid_files/9/0_0.png",
+      "https://fixtures.test/desktop/basic-webp/pyramid_files/9/0_1.png",
+      "https://fixtures.test/desktop/basic-webp/pyramid_files/9/1_0.png",
+      "https://fixtures.test/desktop/basic-webp/pyramid_files/9/1_1.png"
+    ]
+  },
+  "scenario": "desktop/basic-webp",
+  "transcript": [
+    {
+      "event": "command",
+      "name": "start_job",
+      "step": 1
+    },
+    {
+      "event": "job-state",
+      "state": "Discovering",
+      "step": 2
+    },
+    {
+      "event": "request-observed",
+      "step": 3,
+      "url": "https://fixtures.test/desktop/basic-webp/pyramid.dzi"
+    },
+    {
+      "event": "command",
+      "name": "request_destination",
+      "step": 4
+    },
+    {
+      "event": "job-state",
+      "state": "Planning",
+      "step": 5
+    },
+    {
+      "event": "request-observed",
+      "step": 6,
+      "url": "https://fixtures.test/desktop/basic-webp/pyramid_files/9/0_0.png"
+    },
+    {
+      "event": "request-observed",
+      "step": 7,
+      "url": "https://fixtures.test/desktop/basic-webp/pyramid_files/9/1_0.png"
+    },
+    {
+      "event": "request-observed",
+      "step": 8,
+      "url": "https://fixtures.test/desktop/basic-webp/pyramid_files/9/0_1.png"
+    },
+    {
+      "event": "request-observed",
+      "step": 9,
+      "url": "https://fixtures.test/desktop/basic-webp/pyramid_files/9/1_1.png"
+    },
+    {
+      "event": "progress",
+      "acquired": 4,
+      "state": "Acquiring",
+      "step": 10,
+      "total": 4
+    },
+    {
+      "event": "completed",
+      "outputHash": "sha256:ca857af61a00c1a0aacf3940bcfb16e5cfc6bc10d93a40e7b54f1fa54c41ec93",
+      "state": "Completed",
+      "step": 11
+    }
+  ]
+}

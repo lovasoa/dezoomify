@@ -1,0 +1,94 @@
+{
+  "capabilities": {
+    "bulkSupported": true,
+    "canvasBytes": 8589934592,
+    "decoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "destinationModes": [
+      "file",
+      "iiif-dir"
+    ],
+    "encoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "handoff": true,
+    "maxConcurrency": 16,
+    "storageModes": [
+      "cache"
+    ]
+  },
+  "description": "Desktop queue retry over the integration-layer queue: the failed entry retries behind the line under a fresh id and succeeds, so the totals recover.",
+  "entries": [
+    {
+      "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
+    },
+    {
+      "url": "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi"
+    }
+  ],
+  "golden": {
+    "human": "bulk: 2 succeeded, 0 failed, 2 total",
+    "machine": {
+      "failed": 0,
+      "kind": "bulk-completed",
+      "succeeded": 2,
+      "total": 2
+    },
+    "outcomes": [
+      {
+        "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
+        "status": "done"
+      },
+      {
+        "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
+        "status": "done"
+      }
+    ],
+    "retriedIdDiffers": true,
+    "summary": {
+      "cancelled": 0,
+      "failed": 0,
+      "pending": 0,
+      "succeeded": 2,
+      "total": 2
+    }
+  },
+  "protocol": "1.0",
+  "provenance": "fixture",
+  "redacted": true,
+  "scenario": "desktop/queue-retry",
+  "script": [
+    {
+      "index": 0,
+      "op": "enqueue"
+    },
+    {
+      "index": 1,
+      "op": "enqueue"
+    },
+    {
+      "op": "finish",
+      "outcome": "done",
+      "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91"
+    },
+    {
+      "errorCode": "tile.download-failed",
+      "op": "finish",
+      "outcome": "failed"
+    },
+    {
+      "entry": "jobq:1",
+      "op": "retry"
+    },
+    {
+      "op": "finish",
+      "outcome": "done",
+      "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91"
+    }
+  ]
+}

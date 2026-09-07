@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "route_id": "fixtures-test-live-vls-zoom",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/live/vls/zoom/2410801",
+      "status": 200,
+      "headers": {
+        "Content-Type": "text/html"
+      },
+      "payload": "payloads/fixtures.test/live/vls/zoom.html"
+    }
+  ]
+}

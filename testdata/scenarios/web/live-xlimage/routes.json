@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "route_id": "fixtures-test-live-xlimage-info",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/live/xlimage/A1456.imgf",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "payload": "payloads/fixtures.test/live/xlimage/A1456.imgf.xml"
+    }
+  ]
+}

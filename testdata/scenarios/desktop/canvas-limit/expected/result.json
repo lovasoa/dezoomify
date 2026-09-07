@@ -1,6 +1,6 @@
 {
   "capabilities": {
-    "bulkSupported": false,
+    "bulkSupported": true,
     "canvasBytes": 8589934592,
     "decoders": [
       "png",

@@ -5,7 +5,8 @@
     "decoders": [
       "png",
       "jpeg",
-      "tiff"
+      "tiff",
+      "webp"
     ],
     "destinationModes": [
       "file",
@@ -14,7 +15,9 @@
     "encoders": [
       "png",
       "jpeg",
-      "tiff"
+      "tiff",
+      "zif",
+      "webp"
     ],
     "handoff": true,
     "maxConcurrency": 16,
@@ -22,39 +25,31 @@
       "cache"
     ]
   },
-  "code": "deep-link.rejected",
+  "code": null,
   "commands": [],
-  "description": "Desktop deep-link rejection: secret, userinfo, unknown-field, version, and oversize links are rejected with zero side effects and no confirmation gate.",
+  "description": "Desktop deep-link handoff: the website Send button carries only the image address (no credentials), validation uses URL parsing plus exact sensitive keys, and the desktop confirm gate names source plus provenance before any effect.",
   "effects": [],
-  "error": {
-    "code": "deep-link.rejected",
-    "message": "deep-link.rejected: secret field cookie is forbidden",
-    "phase": "validation",
-    "recovery": "edit-input",
-    "resourceKind": "handoff",
-    "retryable": false,
-    "transport": "native"
-  },
+  "error": null,
   "events": [
     {
       "channel": "dezoomify://deep-link-pending",
-      "kind": "deep-link-rejected",
+      "kind": "deep-link-pending",
       "seq": 1,
-      "state": "Rejected"
+      "state": "AwaitingConfirm"
     }
   ],
   "originClean": "n/a (no fetch was started; no canvas taint)",
-  "outcome": "rejected",
+  "outcome": "pending-confirmation",
   "output": null,
   "protocol": "1.0",
   "provenance": "fixture",
   "readableBytes": false,
   "redacted": true,
   "resources": [],
-  "scenario": "desktop/deep-link-reject",
+  "scenario": "desktop/handoff-deep-link",
   "states": [
     "idle",
-    "rejected"
+    "pending-confirmation"
   ],
   "transitions": []
 }

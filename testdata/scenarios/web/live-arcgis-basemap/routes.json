@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "route_id": "fixtures-test-live-arcgis-MapServer",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/live/arcgis/MapServer",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "payload": "payloads/fixtures.test/live/arcgis/MapServer.json"
+    }
+  ]
+}

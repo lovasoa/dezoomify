@@ -1,0 +1,13 @@
+{
+  "description": "Desktop deep-link handoff: one-click Send from website display-only and too-large plans arrives as bounded non-secret dezoomify://open input, validates by URL parsing plus exact sensitive keys, and needs explicit confirm before any effect",
+  "id": "desktop/handoff-deep-link",
+  "input": {
+    "mode": "explicit",
+    "url": "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fview%3Fpage%3D1"
+  },
+  "operation": "recognize",
+  "source_evidence": {
+    "path": "apps/desktop/src-tauri/src/deep_link.rs",
+    "snapshot": "local"
+  }
+}

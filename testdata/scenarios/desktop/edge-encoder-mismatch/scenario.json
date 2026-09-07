@@ -1,0 +1,13 @@
+{
+  "id": "desktop/edge-encoder-mismatch",
+  "description": "Desktop encoder edge: request_destination with a ZIF format but a PNG path is denied before any work (extension/format mismatch)",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/desktop/basic/pyramid.dzi"
+  },
+  "operation": "download-failure",
+  "source_evidence": {
+    "path": "apps/desktop/src-tauri/src/jobs.rs",
+    "snapshot": "local"
+  }
+}

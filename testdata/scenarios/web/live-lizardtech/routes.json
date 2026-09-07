@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "route_id": "fixtures-test-live-lizardtech-calcrgn",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/live/lizardtech/iserv/calcrgn",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/xml"
+      },
+      "payload": "payloads/fixtures.test/live/lizardtech/calcrgn.xml"
+    }
+  ]
+}

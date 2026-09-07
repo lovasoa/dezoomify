@@ -1,0 +1,50 @@
+{
+  "description": "Desktop queue basic transcript: ordered queue transitions. One entry is active at a time; the failed entry settles before the next starts.",
+  "events": [
+    {
+      "entry": "jobq:0",
+      "origin": "https://fixtures.test",
+      "transition": "active"
+    },
+    {
+      "entry": "jobq:1",
+      "origin": "https://fixtures.test",
+      "transition": "queued"
+    },
+    {
+      "entry": "jobq:2",
+      "origin": "https://fixtures.test",
+      "transition": "queued"
+    },
+    {
+      "entry": "jobq:0",
+      "transition": "done"
+    },
+    {
+      "entry": "jobq:1",
+      "transition": "active"
+    },
+    {
+      "entry": "jobq:1",
+      "progress": {
+        "acquired": 2,
+        "total": 4
+      },
+      "transition": "progress"
+    },
+    {
+      "entry": "jobq:1",
+      "errorCode": "tile.download-failed",
+      "transition": "failed"
+    },
+    {
+      "entry": "jobq:2",
+      "transition": "active"
+    },
+    {
+      "entry": "jobq:2",
+      "transition": "done"
+    }
+  ],
+  "scenario": "desktop/queue-basic"
+}

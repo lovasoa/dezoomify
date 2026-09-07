@@ -1,0 +1,13 @@
+{
+  "id": "web/live-xlimage",
+  "description": "Live recording: XLimage https shape (uffizicloud A1456.imgf, https upgrade)",
+  "source_evidence": {
+    "path": "crates/xtask/src/live.rs xlimage (https://uffizicloud.centrica.it)",
+    "snapshot": "live-triage-2026-09-07"
+  },
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/live/xlimage/A1456.imgf?cmd=info"
+  },
+  "operation": "discover"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "desktop/basic-webp",
+  "description": "Desktop happy path (basic-webp): start_job plus request_destination drives the shared native pipeline over loopback and publishes a 512x512 lossless WebP single file",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/basic-webp/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Desktop queue basic: three validated single-job requests run one at a time through the single-job engine; the middle entry fails and never stops the rest",
+  "id": "desktop/queue-basic",
+  "input": {
+    "mode": "queue",
+    "urls": [
+      "https://fixtures.test/desktop/basic/pyramid.dzi",
+      "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi",
+      "https://fixtures.test/desktop/basic/pyramid.dzi"
+    ]
+  },
+  "operation": "queue",
+  "source_evidence": {
+    "path": "apps/desktop/src/queue.ts",
+    "snapshot": "local"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "web/live-lizardtech",
+  "description": "Live recording: LizardTech http-only legacy shape (cartweb.geography.ua.edu calcrgn, redacted to fixtures.test)",
+  "source_evidence": {
+    "path": "crates/xtask/src/live.rs lizardtech (live http-only, https unavailable)",
+    "snapshot": "live-triage-2026-09-07"
+  },
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/live/lizardtech/iserv/calcrgn?cat=North%20America%20and%20United%20States&item=NorthAmerica/US1566a.sid&wid=500&hei=400"
+  },
+  "operation": "discover"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "desktop/basic-iiif-dir",
+  "description": "Desktop happy path (basic-iiif-dir): start_job plus request_destination drives the shared native pipeline over loopback and publishes a 512x512 IIIF tile tree (info.json plus JPEG tiles at real IIIF request paths)",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/basic-iiif-dir/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

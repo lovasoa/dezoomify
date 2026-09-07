@@ -1,0 +1,13 @@
+{
+  "id": "web/live-vls-cookie",
+  "description": "Live recording: VLS Cookie-gated shape (BLB zoom/2410801 needs Cookie js_enabled=2 live; fixture is credential-free)",
+  "source_evidence": {
+    "path": "crates/xtask/src/live.rs vls (Cookie js_enabled=2, CLI only)",
+    "snapshot": "live-triage-2026-09-07"
+  },
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/live/vls/zoom/2410801"
+  },
+  "operation": "discover"
+}

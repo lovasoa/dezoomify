@@ -1,0 +1,49 @@
+{
+  "description": "Desktop deep-link handoff transcript: one-click Send carries bounded non-secret input, exact-match validation keeps /cookie-recipe/ valid while ?token= is rejected, and nothing runs before explicit confirm.",
+  "expected": {
+    "canariesFound": [],
+    "confirmationReached": true,
+    "fileEffects": 0,
+    "networkCalls": 0,
+    "singleUse": true
+  },
+  "scenario": "desktop/handoff-deep-link",
+  "transcript": [
+    {
+      "event": "handoff-received",
+      "result": "ok",
+      "step": 1,
+      "url": "dezoomify://open?v=2&src=https%3A%2F%2Fexample.com%2Fview%3Fpage%3D1"
+    },
+    {
+      "event": "validation",
+      "result": "ok",
+      "step": 2,
+      "urlParsing": true,
+      "vectors": [
+        "cookie-recipe-valid",
+        "token-rejected",
+        "userinfo-rejected",
+        "file-rejected"
+      ]
+    },
+    {
+      "event": "consent-shown",
+      "origins": [
+        "https://example.com/"
+      ],
+      "scope": "image address only, no sign-in details",
+      "step": 3
+    },
+    {
+      "event": "awaiting-confirm",
+      "networkCalls": 0,
+      "step": 4
+    },
+    {
+      "canariesFound": [],
+      "event": "secret-scan",
+      "step": 5
+    }
+  ]
+}

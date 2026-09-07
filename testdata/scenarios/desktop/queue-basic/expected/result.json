@@ -1,0 +1,105 @@
+{
+  "capabilities": {
+    "bulkSupported": true,
+    "canvasBytes": 8589934592,
+    "decoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "destinationModes": [
+      "file",
+      "iiif-dir"
+    ],
+    "encoders": [
+      "png",
+      "jpeg",
+      "tiff"
+    ],
+    "handoff": true,
+    "maxConcurrency": 16,
+    "storageModes": [
+      "cache"
+    ]
+  },
+  "description": "Desktop queue basic over the integration-layer queue: three entries run sequentially, the failed middle entry never stops the rest, and the totals mirror the CLI bulk contract.",
+  "entries": [
+    {
+      "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
+    },
+    {
+      "url": "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi"
+    },
+    {
+      "url": "https://fixtures.test/desktop/basic/pyramid.dzi"
+    }
+  ],
+  "golden": {
+    "human": "bulk: 2 succeeded, 1 failed, 3 total",
+    "machine": {
+      "failed": 1,
+      "kind": "bulk-completed",
+      "succeeded": 2,
+      "total": 3
+    },
+    "outcomes": [
+      {
+        "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
+        "status": "done"
+      },
+      {
+        "errorCode": "tile.download-failed",
+        "status": "failed"
+      },
+      {
+        "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
+        "status": "done"
+      }
+    ],
+    "summary": {
+      "cancelled": 0,
+      "failed": 1,
+      "pending": 0,
+      "succeeded": 2,
+      "total": 3
+    }
+  },
+  "protocol": "1.0",
+  "provenance": "fixture",
+  "redacted": true,
+  "scenario": "desktop/queue-basic",
+  "script": [
+    {
+      "index": 0,
+      "op": "enqueue"
+    },
+    {
+      "index": 1,
+      "op": "enqueue"
+    },
+    {
+      "index": 2,
+      "op": "enqueue"
+    },
+    {
+      "op": "finish",
+      "outcome": "done",
+      "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91"
+    },
+    {
+      "acquired": 2,
+      "op": "progress",
+      "total": 4
+    },
+    {
+      "errorCode": "tile.download-failed",
+      "op": "finish",
+      "outcome": "failed"
+    },
+    {
+      "op": "finish",
+      "outcome": "done",
+      "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91"
+    }
+  ]
+}

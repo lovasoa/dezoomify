@@ -1,0 +1,13 @@
+{
+  "id": "web/live-arcgis-basemap",
+  "description": "Live recording: ArcGIS basemap viewer shape (cartesius basemapUrl, https upgrade, token pattern)",
+  "source_evidence": {
+    "path": "crates/xtask/src/live.rs arcgis_basemap_url (https://www.cartesius.be)",
+    "snapshot": "live-triage-2026-09-07"
+  },
+  "input": {
+    "mode": "automatic",
+    "url": "https://fixtures.test/live/arcgis/viewer.html?basemapUrl=https%3A%2F%2Ffixtures.test%2Flive%2Farcgis%2FMapServer"
+  },
+  "operation": "discover"
+}

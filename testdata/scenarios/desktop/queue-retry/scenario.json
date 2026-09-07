@@ -1,0 +1,16 @@
+{
+  "description": "Desktop queue retry: a failed entry retries behind the line under a fresh id and succeeds; cancel-all issues no new work",
+  "id": "desktop/queue-retry",
+  "input": {
+    "mode": "queue",
+    "urls": [
+      "https://fixtures.test/desktop/basic/pyramid.dzi",
+      "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi"
+    ]
+  },
+  "operation": "queue",
+  "source_evidence": {
+    "path": "apps/desktop/src/queue.ts",
+    "snapshot": "local"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "description": "Desktop queue retry transcript: the failed entry retries under a fresh id and the retried entry runs to done.",
+  "events": [
+    {
+      "entry": "jobq:0",
+      "origin": "https://fixtures.test",
+      "transition": "active"
+    },
+    {
+      "entry": "jobq:1",
+      "origin": "https://fixtures.test",
+      "transition": "queued"
+    },
+    {
+      "entry": "jobq:0",
+      "transition": "done"
+    },
+    {
+      "entry": "jobq:1",
+      "transition": "active"
+    },
+    {
+      "entry": "jobq:1",
+      "errorCode": "tile.download-failed",
+      "transition": "failed"
+    },
+    {
+      "entry": "jobq:2",
+      "origin": "https://fixtures.test",
+      "transition": "active"
+    },
+    {
+      "entry": "jobq:2",
+      "transition": "done"
+    }
+  ],
+  "scenario": "desktop/queue-retry"
+}
