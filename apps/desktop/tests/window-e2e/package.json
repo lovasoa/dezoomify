@@ -1,0 +1,14 @@
+{
+  "name": "dezoomify-desktop-window-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-window end-to-end gate for the Tauri desktop app: launch the window shell under tauri-driver, drive it with selenium-webdriver against hermetic loopback fixtures, and verify saved bytes against scenario goldens.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test window.spec.mjs"
+  },
+  "devDependencies": {
+    "selenium-webdriver": "4.48.0"
+  },
+  "license": "GPL-3.0-or-later"
+}

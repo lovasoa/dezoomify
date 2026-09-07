@@ -76,20 +76,131 @@ pub fn build_desktop(args: &[String]) -> Result<(), String> {
     }
 }
 
-pub fn test_desktop(_args: &[String]) -> Result<(), String> {
+pub fn test_desktop(args: &[String]) -> Result<(), String> {
+    if args.iter().any(|a| a == "--e2e-window") {
+        if args.len() != 1 {
+            return Err("usage: cargo xtask test desktop [--e2e-window]".to_string());
+        }
+        return test_desktop_e2e_window();
+    }
+    if !args.is_empty() {
+        return Err(format!(
+            "unknown test desktop argument(s): {}; usage: cargo xtask test desktop [--e2e-window]",
+            args.join(" ")
+        ));
+    }
     // Lean shell unit tests: handoff execution, registration, deep links,
     // commands, updater (workspace member, always builds offline).
     run_cargo(&["test", "-p", DESKTOP_PKG])?;
     run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
+    run_node(&["apps/desktop/tests/queue.test.mjs"])?;
+    // Versioned icon generator (scripts/gen-desktop-icons.py, stdlib-only,
+    // deterministic): re-runs the script and asserts byte-identical PNG/ICO/
+    // ICNS output plus container magic. Runs before the hermetic E2E so a
+    // nondeterministic generator fails fast.
+    run_node(&["apps/desktop/tests/icons.test.mjs"])?;
     // Hermetic E2E: loopback fixtures plus the lean driver and frontend
     // harness (submit -> choose -> request_destination -> save with PNG
     // verification, deep-link confirm, cancel). No public network, no
-    // webview needed; the full Tauri WebDriver path stays manual (see
-    // apps/desktop/README.md "End-to-end").
+    // webview needed; the real-window path is the opt-in `--e2e-window`
+    // lane below.
     run_node(&["apps/desktop/tests/e2e.test.mjs"])?;
     println!("test desktop: ok");
     Ok(())
+}
+
+/// Real-window E2E: the window shell under tauri-driver on Linux,
+/// hermetic loopback fixtures, byte-exact save verification. Owns the full
+/// lifecycle through the node harness (preflight, window-shell build,
+/// fixture server, frontend server, tauri-driver, app launches, isolated
+/// profiles with cleanup). Opt-in only: bare `test desktop` (plus `test`,
+/// `test all`, and `ci`) stays lean and display-free.
+fn test_desktop_e2e_window() -> Result<(), String> {
+    if !cfg!(target_os = "linux") {
+        return Err(
+            "test desktop --e2e-window runs on Linux in this wave; macOS/Windows CI wiring (native driver, signed runner) is a later wave"
+                .to_string(),
+        );
+    }
+    if std::env::var_os("DISPLAY").is_none() {
+        return Err(
+            "test desktop --e2e-window needs a display (DISPLAY is unset); rerun under `xvfb-run -a`"
+                .to_string(),
+        );
+    }
+    // Fail-closed driver discovery, mirroring the harness rules.
+    if std::env::var("TAURI_DRIVER_BIN")
+        .ok()
+        .filter(|p| std::path::Path::new(p).exists())
+        .or_else(|| path_on_path("tauri-driver").map(|p| p.to_string_lossy().into_owned()))
+        .is_none()
+    {
+        return Err(
+            "test desktop --e2e-window needs tauri-driver 2.x (or TAURI_DRIVER_BIN=...); install with `cargo install tauri-driver --version \"=2.0.6\"`"
+                .to_string(),
+        );
+    }
+    if std::env::var("WEBKIT_DRIVER_BIN")
+        .ok()
+        .filter(|p| std::path::Path::new(p).exists())
+        .or_else(|| path_on_path("WebKitWebDriver").map(|p| p.to_string_lossy().into_owned()))
+        .is_none()
+    {
+        return Err(
+            "test desktop --e2e-window needs WebKitWebDriver on PATH (or WEBKIT_DRIVER_BIN=...)"
+                .to_string(),
+        );
+    }
+    ensure_window_e2e_deps()?;
+    // The harness launches this exact binary, so build it first: lean
+    // shell, frontend, and window shell with no bundle. `build_desktop`
+    // skips the window shell silently without the webview system packages,
+    // so fail closed up front instead.
+    if !tauri_system_ready() {
+        return Err(format!(
+            "test desktop --e2e-window needs the webview system packages ({WEBKIT_SYSTEM_PACKAGES})"
+        ));
+    }
+    build_desktop(&["--unsigned-test".to_string()])?;
+    run_node(&["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"])?;
+    println!("test desktop --e2e-window: ok (real window, hermetic loopback)");
+    Ok(())
+}
+
+/// Selenium client for the window harness, installed once via the pinned
+/// lockfile (extension-browser precedent: auto-install on first run).
+fn ensure_window_e2e_deps() -> Result<(), String> {
+    let root = super::repo_root();
+    let marker =
+        root.join("apps/desktop/tests/window-e2e/node_modules/selenium-webdriver/package.json");
+    if marker.is_file() {
+        return Ok(());
+    }
+    println!("test desktop --e2e-window: installing harness dependencies (npm install)");
+    let status = Command::new("npm")
+        .args(["install", "--no-audit", "--no-fund"])
+        .current_dir(root.join("apps/desktop/tests/window-e2e"))
+        .status()
+        .map_err(|e| format!("failed to run npm install: {e}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "window harness dependency install failed (npm install)".to_string())?;
+    if !marker.is_file() {
+        return Err("window harness dependencies still missing after npm install".to_string());
+    }
+    Ok(())
+}
+
+fn path_on_path(name: &str) -> Option<std::path::PathBuf> {
+    for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
+        let candidate = dir.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// Desktop development: run the real Tauri development application. Needs
@@ -332,5 +443,39 @@ mod tests {
     #[test]
     fn desktop_logic() {
         assert!(super::test_desktop(&[]).is_ok());
+    }
+
+    #[test]
+    fn desktop_test_args() {
+        // Unknown flags fail fast without running any suite; the window
+        // lane takes exactly one flag.
+        assert!(super::test_desktop(&["--bogus".to_string()]).is_err());
+        assert!(super::test_desktop(&["--e2e-window".to_string(), "--bogus".to_string()]).is_err());
+    }
+
+    #[test]
+    fn desktop_icons_script_versioned() {
+        // The icon generator stays a versioned scripts/ artifact with test
+        // coverage (apps/desktop/tests/icons.test.mjs, run above); it must
+        // not drift into an ad-hoc untracked helper.
+        let root = super::super::repo_root();
+        let script = root.join("scripts/gen-desktop-icons.py");
+        let text = std::fs::read_to_string(&script).expect("read gen-desktop-icons.py");
+        assert!(
+            text.contains("byte-identical"),
+            "script must promise determinism"
+        );
+        assert!(
+            text.contains("cargo xtask build desktop"),
+            "script must name its xtask entry"
+        );
+        for name in [
+            "apps/desktop/src-tauri/icons/32x32.png",
+            "apps/desktop/src-tauri/icons/128x128.png",
+            "apps/desktop/src-tauri/icons/icon.ico",
+            "apps/desktop/src-tauri/icons/icon.icns",
+        ] {
+            assert!(root.join(name).is_file(), "missing generated icon {name}");
+        }
     }
 }

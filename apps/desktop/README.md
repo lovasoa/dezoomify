@@ -47,31 +47,32 @@ The hermetic pieces are `apps/desktop/src-tauri/tests/desktop_e2e.rs`
 frontend integration, real pipeline save, redacted report). Both use
 allocated ports, isolated profiles, fixed seeds, and no shared state.
 
-The full Tauri window shell E2E stays a manual or CI-runner job because
-it needs a display-capable webview plus a WebDriver stack next to the
-app under test:
+The real-window E2E runs the window shell under tauri-driver on Linux
+instead of by hand:
 
-1. Install the platform webview packages (Linux:
-   `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev
-   libayatana-appindicator3-dev build-essential`; macOS ships WebKit,
-   Windows ships WebView2) and the Tauri CLI
-   (`cargo install tauri-cli --version "^2"`), plus `tauri-driver` and a
-   WebDriver-compatible browser on an isolated profile.
-2. Build the app: `cargo xtask build desktop --unsigned-test` (lean
-   shell, frontend, and window shell, no bundle).
-3. Serve fixtures hermetically in a second terminal:
-   `cargo xtask fixtures serve --port 0 --write-address /tmp/dz-e2e/server.addr`
-   and read the allocated `127.0.0.1:PORT` address from that file.
-4. Launch the window shell under `tauri-driver` with a fresh profile and
-   ephemeral ports only, pointing the submit URL at the allocated
-   fixture address (`/fetch?url=https://fixtures.test/cli/pyramid.dzi`).
-5. Drive submit, image choice (`img:0`), level choice, the native save
-   dialog destination, and save; verify the saved PNG matches the
-   `native/cli-dzi` golden exactly as the hermetic gate does.
-6. Repeat with a `dezoomify://open?v=2&src=...` deep link (confirm
-   dialog accepts or declines before any work) and with cancel before
-   completion (terminal once, uncommitted output removed). Keep reports
-   redacted and seeds fixed as in the hermetic gate.
+```sh
+cargo xtask test desktop --e2e-window
+```
+
+The lane builds the window shell (`--unsigned-test`: lean shell, frontend,
+window shell, no bundle), serves fixtures hermetically on an ephemeral
+loopback port, serves the built frontend over loopback for the debug
+window shell, launches the app under tauri-driver with a fresh profile and
+ephemeral ports, and drives four flows with selenium-webdriver: submit with
+destination grant to a byte-exact save versus the `native/cli-dzi` golden,
+cancel with output cleanup, an existing-destination refusal with its stable
+code, and the deep-link confirm gate (pending links perform no effect).
+The native save dialog is not WebDriver-automatable, so the run sets the
+fail-closed E2E fixed destination (`DEZOOMIFY_E2E_WINDOW=1` plus
+`DEZOOMIFY_E2E_FIXED_DESTINATION`); production never sets either, so the
+dialog always shows there. Reports stay redacted and seeds fixed as in the
+hermetic gate.
+
+The lane needs a display (`xvfb-run -a` when headless), tauri-driver 2.x
+(`cargo install tauri-driver --version "=2.0.6"`, or `TAURI_DRIVER_BIN`),
+WebKitWebDriver (`WEBKIT_DRIVER_BIN` override), and the webview system
+packages above; each missing piece fails closed naming it. macOS and
+Windows CI wiring is a later wave.
 
 ## Bundles
 

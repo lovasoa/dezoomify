@@ -1,10 +1,41 @@
 // Minimal host-neutral shared-ui helpers (no React, no browser globals).
 import type { StructuredError } from "./controller.ts";
 
+// Canonical transport labels (todo 2.2 single source): the implementation
+// lives one layer down in `packages/browser-runtime/src/transport-labels.ts`
+// (dependency-free); this module only re-exports them for rendering, so the
+// dependency points inward. Codes ("direct", "proxy", "display",
+// "browser-session", "native") map to these display strings; raw labels pass
+// through for back-compat.
+//
+// The namespace-destructure shape below keeps the same single source and
+// export surface while giving the bundler plain local bindings (a bare
+// import-plus-re-export of the same names miscompiles the local references
+// in the desktop bundle, throwing `DIRECT_TRANSPORT_LABEL` at runtime).
+import * as TransportLabels from "../../browser-runtime/src/transport-labels.ts";
+const {
+  DIRECT_TRANSPORT_LABEL,
+  PROXY_TRANSPORT_LABEL,
+  DISPLAY_TRANSPORT_LABEL,
+  BROWSER_SESSION_TRANSPORT_LABEL,
+  NATIVE_TRANSPORT_LABEL,
+} = TransportLabels;
+export {
+  DIRECT_TRANSPORT_LABEL,
+  PROXY_TRANSPORT_LABEL,
+  DISPLAY_TRANSPORT_LABEL,
+  BROWSER_SESSION_TRANSPORT_LABEL,
+  NATIVE_TRANSPORT_LABEL,
+};
+
 export function renderTransportLabel(transport: string): string {
-  if (transport === "direct") return "Direct from your browser";
-  if (transport === "proxy") return "Metadata proxy";
-  if (transport === "display") return "Display only";
+  if (transport === "direct" || transport === DIRECT_TRANSPORT_LABEL) return DIRECT_TRANSPORT_LABEL;
+  if (transport === "proxy" || transport === PROXY_TRANSPORT_LABEL) return PROXY_TRANSPORT_LABEL;
+  if (transport === "display" || transport === DISPLAY_TRANSPORT_LABEL) return DISPLAY_TRANSPORT_LABEL;
+  if (transport === "browser-session" || transport === BROWSER_SESSION_TRANSPORT_LABEL) {
+    return BROWSER_SESSION_TRANSPORT_LABEL;
+  }
+  if (transport === "native" || transport === NATIVE_TRANSPORT_LABEL) return NATIVE_TRANSPORT_LABEL;
   return transport;
 }
 
@@ -19,7 +50,7 @@ export function renderSaveGuidance(originClean: boolean): string {
   return (
     "Your image should appear below. In order to persist it as a file on " +
     "your computer, right-click on it and select \"Save Image As...\". " +
-    "For faster downloads that automatically create files in the format " +
+    "For faster saves that automatically create files in the format " +
     "you choose, use the desktop app."
   );
 }
@@ -33,6 +64,25 @@ export function renderProgress(current: number, total: number): string {
   if (total <= 0) return `Working: ${current} done.`;
   const pct = Math.max(0, Math.min(100, Math.round((current / total) * 100)));
   return `Working: ${current} of ${total} done (${pct} percent).`;
+}
+
+/**
+ * Missing-tile ledger behind a kept partial (gap map data, no user copy).
+ * Splits the ledger into the ids shown inline plus the overflow count, so
+ * every app (website, desktop app, extension) renders the same gap map
+ * instead of silent gaps. Pure data: callers compose the sentence through
+ * their own dictionary (`view.done.gapMap` in shared UI). Ids are short
+ * plan tokens; URLs and paths never belong here (hosts filter them out).
+ */
+export function splitGapLedger(
+  missingTiles: Array<string>,
+  maxShown = 20,
+): { shown: string; rest: number; count: number } {
+  const ids = (Array.isArray(missingTiles) ? missingTiles : []).filter(
+    (id) => typeof id === "string" && id.length > 0,
+  );
+  const shown = ids.slice(0, maxShown).join(", ");
+  return { shown, rest: Math.max(0, ids.length - maxShown), count: ids.length };
 }
 
 export function renderCompletion(width: number, height: number, mime: string): string {

@@ -17,18 +17,60 @@
 // surface typed choices (retry / choose-output / keep-partial /
 // discard-partial / handoff-to-native) wired to answer_choice (RetryReady /
 // PartialKeep), request_destination, and requestHandoff.
-import { createController } from "../../../packages/shared-ui/src/controller.ts";
-import { renderView } from "../../../packages/shared-ui/src/view.ts";
-import type { ViewContext } from "../../../packages/shared-ui/src/view.ts";
-import { suggestedNameFor } from "../../../packages/shared-ui/src/saveName.ts";
+import { createController, renderView, t } from "@dezoomify/shared-ui";
+import type { ViewContext } from "@dezoomify/shared-ui";
+import { suggestedNameFor } from "@dezoomify/browser-runtime";
+import {
+  asPayload,
+  extractMissingTiles,
+  formatMissingSummary,
+  hostOf,
+  isValidInputUrl,
+  numField,
+  parseDetailObject,
+  payloadJob,
+  payloadReason,
+  payloadSeq,
+  payloadText,
+  phaseFor,
+  encoderToMime,
+  readInitialUrl,
+  redactedOriginOnly,
+  strField,
+  technicalDetailFor,
+  validateDeepLinkPayload,
+} from "./errorCopy.ts";
+import type { ValidatedDeepLink } from "./errorCopy.ts";
+import {
+  DISCARD_PARTIAL_CHOICE,
+  KEEP_PARTIAL_CHOICE,
+  RETRY_CHOICE,
+  completeJob,
+  dispatchFail,
+  ensureChosenThroughPreflight,
+  isTerminalStatus,
+} from "./jobController.ts";
+import type { CatalogNotice, PendingDecision } from "./jobController.ts";
+import {
+  buildCopyDiagnostics,
+  DESKTOP_APP_VERSION,
+  handleCopyDiagnostics,
+} from "./diagnostics.ts";
+import {
+  ensureDesktopSettingsPanel,
+  getEffectiveSettings,
+  persistSettingsFromPanel,
+  resetDesktopSettings,
+} from "./settingsPanel.ts";
+import type { SettingsPanelEnv } from "./settingsPanel.ts";
 import {
   createDesktopIntegration,
-  NATIVE_ENCODERS,
+  NATIVE_FORMATS,
   PROTOCOL_MAX,
   PROTOCOL_MIN,
   PROTOCOL_VERSION,
 } from "./desktopIntegration.ts";
-import type { NativeEncoder } from "./desktopIntegration.ts";
+import type { NativeFormat } from "./desktopIntegration.ts";
 import { DESKTOP_EVENT_CHANNELS, assertNoTileBytes, redactForEvent } from "./events.ts";
 import type { DesktopEventChannel } from "./events.ts";
 import {
@@ -41,15 +83,11 @@ import {
   validateSettings,
 } from "./settings.ts";
 import type { DesktopSettings } from "./settings.ts";
+import { listen as tauriApiListen } from "@tauri-apps/api/event";
 import "./desktop.css";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 const integration = createDesktopIntegration();
-
-// Desktop app version mirrors apps/desktop/package.json. Kept as a literal
-// so the TS layer stays host-neutral (no JSON import, no I/O); bump both
-// together. Used only for copy-diagnostics provenance, never for logic.
-const DESKTOP_APP_VERSION = "3.0.0";
 
 // Task 5.3 Help/About (docs rule: docs/user/ is the only source of user
 // text; link, never duplicate). Short link labels only; every user guide
@@ -57,17 +95,18 @@ const DESKTOP_APP_VERSION = "3.0.0";
 // (https-only). No user copy is duplicated here.
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
 const DESKTOP_HELP_LINKS: Array<{ label: string; url: string }> = [
-  { label: "Help", url: `${DESKTOP_DOCS_BASE}/help/` },
-  { label: "Desktop guide", url: `${DESKTOP_DOCS_BASE}/help/desktop-app.html` },
-  { label: "Troubleshooting", url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
-  { label: "FAQ", url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
-  { label: "Privacy", url: `${DESKTOP_DOCS_BASE}/privacy.html` },
-  { label: "Terms", url: `${DESKTOP_DOCS_BASE}/terms.html` },
-  { label: "Donate", url: "https://github.com/sponsors/lovasoa/" },
+  { label: t("desktop.help.help"), url: `${DESKTOP_DOCS_BASE}/help/` },
+  { label: t("desktop.help.desktopGuide"), url: `${DESKTOP_DOCS_BASE}/help/desktop-app.html` },
+  { label: t("desktop.help.troubleshooting"), url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
+  { label: t("desktop.help.faq"), url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
+  { label: t("desktop.help.privacy"), url: `${DESKTOP_DOCS_BASE}/privacy.html` },
+  { label: t("desktop.help.terms"), url: `${DESKTOP_DOCS_BASE}/terms.html` },
+  { label: t("desktop.help.donate"), url: "https://github.com/sponsors/lovasoa/" },
 ];
 
 // Transport reported for every desktop controller transition. Pixels stay
-// native, so the badge never claims a browser transport.
+// native, so the badge never claims a browser transport. The "native" code
+// renders via shared-ui renderTransportLabel (canonical NATIVE label).
 const NATIVE_TRANSPORT = "native";
 
 // Per-request timeout shown in the job view (native parity: 30 s request,
@@ -76,23 +115,6 @@ const REQUEST_TIMEOUT_MS = 30000;
 
 // Capped technical log (oldest dropped first), web parity.
 const MAX_LOG_LINES = 60;
-
-// Large-image preflight bounds (native parity, docs/native-apps.md):
-// the canvas holds 4 bytes per pixel plus transient encode buffers,
-// budgeted at 8 GiB. JPEG addresses at most 65535 px per side.
-const CANVAS_BYTES_PER_PIXEL = 4;
-const CANVAS_LIMIT_BYTES = 8 * 1024 * 1024 * 1024;
-const JPEG_MAX_SIDE = 65535;
-
-// Opaque desktop choice strings. They must keep matching the shell mapping
-// (apps/desktop/src-tauri/src/jobs.rs map_choice_kind) and the engine
-// response shapes (RetryReady needs att:<suffix>, PartialKeep derives keep
-// from keep/discard/partial markers):
-// - retry -> RetryReady ("att:" prefix)
-// - keep-partial / discard-partial -> PartialKeep ("partial:" + keep/discard)
-const RETRY_CHOICE = "att:0:ready";
-const KEEP_PARTIAL_CHOICE = "partial:keep";
-const DISCARD_PARTIAL_CHOICE = "partial:discard";
 
 let sessionId = "sess:desktop-1";
 const controller = createController(sessionId);
@@ -110,25 +132,29 @@ let retiredJobId: string | null = null;
 let remoteSeqByJob: Record<string, number> = {};
 let submitToken = 0;
 let lastInputUrl = "";
-let grantedFormat: NativeEncoder = "png";
+let grantedFormat: NativeFormat = "png";
 
-// Native output formats (todo 4.4): single source is NATIVE_ENCODERS in
-// desktopIntegration.ts (png/jpeg/tiff), matching SUPPORTED_FORMATS in
-// commands.rs and the tauri_shell.rs dialog filters. The 3-radio selector
-// below writes grantedFormat; requestOutputAndResume reads it so the Save
-// and choose-output paths never hard-code a format.
-function normalizeNativeFormat(value: unknown): NativeEncoder {
+// Native output formats (todo 4.4, todo 5.1): single source is
+// NATIVE_FORMATS in desktopIntegration.ts
+// (png/jpeg/tiff/zif/webp/iiif-dir), matching SUPPORTED_FORMATS in
+// commands.rs and the tauri_shell.rs dialog filters. The 6-radio selector
+// below writes grantedFormat (file encoders plus the `iiif-dir` tree mode);
+// requestOutputAndResume reads it so the Save and choose-output paths never
+// hard-code a format. `iiif-dir` suggests a `.iiif` name (extensionless also
+// validates natively) and the shell writes the tile tree at that path.
+function normalizeNativeFormat(value: unknown): NativeFormat {
   if (typeof value === "string") {
     const lower = value.toLowerCase();
-    if ((NATIVE_ENCODERS as readonly string[]).includes(lower)) {
-      return lower as NativeEncoder;
+    if ((NATIVE_FORMATS as readonly string[]).includes(lower)) {
+      return lower as NativeFormat;
     }
+    if (lower === "iiif") return "iiif-dir";
   }
   return "png";
 }
 
 function suggestedNameForFormat(
-  format: NativeEncoder,
+  format: NativeFormat,
   width?: unknown,
   height?: unknown,
 ): string {
@@ -137,20 +163,18 @@ function suggestedNameForFormat(
 
 // Minimal settings (task 3.5): persisted locally, validated with fail-closed
 // bounds, and sent on the next start_job. Header values never enter logs;
-// use describeSettingsForLog for any diagnostics.
+// use describeSettingsForLog for any diagnostics. Todo 5.1: the persisted
+// outputFormat seeds the encoder picker so ZIF/WebP/`iiif-dir` survive
+// reloads; download settings still travel via settingsToInvokeArgs only.
 let desktopSettings: DesktopSettings = loadSettings();
-let settingsError: string | null = null;
+grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
 
-interface PendingDecision {
-  kind: "destination-request" | "destination-recovery" | "partial-recovery";
-  reason: string;
-  recovery?: string;
-  attempt?: string;
-  missingTiles?: Array<string>;
-  failedCount?: number;
-  totalCount?: number;
+function persistOutputFormat(format: NativeFormat): void {
+  if (desktopSettings.outputFormat === format) return;
+  desktopSettings = { ...desktopSettings, outputFormat: format };
+  saveSettings(desktopSettings);
 }
-
+let settingsError: string | null = null;
 let pendingDecision: PendingDecision | null = null;
 
 // Catalog auto-choice notice (todo 4.3): reuses the pendingDecision aux
@@ -158,8 +182,7 @@ let pendingDecision: PendingDecision | null = null;
 // pipeline auto-saves images[0] at the largest fitting level; the shared job
 // view renders this honestly from controller imageCount plus this aux
 // (WxH/K tiles). No picker is offered.
-let catalogNotice: { imageCount: number; width?: number; height?: number; tiles?: number } | null =
-  null;
+let catalogNotice: CatalogNotice | null = null;
 
 // Accessibility (Task 5.2): dialog focus state. Each modal stores the element
 // focused before it opened so focus returns on close. Recovery tracks its key
@@ -225,352 +248,6 @@ function nextSeq(): number {
   return currentSeq;
 }
 
-function categoryFor(code: string): string {
-  if (code === "INVALID_URL" || code === "INVALID_SETTINGS") return "validation";
-  if (code === "NO_IMAGE_FOUND") return "discovery";
-  if (code.indexOf("OUTPUT_") === 0 || code === "OUTPUT_DENIED") return "output";
-  if (code === "WORKER_FAILED" || code === "PLAN_INVALID") return "internal";
-  const lower = String(code ?? "").toLowerCase();
-  if (lower.indexOf("protocol.incompatible") === 0 || lower.indexOf("handoff.rejected") === 0) return "validation";
-  if (lower.indexOf("discovery.") === 0 || lower.indexOf("job.discovery") >= 0) return "discovery";
-  if (lower.indexOf("output.") === 0) return "output";
-  if (lower.indexOf("internal") >= 0 || lower === "native.internal") return "internal";
-  if (lower.indexOf("job.invalid") >= 0 || lower.indexOf("command.") === 0) return "validation";
-  return "transport";
-}
-
-function phaseFor(code: string): string {
-  if (code === "NO_IMAGE_FOUND") return "discovery";
-  if (code.indexOf("OUTPUT_") === 0 || code === "OUTPUT_DENIED") return "output";
-  const lower = String(code ?? "").toLowerCase();
-  if (lower === "protocol.incompatible") return "handshake";
-  if (lower === "handoff.rejected") return "validation";
-  if (lower.indexOf("discovery.") === 0 || lower.indexOf("job.discovery") >= 0) return "discovery";
-  if (lower === "tile.decode-failed" || lower.indexOf("decode.") === 0) return "decode";
-  if (lower === "tile.processing-failed") return "processing";
-  if (lower.indexOf("output.") === 0) return "output";
-  if (lower === "job.cancelled") return "cleanup";
-  if (lower.indexOf("job.resource") === 0 || lower.indexOf("job.plan") === 0 || lower.indexOf("job.probe") === 0) return "acquisition";
-  if (lower.indexOf("command.") === 0 || lower.indexOf("job.invalid") >= 0 || lower.indexOf("job.post-terminal") >= 0 || lower.indexOf("job.unknown") >= 0 || lower.indexOf("job.stale") >= 0) return "validation";
-  return "acquisition";
-}
-
-function isTerminalStatus(status: string): boolean {
-  return status === "completed" || status === "cancelled" || status === "failed";
-}
-
-function isValidInputUrl(url: string): boolean {
-  if (typeof url !== "string") return false;
-  const trimmed = url.trim();
-  if (trimmed.length === 0 || trimmed.length > 2048) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-  if (parsed.username !== "" || parsed.password !== "") return false;
-  return true;
-}
-
-// Redacted origin (scheme://host[:port]) for diagnostics and bug reports.
-// Never includes userinfo, path, query, or fragment; "" when unparseable.
-function redactedOriginOnly(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
-    const host = u.hostname.toLowerCase();
-    if (!host) return "";
-    const defaultPort = u.protocol === "https:" ? "443" : "80";
-    const port = u.port && u.port !== defaultPort ? `:${u.port}` : "";
-    return `${u.protocol}//${host}${port}`;
-  } catch {
-    return "";
-  }
-}
-
-function hostOf(url: string): string {
-  const origin = redactedOriginOnly(url);
-  if (origin) {
-    const withoutScheme = origin.split("://")[1] ?? "";
-    if (withoutScheme) return withoutScheme;
-  }
-  return "the server";
-}
-
-// Idle prefill: read an initial URL from the launch location without ever
-// treating it as a started job. Supports ?url=/ ?src= and legacy #url= or
-// bare hash payloads. Invalid or secret-bearing candidates return null.
-function readInitialUrl(): string | null {
-  try {
-    const loc = (globalThis as Record<string, unknown>)["location"] as
-      | { search?: string; hash?: string }
-      | undefined;
-    if (!loc) return null;
-    const search = typeof loc.search === "string" ? loc.search : "";
-    if (search) {
-      const params = new URLSearchParams(search);
-      for (const key of ["url", "src", "input_url", "inputUrl"]) {
-        const v = params.get(key);
-        if (v && isValidInputUrl(v.trim())) return v.trim();
-      }
-    }
-    const hash = typeof loc.hash === "string" ? loc.hash : "";
-    if (hash && hash.startsWith("#")) {
-      const body = hash.slice(1);
-      if (body.startsWith("?")) {
-        const params = new URLSearchParams(body.slice(1));
-        const v = params.get("url") ?? params.get("src");
-        if (v && isValidInputUrl(v.trim())) return v.trim();
-      } else if (body.startsWith("url=")) {
-        try {
-          const v = decodeURIComponent(body.slice(4).replace(/\+/g, " "));
-          if (isValidInputUrl(v.trim())) return v.trim();
-        } catch {
-          return null;
-        }
-      } else if (body.length > 0 && body.length <= 2048) {
-        try {
-          const v = decodeURIComponent(body.replace(/\+/g, " "));
-          if (isValidInputUrl(v.trim())) return v.trim();
-        } catch {
-          return null;
-        }
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-// Redact full http(s) URLs inside free-form technical text down to their
-// redacted origin, so diagnostics never carry paths, queries, or fragments.
-function redactUrlsInText(text: string): string {
-  return String(text ?? "").replace(/https?:\/\/[^\s"'<>]+/g, (match) => {
-    const origin = redactedOriginOnly(match);
-    return origin === "" ? "the server" : origin;
-  });
-}
-
-function trimTechnical(text: string, max = 2000): string {
-  const redacted = redactUrlsInText(text);
-  if (redacted.length <= max) return redacted;
-  return `${redacted.slice(0, max)}…`;
-}
-
-function formatGiB(bytes: number): string {
-  const gib = bytes / (1024 * 1024 * 1024);
-  if (gib >= 10) return `${Math.round(gib)} GiB`;
-  return `${(Math.round(gib * 10) / 10).toFixed(1)} GiB`;
-}
-
-// Layered error copy: every code has plain jargon-free wording that names
-// the step, the picture source, and the single best next action. Technical
-// vocabulary (transport names, statuses, raw engine chains) stays out of
-// this sentence; it belongs in the collapsible detail built beside it.
-function plainMessageFor(code: string, engineMessage: string): string {
-  const host = hostOf(lastInputUrl || activity().url || "");
-  const engine = String(engineMessage ?? "");
-  const lowerCode = String(code ?? "").toLowerCase();
-  if (code === "INVALID_URL") {
-    return "That address does not look like a web page address. Enter an address starting with http:// or https://.";
-  }
-  if (code === "INVALID_SETTINGS") {
-    return "These download settings cannot be used. Adjust the highlighted settings and try again.";
-  }
-  if (code === "OUTPUT_DENIED") {
-    return "The save destination was not accepted. Choose a different file to continue.";
-  }
-  if (lowerCode === "protocol.incompatible") {
-    return `This app version cannot open this picture from ${host}. Update the app and try again.`;
-  }
-  if (lowerCode === "handoff.rejected") {
-    return `This link cannot be opened from ${host}. Try a different address without sign-in details.`;
-  }
-  if (lowerCode === "output.exists") {
-    return `A file already exists at the save destination from ${host}. Choose a different file or confirm overwriting to continue.`;
-  }
-  if (lowerCode === "output.destination-denied" || lowerCode === "output.unsupported-extension") {
-    return `The save destination was not accepted from ${host}. Choose a different file to continue.`;
-  }
-  if (lowerCode === "job.post-terminal" || lowerCode === "job.unknown" || lowerCode === "job.stale") {
-    return `This job is no longer active from ${host}. Start again with a fresh address.`;
-  }
-  if (lowerCode === "output.canvas-limit" || lowerCode.indexOf("canvas-limit") >= 0) {
-    const dim = engine.match(/(\d+)\s*x\s*(\d+)/);
-    const needMatch = engine.match(/needs\s+([0-9.]+\s*GiB[^,;]*|[0-9,]+\s*bytes[^,;]*)/i);
-    const dims = dim ? `${dim[1]} by ${dim[2]} pixels` : "this picture";
-    const need = needMatch ? ` It needs about ${needMatch[1].trim()} of memory` : "";
-    return (
-      `This picture is too large to assemble on this computer (${dims},` +
-      `${need} at 4 bytes per pixel, limit ${formatGiB(CANVAS_LIMIT_BYTES)}).` +
-      ` Save a smaller version with Max width (CLI: --max-width).` +
-      ` Note: JPEG saves at most ${JPEG_MAX_SIDE} pixels per side; keep PNG for larger pictures. From ${host}.`
-    );
-  }
-  if (lowerCode === "output.encode-failed" && /65535|jpeg/i.test(engine)) {
-    const dim = engine.match(/(\d+)\s*x\s*(\d+)/);
-    const dims = dim ? `${dim[1]} by ${dim[2]} pixels` : "this picture";
-    return (
-      `This picture (${dims}) is too large for JPEG, which allows at most` +
-      ` ${JPEG_MAX_SIDE} pixels per side. Save it as PNG instead. From ${host}.`
-    );
-  }
-  if (
-    lowerCode.indexOf("tile.") === 0 ||
-    lowerCode === "tile.download-failed" ||
-    lowerCode === "job.partial-discarded" ||
-    lowerCode.indexOf("partial") >= 0
-  ) {
-    if (lowerCode === "job.partial-discarded") {
-      return `The partial picture was discarded so no file was kept. Try again from ${host} with a steady connection.`;
-    }
-    return (
-      `Some pieces of this picture from ${host} could not be saved.` +
-      ` Retry the failed pieces, or keep the partial picture with blank areas.`
-    );
-  }
-  if (
-    code === "NO_IMAGE_FOUND" ||
-    lowerCode.indexOf("discovery.no-image") >= 0 ||
-    lowerCode.indexOf("discovery.failed") >= 0 ||
-    lowerCode.indexOf("discovery.") === 0 ||
-    lowerCode.indexOf("job.discovery") >= 0 ||
-    lowerCode.indexOf("job.no-images") >= 0 ||
-    lowerCode.indexOf("job.catalog") >= 0 ||
-    lowerCode.indexOf("job.empty") >= 0 ||
-    lowerCode.indexOf("unknown-dezoomer") >= 0
-  ) {
-    return `Could not find a zoomable image at this address from ${host}. Try a different page or check the address.`;
-  }
-  if (
-    lowerCode.indexOf("plan") >= 0 ||
-    lowerCode.indexOf("level") >= 0 ||
-    lowerCode.indexOf("tile-plan") >= 0 ||
-    lowerCode.indexOf("resource-limit") >= 0 ||
-    lowerCode.indexOf("tile.limit") >= 0
-  ) {
-    return `This picture has no usable size to save from ${host}. Try a different picture or a smaller Max width.`;
-  }
-  if (
-    lowerCode.indexOf("transport.") === 0 ||
-    lowerCode.indexOf("network") >= 0 ||
-    lowerCode.indexOf("http-error") >= 0 ||
-    lowerCode.indexOf("timeout") >= 0 ||
-    lowerCode.indexOf("tls") >= 0 ||
-    lowerCode.indexOf("redirect") >= 0
-  ) {
-    return `Saving stalled while contacting ${host}. Check your connection and try again.`;
-  }
-  if (lowerCode.indexOf("output.") === 0 || code.indexOf("OUTPUT_") === 0) {
-    return `Could not write this picture from ${host}. Choose a different save destination and try again.`;
-  }
-  if (lowerCode.indexOf("job.cancelled") >= 0) {
-    return `The image save was stopped. Any unfinished file was removed.`;
-  }
-  if (
-    code === "START_FAILED" ||
-    code === "CHOICE_FAILED" ||
-    lowerCode.indexOf("invalid") >= 0 ||
-    lowerCode.indexOf("stale") >= 0 ||
-    lowerCode.indexOf("unknown") >= 0
-  ) {
-    if (code === "START_FAILED") return `Could not start saving this picture from ${host}. Try again.`;
-    if (code === "CHOICE_FAILED") return "That choice was not accepted. Try again.";
-    return `Could not save this picture from ${host}. Try again with a different address.`;
-  }
-  if (lowerCode.indexOf("internal") >= 0 || code === "WORKER_FAILED" || code === "PLAN_INVALID") {
-    return `Something unexpected stopped this save from ${host}. Try again, and copy diagnostics if it keeps happening.`;
-  }
-  return `Could not save this picture from ${host}. Try again.`;
-}
-
-// Technical chain for the collapsible detail only: code, phase, transport,
-// resource kind, status, trimmed origin, and the trimmed non-secret engine
-// text. Never shown as the first message. Phase/transport/resource-kind come
-// from the backend payload when present (stable codes), falling back to the
-// local code mapping only for legacy payloads.
-function technicalDetailFor(
-  code: string,
-  engineMessage: string,
-  extraDetail: string | undefined,
-  opts?: { phase?: string; transport?: string; resourceKind?: string },
-): string {
-  const state = controller.getState();
-  const origin = redactedOriginOnly(lastInputUrl || activity().url || "");
-  const lines = [
-    `Code: ${code}`,
-    `Phase: ${opts?.phase ?? phaseFor(code)}`,
-    `Transport: ${opts?.transport ?? NATIVE_TRANSPORT}`,
-  ];
-  if (opts?.resourceKind) lines.push(`Resource: ${opts.resourceKind}`);
-  lines.push(`Status: ${state.status}`);
-  lines.push(`Origin: ${origin === "" ? "n/a" : origin}`);
-  const engine = trimTechnical(engineMessage || "");
-  if (engine) lines.push(`Engine: ${engine}`);
-  if (extraDetail && extraDetail !== engineMessage) {
-    const extra = trimTechnical(extraDetail);
-    if (extra && extra !== engine) lines.push(`Detail: ${extra}`);
-  }
-  return lines.join("\n");
-}
-
-// Missing-tile ids for the partial view: typed fields first, then
-// tile ids inside free-form detail text. Ids are short tokens only;
-// URLs and paths never enter the list.
-function extractMissingTiles(
-  payload: Record<string, unknown>,
-  detailObj: Record<string, unknown> | null,
-  detailRaw: string,
-): Array<string> {
-  const out: Array<string> = [];
-  const pushToken = (v: unknown): void => {
-    if (typeof v !== "string") return;
-    const t = v.trim();
-    if (t.length === 0 || t.length > 128) return;
-    if (t.indexOf("http://") >= 0 || t.indexOf("https://") >= 0) return;
-    if (t.indexOf("/") >= 0 && t.indexOf(":") < 0) return;
-    if (out.indexOf(t) < 0) out.push(t);
-  };
-  const tables: Array<Record<string, unknown> | null | undefined> = [payload, detailObj ?? undefined];
-  for (const table of tables) {
-    if (!table) continue;
-    for (const key of ["missing", "missingTiles", "missing_tiles", "failedTiles", "failed_tiles", "tiles", "failed"]) {
-      const v = (table as Record<string, unknown>)[key];
-      if (Array.isArray(v)) {
-        for (const item of v) {
-          if (typeof item === "string") pushToken(item);
-          else if (item && typeof item === "object") {
-            const obj = item as Record<string, unknown>;
-            pushToken(obj["tile"] ?? obj["id"] ?? obj["name"]);
-          }
-        }
-      } else if (typeof v === "string" && v.length > 0 && v.length <= 2048) {
-        for (const part of v.split(/[\s,;]+/)) pushToken(part);
-      }
-    }
-  }
-  const text = String(detailRaw ?? "");
-  const tileRe = /tile[:#\s]*([A-Za-z0-9._-]{1,64})/gi;
-  let m: RegExpExecArray | null;
-  while ((m = tileRe.exec(text)) !== null) {
-    pushToken(m[1]);
-    if (out.length >= 60) break;
-  }
-  return out.slice(0, 60);
-}
-
-function formatMissingSummary(missing: Array<string>, failedCount?: number): string {
-  const count = missing.length > 0 ? missing.length : (failedCount ?? 0);
-  if (count <= 0) return "Some tiles could not be saved.";
-  if (missing.length === 0) return `${count} tile${count === 1 ? "" : "s"} could not be saved.`;
-  const shown = missing.slice(0, 20).join(", ");
-  const rest = missing.length > 20 ? ` and ${missing.length - 20} more` : "";
-  return `${missing.length} tile${missing.length === 1 ? "" : "s"} missing: ${shown}${rest}.`;
-}
-
 interface TauriInvokeFn {
   (cmd: string, args?: Record<string, unknown>): Promise<unknown>;
 }
@@ -591,6 +268,13 @@ type TauriListenFn = (
 ) => Promise<unknown> | unknown;
 
 function tauriListen(): TauriListenFn | null {
+  // The window ships with `withGlobalTauri: false`, so no `listen` global
+  // exists; the bundled `@tauri-apps/api` call reaches the core event
+  // plugin through `__TAURI_INTERNALS__` instead. It rejects outside a
+  // Tauri webview, which `subscribeToDesktopEvents` already tolerates.
+  if (typeof tauriApiListen === "function") {
+    return (channel, handler) => tauriApiListen(channel, handler);
+  }
   const g = globalThis as Record<string, unknown>;
   const candidates: Array<unknown> = [g["__TAURI_EVENT__"], g["__TAURI_INTERNALS__"], g["__TAURI__"]];
   for (const cand of candidates) {
@@ -663,8 +347,8 @@ function resetActivity(url: string): void {
     url,
     startedAt: now,
     now,
-    stepLabel: "Finding the zoomable image…",
-    detail: `Contacting ${hostOf(url)}…`,
+    stepLabel: t("view.step.discovering"),
+    detail: t("desktop.step.contacting", { host: hostOf(url) }),
     pendingRequests: 0,
     completedRequests: 0,
     failedRequests: 0,
@@ -714,56 +398,115 @@ function noteProgress(current: number, total: number): void {
   a.now = Date.now();
 }
 
+// Shared env wiring for the split modules (todo 2.2): single closures over
+// the module job state, so errorCopy/jobController/settingsPanel/diagnostics
+// stay stateless while behavior is unchanged.
+function controllerDispatch(event: unknown): void {
+  controller.dispatch(event as never);
+}
+
+function preflightThrough(imageCount?: number): void {
+  ensureChosenThroughPreflight(controllerDispatch, sessionId, nextSeq, NATIVE_TRANSPORT, imageCount);
+}
+
+const failEnv = {
+  dispatch: controllerDispatch,
+  getStatus: () => controller.getState().status,
+  sessionId: () => sessionId,
+  next: () => nextSeq(),
+  nativeTransport: NATIVE_TRANSPORT,
+  host: () => hostOf(lastInputUrl || activity().url || ""),
+  origin: () => redactedOriginOnly(lastInputUrl || activity().url || ""),
+  clearPending: () => {
+    pendingDecision = null;
+    catalogNotice = null;
+  },
+  stopHeartbeat: () => stopHeartbeat(),
+  pushLog: (line: string) => pushLog(line),
+  update: () => update(),
+};
+
+const jobEnv = {
+  dispatch: controllerDispatch,
+  getStatus: () => controller.getState().status,
+  sessionId: () => sessionId,
+  next: () => nextSeq(),
+  nativeTransport: NATIVE_TRANSPORT,
+  getImageCount: () => controller.getState().imageCount ?? 0,
+  getProgressTotal: () => viewCtx.currentProgress?.total,
+  getCompletedInfo: () => viewCtx.completedInfo,
+  setCompletedInfo: (info: { width: number; height: number; mime: string } | undefined) => {
+    viewCtx.completedInfo = info;
+  },
+  setImageChoice: (choice: { width: number; height: number; tiles?: number } | undefined) => {
+    viewCtx.imageChoice = choice;
+  },
+  getCatalogNotice: () => catalogNotice,
+  setCatalogNotice: (notice: CatalogNotice | null) => {
+    catalogNotice = notice;
+  },
+  setPendingDecision: (decision: PendingDecision | null) => {
+    pendingDecision = decision;
+  },
+  setCompletedPartial: (partial: boolean, missing: Array<string>) => {
+    completedPartial = partial;
+    completedMissing = missing;
+  },
+  pushLog: (line: string) => pushLog(line),
+  setStep: (label: string, detail?: string) => setStep(label, detail),
+  stopHeartbeat: () => stopHeartbeat(),
+  update: () => update(),
+};
+
+const settingsEnv: SettingsPanelEnv = {
+  root,
+  getSettings: () => desktopSettings,
+  setSettings: (settings: DesktopSettings) => {
+    desktopSettings = settings;
+  },
+  setError: (error: string | null) => {
+    settingsError = error;
+  },
+  pushLog: (line: string) => pushLog(line),
+  update: () => update(),
+};
+
+function runPersistSettingsFromPanel(): void {
+  persistSettingsFromPanel(settingsEnv);
+}
+
+function runResetDesktopSettings(): void {
+  resetDesktopSettings(settingsEnv);
+}
+
+function diagnosticsSnapshot() {
+  const state = controller.getState();
+  return {
+    status: state.status,
+    transport: state.transport,
+    jobId: currentJobId,
+    attempt: pendingDecision?.attempt,
+    sessionId,
+    nativeTransport: NATIVE_TRANSPORT,
+    error: state.error
+      ? {
+          code: state.error.code,
+          category: state.error.category,
+          ...(state.error.phase ? { phase: state.error.phase } : {}),
+          retryable: state.error.retryable,
+          message: state.error.message,
+          ...(state.error.detail ? { detail: state.error.detail } : {}),
+        }
+      : null,
+    progress: viewCtx.currentProgress
+      ? { current: viewCtx.currentProgress.current, total: viewCtx.currentProgress.total }
+      : undefined,
+    origin: redactedOriginOnly(lastInputUrl),
+  };
+}
+
 // --- Controller transitions ---
 
-function dispatchFail(
-  code: string,
-  message: string,
-  opts?: {
-    transport?: string;
-    phase?: string;
-    detail?: string;
-    retryable?: boolean;
-    resourceKind?: string;
-  },
-): void {
-  const transport = opts?.transport ?? NATIVE_TRANSPORT;
-  const phase = opts?.phase ?? phaseFor(code);
-  // Prefer the backend's retryable verdict when present (stable codes);
-  // fall back to the legacy local heuristic only for payloads without it.
-  const retryable =
-    opts?.retryable ?? (code !== "INVALID_URL" && code !== "NO_IMAGE_FOUND" && code !== "OUTPUT_DENIED");
-  // Layered presentation: the first message stays a plain jargon-free
-  // sentence naming the step, picture source, and single best action.
-  // The technical chain (transport, status, trimmed origin, engine text)
-  // lives only in the collapsible detail.
-  const plain = plainMessageFor(code, message);
-  const technical = technicalDetailFor(code, message, opts?.detail, {
-    phase,
-    transport,
-    ...(opts?.resourceKind ? { resourceKind: opts.resourceKind } : {}),
-  });
-  controller.dispatch({
-    seq: nextSeq(),
-    sessionId,
-    kind: "fail",
-    transport,
-    error: {
-      code,
-      category: categoryFor(code),
-      retryable,
-      message: plain,
-      transport,
-      phase,
-      detail: technical,
-    },
-  });
-  pushLog(`Failed (${code}): ${trimTechnical(message, 160)}`);
-  pendingDecision = null;
-  catalogNotice = null;
-  stopHeartbeat();
-  update();
-}
 
 function clearJobViewState(): void {
   viewCtx.currentProgress = undefined;
@@ -791,7 +534,7 @@ function handleSubmitUrl(url: string): void {
         code: "INVALID_URL",
         category: "validation",
         retryable: false,
-        message: "Please enter a valid web address starting with http:// or https://",
+        message: t("desktop.url.invalid"),
         transport: NATIVE_TRANSPORT,
         phase: "discovery",
       },
@@ -820,11 +563,19 @@ function handleSubmitUrl(url: string): void {
   // Minimal settings are validated fail-closed here: invalid settings fail
   // the submit before any start_job effect. The redacted summary never
   // includes header values.
-  const effective = getEffectiveSettings();
+  const effective = getEffectiveSettings(root, desktopSettings);
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;
-    const technical = technicalDetailFor("INVALID_SETTINGS", "These download settings are invalid.", detail);
+    const technical = technicalDetailFor(
+      "INVALID_SETTINGS",
+      "These download settings are invalid.",
+      detail,
+      undefined,
+      controller.getState().status,
+      redactedOriginOnly(lastInputUrl || activity().url || ""),
+      NATIVE_TRANSPORT,
+    );
     controller.dispatch({
       seq: nextSeq(),
       sessionId,
@@ -834,7 +585,7 @@ function handleSubmitUrl(url: string): void {
         code: "INVALID_SETTINGS",
         category: "validation",
         retryable: false,
-        message: "These download settings are invalid. Adjust them and try again.",
+        message: t("desktop.settings.invalidSubmit"),
         transport: NATIVE_TRANSPORT,
         phase: "discovery",
         detail: technical,
@@ -854,7 +605,8 @@ function handleSubmitUrl(url: string): void {
     return;
   }
   const settingsArgs = settingsToInvokeArgs(desktopSettings);
-  void invoke("start_job", { input_url: trimmed, settings: settingsArgs }).then(
+  // Tauri commands take camelCase args (`inputUrl` for Rust `input_url`).
+  void invoke("start_job", { inputUrl: trimmed, settings: settingsArgs }).then(
     (raw) => {
       if (token !== submitToken) return;
       const res = raw as { job?: unknown; seq?: unknown } | null;
@@ -867,8 +619,8 @@ function handleSubmitUrl(url: string): void {
     },
     (error: unknown) => {
       if (token !== submitToken) return;
-      const message = error instanceof Error ? error.message : "Could not start the job.";
-      dispatchFail("START_FAILED", message);
+      const message = error instanceof Error ? error.message : t("desktop.invoke.startFallback");
+      dispatchFail(failEnv, "START_FAILED", message);
     },
   );
 }
@@ -886,7 +638,7 @@ function answerChoice(choice: string, onGranted: () => void, failureLabel: strin
     },
     (error: unknown) => {
       const message = error instanceof Error ? error.message : failureLabel;
-      dispatchFail("CHOICE_FAILED", message);
+      dispatchFail(failEnv, "CHOICE_FAILED", message);
     },
   );
 }
@@ -901,7 +653,7 @@ function handleSelectImage(index: number): void {
       controller.dispatch({ seq: nextSeq(), sessionId, kind: "image-chosen" });
       update();
     },
-    "The image choice was rejected.",
+    t("desktop.invoke.choiceImage"),
   );
 }
 
@@ -915,7 +667,7 @@ function handleSelectLevel(level: number): void {
       controller.dispatch({ seq: nextSeq(), sessionId, kind: "level-chosen" });
       update();
     },
-    "The level choice was rejected.",
+    t("desktop.invoke.choiceLevel"),
   );
 }
 
@@ -929,7 +681,7 @@ function handleCancel(): void {
   // The shell removes uncommitted output best-effort; the cancelled view
   // notes that removal.
   pushLog("Cancelling… cleaning up…");
-  setStep("Working…", "Cleaning up… removing unfinished file…");
+  setStep(t("view.step.working"), t("desktop.step.cleanupDetail"));
   pendingDecision = null;
   catalogNotice = null;
   if (job && invoke) {
@@ -985,9 +737,9 @@ function requestOutputAndResume(origin: string): void {
             pendingDecision = null;
           }
           pushLog("Save destination granted");
-          ensureChosenThroughPreflight();
+          preflightThrough();
           controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-start" });
-          setStep("Assembling the final picture…", "Encoding in the native app");
+          setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
           if (!tauriInvoke()) {
             // Validation-only fallback (no Tauri host): no native worker
             // will emit job-output, so close the loop locally.
@@ -1000,7 +752,7 @@ function requestOutputAndResume(origin: string): void {
           // OUTPUT_DENIED only for payloads without it.
           const denied = result as { reason?: string; code?: string };
           const code = typeof denied.code === "string" && denied.code.length > 0 ? denied.code : "OUTPUT_DENIED";
-          dispatchFail(code, denied.reason ?? "The save destination was denied.");
+          dispatchFail(failEnv, code, denied.reason ?? t("desktop.output.deniedFallback"));
         } else {
           pushLog("Save destination request cancelled");
           update();
@@ -1008,8 +760,8 @@ function requestOutputAndResume(origin: string): void {
       },
       (error: unknown) => {
         if (isTerminalStatus(controller.getState().status)) return;
-        const message = error instanceof Error ? error.message : "Could not request the save destination.";
-        dispatchFail("OUTPUT_DENIED", message);
+        const message = error instanceof Error ? error.message : t("desktop.invoke.destination");
+        dispatchFail(failEnv, "OUTPUT_DENIED", message);
       },
     );
 }
@@ -1029,10 +781,10 @@ function handleRecoveryRetry(): void {
     RETRY_CHOICE,
     () => {
       pendingDecision = null;
-      setStep("Saving image tiles…", "Retrying");
+      setStep(t("view.step.downloading"), t("desktop.step.retrying"));
       update();
     },
-    "The retry request was rejected.",
+    t("desktop.invoke.retry"),
   );
 }
 
@@ -1050,12 +802,12 @@ function handlePartialChoice(keep: boolean): void {
     () => {
       pendingDecision = null;
       setStep(
-        keep ? "Assembling the final picture…" : "Working…",
-        keep ? "Encoding partial image in the native app" : "Discarding partial image",
+        keep ? t("view.step.saving") : t("view.step.working"),
+        keep ? t("desktop.step.encodingPartial") : t("desktop.step.discardingPartial"),
       );
       update();
     },
-    "The partial-image choice was rejected.",
+    t("desktop.invoke.partial"),
   );
 }
 
@@ -1077,9 +829,7 @@ function handleHandoffToNative(): void {
             : `Handoff rejected: ${result.reason}`,
         );
         const a = activity();
-        a.detail = result.accepted
-          ? "This picture can be handed to another app. You are already in the native app, so you can continue here."
-          : "This picture cannot be handed to another app. Continue here or try a different picture.";
+        a.detail = result.accepted ? t("desktop.handoff.acceptedDetail") : t("desktop.handoff.rejectedDetail");
         touchProgress();
         update();
       },
@@ -1120,150 +870,6 @@ function handleOpenExternalLink(url: string): void {
   );
 }
 
-// --- Minimal settings (task 3.5) ---
-
-// Read the current settings draft from the panel inputs when present,
-// otherwise the last persisted settings. Always validated fail-closed;
-// callers must not start a job when `ok` is false. Header values are never
-// logged; only describeSettingsForLog leaves this layer.
-function getEffectiveSettings(): { ok: boolean; settings: DesktopSettings | null; errors: Array<string> } {
-  if (typeof document === "undefined" || !root) {
-    const validated = validateSettings({
-      outputDir: desktopSettings.outputDir,
-      compression: desktopSettings.compression,
-      maxWidth: desktopSettings.maxWidth,
-      maxHeight: desktopSettings.maxHeight,
-      retries: desktopSettings.retries,
-      cacheDir: desktopSettings.cacheDir,
-      headers: { ...desktopSettings.headers },
-    });
-    if (!validated.ok || !validated.settings) return { ok: false, settings: null, errors: validated.errors };
-    return { ok: true, settings: validated.settings, errors: [] };
-  }
-  const panel = document.getElementById("dz-desktop-settings");
-  if (!panel) {
-    return { ok: true, settings: desktopSettings, errors: [] };
-  }
-  const readInput = (id: string): string => {
-    const el = panel.querySelector(`#${id}`) as HTMLInputElement | HTMLTextAreaElement | null;
-    return el && typeof el.value === "string" ? el.value : "";
-  };
-  const headersRaw = readInput("dz-settings-headers");
-  const parsedHeaders = parseHeadersText(headersRaw);
-  const raw = {
-    outputDir: readInput("dz-settings-output-dir"),
-    compression: readInput("dz-settings-compression"),
-    maxWidth: readInput("dz-settings-max-width"),
-    maxHeight: readInput("dz-settings-max-height"),
-    retries: readInput("dz-settings-retries"),
-    cacheDir: readInput("dz-settings-cache-dir"),
-    headers: parsedHeaders.headers,
-  };
-  const errors: Array<string> = [...parsedHeaders.errors];
-  const validated = validateSettings(raw);
-  for (const e of validated.errors) errors.push(e);
-  if (!validated.ok || !validated.settings) return { ok: false, settings: null, errors };
-  return { ok: true, settings: validated.settings, errors: [] };
-}
-
-// Persist the panel draft when valid; show validation errors otherwise.
-// Invalid drafts never overwrite the last good persisted payload.
-function persistSettingsFromPanel(): void {
-  const effective = getEffectiveSettings();
-  if (!effective.ok || !effective.settings) {
-    settingsError = effective.errors.join("; ") || "Invalid settings.";
-    update();
-    return;
-  }
-  settingsError = null;
-  desktopSettings = effective.settings;
-  const saveErrors = saveSettings(desktopSettings);
-  if (saveErrors.length > 0) {
-    settingsError = saveErrors.join("; ");
-  } else {
-    pushLog(`Settings saved: ${describeSettingsForLog(desktopSettings)}`);
-  }
-  update();
-}
-
-function resetDesktopSettings(): void {
-  const fresh = validateSettings(null);
-  desktopSettings = fresh.settings ?? desktopSettings;
-  settingsError = null;
-  saveSettings(desktopSettings);
-  pushLog("Settings reset to defaults");
-  update();
-}
-
-// Copy-diagnostics provenance: typed error context, job and attempt ids, app
-// and protocol versions, and the redacted source origin only. Never the full
-// URL, credentials, or response content.
-function buildCopyDiagnostics(): string {
-  const state = controller.getState();
-  const error = state.error;
-  const origin = redactedOriginOnly(lastInputUrl);
-  const lines = [
-    `Status: ${state.status}`,
-    `Transport: ${state.transport ?? NATIVE_TRANSPORT}`,
-    `Job: ${currentJobId ?? "none"}`,
-    `Attempt: ${pendingDecision?.attempt ?? "n/a"}`,
-    `Session: ${sessionId}`,
-    `App: dezoomify-desktop ${DESKTOP_APP_VERSION}`,
-    `Protocol: ${PROTOCOL_VERSION} (min ${PROTOCOL_MIN}, max ${PROTOCOL_MAX})`,
-  ];
-  if (error) {
-    lines.push(`Code: ${error.code}`);
-    lines.push(`Category: ${error.category}`);
-    lines.push(`Phase: ${error.phase ?? phaseFor(error.code)}`);
-    lines.push(`Retryable: ${String(error.retryable)}`);
-    lines.push(`Message: ${error.message}`);
-    if (error.detail) lines.push(`Detail: ${error.detail}`);
-  }
-  const progress = viewCtx.currentProgress;
-  if (progress) lines.push(`Tiles: ${progress.current} of ${progress.total}`);
-  lines.push(`Origin: ${origin === "" ? "n/a" : origin}`);
-  return lines.join("\n");
-}
-
-function handleCopyDiagnostics(): void {
-  const text = buildCopyDiagnostics();
-  const done = () => {
-    const btn = typeof document !== "undefined" ? document.getElementById("dz-btn-copy-diag") : null;
-    if (btn) {
-      btn.textContent = "Copied!";
-      setTimeout(() => {
-        try {
-          if (btn.isConnected) btn.textContent = "Copy diagnostics";
-        } catch {
-          // Button may be gone after re-render; ignore.
-        }
-      }, 2000);
-    }
-  };
-  try {
-    const nav = globalThis as Record<string, unknown>;
-    const clipboard = nav["navigator"] as unknown as
-      | { clipboard?: { writeText?: (text: string) => Promise<unknown> } }
-      | undefined;
-    if (clipboard?.clipboard?.writeText) {
-      void (clipboard.clipboard.writeText(text) as Promise<unknown>).then(done, done);
-      return;
-    }
-    if (typeof document !== "undefined") {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
-      done();
-    }
-  } catch {
-    // Copy failures stay silent; the technical-details section still shows
-    // the same diagnostics for manual copying.
-  }
-}
-
 // No onCopyShareLink: desktop output is a native file handle, so there is no
 // shareable browser link to copy. The job view hides the share button when
 // the callback is absent; diagnostics copying has its own explicit button.
@@ -1272,364 +878,10 @@ function handleCopyDiagnostics(): void {
 // dispatch is accepted only when the controller transition is legal, so
 // calling this on every running/progress signal is safe and duplicate
 // signals never double-advance.
-function ensureChosenThroughPreflight(imageCount?: number): void {
-  controller.dispatch({
-    seq: nextSeq(),
-    sessionId,
-    kind: "images-found",
-    ...(typeof imageCount === "number" ? { imageCount } : {}),
-    transport: NATIVE_TRANSPORT,
-  });
-  controller.dispatch({ seq: nextSeq(), sessionId, kind: "image-chosen" });
-  controller.dispatch({ seq: nextSeq(), sessionId, kind: "level-chosen" });
-  controller.dispatch({ seq: nextSeq(), sessionId, kind: "preflight-ok", transport: NATIVE_TRANSPORT });
-}
-
-function completeJob(
-  completedInfo?: { width: number; height: number; mime: string },
-  partial?: boolean,
-  missing?: Array<string>,
-): void {
-  if (isTerminalStatus(controller.getState().status)) return;
-  ensureChosenThroughPreflight();
-  if (completedInfo) viewCtx.completedInfo = completedInfo;
-  const info = viewCtx.completedInfo;
-  if (info && info.width > 0 && info.height > 0) {
-    const prevCount = catalogNotice?.imageCount ?? controller.getState().imageCount ?? 0;
-    catalogNotice = {
-      ...(catalogNotice ?? {}),
-      imageCount: prevCount,
-      width: info.width,
-      height: info.height,
-      ...(typeof viewCtx.currentProgress?.total === "number" && viewCtx.currentProgress.total > 0
-        ? { tiles: viewCtx.currentProgress.total }
-        : {}),
-    };
-    viewCtx.imageChoice = {
-      width: info.width,
-      height: info.height,
-      ...(typeof viewCtx.currentProgress?.total === "number" && viewCtx.currentProgress.total > 0
-        ? { tiles: viewCtx.currentProgress.total }
-        : {}),
-    };
-  }
-  pendingDecision = null;
-  completedPartial = partial === true;
-  completedMissing = Array.isArray(missing) ? missing.slice(0, 60) : [];
-  if (info) {
-    if (completedPartial) {
-      const summary = formatMissingSummary(completedMissing, completedMissing.length);
-      pushLog(`Partial done: ${info.width}x${info.height} (${info.mime}); ${summary}`);
-      setStep("Assembling the final picture…", `Partial image ${info.width} by ${info.height} pixels; ${summary}`);
-    } else {
-      pushLog(`Done: ${info.width}x${info.height} (${info.mime})`);
-      setStep("Assembling the final picture…", `Finished ${info.width} by ${info.height} pixels`);
-    }
-  } else if (completedPartial) {
-    const summary = formatMissingSummary(completedMissing, completedMissing.length);
-    pushLog(`Partial done; ${summary}`);
-    setStep("Assembling the final picture…", `Partial image saved; ${summary}`);
-  } else {
-    pushLog("Done");
-    setStep("Assembling the final picture…", "Finished");
-  }
-  controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-start" });
-  controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-done" });
-  stopHeartbeat();
-  update();
-}
-
-// --- IPC payload parsing ---
-
-type PayloadTable = Record<string, unknown>;
-
-function asPayload(raw: unknown): PayloadTable {
-  if (typeof raw === "object" && raw !== null) return raw as PayloadTable;
-  return { value: raw };
-}
-
-function payloadText(payload: PayloadTable): string {
-  const parts: Array<string> = [];
-  for (const key of ["kind", "event", "detail", "state", "reason", "status", "phase"]) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) parts.push(v);
-  }
-  return parts.join(" ").toLowerCase();
-}
-
-function payloadJob(payload: PayloadTable): string | null {
-  for (const key of ["job", "jobId", "job_id"]) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
-}
-
-function payloadSeq(payload: PayloadTable): number | null {
-  for (const key of ["seq", "seqNo", "sequence", "eventSeq"]) {
-    const v = payload[key];
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
-    if (typeof v === "string" && v.trim() !== "") {
-      const n = Number(v.trim());
-      if (Number.isFinite(n) && n >= 0) return Math.floor(n);
-    }
-  }
-  return null;
-}
-
-function strField(payload: PayloadTable, keys: Array<string>): string | undefined {
-  for (const key of keys) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return undefined;
-}
-
-// Numeric field from a payload key (number or numeric string) or from a
-// "k=v"/"k: v" pair inside free-form detail text (the shell joins pipeline
-// detail maps as "acquired=3 total=10").
-function numField(payload: PayloadTable, detailText: string, keys: Array<string>): number | undefined {
-  for (const key of keys) {
-    const v = payload[key];
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
-    if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v.trim()))) {
-      const n = Math.floor(Number(v.trim()));
-      if (n >= 0) return n;
-    }
-  }
-  for (const key of keys) {
-    const m = detailText.match(new RegExp(`(?:^|\\s)${key}\\s*[:=]\\s*(\\d+)`, "i"));
-    if (m) {
-      const n = Math.floor(Number(m[1]));
-      if (Number.isFinite(n) && n >= 0) return n;
-    }
-  }
-  return undefined;
-}
-
-// Structured detail attached to an event: JSON object string, "k=v" pairs,
-// or a plain technical sentence. Returns the parsed object when the detail
-// is shaped, so reason/recovery/attempt/code/message stay typed (never
-// branched from display strings elsewhere).
-function parseDetailObject(detail: string): PayloadTable | null {
-  const trimmed = detail.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (typeof parsed === "object" && parsed !== null) return parsed as PayloadTable;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-function payloadReason(payload: PayloadTable, text: string): "destination" | "partial" | null {
-  const direct = strField(payload, ["reason", "recoveryReason", "recovery_reason"]);
-  if (direct) {
-    const lower = direct.toLowerCase();
-    if (lower.indexOf("destination") >= 0) return "destination";
-    if (lower.indexOf("partial") >= 0) return "partial";
-  }
-  const detail = strField(payload, ["detail"]);
-  if (detail) {
-    const obj = parseDetailObject(detail);
-    if (obj) {
-      const inner = strField(obj, ["reason"]);
-      if (inner) {
-        const lower = inner.toLowerCase();
-        if (lower.indexOf("destination") >= 0) return "destination";
-        if (lower.indexOf("partial") >= 0) return "partial";
-      }
-    }
-  }
-  if (text.indexOf("destination") >= 0) return "destination";
-  if (text.indexOf("partial") >= 0) return "partial";
-  return null;
-}
-
-function encoderToMime(value: string | undefined, fallback: string): string {
-  if (!value) return fallback;
-  const lower = value.toLowerCase();
-  if (lower.indexOf("image/") === 0) return value;
-  if (lower === "png") return "image/png";
-  if (lower === "jpeg" || lower === "jpg") return "image/jpeg";
-  if (lower === "tiff" || lower === "tif") return "image/tiff";
-  return fallback;
-}
-
 function grantedMime(): string {
   return encoderToMime(grantedFormat, "image/png");
 }
 
-function extractDeepLinkUrl(payload: PayloadTable): string | null {
-  for (const key of ["url", "sourceUrl", "source_url", "input_url", "inputUrl", "href", "detail"]) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
-}
-
-interface ValidatedDeepLink {
-  sourceUrl: string;
-  hint: string | null;
-  version: number;
-}
-
-const DEEP_LINK_SECRET_QUERY_KEYS = new Set([
-  "cookie",
-  "cookies",
-  "authorization",
-  "proxy-authorization",
-  "bearer",
-  "token",
-  "signature",
-  "sig",
-  "auth",
-  "secret",
-  "password",
-  "session",
-  "sid",
-  "apikey",
-  "api_key",
-  "key",
-]);
-
-function hasSecretQueryParams(urlString: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(urlString);
-  } catch {
-    return true;
-  }
-  for (const key of parsed.searchParams.keys()) {
-    if (DEEP_LINK_SECRET_QUERY_KEYS.has(key.toLowerCase())) return true;
-  }
-  return false;
-}
-
-// Deep-link source check: the shared input-URL shape plus the deep-link
-// non-secret rule (no secret query keys, no local-file/path markers).
-function isValidDeepLinkSource(source: unknown): source is string {
-  if (typeof source !== "string") return false;
-  const trimmed = source.trim();
-  if (!isValidInputUrl(trimmed)) return false;
-  if (hasSecretQueryParams(trimmed)) return false;
-  const lower = trimmed.toLowerCase();
-  for (const needle of ["file://", "/etc/", "c:\\"]) {
-    if (lower.includes(needle)) return false;
-  }
-  return true;
-}
-
-function normalizeDeepLinkHint(hint: unknown): string | null | undefined {
-  if (hint === undefined || hint === null) return null;
-  if (typeof hint !== "string") return undefined;
-  if (hint.includes("\0")) return undefined;
-  if (hint.length === 0) return null;
-  if (hint.length > 256) return undefined;
-  return hint;
-}
-
-function normalizeDeepLinkVersion(version: unknown): number | null {
-  if (typeof version === "number" && Number.isInteger(version)) {
-    return version === 1 || version === 2 ? version : null;
-  }
-  if (typeof version === "string" && (version === "1" || version === "2")) {
-    return Number(version);
-  }
-  return null;
-}
-
-// Re-parse one raw `dezoomify://open` URL in the frontend (defense in depth:
-// the Rust shell already validated it with `deep_link::parse_deep_link`).
-// Rejects oversize, wrong scheme, duplicate/unknown/secret fields,
-// unsupported versions, and malformed percent-encoding. Null means reject.
-function parseRawDeepLinkUrl(raw: string): ValidatedDeepLink | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (trimmed.length === 0 || trimmed.length > 2048) return null;
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== "dezoomify:") return null;
-  if (parsed.hostname !== "open") return null;
-  if (parsed.username !== "" || parsed.password !== "") return null;
-  const query = trimmed.split("?")[1]?.split("#")[0] ?? "";
-  if (query.length === 0) return null;
-  let versionRaw: string | null = null;
-  let srcRaw: string | null = null;
-  let hintRaw: string | null = null;
-  let seenV = false;
-  let seenSrc = false;
-  let seenHint = false;
-  for (const pair of query.split("&")) {
-    if (pair.length === 0) continue;
-    const eq = pair.indexOf("=");
-    if (eq < 0) return null;
-    const name = pair.slice(0, eq);
-    const value = pair.slice(eq + 1);
-    if (name.includes("%")) return null;
-    if (name === "v") {
-      if (seenV) return null;
-      seenV = true;
-      versionRaw = value;
-    } else if (name === "src") {
-      if (seenSrc) return null;
-      seenSrc = true;
-      srcRaw = value;
-    } else if (name === "hint") {
-      if (seenHint) return null;
-      seenHint = true;
-      hintRaw = value;
-    } else {
-      return null;
-    }
-  }
-  if (versionRaw !== "1" && versionRaw !== "2") return null;
-  if (srcRaw === null) return null;
-  let sourceUrl: string;
-  try {
-    sourceUrl = decodeURIComponent(srcRaw.replace(/\+/g, " "));
-  } catch {
-    return null;
-  }
-  if (!isValidDeepLinkSource(sourceUrl)) return null;
-  let hint: string | null = null;
-  if (hintRaw !== null) {
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(hintRaw.replace(/\+/g, " "));
-    } catch {
-      return null;
-    }
-    const normalized = normalizeDeepLinkHint(decoded);
-    if (normalized === undefined) return null;
-    hint = normalized;
-  }
-  return { sourceUrl: sourceUrl.trim(), hint, version: Number(versionRaw) };
-}
-
-// Validate a `dezoomify://deep-link-pending` payload again in the frontend
-// before showing the confirm UI. Accepts the redacted
-// `{source_url, hint, version}` triple emitted by the Rust shell, or a raw
-// `dezoomify://open` URL in legacy shapes. Null means reject (no-op).
-function validateDeepLinkPayload(payload: PayloadTable): ValidatedDeepLink | null {
-  const sourceRaw =
-    payload["source_url"] ?? payload["sourceUrl"] ?? extractDeepLinkUrl(payload);
-  if (typeof sourceRaw === "string" && sourceRaw.trim().startsWith("dezoomify://")) {
-    return parseRawDeepLinkUrl(sourceRaw);
-  }
-  const version = normalizeDeepLinkVersion(payload["version"] ?? payload["v"]);
-  if (version === null) return null;
-  if (!isValidDeepLinkSource(sourceRaw)) return null;
-  const hint = normalizeDeepLinkHint(payload["hint"] ?? null);
-  if (hint === undefined) return null;
-  return { sourceUrl: (sourceRaw as string).trim(), hint, version };
-}
 
 function dismissDeepLinkConfirm(restore = true): void {
   if (typeof document === "undefined") return;
@@ -1668,24 +920,25 @@ function showDeepLinkConfirm(info: ValidatedDeepLink): void {
   title.className = "dz-modal-title";
   title.id = "dz-deep-link-title";
   title.tabIndex = -1;
-  title.textContent = "Another app wants to open an image in Dezoomify.";
+  title.textContent = t("desktop.link.title");
   const source = doc.createElement("p");
   source.className = "dz-modal-subtitle";
   source.id = "dz-deep-link-desc";
-  source.textContent = `Source: ${info.sourceUrl}`;
+  source.textContent = t("desktop.link.source", { url: info.sourceUrl });
   const provenance = doc.createElement("p");
   provenance.className = "dz-notice-message";
-  provenance.textContent =
-    `Provenance: dezoomify:// link (v${info.version})` + (info.hint ? ` · ${info.hint}` : "");
+  provenance.textContent = info.hint
+    ? t("desktop.link.provHint", { version: info.version, hint: info.hint })
+    : t("desktop.link.prov", { version: info.version });
   const note = doc.createElement("p");
   note.className = "dz-notice-message";
-  note.textContent = "Nothing runs until you confirm. Declining does nothing.";
+  note.textContent = t("desktop.link.note");
   const row = doc.createElement("div");
   row.className = "dz-modal-actions";
   const declineButton = doc.createElement("button");
   declineButton.type = "button";
   declineButton.className = "dz-btn-secondary";
-  declineButton.textContent = "Dismiss";
+  declineButton.textContent = t("desktop.link.dismiss");
   const close = (): void => {
     doc.removeEventListener("keydown", onKeyDown, true);
     dismissDeepLinkConfirm(true);
@@ -1723,7 +976,7 @@ function showDeepLinkConfirm(info: ValidatedDeepLink): void {
   const confirmButton = doc.createElement("button");
   confirmButton.type = "button";
   confirmButton.className = "dz-btn-tactile";
-  confirmButton.textContent = "Open image";
+  confirmButton.textContent = t("desktop.link.open");
   confirmButton.addEventListener("click", () => {
     doc.removeEventListener("keydown", onKeyDown, true);
     dismissDeepLinkConfirm(true);
@@ -1840,7 +1093,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     };
     if (reason === "partial") {
       const summary = formatMissingSummary(missing, failedCount);
-      setStep("Some tiles could not be saved…", "Choose whether to keep the partial image, discard it, or retry.");
+      setStep(t("desktop.step.partialTitle"), t("desktop.step.partialDetail"));
       pushLog(`Recovery requested: partial (${summary} keep-partial / discard-partial / retry)`);
       if (typeof failedCount === "number") {
         const a = activity();
@@ -1848,7 +1101,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
         a.now = Date.now();
       }
     } else {
-      setStep("Choose where to save…", "The save destination needs attention before the job can continue.");
+      setStep(t("desktop.step.chooseWhere"), t("desktop.step.chooseWhereDetail"));
       pushLog("Recovery requested: destination (choose-output / retry)");
     }
     update();
@@ -1898,7 +1151,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
           }
         }
       }
-      if (!message) message = "The job failed.";
+      if (!message) message = t("desktop.job.failedFallback");
       // A "code: message" detail that duplicates the message adds no
       // technical value; keep detail only when it carries more.
       if (detail === message) detail = undefined;
@@ -1917,7 +1170,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
         a.failedRequests = failedCount;
         a.now = Date.now();
       }
-      dispatchFail(code, message, {
+      dispatchFail(failEnv, code, message, {
         transport,
         phase,
         ...(typeof retryable === "boolean" ? { retryable } : {}),
@@ -1929,12 +1182,12 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
   }
   if (kind === "error" || text.indexOf("error") >= 0) {
     const code = strField(payload, ["code"]) ?? "JOB_FAILED";
-    const message = strField(payload, ["message"]) ?? (detailRaw !== "" ? detailRaw : "The job failed.");
+    const message = strField(payload, ["message"]) ?? (detailRaw !== "" ? detailRaw : t("desktop.job.failedFallback"));
     const transport = strField(payload, ["transport"]) ?? NATIVE_TRANSPORT;
     const rawRetryable = payload["retryable"];
     const retryable = typeof rawRetryable === "boolean" ? rawRetryable : undefined;
     const resourceKind = strField(payload, ["resource-kind", "resource_kind", "resourceKind"]);
-    dispatchFail(code, message, {
+    dispatchFail(failEnv, code, message, {
       transport,
       phase: strField(payload, ["phase"]) ?? phaseFor(code),
       ...(typeof retryable === "boolean" ? { retryable } : {}),
@@ -1961,7 +1214,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     return;
   }
   if (kind === "cancelling" || text.indexOf("cancelling") >= 0 || text.indexOf("cleaning") >= 0) {
-    setStep("Working…", "Cleaning up… removing unfinished file…");
+    setStep(t("view.step.working"), t("desktop.step.cleanupDetail"));
     update();
     return;
   }
@@ -1969,7 +1222,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     if (kind === "progress" || kind === "downloading" || kind === "discovery" || kind === "encoding") {
       // Progress text never signals cancellation; fall through.
     } else {
-      setStep("Working…", "Cleaning up… removing unfinished file…");
+      setStep(t("view.step.working"), t("desktop.step.cleanupDetail"));
       update();
       return;
     }
@@ -2013,7 +1266,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
       const short = outputHash.slice(0, 24);
       pushLog(isPartial ? `Partial output ready (${short}…)` : `Output ready (${short}…)`);
     }
-    completeJob(
+    completeJob(jobEnv, 
       typeof width === "number" && typeof height === "number" && width > 0 && height > 0
         ? { width, height, mime }
         : undefined,
@@ -2029,25 +1282,28 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
   // grants observed as events.
   if (kind === "destination" || text.indexOf("destination") >= 0) {
     if (text.indexOf("denied") >= 0) {
-      dispatchFail("OUTPUT_DENIED", "The save destination was denied.");
+      dispatchFail(failEnv, "OUTPUT_DENIED", t("desktop.output.deniedFallback"));
       return;
     }
     const format = strField(payload, ["format"]) ?? detailRaw;
-    if (format === "png" || format === "jpeg" || format === "tiff") grantedFormat = format;
+    if (format) {
+      const normalized = normalizeNativeFormat(format);
+      if ((NATIVE_FORMATS as readonly string[]).includes(normalized)) grantedFormat = normalized;
+    }
     if (text.indexOf("awaiting") >= 0 || text.indexOf("request-destination") >= 0) {
       if (!pendingDecision) {
         pendingDecision = { kind: "destination-request", reason: "destination" };
       }
-      setStep("Choose where to save…", "Pick the output file to continue.");
+      setStep(t("desktop.step.chooseWhere"), t("desktop.step.pickOutput"));
       pushLog("Save destination requested");
       update();
       return;
     }
-    ensureChosenThroughPreflight(
+    preflightThrough(
       numField(payload, detailRaw, ["imageCount", "images", "count"]),
     );
     controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-start" });
-    setStep("Assembling the final picture…", "Encoding in the native app");
+    setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
     update();
     return;
   }
@@ -2080,17 +1336,16 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     } else if (!catalogNotice && controller.getState().imageCount > 0) {
       catalogNotice = { imageCount: controller.getState().imageCount };
     }
-    const noun = (catalogNotice?.imageCount ?? found ?? 0) === 1
-      ? "1 image"
-      : `${catalogNotice?.imageCount ?? found ?? 0} images`;
+    const nounCount = catalogNotice?.imageCount ?? found ?? 0;
+    const noun = nounCount === 1 ? t("view.job.oneImage") : t("view.job.manyImages", { count: nounCount });
     if ((catalogNotice?.imageCount ?? found ?? 0) > 0) {
       pushLog(`Found ${noun}; auto-saving largest that fits`);
       setStep(
-        `Found ${noun}, saving largest that fits…`,
-        "The app saves the first image automatically; no picker is offered.",
+        t("desktop.step.foundFits", { noun }),
+        t("desktop.step.appAutoDetail"),
       );
     } else {
-      setStep("Image found; picking the best one…");
+      setStep(t("view.step.choosingImage"));
     }
     update();
     return;
@@ -2106,7 +1361,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     flat.indexOf("awaitinglevel") >= 0
   ) {
     controller.dispatch({ seq: nextSeq(), sessionId, kind: "image-chosen" });
-    setStep("Choosing the highest resolution…");
+    setStep(t("view.step.choosingLevel"));
     update();
     return;
   }
@@ -2114,11 +1369,11 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
   // Display-only preview: no bytes will be readable, so no save is offered.
   if (text.indexOf("display-only") >= 0 || text.indexOf("display_only") >= 0) {
     if (isTerminalStatus(controller.getState().status)) return;
-    ensureChosenThroughPreflight(
+    preflightThrough(
       numField(payload, detailRaw, ["imageCount", "images", "count"]),
     );
     controller.dispatch({ seq: nextSeq(), sessionId, kind: "preflight-display-only" });
-    setStep("Display-only preview…", "This picture can only be viewed here.");
+    setStep(t("desktop.step.displayPreview"), t("desktop.step.displayDetail"));
     pushLog("Display-only preview");
     update();
     return;
@@ -2141,7 +1396,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     const total = numField(payload, detailRaw, ["total"]) ?? 0;
     const message = strField(payload, ["message"]);
     const progressCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
-    ensureChosenThroughPreflight(progressCount);
+    preflightThrough(progressCount);
     if (progressCount !== undefined || total > 0) {
       const prevCount = catalogNotice?.imageCount ?? controller.getState().imageCount ?? 0;
       catalogNotice = {
@@ -2153,13 +1408,13 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     viewCtx.currentProgress = { current, total, ...(message ? { message } : {}) };
     noteProgress(current, total);
     if (kind === "discovery" || text.indexOf("discover") >= 0) {
-      setStep("Finding the zoomable image…", `Contacting ${hostOf(lastInputUrl || activity().url || "")}…`);
+      setStep(t("view.step.discovering"), t("desktop.step.contacting", { host: hostOf(lastInputUrl || activity().url || "") }));
     } else if (kind === "encoding" || text.indexOf("encod") >= 0) {
-      setStep("Assembling the final picture…", "Encoding in the native app");
+      setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
     } else {
       setStep(
-        "Saving image tiles…",
-        total > 0 ? `${current} of ${total} tiles at full resolution` : undefined,
+        t("view.step.downloading"),
+        total > 0 ? t("desktop.step.tilesAtFull", { current, total }) : undefined,
       );
     }
     controller.dispatch({ seq: nextSeq(), sessionId, kind: "progress" });
@@ -2180,14 +1435,14 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
   ) {
     if (text.indexOf("running") >= 0 || text.indexOf("downloading") >= 0 || text.indexOf("acquiring") >= 0) {
       const runningCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
-      ensureChosenThroughPreflight(runningCount);
+      preflightThrough(runningCount);
       if (runningCount !== undefined && !catalogNotice) {
         catalogNotice = { imageCount: runningCount };
       }
       controller.dispatch({ seq: nextSeq(), sessionId, kind: "progress" });
-      setStep("Saving image tiles…");
-    } else if (text.indexOf("cancelling") >= 0 || text.indexOf("cleaning") >= 0) {
-      setStep("Working…", "Cleaning up…");
+      setStep(t("view.step.downloading"));
+    } else     if (text.indexOf("cancelling") >= 0 || text.indexOf("cleaning") >= 0) {
+      setStep(t("view.step.working"), t("desktop.step.cleaningShort"));
     }
     update();
     return;
@@ -2248,11 +1503,14 @@ function syncInitialUrlFromLocation(): void {
   }
 }
 
-// Output format selector (todo 4.4): 3 native radios (PNG/JPEG/TIFF) bound
-// to grantedFormat. Flat flow inside the aux panel, native inputs so Tab and
-// screen readers work; the crisp 2px focus ring comes from desktop.css.
-// Changing a radio only updates grantedFormat; requestOutputAndResume reads
-// it when building { format, suggestedName } for requestSaveDestination.
+// Output format selector (todo 4.4, todo 5.1): 6 native radios
+// (PNG/JPEG/TIFF/ZIF/WebP/IIIF folder) bound to grantedFormat. Flat flow
+// inside the aux panel, native inputs so Tab and screen readers work; the
+// crisp 2px focus ring comes from desktop.css. Changing a radio only updates
+// grantedFormat; requestOutputAndResume reads it when building
+// { format, suggestedName } for requestSaveDestination. The `iiif-dir` radio
+// is the directory mode: it suggests a `.iiif` name and the shell writes the
+// IIIF tile tree at that path (extensionless also validates natively).
 function appendOutputFormatRadios(parent: HTMLElement, doc: Document): void {
   const group = doc.createElement("fieldset");
   group.id = "dz-output-format-group";
@@ -2262,9 +1520,9 @@ function appendOutputFormatRadios(parent: HTMLElement, doc: Document): void {
   group.style.margin = "0";
   const legend = doc.createElement("legend");
   legend.className = "dz-notice-message";
-  legend.textContent = "Output format";
+  legend.textContent = t("desktop.panel.outputFormat");
   group.appendChild(legend);
-  for (const value of NATIVE_ENCODERS) {
+  for (const value of NATIVE_FORMATS) {
     const label = doc.createElement("label");
     label.style.display = "inline-flex";
     label.style.alignItems = "center";
@@ -2276,10 +1534,18 @@ function appendOutputFormatRadios(parent: HTMLElement, doc: Document): void {
     input.value = value;
     if (normalizeNativeFormat(grantedFormat) === value) input.checked = true;
     input.addEventListener("change", () => {
-      if (input.checked) grantedFormat = normalizeNativeFormat(input.value);
+      if (input.checked) {
+        grantedFormat = normalizeNativeFormat(input.value);
+        persistOutputFormat(grantedFormat);
+      }
     });
     const text = doc.createElement("span");
-    text.textContent = value === "png" ? "PNG" : value === "jpeg" ? "JPEG" : "TIFF";
+    if (value === "png") text.textContent = "PNG";
+    else if (value === "jpeg") text.textContent = "JPEG";
+    else if (value === "tiff") text.textContent = "TIFF";
+    else if (value === "zif") text.textContent = "ZIF";
+    else if (value === "webp") text.textContent = "WebP";
+    else text.textContent = "IIIF folder";
     label.append(input, text);
     group.appendChild(label);
   }
@@ -2359,7 +1625,7 @@ function ensureDesktopAuxPanel(): void {
   aux.id = "dz-desktop-aux";
   aux.className = "dz-view-body dz-desktop-aux";
   aux.setAttribute("role", "region");
-  aux.setAttribute("aria-label", "Desktop job actions");
+  aux.setAttribute("aria-label", t("desktop.panel.jobActions"));
   appendOutputFormatRadios(aux, doc);
 
   let decisionBox: HTMLElement | null = null;
@@ -2392,39 +1658,36 @@ function ensureDesktopAuxPanel(): void {
     }
 
     if (decision.kind === "partial-recovery") {
-      title.textContent = "Some tiles could not be saved";
+      title.textContent = t("desktop.rec.partialTitle");
       const missing = decision.missingTiles ?? [];
       const summary = formatMissingSummary(missing, decision.failedCount);
-      desc.textContent =
-        `Part of the image is missing. ${summary} Keep the partial image` +
-        ` (blank areas stay empty), discard it, or retry the failed tiles.`;
+      desc.textContent = t("desktop.rec.partialDesc", { summary });
       decisionBox.append(title, desc);
       if (missing.length > 0) {
         const list = doc.createElement("p");
         list.className = "dz-notice-message dz-missing-list";
         const shown = missing.slice(0, 20).join(", ");
-        const rest = missing.length > 20 ? ` and ${missing.length - 20} more` : "";
-        list.textContent = `Missing tiles: ${shown}${rest}.`;
+        const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
+        list.textContent = t("desktop.rec.missing", { shown, rest });
         decisionBox.appendChild(list);
       }
       decisionBox.appendChild(row);
-      addButton("Keep partial image", true, () => handlePartialChoice(true));
-      addButton("Discard partial", false, () => handlePartialChoice(false));
-      addButton("Retry failed tiles", false, () => handleRecoveryRetry());
+      addButton(t("desktop.rec.keep"), true, () => handlePartialChoice(true));
+      addButton(t("desktop.rec.discard"), false, () => handlePartialChoice(false));
+      addButton(t("desktop.rec.retryTiles"), false, () => handleRecoveryRetry());
     } else if (decision.kind === "destination-recovery") {
-      title.textContent = "Save destination needs attention";
-      desc.textContent =
-        "The save destination was not accepted. Choose an output file, try again, or use another app.";
+      title.textContent = t("desktop.rec.destTitle");
+      desc.textContent = t("desktop.rec.destDesc");
       decisionBox.append(title, desc, row);
-      addButton("Choose output…", true, () => requestOutputAndResume("choose-output"));
-      addButton("Try again", false, () => handleRecoveryRetry());
-      addButton("Use another app", false, () => handleHandoffToNative());
+      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume("choose-output"));
+      addButton(t("desktop.rec.tryAgain"), false, () => handleRecoveryRetry());
+      addButton(t("desktop.rec.useOther"), false, () => handleHandoffToNative());
     } else {
-      title.textContent = "Choose where to save";
-      desc.textContent = "Pick the output file to continue saving this image.";
+      title.textContent = t("desktop.rec.chooseTitle");
+      desc.textContent = t("desktop.rec.chooseDesc");
       decisionBox.append(title, desc, row);
-      addButton("Choose output…", true, () => requestOutputAndResume("choose-output"));
-      addButton("Use another app", false, () => handleHandoffToNative());
+      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume("choose-output"));
+      addButton(t("desktop.rec.useOther"), false, () => handleHandoffToNative());
     }
     decisionBox.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -2467,20 +1730,18 @@ function ensureDesktopAuxPanel(): void {
     doneBox.setAttribute("aria-live", "polite");
     const title = doc.createElement("h2");
     title.className = "dz-notice-title";
-    title.textContent = "Partial image saved";
+    title.textContent = t("desktop.done.partialTitle");
     const desc = doc.createElement("p");
     desc.className = "dz-notice-message";
     const summary = formatMissingSummary(completedMissing, completedMissing.length);
-    desc.textContent =
-      `This file is marked as partial: ${summary} Missing areas are left` +
-      ` blank. This distinguishes it from a complete save.`;
+    desc.textContent = t("desktop.done.partialDesc", { summary });
     doneBox.append(title, desc);
     if (completedMissing.length > 0) {
       const list = doc.createElement("p");
       list.className = "dz-notice-message dz-missing-list";
       const shown = completedMissing.slice(0, 20).join(", ");
-      const rest = completedMissing.length > 20 ? ` and ${completedMissing.length - 20} more` : "";
-      list.textContent = `Missing tiles: ${shown}${rest}.`;
+      const rest = completedMissing.length > 20 ? t("desktop.rec.more", { n: completedMissing.length - 20 }) : "";
+      list.textContent = t("desktop.rec.missing", { shown, rest });
       doneBox.appendChild(list);
     }
     aux.appendChild(doneBox);
@@ -2492,7 +1753,7 @@ function ensureDesktopAuxPanel(): void {
     note.id = "dz-cancel-cleanup-note";
     note.setAttribute("role", "status");
     note.setAttribute("aria-live", "polite");
-    note.textContent = "Save cancelled. Cleanup is done and any unfinished file was removed.";
+    note.textContent = t("desktop.cancel.note");
     aux.appendChild(note);
   }
 
@@ -2503,8 +1764,8 @@ function ensureDesktopAuxPanel(): void {
     copyBtn.type = "button";
     copyBtn.id = "dz-btn-copy-diag";
     copyBtn.className = "dz-btn-secondary";
-    copyBtn.textContent = "Copy diagnostics";
-    copyBtn.addEventListener("click", () => handleCopyDiagnostics());
+    copyBtn.textContent = t("desktop.copy.diagnostics");
+    copyBtn.addEventListener("click", () => handleCopyDiagnostics(() => buildCopyDiagnostics(diagnosticsSnapshot())));
     copyRow.appendChild(copyBtn);
     aux.appendChild(copyRow);
   }
@@ -2544,190 +1805,6 @@ function ensureDesktopAuxPanel(): void {
     recoveryReturnFocus = null;
   }
   lastRecoveryKey = decisionKey;
-}
-
-// Minimal settings panel: simple section inside the single status card,
-// re-applied after every render by stable id. Skips re-render while focus
-// sits inside the panel so typing never loses focus. All values validate
-// fail-closed; header values never enter logs or diagnostics.
-//
-// Accessibility: region labelled by its heading, every input wrapped in an
-// explicit label (name + control), browse buttons carry distinct aria-labels
-// so the two "Browse" actions stay distinguishable, and validation errors
-// use role="alert" with aria-live assertive. All controls are native and Tab
-// reachable with the crisp 2px focus ring.
-function ensureDesktopSettingsPanel(): void {
-  if (typeof document === "undefined" || !root) return;
-  const card = root.querySelector(".dz-card");
-  if (!card) return;
-  const existing = document.getElementById("dz-desktop-settings");
-  if (existing && existing.contains(document.activeElement)) return;
-  existing?.remove();
-
-  const doc = root.ownerDocument;
-  const panel = doc.createElement("div");
-  panel.id = "dz-desktop-settings";
-  panel.className = "dz-view-body dz-desktop-settings";
-  panel.setAttribute("role", "region");
-  panel.setAttribute("aria-labelledby", "dz-settings-title");
-
-  const title = doc.createElement("h2");
-  title.className = "dz-notice-title";
-  title.id = "dz-settings-title";
-  title.textContent = "Settings";
-  const desc = doc.createElement("p");
-  desc.className = "dz-notice-message";
-  desc.textContent =
-    "Minimal download settings. Saved on this device and used for the next job. Headers are sent to the image origin only and never logged.";
-  panel.append(title, desc);
-
-  const form = doc.createElement("div");
-  form.className = "dz-settings-form";
-
-  function addLabeledInput(
-    id: string,
-    label: string,
-    value: string,
-    opts: { inputMode?: string; placeholder?: string; type?: string },
-  ): HTMLInputElement {
-    const wrap = doc.createElement("label");
-    wrap.className = "dz-settings-field";
-    wrap.setAttribute("for", id);
-    const span = doc.createElement("span");
-    span.textContent = label;
-    const input = doc.createElement("input");
-    input.id = id;
-    input.name = id;
-    input.type = opts.type ?? "text";
-    input.className = "dz-input";
-    if (opts.inputMode) input.inputMode = opts.inputMode;
-    if (opts.placeholder) input.placeholder = opts.placeholder;
-    input.value = value;
-    input.addEventListener("change", () => persistSettingsFromPanel());
-    wrap.append(span, input);
-    form.appendChild(wrap);
-    return input;
-  }
-
-  const outputInput = addLabeledInput(
-    "dz-settings-output-dir",
-    "Output directory (optional)",
-    desktopSettings.outputDir ?? "",
-    { placeholder: "/home/you/Pictures" },
-  );
-  const compressionInput = addLabeledInput(
-    "dz-settings-compression",
-    "Compression 0-100 (default 5)",
-    String(desktopSettings.compression),
-    { inputMode: "numeric" },
-  );
-  const maxWidthInput = addLabeledInput(
-    "dz-settings-max-width",
-    "Max width px (optional)",
-    desktopSettings.maxWidth === null ? "" : String(desktopSettings.maxWidth),
-    { inputMode: "numeric", placeholder: "empty = largest" },
-  );
-  const maxHeightInput = addLabeledInput(
-    "dz-settings-max-height",
-    "Max height px (optional)",
-    desktopSettings.maxHeight === null ? "" : String(desktopSettings.maxHeight),
-    { inputMode: "numeric", placeholder: "empty = largest" },
-  );
-  const retriesInput = addLabeledInput(
-    "dz-settings-retries",
-    "Retries 0-100 (default 3, 0 = none)",
-    String(desktopSettings.retries),
-    { inputMode: "numeric" },
-  );
-  const cacheInput = addLabeledInput(
-    "dz-settings-cache-dir",
-    "Cache directory (optional resume cache)",
-    desktopSettings.cacheDir ?? "",
-    { placeholder: "/home/you/.cache/dezoomify" },
-  );
-  void compressionInput;
-  void maxWidthInput;
-  void maxHeightInput;
-  void retriesInput;
-
-  function addBrowseButton(forInput: HTMLInputElement, label: string): void {
-    const btn = doc.createElement("button");
-    btn.type = "button";
-    btn.className = "dz-btn-secondary";
-    btn.textContent = "Browse…";
-    btn.setAttribute("aria-label", label);
-    btn.addEventListener("click", () => {
-      void pickDirectory(forInput.value || null).then((picked) => {
-        if (picked) {
-          forInput.value = picked;
-          persistSettingsFromPanel();
-          try {
-            forInput.focus();
-          } catch {
-            // Focus restore is best effort.
-          }
-        } else {
-          try {
-            btn.focus();
-          } catch {
-            // Keep focus where it is when the picker cancels.
-          }
-        }
-      });
-    });
-    form.appendChild(btn);
-  }
-  addBrowseButton(outputInput, "Browse for output directory");
-  addBrowseButton(cacheInput, "Browse for cache directory");
-
-  const headersDetails = doc.createElement("details");
-  headersDetails.className = "dz-details";
-  headersDetails.open = true;
-  const headersSummary = doc.createElement("summary");
-  headersSummary.className = "dz-summary";
-  headersSummary.textContent = "Advanced: request headers (trusted)";
-  const headersLabel = doc.createElement("label");
-  headersLabel.className = "dz-settings-field";
-  headersLabel.setAttribute("for", "dz-settings-headers");
-  const headersSpan = doc.createElement("span");
-  headersSpan.textContent = "Request headers, one per line as Name: value (optional, trusted)";
-  const headersInput = doc.createElement("textarea");
-  headersInput.id = "dz-settings-headers";
-  headersInput.name = "dz-settings-headers";
-  headersInput.className = "dz-input";
-  headersInput.rows = 3;
-  headersInput.placeholder = "Referer: https://example.com/viewer";
-  headersInput.value = Object.entries(desktopSettings.headers)
-    .map(([name, value]) => `${name}: ${value}`)
-    .join("\n");
-  headersInput.addEventListener("change", () => persistSettingsFromPanel());
-  headersLabel.append(headersSpan, headersInput);
-  headersDetails.append(headersSummary, headersLabel);
-  form.appendChild(headersDetails);
-
-  panel.appendChild(form);
-
-  if (settingsError) {
-    const err = doc.createElement("p");
-    err.className = "dz-notice-message";
-    err.id = "dz-settings-error";
-    err.setAttribute("role", "alert");
-    err.setAttribute("aria-live", "assertive");
-    err.textContent = settingsError;
-    panel.appendChild(err);
-  }
-
-  const row = doc.createElement("div");
-  row.className = "dz-actions-row";
-  const resetBtn = doc.createElement("button");
-  resetBtn.type = "button";
-  resetBtn.className = "dz-btn-secondary";
-  resetBtn.textContent = "Reset settings";
-  resetBtn.addEventListener("click", () => resetDesktopSettings());
-  row.appendChild(resetBtn);
-  panel.appendChild(row);
-
-  card.appendChild(panel);
 }
 
 // Resolve any anchor href seen in the privileged window to a canonical
@@ -2845,7 +1922,7 @@ function ensureDesktopHelpAbout(): void {
   const title = doc.createElement("h2");
   title.className = "dz-notice-title";
   title.id = "dz-help-title";
-  title.textContent = "Help and about";
+  title.textContent = t("desktop.help.title");
   region.appendChild(title);
 
   const version = doc.createElement("p");
@@ -2927,7 +2004,13 @@ function update() {
     },
   );
   ensureDesktopAuxPanel();
-  ensureDesktopSettingsPanel();
+  ensureDesktopSettingsPanel({
+    root,
+    settings: desktopSettings,
+    error: settingsError,
+    onPersist: () => runPersistSettingsFromPanel(),
+    onReset: () => runResetDesktopSettings(),
+  });
   ensureDesktopHelpAbout();
   ensureDesktopExternalNav();
   ensureDesktopFooter();
@@ -2964,7 +2047,7 @@ function getPendingDecision(): PendingDecision | null {
   };
 }
 
-function getCatalogNotice(): { imageCount: number; width?: number; height?: number; tiles?: number } | null {
+function getCatalogNotice(): CatalogNotice | null {
   return catalogNotice ? { ...catalogNotice } : null;
 }
 
