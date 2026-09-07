@@ -2,15 +2,15 @@
   "action": {
     "default_title": "Dezoomify",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "16": "icons/icon16-grey.png",
+      "48": "icons/icon48-grey.png",
+      "128": "icons/icon128-grey.png"
     }
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'"
   },
-  "description": "Save full-resolution zoomable images. Finite active-tab scan only; no background monitoring.",
+  "description": "Click to monitor the active tab for zoomable images. Explicit-action indefinite monitoring only: one reload, stops on detection, second click, tab close, or navigation; no background monitoring.",
   "host_permissions": [],
   "icons": {
     "16": "icons/icon16.png",
@@ -21,6 +21,12 @@
   "name": "Dezoomify",
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "optional_permissions": ["cookies"],
-  "permissions": ["activeTab", "webRequest", "nativeMessaging"],
-  "version": "3.0.0"
+  "permissions": ["activeTab", "scripting", "webRequest", "nativeMessaging"],
+  "version": "3.0.0",
+  "web_accessible_resources": [
+    {
+      "resources": ["modal/modal.html"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ]
 }

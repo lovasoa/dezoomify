@@ -46,7 +46,9 @@ complete within the 1500 ms metadata window, for an eligible public,
 non-credential metadata request (never tiles). The active transport is always visible. No cookies,
 `Authorization`, browser credentials, or user-supplied credential headers are
 sent to or by the proxy. The extension never uses the metadata CORS proxy;
-extension-to-native cookie handoff is separately consent-gated. It connects
+extension-to-native cookie handoff is separately consent-gated. The extension
+transport is tab-origin direct fetch followed by `<img>` tainted
+display-only, with the active transport always visible. It connects
 `packages/shared-ui` to
 `crates/dezoomify-wasm` on the website and in the extension.
 

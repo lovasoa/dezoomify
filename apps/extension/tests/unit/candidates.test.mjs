@@ -107,3 +107,48 @@ test("dispose clears all candidates", () => {
   assert.equal(store.size, 0);
   assert.deepEqual(store.list(), []);
 });
+
+// --- Click-to-monitor windowing (additive; deterministic first-seen order) ---
+
+test("windowing: first-seen order preserved for core ranking", () => {
+  const store = createCandidateStore();
+  const urls = [
+    "https://a.example/viewer/page",
+    "https://a.example/ImageProperties.xml",
+    "https://tiles.example/iiif/image/info.json",
+  ];
+  for (const u of urls) assert.equal(store.add(u).added, true);
+  assert.deepEqual(store.list().map((c) => c.url), urls);
+});
+
+test("windowing: cap keeps the first window; overflow never evicts", () => {
+  const store = createCandidateStore();
+  for (let i = 0; i < MAX_CANDIDATES; i += 1) {
+    assert.equal(store.add(`https://a.example/img${i}.dzi`).added, true);
+  }
+  const first = store.list()[0].url;
+  const last = store.list()[MAX_CANDIDATES - 1].url;
+  assert.equal(first, "https://a.example/img0.dzi");
+  // Overflow rejected deterministically; the stored window is unchanged.
+  for (let i = 0; i < 10; i += 1) {
+    const over = store.add(`https://a.example/overflow${i}.dzi`);
+    assert.equal(over.added, false);
+    assert.equal(over.code, "cap-reached");
+  }
+  assert.equal(store.size, MAX_CANDIDATES);
+  assert.equal(store.list()[0].url, first);
+  assert.equal(store.list()[MAX_CANDIDATES - 1].url, last);
+});
+
+test("windowing: duplicates never consume cap slots", () => {
+  const store = createCandidateStore();
+  assert.equal(store.add("https://a.example/a.dzi").added, true);
+  for (let i = 0; i < 5; i += 1) {
+    assert.equal(store.add("https://a.example/a.dzi").code, "duplicate");
+  }
+  assert.equal(store.size, 1);
+  for (let i = 0; i < MAX_CANDIDATES - 1; i += 1) {
+    assert.equal(store.add(`https://a.example/fill${i}.dzi`).added, true);
+  }
+  assert.equal(store.size, MAX_CANDIDATES);
+});

@@ -491,8 +491,11 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("stage manifest: {e}"))?;
     // Stage exactly what apps/extension/scripts/package-store.sh ships
     // (least privilege): background/index.js as a CLASSIC script
-    // (export-free), the page entry plus its direct imports, icons, and
-    // the wasm glue. Never app/, content/, or helper-only page files.
+    // (export-free), the injected in-tab modal (content/modal.js classic
+    // export-free plus its host CSS) with the job iframe document and its
+    // module app, the page entry plus its direct imports, icons (brand plus
+    // grey idle set), and the wasm glue. Never app/ or helper-only files;
+    // src/content/* otherwise stays unit-test only.
     let bg_src = std::fs::read_to_string(src.join("background/index.ts"))
         .map_err(|e| format!("read background/index.ts: {e}"))?;
     let mut bg_out = String::new();
@@ -504,6 +507,34 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&bg_dir).map_err(|e| format!("create background: {e}"))?;
     std::fs::write(bg_dir.join("index.js"), bg_out)
         .map_err(|e| format!("stage background/index.js: {e}"))?;
+    let modal_src = std::fs::read_to_string(src.join("content/modal.js"))
+        .map_err(|e| format!("read content/modal.js: {e}"))?;
+    let mut modal_out = String::new();
+    for line in modal_src.lines() {
+        modal_out.push_str(line.strip_prefix("export ").unwrap_or(line));
+        modal_out.push('\n');
+    }
+    let content_dir = staging.join("content");
+    std::fs::create_dir_all(&content_dir).map_err(|e| format!("create content: {e}"))?;
+    std::fs::write(content_dir.join("modal.js"), modal_out)
+        .map_err(|e| format!("stage content/modal.js: {e}"))?;
+    std::fs::copy(
+        src.join("content").join("modal.css"),
+        content_dir.join("modal.css"),
+    )
+    .map_err(|e| format!("stage content/modal.css: {e}"))?;
+    let modal_dir = staging.join("modal");
+    std::fs::create_dir_all(&modal_dir).map_err(|e| format!("create modal: {e}"))?;
+    std::fs::copy(
+        src.join("modal").join("modal.html"),
+        modal_dir.join("modal.html"),
+    )
+    .map_err(|e| format!("stage modal/modal.html: {e}"))?;
+    std::fs::copy(
+        src.join("modal").join("modal.ts"),
+        modal_dir.join("modal.js"),
+    )
+    .map_err(|e| format!("stage modal/modal.js: {e}"))?;
     let page_dir = staging.join("page");
     std::fs::create_dir_all(&page_dir).map_err(|e| format!("create page: {e}"))?;
     for name in [
@@ -545,7 +576,14 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     }
     let icons_dir = staging.join("icons");
     std::fs::create_dir_all(&icons_dir).map_err(|e| format!("create icons: {e}"))?;
-    for icon in ["icon16.png", "icon48.png", "icon128.png"] {
+    for icon in [
+        "icon16.png",
+        "icon48.png",
+        "icon128.png",
+        "icon16-grey.png",
+        "icon48-grey.png",
+        "icon128-grey.png",
+    ] {
         std::fs::copy(src.join("icons").join(icon), icons_dir.join(icon))
             .map_err(|e| format!("stage {icon}: {e}"))?;
     }
@@ -563,6 +601,8 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     }
     for rel in [
         "background/index.js",
+        "content/modal.js",
+        "modal/modal.js",
         "page/page.js",
         "page/scan.js",
         "page/candidates.js",

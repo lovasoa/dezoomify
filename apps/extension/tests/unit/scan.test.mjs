@@ -268,3 +268,192 @@ test("TS source contains finite-machine and security tokens", () => {
     assert.ok(src.includes(tok), `scan.ts missing ${tok}`);
   }
 });
+
+// --- Click-to-monitor indefinite bounds (additive; no deadlines fired) ---
+//
+// The redesign is indefinite explicit-action monitoring: grey idle, blue+dot
+// while monitoring, single reload, stop on detection/second-click/close/
+// navigate, no auto-rearm, worker restart fails closed. The fake scheduler
+// never fires unless the test fires it, so "indefinite" here means the
+// scanner stays armed across activity until an explicit terminal signal.
+
+test("indefinite: monitoring persists across activity until explicit detection stop", async () => {
+  const f = makeDeps();
+  const s = createScanner(f.deps);
+  await s.startScan({ quietMs: 60_000, deadlineMs: 3_600_000, finalizeMs: 10 });
+  s.notifyReloadComplete();
+  assert.equal(s.getState(), "observing");
+  // Sustained activity keeps monitoring alive; nothing stops itself.
+  for (let i = 0; i < 5; i += 1) {
+    assert.equal(s.handleRequest(11, `https://a.example/tile${i}.jpg`), true);
+    assert.equal(s.getState(), "observing");
+  }
+  assert.deepEqual(s.getListenerCounts(), { webRequest: 1, tab: 1, timers: 2 });
+  // Detection is an explicit stop with full cleanup (modal opens elsewhere).
+  s.dispose("detected");
+  assert.equal(s.getState(), "stopped");
+  assert.equal(s.getStopReason(), "detected");
+  assert.deepEqual(s.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+});
+
+test("indefinite: exactly one reload; activity and page events never reload", async () => {
+  const f = makeDeps();
+  const s = createScanner(f.deps);
+  await s.startScan({ quietMs: 60_000, deadlineMs: 3_600_000, finalizeMs: 10 });
+  assert.equal(f.reloadCount, 1);
+  s.notifyReloadComplete();
+  s.handleRequest(11, "https://a.example/a.dzi");
+  s.handleRequest(22, "https://b.example/noise.jpg");
+  for (const kind of ["open", "focus", "reconnect", "navigate", "restart-signal"]) {
+    const r = s.handleExtensionPageEvent(kind);
+    assert.equal(r.reloaded, false);
+    assert.equal(r.rearmed, false);
+  }
+  assert.equal(f.reloadCount, 1);
+  assert.deepEqual(f.order, ["observer", "reload:11"]);
+});
+
+test("indefinite: second click cancels monitoring with no second reload", async () => {
+  const f = makeDeps();
+  const s = createScanner(f.deps);
+  await s.startScan({ quietMs: 60_000, deadlineMs: 3_600_000, finalizeMs: 10 });
+  assert.equal(f.reloadCount, 1);
+  // Second click while monitoring: explicit cancel back to a clean stop.
+  s.dispose("second-click");
+  assert.equal(s.getState(), "stopped");
+  assert.equal(s.getStopReason(), "second-click");
+  assert.equal(f.reloadCount, 1);
+  assert.deepEqual(s.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+  // A fresh click after cancel starts a new generation with its single reload.
+  const before = f.reloadCount;
+  const out = await s.startScan({ quietMs: 60_000, deadlineMs: 3_600_000, finalizeMs: 10 });
+  assert.equal(out.generation, 2);
+  assert.equal(f.reloadCount, before + 1);
+});
+
+test("indefinite: tab closed or navigated stops monitoring without stale results", async () => {
+  const f1 = makeDeps();
+  const s1 = createScanner(f1.deps);
+  await s1.startScan({ quietMs: 60_000, deadlineMs: 3_600_000, finalizeMs: 10 });
+  s1.notifyReloadComplete();
+  s1.handleRequest(11, "https://a.example/a.dzi");
+  assert.equal(s1.handleTabRemoved(11), true);
+  assert.equal(s1.getState(), "stopped");
+  assert.equal(s1.getStopReason(), "tab-closed");
+  assert.deepEqual(s1.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+
+  const f2 = makeDeps();
+  const s2 = createScanner(f2.deps);
+  await s2.startScan({ quietMs: 60_000, deadlineMs: 3_600_000, finalizeMs: 10 });
+  s2.notifyReloadComplete();
+  s2.handleRequest(11, "https://a.example/a.dzi");
+  assert.equal(s2.handleTabUpdated(11), true);
+  assert.equal(s2.getState(), "stopped");
+  assert.equal(s2.getStopReason(), "tab-navigated");
+  assert.deepEqual(s2.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+});
+
+test("indefinite: worker restart fails closed to idle with no rearm", async () => {
+  const f = makeDeps();
+  const s = createScanner(f.deps);
+  await s.startScan({ quietMs: 60_000, deadlineMs: 3_600_000, finalizeMs: 10 });
+  s.notifyReloadComplete();
+  const before = f.reloadCount;
+  const r = s.handleWorkerRestart();
+  assert.equal(r.state, "idle");
+  assert.equal(r.reloaded, false);
+  assert.equal(r.rearmed, false);
+  assert.equal(s.getState(), "idle");
+  assert.equal(f.reloadCount, before);
+  assert.deepEqual(s.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+  // Next explicit click rearms exactly once.
+  await s.startScan({ quietMs: 60_000, deadlineMs: 3_600_000, finalizeMs: 10 });
+  assert.equal(f.reloadCount, before + 1);
+});
+
+// --- Indefinite API (`startScan({ indefinite: true })`, guarded) ---
+//
+// The background click-to-monitor flow schedules no timers and rests in
+// `detecting` until notifyDetected/cancel/tab-close/navigate/dispose. These
+// tests probe the API only when the scanner exposes it, so the finite page
+// flow contract above stays green on either version.
+
+test("indefinite api: no timers, single reload, detection stops monitoring", async (t) => {
+  const probe = createScanner(makeDeps().deps);
+  if (typeof probe.notifyDetected !== "function") {
+    t.skip("scanner predates the indefinite api");
+    return;
+  }
+  const f = makeDeps();
+  const s = createScanner(f.deps);
+  const out = await s.startScan({ indefinite: true });
+  assert.equal(out.indefinite, true);
+  assert.equal(f.reloadCount, 1);
+  assert.deepEqual(s.getListenerCounts(), { webRequest: 1, tab: 1, timers: 0 });
+  s.notifyReloadComplete();
+  assert.equal(s.getState(), "detecting");
+  assert.deepEqual(s.getListenerCounts(), { webRequest: 1, tab: 1, timers: 0 });
+  // Observed traffic counts but never stops monitoring by itself.
+  assert.equal(s.handleRequest(11, "https://a.example/a.dzi"), true);
+  assert.equal(s.getState(), "detecting");
+  assert.equal(f.reloadCount, 1);
+  assert.equal(s.notifyDetected("iiif"), true);
+  assert.equal(s.getState(), "stopped");
+  assert.equal(s.getStopReason(), "detected");
+  assert.deepEqual(s.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+});
+
+test("indefinite api: second-click cancel and replace with no extra reload", async (t) => {
+  const probe = createScanner(makeDeps().deps);
+  if (typeof probe.cancel !== "function") {
+    t.skip("scanner predates the indefinite api");
+    return;
+  }
+  const f = makeDeps();
+  const s = createScanner(f.deps);
+  await s.startScan({ indefinite: true });
+  assert.equal(s.cancel(), true);
+  assert.equal(s.getState(), "stopped");
+  assert.equal(s.getStopReason(), "cancelled");
+  assert.equal(f.reloadCount, 1);
+  assert.deepEqual(s.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+  // Cancel on idle/stopped is a no-op.
+  assert.equal(s.cancel(), false);
+  // Fresh click after cancel rearms exactly once.
+  const out = await s.startScan({ indefinite: true });
+  assert.equal(out.generation, 2);
+  assert.equal(f.reloadCount, 2);
+});
+
+test("indefinite api: tab close/navigate and restart fail closed", async (t) => {
+  const probe = createScanner(makeDeps().deps);
+  if (typeof probe.notifyDetected !== "function" || typeof probe.cancel !== "function") {
+    t.skip("scanner predates the indefinite api");
+    return;
+  }
+  const f1 = makeDeps();
+  const s1 = createScanner(f1.deps);
+  await s1.startScan({ indefinite: true });
+  s1.notifyReloadComplete();
+  assert.equal(s1.handleTabRemoved(11), true);
+  assert.equal(s1.getStopReason(), "tab-closed");
+  assert.deepEqual(s1.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+
+  const f2 = makeDeps();
+  const s2 = createScanner(f2.deps);
+  await s2.startScan({ indefinite: true });
+  s2.notifyReloadComplete();
+  assert.equal(s2.handleTabUpdated(11), true);
+  assert.equal(s2.getStopReason(), "tab-navigated");
+  assert.deepEqual(s2.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+
+  const f3 = makeDeps();
+  const s3 = createScanner(f3.deps);
+  await s3.startScan({ indefinite: true });
+  s3.notifyReloadComplete();
+  const r = s3.handleWorkerRestart();
+  assert.equal(r.state, "idle");
+  assert.equal(r.reloaded, false);
+  assert.equal(r.rearmed, false);
+  assert.deepEqual(s3.getListenerCounts(), { webRequest: 0, tab: 0, timers: 0 });
+});

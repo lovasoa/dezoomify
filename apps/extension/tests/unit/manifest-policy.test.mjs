@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 
 function readJson(rel) {
   return JSON.parse(readFileSync(new URL(rel, import.meta.url), "utf8"));
@@ -32,7 +32,7 @@ const firefoxOverlay = readJson("../../src/manifest/firefox.json");
 const genChromium = readJson("../../generated/manifest.chromium.json");
 const genFirefox = readJson("../../generated/manifest.firefox.json");
 
-const REVIEWED_PERMS = new Set(["activeTab", "webRequest", "nativeMessaging"]);
+const REVIEWED_PERMS = new Set(["activeTab", "scripting", "webRequest", "nativeMessaging"]);
 const REVIEWED_OPTIONAL = new Set(["cookies"]);
 const EXPECTED_GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 
@@ -73,9 +73,15 @@ for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefo
   });
 
   test(`${name}: no remote code`, () => {
-    const withoutOptionalHosts = JSON.stringify({ ...manifest, optional_host_permissions: undefined });
-    assert.ok(!withoutOptionalHosts.includes("http://"), `${name} unexpected remote http`);
-    assert.ok(!withoutOptionalHosts.includes("javascript:"), `${name} javascript: URL`);
+    // Match patterns (optional hosts, iframe exposure) are grants, not
+    // code: strip them before scanning for remote references.
+    const withoutGrants = JSON.stringify({
+      ...manifest,
+      optional_host_permissions: undefined,
+      web_accessible_resources: undefined,
+    });
+    assert.ok(!withoutGrants.includes("http://"), `${name} unexpected remote http`);
+    assert.ok(!withoutGrants.includes("javascript:"), `${name} javascript: URL`);
     for (const u of backgroundUrls(manifest)) {
       assert.ok(!u.startsWith("http"), `${name} remote background ${u}`);
       assert.ok(!u.startsWith("data:"), `${name} data background ${u}`);
@@ -103,19 +109,32 @@ for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefo
     // anchor, which needs no `downloads` permission, so it must stay absent.
     assert.ok(!(manifest.permissions ?? []).includes("downloads"), `${name} unused downloads permission`);
     // Least privilege: the page works on the bound tab only (`tabs.get`),
-    // never enumerates tabs, so `tabs`/`scripting` must stay absent.
+    // never enumerates tabs, so `tabs` must stay absent. `scripting` is
+    // reviewed and used: the background injects the in-tab modal on the
+    // clicked tab only, after detection (never declared content scripts).
     assert.ok(!(manifest.permissions ?? []).includes("tabs"), `${name} tabs permission forbids tab enumeration`);
-    assert.ok(!(manifest.permissions ?? []).includes("scripting"), `${name} scripting permission unused`);
+    assert.ok((manifest.permissions ?? []).includes("scripting"), `${name} scripting permission required for detected-tab modal injection`);
     assert.equal(manifest.content_scripts, undefined, `${name} no content scripts declared`);
   });
 
-  test(`${name}: declared icons exist`, () => {
+  test(`${name}: declared icons exist (grey idle action, blue brand icons)`, () => {
     for (const [size, path] of Object.entries(manifest.icons ?? {})) {
       assert.ok(["16", "48", "128"].includes(size), `${name} unexpected icon size ${size}`);
       assert.ok(path.startsWith("icons/"), `${name} icon must be bundled ${path}`);
     }
     assert.deepEqual(Object.keys(manifest.icons ?? {}).sort(), ["128", "16", "48"]);
-    assert.deepEqual(manifest.action?.default_icon, manifest.icons, `${name} action icon must match icons`);
+    // Toolbar action defaults to the grey idle set (background swaps blue
+    // while monitoring via action.setIcon); brand icons stay blue.
+    assert.deepEqual(manifest.action?.default_icon, {
+      16: "icons/icon16-grey.png",
+      48: "icons/icon48-grey.png",
+      128: "icons/icon128-grey.png",
+    }, `${name} action icon must be the grey idle set`);
+    assert.deepEqual(manifest.icons, {
+      16: "icons/icon16.png",
+      48: "icons/icon48.png",
+      128: "icons/icon128.png",
+    }, `${name} brand icons must be the blue set`);
   });
 }
 
@@ -142,6 +161,59 @@ test("declared permissions are used by shipped code", () => {
   assert.ok(page.includes("api.cookies.getAll"), "cookies must be used by consented handoff");
   assert.ok(page.includes("api.webRequest.onBeforeRequest"), "webRequest must be used by scan");
   assert.ok(!page.includes("chrome.downloads"), "downloads API must stay unused (blob anchor save)");
+  // The background click-to-monitor owns the exact-tabId observer, the
+  // single reload, and the grey<->blue+dot icon transitions, and injects
+  // the in-tab modal on the clicked tab only, after detection.
+  const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
+  assert.ok(background.includes("onBeforeRequest"), "webRequest observer must live in the background monitor");
+  assert.ok(background.includes("tabs.reload"), "background must perform the single monitored reload");
+  assert.ok(background.includes("setIcon"), "background must swap grey<->blue icons");
+  assert.ok(background.includes("setBadgeText"), "background must show the monitoring badge dot");
+  assert.ok(background.includes("executeScript"), "background must inject the modal on the detected tab");
+  assert.ok(background.includes("insertCSS"), "background must inject the modal host CSS on the detected tab");
+  assert.ok(background.includes("content/modal.js"), "background must inject only the reviewed loader entry");
+  assert.ok(background.includes("content/modal.css"), "background must inject only the reviewed host CSS");
+  assert.ok(!background.includes("tabs.query"), "background must never enumerate tabs");
+  // Loader protocol parity: background and content/modal.js share the
+  // `{ type }` runtime messages (streaming update with urls, tab-side byte
+  // confirmation, close, fallback). URL-text-only `dezoomify-detected` is
+  // retired: the background never emits it (many formats require response
+  // bytes); the loader still accepts it as candidates-only (covered in
+  // modal-in-tab.test.mjs).
+  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-open-panel"]) {
+    assert.ok(background.includes(kind), `background must speak ${kind}`);
+  }
+  assert.ok(background.includes("urls"), "background monitor-update must stream candidate urls");
+  assert.ok(!background.includes("dezoomify-detected"), "background must not emit retired URL-text detection");
+  const loader = readFileSync(new URL("../../src/content/modal.js", import.meta.url), "utf8");
+  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-open-panel"]) {
+    assert.ok(loader.includes(kind), `injected loader must speak ${kind}`);
+  }
+});
+
+test("click-to-monitor least privilege: observer-before-reload, no enumeration, no offscreen", () => {
+  const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
+  const code = background
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+    .join("\n");
+  // The clicked tab id comes from the action event only; the background
+  // never enumerates tabs and never requests broad hosts.
+  assert.ok(code.includes("onClicked"), "monitor must arm on the explicit action click");
+  assert.ok(!code.includes("tabs.query"), "background must never enumerate tabs");
+  assert.ok(!code.includes("<all_urls>"), "background filter must be http/https, never <all_urls>");
+  assert.ok(code.includes('"http://*/*"'), "background filter must cover http");
+  assert.ok(code.includes('"https://*/*"'), "background filter must cover https");
+  assert.ok(code.includes("tabId,"), "background observer must filter by exact tabId");
+  assert.ok(code.includes("onRemoved"), "monitor must stop when the tab closes");
+  assert.ok(code.includes("onUpdated"), "monitor must stop when the tab navigates");
+  assert.ok(code.includes("onInstalled"), "install must open first-run guidance only");
+  assert.ok(!code.includes("offscreen"), "no offscreen document (unnecessary for a reload monitor)");
+  assert.ok(!code.includes("host_permissions"), "background must not touch broad host permissions");
+  // No offscreen declared in either generated manifest either.
+  for (const gen of [genChromium, genFirefox]) {
+    assert.equal(gen.offscreen, undefined, "offscreen must stay undeclared");
+  }
 });
 
 test("bound-tab least privilege: no tab enumeration, narrow webRequest filter", () => {
@@ -162,9 +234,19 @@ test("bound-tab least privilege: no tab enumeration, narrow webRequest filter", 
 
 test("store package ships only loaded files (no dead code)", () => {
   const script = readFileSync(new URL("../../scripts/package-store.sh", import.meta.url), "utf8");
-  // No content_scripts declared, so content/ must never be zipped.
-  assert.ok(!script.includes(" page content wasm"), "package must not zip content/ (no content_scripts)");
-  assert.ok(script.includes("icons background page wasm"), "package must zip icons+background+page+wasm");
+  // No content_scripts declared: the programmatically injected loader plus
+  // the job iframe (modal/, clicked tab only) ship; src/content/* stays
+  // unit-test only. The bound page stays as the injection fallback and E2E path.
+  assert.ok(script.includes("content/modal.js"), "package must stage the injected loader entry");
+  assert.ok(script.includes("content/modal.css"), "package must stage the injected host CSS");
+  assert.ok(script.includes("modal/modal.html"), "package must stage the job iframe document");
+  assert.ok(script.includes("modal/modal.js"), "package must stage the job iframe runner");
+  assert.ok(!script.match(/(strip_exports|cp) "\$SRC\/content\/reload-marker/), "package must never stage the reload marker");
+  assert.ok(script.includes('content/reload-marker.js'), "package must guard against the reload marker shipping");
+  assert.ok(script.includes('content/'), "package must guard against content/ shipping");
+  assert.ok(script.includes("icons background content modal page wasm"), "package must zip icons+background+content+modal+page+wasm");
+  // The grey idle set swapped via action.setIcon must ship with the brand icons.
+  assert.ok(script.includes("icon16-grey.png"), "package must stage the grey idle icons");
   // E2E-only manifest variant must not inject a tabs permission: shipped
   // code (and the harness) never enumerates tabs.
   assert.ok(!script.includes('"tabs"'), "package must never inject tabs permission");
@@ -188,4 +270,92 @@ test("generated manifests are the deterministic generator output (base+overlay, 
       assert.ok(!key.startsWith("_"), `${name} generated manifest must not ship ${key}`);
     }
   }
+});
+
+// --- Click-to-monitor modal policy (additive; least privilege) ---
+//
+// Monitoring (grey idle action icon, blue brand icons + badge dot while
+// watching) observes via an exact-tabId webRequest filter before a single
+// reload, then injects the in-tab modal on the clicked tab only (`scripting`
+// on detection, never declared content scripts): no tab enumeration, no
+// permanent hosts, no downloads, tab-origin fetch only, and no metadata
+// proxy.
+
+test("monitoring adds no permissions (no tabs/downloads/cookies/hosts; scripting reviewed)", () => {
+  for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
+    for (const forbidden of ["tabs", "downloads", "cookies"]) {
+      assert.ok(!(manifest.permissions ?? []).includes(forbidden), `${name} monitoring must not add ${forbidden}`);
+    }
+    // `scripting` is the one reviewed addition: detected-tab-only modal
+    // injection (executeScript/insertCSS on the clicked tab, used by the
+    // background monitor).
+    assert.ok((manifest.permissions ?? []).includes("scripting"), `${name} modal injection requires scripting`);
+    assert.deepEqual(manifest.host_permissions, [], `${name} monitoring adds no permanent hosts`);
+    assert.deepEqual(
+      manifest.optional_host_permissions,
+      ["http://*/*", "https://*/*"],
+      `${name} per-site grants stay optional`,
+    );
+  }
+});
+
+test("content-script authority stays tab-origin bounded (absent or http/https only)", () => {
+  for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
+    const scripts = manifest.content_scripts;
+    if (scripts === undefined) return; // current shape: no content scripts declared
+    assert.ok(Array.isArray(scripts), `${name} content_scripts must be a list`);
+    for (const entry of scripts) {
+      for (const match of entry.matches ?? []) {
+        assert.ok(!match.includes("<all_urls>"), `${name} content script must never match <all_urls>: ${match}`);
+        assert.ok(
+          match.startsWith("http://") || match.startsWith("https://"),
+          `${name} content script match must be http/https: ${match}`,
+        );
+      }
+      for (const file of [...(entry.js ?? []), ...(entry.css ?? [])]) {
+        assert.ok(!file.startsWith("http"), `${name} content script must be bundled: ${file}`);
+      }
+    }
+  }
+});
+
+test("job iframe stays web-accessible on http/https only (hostile-page embed)", () => {
+  for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
+    const war = manifest.web_accessible_resources ?? [];
+    const entries = war.filter((entry) => (entry.resources ?? []).includes("modal/modal.html"));
+    assert.ok(entries.length > 0, `${name} must expose modal/modal.html for the in-tab iframe`);
+    for (const entry of entries) {
+      for (const match of entry.matches ?? []) {
+        assert.ok(!match.includes("<all_urls>"), `${name} iframe exposure must never use <all_urls>: ${match}`);
+        assert.ok(
+          match.startsWith("http://") || match.startsWith("https://"),
+          `${name} iframe exposure must be http/https: ${match}`,
+        );
+      }
+    }
+    // The iframe document ships in the store package.
+    const abs = new URL("../../src/modal/modal.html", import.meta.url);
+    assert.ok(existsSync(abs), `${name} web-accessible modal.html missing on disk`);
+  }
+});
+
+test("monitoring icons are bundled when declared (idle grey vs monitoring blue+dot)", () => {
+  for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
+    const icons = { ...(manifest.icons ?? {}), ...((manifest.action?.default_icon ?? {})) };
+    assert.ok(Object.keys(icons).length > 0, `${name} must declare icons`);
+    for (const rel of Object.values(icons)) {
+      assert.ok(rel.startsWith("icons/"), `${name} icon must be bundled ${rel}`);
+      const abs = new URL(`../../src/${rel}`, import.meta.url);
+      assert.ok(existsSync(abs), `${name} declared icon missing on disk: ${rel}`);
+    }
+    // No remote icon URLs ever.
+    assert.ok(!JSON.stringify(icons).includes("http"), `${name} icons must be local`);
+  }
+});
+
+test("description stays explicit click-to-monitor with indefinite bounds", () => {
+  const text = String(base.description ?? "");
+  assert.ok(/click to monitor/i.test(text), "description must name the explicit click-to-monitor action");
+  assert.ok(/indefinite/i.test(text), "description must name indefinite monitoring");
+  assert.ok(/no background monitoring/i.test(text), "description must promise no background monitoring");
 });

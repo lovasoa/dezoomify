@@ -1,4 +1,5 @@
 {
+  "_compatNote": "Firefox runs background/index.js as an MV3 event page (non-persistent scripts entry; modules unsupported, so the entry ships as a classic script). scripting.executeScript/insertCSS inject content/modal.js + content/modal.css on the clicked tab under the activeTab grant, same as Chromium. No offscreen document: offscreen is Chromium-only and unnecessary for an in-tab modal.",
   "background": {
     "scripts": ["background/index.js"]
   },

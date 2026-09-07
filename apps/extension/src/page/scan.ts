@@ -1,9 +1,19 @@
 /**
- * Finite active-tab reload scan state machine (Phase 12).
+ * Active-tab reload scan state machine (Phase 12, generalized for
+ * click-to-monitor).
  *
- * States: idle -> arming -> reloading -> observing -> settling -> stopped.
+ * Finite mode (the extension page flow): idle -> arming -> reloading ->
+ * observing -> settling -> stopped, with a quiet-settle timer and a hard
+ * deadline (both injected via `scheduler`).
  *
- * Rules enforced here:
+ * Indefinite mode (the background click-to-monitor flow, `startScan({
+ * indefinite: true })`): idle -> arming -> reloading -> detecting ->
+ * stopped. The `detecting` state installs no quiet-settle or deadline
+ * timers and is exited only by detection (`notifyDetected`), explicit
+ * cancel (`cancel`), tab close (`handleTabRemoved`), tab navigation
+ * (`handleTabUpdated`), or terminal cleanup (`dispose`).
+ *
+ * Rules enforced here in both modes:
  * - Only explicit `startScan()` leaves `idle`. Extension-page open/focus/
  *   reconnect/restart never reloads or rearms (see `handleExtensionPageEvent`
  *   and `handleWorkerRestart`).
@@ -12,20 +22,22 @@
  *   rejected before any observer/reload.
  * - The webRequest observer filtered by exact `tabId` is installed BEFORE
  *   the single reload.
- * - Exactly one reload per scan. Quiet-settle timer + hard deadline are
- *   injected via `scheduler` so tests use fake timers.
+ * - Exactly one reload per scan. Finite-mode quiet-settle + hard deadline
+ *   are injected via `scheduler` so tests use fake timers; indefinite mode
+ *   schedules no timers.
  * - Every terminal path removes all listeners and timers.
  *
  * This file intentionally uses only standard JavaScript plus JSDoc so it can
  * be loaded by Node unit tests without a build step. No browser globals are
  * touched directly; all effects go through injected dependencies.
  *
- * @typedef {"idle"|"arming"|"reloading"|"observing"|"settling"|"stopped"} ScanState
+ * @typedef {"idle"|"arming"|"reloading"|"observing"|"settling"|"stopped"|"detecting"} ScanState
  * @typedef {{ id: number, url: string }} ActiveTab
  * @typedef {(tabId: number, url: string) => void} RequestHandler
  */
 
-/** Ordered states, exported for tests. */
+/** Ordered finite states, exported for tests (stable; indefinite mode adds
+ * `INDEFINITE_STATE` without changing this list). */
 export const SCANNER_STATES = Object.freeze([
   "idle",
   "arming",
@@ -34,6 +46,13 @@ export const SCANNER_STATES = Object.freeze([
   "settling",
   "stopped",
 ]);
+
+/**
+ * Indefinite detecting state for click-to-monitor scans (`startScan({
+ * indefinite: true })`). Kept out of SCANNER_STATES so the finite page flow
+ * contract stays stable; `getState()` returns it only in indefinite mode.
+ */
+export const INDEFINITE_STATE = "detecting";
 
 /** Default timing budgets (ms). Overridable per scan. */
 export const DEFAULT_QUIET_MS = 1500;
@@ -120,6 +139,8 @@ export function createScanner(deps) {
   let finalizeMs = DEFAULT_FINALIZE_MS;
   /** @type {number} */
   let generation = 0;
+  /** @type {boolean} */
+  let indefinite = false;
 
   /** @type {RequestHandler} */
   const internalHandler = (tabId, url) => {
@@ -162,6 +183,7 @@ export function createScanner(deps) {
   }
 
   function onQuietTimeout() {
+    if (indefinite) return;
     if (state !== "observing") return;
     state = "settling";
     clearTimer(quietTimer);
@@ -173,6 +195,7 @@ export function createScanner(deps) {
   }
 
   function onDeadline() {
+    if (indefinite) return;
     if (state === "idle" || state === "stopped") return;
     terminate("deadline");
   }
@@ -193,7 +216,13 @@ export function createScanner(deps) {
    * Allowed from `idle` (first scan) or `stopped` (re-click starts a new
    * generation). A re-click while a scan is active replaces it: the old
    * generation is terminated with cleanup first ("replaced").
-   * @param {{ quietMs?: number, deadlineMs?: number, finalizeMs?: number }} [opts]
+   *
+   * Finite mode (default) settles via the quiet timer and hard deadline.
+   * Indefinite mode (`{ indefinite: true }`, the background click-to-monitor
+   * flow) schedules no timers: after the single reload the scanner rests in
+   * `detecting` until `notifyDetected`, `cancel`, `handleTabRemoved`,
+   * `handleTabUpdated`, or `dispose`.
+   * @param {{ quietMs?: number, deadlineMs?: number, finalizeMs?: number, indefinite?: boolean }} [opts]
    */
   async function startScan(opts = {}) {
     if (state !== "idle" && state !== "stopped") {
@@ -212,6 +241,7 @@ export function createScanner(deps) {
     quietMs = opts.quietMs ?? DEFAULT_QUIET_MS;
     deadlineMs = opts.deadlineMs ?? DEFAULT_DEADLINE_MS;
     finalizeMs = opts.finalizeMs ?? DEFAULT_FINALIZE_MS;
+    indefinite = opts.indefinite ?? false;
 
     state = "arming";
     generation += 1;
@@ -231,37 +261,60 @@ export function createScanner(deps) {
     deps.addWebRequestListener(internalHandler, tab.id);
     webRequestAttached = true;
     observerInstalledBeforeReload = true;
-    // Finite hard deadline starts at arm.
-    clearTimer(deadlineTimer);
-    deadlineTimer = scheduler.setTimeout(onDeadline, deadlineMs);
+    if (!indefinite) {
+      // Finite hard deadline starts at arm; indefinite mode sets no timers.
+      clearTimer(deadlineTimer);
+      deadlineTimer = scheduler.setTimeout(onDeadline, deadlineMs);
+    }
     // Exactly one reload of exactly that tab.
     await deps.reloadTab(tab.id);
     reloadCount += 1;
     if (state === "arming") {
       state = "reloading";
-      // Quiet-settle timer arms after reload; re-armed on completion/activity.
-      armQuietTimer();
+      if (!indefinite) {
+        // Quiet-settle timer arms after reload; re-armed on completion/activity.
+        armQuietTimer();
+      }
     }
-    return { generation, tabId: tab.id, url: tab.url };
+    return { generation, tabId: tab.id, url: tab.url, indefinite };
   }
 
   /**
    * Called when the reloaded tab finishes loading (or first activity).
-   * Moves reloading -> observing.
+   * Moves reloading -> observing (finite) or reloading -> detecting
+   * (indefinite).
    */
   function notifyReloadComplete() {
     if (state !== "reloading") return false;
+    if (indefinite) {
+      state = "detecting";
+      return true;
+    }
     state = "observing";
     armQuietTimer();
     return true;
   }
 
   /**
-   * Route an observed request. Only the exact active tabId counts.
+   * Route an observed request. Only the exact active tabId counts. Finite
+   * mode re-arms the quiet-settle timer; indefinite mode only counts and
+   * rests in `detecting` (detection itself arrives via `notifyDetected`).
    * @param {number} tabId
    * @param {string} _url
    */
   function handleRequest(tabId, _url) {
+    if (indefinite) {
+      if (state !== "reloading" && state !== "detecting") return false;
+      if (activeTab && tabId === activeTab.id) {
+        observedForActiveTab += 1;
+        if (state === "reloading") {
+          state = "detecting";
+        }
+        return true;
+      }
+      observedForOtherTab += 1;
+      return false;
+    }
     if (state !== "reloading" && state !== "observing") return false;
     if (activeTab && tabId === activeTab.id) {
       observedForActiveTab += 1;
@@ -273,6 +326,28 @@ export function createScanner(deps) {
     }
     observedForOtherTab += 1;
     return false;
+  }
+
+  /**
+   * Detection signal: a zoomable image was found for the monitored tab.
+   * Exits `detecting` (indefinite mode) or `reloading`/`observing` (finite
+   * mode) with reason "detected" and full listener/timer cleanup.
+   * @param {string} [_detail] optional non-secret detection detail (never logged with credentials)
+   */
+  function notifyDetected(_detail) {
+    if (state !== "reloading" && state !== "observing" && state !== "detecting") return false;
+    terminate("detected");
+    return true;
+  }
+
+  /**
+   * Explicit user cancel (e.g. second toolbar click). Exits any active
+   * state with reason "cancelled" and full cleanup. Idle/stopped stay put.
+   */
+  function cancel() {
+    if (state === "idle" || state === "stopped") return false;
+    terminate("cancelled");
+    return true;
   }
 
   /**
@@ -324,6 +399,7 @@ export function createScanner(deps) {
     observerInstalledBeforeReload = false;
     observedForActiveTab = 0;
     observedForOtherTab = 0;
+    indefinite = false;
     return { state, reloaded: false, rearmed: false };
   }
 
@@ -362,6 +438,7 @@ export function createScanner(deps) {
       observedForOtherTab,
       listeners: getListenerCounts(),
       generation,
+      indefinite,
     };
   }
 
@@ -373,6 +450,8 @@ export function createScanner(deps) {
     getSnapshot,
     startScan,
     notifyReloadComplete,
+    notifyDetected,
+    cancel,
     handleRequest,
     handleTabRemoved,
     handleTabUpdated,

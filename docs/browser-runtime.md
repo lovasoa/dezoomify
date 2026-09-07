@@ -35,6 +35,8 @@ The website uses this order:
 
 The website always shows the active transport as direct browser fetch or the metadata CORS proxy, including an automatic transition after the classified direct failure. Proxy fallback requires no per-attempt consent.
 
+The extension transport is tab-origin direct fetch followed by `<img>` tainted display-only. The extension fetches readable bytes in the monitored tab's origin context under activeTab or granted host permissions; the active transport stays visible in the modal. When readable bytes are unavailable (CORS-blocked without a grant), tiles render as ordinary `<img>` elements: visible but tainted, with no JavaScript pixel reads, hashing, processing, `toBlob`, or `toDataURL`. The extension never uses the metadata CORS proxy.
+
 The proxy is not a general relay and serves metadata only, never tiles. Both the browser-to-proxy request and the proxy's upstream request omit cookies, `Authorization`, and browser credentials. The proxy accepts only validated metadata requests for eligible public resources, blocks private and local networks, follows bounded redirects, limits size and duration, strips headers outside its allowlist, and returns explicit CORS headers. The frontend additionally holds every proxy request (metadata and any tile images fetched through the proxy) to a single global budget of at most 4 requests in flight and at most 4 request starts per second; direct tile requests never draw from that budget and keep their own per-host pacing. Details are in [Security](security.md).
 
 ## Limits and capabilities

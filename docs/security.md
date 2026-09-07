@@ -31,6 +31,18 @@ The proxy permits only supported HTTP methods and serves metadata only, never ti
 
 ## Extension and desktop
 
-Extension scans begin only with an explicit action, register before at most one reload, stop at a finite deadline, and never reload-rearm; see [Extension](extension.md). Content scripts cannot invoke arbitrary browser-session fetches. Tauri exposes an allowlisted command surface and passes opaque file handles instead of unrestricted paths where practical. The desktop app declares only the permissions its shipped code uses: the capability documents grant exactly the commands, event channels, and updater check the shipped shell and frontend exercise. The frontend invokes `query_capabilities` once at boot so the grant always maps to a live negotiation, and external links leave only through the single granted `opener:allow-open-url` command for valid `https` URLs with no fallback attempted.
+Extension scans begin only with an explicit action: the toolbar click arms
+indefinite monitoring on exactly the clicked tab (grey idle, blue with a dot
+while monitoring), performs at most one reload, and stops on detection, a
+second click, tab close, or navigation away, with no auto-rearm and no
+deadline; a worker restart fails closed to idle; see [Extension](extension.md).
+The extension never enumerates tabs and its toolbar icon always reports
+idle versus monitoring (grey idle action icon, blue brand icons). The in-tab
+modal is injected programmatically on the explicit click only (`scripting`
+on the clicked tab, no declared content scripts, no `<all_urls>`); it runs
+with tab-origin authority:
+the monitored tab's origin under activeTab plus explicitly granted host
+permissions, with every redirect hop revalidated and the metadata CORS proxy
+never used. Content scripts cannot invoke arbitrary browser-session fetches. Tauri exposes an allowlisted command surface and passes opaque file handles instead of unrestricted paths where practical. The desktop app declares only the permissions its shipped code uses: the capability documents grant exactly the commands, event channels, and updater check the shipped shell and frontend exercise. The frontend invokes `query_capabilities` once at boot so the grant always maps to a live negotiation, and external links leave only through the single granted `opener:allow-open-url` command for valid `https` URLs with no fallback attempted.
 
 Website and deep-link handoffs are bounded, non-secret, untrusted input that native validates and the user confirms; they use no client-side signing. For Native Messaging, browser enforcement of the native host's allowed extension IDs authenticates the extension sender to the native host. A fresh challenge and one-use nonce bind messages to one session and prevent replay; they do not establish identity. Security regressions are covered by shared and host-specific tests in [Testing](testing.md).

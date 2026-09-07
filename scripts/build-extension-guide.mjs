@@ -95,7 +95,11 @@ function renderMarkdown(source) {
       }
       const note = heading[2] === GUIDE_NOTE;
       const tag = note ? "aside" : "article";
-      const className = note ? "dz-guide-note" : "dz-guide-step";
+      const className = note
+        ? "dz-guide-note"
+        : GUIDE_STEPS.has(heading[2])
+          ? "dz-guide-step"
+          : "dz-guide-section";
       output.push(`<${tag} class="${className}">${visualFor(heading[2])}`);
       sectionOpen = true;
       sectionTag = tag;
@@ -133,6 +137,9 @@ function renderMarkdown(source) {
 }
 
 function guideSource(source) {
+  // Every `##` section renders (the user doc owns the wording and may add
+  // or rename sections freely); titled walkthrough steps additionally get
+  // the steps wrapper and screenshots in `renderMarkdown`.
   const lines = source.split(/\r?\n/);
   const selected = [];
   let section = "skip";
@@ -140,9 +147,9 @@ function guideSource(source) {
     if (/^#\s+/.test(line)) continue;
     const heading = line.match(/^##\s+(.+)$/);
     if (heading) {
-      section = GUIDE_STEPS.has(heading[1]) || heading[1] === GUIDE_NOTE ? heading[1] : "skip";
+      section = heading[1];
     }
-    if (GUIDE_STEPS.has(section) || section === GUIDE_NOTE) selected.push(line);
+    if (section !== "skip") selected.push(line);
   }
   return selected.join("\n");
 }

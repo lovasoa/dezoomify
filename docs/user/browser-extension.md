@@ -2,13 +2,10 @@
 
 # Browser extension
 
-Find the full image behind a museum, library, or archive viewer, even when the
-page requires you to sign in.
-
-## 1. Click the Dezoomify icon
-
-On the page with the image, click Dezoomify in the browser toolbar. If it is
-hidden, open the puzzle-piece menu and pin it.
+The extension adds Dezoomify to your browser. While you look at a zoomable
+image, it can find the image behind the viewer automatically, including on
+pages where you are signed in, such as library portals, museum
+subscriptions, and academic archives.
 
 ## Install
 
@@ -17,33 +14,30 @@ Install it from the
 (works with Chrome, Edge, Brave, and other Chromium-based browsers). A
 Firefox version is on its way.
 
-## 2. Let the page settle
+## Save an image
 
-The page reloads so Dezoomify can see the viewer. Wait for it to finish, then
-zoom in on the image once.
-
-## 3. Start dezooming
-
-Dezoomify opens a new tab and starts dezooming automatically. Leave it open
-until your image is ready, then save it.
-
-## Tiled or static?
-
-Use the browser's normal save action when **Save image as** gives you the
-complete artwork. Use Dezoomify when zooming stays sharp and the viewer loads
-many tiles or strips instead of one image.
-
-## Extension limits
-
-The extension saves the first image it finds and does not offer an image list.
-For a different image, the full resolution, or an image too large for a
-browser tab, use the [desktop app](./desktop-app.md) or the
-[command-line tool](./command-line.md).
+1. Open the page that shows the zoomable image.
+2. Press the Dezoomify magnifying-glass button in the browser toolbar.
+   The grey icon turns blue with a dot: the extension is now watching that
+   tab for a zoomable image.
+3. The first time on a new site, the browser asks for permission to look at
+   that site. Approve it. Dezoomify only asks for the sites you use it on,
+   never for all your browsing.
+4. The page reloads once automatically. Keep the tab open; a second press
+   of the button, closing the tab, or navigating away stops watching.
+5. When an image is found, a small window opens inside the same page.
+   Pick the image and save it at the highest resolution that fits in a
+   browser tab.
+   There is no list to pick from in the extension.
+   For a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).
 
 ## What the extension does with your data
 
 - It only looks at the page you pointed it at, only after you pressed the
-  button. It does not watch your browsing in the background.
+  button. It does not watch your browsing in the background. Watching has
+  no time limit but stops by itself when it finds an image, when you press
+  the button again, or when you close the tab or leave the page; it never
+  restarts itself.
 - It uses your existing browser session, so images behind a sign-in work.
   Your credentials stay in your browser; Dezoomify never stores or sends
   them anywhere else.

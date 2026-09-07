@@ -205,18 +205,32 @@ cargo xtask test native-messaging
 ```
 
 Verify manifests and permissions (narrow host grants, no remote code, strict
-CSP with `wasm-unsafe-eval` for the page core), scanning state machines with
-observer-before-reload ordering and bounded settle, browser-session fetch
+CSP with `wasm-unsafe-eval` for the page core), monitoring state machines with
+observer-before-reload ordering and indefinite explicit-action bounds (no
+deadline, single reload, stop on detection/second-click/close/navigate, no
+auto-rearm, worker restart fails closed), candidate caps and windowing,
+browser-session fetch
 scoping, and handoff envelope validation with replay/expiry/origin rejection
 and zero side effects on rejection. These gates run the unit suites plus a
 hermetic headless browser E2E in both engines: the real store-shaped package
-(with an E2E-only loopback grant) opens a fixture page, runs the finite
-reload scan, discovers through the wasm core, fetches the tiles, assembles
+(with an E2E-only loopback grant) opens a fixture page, runs the
+click-to-monitor flow, discovers through the wasm core, fetches the tiles, assembles
 the image, saves it, and the test verifies the saved PNG bytes against the
 fixture pyramid. Chromium runs under Playwright; Firefox under
 Selenium/geckodriver (binary via `DEZOOMIFY_FIREFOX_BIN`, a system install,
 or the Playwright cache; deps auto-install via npm on first run). Full
 user-facing UI flows remain manual or CI-runner work.
+
+The headless E2E drives the modal-in-tab flow: toolbar click arms monitoring
+on the fixture tab (grey icon becomes blue with a dot and badge), at most one
+reload runs, detection stops monitoring and opens the modal in the same tab
+(no new tab, no `page.html?tab=` navigation in the new flow; the bound page
+stays as the headless fallback), a clean save asserts byte-exact PNG pixels
+versus the fixture pyramid, a CORS-blocked fixture asserts tainted
+display-only with no pixel reads (`originClean` false, `<img>` visible, no
+`toBlob`/`toDataURL`/hashing), and a cookie/auth fixture asserts the pass
+through tab-context fetch. All legs run over the loopback fixture-server with
+no public network.
 
 ### Browser tainted canvas
 
