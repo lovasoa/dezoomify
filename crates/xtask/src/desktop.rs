@@ -153,10 +153,17 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // checkout then cannot swap the app mid-run; on CI runners the copies
     // are simply identical content.
     let e2e_dir = super::repo_root().join("target/e2e-window");
-    let app_copy = stage_e2e_artifact(
-        &super::repo_root().join("target/debug/dezoomify-desktop"),
-        &e2e_dir.join("dezoomify-desktop"),
-    )?;
+    // Windows builds `dezoomify-desktop.exe`; accept the extensionless
+    // lane value when the suffixed binary is the one on disk, and keep
+    // the suffix on the staged copy so the harness env points at a real
+    // file.
+    let app_src = window_shell_bin(&super::repo_root().join("target/debug/dezoomify-desktop"));
+    let app_dst_name = if app_src.extension().is_some_and(|e| e == "exe") {
+        "dezoomify-desktop.exe"
+    } else {
+        "dezoomify-desktop"
+    };
+    let app_copy = stage_e2e_artifact(&app_src, &e2e_dir.join(app_dst_name))?;
     let dist_copy = stage_e2e_artifact(
         &super::repo_root().join("apps/desktop/dist"),
         &e2e_dir.join("dist"),
@@ -210,6 +217,8 @@ fn test_desktop_e2e_window() -> Result<(), String> {
 
 /// Copy one build output (file or directory) into the lane-private tree,
 /// replacing any previous copy. Fails closed naming the missing source.
+/// Pure-Rust copy (no `cp` dependency) so the lane works on Windows too;
+/// executable bits are preserved on Unix.
 fn stage_e2e_artifact(
     src: &std::path::Path,
     dst: &std::path::Path,
@@ -226,19 +235,55 @@ fn stage_e2e_artifact(
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
-    let src_arg = src.to_string_lossy();
-    let dst_arg = dst.to_string_lossy();
-    let status = Command::new("cp")
-        .args(["-r", src_arg.as_ref(), dst_arg.as_ref()])
-        .status()
-        .map_err(|e| format!("failed to run cp: {e}"))?;
-    if !status.success() || !dst.exists() {
+    copy_e2e_tree(src, dst)?;
+    if !dst.exists() {
         return Err(format!(
             "failed to stage e2e-window artifact {}",
             dst.display()
         ));
     }
     Ok(dst.to_path_buf())
+}
+
+/// Resolve the window-shell binary, accepting the `.exe` suffix on
+/// Windows when the extensionless path is absent.
+fn window_shell_bin(base: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let exe = base.with_extension("exe");
+        if !base.exists() && exe.exists() {
+            return exe;
+        }
+    }
+    base.to_path_buf()
+}
+
+fn copy_e2e_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    let meta = std::fs::metadata(src)
+        .map_err(|e| format!("cannot stat {}: {e}", src.display()))?;
+    if meta.is_file() {
+        std::fs::copy(src, dst)
+            .map_err(|e| format!("cannot copy {}: {e}", src.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = meta.permissions().mode();
+            std::fs::set_permissions(dst, std::fs::Permissions::from_mode(mode))
+                .map_err(|e| format!("cannot chmod {}: {e}", dst.display()))?;
+        }
+        return Ok(());
+    }
+    std::fs::create_dir_all(dst)
+        .map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
+    let entries =
+        std::fs::read_dir(src).map_err(|e| format!("cannot list {}: {e}", src.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("cannot list {}: {e}", src.display()))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        copy_e2e_tree(&from, &to)?;
+    }
+    Ok(())
 }
 
 /// Selenium client for the window harness, installed once via the pinned
