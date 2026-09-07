@@ -9,6 +9,22 @@ export interface LimitDecision {
   area: number | null;
 }
 
+/** Largest canvas a browser tab can hold (16384 x 16384, legacy parity). */
+export const BROWSER_MAX_CANVAS_AREA = 268435456;
+
+/** Browser canvas side limit: 16384 px per side, no policy widening. */
+export const BROWSER_MAX_CANVAS_SIDE = 16384;
+
+export const BROWSER_LIMITS: BrowserLimits = {
+  maxWidth: BROWSER_MAX_CANVAS_SIDE,
+  maxHeight: BROWSER_MAX_CANVAS_SIDE,
+  maxArea: BROWSER_MAX_CANVAS_AREA,
+  maxBytes: BROWSER_MAX_CANVAS_AREA * 4,
+};
+
+/** Upper bound on tiles materialized into one website plan (allocation guard). */
+export const BROWSER_MAX_PLAN_TILES = 100_000;
+
 export function safeArea(width: number, height: number): number | null {
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
   if (!Number.isInteger(width) || !Number.isInteger(height)) return null;
@@ -52,4 +68,70 @@ export function probeLimits(
     return { verdict: "browser-risk", reason: "memory-uncertain", area };
   }
   return { verdict: "ok", reason: "within-limits", area };
+}
+
+/**
+ * Tile-count estimate for a declared size assuming 256 px tiles (todo 5.3).
+ * 256 px is the smallest common tile, so the estimate is a conservative
+ * upper bound. Overflow-safe: returns null for invalid sizes or when the
+ * multiply would exceed MAX_SAFE_INTEGER.
+ */
+export function estimateTileCount(
+  width: number,
+  height: number,
+  tileSide: number = 256,
+): number | null {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  if (!Number.isInteger(tileSide) || tileSide <= 0) return null;
+  const cols = Math.floor((width + tileSide - 1) / tileSide);
+  const rows = Math.floor((height + tileSide - 1) / tileSide);
+  if (!Number.isSafeInteger(cols) || !Number.isSafeInteger(rows) || cols <= 0 || rows <= 0) {
+    return null;
+  }
+  if (cols > Number.MAX_SAFE_INTEGER / rows) return null;
+  return cols * rows;
+}
+
+export interface PickedLevel {
+  index: number;
+}
+
+/**
+ * Largest declared level that fits the browser canvas wins (overflow-safe
+ * via `probeLimits`). Levels without a declared size keep the old behavior
+ * (last wins). When declared levels exist but none fits, the smallest
+ * declared level is returned so the pre-plan gate fails fast.
+ */
+export function pickLevel(image: {
+  levels: Array<{ index: number; imageSize?: { x: number; y: number } }>;
+}): PickedLevel {
+  let best: PickedLevel | null = null;
+  let bestArea = -1;
+  let smallest: PickedLevel | null = null;
+  let smallestArea = Number.POSITIVE_INFINITY;
+  let sawDeclared = false;
+  let lastUndeclared: PickedLevel | null = null;
+  for (const level of image.levels) {
+    const size = level.imageSize;
+    if (!size) {
+      lastUndeclared = { index: level.index };
+      continue;
+    }
+    sawDeclared = true;
+    const fits = probeLimits({ width: size.x, height: size.y }, BROWSER_LIMITS).verdict === "ok";
+    const area = safeArea(size.x, size.y) ?? Number.POSITIVE_INFINITY;
+    if (fits && area >= bestArea) {
+      best = { index: level.index };
+      bestArea = area;
+    }
+    if (area < smallestArea) {
+      smallest = { index: level.index };
+      smallestArea = area;
+    }
+  }
+  if (best) return best;
+  if (sawDeclared) return smallest ?? { index: 0 };
+  return lastUndeclared ?? { index: 0 };
 }
