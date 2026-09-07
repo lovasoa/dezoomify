@@ -662,8 +662,11 @@ test("formats: iiif-dir destination saves a byte-exact tile tree", { timeout: 18
       const info = JSON.parse(infoRaw);
       assert.equal(info.width, 512, "iiif-dir width");
       assert.equal(info.height, 512, "iiif-dir height");
-      // Tree digest mirrors the native pipeline (info.json plus tile bytes
-      // in sorted path order); pins the golden without trusting it.
+      // Tree digest is the concat of sorted file bytes (info.json plus
+      // tiles); it pins the golden without trusting it. The digest is
+      // sensitive to the fixed destination name (info.json `@id` carries
+      // the directory basename), so fixedName stays exactly
+      // "format-iiif-dir" to match the pinned golden.
       const { createHash } = await import("node:crypto");
       const files = [];
       const walk = (dir, rel = "") => {
