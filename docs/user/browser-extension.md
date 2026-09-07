@@ -2,7 +2,7 @@
 
 # Browser extension
 
-Find the full image behind a museum, library, or archive viewer—even when the
+Find the full image behind a museum, library, or archive viewer, even when the
 page requires you to sign in.
 
 ## 1. Click the Dezoomify icon
