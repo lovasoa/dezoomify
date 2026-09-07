@@ -956,6 +956,9 @@ fn execute_effects(
                     let Some(decision) = await_partial_choice(attempt, effect) else {
                         // Cancelled while waiting: stop honestly without
                         // writing output.
+                        if let Some(gate) = attempt.partial_gate.clone() {
+                            gate.clear_pending();
+                        }
                         let _ = job.on_response(JobResponse::Cancel {
                             job: job_id.clone(),
                         });

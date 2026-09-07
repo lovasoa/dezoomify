@@ -25,7 +25,10 @@ use std::sync::{
 use std::thread::JoinHandle;
 
 use dezoomify_native::output::{validate_destination, OutputFormat};
-use dezoomify_native::pipeline::{PartialPolicy, PipelineConfig, PipelineEvent};
+use dezoomify_native::pipeline::{
+    partial_decision_from_choice, PartialDecision, PartialGate, PartialPolicy, PipelineConfig,
+    PipelineEvent,
+};
 use dezoomify_native::{JobRequest, NativeRuntime};
 
 use crate::settings::{pipeline_config_for, DesktopSettings};
@@ -282,6 +285,29 @@ pub struct JobRecord {
     pub last_error_code: Option<String>,
     /// Last typed driver failure message, redacted (`None` unless failed).
     pub last_error_message: Option<String>,
+    /// Interactive partial gate shared with the background driver worker.
+    /// Cloned into `pipeline_config.partial_gate` so `answer_choice`
+    /// wakes a waiting driver without polling.
+    pub partial_gate: std::sync::Arc<PartialGate>,
+    /// Pending interactive partial request (missing ledger while the host
+    /// dialog waits). `None` unless `AwaitingPartialDecision`.
+    pub pending_partial: Option<PartialPending>,
+    /// Missing tile ids for a kept partial (`None` until a partial publish).
+    /// Redacted ids only, never URLs or paths.
+    pub output_missing: Vec<String>,
+    /// Sibling basename for a kept partial (`out.partial.png`, never the
+    /// granted path). `None` until a partial publish.
+    pub output_sibling: Option<String>,
+}
+
+/// Pending interactive partial request: the ledger the dialog shows.
+/// Tile ids and counts only; never URLs, paths, or secrets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialPending {
+    pub missing: Vec<String>,
+    pub failed: u64,
+    pub total: u64,
+    pub recovery: Option<String>,
 }
 
 impl std::fmt::Debug for JobRecord {
@@ -352,6 +378,13 @@ struct DriverSuccess {
     width: u32,
     height: u32,
     tile_count: usize,
+    /// True when the driver kept a partial (blank missing regions).
+    partial: bool,
+    /// Missing tile ids for a kept partial (empty for complete saves).
+    missing: Vec<String>,
+    /// Sibling basename for a kept partial (`out.partial.png`, never the
+    /// granted path). `None` for complete saves.
+    sibling: Option<String>,
 }
 
 /// Typed driver failure delivered by the background worker.
@@ -375,6 +408,18 @@ enum DriverMessage {
     /// at the pipeline defaults (first image, largest fitting level); only
     /// an explicit `answer_choice` overrides them before the grant.
     Discovered { job: String },
+    /// Interactive partial decision requested by the driver
+    /// (`recovery-requested{reason: partial}` plus `missing-work`). Moves
+    /// the job to `AwaitingPartialDecision` with one `job-state`
+    /// `recovery-requested` event carrying the redacted missing ledger,
+    /// which is the frontend's cue to offer keep/discard/retry.
+    RecoveryRequested {
+        job: String,
+        missing: Vec<String>,
+        failed: u64,
+        total: u64,
+        recovery: Option<String>,
+    },
     Finished {
         job: String,
         result: Result<DriverSuccess, DriverFailure>,
@@ -566,7 +611,7 @@ impl JobTable {
             } else {
                 "Completed"
             };
-            let payload = serde_json::json!({
+            let mut payload = serde_json::json!({
                 "job": base_job,
                 "jobId": base_job,
                 "seq": event.seq,
@@ -582,6 +627,53 @@ impl JobTable {
                 "detail": redact_message(&event.detail),
                 "origin": origin,
             });
+            // Honest partials also carry the redacted ledger plus the sibling
+            // basename (never the granted path) so the UI can never claim a
+            // complete save. Parsed from the stored record when available,
+            // else from the JSON detail.
+            if state == "PartiallyCompleted" {
+                let (mut missing, mut sibling) = record
+                    .map(|r| (r.output_missing.clone(), r.output_sibling.clone()))
+                    .unwrap_or_default();
+                if missing.is_empty() || sibling.is_none() {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&event.detail) {
+                        if missing.is_empty() {
+                            if let Some(list) =
+                                value.get("missing").and_then(serde_json::Value::as_array)
+                            {
+                                missing = list
+                                    .iter()
+                                    .filter_map(|v| v.as_str().map(str::to_string))
+                                    .filter(|id| {
+                                        !id.is_empty()
+                                            && id.len() <= 128
+                                            && !id.contains("://")
+                                            && !id.contains('/')
+                                    })
+                                    .take(60)
+                                    .collect();
+                            }
+                        }
+                        if sibling.is_none() {
+                            sibling = value
+                                .get("sibling")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string)
+                                .filter(|s| {
+                                    !s.is_empty()
+                                        && s.len() <= 256
+                                        && !s.contains('/')
+                                        && !s.contains('\\')
+                                });
+                        }
+                    }
+                }
+                payload["missing"] = serde_json::json!(missing);
+                payload["missingTiles"] = serde_json::json!(missing);
+                if let Some(name) = sibling {
+                    payload["sibling"] = serde_json::json!(name);
+                }
+            }
             debug_assert!(!payload_has_forbidden_keys(&payload));
             return (channel, payload);
         }
@@ -618,7 +710,7 @@ impl JobTable {
         let state = record
             .map(|r| r.state.name().to_string())
             .unwrap_or_else(|| redact_message(&event.detail));
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "job": base_job,
             "jobId": base_job,
             "seq": event.seq,
@@ -627,6 +719,59 @@ impl JobTable {
             "detail": redact_message(&event.detail),
             "origin": origin,
         });
+        // Recovery requests also carry the redacted ledger inline so the
+        // dialog shows typed keep/discard/retry without parsing display
+        // text. Parsed from the stored pending request when available, else
+        // from the JSON detail.
+        if event.kind.eq_ignore_ascii_case("recovery-requested") {
+            let (missing, failed, total, recovery) = record
+                .and_then(|r| r.pending_partial.clone())
+                .map(|p| (p.missing, p.failed, p.total, p.recovery))
+                .unwrap_or_else(|| {
+                    serde_json::from_str::<serde_json::Value>(&event.detail)
+                        .ok()
+                        .map(|value| {
+                            let missing = value
+                                .get("missing")
+                                .and_then(serde_json::Value::as_array)
+                                .map(|list| {
+                                    list.iter()
+                                        .filter_map(|v| v.as_str().map(str::to_string))
+                                        .filter(|id| {
+                                            !id.is_empty()
+                                                && id.len() <= 128
+                                                && !id.contains("://")
+                                                && !id.contains('/')
+                                        })
+                                        .take(60)
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
+                            let failed = value
+                                .get("failed")
+                                .and_then(serde_json::Value::as_u64)
+                                .unwrap_or(missing.len() as u64);
+                            let total = value
+                                .get("total")
+                                .and_then(serde_json::Value::as_u64)
+                                .unwrap_or(0);
+                            let recovery = value
+                                .get("recovery")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string);
+                            (missing, failed, total, recovery)
+                        })
+                        .unwrap_or_default()
+                });
+            payload["reason"] = serde_json::json!("partial");
+            payload["missing"] = serde_json::json!(missing);
+            payload["missingTiles"] = serde_json::json!(missing);
+            payload["failed"] = serde_json::json!(failed);
+            payload["total"] = serde_json::json!(total);
+            if let Some(id) = recovery {
+                payload["recovery"] = serde_json::json!(id);
+            }
+        }
         debug_assert!(!payload_has_forbidden_keys(&payload));
         (channel, payload)
     }
@@ -757,8 +902,10 @@ impl JobTable {
         let id = format!("job:{n}");
 
         let cancel_flag = std::sync::Arc::new(AtomicBool::new(false));
+        let partial_gate = std::sync::Arc::new(PartialGate::new());
         let mut pipeline_config = config;
         pipeline_config.cancel_flag = std::sync::Arc::clone(&cancel_flag);
+        pipeline_config.partial_gate = Some(std::sync::Arc::clone(&partial_gate));
 
         // CLI parity (`main.rs:325-346`): open a native handle for the redacted
         // origin. The desktop `job:n` id stays the transcript key; the native
@@ -803,6 +950,10 @@ impl JobTable {
                 output_source_format: None,
                 last_error_code: None,
                 last_error_message: None,
+                partial_gate,
+                pending_partial: None,
+                output_missing: Vec::new(),
+                output_sibling: None,
             },
         );
         // Enqueue the initial `Discovering` emit so the shell emits
@@ -869,6 +1020,9 @@ impl JobTable {
             record.output_height = None;
             record.output_tile_count = None;
             record.output_source_format = None;
+            record.pending_partial = None;
+            record.output_missing.clear();
+            record.output_sibling = None;
             if let Some(dest) = record.destination.clone() {
                 let overwrite = record.destination_overwrite;
                 remove_uncommitted_output(&dest, overwrite);
@@ -888,11 +1042,49 @@ impl JobTable {
     /// `AwaitingLevelSelection`, level choices to `AwaitingDestination`,
     /// recovery retries to `Running`, and partial keep/discard to `Running`
     /// (the terminal `PartiallyCompleted`/`Failed` arrives via the driver).
+    ///
+    /// Partial decisions while `AwaitingPartialDecision` also wake the
+    /// waiting driver through the shared [`PartialGate`]: keep/discard map
+    /// to [`PartialDecision`], retry re-drives the failed tiles. The gate
+    /// answer is stored even for early choices so a racing driver still
+    /// observes it; the policy is updated alongside for timeout fallback.
     pub fn answer_choice(&mut self, job: &str, choice: &str) -> Result<(u64, String), String> {
         self.pump_drivers();
         self.require_live(job)?;
         if choice.is_empty() || choice.len() > 128 {
             return Err("choice must be 1..128 bytes".to_string());
+        }
+        // Interactive partial answers wake the driver even before the pump
+        // observed the request: the gate stores early answers.
+        let partial_decision = partial_decision_from_choice(choice);
+        let awaiting_partial = self
+            .jobs
+            .get(job)
+            .is_some_and(|r| r.state == JobState::AwaitingPartialDecision);
+        if let Some(decision) = partial_decision {
+            if let Some(record) = self.jobs.get(job) {
+                record.partial_gate.answer(decision);
+            }
+            // Retry never changes the fallback policy; keep/discard do so a
+            // 60s timeout stays honest to the last explicit choice.
+            if decision != PartialDecision::Retry {
+                if let Some(record) = self.jobs.get_mut(job) {
+                    record.pipeline_config.partial_policy = match decision {
+                        PartialDecision::Keep => PartialPolicy::Keep,
+                        _ => PartialPolicy::Fail,
+                    };
+                }
+            }
+            if awaiting_partial {
+                if let Some(record) = self.jobs.get_mut(job) {
+                    record.pending_partial = None;
+                    record.state = JobState::Running;
+                }
+                let seq = self.push_event(job, "job-state", JobState::Running.name());
+                return Ok((seq, "job-state:running".to_string()));
+            }
+            // No pending request yet: fall through to the legacy policy
+            // update below so pre-grant choices still take effect.
         }
         let mapped = map_choice_kind(choice);
         let next_state = match mapped {
@@ -908,7 +1100,7 @@ impl JobTable {
                     _ => {}
                 }
             }
-            if mapped == "PartialKeep" {
+            if mapped == "PartialKeep" && partial_decision.is_none() {
                 let lower = choice.to_ascii_lowercase();
                 let keep = !(lower.contains("discard") || lower.contains("fail"));
                 record.pipeline_config.partial_policy = if keep {
@@ -1064,9 +1256,103 @@ impl JobTable {
             record.output_width = Some(width);
             record.output_height = Some(height);
             record.output_tile_count = Some(tile_count);
+            record.output_missing.clear();
+            record.output_sibling = None;
+            record.pending_partial = None;
             record.state = JobState::PartiallyCompleted;
         }
         Ok(self.push_event(job, "partial-completed", output_hash))
+    }
+
+    /// Honest kept-partial publish for tests: stores the digest, geometry,
+    /// missing ledger, and sibling basename, then emits `partial-completed`
+    /// with the honest JSON detail (never the granted path).
+    #[cfg(test)]
+    pub fn complete_partial_with_ledger_for_test(
+        &mut self,
+        job: &str,
+        output_hash: &str,
+        format: &str,
+        width: u32,
+        height: u32,
+        tile_count: usize,
+        missing: &[String],
+        sibling: &str,
+    ) -> Result<u64, String> {
+        self.pump_drivers();
+        self.require_live(job)?;
+        let mut ledger = missing.to_vec();
+        ledger.sort();
+        ledger.dedup();
+        if let Some(record) = self.jobs.get_mut(job) {
+            record.output_hash = Some(output_hash.to_string());
+            record.destination_format = Some(
+                record
+                    .destination_format
+                    .clone()
+                    .unwrap_or_else(|| format.to_string()),
+            );
+            record.output_width = Some(width);
+            record.output_height = Some(height);
+            record.output_tile_count = Some(tile_count);
+            record.output_missing = ledger.clone();
+            record.output_sibling = Some(sibling.to_string());
+            record.pending_partial = None;
+            record.state = JobState::PartiallyCompleted;
+        }
+        let detail = partial_detail_json(output_hash, &ledger, sibling);
+        Ok(self.push_event(job, "partial-completed", &detail))
+    }
+
+    /// Interactive partial request for tests: moves a live job to
+    /// `AwaitingPartialDecision` with the redacted ledger and emits the
+    /// `recovery-requested` dialog event exactly once.
+    #[cfg(test)]
+    pub fn request_partial_for_test(
+        &mut self,
+        job: &str,
+        missing: &[String],
+        failed: u64,
+        total: u64,
+    ) -> Result<u64, String> {
+        self.pump_drivers();
+        self.require_live(job)?;
+        let mut ledger = missing.to_vec();
+        ledger.sort();
+        ledger.dedup();
+        if let Some(record) = self.jobs.get_mut(job) {
+            record.pending_partial = Some(PartialPending {
+                missing: ledger.clone(),
+                failed,
+                total,
+                recovery: None,
+            });
+            record.state = JobState::AwaitingPartialDecision;
+            if total > 0 {
+                record.progress_total = record.progress_total.max(total);
+            }
+        }
+        let detail = recovery_detail_json(&ledger, failed, total, None);
+        Ok(self.push_event(job, "recovery-requested", &detail))
+    }
+
+    /// Snapshot of the pending partial ledger, if the dialog waits.
+    #[cfg(test)]
+    pub fn pending_partial_for(&self, job: &str) -> Option<PartialPending> {
+        self.jobs.get(job).and_then(|r| r.pending_partial.clone())
+    }
+
+    /// Snapshot of the kept-partial missing ledger, if published.
+    pub fn output_missing_for(&self, job: &str) -> Vec<String> {
+        self.jobs
+            .get(job)
+            .map(|r| r.output_missing.clone())
+            .unwrap_or_default()
+    }
+
+    /// Snapshot of the kept-partial sibling basename, if published.
+    pub fn output_sibling_for(&self, job: &str) -> Option<String> {
+        self.jobs.get(job).and_then(|r| r.output_sibling.clone())
     }
 
     /// Record driver progress for tests without spawning I/O: folds
@@ -1197,6 +1483,19 @@ impl JobTable {
                 let tx_progress = tx.clone();
                 let job_for_events = job_id.clone();
                 let mut on_event = |event: PipelineEvent| {
+                    let lower = event.kind.to_ascii_lowercase();
+                    if lower == "recovery-requested" || lower == "missing-work" {
+                        let (missing, failed, total, recovery) =
+                            parse_partial_detail(&event.detail);
+                        let _ = tx_progress.send(DriverMessage::RecoveryRequested {
+                            job: job_for_events.clone(),
+                            missing,
+                            failed,
+                            total,
+                            recovery,
+                        });
+                        return;
+                    }
                     let _ = tx_progress.send(DriverMessage::Progress {
                         job: job_for_events.clone(),
                         kind: event.kind,
@@ -1211,13 +1510,24 @@ impl JobTable {
                     &mut on_event,
                 );
                 let outcome = match result {
-                    Ok(outcome) => Ok(DriverSuccess {
-                        output_hash: outcome.output_hash,
-                        format: outcome.format,
-                        width: outcome.image_size.x,
-                        height: outcome.image_size.y,
-                        tile_count: outcome.tile_count,
-                    }),
+                    Ok(outcome) => {
+                        // Sibling basename only: the granted path never
+                        // crosses IPC or the transcript.
+                        let sibling = std::path::Path::new(&outcome.output_path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .map(str::to_string);
+                        Ok(DriverSuccess {
+                            output_hash: outcome.output_hash,
+                            format: outcome.format,
+                            width: outcome.image_size.x,
+                            height: outcome.image_size.y,
+                            tile_count: outcome.tile_count,
+                            partial: outcome.partial,
+                            missing: outcome.missing,
+                            sibling,
+                        })
+                    }
                     Err(error) => Err(DriverFailure {
                         code: error.code,
                         message: error.message,
@@ -1374,6 +1684,53 @@ impl JobTable {
                     }
                     self.push_event(&job, "job-state", "AwaitingDestination");
                 }
+                DriverMessage::RecoveryRequested {
+                    job,
+                    missing,
+                    failed,
+                    total,
+                    recovery,
+                } => {
+                    let live = self.jobs.get(&job).is_some_and(|r| !r.state.is_terminal());
+                    if !live {
+                        continue;
+                    }
+                    // Only live acquisition waits: a late duplicate after the
+                    // user already answered (Running) or after terminal is
+                    // ignored so the dialog appears exactly once per request.
+                    let awaiting = self.jobs.get(&job).is_some_and(|r| {
+                        matches!(
+                            r.state,
+                            JobState::Planning
+                                | JobState::Acquiring
+                                | JobState::Running
+                                | JobState::AwaitingPartialDecision
+                        )
+                    });
+                    if !awaiting {
+                        continue;
+                    }
+                    // Redacted ledger only: tile ids and counts, never URLs,
+                    // paths, or secrets.
+                    let mut ledger = missing.clone();
+                    ledger.sort();
+                    ledger.dedup();
+                    ledger.truncate(60);
+                    if let Some(record) = self.jobs.get_mut(&job) {
+                        record.pending_partial = Some(PartialPending {
+                            missing: ledger.clone(),
+                            failed,
+                            total,
+                            recovery: recovery.clone(),
+                        });
+                        record.state = JobState::AwaitingPartialDecision;
+                        if total > 0 {
+                            record.progress_total = record.progress_total.max(total);
+                        }
+                    }
+                    let detail = recovery_detail_json(&ledger, failed, total, recovery.as_deref());
+                    self.push_event(&job, "recovery-requested", &detail);
+                }
                 DriverMessage::Finished { job, result } => {
                     let live = self.jobs.get(&job).is_some_and(|r| !r.state.is_terminal());
                     if !live {
@@ -1381,26 +1738,71 @@ impl JobTable {
                     }
                     match result {
                         Ok(success) => {
-                            if let Some(record) = self.jobs.get_mut(&job) {
-                                record.state = JobState::Completed;
-                                record.output_hash = Some(success.output_hash.clone());
-                                record.output_width = Some(success.width);
-                                record.output_height = Some(success.height);
-                                record.output_tile_count = Some(success.tile_count);
-                                record.output_source_format = Some(success.format);
-                                record.progress_acquired =
-                                    record.progress_acquired.max(success.tile_count as u64);
-                                if record.progress_total != 0 {
-                                    record.progress_total =
-                                        record.progress_total.max(success.tile_count as u64);
+                            if success.partial {
+                                // Honest partial terminal: `partial-completed`
+                                // with the missing ledger plus the sibling
+                                // basename (never the granted path), so the
+                                // UI can never claim a complete save.
+                                let mut ledger = success.missing.clone();
+                                ledger.sort();
+                                ledger.dedup();
+                                ledger.truncate(60);
+                                let sibling = success
+                                    .sibling
+                                    .clone()
+                                    .unwrap_or_else(|| "output.partial".to_string());
+                                if let Some(record) = self.jobs.get_mut(&job) {
+                                    record.state = JobState::PartiallyCompleted;
+                                    record.output_hash = Some(success.output_hash.clone());
+                                    record.output_width = Some(success.width);
+                                    record.output_height = Some(success.height);
+                                    record.output_tile_count = Some(success.tile_count);
+                                    record.output_source_format = Some(success.format);
+                                    record.output_missing = ledger.clone();
+                                    record.output_sibling = Some(sibling.clone());
+                                    record.pending_partial = None;
+                                    record.progress_acquired =
+                                        record.progress_acquired.max(success.tile_count as u64);
+                                    if record.progress_total != 0 {
+                                        record.progress_total =
+                                            record.progress_total.max(success.tile_count as u64);
+                                    }
                                 }
+                                let detail = partial_detail_json(
+                                    &self
+                                        .jobs
+                                        .get(&job)
+                                        .and_then(|r| r.output_hash.clone())
+                                        .unwrap_or_else(|| "out:0".to_string()),
+                                    &ledger,
+                                    &sibling,
+                                );
+                                self.push_event(&job, "partial-completed", &detail);
+                            } else {
+                                if let Some(record) = self.jobs.get_mut(&job) {
+                                    record.state = JobState::Completed;
+                                    record.output_hash = Some(success.output_hash.clone());
+                                    record.output_width = Some(success.width);
+                                    record.output_height = Some(success.height);
+                                    record.output_tile_count = Some(success.tile_count);
+                                    record.output_source_format = Some(success.format);
+                                    record.output_missing.clear();
+                                    record.output_sibling = None;
+                                    record.pending_partial = None;
+                                    record.progress_acquired =
+                                        record.progress_acquired.max(success.tile_count as u64);
+                                    if record.progress_total != 0 {
+                                        record.progress_total =
+                                            record.progress_total.max(success.tile_count as u64);
+                                    }
+                                }
+                                let detail = self
+                                    .jobs
+                                    .get(&job)
+                                    .and_then(|r| r.output_hash.clone())
+                                    .unwrap_or_else(|| "out:0".to_string());
+                                self.push_event(&job, "completed", &detail);
                             }
-                            let detail = self
-                                .jobs
-                                .get(&job)
-                                .and_then(|r| r.output_hash.clone())
-                                .unwrap_or_else(|| "out:0".to_string());
-                            self.push_event(&job, "completed", &detail);
                         }
                         Err(failure) => {
                             if failure.code == "job.cancelled" {
@@ -1414,6 +1816,9 @@ impl JobTable {
                                     record.output_height = None;
                                     record.output_tile_count = None;
                                     record.output_source_format = None;
+                                    record.pending_partial = None;
+                                    record.output_missing.clear();
+                                    record.output_sibling = None;
                                 }
                                 if let Some((dest, overwrite)) = uncommitted {
                                     remove_uncommitted_output(&dest, overwrite);
@@ -1432,6 +1837,7 @@ impl JobTable {
                                 self.push_event(&job, "job-state", "CleaningUp");
                                 if let Some(record) = self.jobs.get_mut(&job) {
                                     record.state = JobState::Failed;
+                                    record.pending_partial = None;
                                 }
                                 if let Some((dest, overwrite)) = uncommitted {
                                     remove_uncommitted_output(&dest, overwrite);
@@ -1449,6 +1855,82 @@ impl JobTable {
             }
         }
     }
+}
+
+/// Parse a driver partial detail map (`recovery-requested`/`missing-work`)
+/// into its redacted ledger. Tile ids only; URLs, paths, and secrets never
+/// survive: overlong entries or entries containing `://` or `/` are dropped.
+fn parse_partial_detail(
+    detail: &BTreeMap<String, String>,
+) -> (Vec<String>, u64, u64, Option<String>) {
+    let mut missing = Vec::new();
+    if let Some(raw) = detail.get("missing") {
+        for part in raw.split([',', ' ', ';']) {
+            let token = part.trim();
+            if token.is_empty() || token.len() > 128 {
+                continue;
+            }
+            if token.contains("://") || token.contains('/') {
+                continue;
+            }
+            if !missing.contains(&token.to_string()) {
+                missing.push(token.to_string());
+            }
+            if missing.len() >= 60 {
+                break;
+            }
+        }
+    }
+    missing.sort();
+    missing.dedup();
+    let failed = detail
+        .get("failed")
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(missing.len() as u64)
+        .max(missing.len() as u64)
+        .max(1);
+    let total = detail
+        .get("total")
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let recovery = detail
+        .get("recovery")
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty() && v.len() <= 128);
+    (missing, failed, total, recovery)
+}
+
+/// Honest `recovery-requested` detail: JSON with the redacted ledger so the
+/// frontend dialog shows typed keep/discard/retry without ever seeing a
+/// path or URL.
+fn recovery_detail_json(
+    missing: &[String],
+    failed: u64,
+    total: u64,
+    recovery: Option<&str>,
+) -> String {
+    let mut value = serde_json::json!({
+        "reason": "partial",
+        "missing": missing,
+        "failed": failed,
+        "total": total,
+    });
+    if let Some(id) = recovery {
+        value["recovery"] = serde_json::json!(id);
+    }
+    value.to_string()
+}
+
+/// Honest `partial-completed` detail: the output hash plus the missing
+/// ledger and the sibling basename (never the granted path).
+fn partial_detail_json(output_hash: &str, missing: &[String], sibling: &str) -> String {
+    serde_json::json!({
+        "outputHash": output_hash,
+        "missing": missing,
+        "sibling": sibling,
+        "reason": "partial",
+    })
+    .to_string()
 }
 
 /// Parse `acquired`/`total` counts from a redacted `k=v` detail string.
@@ -2699,5 +3181,173 @@ mod tests {
         );
         assert_eq!(table.events_for(&id).len(), events_before);
         table.cancel_job(&id).unwrap();
+    }
+
+    #[test]
+    fn partial_recovery_request_is_honest_and_reachable() {
+        let mut table = JobTable::new();
+        let id = table.start_job("https://example.com/item").unwrap();
+        let missing = vec!["tile:1".to_string(), "tile:2".to_string()];
+        table.request_partial_for_test(&id, &missing, 2, 4).unwrap();
+        assert_eq!(table.state_of(&id), Some(JobState::AwaitingPartialDecision));
+        let pending = table.pending_partial_for(&id).expect("pending ledger");
+        assert_eq!(pending.missing, missing);
+        assert_eq!((pending.failed, pending.total), (2, 4));
+        let events = table.events_for(&id);
+        let requested = events
+            .iter()
+            .find(|e| e.kind == "recovery-requested")
+            .expect("recovery-requested event");
+        // Ledger only: tile ids and counts, never paths or URLs.
+        assert!(requested.detail.contains("tile:1"));
+        assert!(requested.detail.contains("partial"));
+        assert!(!requested.detail.contains("example.com/item"));
+        assert!(!requested.detail.contains("/tmp"));
+        let (channel, payload) = table.project_event(&id, requested);
+        assert_eq!(channel, CHANNEL_JOB_STATE);
+        assert_eq!(payload["reason"], serde_json::json!("partial"));
+        assert_eq!(payload["missing"], serde_json::json!(["tile:1", "tile:2"]));
+        assert!(!payload.to_string().contains("example.com/item"));
+        assert!(!payload_has_forbidden_keys(&payload));
+    }
+
+    #[test]
+    fn partial_answer_wakes_the_driver_gate() {
+        let mut table = JobTable::new();
+        let id = table.start_job("https://example.com/item").unwrap();
+        table
+            .request_partial_for_test(&id, &["tile:9".to_string()], 1, 4)
+            .unwrap();
+        // Keep wakes the gate and leaves the awaiting state for the driver
+        // terminal.
+        table.answer_choice(&id, "partial:keep").unwrap();
+        assert_eq!(table.state_of(&id), Some(JobState::Running));
+        assert!(table.pending_partial_for(&id).is_none());
+        let gate = table.jobs.get(&id).expect("record").partial_gate.clone();
+        // The answer was consumed by the wait in `answer_choice`? No: the
+        // gate still holds it for the background driver to take.
+        // `answer_choice` answers but does not take, so the driver observes
+        // it exactly once.
+        assert_eq!(
+            gate.take_decision(),
+            Some(dezoomify_native::pipeline::PartialDecision::Keep)
+        );
+        // Discard maps distinctly; retry never changes the fallback policy.
+        let id2 = table.start_job("https://example.com/other").unwrap();
+        table
+            .request_partial_for_test(&id2, &["tile:3".to_string()], 1, 2)
+            .unwrap();
+        table.answer_choice(&id2, "partial:discard").unwrap();
+        let gate2 = table.jobs.get(&id2).expect("record").partial_gate.clone();
+        assert_eq!(
+            gate2.take_decision(),
+            Some(dezoomify_native::pipeline::PartialDecision::Discard)
+        );
+        assert_eq!(
+            table.config_for(&id2).expect("config").partial_policy,
+            dezoomify_native::pipeline::PartialPolicy::Fail
+        );
+        let id3 = table.start_job("https://example.com/third").unwrap();
+        table
+            .request_partial_for_test(&id3, &["tile:4".to_string()], 1, 2)
+            .unwrap();
+        table.answer_choice(&id3, "att:0:ready").unwrap();
+        let gate3 = table.jobs.get(&id3).expect("record").partial_gate.clone();
+        assert_eq!(
+            gate3.take_decision(),
+            Some(dezoomify_native::pipeline::PartialDecision::Retry)
+        );
+    }
+
+    #[test]
+    fn partial_completed_terminal_carries_ledger_and_sibling_only() {
+        let mut table = JobTable::new();
+        let id = table.start_job("https://example.com/item").unwrap();
+        // Grant a real path, then publish an honest partial: the terminal
+        // must name the sibling basename, never the granted path.
+        let granted = scratch_path("honest-partial", "saved.png");
+        // Stop the discovery worker so the grant below is synchronous.
+        if let Some(handle) = table.driver_handles.remove(&id) {
+            handle.join().unwrap();
+        }
+        table.pump_drivers();
+        table
+            .request_destination(&id, &granted, "png", false)
+            .unwrap();
+        // Remove the pipeline worker handle without waiting: this test
+        // asserts the honest terminal shape, not real I/O.
+        if let Some(handle) = table.driver_handles.remove(&id) {
+            // The worker may still be starting; detach without joining a
+            // running pipeline (join would block on real network).
+            if handle.is_finished() {
+                let _ = handle.join();
+            } else {
+                // Signal cancellation so a stray worker exits promptly,
+                // then detach (the handle is dropped without join; the
+                // thread is short-lived in tests).
+                if let Some(record) = table.jobs.get(&id) {
+                    record
+                        .cancel_flag
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        }
+        let missing = vec!["tile:1".to_string()];
+        table
+            .complete_partial_with_ledger_for_test(
+                &id,
+                "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "png",
+                512,
+                512,
+                3,
+                &missing,
+                "saved.partial.png",
+            )
+            .unwrap();
+        assert_eq!(table.state_of(&id), Some(JobState::PartiallyCompleted));
+        assert_eq!(table.output_missing_for(&id), missing);
+        assert_eq!(
+            table.output_sibling_for(&id).as_deref(),
+            Some("saved.partial.png")
+        );
+        let events = table.events_for(&id);
+        let terminal = events
+            .iter()
+            .find(|e| e.kind == "partial-completed")
+            .expect("partial-completed terminal");
+        assert!(terminal.detail.contains("saved.partial.png"));
+        assert!(terminal.detail.contains("tile:1"));
+        assert!(
+            !terminal.detail.contains("honest-partial"),
+            "granted directory must never enter the terminal"
+        );
+        let (channel, payload) = table.project_event(&id, terminal);
+        assert_eq!(channel, CHANNEL_JOB_OUTPUT);
+        assert_eq!(payload["state"], serde_json::json!("PartiallyCompleted"));
+        assert_eq!(payload["missing"], serde_json::json!(["tile:1"]));
+        assert_eq!(payload["sibling"], serde_json::json!("saved.partial.png"));
+        assert!(!payload.to_string().contains("honest-partial"));
+        assert!(!payload_has_forbidden_keys(&payload));
+        // Post-terminal answers stay stale.
+        assert_eq!(
+            table.answer_choice(&id, "partial:keep").unwrap_err(),
+            "stale"
+        );
+    }
+
+    #[test]
+    fn partial_discard_fails_honestly_with_no_output() {
+        let mut table = JobTable::new();
+        let id = table.start_job("https://example.com/item").unwrap();
+        table
+            .fail_test_job(&id, "tile.download-failed", "1 tile(s) still failing")
+            .unwrap();
+        assert_eq!(table.state_of(&id), Some(JobState::Failed));
+        assert!(table.output_hash_for(&id).is_none());
+        assert!(table.output_missing_for(&id).is_empty());
+        assert!(table.output_sibling_for(&id).is_none());
+        let snapshot = table.error_snapshot_for(&id).expect("error snapshot");
+        assert_eq!(snapshot.code, "tile.download-failed");
     }
 }
