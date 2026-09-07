@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Generate the desktop app icons (plain RGBA PNGs + ICO/ICNS, deterministic).
 
+Runs inside `cargo xtask build desktop` before the bundler.
+Covered by `cargo xtask test desktop` (icons gate).
 Usage: python3 scripts/gen-desktop-icons.py
 Writes under apps/desktop/src-tauri/icons/:
   32x32.png and 128x128.png (Linux deb PNGs),
