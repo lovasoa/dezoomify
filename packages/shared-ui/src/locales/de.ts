@@ -363,19 +363,6 @@ export const de = {
   "desktop.settings.headersAdv": "Erweitert: Anfragekopfzeilen (vertrauenswuerdig)",
   "desktop.settings.headersLabel": "Anfragekopfzeilen, eine je Zeile als Name: Wert (optional, vertrauenswuerdig)",
   "desktop.settings.reset": "Einstellungen zuruecksetzen",
-  "desktop.settings.crop": "Ausschnitt x,y,w,h in Stufenpixeln (optional)",
-  "desktop.settings.cropPlaceholder": "z. B. 100,100,800,600",
-  // Crop / region selection (shared UI, website preview, desktop, extension).
-  "view.crop.button": "Ausschnitt",
-  "view.crop.hint": "Ziehen Sie auf der Vorschau, um einen Bereich zu wahlen, oder geben Sie exakte Zahlen ein.",
-  "view.crop.x": "X",
-  "view.crop.y": "Y",
-  "view.crop.w": "Breite",
-  "view.crop.h": "Hohe",
-  "view.crop.apply": "Ausschnitt anwenden",
-  "view.crop.clear": "Loschen",
-  "view.crop.size": "Bereich: {size}",
-  "view.crop.invalid": "Dieser Bereich ist leer oder liegt ausserhalb des Bildes. Wahlen Sie x,y,w,h innerhalb der Stufengrosse.",
   // Extension page user copy (apps/extension/src/page/page.ts). The page
   // imports this table through its vendored `page/vendor/i18n.js` codegen
   // mirror (see `scripts/sync-web-js.mjs`) and renders through the same

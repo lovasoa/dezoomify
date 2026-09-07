@@ -26,18 +26,6 @@ You can also paste the address of an image's description file directly,
 for example an `info.json`, `ImageProperties.xml`, or `.dzi` address, when
 you know it. See [finding the image address](./finding-the-image-address.md).
 
-## Save part of an image
-
-When the picture appears, the preview toolbar offers **Crop**. The button
-toggles region mode: drag on the preview to draw the region, or type exact
-numbers (`x,y,w,h` in level pixels) and press **Apply crop**. The live
-estimate names the region size. **Apply crop** runs the same picture again
-for exactly that region at the same resolution; **Clear** restores the full
-picture. An empty region or a region outside the picture stops before any
-piece is saved with a message naming the fix. The selection uses only the
-tile plan and never reads picture data, so it works where the picture can
-only be viewed.
-
 ## Saving several images
 
 Pasting another address while a job runs queues it instead of stopping the

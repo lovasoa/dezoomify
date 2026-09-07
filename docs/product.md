@@ -35,7 +35,7 @@ Nothing important is locked behind a tier the user cannot reach, and every failu
 ## Core workflow
 
 1. The runtime discovers one or more image catalogs from an input.
-2. The user selects an image, resolution level, crop, processing recipe, and output.
+2. The user selects an image, resolution level, processing recipe, and output.
 3. The job engine validates the request against runtime capabilities.
 4. The runtime executes tile acquisition and processing effects while the engine records their outcomes and reports deterministic progress.
 5. The engine drives encoding, finalization, publication, and cleanup effects through the selected output destination.

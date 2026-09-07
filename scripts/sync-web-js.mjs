@@ -39,7 +39,6 @@ const PAIRS = [
   ["packages/browser-runtime/src/limits.ts", "packages/browser-runtime/src/limits.js"],
   ["packages/browser-runtime/src/queue.ts", "packages/browser-runtime/src/queue.js"],
   ["packages/browser-runtime/src/session.ts", "packages/browser-runtime/src/session.js"],
-  ["packages/browser-runtime/src/crop.ts", "packages/browser-runtime/src/crop.js"],
   ["packages/browser-runtime/src/preview.ts", "packages/browser-runtime/src/preview.js"],
   ["packages/browser-runtime/src/transport-labels.ts", "packages/browser-runtime/src/transport-labels.js"],
   ["packages/browser-runtime/src/save-name.ts", "packages/browser-runtime/src/save-name.js"],
@@ -69,7 +68,6 @@ const VENDOR_PAIRS = [
   ["packages/browser-runtime/src/limits.js", "apps/extension/src/page/vendor/limits.js"],
   ["packages/browser-runtime/src/transport-labels.js", "apps/extension/src/page/vendor/transport-labels.js"],
   ["packages/browser-runtime/src/save-name.js", "apps/extension/src/page/vendor/save-name.js"],
-  ["packages/browser-runtime/src/crop.js", "apps/extension/src/page/vendor/crop.js"],
 ];
 
 const VENDOR_CSS_PAIRS = [

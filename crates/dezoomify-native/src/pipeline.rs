@@ -181,12 +181,6 @@ pub struct PipelineConfig {
     /// Default `Keep` matches the reference `PartialDownload` file behavior
     /// (partial output kept, blank regions, `partial: true`).
     pub partial_policy: PartialPolicy,
-    /// Optional crop rectangle in level pixels (`x,y,w,h`). When set, only
-    /// tiles intersecting the clamped rectangle are fetched and the output
-    /// canvas is the clamped size. Empty or out-of-bounds crops fail before
-    /// acquisition with typed `output.crop-invalid`. Parsed by the CLI
-    /// `--crop` flag (see `dezoomify_core::core::crop::parse_crop`).
-    pub crop: Option<dezoomify_core::core::crop::CropRect>,
     /// Cooperative cancellation: when set, the driver stops issuing new
     /// work at the next effect boundary, cleans up, and reports
     /// `job.cancelled` without writing output. Clones share the flag.
@@ -219,7 +213,6 @@ impl Default for PipelineConfig {
             largest: false,
             format: None,
             partial_policy: PartialPolicy::Keep,
-            crop: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             pause_after: None,
         }
@@ -490,76 +483,6 @@ pub(crate) fn blit_onto(
         i64::from(destination.x),
         i64::from(destination.y),
     );
-}
-
-/// Blit one tile onto a cropped canvas.
-///
-/// `destination`/`extent` are level-pixel coordinates from the engine plan;
-/// `crop` is the already-clamped rectangle the target canvas was sized to.
-/// Only the tile/crop intersection is copied, so edge tiles that start
-/// before the crop still assemble seamlessly. Out-of-intersection tiles are
-/// skipped. Overflow-safe via [`dezoomify_core::core::crop`].
-pub(crate) fn blit_onto_cropped(
-    target: &mut image::RgbaImage,
-    destination: Vec2d,
-    extent: Option<Vec2d>,
-    tile: &image::RgbaImage,
-    crop: &dezoomify_core::core::crop::CropRect,
-) {
-    use dezoomify_core::core::crop::crop_intersection;
-    let extent = extent.unwrap_or(Vec2d {
-        x: tile.width(),
-        y: tile.height(),
-    });
-    let tile_w = extent.x.min(tile.width());
-    let tile_h = extent.y.min(tile.height());
-    if tile_w == 0 || tile_h == 0 {
-        return;
-    }
-    let Some((src_x, src_y, copy_w, copy_h, dst_x, dst_y)) =
-        crop_intersection(destination.x, destination.y, tile_w, tile_h, crop)
-    else {
-        return;
-    };
-    if copy_w == 0 || copy_h == 0 {
-        return;
-    }
-    let src_w = copy_w.min(tile.width().saturating_sub(src_x));
-    let src_h = copy_h.min(tile.height().saturating_sub(src_y));
-    if src_w == 0 || src_h == 0 {
-        return;
-    }
-    if dst_x >= target.width() || dst_y >= target.height() {
-        return;
-    }
-    let dst_w = src_w.min(target.width() - dst_x);
-    let dst_h = src_h.min(target.height() - dst_y);
-    if dst_w == 0 || dst_h == 0 {
-        return;
-    }
-    let cropped = image::imageops::crop_imm(tile, src_x, src_y, dst_w, dst_h).to_image();
-    image::imageops::overlay(target, &cropped, i64::from(dst_x), i64::from(dst_y));
-}
-
-/// Clamp a configured crop against the level canvas, mapping empty or
-/// out-of-bounds crops to typed `output.crop-invalid` before acquisition.
-pub(crate) fn clamped_crop_for(
-    crop: Option<dezoomify_core::core::crop::CropRect>,
-    canvas: Vec2d,
-) -> Result<Option<dezoomify_core::core::crop::CropRect>, NativeError> {
-    let Some(requested) = crop else {
-        return Ok(None);
-    };
-    match dezoomify_core::core::crop::clamp_crop(requested, canvas) {
-        Some(clamped) => Ok(Some(clamped)),
-        None => Err(NativeError::new(
-            "output.crop-invalid",
-            format!(
-                "crop {}x{} at {},{} is empty or outside the {}x{} image; choose x,y,w,h inside the level size",
-                requested.w, requested.h, requested.x, requested.y, canvas.x, canvas.y,
-            ),
-        )),
-    }
 }
 
 /// Encode the assembled canvas as PNG at the configured deflate tier.

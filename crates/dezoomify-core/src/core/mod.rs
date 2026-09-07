@@ -4,7 +4,6 @@
 //! filesystem types.  It describes work for an application to perform.
 
 pub mod adaptive;
-pub mod crop;
 pub mod discovery;
 pub mod model;
 pub mod processing;
@@ -15,9 +14,6 @@ pub mod uri;
 pub use adaptive::{
     AdaptiveProgram, AdaptiveSource, DiscoverableGrid, DiscoverableStep, ObservationResult,
     ProbeContinuation,
-};
-pub use crop::{
-    CropRect, clamp_crop, crop_byte_estimate, crop_intersection, parse_crop, tile_intersects,
 };
 pub use discovery::{
     DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,

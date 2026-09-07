@@ -37,22 +37,9 @@
           <button type="button" class="dz-btn-secondary" id="preview-zoom-in" aria-label="Zoom in">+</button>
           <button type="button" class="dz-btn-secondary" id="preview-zoom-100" aria-label="Reset zoom to 100 percent">100%</button>
           <button type="button" class="dz-btn-secondary" id="preview-zoom-reset" aria-label="Reset preview pan and zoom">Reset</button>
-          <button type="button" class="dz-btn-secondary" id="preview-crop-toggle" aria-label="Toggle crop region selection" aria-pressed="false">Crop</button>
-        </div>
-        <div id="crop-panel" class="dz-crop-panel" hidden>
-          <label>X <input id="crop-x" type="number" min="0" step="1" inputmode="numeric" /></label>
-          <label>Y <input id="crop-y" type="number" min="0" step="1" inputmode="numeric" /></label>
-          <label>W <input id="crop-w" type="number" min="1" step="1" inputmode="numeric" /></label>
-          <label>H <input id="crop-h" type="number" min="1" step="1" inputmode="numeric" /></label>
-          <button type="button" class="dz-btn-secondary" id="crop-apply">Apply crop</button>
-          <button type="button" class="dz-btn-secondary" id="crop-clear">Clear</button>
-          <span id="crop-estimate" class="dz-crop-estimate" aria-live="polite"></span>
         </div>
         <div id="canvas-stack" class="dz-canvas-stack">
           <canvas id="rendering-canvas" width="0" height="0"></canvas>
-          <div id="crop-overlay" class="dz-crop-overlay" hidden>
-            <div id="crop-rect" class="dz-crop-rect" hidden></div>
-          </div>
         </div>
       </div>
     </main>

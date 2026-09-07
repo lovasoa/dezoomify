@@ -468,19 +468,6 @@ const en = {
   "desktop.settings.headersAdv": "Advanced: request headers (trusted)",
   "desktop.settings.headersLabel": "Request headers, one per line as Name: value (optional, trusted)",
   "desktop.settings.reset": "Reset settings",
-  "desktop.settings.crop": "Crop x,y,w,h in level pixels (optional)",
-  "desktop.settings.cropPlaceholder": "e.g. 100,100,800,600",
-  // Crop / region selection (shared UI, website preview, desktop, extension).
-  "view.crop.button": "Crop",
-  "view.crop.hint": "Drag on the preview to choose a region, or type exact numbers.",
-  "view.crop.x": "X",
-  "view.crop.y": "Y",
-  "view.crop.w": "Width",
-  "view.crop.h": "Height",
-  "view.crop.apply": "Apply crop",
-  "view.crop.clear": "Clear",
-  "view.crop.size": "Region: {size}",
-  "view.crop.invalid": "That region is empty or outside the image. Choose x,y,w,h inside the level size.",
   // Extension page user copy (apps/extension/src/page/page.ts). The page
   // imports this table through its vendored `page/vendor/i18n.js` codegen
   // mirror (see `scripts/sync-web-js.mjs`) and renders through the same

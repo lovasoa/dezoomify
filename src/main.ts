@@ -51,15 +51,6 @@ import {
   PREVIEW_ZOOM_STEP,
   clampPreviewScale,
 } from "../packages/browser-runtime/src/preview.ts";
-import {
-  clampCrop,
-  cropByteEstimate,
-  cropSizeLabel,
-  parseCrop,
-  screenRectToLevel,
-  subsetPlanForCrop,
-} from "../packages/browser-runtime/src/crop.ts";
-import type { CropRect } from "../packages/browser-runtime/src/crop.ts";
 
 // Re-export the shared browser limits plus the preview transform helpers for
 // existing website test imports (`test/pick-level.test.mjs` and
@@ -72,233 +63,6 @@ export {
 };
 
 const preview = createPreviewControls();
-
-// Crop / region selection (todo 5.4): drag-rect on the preview plus exact
-// numeric inputs. Transform-only and tainted-safe: the drag maps screen
-// pixels to level pixels through the preview transform (scale/tx/ty) and
-// subsets the tile plan (`subsetPlanForCrop`); no pixel reads, no
-// `getImageData`/`toBlob`/`toDataURL` for selection. Empty or
-// out-of-bounds crops fail before acquisition with a typed error naming
-// the fix. `pendingCrop` applies to the next run; Apply re-runs the last
-// URL with the subset plan, Clear restores the full image.
-let pendingCrop: CropRect | null = null;
-let cropMode = false;
-let lastJobUrl: string | null = null;
-let lastCanvasSize: { x: number; y: number } | null = null;
-
-function readCropInputs(): CropRect | null {
-  if (typeof document === "undefined") return null;
-  try {
-    const get = (id: string): string => {
-      const el = document.getElementById(id) as HTMLInputElement | null;
-      return el && typeof el.value === "string" ? el.value.trim() : "";
-    };
-    const xText = get("crop-x");
-    const yText = get("crop-y");
-    const wText = get("crop-w");
-    const hText = get("crop-h");
-    if (xText === "" && yText === "" && wText === "" && hText === "") return null;
-    if (xText === "" || yText === "" || wText === "" || hText === "") return null;
-    return parseCrop(`${xText},${yText},${wText},${hText}`);
-  } catch {
-    return null;
-  }
-}
-
-function writeCropInputs(rect: CropRect | null): void {
-  if (typeof document === "undefined") return;
-  try {
-    const set = (id: string, value: string): void => {
-      const el = document.getElementById(id) as HTMLInputElement | null;
-      if (el) el.value = value;
-    };
-    set("crop-x", rect ? String(rect.x) : "");
-    set("crop-y", rect ? String(rect.y) : "");
-    set("crop-w", rect ? String(rect.w) : "");
-    set("crop-h", rect ? String(rect.h) : "");
-  } catch {
-    // Crop inputs are best-effort.
-  }
-}
-
-function updateCropEstimate(): void {
-  if (typeof document === "undefined") return;
-  try {
-    const el = document.getElementById("crop-estimate");
-    if (!el) return;
-    const rect = readCropInputs();
-    if (!rect) {
-      el.textContent = "";
-      return;
-    }
-    const canvas = lastCanvasSize;
-    const clamped = canvas ? clampCrop(rect, canvas) : rect;
-    if (!clamped) {
-      el.textContent = "That region is empty or outside the image.";
-      return;
-    }
-    const bytes = cropByteEstimate(clamped);
-    const approx = bytes !== null && bytes >= 1048576 ? ` (~${(bytes / 1048576).toFixed(1)} MiB)` : "";
-    el.textContent = `Region: ${cropSizeLabel(clamped)}${approx}`;
-  } catch {
-    // Estimate must never break the job.
-  }
-}
-
-function updateCropOverlay(rect: CropRect | null): void {
-  if (typeof document === "undefined") return;
-  try {
-    const overlay = document.getElementById("crop-overlay");
-    const box = document.getElementById("crop-rect");
-    const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
-    if (!overlay || !box || !canvas) return;
-    if (!rect || !lastCanvasSize) {
-      box.hidden = true;
-      return;
-    }
-    // Map level pixels back to screen pixels through the preview transform
-    // for the overlay rect (inverse of `screenRectToLevel`).
-    let scale = 1;
-    let tx = 0;
-    let ty = 0;
-    try {
-      const t = preview.getTransform();
-      if (Number.isFinite(t.scale) && t.scale > 0) scale = t.scale;
-      if (Number.isFinite(t.tx)) tx = t.tx;
-      if (Number.isFinite(t.ty)) ty = t.ty;
-    } catch {
-      // Identity fallback keeps the drag honest without the transform.
-    }
-    const canvasRect = canvas.getBoundingClientRect();
-    void canvasRect;
-    box.hidden = false;
-    box.style.left = `${rect.x * scale + tx}px`;
-    box.style.top = `${rect.y * scale + ty}px`;
-    box.style.width = `${rect.w * scale}px`;
-    box.style.height = `${rect.h * scale}px`;
-    void overlay;
-  } catch {
-    // Overlay must never break the job.
-  }
-}
-
-function setCropMode(enabled: boolean): void {
-  cropMode = enabled;
-  if (typeof document === "undefined") return;
-  try {
-    const toggle = document.getElementById("preview-crop-toggle");
-    if (toggle) toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
-    const panel = document.getElementById("crop-panel");
-    if (panel) (panel as HTMLElement & { hidden: boolean }).hidden = false;
-    const overlay = document.getElementById("crop-overlay");
-    if (overlay) (overlay as HTMLElement & { hidden: boolean }).hidden = !enabled;
-    const canvas = document.getElementById("rendering-canvas");
-    if (canvas) (canvas as HTMLElement).style.cursor = enabled ? "crosshair" : "";
-  } catch {
-    // Crop mode toggle must never break the job.
-  }
-}
-
-function initCropControls(): void {
-  if (typeof document === "undefined") return;
-  try {
-    document.getElementById("preview-crop-toggle")?.addEventListener("click", () => {
-      setCropMode(!cropMode);
-    });
-    for (const id of ["crop-x", "crop-y", "crop-w", "crop-h"]) {
-      document.getElementById(id)?.addEventListener("input", () => {
-        try {
-          const rect = readCropInputs();
-          pendingCrop = rect;
-          updateCropEstimate();
-          updateCropOverlay(rect);
-        } catch {
-          // Input handling must never throw.
-        }
-      });
-    }
-    document.getElementById("crop-apply")?.addEventListener("click", () => {
-      const rect = readCropInputs();
-      if (!rect) return;
-      pendingCrop = rect;
-      updateCropEstimate();
-      updateCropOverlay(rect);
-      if (lastJobUrl) void runJob(lastJobUrl);
-    });
-    document.getElementById("crop-clear")?.addEventListener("click", () => {
-      pendingCrop = null;
-      writeCropInputs(null);
-      updateCropEstimate();
-      updateCropOverlay(null);
-      if (lastJobUrl) void runJob(lastJobUrl);
-    });
-    // Drag-rect on the preview overlay: pointer capture, screen-to-level
-    // through the preview transform, live inputs plus estimate. No pixel
-    // reads, only plan arithmetic.
-    const overlay = document.getElementById("crop-overlay");
-    const canvas = document.getElementById("rendering-canvas");
-    if (overlay && canvas) {
-      let dragging = false;
-      let startX = 0;
-      let startY = 0;
-      overlay.addEventListener("pointerdown", (ev) => {
-        if (!cropMode) return;
-        const e = ev as PointerEvent;
-        dragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        try {
-          (overlay as Element & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(e.pointerId ?? 0);
-        } catch {
-          // Best-effort.
-        }
-        (e as PointerEvent).preventDefault?.();
-      });
-      overlay.addEventListener("pointermove", (ev) => {
-        if (!dragging || !cropMode || !lastCanvasSize) return;
-        const e = ev as PointerEvent;
-        let transform = { scale: 1, tx: 0, ty: 0 };
-        try {
-          transform = preview.getTransform();
-        } catch {
-          // Identity fallback.
-        }
-        // Overlay coordinates are viewport-relative; the canvas may be
-        // scrolled inside its wrapper, so subtract the canvas origin.
-        let originX = 0;
-        let originY = 0;
-        try {
-          const r = (canvas as HTMLCanvasElement).getBoundingClientRect();
-          originX = r.left;
-          originY = r.top;
-        } catch {
-          // Origin fallback keeps the drag inside the image.
-        }
-        const rect = screenRectToLevel(
-          startX - originX,
-          startY - originY,
-          e.clientX - originX,
-          e.clientY - originY,
-          transform,
-          lastCanvasSize,
-        );
-        if (rect) {
-          writeCropInputs(rect);
-          pendingCrop = rect;
-          updateCropEstimate();
-          updateCropOverlay(rect);
-        }
-      });
-      const endDrag = (): void => {
-        dragging = false;
-      };
-      overlay.addEventListener("pointerup", endDrag);
-      overlay.addEventListener("pointercancel", endDrag);
-    }
-  } catch {
-    // Crop wiring must never break the job.
-  }
-}
 
 let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
@@ -1326,7 +1090,6 @@ function setCanvasVisible(visible: boolean): void {
       } catch {
         // Preview reset must never break the job.
       }
-      updateCropOverlay(null);
     }
   } catch {
     // Canvas visibility must never break the job.
@@ -1514,7 +1277,6 @@ async function drawTile(
 
 async function runJob(url: string): Promise<void> {
   const token = ++jobToken;
-  lastJobUrl = url;
   resetActivity(url);
   setCanvasVisible(false);
   jobPaused = false;
@@ -1595,20 +1357,6 @@ async function runJob(url: string): Promise<void> {
       throw error;
     }
     if (token !== jobToken) return;
-    // Crop subset (plan_from_tiles subset in level pixels, clamped,
-    // overflow-safe): keep only intersecting tiles with destinations
-    // shifted into the cropped canvas. Empty or out-of-bounds crops fail
-    // before acquisition with a typed error naming the fix. Tainted-safe:
-    // plan arithmetic only, never pixel reads.
-    if (pendingCrop) {
-      try {
-        plan = subsetPlanForCrop(plan, pendingCrop);
-        pushLog(`Crop ${pendingCrop.w}x${pendingCrop.h} at ${pendingCrop.x},${pendingCrop.y}: planning ${plan.tiles.length} tiles`);
-      } catch (error) {
-        const message = (error as Error)?.message ?? "That region is empty or outside the image.";
-        throw failure("CROP_INVALID", "That region is empty or outside the image. Choose x,y,w,h inside the level size.", false, undefined, message);
-      }
-    }
     pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
     const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
     if (!canvas) {
@@ -1644,14 +1392,11 @@ async function runJob(url: string): Promise<void> {
     }
     canvas.width = width;
     canvas.height = height;
-    lastCanvasSize = { x: width, y: height };
     try {
       preview.resetTransform(document);
     } catch {
       // Preview reset must never break the job.
     }
-    updateCropEstimate();
-    updateCropOverlay(pendingCrop);
     const ctx2d = canvas.getContext("2d") as CanvasRenderingContext2D;
     ctx2d.clearRect(0, 0, width, height);
     // Reveal the canvas before the first tile paints (legacy parity): tiles
@@ -2088,7 +1833,6 @@ if (appContainer) {
     } catch {
       // Preview wiring must never break the job.
     }
-    initCropControls();
   }
   document.getElementById("dz-nav-btn-extension")?.addEventListener("click", () => showExtensionGuidance(document));
   document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () => showDesktopAppGuidance(document, {

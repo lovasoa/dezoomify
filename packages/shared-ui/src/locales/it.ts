@@ -363,19 +363,6 @@ export const it = {
   "desktop.settings.headersAdv": "Avanzate: intestazioni di richiesta (fidate)",
   "desktop.settings.headersLabel": "Intestazioni di richiesta, una per riga come Nome: valore (facoltative, fidate)",
   "desktop.settings.reset": "Reimposta le impostazioni",
-  "desktop.settings.crop": "Ritaglia x,y,w,h in pixel del livello (facoltativo)",
-  "desktop.settings.cropPlaceholder": "p. es. 100,100,800,600",
-  // Crop / region selection (shared UI, website preview, desktop, extension).
-  "view.crop.button": "Ritaglia",
-  "view.crop.hint": "Trascina sull anteprima per scegliere una zona, oppure digita numeri esatti.",
-  "view.crop.x": "X",
-  "view.crop.y": "Y",
-  "view.crop.w": "Larghezza",
-  "view.crop.h": "Altezza",
-  "view.crop.apply": "Applica il ritaglio",
-  "view.crop.clear": "Cancella",
-  "view.crop.size": "Zona: {size}",
-  "view.crop.invalid": "Questa zona e vuota o fuori dall immagine. Scegli x,y,w,h dentro le dimensioni del livello.",
   // Extension page user copy (apps/extension/src/page/page.ts). The page
   // imports this table through its vendored `page/vendor/i18n.js` codegen
   // mirror (see `scripts/sync-web-js.mjs`) and renders through the same

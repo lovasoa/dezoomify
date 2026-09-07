@@ -1637,49 +1637,9 @@ abbr[title] {
   cursor: grabbing;
 }
 
-.dz-crop-panel {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--dz-surface-border);
-  background: var(--dz-surface-gradient);
-}
-
-.dz-crop-panel label {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.88rem;
-}
-
-.dz-crop-panel input {
-  width: 5.5rem;
-}
-
-.dz-crop-estimate {
-  font-size: 0.88rem;
-  color: var(--dz-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
 .dz-canvas-stack {
   position: relative;
   overflow: auto;
-}
-
-.dz-crop-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-}
-
-.dz-crop-rect {
-  position: absolute;
-  border: 2px solid #3c7bff;
-  background: rgba(60, 123, 255, 0.12);
-  border-radius: var(--dz-radius);
 }
 
 /* Pinned Site Footer */

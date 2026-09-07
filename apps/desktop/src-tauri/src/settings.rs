@@ -55,10 +55,6 @@ pub struct DesktopSettings {
     pub cache_dir: Option<PathBuf>,
     /// Trusted user headers, lowercased names (origin-scoped, never logged).
     pub headers: BTreeMap<String, String>,
-    /// Optional crop rectangle in level pixels (`x,y,w,h`). Validated as
-    /// four integers with non-zero size; bounds against the level are
-    /// enforced by the native pipeline (`output.crop-invalid`).
-    pub crop: Option<dezoomify_core::core::crop::CropRect>,
 }
 
 impl DesktopSettings {
@@ -72,7 +68,6 @@ impl DesktopSettings {
             retries: DEFAULT_RETRIES,
             cache_dir: None,
             headers: BTreeMap::new(),
-            crop: None,
         }
     }
 }
@@ -96,7 +91,6 @@ pub fn pipeline_config_for(settings: &DesktopSettings) -> PipelineConfig {
             .cache_dir
             .clone()
             .or_else(|| Some(dezoomify_native::pipeline::default_tile_cache_dir())),
-        crop: settings.crop,
         fetch: FetchLimits {
             timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(6),
@@ -117,7 +111,7 @@ pub fn describe_settings_for_log(settings: &DesktopSettings) -> String {
     let mut names: Vec<&str> = settings.headers.keys().map(String::as_str).collect();
     names.sort();
     format!(
-        "compression={} retries={} max_width={} max_height={} output_dir={} cache_dir={} crop={} headers={} [{}]",
+        "compression={} retries={} max_width={} max_height={} output_dir={} cache_dir={} headers={} [{}]",
         settings.compression,
         settings.retries,
         settings
@@ -138,29 +132,9 @@ pub fn describe_settings_for_log(settings: &DesktopSettings) -> String {
         } else {
             "unset"
         },
-        settings
-            .crop
-            .map(|r| format!("{},{},{},{}", r.x, r.y, r.w, r.h))
-            .unwrap_or_else(|| "none".to_string()),
         names.len(),
         names.join(","),
     )
-}
-
-fn parse_opt_crop(
-    value: &serde_json::Value,
-) -> Result<Option<dezoomify_core::core::crop::CropRect>, String> {
-    match value {
-        serde_json::Value::Null => Ok(None),
-        serde_json::Value::String(s) => {
-            let trimmed = s.trim();
-            if trimmed.is_empty() {
-                return Ok(None);
-            }
-            dezoomify_core::core::crop::parse_crop(trimmed).map(Some)
-        }
-        _ => Err("crop must be x,y,w,h in level pixels or null".to_string()),
-    }
 }
 
 fn validate_dir_field(raw: &str, field: &str) -> Result<Option<PathBuf>, String> {
@@ -405,10 +379,6 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         None => BTreeMap::new(),
         Some(v) => parse_headers_value(v)?,
     };
-    let crop = match obj.get("crop") {
-        None => None,
-        Some(v) => parse_opt_crop(v)?,
-    };
     Ok(DesktopSettings {
         output_dir,
         compression,
@@ -417,7 +387,6 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         retries,
         cache_dir,
         headers,
-        crop,
     })
 }
 

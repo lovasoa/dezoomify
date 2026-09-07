@@ -40,7 +40,6 @@ ignores caps).
 | Cap the height | `-h, --max-height 800` |
 | Pick a level by index | `--zoom-level 0` (0 is smallest; too large uses last; wins over largest and caps) |
 | Pick a specific image when several are found | `--image-index 2` (0-based; too large uses last) |
-| Save only part of the picture | `--crop 100,100,800,600` (`x,y,w,h` in level pixels; only intersecting tiles run; empty or outside regions fail with `output.crop-invalid`) |
 | Keep a partial image when some tiles fail | `--keep-partial` (default; missing regions stay blank, saved to a `.partial` sibling: `out.png` becomes `out.partial.png`) |
 | Discard partial output on tile failure | `--no-partial` (fails with `tile.download-failed` and no output) |
 | Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries) |

@@ -31,7 +31,6 @@ const VENDOR_JS = [
   ["../../src/page/vendor/limits.js", "../../../../packages/browser-runtime/src/limits.js"],
   ["../../src/page/vendor/transport-labels.js", "../../../../packages/browser-runtime/src/transport-labels.js"],
   ["../../src/page/vendor/save-name.js", "../../../../packages/browser-runtime/src/save-name.js"],
-  ["../../src/page/vendor/crop.js", "../../../../packages/browser-runtime/src/crop.js"],
 ];
 
 test("vendor mirrors carry the canonical logic (flattened for no-bundler)", () => {

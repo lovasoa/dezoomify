@@ -4,7 +4,7 @@
 // `node:child_process`); it imports nothing from the network and performs
 // no fetches. It asserts:
 //   1. the required JS surface is exported by `crates/dezoomify-wasm/src/lib.rs`
-//      (protocolVersion, Session, dispatch, drain, buffers, process, dispose),
+//      (protocolVersion, Session, dispatch, drain, buffers, dispose),
 //   2. the crate manifest stays adapter-only (cdylib+rlib, no web-sys
 //      Window/Document/fetch/Canvas/storage/worker features, no
 //      reqwest/tokio/image),
@@ -62,7 +62,6 @@ describe("P07-EXPORTS: required JS surface is exported", () => {
       'js_name = "takeBuffer"',
       'js_name = "freeBuffer"',
     ],
-    process: ['js_name = "process"', "pub fn process"],
     dispose: ['js_name = "dispose"', "pub fn dispose"],
   };
   for (const [exportName, evidence] of Object.entries(bindings)) {
@@ -138,7 +137,7 @@ describe("P07-CAPABILITIES: adapter stays capability-free", () => {
   });
 
   it("sources avoid forbidden host APIs", () => {
-    const files = ["lib.rs", "session.rs", "buffer.rs", "processing.rs", "error.rs", "codec.rs"];
+    const files = ["lib.rs", "session.rs", "buffer.rs", "error.rs", "codec.rs"];
     // Strip line comments so contract prose (which names the forbidden
     // capabilities) is not mistaken for usage.
     const code = files
@@ -157,7 +156,7 @@ describe("P07-CAPABILITIES: adapter stays capability-free", () => {
 });
 
 describe("P07-WORKFLOWS: native conformance", () => {
-  it("cargo test passes (buffer/dispatch/drain/process/dispose/isolation)", () => {
+  it("cargo test passes (buffer/dispatch/drain/dispose/isolation)", () => {
     const run = spawnSync(
       "cargo",
       ["test", "--manifest-path", path.join(CRATE, "Cargo.toml"), "--offline"],

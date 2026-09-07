@@ -19,7 +19,6 @@
 //! | drain          | [`session::Session::drain_messages`] (FIFO, exactly once)    |
 //! | buffers        | `allocate_buffer` / `write_buffer` / `commit_buffer` /      |
 //! |                | `take_buffer` / `free_buffer` / `protocol_handle` on Session |
-//! | process        | [`session::Session::process_crop`] (`composite-crop` only)   |
 //! | dispose        | [`session::Session::dispose`] (repeat-safe)                   |
 //!
 //! ## Ownership, reentrancy, disposal
@@ -69,17 +68,15 @@ pub mod buffer;
 pub mod codec;
 pub mod discovery;
 pub mod error;
-pub mod processing;
 pub mod session;
 
 pub use buffer::{ArenaHandle, ByteArena, MAX_BUFFERS, MAX_BUFFER_BYTES, MAX_TOTAL_BYTES};
 pub use dezoomify_protocol::dto::{PROTOCOL_MAJOR, PROTOCOL_MINOR, PROTOCOL_VERSION};
 pub use error::{redact, AdapterError, AdapterErrorCode};
-pub use processing::{composite_crop, fnv1a64_hex, CropGeometry, PIXEL_BYTES};
 pub use session::{
     Session, SessionState, DEFAULT_MAX_BUFFERS, DEFAULT_MAX_BUFFER_BYTES, DEFAULT_MAX_MESSAGES,
     DEFAULT_MAX_TOTAL_BYTES, HARD_MAX_BUFFERS, HARD_MAX_BUFFER_BYTES, HARD_MAX_MESSAGES,
-    HARD_MAX_TOTAL_BYTES, PROCESSING_OPERATION,
+    HARD_MAX_TOTAL_BYTES,
 };
 
 /// Protocol major/minor in lossless stable form (`"1.0"`), without creating
@@ -93,7 +90,7 @@ pub fn protocol_version() -> &'static str {
 /// Rust API above, which exercises the same logic without a browser.
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_api {
-    use super::{buffer::ArenaHandle, session::Session, CropGeometry};
+    use super::{buffer::ArenaHandle, session::Session};
     use wasm_bindgen::prelude::*;
 
     fn js_error(error: super::AdapterError) -> JsValue {
@@ -200,32 +197,6 @@ pub mod wasm_api {
         pub fn free_buffer(&mut self, handle_json: &str) -> Result<(), JsValue> {
             let handle: ArenaHandle = serde_json::from_str(handle_json).map_err(js_malformed)?;
             self.inner.free_buffer(handle).map_err(js_error)
-        }
-
-        /// Execute one bounded pure pixel operation on supplied buffers
-        /// (`process`). Only `composite-crop` exists in adapter v1; returns
-        /// the output digest. `geometry_json` is `{"x":..,"y":..,"w":..,"h":..}`.
-        // 6.1: the `process` export mirrors the fixed JS calling
-        // convention (operation, handles, geometry, extents); packing
-        // them into one object would break the documented JS surface.
-        #[allow(clippy::too_many_arguments)]
-        #[wasm_bindgen(js_name = "process")]
-        pub fn process(
-            &mut self,
-            operation: &str,
-            input_json: &str,
-            output_json: &str,
-            geometry_json: &str,
-            src_width: u32,
-            src_height: u32,
-        ) -> Result<String, JsValue> {
-            let input: ArenaHandle = serde_json::from_str(input_json).map_err(js_malformed)?;
-            let output: ArenaHandle = serde_json::from_str(output_json).map_err(js_malformed)?;
-            let geometry: CropGeometry =
-                CropGeometry::from_json(geometry_json).map_err(js_error)?;
-            self.inner
-                .process_crop(operation, input, output, src_width, src_height, &geometry)
-                .map_err(js_error)
         }
 
         /// Cancel/release session resources; repeat-safe (`dispose`).

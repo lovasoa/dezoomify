@@ -363,19 +363,6 @@ export const fr = {
   "desktop.settings.headersAdv": "Avance : entetes de requete (de confiance)",
   "desktop.settings.headersLabel": "Entetes de requete, un par ligne sous la forme Nom : valeur (facultatif, de confiance)",
   "desktop.settings.reset": "Reinitialiser les parametres",
-  "desktop.settings.crop": "Recadrer x,y,w,h en pixels du niveau (facultatif)",
-  "desktop.settings.cropPlaceholder": "p. ex. 100,100,800,600",
-  // Crop / region selection (shared UI, website preview, desktop, extension).
-  "view.crop.button": "Recadrer",
-  "view.crop.hint": "Faites glisser sur l apercu pour choisir une zone, ou saisissez des nombres exacts.",
-  "view.crop.x": "X",
-  "view.crop.y": "Y",
-  "view.crop.w": "Largeur",
-  "view.crop.h": "Hauteur",
-  "view.crop.apply": "Appliquer le recadrage",
-  "view.crop.clear": "Effacer",
-  "view.crop.size": "Zone : {size}",
-  "view.crop.invalid": "Cette zone est vide ou hors de l image. Choisissez x,y,w,h dans la taille du niveau.",
   // Extension page user copy (apps/extension/src/page/page.ts). The page
   // imports this table through its vendored `page/vendor/i18n.js` codegen
   // mirror (see `scripts/sync-web-js.mjs`) and renders through the same

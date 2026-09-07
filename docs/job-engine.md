@@ -4,7 +4,7 @@
 
 ## Model
 
-A job contains immutable input intent and evolving state. Input intent includes the source, selected catalog item and level, crop, processing recipe, output destination and format, retry policy, partial-output policy, and applicable transport preference. State records the current phase, active transport, tile acquisition and processing outcomes, in-flight effect identifiers, failures, cancellation, publication, and cleanup status.
+A job contains immutable input intent and evolving state. Input intent includes the source, selected catalog item and level, processing recipe, output destination and format, retry policy, partial-output policy, and applicable transport preference. State records the current phase, active transport, tile acquisition and processing outcomes, in-flight effect identifiers, failures, cancellation, publication, and cleanup status.
 
 The engine accepts a command or effect result and returns:
 

@@ -379,64 +379,6 @@ fn max_width_selects_the_largest_fitting_level() {
 }
 
 #[test]
-fn crop_subset_saves_only_the_region() {
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    let out_dir = temp_dir("crop");
-    let output = out_dir.join("cropped.png");
-    let crop = dezoomify_core::core::crop::parse_crop("0,0,256,256").expect("parse crop");
-    let config = PipelineConfig {
-        crop: Some(crop),
-        ..Default::default()
-    };
-    let outcome = pipeline::run(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_event| {},
-    )
-    .expect("cropped pipeline succeeds");
-    assert_eq!((outcome.image_size.x, outcome.image_size.y), (256, 256));
-    assert_eq!(outcome.tile_count, 1);
-    assert!(!outcome.partial);
-    let expected = scenario_expected("cli-crop");
-    assert_eq!(
-        outcome.output_hash,
-        expected["outputHash"].as_str().expect("outputHash")
-    );
-    assert_eq!(outcome.output_hash, sha256_of_file(&output));
-    // The cropped bytes decode at the cropped size.
-    let decoded = image::load_from_memory(&std::fs::read(&output).expect("read"))
-        .expect("decode")
-        .to_rgba8();
-    assert_eq!((decoded.width(), decoded.height()), (256, 256));
-}
-
-#[test]
-fn crop_out_of_bounds_fails_before_acquisition() {
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    let out_dir = temp_dir("crop-invalid");
-    let output = out_dir.join("bad.png");
-    let crop = dezoomify_core::core::crop::parse_crop("600,600,10,10").expect("parse");
-    let config = PipelineConfig {
-        crop: Some(crop),
-        ..Default::default()
-    };
-    let error = pipeline::run(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_event| {},
-    )
-    .expect_err("out-of-bounds crop must fail");
-    assert_eq!(error.code, "output.crop-invalid");
-    assert!(!output.exists(), "failed crops write no output");
-}
-
-#[test]
 fn probe_planned_grid_matches_the_fixed_grid_output() {
     // A generic template has no fixed geometry: the driver answers probe
     // effects with observed tile sizes until the job resolves a real grid.

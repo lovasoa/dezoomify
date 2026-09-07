@@ -608,7 +608,7 @@ impl CapabilitiesDto {
             input_schemes: vec!["https".into(), "http".into()],
             fetch_modes: vec!["direct".into(), "ordinary-image-display".into()],
             decoders: vec!["png".into(), "jpeg".into()],
-            processing_ops: vec!["crop".into(), "composite".into()],
+            processing_ops: vec!["composite".into()],
             encoders: vec!["png".into()],
             destination_modes: vec!["save".into()],
             storage_modes: vec!["none".into()],

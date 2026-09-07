@@ -25,13 +25,12 @@ no pause command).
 |---|---|---|
 | 1 | Queue / bulk | Reuses the single-job engine; unblocks collectors and scripts without a runtime queue. Highest contract risk, so it goes first while the boundary is fresh. |
 | 2 | Preview / estimate | Makes step 2 of the [core workflow](../docs/product.md#core-workflow) honest: users see cost and limits before acquisition. Read-only, feeds app choice. |
-| 3 | Crop | Extends the existing selection step (image, level, crop, recipe, output). Needs the estimate from 2 to price the cropped job. |
-| 4 | History | Builds on 1: a queue produces repeatable jobs worth re-running. Needs storage and redaction design. |
-| 5 | Distribution | Ships what exists (signed installers, store listing) before widening the job surface further. No runtime change. |
-| 6 | i18n / a11y | Cross-cuts every string. Goes last so locales translate settled flows, not churn. |
+| 3 | History | Builds on 1: a queue produces repeatable jobs worth re-running. Needs storage and redaction design. |
+| 4 | Distribution | Ships what exists (signed installers, store listing) before widening the job surface further. No runtime change. |
+| 5 | i18n / a11y | Cross-cuts every string. Goes last so locales translate settled flows, not churn. |
 
-Dependency chain: 2 prices 1 and 3; 3 needs 2; 4 replays 1-3;
-5 ships 1-4 unchanged; 6 translates 1-5.
+Dependency chain: 2 prices 1; 3 replays 1; 4 ships 1-3 unchanged;
+5 translates 1-4.
 
 ## 1. Queue / bulk
 
@@ -98,34 +97,7 @@ Acceptance:
 - Copy follows progressive disclosure: one plain sentence first, detail
   behind diagnostics.
 
-## 3. Crop
-
-Current state: [Core workflow](../docs/product.md#core-workflow) step 2
-already names crop alongside image, level, recipe, and output; the job
-intent carries crop and the protocol advertises `processing_ops`
-(`crop`, `composite`); core has crop-aware paths (edge crops, pnav
-crop grid). There is no complete shared UI crop selector.
-
-Capability impact: gated on `processing_ops` containing `crop`. Runtimes
-without it hide the control; the engine validates the recipe against
-capabilities so checks are never UI-only.
-
-Smallest slice: a single-rectangle crop selector on the selection step
-with preview overlay, normalized coordinates into the existing recipe,
-validation against the selected level size, and redacted diagnostics.
-No multi-region, no free-form masks, no new processing op.
-
-Acceptance:
-
-- User selects one rectangle; the job runs exactly that region at the
-  selected level.
-- Out-of-bounds or empty crops fail before acquisition with a typed error
-  naming the fix.
-- Estimate from 2 reflects the cropped size.
-- Runtimes lacking `crop` hide the control and the engine rejects a
-  forged crop recipe.
-
-## 4. History
+## 3. History
 
 Current state: no persisted job-history ledger (plans track active work;
 engine state is per-job transient; the resume cache holds tile response

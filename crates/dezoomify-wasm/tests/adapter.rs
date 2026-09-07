@@ -1,5 +1,5 @@
 //! Phase-07 adapter conformance: buffer lifecycle, dispatch, drain,
-//! processing, isolation, disposal, redaction, and the `P07-WORKFLOWS`
+//! isolation, disposal, redaction, and the `P07-WORKFLOWS`
 //! transcript golden (`testdata/scenarios/wasm/replay/expected/wasm.json`).
 //!
 //! Representation note: [`Session`] delegates its lifecycle to
@@ -14,9 +14,7 @@ use dezoomify_protocol::dto::{
     ControlBody, ControlEnvelope, ErrorDto, ErrorPhase, HostEffect, JobCommand, JobEvent,
     RequestPurpose,
 };
-use dezoomify_wasm::{
-    protocol_version, AdapterErrorCode, ArenaHandle, CropGeometry, Session, PROCESSING_OPERATION,
-};
+use dezoomify_wasm::{protocol_version, AdapterErrorCode, ArenaHandle, Session};
 
 const JOB_A: &str = "job:wasm-basic-1";
 /// Recognizable Deep Zoom input URL: the registry's deepzoom candidate
@@ -439,107 +437,6 @@ fn discovery_failure_and_cancel_paths_follow_the_engine() {
         AdapterErrorCode::WrongState,
         "cancel in a terminal state is rejected"
     );
-}
-
-#[test]
-fn processing_copies_exact_pixels_with_expected_digest() {
-    let mut session = new_session();
-    // 4x4 RGBA8: pixel (x, y) is [x, y, x ^ y, 255].
-    let mut source = Vec::with_capacity(4 * 4 * 4);
-    for y in 0u8..4 {
-        for x in 0u8..4 {
-            source.extend_from_slice(&[x, y, x ^ y, 255]);
-        }
-    }
-    let input = seal(&mut session, &source);
-    let output = session.allocate_buffer(2 * 2 * 4).expect("output");
-    let geometry = CropGeometry {
-        x: 1,
-        y: 1,
-        w: 2,
-        h: 2,
-    };
-    let digest = session
-        .process_crop(PROCESSING_OPERATION, input, output, 4, 4, &geometry)
-        .expect("crop");
-    // Digest of the exact expected bytes below.
-    assert_eq!(digest, "9b49c8758f302b81");
-    session
-        .commit_buffer(output, 2 * 2 * 4)
-        .expect("seal output");
-    let pixels = session.take_buffer(output).expect("read output");
-    assert_eq!(
-        pixels,
-        vec![
-            1, 1, 0, 255, 2, 1, 3, 255, //
-            1, 2, 3, 255, 2, 2, 0, 255, //
-        ]
-    );
-    assert_eq!(
-        session
-            .process_crop("decode-image", input, output, 4, 4, &geometry)
-            .unwrap_err()
-            .code(),
-        AdapterErrorCode::Malformed,
-        "unknown operations are rejected"
-    );
-}
-
-#[test]
-fn processing_bounds_failures_leave_output_untouched() {
-    let mut session = new_session();
-    let mut source = Vec::with_capacity(4 * 4 * 4);
-    for y in 0u8..4 {
-        for x in 0u8..4 {
-            source.extend_from_slice(&[x, y, x ^ y, 255]);
-        }
-    }
-    let input = seal(&mut session, &source);
-    // Region overruns the source edge.
-    let output = session.allocate_buffer(2 * 2 * 4).expect("output");
-    let bad = CropGeometry {
-        x: 3,
-        y: 3,
-        w: 2,
-        h: 2,
-    };
-    assert_eq!(
-        session
-            .process_crop(PROCESSING_OPERATION, input, output, 4, 4, &bad)
-            .unwrap_err()
-            .code(),
-        AdapterErrorCode::LimitExceeded
-    );
-    // Undersized output capacity.
-    let small = session.allocate_buffer(4).expect("small output");
-    let ok = CropGeometry {
-        x: 0,
-        y: 0,
-        w: 2,
-        h: 2,
-    };
-    assert_eq!(
-        session
-            .process_crop(PROCESSING_OPERATION, input, small, 4, 4, &ok)
-            .unwrap_err()
-            .code(),
-        AdapterErrorCode::LimitExceeded
-    );
-    // In-place processing is forbidden (aliasing).
-    assert_eq!(
-        session
-            .process_crop(PROCESSING_OPERATION, input, input, 4, 4, &ok)
-            .unwrap_err()
-            .code(),
-        AdapterErrorCode::WrongState
-    );
-    // Atomicity: the failed output still holds its zeroed allocation bytes.
-    session.commit_buffer(output, 2 * 2 * 4).expect("seal");
-    assert_eq!(
-        session.take_buffer(output).expect("read"),
-        vec![0u8; 2 * 2 * 4]
-    );
-    session.free_buffer(small).expect("release small");
 }
 
 #[test]

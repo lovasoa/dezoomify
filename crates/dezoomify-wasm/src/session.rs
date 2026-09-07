@@ -41,7 +41,6 @@
 use crate::buffer::{ArenaHandle, ByteArena, MAX_BUFFERS, MAX_BUFFER_BYTES, MAX_TOTAL_BYTES};
 use crate::codec::{decode_envelope, encode_envelope};
 use crate::error::{redact, AdapterError, AdapterErrorCode};
-use crate::processing::{composite_crop, fnv1a64_hex, CropGeometry};
 use dezoomify_job::{Job as EngineJob, JobError as EngineJobError, JobResponse, Outcome};
 use dezoomify_protocol::dto::{
     negotiate_version, CatalogDto, ControlBody, ControlEnvelope, EffectId, ErrorDto, ErrorPhase,
@@ -68,9 +67,6 @@ pub const DEFAULT_MAX_TOTAL_BYTES: u64 = MAX_TOTAL_BYTES;
 pub const DEFAULT_MAX_BUFFERS: usize = MAX_BUFFERS;
 /// Default queued-message cap.
 pub const DEFAULT_MAX_MESSAGES: usize = 1024;
-
-/// Name of the single supported processing operation.
-pub const PROCESSING_OPERATION: &str = "composite-crop";
 
 /// Session lifecycle state, projected 1:1 from the engine state machine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -471,37 +467,6 @@ impl Session {
     ) -> Result<dezoomify_protocol::dto::BufferHandle, AdapterError> {
         self.require_live()?;
         self.arena.to_protocol_handle(handle)
-    }
-
-    /// Run the single bounded pure operation `composite-crop`: copy
-    /// `geometry` from committed RGBA8 `input` (`src_width` x `src_height`)
-    /// into uncommitted `output` (capacity must equal the crop exactly).
-    /// Returns the FNV-1a digest of the cropped bytes. Failure is atomic:
-    /// `output` is untouched on error.
-    ///
-    /// # Errors
-    ///
-    /// `disposed` after disposal; `malformed` for unknown operation names;
-    /// arena seal/aliasing errors; processing bound errors.
-    pub fn process_crop(
-        &mut self,
-        operation: &str,
-        input: ArenaHandle,
-        output: ArenaHandle,
-        src_width: u32,
-        src_height: u32,
-        geometry: &CropGeometry,
-    ) -> Result<String, AdapterError> {
-        self.require_live()?;
-        if operation != PROCESSING_OPERATION {
-            return Err(AdapterError::new(
-                AdapterErrorCode::Malformed,
-                format!("unsupported processing operation {operation}"),
-            ));
-        }
-        let (input_bytes, output_bytes) = self.arena.processing_pair(input, output)?;
-        composite_crop(input_bytes, src_width, src_height, output_bytes, geometry)?;
-        Ok(fnv1a64_hex(output_bytes))
     }
 
     // -----------------------------------------------------------------------

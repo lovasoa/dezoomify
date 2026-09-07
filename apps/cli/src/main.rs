@@ -258,19 +258,6 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     } else {
         parsed.max_width
     };
-    // `--crop x,y,w,h` is validated at parse time; a malformed value
-    // already failed, so an unparseable value here is unreachable and
-    // fails closed as `output.crop-invalid` rather than running uncropped.
-    let crop = match parsed.crop.as_deref() {
-        None => None,
-        Some(raw) => match dezoomify_core::core::crop::parse_crop(raw) {
-            Ok(rect) => Some(rect),
-            Err(message) => {
-                eprintln!("error: {message}");
-                std::process::exit(2);
-            }
-        },
-    };
     PipelineConfig {
         user_headers,
         max_width,
@@ -287,7 +274,6 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
             .tile_cache
             .clone()
             .or_else(|| Some(dezoomify_native::pipeline::default_tile_cache_dir())),
-        crop,
         pause_after: parsed.pause_after,
         format: if parsed.dezoomer.eq_ignore_ascii_case("auto") {
             None

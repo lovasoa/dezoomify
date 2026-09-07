@@ -28,7 +28,6 @@ import { createScanner, isPrivilegedUrl } from "./scan.js";
 import { validateCandidateUrl, redactUrlForLabel } from "./candidates.js";
 import { createSessionFetcher, originOf } from "./fetch.js";
 import { requestNativeHandoff, NATIVE_HOST_NAME } from "./nativeHandoff.js";
-import { parseCrop, clampCrop, subsetPlanForCrop, cropSizeLabel } from "./vendor/crop.js";
 import { pickLevel, BROWSER_MAX_PLAN_TILES } from "./vendor/limits.js";
 import init, * as wasm from "../wasm/dezoomify-wasm.js";
 
@@ -161,74 +160,6 @@ const fail = (code, detail) => {
 // ranking, and save naming are unchanged.
 
 const uiState = { cancelRequested: false, lastTabId: null };
-
-// Crop / region selection (todo 5.4, vendored shared-ui): numeric inputs
-// plus live estimate. Tainted-safe: plan subset only, never pixel reads.
-// Empty or out-of-bounds crops fail before acquisition with a typed error.
-function readCropInputs() {
-  try {
-    const get = (id) => {
-      const el = document.getElementById(id);
-      return el && typeof el.value === "string" ? el.value.trim() : "";
-    };
-    const x = get("crop-x");
-    const y = get("crop-y");
-    const w = get("crop-w");
-    const h = get("crop-h");
-    if (x === "" && y === "" && w === "" && h === "") return null;
-    if (x === "" || y === "" || w === "" || h === "") return null;
-    return parseCrop(`${x},${y},${w},${h}`);
-  } catch {
-    return null;
-  }
-}
-
-function updateCropEstimate(canvas) {
-  try {
-    const el = document.getElementById("crop-estimate");
-    if (!el) return;
-    const rect = readCropInputs();
-    if (!rect) {
-      el.textContent = "";
-      return;
-    }
-    const clamped = canvas ? clampCrop(rect, canvas) : rect;
-    if (!clamped) {
-      el.textContent = "That region is empty or outside the image.";
-      return;
-    }
-    el.textContent = `Region: ${cropSizeLabel(clamped)}`;
-  } catch {
-    // Estimate must never break the job.
-  }
-}
-
-function initCropInputs() {
-  try {
-    document.getElementById("dz-crop")?.removeAttribute("hidden");
-    for (const id of ["crop-x", "crop-y", "crop-w", "crop-h"]) {
-      document.getElementById(id)?.addEventListener("input", () => updateCropEstimate(null));
-    }
-    document.getElementById("crop-clear")?.addEventListener("click", () => {
-      for (const id of ["crop-x", "crop-y", "crop-w", "crop-h"]) {
-        const el = document.getElementById(id);
-        if (el) el.value = "";
-      }
-      updateCropEstimate(null);
-    });
-    document.getElementById("crop-apply")?.addEventListener("click", () => {
-      if (uiState.lastTabId !== null) run(uiState.lastTabId);
-    });
-  } catch {
-    // Crop wiring must never break the page.
-  }
-}
-
-try {
-  if (typeof document !== "undefined") initCropInputs();
-} catch {
-  // Init is best-effort.
-}
 
 // Recent-jobs history per tab (todo 5.2): local-only ledger for this page
 // instance (one page per bound tab, so session storage is already per-tab).
@@ -929,20 +860,6 @@ async function run(tabId) {
     setStep("Choosing the highest resolution…");
     let plan = await planLevel(session, image, tabOrigin);
     throwIfCancelled();
-    try {
-      updateCropEstimate(plan.canvas);
-    } catch {
-      // Estimate is best-effort.
-    }
-    const requestedCrop = readCropInputs();
-    if (requestedCrop) {
-      try {
-        plan = subsetPlanForCrop(plan, requestedCrop);
-        log(`crop ${requestedCrop.w}x${requestedCrop.h} at ${requestedCrop.x},${requestedCrop.y}: planning ${plan.tiles.length} tiles`);
-      } catch (e) {
-        throw Object.assign(new Error("That region is empty or outside the image. Choose x,y,w,h inside the level size."), { code: "crop-invalid", detail: e?.message });
-      }
-    }
     log("plan: " + plan.tiles.length + " tiles, canvas " + plan.canvas.x + "x" + plan.canvas.y);
     setDiagnostics([
       "Phase: tiles",
