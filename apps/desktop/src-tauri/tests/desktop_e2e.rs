@@ -257,6 +257,82 @@ fn percent_encode(raw: &str) -> String {
     out
 }
 
+/// Gateway input for an arbitrary fixture URL (loopback only, never public).
+fn gateway_input_for(origin: &str, fixture_url: &str) -> String {
+    format!("{origin}/fetch?url={fixture_url}")
+}
+
+/// Pump until the job reaches `AwaitingPartialDecision` (the interactive
+/// dialog cue). Panics with the redacted tail on timeout.
+fn wait_for_partial_decision(table: &mut JobTable, job: &str, timeout: Duration) {
+    let start = Instant::now();
+    loop {
+        table.poll_drivers();
+        if table.state_of(job) == Some(JobState::AwaitingPartialDecision) {
+            return;
+        }
+        if table.state_of(job).is_some_and(|s| s.is_terminal()) {
+            panic!("job {job} reached terminal before the partial dialog");
+        }
+        if start.elapsed() > timeout {
+            let tail: Vec<String> = table
+                .events_for(job)
+                .iter()
+                .rev()
+                .take(5)
+                .map(|e| format!("{}:{}", e.kind, e.seq))
+                .collect();
+            panic!("job {job} never asked for a partial decision; tail={tail:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn assert_partial_transcript_hygiene(table: &mut JobTable, job: &str, granted_leaf: &str) {
+    let events = table.events_for(job);
+    let mut last = 0u64;
+    let mut partials = 0usize;
+    let mut completes = 0usize;
+    for event in &events {
+        assert!(event.seq > last, "seq must be strictly monotonic");
+        last = event.seq;
+        if event.kind == "partial-completed" {
+            partials += 1;
+        }
+        if event.kind == "completed" {
+            completes += 1;
+        }
+        assert!(
+            !event.detail.contains("/desktop/tile-failure"),
+            "full fixture path leaked into transcript"
+        );
+        // The granted absolute path never enters the transcript; only the
+        // sibling basename may appear in the honest terminal.
+        assert!(
+            !event.detail.contains(granted_leaf) || event.detail.contains(".partial."),
+            "granted leaf must not masquerade as output"
+        );
+    }
+    assert_eq!(partials, 1, "honest partial terminal exactly once");
+    assert_eq!(completes, 0, "partial must never also claim complete");
+    for emit in table.drain_pending() {
+        assert!(
+            !payload_has_forbidden_keys(&emit.payload),
+            "tile bytes crossed IPC on {}",
+            emit.channel
+        );
+        let text = emit.payload.to_string();
+        assert!(
+            !text.contains("/desktop/tile-failure"),
+            "full input URL leaked into IPC payload"
+        );
+    }
+    assert!(
+        table.drain_pending().is_empty(),
+        "drain never replays emits"
+    );
+}
+
 #[test]
 fn desktop_e2e_save_flow_verifies_real_png() {
     let origin = start_fixture_server();
@@ -378,6 +454,116 @@ fn desktop_e2e_cancel_flow_leaves_no_output() {
     assert_eq!(err.code, "job.stale");
     assert_eq!(table.events_for(&job).len(), before);
     assert_transcript_hygiene(&mut table, &job);
+
+    let _ = std::fs::remove_dir_all(&profile);
+}
+
+#[test]
+fn desktop_e2e_partial_keep_is_honest_with_sibling() {
+    let origin = start_fixture_server();
+    let input = gateway_input_for(
+        &origin,
+        "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi",
+    );
+    let profile = profile_dir("partial-keep");
+    let dest = profile.join("kept.png");
+    let sibling = profile.join("kept.partial.png");
+    assert!(!dest.exists() && !sibling.exists(), "profile starts empty");
+
+    let mut table = JobTable::new();
+    let job = submit_and_choose(&mut table, &input);
+    grant_destination_until_running(&mut table, &job, &dest);
+    // The driver waits for the explicit dialog choice (no auto-answer).
+    wait_for_partial_decision(&mut table, &job, Duration::from_secs(60));
+    let pending = table.events_for(&job);
+    assert!(
+        pending.iter().any(|e| e.kind == "recovery-requested"),
+        "partial dialog requested exactly once before any terminal"
+    );
+    // Explicit keep: the `.partial` sibling carries the bytes and geometry
+    // while the granted path stays untouched.
+    commands::dispatch(&mut table, "answer_choice", Some(&job), Some("partial:keep"))
+        .expect("keep choice accepted");
+    let state = wait_for_terminal(&mut table, &job, Duration::from_secs(90));
+    assert_eq!(
+        state,
+        JobState::PartiallyCompleted,
+        "kept partial ends partial-completed, never completed"
+    );
+    assert!(sibling.exists(), "kept bytes land at the sibling");
+    assert!(
+        !dest.exists(),
+        "granted destination untouched by the partial publish"
+    );
+    let bytes = std::fs::read(&sibling).expect("sibling written");
+    let decoded = image::load_from_memory(&bytes)
+        .expect("sibling decodes")
+        .to_rgba8();
+    assert_eq!(
+        (decoded.width(), decoded.height()),
+        (EXPECTED_WIDTH, EXPECTED_HEIGHT),
+        "kept geometry stays honest"
+    );
+    let snapshot = table.output_snapshot_for(&job).expect("output snapshot");
+    assert_eq!(snapshot.width, EXPECTED_WIDTH);
+    assert_eq!(snapshot.height, EXPECTED_HEIGHT);
+    assert_eq!(snapshot.output_hash, sha256_hex(&bytes));
+    assert_eq!(
+        table.output_sibling_for(&job).as_deref(),
+        Some("kept.partial.png"),
+        "sibling basename only, never the granted path"
+    );
+    assert!(
+        !table.output_missing_for(&job).is_empty(),
+        "missing ledger survives to the terminal"
+    );
+    assert_partial_transcript_hygiene(&mut table, &job, "kept.png");
+
+    let _ = std::fs::remove_dir_all(&profile);
+}
+
+#[test]
+fn desktop_e2e_partial_discard_fails_honestly_with_no_output() {
+    let origin = start_fixture_server();
+    let input = gateway_input_for(
+        &origin,
+        "https://fixtures.test/desktop/tile-failure-fail/broken.dzi",
+    );
+    let profile = profile_dir("partial-discard");
+    let dest = profile.join("discarded.png");
+    let sibling = profile.join("discarded.partial.png");
+
+    let mut table = JobTable::new();
+    let job = submit_and_choose(&mut table, &input);
+    grant_destination_until_running(&mut table, &job, &dest);
+    wait_for_partial_decision(&mut table, &job, Duration::from_secs(60));
+    commands::dispatch(
+        &mut table,
+        "answer_choice",
+        Some(&job),
+        Some("partial:discard"),
+    )
+    .expect("discard choice accepted");
+    let state = wait_for_terminal(&mut table, &job, Duration::from_secs(90));
+    assert_eq!(state, JobState::Failed, "discard ends failed");
+    let snapshot = table.error_snapshot_for(&job).expect("error snapshot");
+    assert_eq!(
+        snapshot.code, "tile.download-failed",
+        "stable code, never display strings"
+    );
+    assert!(
+        table.output_hash_for(&job).is_none(),
+        "discard writes no output"
+    );
+    assert!(!dest.exists(), "granted destination untouched on discard");
+    assert!(!sibling.exists(), "no sibling on the discard path");
+    assert!(
+        !table
+            .events_for(&job)
+            .iter()
+            .any(|e| e.kind == "partial-completed" || e.kind == "completed"),
+        "discard never claims a save"
+    );
 
     let _ = std::fs::remove_dir_all(&profile);
 }

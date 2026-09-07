@@ -70,6 +70,7 @@ const SEL = {
   recoveryTitle: "#dz-recovery-title",
   recoveryDesc: "#dz-recovery-desc",
   recoveryButtons: ".dz-recovery-dialog button",
+  partialNote: ".dz-partial-note",
   completed: ".dz-completed-section",
   completedSummary: ".dz-completed-summary",
   error: ".dz-error-section",
@@ -109,6 +110,7 @@ async function snapshot(driver) {
       recoveryTitle: text(${JSON.stringify(SEL.recoveryTitle)}),
       recoveryDesc: text(${JSON.stringify(SEL.recoveryDesc)}),
       recoveryButtons: buttons(${JSON.stringify(SEL.recoveryButtons)}),
+      partialNote: text(".dz-partial-note"),
       settingsError: text(${JSON.stringify(SEL.settingsError)}),
       settingsAlert: !!document.querySelector(${JSON.stringify(SEL.settingsError)} + '[role="alert"]'),
       copyDiag: !!document.querySelector(${JSON.stringify(SEL.copyDiag)}),
@@ -550,57 +552,52 @@ test("real window: corrupt tile with keep policy still saves", { timeout: 240000
       await waitFor(driver, (s) => s.jobSection, 60000, "job section");
       await waitFor(driver, (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Choose output")), 60000, "destination request");
       assert.equal(await clickChooseOutput(driver), true, "choose-output action clicked");
-      // The native driver auto-answers the engine's partial request with
-      // the Keep default (crates/dezoomify-native/src/job_driver.rs
-      // request-decision branch), so the interactive partial-recovery
-      // dialog is not expected here. If the dialog ever appears, its Keep
-      // path must still complete the save.
-      const terminal = await (async () => {
-        const start = Date.now();
-        for (;;) {
-          const snap = await snapshot(driver);
-          const partialDialog = (snap.recoveryButtons ?? []).some((b) => b.includes("Keep partial"));
-          if (partialDialog) return { snap, viaDialog: true };
-          if (snap.completed || snap.error) return { snap, viaDialog: false };
-          if (Date.now() - start > 150000) assert.fail(`kept save never settled: ${JSON.stringify(snap)}`);
-          await new Promise((r) => setTimeout(r, 250));
-        }
-      })();
-      if (terminal.viaDialog) {
-        const buttons = terminal.snap.recoveryButtons ?? [];
-        assert.ok(buttons.some((b) => b.includes("Keep partial")), "keep action offered");
-        assert.ok(buttons.some((b) => b.includes("Discard")), "discard action offered");
-        assert.ok(buttons.some((b) => b.includes("Retry")), "retry action offered");
-        assert.equal(await clickDialogButton(driver, "Keep partial"), true, "keep-partial clicked");
-        const done = await waitFor(driver, (s) => s.completed || s.error, 120000, "kept terminal");
-        assert.equal(done.error, false, "kept partial completes without error");
-      } else {
-        assert.equal(terminal.snap.error, false, "no error section on the kept save");
-      }
+      // Honest partials wait for the explicit dialog choice (no
+      // auto-answer): the driver announces `recovery-requested{partial}`
+      // with the missing ledger and waits up to 60s for keep/discard/retry.
+      const dialog = await waitFor(
+        driver,
+        (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Keep partial")),
+        120000,
+        "partial dialog",
+      );
+      const buttons = dialog.recoveryButtons ?? [];
+      assert.ok(buttons.some((b) => b.includes("Keep partial")), "keep action offered");
+      assert.ok(buttons.some((b) => b.includes("Discard")), "discard action offered");
+      assert.ok(buttons.some((b) => b.includes("Retry")), "retry action offered");
+      assert.equal(await clickDialogButton(driver, "Keep partial"), true, "keep-partial clicked");
+      const done = await waitFor(driver, (s) => s.completed || s.error, 120000, "kept terminal");
+      assert.equal(done.error, false, "kept partial completes without error");
       // Kept partials publish to the `.partial` sibling, never to the
       // granted destination (crates/dezoomify-native/src/job_driver.rs
       // partial publish; partial_path_for in output.rs): the kept bytes
       // land at kept-partial.partial.png with full geometry while the
       // granted path stays untouched, so a partial file never masquerades
-      // as the complete save.
+      // as the complete save. The honest `.dz-partial-note` names the
+      // sibling basename plus the missing ledger, never the granted path.
       const sibling = fixedDest.replace(/\.png$/, ".partial.png");
       assert.ok(existsSync(sibling), "kept partial published to the sibling path");
       const { width, height } = decodePngSize(readFileSync(sibling));
       assert.equal(width, 512, "kept image width");
       assert.equal(height, 512, "kept image height");
       assert.ok(!existsSync(fixedDest), "granted destination untouched by the partial publish");
+      const noted = await waitFor(driver, (s) => (s.partialNote ?? "") !== "", 30000, "partial note");
+      assert.match(noted.partialNote ?? "", /Partial image saved/, "honest partial title");
+      assert.match(noted.partialNote ?? "", /kept\.partial\.png/, "note names the sibling basename");
+      assert.ok(!(noted.partialNote ?? "").includes(fixedDest), "note never leaks the granted path");
+      assert.ok(!(noted.partialNote ?? "").includes(work), "no absolute profile paths in the note");
       const text = redactedReport("partial-keep", {
         scenario: "desktop/tile-failure-keep",
         origin: redactedOriginOnly(input),
-        save: { width: 512, height: 512, viaDialog: terminal.viaDialog, sibling: "kept-partial.partial.png" },
+        save: { width: 512, height: 512, viaDialog: true, sibling: "kept-partial.partial.png" },
       });
       assert.ok(!text.includes(work), "no absolute profile paths in the report");
-      console.log(`window partial-keep: 512x512 sibling (viaDialog=${terminal.viaDialog}, seed ${SEED})`);
+      console.log(`window partial-keep: 512x512 sibling via dialog (seed ${SEED})`);
     },
   });
 });
 
-test("real window: missing tiles complete as kept partial to the sibling", { timeout: 240000 }, async () => {
+test("real window: discarded partial fails honestly with no output", { timeout: 240000 }, async () => {
   await runWindowFlow({
     nativeDriverBin: shared.nativeDriverBin,
     fixedName: "failed-tiles.png",
@@ -610,28 +607,96 @@ test("real window: missing tiles complete as kept partial to the sibling", { tim
       await waitFor(driver, (s) => s.jobSection, 60000, "job section");
       await waitFor(driver, (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Choose output")), 60000, "destination request");
       assert.equal(await clickChooseOutput(driver), true, "choose-output action clicked");
-      // Desktop defaults keep partial output (PartialPolicy::Keep): the two
-      // 404 tiles exhaust retries, the kept partial publishes to the
-      // sibling, and the save completes. The engine-level fail policy
-      // (tile.download-failed) is unreachable from this UI because the
-      // shell auto-answers partial decisions and never surfaces
-      // AwaitingPartialDecision; see the report for the exact evidence.
-      const terminal = await waitFor(driver, (s) => s.completed || s.error, 180000, "kept-partial terminal");
-      assert.equal(terminal.error, false, "missing tiles complete as kept partial under desktop defaults");
-      assert.match(terminal.completedSummary ?? "", /512 by 512/, "completed summary names the geometry");
+      // Discarding stays honest: the explicit Discard choice fails with the
+      // stable `tile.download-failed` code and writes neither the granted
+      // destination nor the `.partial` sibling.
+      const dialog = await waitFor(
+        driver,
+        (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Discard")),
+        120000,
+        "partial dialog",
+      );
+      assert.ok((dialog.recoveryButtons ?? []).some((b) => b.includes("Keep partial")), "keep offered");
+      assert.ok((dialog.recoveryButtons ?? []).some((b) => b.includes("Retry")), "retry offered");
+      assert.equal(await clickDialogButton(driver, "Discard"), true, "discard clicked");
+      const failed = await waitFor(driver, (s) => s.error, 120000, "honest failure");
+      assert.match(failed.errorDiagnostics ?? "", /Code: tile\.download-failed/, "stable discard code");
       const sibling = fixedDest.replace(/\.png$/, ".partial.png");
-      assert.ok(existsSync(sibling), "kept partial published to the sibling path");
-      const { width, height } = decodePngSize(readFileSync(sibling));
-      assert.equal(width, 512, "kept image width");
-      assert.equal(height, 512, "kept image height");
-      assert.ok(!existsSync(fixedDest), "granted destination untouched by the partial publish");
-      const text = redactedReport("partial-fail-kept", {
+      assert.ok(!existsSync(fixedDest), "granted destination untouched on discard");
+      assert.ok(!existsSync(sibling), "no sibling on the discard path");
+      const settled = await snapshot(driver);
+      assert.equal(settled.completed, false, "discard never claims a save");
+      assert.equal(settled.partialNote ?? "", "", "no partial note on discard");
+      const text = redactedReport("partial-discard", {
         scenario: "desktop/tile-failure-fail",
         origin: redactedOriginOnly(input),
-        save: { width: 512, height: 512, sibling: "failed-tiles.partial.png" },
+        error: { code: "tile.download-failed" },
       });
       assert.ok(!text.includes(work), "no absolute profile paths in the report");
-      console.log(`window partial-fail-kept: 512x512 sibling (seed ${SEED})`);
+      console.log(`window partial-discard: tile.download-failed, no output (seed ${SEED})`);
+    },
+  });
+});
+
+test("real window: retrying failed tiles re-asks then keeps honestly", { timeout: 240000 }, async () => {
+  await runWindowFlow({
+    nativeDriverBin: shared.nativeDriverBin,
+    fixedName: "retried-partial.png",
+    body: async ({ driver, base, fixedDest, work }) => {
+      const input = gatewayInput(base, "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi");
+      await submitUrl(driver, input);
+      await waitFor(driver, (s) => s.jobSection, 60000, "job section");
+      await waitFor(driver, (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Choose output")), 60000, "destination request");
+      assert.equal(await clickChooseOutput(driver), true, "choose-output action clicked");
+      const first = await waitFor(
+        driver,
+        (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Retry")),
+        120000,
+        "first partial dialog",
+      );
+      void first;
+      assert.equal(await clickDialogButton(driver, "Retry"), true, "retry clicked");
+      // Retry re-drives the failed tiles: the corrupt tile fails again, so
+      // the dialog reappears for the honest keep. A stalled retry would
+      // surface as an honest failure instead; either way the UI never
+      // claims a complete save without an explicit second choice.
+      const second = await (async () => {
+        const start = Date.now();
+        for (;;) {
+          const snap = await snapshot(driver);
+          const dialogAgain = (snap.recoveryButtons ?? []).some((b) => b.includes("Keep partial"));
+          if (dialogAgain) return { snap, reasked: true };
+          if (snap.completed || snap.error) return { snap, reasked: false };
+          if (Date.now() - start > 150000) assert.fail(`retry never settled: ${JSON.stringify(snap)}`);
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      })();
+      if (second.reasked) {
+        assert.equal(await clickDialogButton(driver, "Keep partial"), true, "keep after retry clicked");
+        const done = await waitFor(driver, (s) => s.completed || s.error, 120000, "kept terminal after retry");
+        assert.equal(done.error, false, "kept partial completes after retry");
+      } else {
+        // Fail-closed retry: an honest failure still beats a silent stall.
+        assert.equal(second.snap.error, true, "retry settles honestly when it cannot re-ask");
+      }
+      const sibling = fixedDest.replace(/\.png$/, ".partial.png");
+      if (existsSync(sibling)) {
+        const { width, height } = decodePngSize(readFileSync(sibling));
+        assert.equal(width, 512, "kept image width after retry");
+        assert.equal(height, 512, "kept image height after retry");
+        assert.ok(!existsSync(fixedDest), "granted destination untouched");
+        const noted = await waitFor(driver, (s) => (s.partialNote ?? "") !== "", 30000, "partial note after retry");
+        assert.match(noted.partialNote ?? "", /retried-partial\.partial\.png/, "note names the sibling basename");
+      } else {
+        assert.ok(!existsSync(fixedDest), "no complete save claimed after retry");
+      }
+      const text = redactedReport("partial-retry", {
+        scenario: "desktop/tile-failure-keep",
+        origin: redactedOriginOnly(input),
+        save: { width: 512, height: 512, sibling: "retried-partial.partial.png" },
+      });
+      assert.ok(!text.includes(work), "no absolute profile paths in the report");
+      console.log(`window partial-retry: re-asked=${second.reasked} (seed ${SEED})`);
     },
   });
 });
