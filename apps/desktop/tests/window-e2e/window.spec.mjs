@@ -583,7 +583,7 @@ test("real window: corrupt tile with keep policy still saves", { timeout: 240000
       assert.ok(!existsSync(fixedDest), "granted destination untouched by the partial publish");
       const noted = await waitFor(driver, (s) => (s.partialNote ?? "") !== "", 30000, "partial note");
       assert.match(noted.partialNote ?? "", /Partial image saved/, "honest partial title");
-      assert.match(noted.partialNote ?? "", /kept\.partial\.png/, "note names the sibling basename");
+      assert.match(noted.partialNote ?? "", /kept-partial\.partial\.png/, "note names the sibling basename");
       assert.ok(!(noted.partialNote ?? "").includes(fixedDest), "note never leaks the granted path");
       assert.ok(!(noted.partialNote ?? "").includes(work), "no absolute profile paths in the note");
       const text = redactedReport("partial-keep", {
