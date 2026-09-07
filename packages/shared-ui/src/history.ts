@@ -1,0 +1,317 @@
+// Job history ledger (todo 5.2): last-20 jobs, redacted by default.
+//
+// Pure and host-neutral: no host globals, no I/O. Hosts inject a
+// key-value store (localStorage, sessionStorage, or an in-memory map) and
+// render through `view.ts`. Only redacted origins plus a path hash persist
+// by default; the full source URL persists only for non-sensitive URLs when
+// the user has opted in. Credentials, headers, cookies, and signed query
+// values never enter history.
+//
+// Sensitivity follows the proxy and deep-link vocabularies
+// (`crates/fixture-server/src/lib.rs` redact_url_for_log plus
+// `apps/desktop/src/errorCopy.ts` DEEP_LINK_SECRET_QUERY_KEYS): userinfo in
+// the authority or a sensitive query key marks the URL sensitive. Sensitive
+// entries keep origin plus path hash only and can never reopen by URL.
+//
+// This module is erasable-syntax-only TypeScript so
+// `scripts/sync-web-js.mjs` can mirror it to `history.js` exactly like the
+// other shared-ui modules. Keep it framework-free: shared UI stays vanilla.
+
+export const HISTORY_MAX = 20;
+
+export const HISTORY_KEY_WEBSITE = "dezoomify.history.v1";
+
+export const HISTORY_OPTIN_KEY_WEBSITE = "dezoomify.history.optin.v1";
+
+export const HISTORY_KEY_DESKTOP = "dezoomify.desktop.history.v1";
+
+export const HISTORY_OPTIN_KEY_DESKTOP = "dezoomify.desktop.history.optin.v1";
+
+export const HISTORY_KEY_EXTENSION = "dezoomify.ext.history.v1";
+
+export interface HistoryEntry {
+  origin: string;
+  pathHash: string;
+  url?: string;
+  width?: number;
+  height?: number;
+  format?: string;
+  at: number;
+}
+
+export interface HistoryStore {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+const SENSITIVE_SUBSTRINGS: ReadonlyArray<string> = [
+  "apikey",
+  "api_key",
+  "token",
+  "auth",
+  "session",
+  "signature",
+  "secret",
+  "password",
+  "cookie",
+];
+
+const SENSITIVE_EXACT: ReadonlyArray<string> = [
+  "cookie",
+  "cookies",
+  "authorization",
+  "proxy-authorization",
+  "bearer",
+  "token",
+  "signature",
+  "sig",
+  "auth",
+  "secret",
+  "password",
+  "session",
+  "sid",
+  "apikey",
+  "api_key",
+  "key",
+];
+
+function isSensitiveKey(name: string): boolean {
+  const lower = String(name ?? "").toLowerCase();
+  if (lower === "") return false;
+  for (const exact of SENSITIVE_EXACT) {
+    if (lower === exact) return true;
+  }
+  for (const part of SENSITIVE_SUBSTRINGS) {
+    if (lower.includes(part)) return true;
+  }
+  return false;
+}
+
+/** True when the URL carries userinfo or a sensitive query key. Fail-closed: unparseable URLs count as sensitive. */
+export function isSensitiveUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(String(url ?? "").trim());
+  } catch {
+    return true;
+  }
+  if (parsed.username !== "" || parsed.password !== "") return true;
+  try {
+    for (const key of parsed.searchParams.keys()) {
+      if (isSensitiveKey(key)) return true;
+    }
+  } catch {
+    return true;
+  }
+  const fragment = parsed.hash ?? "";
+  if (fragment !== "") {
+    const body = fragment.slice(1);
+    if (body !== "") {
+      const pairs = body.split("&");
+      for (const pair of pairs) {
+        const key = pair.split("=")[0] ?? "";
+        if (key !== "" && isSensitiveKey(key)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Redacted origin (`scheme://host[:port]`, lowercased host). Empty when unparseable or non-http(s). */
+export function historyOriginOf(url: string): string {
+  try {
+    const parsed = new URL(String(url ?? "").trim());
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    const host = parsed.hostname.toLowerCase();
+    if (host === "") return "";
+    const defaultPort = parsed.protocol === "https:" ? "443" : "80";
+    const port = parsed.port && parsed.port !== defaultPort ? `:${parsed.port}` : "";
+    return `${parsed.protocol}//${host}${port}`;
+  } catch {
+    return "";
+  }
+}
+
+/** Stable non-crypto path hash (FNV-1a 32-bit, 8 hex chars) for dedup. One-way: the hash reveals no URL text. */
+export function historyPathHash(url: string): string {
+  const text = String(url ?? "");
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+export interface HistoryDetails {
+  width?: number;
+  height?: number;
+  format?: string;
+  at?: number;
+}
+
+/** Build one ledger entry. The full URL is kept only when the URL is non-sensitive and the user opted in. */
+export function toHistoryEntry(
+  url: string,
+  details: HistoryDetails,
+  allowFullUrl: boolean,
+): HistoryEntry | null {
+  const origin = historyOriginOf(url);
+  if (origin === "") return null;
+  const trimmed = String(url ?? "").trim();
+  if (trimmed === "" || trimmed.length > 2048) return null;
+  const sensitive = isSensitiveUrl(trimmed);
+  const entry: HistoryEntry = {
+    origin,
+    pathHash: historyPathHash(trimmed),
+    at: typeof details.at === "number" && Number.isFinite(details.at) ? Math.floor(details.at) : Date.now(),
+  };
+  if (typeof details.width === "number" && Number.isFinite(details.width) && details.width > 0) {
+    entry.width = Math.floor(details.width);
+  }
+  if (typeof details.height === "number" && Number.isFinite(details.height) && details.height > 0) {
+    entry.height = Math.floor(details.height);
+  }
+  if (typeof details.format === "string" && details.format.trim() !== "") {
+    entry.format = details.format.trim().slice(0, 32);
+  }
+  if (!sensitive && allowFullUrl) {
+    entry.url = trimmed;
+  }
+  return entry;
+}
+
+/** Insert one entry at the front, deduped by origin plus path hash, capped at HISTORY_MAX. */
+export function pushHistory(entries: Array<HistoryEntry>, entry: HistoryEntry): Array<HistoryEntry> {
+  const list = Array.isArray(entries) ? entries.slice() : [];
+  const kept = list.filter((item) => {
+    if (!item || typeof item !== "object") return false;
+    return !(item.origin === entry.origin && item.pathHash === entry.pathHash);
+  });
+  kept.unshift(entry);
+  return kept.slice(0, HISTORY_MAX);
+}
+
+function isValidEntry(raw: unknown): raw is HistoryEntry {
+  if (!raw || typeof raw !== "object") return false;
+  const entry = raw as Record<string, unknown>;
+  if (typeof entry["origin"] !== "string" || (entry["origin"] as string) === "") return false;
+  try {
+    const parsed = new URL(entry["origin"] as string);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  } catch {
+    return false;
+  }
+  if (typeof entry["pathHash"] !== "string" || !/^[0-9a-f]{8}$/.test(entry["pathHash"] as string)) {
+    return false;
+  }
+  if (typeof entry["at"] !== "number" || !Number.isFinite(entry["at"] as number)) return false;
+  if (entry["url"] !== undefined) {
+    if (typeof entry["url"] !== "string") return false;
+    const url = (entry["url"] as string).trim();
+    if (url === "" || url.length > 2048) return false;
+    if (historyOriginOf(url) === "") return false;
+    if (isSensitiveUrl(url)) return false;
+  }
+  for (const key of ["width", "height"] as const) {
+    const value = entry[key];
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || (value as number) <= 0)) {
+      return false;
+    }
+  }
+  if (entry["format"] !== undefined && typeof entry["format"] !== "string") return false;
+  return true;
+}
+
+/** Parse stored JSON into validated entries (fail-closed: bad payloads yield an empty list). */
+export function parseHistoryJson(text: string | null | undefined): Array<HistoryEntry> {
+  if (typeof text !== "string" || text.trim() === "") return [];
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!Array.isArray(parsed)) return [];
+    const out: Array<HistoryEntry> = [];
+    for (const item of parsed) {
+      if (isValidEntry(item)) {
+        const entry: HistoryEntry = {
+          origin: (item as HistoryEntry).origin,
+          pathHash: (item as HistoryEntry).pathHash,
+          at: Math.floor((item as HistoryEntry).at),
+        };
+        const typed = item as HistoryEntry;
+        if (typeof typed.url === "string") entry.url = typed.url;
+        if (typeof typed.width === "number") entry.width = Math.floor(typed.width);
+        if (typeof typed.height === "number") entry.height = Math.floor(typed.height);
+        if (typeof typed.format === "string") entry.format = typed.format;
+        out.push(entry);
+        if (out.length >= HISTORY_MAX) break;
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+export function serializeHistory(entries: Array<HistoryEntry>): string {
+  const list = Array.isArray(entries) ? entries.slice(0, HISTORY_MAX) : [];
+  return JSON.stringify(list);
+}
+
+/** Load validated history from a store. Never throws: storage errors yield an empty list. */
+export function loadHistory(store: HistoryStore | null | undefined, key: string): Array<HistoryEntry> {
+  if (!store || typeof store.getItem !== "function") return [];
+  try {
+    return parseHistoryJson(store.getItem(key));
+  } catch {
+    return [];
+  }
+}
+
+/** Persist history to a store. Best-effort: storage errors are swallowed so jobs never break. */
+export function saveHistory(
+  store: HistoryStore | null | undefined,
+  key: string,
+  entries: Array<HistoryEntry>,
+): void {
+  if (!store || typeof store.setItem !== "function") return;
+  try {
+    store.setItem(key, serializeHistory(entries));
+  } catch {
+    // History persistence must never break a job.
+  }
+}
+
+/** Remove all history from a store. Best-effort like the save path. */
+export function clearHistory(store: HistoryStore | null | undefined, key: string): void {
+  if (!store || typeof store.removeItem !== "function") return;
+  try {
+    store.removeItem(key);
+  } catch {
+    // Clearing must never throw.
+  }
+}
+
+/** Read the full-URL opt-in flag (`"1"` means opted in). Defaults to false on any error. */
+export function loadHistoryOptIn(store: HistoryStore | null | undefined, key: string): boolean {
+  if (!store || typeof store.getItem !== "function") return false;
+  try {
+    return store.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Persist the full-URL opt-in flag. Best-effort like history itself. */
+export function saveHistoryOptIn(store: HistoryStore | null | undefined, key: string, value: boolean): void {
+  if (!store) return;
+  try {
+    if (value) {
+      store.setItem(key, "1");
+    } else {
+      store.removeItem(key);
+    }
+  } catch {
+    // Opt-in persistence must never break the UI.
+  }
+}
