@@ -1,5 +1,9 @@
 //! CLI entry point: argument parsing, real download pipeline, honest events.
 
+// 6.1 unwrap policy: failures map to stderr diagnostics and exit codes
+// instead of panicking (see `dezoomify-protocol` crate root for the policy).
+#![deny(clippy::unwrap_used)]
+
 mod arguments;
 mod report;
 
@@ -254,6 +258,19 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
     } else {
         parsed.max_width
     };
+    // `--crop x,y,w,h` is validated at parse time; a malformed value
+    // already failed, so an unparseable value here is unreachable and
+    // fails closed as `output.crop-invalid` rather than running uncropped.
+    let crop = match parsed.crop.as_deref() {
+        None => None,
+        Some(raw) => match dezoomify_core::core::crop::parse_crop(raw) {
+            Ok(rect) => Some(rect),
+            Err(message) => {
+                eprintln!("error: {message}");
+                std::process::exit(2);
+            }
+        },
+    };
     PipelineConfig {
         user_headers,
         max_width,
@@ -266,7 +283,12 @@ fn pipeline_config_for(parsed: &Args) -> PipelineConfig {
         retry_delay: parsed.retry_delay,
         min_interval: parsed.min_interval,
         compression: parsed.compression,
-        cache_dir: parsed.tile_cache.clone(),
+        cache_dir: parsed
+            .tile_cache
+            .clone()
+            .or_else(|| Some(dezoomify_native::pipeline::default_tile_cache_dir())),
+        crop,
+        pause_after: parsed.pause_after,
         format: if parsed.dezoomer.eq_ignore_ascii_case("auto") {
             None
         } else {
@@ -334,11 +356,14 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         }
     };
     handle.emit("started");
-    print_event(
-        parsed.json,
-        handle.events().last().expect("started event"),
-        level,
-    );
+    // `emit` just pushed, so `last()` is `Some` by construction; a missing
+    // event is an internal error, reported like any other failure (the 6.1
+    // unwrap policy forbids panicking on it).
+    let Some(started) = handle.events().last() else {
+        eprintln!("error: job started without an event (native.internal)");
+        return false;
+    };
+    print_event(parsed.json, started, level);
 
     let config = pipeline_config_for(parsed);
     let json = parsed.json;

@@ -68,6 +68,15 @@ pub struct Args {
     /// `tile.download-failed` and no output. `--keep-partial` is the
     /// explicit opt-in spelling of the default; last flag wins.
     pub keep_partial: bool,
+    /// Optional crop rectangle in level pixels (`x,y,w,h`), wired to native
+    /// `crop`. Only tiles intersecting the clamped rectangle are fetched;
+    /// empty or out-of-bounds crops fail with `output.crop-invalid`.
+    pub crop: Option<String>,
+    /// Pause v1 demonstration: pause the engine after this many tiles are
+    /// acquired (suspend new scheduling, finish in-flight, retain decoded),
+    /// then resume and complete. Wired to native `pause_after`. `None`
+    /// disables the demonstration.
+    pub pause_after: Option<usize>,
 }
 
 impl Args {
@@ -138,6 +147,8 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut tile_cache: Option<PathBuf> = None;
     let mut bulk: Option<String> = None;
     let mut keep_partial = true;
+    let mut crop: Option<String> = None;
+    let mut pause_after: Option<usize> = None;
     let mut i = 0;
     while i < args.len() {
         let (flag, inline_value) = split_flag_value(&args[i]);
@@ -291,6 +302,29 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
                 bulk = Some(raw);
             }
+            "--crop" => {
+                let raw = take_value(args, &mut i, inline_value, "--crop")?;
+                if raw.is_empty() {
+                    return Err("missing value for --crop".to_string());
+                }
+                // Validate eagerly so typos fail before any work; the native
+                // pipeline re-validates against the level size.
+                dezoomify_core::core::crop::parse_crop(&raw)?;
+                if crop.is_some() {
+                    return Err("duplicate --crop".to_string());
+                }
+                crop = Some(raw);
+            }
+            "--pause-after" => {
+                let raw = take_value(args, &mut i, inline_value, "--pause-after")?;
+                let count: usize = raw
+                    .parse()
+                    .map_err(|_| format!("invalid --pause-after value: {raw}"))?;
+                if pause_after.is_some() {
+                    return Err("duplicate --pause-after".to_string());
+                }
+                pause_after = Some(count);
+            }
             "--help" | "-?" => return Err(help()),
             "--version" | "-V" => {
                 return Err(format!("dezoomify-cli {}", env!("CARGO_PKG_VERSION")));
@@ -355,6 +389,8 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         tile_cache,
         bulk,
         keep_partial,
+        crop,
+        pause_after,
     })
 }
 
@@ -528,6 +564,8 @@ fn help() -> String {
         "  -h, --max-height <px>       largest level whose height fits (positive integer)",
         "  --zoom-level <n>            select level by index, 0 is smallest, too large uses last",
         "  --image-index <n>           select image by index, 0 is first, too large uses last",
+        "  --crop <x,y,w,h>            save only the region at x,y of size w,h in level pixels",
+        "  --pause-after <n>           pause after n tiles, then resume (Pause v1 demo)",
         "  -n, --parallelism <n>       max concurrent tile downloads (default 16)",
         "  -r, --retries <n>           tile retry budget, 0 means no retries (default 3)",
         "  --retry-delay <duration>    delay before first retry, then doubling (default 2s)",
@@ -981,6 +1019,94 @@ mod tests {
         assert_eq!(args.input.as_deref(), Some("https://example.com/x.dzi"));
         assert_eq!(args.output, None);
         assert_eq!(args.bulk_output_file(), None);
+    }
+
+    #[test]
+    fn crop_parses_and_rejects_bad_values() {
+        let args = parse(&[
+            "--crop".to_string(),
+            "10,20,300,200".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("crop parses");
+        assert_eq!(args.crop.as_deref(), Some("10,20,300,200"));
+        let inline = parse(&[
+            "--crop=0,0,256,256".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("inline crop parses");
+        assert_eq!(inline.crop.as_deref(), Some("0,0,256,256"));
+        for bad in ["10,20,0,5", "10,20", "a,b,c,d"] {
+            let err = parse(&[
+                "--crop".to_string(),
+                bad.to_string(),
+                "https://example.com/x.dzi".to_string(),
+                "out.png".to_string(),
+            ])
+            .expect_err("bad crop must fail");
+            assert!(err.contains("invalid --crop"), "typed error: {err}");
+        }
+        let dup = parse(&[
+            "--crop".to_string(),
+            "0,0,10,10".to_string(),
+            "--crop".to_string(),
+            "0,0,20,20".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect_err("duplicate crop must fail");
+        assert!(dup.contains("duplicate --crop"), "duplicate: {dup}");
+        let defaults = parse(&[
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("defaults");
+        assert_eq!(defaults.crop, None);
+    }
+
+    #[test]
+    fn pause_after_parses_and_rejects_bad_values() {
+        let args = parse(&[
+            "--pause-after".to_string(),
+            "2".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("pause-after parses");
+        assert_eq!(args.pause_after, Some(2));
+        let inline = parse(&[
+            "--pause-after=0".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("inline pause-after parses");
+        assert_eq!(inline.pause_after, Some(0));
+        let err = parse(&[
+            "--pause-after".to_string(),
+            "nope".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect_err("bad pause-after must fail");
+        assert!(err.contains("invalid --pause-after"), "typed error: {err}");
+        let dup = parse(&[
+            "--pause-after".to_string(),
+            "1".to_string(),
+            "--pause-after".to_string(),
+            "2".to_string(),
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect_err("duplicate pause-after must fail");
+        assert!(dup.contains("duplicate --pause-after"), "duplicate: {dup}");
+        let defaults = parse(&[
+            "https://example.com/x.dzi".to_string(),
+            "out.png".to_string(),
+        ])
+        .expect("defaults");
+        assert_eq!(defaults.pause_after, None);
     }
 
     #[test]
