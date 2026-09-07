@@ -20,21 +20,42 @@ export const MAX_CAPABILITIES = 10;
 export const MAX_CAPABILITY_LENGTH = 64;
 export const MAX_REQUEST_ID_LENGTH = 128;
 
-/** Keys that must never appear in a non-secret handoff envelope. */
+/** Keys that must never appear in a non-secret handoff envelope. Single shared
+ * vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
+ * `testdata/redaction-vectors.json`, and `packages/protocol-ts/src/generated.ts`.
+ * Matching is case-insensitive exact (never substring). */
 export const SECRET_KEYS = Object.freeze([
+  "access-token",
+  "access_token",
+  "api-key",
+  "api_key",
+  "apikey",
+  "auth",
+  "authorization",
+  "bearer",
+  "code",
   "cookie",
   "cookies",
   "cookievalue",
   "cookievalues",
-  "authorization",
-  "token",
-  "secret",
-  "signature",
-  "privatekey",
-  "set-cookie",
-  "sessiontoken",
-  "bearer",
+  "credential",
+  "key",
+  "passwd",
   "password",
+  "proxy-authorization",
+  "secret",
+  "session",
+  "sessionid",
+  "sessiontoken",
+  "set-cookie",
+  "sid",
+  "sig",
+  "signature",
+  "state",
+  "ticket",
+  "token",
+  "privatekey",
+  "x-api-key",
 ]);
 
 /** Prototype-pollution keys that invalidate any envelope. */
@@ -84,6 +105,26 @@ export function validateHandoffEnvelope(envelope, ctx) {
     return fail("bad-url", "sourceUrl scheme must be http/https");
   }
   if (parsed.username || parsed.password) return fail("secret-field", "sourceUrl must not embed credentials");
+  // Secret query keys in the source URL are forbidden by exact-match URL
+  // parsing (never substring), mirroring the protocol DTO so
+  // `/cookie-recipe/` stays valid while `?token=secret` is rejected.
+  for (const key of parsed.searchParams.keys()) {
+    if (SECRET_KEYS.includes(key.toLowerCase())) {
+      return fail("secret-field", `sourceUrl must be non-secret (found ${key})`);
+    }
+  }
+  if (parsed.hash) {
+    const fragment = parsed.hash.slice(1);
+    for (const pair of fragment.split("&")) {
+      const eq = pair.indexOf("=");
+      if (eq > 0) {
+        const key = pair.slice(0, eq).replace(/^[?#]+/, "");
+        if (SECRET_KEYS.includes(key.toLowerCase())) {
+          return fail("secret-field", `sourceUrl must be non-secret (found ${key})`);
+        }
+      }
+    }
+  }
   if (env.capabilities !== undefined) {
     if (!Array.isArray(env.capabilities)) return fail("malformed", "capabilities must be an array");
     if (env.capabilities.length > MAX_CAPABILITIES) return fail("oversize", "too many capabilities");

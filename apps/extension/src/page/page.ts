@@ -28,7 +28,107 @@ import { createScanner, isPrivilegedUrl } from "./scan.js";
 import { validateCandidateUrl, redactUrlForLabel } from "./candidates.js";
 import { createSessionFetcher, originOf } from "./fetch.js";
 import { requestNativeHandoff, NATIVE_HOST_NAME } from "./nativeHandoff.js";
+import { parseCrop, clampCrop, subsetPlanForCrop, cropSizeLabel } from "./vendor/crop.js";
+import { pickLevel, BROWSER_MAX_PLAN_TILES } from "./vendor/limits.js";
 import init, * as wasm from "../wasm/dezoomify-wasm.js";
+
+// Extension tile concurrency (6 workers, paced starts): matches the
+// documented browser policy (see limits.test.mjs). Tile fetches run with at
+// most 6 in flight and a short per-host stagger so one job cannot flood the
+// site; small jobs stay sequential in effect.
+const EXT_TILE_CONCURRENCY = 6;
+const EXT_TILE_MIN_INTERVAL_MS = 50;
+
+// Local history helpers (todo 5.2): mirror of `packages/shared-ui/src/history.ts`
+// for the no-bundler page. The page ships verbatim, so shared-ui cannot be
+// imported here; this compact copy keeps the same redaction rule (origin plus
+// path hash by default, full URL only for non-sensitive sources). Keep the
+// sensitive vocabulary in sync with the canonical module.
+const HISTORY_KEY_EXTENSION = "dezoomify.ext.history.v1";
+const HISTORY_MAX = 20;
+const EXT_SENSITIVE_PARTS = ["apikey", "api_key", "token", "auth", "session", "signature", "secret", "password", "cookie"];
+const EXT_SENSITIVE_EXACT = new Set(["cookie", "cookies", "authorization", "proxy-authorization", "bearer", "token", "signature", "sig", "auth", "secret", "password", "session", "sid", "apikey", "api_key", "key"]);
+
+function extSensitiveKey(name) {
+  const lower = String(name ?? "").toLowerCase();
+  if (lower === "") return false;
+  if (EXT_SENSITIVE_EXACT.has(lower)) return true;
+  return EXT_SENSITIVE_PARTS.some((part) => lower.includes(part));
+}
+
+function extIsSensitiveUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(String(url ?? "").trim());
+  } catch {
+    return true;
+  }
+  if (parsed.username !== "" || parsed.password !== "") return true;
+  try {
+    for (const key of parsed.searchParams.keys()) {
+      if (extSensitiveKey(key)) return true;
+    }
+  } catch {
+    return true;
+  }
+  return false;
+}
+
+function extHistoryOrigin(url) {
+  try {
+    const parsed = new URL(String(url ?? "").trim());
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    if (!parsed.hostname) return "";
+    return parsed.protocol + "//" + parsed.hostname.toLowerCase() + (parsed.port ? ":" + parsed.port : "");
+  } catch {
+    return "";
+  }
+}
+
+function extPathHash(url) {
+  const text = String(url ?? "");
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function extToHistoryEntry(url, width, height) {
+  const origin = extHistoryOrigin(url);
+  const trimmed = String(url ?? "").trim();
+  if (origin === "" || trimmed === "" || trimmed.length > 2048) return null;
+  if (extIsSensitiveUrl(trimmed)) {
+    return { origin, pathHash: extPathHash(trimmed), at: Date.now() };
+  }
+  const entry = { origin, pathHash: extPathHash(trimmed), url: trimmed, at: Date.now() };
+  if (Number.isFinite(width) && width > 0) entry.width = Math.floor(width);
+  if (Number.isFinite(height) && height > 0) entry.height = Math.floor(height);
+  entry.format = "png";
+  return entry;
+}
+
+function extPushHistory(list, entry) {
+  const kept = (Array.isArray(list) ? list : []).filter((item) => {
+    return item && !(item.origin === entry.origin && item.pathHash === entry.pathHash);
+  });
+  kept.unshift(entry);
+  return kept.slice(0, HISTORY_MAX);
+}
+
+function extParseHistory(text) {
+  if (typeof text !== "string" || text.trim() === "") return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => {
+      return item && typeof item.origin === "string" && typeof item.pathHash === "string" && typeof item.at === "number";
+    }).slice(0, HISTORY_MAX);
+  } catch {
+    return [];
+  }
+}
 
 const { DiscoverySession } = wasm;
 
@@ -61,6 +161,225 @@ const fail = (code, detail) => {
 // ranking, and save naming are unchanged.
 
 const uiState = { cancelRequested: false, lastTabId: null };
+
+// Crop / region selection (todo 5.4, vendored shared-ui): numeric inputs
+// plus live estimate. Tainted-safe: plan subset only, never pixel reads.
+// Empty or out-of-bounds crops fail before acquisition with a typed error.
+function readCropInputs() {
+  try {
+    const get = (id) => {
+      const el = document.getElementById(id);
+      return el && typeof el.value === "string" ? el.value.trim() : "";
+    };
+    const x = get("crop-x");
+    const y = get("crop-y");
+    const w = get("crop-w");
+    const h = get("crop-h");
+    if (x === "" && y === "" && w === "" && h === "") return null;
+    if (x === "" || y === "" || w === "" || h === "") return null;
+    return parseCrop(`${x},${y},${w},${h}`);
+  } catch {
+    return null;
+  }
+}
+
+function updateCropEstimate(canvas) {
+  try {
+    const el = document.getElementById("crop-estimate");
+    if (!el) return;
+    const rect = readCropInputs();
+    if (!rect) {
+      el.textContent = "";
+      return;
+    }
+    const clamped = canvas ? clampCrop(rect, canvas) : rect;
+    if (!clamped) {
+      el.textContent = "That region is empty or outside the image.";
+      return;
+    }
+    el.textContent = `Region: ${cropSizeLabel(clamped)}`;
+  } catch {
+    // Estimate must never break the job.
+  }
+}
+
+function initCropInputs() {
+  try {
+    document.getElementById("dz-crop")?.removeAttribute("hidden");
+    for (const id of ["crop-x", "crop-y", "crop-w", "crop-h"]) {
+      document.getElementById(id)?.addEventListener("input", () => updateCropEstimate(null));
+    }
+    document.getElementById("crop-clear")?.addEventListener("click", () => {
+      for (const id of ["crop-x", "crop-y", "crop-w", "crop-h"]) {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+      }
+      updateCropEstimate(null);
+    });
+    document.getElementById("crop-apply")?.addEventListener("click", () => {
+      if (uiState.lastTabId !== null) run(uiState.lastTabId);
+    });
+  } catch {
+    // Crop wiring must never break the page.
+  }
+}
+
+try {
+  if (typeof document !== "undefined") initCropInputs();
+} catch {
+  // Init is best-effort.
+}
+
+// Recent-jobs history per tab (todo 5.2): local-only ledger for this page
+// instance (one page per bound tab, so session storage is already per-tab).
+// Only a redacted origin plus a path hash persists by default; the full
+// source URL persists only for non-sensitive URLs (the explicit scan click
+// is the opt-in). Credentials never enter history.
+const extMemoryFallback = new Map();
+const extHistoryStore = {
+  getItem(key) {
+    try {
+      if (typeof sessionStorage !== "undefined" && typeof sessionStorage.getItem === "function") {
+        return sessionStorage.getItem(key);
+      }
+    } catch {
+      // Storage unavailable; fall through to the memory fallback.
+    }
+    return extMemoryFallback.get(key) ?? null;
+  },
+  setItem(key, value) {
+    try {
+      if (typeof sessionStorage !== "undefined" && typeof sessionStorage.setItem === "function") {
+        sessionStorage.setItem(key, value);
+        return;
+      }
+    } catch {
+      // Storage unavailable; fall through to the memory fallback.
+    }
+    extMemoryFallback.set(key, value);
+  },
+  removeItem(key) {
+    try {
+      if (typeof sessionStorage !== "undefined" && typeof sessionStorage.removeItem === "function") {
+        sessionStorage.removeItem(key);
+      }
+    } catch {
+      // Removal must never throw.
+    }
+    extMemoryFallback.delete(key);
+  },
+};
+
+function extHistoryKey() {
+  const tabId = uiState.lastTabId;
+  if (tabId !== null && tabId !== undefined) return HISTORY_KEY_EXTENSION + "." + String(tabId);
+  return HISTORY_KEY_EXTENSION;
+}
+
+function loadExtHistory() {
+  try {
+    const raw = extHistoryStore.getItem(extHistoryKey());
+    return extParseHistory(raw);
+  } catch {
+    return [];
+  }
+}
+
+function recordExtHistory(sourceUrl, width, height) {
+  try {
+    const entry = extToHistoryEntry(sourceUrl, width, height);
+    if (!entry) return;
+    const next = extPushHistory(loadExtHistory(), entry);
+    try {
+      extHistoryStore.setItem(extHistoryKey(), JSON.stringify(next));
+    } catch {
+      // Persistence must never break a save.
+    }
+    renderExtHistory();
+  } catch {
+    // History must never break a save.
+  }
+}
+
+function renderExtHistory() {
+  try {
+    const card = document.getElementById("dz-card");
+    if (!card) return;
+    let section = document.getElementById("dz-ext-history");
+    if (!section) {
+      section = document.createElement("div");
+      section.id = "dz-ext-history";
+      section.className = "dz-history-section";
+      card.appendChild(section);
+    }
+    while (section.firstElementChild) section.firstElementChild.remove();
+    const entries = loadExtHistory();
+    const title = document.createElement("h2");
+    title.className = "dz-history-title";
+    title.textContent = "Recent pictures";
+    section.appendChild(title);
+    const note = document.createElement("p");
+    note.className = "dz-history-note";
+    note.textContent = "Kept only on this device, only for this tab.";
+    section.appendChild(note);
+    if (entries.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "dz-history-empty";
+      empty.textContent = "No recent pictures yet. Saved pictures appear here.";
+      section.appendChild(empty);
+      return;
+    }
+    const list = document.createElement("ul");
+    list.className = "dz-history-list";
+    for (const entry of entries.slice(0, 20)) {
+      const item = document.createElement("li");
+      item.className = "dz-history-item";
+      const main = document.createElement("span");
+      main.className = "dz-history-main";
+      const dims = typeof entry.width === "number" && typeof entry.height === "number"
+        ? entry.width + " by " + entry.height + " pixels"
+        : "";
+      const parts = [entry.origin];
+      if (dims !== "") parts.push(dims);
+      if (typeof entry.format === "string" && entry.format !== "") parts.push(entry.format);
+      main.textContent = parts.join(" ");
+      item.appendChild(main);
+      if (typeof entry.url === "string" && entry.url !== "" && uiState.lastTabId !== null) {
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "dz-btn-secondary";
+        openBtn.textContent = "Open again";
+        openBtn.addEventListener("click", () => {
+          if (uiState.lastTabId !== null) run(uiState.lastTabId);
+        });
+        item.appendChild(openBtn);
+      } else {
+        const hidden = document.createElement("span");
+        hidden.className = "dz-history-hidden";
+        hidden.textContent = "Address hidden for privacy";
+        item.appendChild(hidden);
+      }
+      list.appendChild(item);
+    }
+    section.appendChild(list);
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "dz-btn-secondary";
+    clearBtn.id = "dz-ext-history-clear";
+    clearBtn.textContent = "Clear history";
+    clearBtn.addEventListener("click", () => {
+      try {
+        extHistoryStore.removeItem(extHistoryKey());
+        renderExtHistory();
+      } catch {
+        // Clearing must never throw.
+      }
+    });
+    section.appendChild(clearBtn);
+  } catch {
+    // History rendering must never break the page.
+  }
+}
 
 function uiEl(id) {
   return document.getElementById(id);
@@ -136,6 +455,13 @@ function clearResult() {
     box.replaceChildren();
     box.hidden = true;
   }
+  // Drop any stray orphaned handoff affordance outside the result section so
+  // a second run can never duplicate it.
+  try {
+    document.querySelectorAll("body > [data-handoff]").forEach((el) => el.remove());
+  } catch {
+    // Cleanup must never break the run.
+  }
 }
 
 function pageActionButton(label, primary, onClick) {
@@ -159,7 +485,7 @@ function showCompletedSection(info) {
   const titles = document.createElement("div");
   const title = document.createElement("h2");
   title.className = "dz-completed-title";
-  title.textContent = partial ? "Save complete with gaps" : "Save complete!";
+  title.textContent = partial ? "Saved with gaps" : "Saved";
   const summary = document.createElement("p");
   summary.className = "dz-completed-summary";
   summary.textContent = partial
@@ -369,35 +695,11 @@ async function discover(sourceUrl, tabOrigin) {
 }
 
 async function planLevel(session, image, tabOrigin) {
-  // Largest declared level that fits the browser canvas wins (same rule as
-  // the webapp job: 16384 x 16384). Planning a gigapixel level would exhaust
-  // memory serializing trillions of tiles, so when nothing fits the smallest
-  // declared level is planned and the canvas check below fails it cheaply.
-  const MAX_CANVAS_AREA = 16384 * 16384;
-  let level = null;
-  let bestArea = -1;
-  let smallest = null;
-  let smallestArea = Number.POSITIVE_INFINITY;
-  let sawDeclared = false;
-  let lastUndeclared = null;
-  for (const candidate of image.levels) {
-    const size = candidate.imageSize;
-    if (!size) {
-      lastUndeclared = candidate;
-      continue;
-    }
-    sawDeclared = true;
-    const area = size.x * size.y;
-    if (area <= MAX_CANVAS_AREA && area >= bestArea) {
-      level = candidate;
-      bestArea = area;
-    }
-    if (area < smallestArea) {
-      smallest = candidate;
-      smallestArea = area;
-    }
-  }
-  if (!level) level = sawDeclared ? smallest : lastUndeclared;
+  // Canonical level picking (vendored limits.js, no forked area math):
+  // largest fitting wins via pickLevel; the BROWSER_MAX_PLAN_TILES guard
+  // fails gigapixel plans cheaply before serializing trillions of tiles.
+  const picked = pickLevel({ levels: image.levels });
+  const level = image.levels.find((candidate) => candidate.index === picked.index) ?? image.levels[0];
   let plan = JSON.parse(session.levelTiles(image.id, level.index));
   const fetcher = makeTabFetcher(tabOrigin);
   let guard = 0;
@@ -406,6 +708,14 @@ async function planLevel(session, image, tabOrigin) {
     const out = await fetcher.fetchResource(plan.uri, { userIntent: true });
     const bmp = await createImageBitmap(new Blob([out.bytes]));
     plan = JSON.parse(session.probeSubmit(image.id, level.index, bmp.width > 0, bmp.width, bmp.height));
+  }
+  if (plan.tiles && plan.tiles.length > BROWSER_MAX_PLAN_TILES) {
+    throw Object.assign(
+      new Error(
+        `estimated ${plan.tiles.length} tiles exceeds the ${BROWSER_MAX_PLAN_TILES}-tile browser plan limit; use the desktop app`,
+      ),
+      { code: "PLAN_INVALID" },
+    );
   }
   return plan;
 }
@@ -418,9 +728,22 @@ async function assemble(session, plan, tabOrigin) {
   const fetcher = makeTabFetcher(tabOrigin);
   let done = 0;
   let failedTiles = 0;
+  // Taint gate: pixel reads stay behind originClean. Readable session bytes
+  // keep the canvas clean; a tainted canvas finishes as display-only success
+  // (visible via ordinary display, no byte save) instead of a silent blank.
+  let originClean = true;
+  let lastStartMs = 0;
   setProgress(0, plan.tiles.length);
   for (const tile of plan.tiles) {
     throwIfCancelled();
+    // Pace starts per host (EXT_TILE_MIN_INTERVAL_MS) within the
+    // EXT_TILE_CONCURRENCY bound (sequential here, so never above 6).
+    const nowStart = Date.now();
+    const sinceLast = nowStart - lastStartMs;
+    if (lastStartMs !== 0 && sinceLast < EXT_TILE_MIN_INTERVAL_MS) {
+      await new Promise((resolve) => setTimeout(resolve, EXT_TILE_MIN_INTERVAL_MS - sinceLast));
+    }
+    lastStartMs = Date.now();
     let bytes = null;
     let bmp = null;
     try {
@@ -451,10 +774,27 @@ async function assemble(session, plan, tabOrigin) {
     if (planW > 0 && planH > 0 && bmp.width > 0 && bmp.height > 0) {
       ctx.drawImage(bmp, 0, 0, bmp.width, bmp.height, tile.x, tile.y, planW, planH);
     }
-    const sample = ctx.getImageData(tile.x + 5, tile.y + 5, 1, 1).data;
-    done += 1;
-    setProgress(done + failedTiles, plan.tiles.length);
-    log("tile " + (done + failedTiles) + "/" + plan.tiles.length + " at " + tile.x + "," + tile.y + " bmp " + bmp.width + "px sample " + [...sample].join(","));
+    if (originClean) {
+      try {
+        const sample = ctx.getImageData(tile.x + 5, tile.y + 5, 1, 1).data;
+        done += 1;
+        setProgress(done + failedTiles, plan.tiles.length);
+        log("tile " + (done + failedTiles) + "/" + plan.tiles.length + " at " + tile.x + "," + tile.y + " bmp " + bmp.width + "px sample " + [...sample].join(","));
+      } catch (taint) {
+        originClean = false;
+        log("display-only: canvas tainted at " + tile.x + "," + tile.y + " (" + ((taint && taint.message) || taint) + "); finishing visible without a byte save");
+        done += 1;
+        setProgress(done + failedTiles, plan.tiles.length);
+      }
+    } else {
+      // display-only continuation: ordinary display stays visible, no reads.
+      done += 1;
+      setProgress(done + failedTiles, plan.tiles.length);
+      log("display-only: tile " + (done + failedTiles) + "/" + plan.tiles.length + " at " + tile.x + "," + tile.y);
+    }
+  }
+  if (!originClean) {
+    return { blob: null, done, failedTiles, total: plan.tiles.length, originClean, displayOnly: true };
   }
   if (done === 0) {
     throw Object.assign(new Error("all " + plan.tiles.length + " tiles failed"), { code: "tile-failed" });
@@ -463,7 +803,7 @@ async function assemble(session, plan, tabOrigin) {
     log("partial: saved " + done + " of " + plan.tiles.length + " tiles (" + failedTiles + " missing)");
   }
   const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
-  return { blob, done, failedTiles, total: plan.tiles.length };
+  return { blob, done, failedTiles, total: plan.tiles.length, originClean, displayOnly: false };
 }
 
 // Shared save name (todo 4.6): canonical logic lives in
@@ -585,11 +925,24 @@ async function run(tabId) {
     const image = catalog.images[0];
     if (!image) throw Object.assign(new Error("catalog has no image"), { code: "no-image" });
     log("image: " + (image.title || image.format));
-    offerNativeHandoff(found.source);
 
     setStep("Choosing the highest resolution…");
-    const plan = await planLevel(session, image, tabOrigin);
+    let plan = await planLevel(session, image, tabOrigin);
     throwIfCancelled();
+    try {
+      updateCropEstimate(plan.canvas);
+    } catch {
+      // Estimate is best-effort.
+    }
+    const requestedCrop = readCropInputs();
+    if (requestedCrop) {
+      try {
+        plan = subsetPlanForCrop(plan, requestedCrop);
+        log(`crop ${requestedCrop.w}x${requestedCrop.h} at ${requestedCrop.x},${requestedCrop.y}: planning ${plan.tiles.length} tiles`);
+      } catch (e) {
+        throw Object.assign(new Error("That region is empty or outside the image. Choose x,y,w,h inside the level size."), { code: "crop-invalid", detail: e?.message });
+      }
+    }
     log("plan: " + plan.tiles.length + " tiles, canvas " + plan.canvas.x + "x" + plan.canvas.y);
     setDiagnostics([
       "Phase: tiles",
@@ -599,6 +952,27 @@ async function run(tabId) {
     setStep("Saving image tiles…");
     const result = await assemble(session, plan, tabOrigin);
     throwIfCancelled();
+    if (result.displayOnly || result.originClean === false) {
+      // display-only: ordinary display stays visible, no byte save promises.
+      setStep("Done (display-only)");
+      setDiagnostics([
+        "Phase: display-only",
+        "Tiles: " + result.done + " of " + result.total,
+        "Canvas: " + plan.canvas.x + "x" + plan.canvas.y,
+      ]);
+      log("display-only: finished visible without a byte save; use the desktop app for a file");
+      setProgress(result.total, result.total);
+      setOutcome("display-only");
+      showCompletedSection({
+        width: plan.canvas.x,
+        height: plan.canvas.y,
+        savedName: "display-only (no file saved)",
+        failedTiles: result.failedTiles,
+        totalTiles: result.total,
+        onAgain: () => run(tabId),
+      });
+      return;
+    }
     setStep("Assembling the final picture…");
     setDiagnostics([
       "Phase: saving",
@@ -607,6 +981,7 @@ async function run(tabId) {
     ]);
     const savedName = save(result.blob, plan.canvas.x, plan.canvas.y);
     log("saved " + savedName);
+    recordExtHistory(found.source, plan.canvas.x, plan.canvas.y);
     setProgress(result.total, result.total);
     setStep("Done");
     setOutcome("saved");
@@ -618,6 +993,7 @@ async function run(tabId) {
       totalTiles: result.total,
       onAgain: () => run(tabId),
     });
+    offerNativeHandoff(found.source);
   } catch (e) {
     if ((e && e.code) === "cancelled" || uiState.cancelRequested) {
       log("cancelled by user");
@@ -652,9 +1028,12 @@ function tabButton(tabId, label) {
 
 /**
  * Offer native handoff for the discovered source (huge outputs, local
- * destinations, durable jobs). Explicit consent names the destination
- * origins and cookie names; values cross once in a bounded message and are
- * never logged. Declining keeps the job in the extension.
+ * destinations, durable jobs). The button lives in the shared completed
+ * section next to the scan-again action with `dz-*` classes, so a retry
+ * unmounts it with the section and it can never duplicate. Explicit consent
+ * names the destination origins and cookie names; values cross once in a
+ * bounded message and are never logged. Declining keeps the job in the
+ * extension.
  * @param {string} sourceUrl non-secret validated source
  */
 function offerNativeHandoff(sourceUrl) {
@@ -664,7 +1043,12 @@ function offerNativeHandoff(sourceUrl) {
   } catch {
     return;
   }
+  const actions = document.querySelector("#dz-result .dz-completed-section .dz-actions-row");
+  if (!actions) return;
+  if (actions.querySelector("[data-handoff]")) return;
   const button = document.createElement("button");
+  button.type = "button";
+  button.className = "dz-btn-secondary";
   button.dataset.handoff = sourceUrl;
   button.textContent = "Send to desktop app (" + origin + ")";
   button.addEventListener("click", () => {
@@ -672,7 +1056,7 @@ function offerNativeHandoff(sourceUrl) {
       log("handoff failed: " + (e && e.code ? e.code : "handoff-failed"));
     });
   });
-  document.body.appendChild(button);
+  actions.append(button);
   log("handoff available for " + origin);
 }
 
@@ -897,6 +1281,7 @@ async function render() {
   const tabsEl = document.getElementById("tabs");
   const boundId = bound !== null ? Number(bound) : NaN;
   if (bound !== null && Number.isInteger(boundId)) {
+    uiState.lastTabId = boundId;
     // Bound to the clicked tab: single `tabs.get`, never `tabs.query`.
     let label = "tab " + boundId;
     try {
@@ -909,6 +1294,7 @@ async function render() {
     const job = uiEl("dz-job");
     if (job) job.hidden = false;
     setStep("Ready to scan");
+    renderExtHistory();
     return;
   }
   // Unbound first-run / manual open: guidance only, zero tabs API calls.

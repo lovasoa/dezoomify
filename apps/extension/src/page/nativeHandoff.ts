@@ -38,29 +38,51 @@ export const MAX_COOKIE_VALUE_LENGTH = 4096;
 export const MAX_TOKEN_LENGTH = 128;
 export const MAX_MESSAGE_BYTES = 1024 * 1024;
 
-/** Query keys that must never appear in a handoff source URL. */
+/** Query keys that must never appear in a handoff source URL. Single shared
+ * vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
+ * `testdata/redaction-vectors.json`, and `packages/protocol-ts/src/generated.ts`.
+ * Matching is case-insensitive exact (never substring) so `/cookie-recipe/`
+ * stays valid while `?token=secret` is rejected. */
 export const SECRET_QUERY_KEYS = Object.freeze([
+  "access-token",
+  "access_token",
+  "api-key",
+  "api_key",
+  "apikey",
+  "auth",
+  "authorization",
+  "bearer",
+  "code",
   "cookie",
   "cookies",
-  "authorization",
-  "proxy-authorization",
-  "bearer",
-  "token",
-  "signature",
-  "sig",
-  "auth",
-  "secret",
-  "password",
-  "session",
-  "sid",
-  "apikey",
-  "api_key",
+  "credential",
   "key",
+  "passwd",
+  "password",
+  "proxy-authorization",
+  "secret",
+  "session",
+  "sessionid",
+  "sessiontoken",
+  "set-cookie",
+  "sid",
+  "sig",
+  "signature",
+  "state",
+  "ticket",
+  "token",
+  "x-api-key",
 ]);
+
+/** Local-path markers that never travel in a handoff source (separate from
+ * the secret query keys above). Substring checks are confined here; credential
+ * keys always use exact-match URL parsing. */
+export const LOCAL_PATH_MARKERS = Object.freeze(["file://", "/etc/", "c:\\"]);
 
 /**
  * Validate a handoff source URL (bounded, non-secret, untrusted until confirmed).
- * Mirrors the native host envelope rules.
+ * Mirrors the native host envelope rules: URL parsing plus exact sensitive-key
+ * matching, never substring. Returns the stable code for the failure.
  * @param {unknown} raw
  * @returns {{ ok: boolean, code?: string }}
  */
@@ -77,28 +99,27 @@ export function validateHandoffSource(raw) {
     return { ok: false, code: "bad-scheme" };
   }
   if (parsed.username || parsed.password) return { ok: false, code: "secret-field" };
-  const lower = raw.toLowerCase();
-  for (const needle of [
-    "cookie",
-    "authorization",
-    "bearer",
-    "signature",
-    "secret",
-    "password",
-    "session=",
-    "token=",
-    "apikey",
-    "api_key",
-    "file://",
-    "/etc/",
-    "c:\\",
-  ]) {
-    if (lower.includes(needle)) return { ok: false, code: "secret-field" };
-  }
   for (const key of parsed.searchParams.keys()) {
     if (SECRET_QUERY_KEYS.includes(key.toLowerCase())) {
       return { ok: false, code: "secret-field" };
     }
+  }
+  // Fragments never reach servers but can leak tokens in labels/logs.
+  if (parsed.hash) {
+    const fragment = parsed.hash.slice(1);
+    for (const pair of fragment.split("&")) {
+      const eq = pair.indexOf("=");
+      if (eq > 0) {
+        const key = pair.slice(0, eq).replace(/^[?#]+/, "");
+        if (SECRET_QUERY_KEYS.includes(key.toLowerCase())) {
+          return { ok: false, code: "secret-field" };
+        }
+      }
+    }
+  }
+  const lower = raw.toLowerCase();
+  for (const marker of LOCAL_PATH_MARKERS) {
+    if (lower.includes(marker)) return { ok: false, code: "secret-field" };
   }
   return { ok: true };
 }
