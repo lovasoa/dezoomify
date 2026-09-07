@@ -7,6 +7,27 @@ image, it can find the image behind the viewer automatically, including on
 pages where you are signed in, such as library portals, museum
 subscriptions, and academic archives.
 
+## 1. Click the Dezoomify icon
+
+On the page with the image, click Dezoomify in the browser toolbar. If it is
+hidden, open the puzzle-piece menu and pin it.
+
+## 2. Let the page settle
+
+The page reloads so Dezoomify can see the viewer. Wait for it to finish, then
+zoom in on the image once.
+
+## 3. Start dezooming
+
+Dezoomify opens a new tab and starts dezooming automatically. Leave it open
+until your image is ready, then save it.
+
+## Tiled or static?
+
+Use the browser's normal save action when **Save image as** gives you the
+complete artwork. Use Dezoomify when zooming stays sharp and the viewer loads
+many tiles or strips instead of one image.
+
 ## Install
 
 Install it from the
