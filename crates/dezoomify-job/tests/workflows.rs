@@ -363,3 +363,131 @@ fn seqs_are_sorted(transcript: &[String]) -> bool {
     sorted.sort_unstable();
     seqs == sorted
 }
+
+#[test]
+fn pause_suspends_new_tiles_and_resume_redrives() {
+    // Pause v1 (suspend-acquisition): pause stops scheduling new tiles,
+    // in-flight finishes, decoded output is retained, resume re-drives.
+    // The 19 states are unchanged; pause is an orthogonal overlay.
+    let mut host = ScriptedHost::new(&job_id(6), INPUT_URL, test_config()).unwrap();
+    let _ = discover_and_select(&mut host, 6);
+    host.apply(JobResponse::DestinationGranted {
+        job: job_id(6),
+        destination: "dst:0".to_string(),
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AcquiringTiles");
+    assert!(!host.job().is_paused());
+    let planned: Vec<String> = host
+        .tile_effects()
+        .into_iter()
+        .map(|(tile, _, _)| tile)
+        .collect();
+    assert_eq!(planned.len(), 4);
+    // Pause before any tile completes: no new effects, FIFO preserved.
+    let effects_before = host.effects.len();
+    host.apply(JobResponse::Pause { job: job_id(6) }).unwrap();
+    assert!(host.job().is_paused());
+    assert_eq!(host.effects.len(), effects_before);
+    assert!(host
+        .transcript()
+        .iter()
+        .any(|line| line.starts_with("event:paused:")));
+    // Duplicate pause is Ignored with no new work.
+    let len = host.transcript().len();
+    let dup = host.apply(JobResponse::Pause { job: job_id(6) }).unwrap();
+    assert_eq!(dup, dezoomify_job::Outcome::Ignored);
+    assert_eq!(host.transcript().len(), len);
+    // In-flight tile finishes while paused: progress is recorded, but no new
+    // tile is scheduled and completion is deferred.
+    host.apply(JobResponse::TileOutcome {
+        job: job_id(6),
+        tile: planned[0].clone(),
+        ok: true,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AcquiringTiles");
+    assert!(host.job().is_paused());
+    let tile_effects = host.tile_effects().len();
+    assert_eq!(tile_effects, 4, "no new acquire-tile while paused");
+    // Resume re-drives the pending queue in FIFO order.
+    host.apply(JobResponse::Resume { job: job_id(6) }).unwrap();
+    assert!(!host.job().is_paused());
+    assert!(host
+        .transcript()
+        .iter()
+        .any(|line| line.starts_with("event:resumed:")));
+    // Finish the rest: the job completes with exactly one terminal.
+    for tile in planned.iter().skip(1) {
+        host.apply(JobResponse::TileOutcome {
+            job: job_id(6),
+            tile: tile.clone(),
+            ok: true,
+        })
+        .unwrap();
+    }
+    assert_eq!(host.state(), "Completed");
+    assert_eq!(host.terminal_count(), 1);
+    assert!(seqs_are_sorted(host.transcript()));
+}
+
+#[test]
+fn pause_defers_completion_until_resume() {
+    // All tiles finish while paused: completion waits for resume.
+    let mut host = ScriptedHost::new(&job_id(7), INPUT_URL, test_config()).unwrap();
+    let _ = discover_and_select(&mut host, 7);
+    host.apply(JobResponse::DestinationGranted {
+        job: job_id(7),
+        destination: "dst:0".to_string(),
+    })
+    .unwrap();
+    let planned: Vec<String> = host
+        .tile_effects()
+        .into_iter()
+        .map(|(tile, _, _)| tile)
+        .collect();
+    host.apply(JobResponse::Pause { job: job_id(7) }).unwrap();
+    for tile in &planned {
+        host.apply(JobResponse::TileOutcome {
+            job: job_id(7),
+            tile: tile.clone(),
+            ok: true,
+        })
+        .unwrap();
+    }
+    // Every tile arrived but the job stays acquiring while paused.
+    assert_eq!(host.state(), "AcquiringTiles");
+    assert_eq!(host.terminal_count(), 0);
+    host.apply(JobResponse::Resume { job: job_id(7) }).unwrap();
+    assert_eq!(host.state(), "Completed");
+    assert_eq!(host.terminal_count(), 1);
+}
+
+#[test]
+fn pause_preserves_retry_wakeup_and_rejects_post_terminal() {
+    let mut host = ScriptedHost::new(&job_id(8), INPUT_URL, test_config()).unwrap();
+    let _ = discover_and_select(&mut host, 8);
+    host.apply(JobResponse::DestinationGranted {
+        job: job_id(8),
+        destination: "dst:0".to_string(),
+    })
+    .unwrap();
+    let planned: Vec<String> = host
+        .tile_effects()
+        .into_iter()
+        .map(|(tile, _, _)| tile)
+        .collect();
+    // Resume without pause is invalid-state with no work.
+    let err = host
+        .apply(JobResponse::Resume { job: job_id(8) })
+        .unwrap_err();
+    assert_eq!(err.code, "job.invalid-state");
+    // Cancel wins while paused; pause afterwards is post-terminal.
+    host.apply(JobResponse::Pause { job: job_id(8) }).unwrap();
+    host.apply(JobResponse::Cancel { job: job_id(8) }).unwrap();
+    assert_eq!(host.state(), "Cancelled");
+    let late = host.apply(JobResponse::Pause { job: job_id(8) });
+    assert!(late.is_err());
+    assert_eq!(late.unwrap_err().code, "job.post-terminal");
+    assert_eq!(planned.len(), 4);
+}

@@ -7,6 +7,11 @@
 use serde::{Deserialize, Serialize};
 
 /// All 19 externally distinguishable job states.
+///
+/// Pause v1 (todo 5.7) is an orthogonal suspend-acquisition overlay
+/// (`Job::is_paused`), not new states: `paused` stops scheduling new
+/// `acquire-tile` effects, finishes in-flight work, retains decoded output,
+/// and re-drives on resume. State names and terminal semantics are unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum State {
     Created,

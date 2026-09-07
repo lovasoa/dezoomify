@@ -135,6 +135,12 @@ pub enum JobResponse {
     Cancel {
         job: String,
     },
+    Pause {
+        job: String,
+    },
+    Resume {
+        job: String,
+    },
 }
 
 impl JobResponse {
@@ -152,7 +158,9 @@ impl JobResponse {
             | Self::ProbeOutcome { job, .. }
             | Self::RetryReady { job, .. }
             | Self::PartialKeep { job, .. }
-            | Self::Cancel { job } => job,
+            | Self::Cancel { job }
+            | Self::Pause { job }
+            | Self::Resume { job } => job,
         }
     }
 }

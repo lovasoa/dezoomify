@@ -55,6 +55,7 @@ fn transcripts_only() -> Result<(), String> {
     for rel in [
         "testdata/scenarios/job/basic-success/expected/job.json",
         "testdata/scenarios/job/cancel-midway/expected/job.json",
+        "testdata/scenarios/job/pause-resume/expected/job.json",
     ] {
         let path = super::repo_root().join(rel);
         let text =

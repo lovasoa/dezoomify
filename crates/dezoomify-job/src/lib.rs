@@ -12,6 +12,11 @@
 //! `config.plan_probes` allows it).
 
 #![forbid(unsafe_code)]
+// 6.1 unwrap policy: shipped engine code maps failures to typed `JobError`s
+// instead of panicking. Unit tests are exempt via `allow-unwrap-in-tests`
+// in the workspace `clippy.toml`; integration `tests/` targets never inherit
+// this crate-root attribute.
+#![deny(clippy::unwrap_used)]
 
 pub mod config;
 pub mod job;

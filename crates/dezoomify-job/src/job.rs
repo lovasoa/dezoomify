@@ -79,6 +79,11 @@ pub struct Job {
     recovery_reason: Option<String>,
     failed_tiles: Vec<String>,
     terminal: Option<String>,
+    /// Pause v1 overlay (suspend-acquisition): when true the engine stops
+    /// scheduling new `acquire-tile` effects, finishes in-flight work,
+    /// retains decoded output, and re-drives on resume. The 19 `State`
+    /// variants are unchanged; pause is orthogonal to state.
+    paused: bool,
     next_request: u32,
     next_effect: u32,
     next_recovery: u32,
@@ -155,6 +160,7 @@ impl Job {
             recovery_reason: None,
             failed_tiles: Vec::new(),
             terminal: None,
+            paused: false,
             next_request: 0,
             next_effect: 0,
             next_recovery: 0,
@@ -190,6 +196,12 @@ impl Job {
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         self.state.is_terminal()
+    }
+
+    /// Whether Pause v1 is active (suspend-acquisition overlay).
+    #[must_use]
+    pub fn is_paused(&self) -> bool {
+        self.paused
     }
 
     /// Deferred follow-up URI for a wire image id, if that catalog entry is
@@ -304,6 +316,8 @@ impl Job {
         }
         match response {
             JobResponse::Cancel { .. } => self.enter_cancelled(),
+            JobResponse::Pause { .. } => self.apply_pause(),
+            JobResponse::Resume { .. } => self.apply_resume(),
             JobResponse::ResourceBytes {
                 request,
                 bytes,
@@ -833,6 +847,12 @@ impl Job {
                 .map_err(|_| JobError::overflow("acquired count"))?;
             let total = self.planned_tiles.len() as u64;
             self.push_event("progress", json!({"acquired": acquired, "total": total}))?;
+            // Pause v1: finish in-flight, retain decoded, defer completion
+            // and new scheduling until resume. Resume re-drives completion
+            // when every tile has arrived while paused.
+            if self.paused {
+                return Ok(Outcome::Applied);
+            }
             if self.acquired_tiles.len() == self.planned_tiles.len() {
                 self.complete_remaining(false)?;
             } else {
@@ -851,7 +871,11 @@ impl Job {
                 self.pending_tiles.insert(0, tile.to_string());
             }
             self.push_event("warning", json!({"tile": tile, "attempt": next}))?;
-            self.emit_pending_tiles()?;
+            // Pause v1: retry wakeups are preserved in `pending_tiles` and
+            // re-driven on resume; no new `acquire-tile` while paused.
+            if !self.paused {
+                self.emit_pending_tiles()?;
+            }
             return Ok(Outcome::Applied);
         }
         self.in_flight.remove(tile);
@@ -951,7 +975,11 @@ impl Job {
                             "job-state",
                             json!({"state": State::AcquiringTiles.name()}),
                         )?;
-                        self.emit_pending_tiles()?;
+                        // Pause v1: retry wakeups are preserved; new tiles
+                        // wait for resume.
+                        if !self.paused {
+                            self.emit_pending_tiles()?;
+                        }
                         Ok(Outcome::Applied)
                     }
                 }
@@ -961,7 +989,9 @@ impl Job {
                 self.failed_tiles.clear();
                 self.set_state(State::AcquiringTiles)?;
                 self.push_event("job-state", json!({"state": State::AcquiringTiles.name()}))?;
-                self.emit_pending_tiles()?;
+                if !self.paused {
+                    self.emit_pending_tiles()?;
+                }
                 Ok(Outcome::Applied)
             }
             _ => Err(JobError::invalid_state(
@@ -991,6 +1021,7 @@ impl Job {
     fn enter_cancelled(&mut self) -> Result<Outcome, JobError> {
         let cancel_effect = self.alloc_effect_id()?;
         let release_effect = self.alloc_effect_id()?;
+        self.paused = false;
         self.set_state(State::Cancelling)?;
         self.push_effect("cancel-work", json!({"effect": cancel_effect}))?;
         self.push_event("job-state", json!({"state": State::Cancelling.name()}))?;
@@ -1004,7 +1035,43 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
+    /// Pause v1 (suspend-acquisition): stop scheduling new `acquire-tile`
+    /// effects, finish in-flight work, retain decoded output. Valid in any
+    /// non-terminal state; terminal inputs are already rejected as
+    /// post-terminal. FIFO queues are preserved; retry wakeups are preserved
+    /// (deferred until resume); hosts still own clocks.
+    fn apply_pause(&mut self) -> Result<Outcome, JobError> {
+        if self.paused {
+            return Ok(Outcome::Ignored);
+        }
+        self.paused = true;
+        self.push_event("paused", json!({}))?;
+        Ok(Outcome::Applied)
+    }
+
+    /// Resume a paused job (re-drive): clear the overlay and schedule
+    /// pending tiles again. If all tiles finished while paused, complete
+    /// now; otherwise emit up to the concurrency gate. FIFO order is
+    /// preserved because `pending_tiles` was never reordered while paused.
+    fn apply_resume(&mut self) -> Result<Outcome, JobError> {
+        if !self.paused {
+            return Err(JobError::invalid_state("resume valid only while paused"));
+        }
+        self.paused = false;
+        self.push_event("resumed", json!({}))?;
+        if self.state == State::AcquiringTiles
+            && self.acquired_tiles.len() == self.planned_tiles.len()
+            && !self.planned_tiles.is_empty()
+        {
+            self.complete_remaining(false)?;
+        } else if self.state == State::AcquiringTiles {
+            self.emit_pending_tiles()?;
+        }
+        Ok(Outcome::Applied)
+    }
+
     fn complete_remaining(&mut self, partial: bool) -> Result<(), JobError> {
+        self.paused = false;
         self.set_state(State::ProcessingTiles)?;
         for tile in self.planned_tiles.clone() {
             let effect = self.alloc_effect_id()?;
@@ -1049,6 +1116,7 @@ impl Job {
 
     fn fail_via_cleanup(&mut self, code: &str, message: String) -> Result<(), JobError> {
         let release_effect = self.alloc_effect_id()?;
+        self.paused = false;
         self.set_state(State::CleaningUp)?;
         self.push_effect("release-bytes", json!({"effect": release_effect}))?;
         self.push_event("job-state", json!({"state": State::CleaningUp.name()}))?;
@@ -1060,6 +1128,11 @@ impl Job {
     }
 
     fn emit_pending_tiles(&mut self) -> Result<(), JobError> {
+        // Pause v1: suspend-acquisition stops new scheduling; in-flight
+        // finishes, decoded output is retained, FIFO order is preserved.
+        if self.paused {
+            return Ok(());
+        }
         let limit = usize::try_from(self.config.max_concurrent_fetches)
             .map_err(|_| JobError::overflow("concurrency"))?;
         while self.in_flight.len() < limit {
