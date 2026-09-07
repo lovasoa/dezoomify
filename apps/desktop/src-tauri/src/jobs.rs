@@ -250,7 +250,7 @@ pub struct JobRecord {
     /// and passed to `pipeline::run` for atomic publish. `None` until
     /// `request_destination`.
     pub destination: Option<PathBuf>,
-    /// Granted format id (`png`/`jpeg`/`tiff`).
+    /// Granted format id (`png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir`).
     pub destination_format: Option<String>,
     /// Whether the user confirmed overwriting an existing destination.
     /// Always false until an explicit overwrite confirmation exists; an
@@ -369,6 +369,12 @@ enum DriverMessage {
         kind: String,
         detail: BTreeMap<String, String>,
     },
+    /// Discovery finished: the job leaves `Discovering` for
+    /// `AwaitingDestination` with one `job-state` event, which is the
+    /// frontend's cue to offer the save destination. Image and level stay
+    /// at the pipeline defaults (first image, largest fitting level); only
+    /// an explicit `answer_choice` overrides them before the grant.
+    Discovered { job: String },
     Finished {
         job: String,
         result: Result<DriverSuccess, DriverFailure>,
@@ -920,16 +926,18 @@ impl JobTable {
     /// Record a save destination grant for a live job and ensure the real
     /// `pipeline::run` worker is running.
     ///
-    /// The commands layer owns the format-id check (`png`/`jpeg`/`tiff`);
-    /// this layer owns extension matching through the output layer: the
-    /// format maps to an [`OutputFormat`], the path extension infers via
+    /// The commands layer owns the format-id check
+    /// (`png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir`); this layer owns
+    /// extension matching through the output layer: the format maps to an
+    /// [`OutputFormat`], the path extension infers via
     /// [`OutputFormat::infer_from_path`] (`.png` -> PNG, `.jpg`/`.jpeg` ->
-    /// JPEG, `.tif`/`.tiff`/`.zif` -> TIFF, `.iiif`/extensionless/existing
-    /// directory -> `iiif-dir`, anything else a typed error), and
-    /// [`validate_destination`] enforces the extension/format match plus the
-    /// overwrite policy. Any mismatch or refusal is a typed error before any
-    /// work: no state change, no event, no worker. A denied destination
-    /// recovers via request-decision (choose-output) at the caller.
+    /// JPEG, `.tif`/`.tiff` -> TIFF, `.zif` -> ZIF pyramid, `.webp` ->
+    /// lossless WebP, `.iiif`/extensionless/existing directory -> `iiif-dir`,
+    /// anything else a typed error), and [`validate_destination`] enforces
+    /// the extension/format match plus the overwrite policy. Any mismatch or
+    /// refusal is a typed error before any work: no state change, no event,
+    /// no worker. A denied destination recovers via request-decision
+    /// (choose-output) at the caller.
     ///
     /// The real dialog path is stored per job and passed to `pipeline::run`
     /// for atomic publish. Only the opaque destination id (never the path)
@@ -946,8 +954,8 @@ impl JobTable {
         let requested =
             output_format_for_id(format).ok_or_else(|| "unsupported format".to_string())?;
         // Typed error before any work: unknown extensions never start the
-        // driver (fail-closed; only the compiled PNG/JPEG/TIFF codecs plus
-        // the `iiif-dir` tree exist).
+        // driver (fail-closed; only the compiled PNG/JPEG/TIFF/ZIF/WebP
+        // codecs plus the `iiif-dir` tree exist).
         OutputFormat::infer_from_path(path).map_err(|e| e.to_string())?;
         // Extension/format match plus overwrite policy, also before any work.
         validate_destination(path, &requested, overwrite).map_err(|e| e.to_string())?;
@@ -1140,6 +1148,7 @@ impl JobTable {
         };
         let job_id = record.id.clone();
         let input_url = record.input_url.clone();
+        let tx = self.driver_tx.clone();
         if let Ok(handle) = std::thread::Builder::new()
             .name(format!("dezoomify-{job_id}-discovery"))
             .spawn(move || {
@@ -1149,6 +1158,10 @@ impl JobTable {
                     let _ = engine.drain_effects();
                     let _ = engine.drain_events();
                 }
+                // Announce discovery completion through the driver channel so
+                // the pump moves the job to `AwaitingDestination` exactly
+                // once. Best effort: a full table never blocks discovery.
+                let _ = tx.send(DriverMessage::Discovered { job: job_id });
             })
         {
             self.driver_handles.insert(job.to_string(), handle);
@@ -1332,6 +1345,26 @@ impl JobTable {
                     };
                     self.push_event(&job, &kind, &detail_str);
                 }
+                DriverMessage::Discovered { job } => {
+                    let live = self.jobs.get(&job).is_some_and(|r| !r.state.is_terminal());
+                    if !live {
+                        continue;
+                    }
+                    // Only a still-discovering job moves: an early grant or
+                    // choice already advanced the state, and replaying the
+                    // transition would clobber it with a spurious event.
+                    let discovering = self
+                        .jobs
+                        .get(&job)
+                        .is_some_and(|r| r.state == JobState::Discovering);
+                    if !discovering {
+                        continue;
+                    }
+                    if let Some(record) = self.jobs.get_mut(&job) {
+                        record.state = JobState::AwaitingDestination;
+                    }
+                    self.push_event(&job, "job-state", "AwaitingDestination");
+                }
                 DriverMessage::Finished { job, result } => {
                     let live = self.jobs.get(&job).is_some_and(|r| !r.state.is_terminal());
                     if !live {
@@ -1467,13 +1500,16 @@ fn parse_error_detail(detail: &str) -> (String, String) {
 }
 
 /// Map a commands-layer format id onto the output-layer format. The commands
-/// layer accepts only `png`/`jpeg`/`tiff`; extension matching lives in
-/// [`validate_destination`].
+/// layer accepts `png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir`; extension
+/// matching lives in [`validate_destination`].
 fn output_format_for_id(format: &str) -> Option<OutputFormat> {
     match format {
         "png" => Some(OutputFormat::Png),
         "jpeg" => Some(OutputFormat::Jpeg),
         "tiff" => Some(OutputFormat::Tiff),
+        "zif" => Some(OutputFormat::Zif),
+        "webp" => Some(OutputFormat::Webp),
+        "iiif-dir" | "iiif" => Some(OutputFormat::IiifDir),
         _ => None,
     }
 }
@@ -1554,6 +1590,39 @@ fn drive_engine_cancel(job: &str, input_url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Discovery completion moves a discovering job to `AwaitingDestination`
+    /// with one `job-state` event: the frontend's cue to offer the save
+    /// destination. The discovery worker is short-lived, so pump until the
+    /// transition lands (bounded wait, no wall-clock assertions).
+    #[test]
+    fn discovery_completion_requests_destination() {
+        let mut table = JobTable::new();
+        let id = table.start_job("https://example.com/item").unwrap();
+        assert_eq!(table.state_of(&id), Some(JobState::Discovering));
+        let start = std::time::Instant::now();
+        while table.state_of(&id) == Some(JobState::Discovering) {
+            table.poll_drivers();
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "discovery worker never reported completion"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(table.state_of(&id), Some(JobState::AwaitingDestination));
+        let events = table.events_for(&id);
+        assert!(events.len() >= 2, "submit plus destination request");
+        let last = events.last().expect("destination request event");
+        assert_eq!(last.kind, "job-state");
+        assert_eq!(last.detail, "AwaitingDestination");
+        let seqs: Vec<u64> = events.iter().map(|e| e.seq).collect();
+        let sorted = {
+            let mut s = seqs.clone();
+            s.sort();
+            s
+        };
+        assert_eq!(seqs, sorted, "seq stays monotonic");
+    }
 
     #[test]
     fn lifecycle_orders_events() {
