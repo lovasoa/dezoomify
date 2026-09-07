@@ -451,7 +451,8 @@ pub fn known_dezoomers() -> &'static [&'static str] {
 
 /// Validate a `--dezoomer` value: `auto` or a known format (case-insensitive,
 /// matching the core `registry_for`). Unknown names fail with a typed error
-/// listing the expected values; no fallback warning is emitted.
+/// listing the expected values; they are rejected outright rather than
+/// silently using auto-detection.
 fn validate_dezoomer(name: &str) -> Result<(), String> {
     if name == "auto" {
         return Ok(());
