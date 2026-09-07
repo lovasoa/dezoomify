@@ -57,11 +57,11 @@ concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  # Real-window E2E on Linux only. This is the longest single step of the
-  # suite (~20 min green); it runs in its own job so the per-OS bundle
-  # smokes below never queue behind it (and vice versa). macOS/Windows
-  # carry no E2E by code (the lane is Linux-only in this wave); their
-  # compile gates and native-driver block evidence live in bundle-smoke.
+  # Real-window E2E: ubuntu runs here; macOS/Windows run the same lane
+  # in bundle-smoke below (after their compile gates + native-driver
+  # provisioning). The ubuntu leg is the longest single step (~20 min
+  # green); it runs in its own job so the per-OS bundle smokes never queue
+  # behind it (and vice versa).
   window-e2e:
     name: Window E2E (real window, ubuntu)
     runs-on: ubuntu-latest
@@ -167,9 +167,9 @@ jobs:
   # Per-OS release bundle, install, and launch smoke. Ubuntu runs the
   # bundler only (its compile gates and E2E live in window-e2e, which runs
   # in parallel); macOS and Windows additionally carry the cross-OS lean
-  # compile gates plus the native-driver block-evidence steps. The lane
-  # needs no tauri-cli (`--unsigned-test` stops before the bundler); only
-  # these bundle steps do.
+  # compile gates plus the real-window E2E legs (same lane as window-e2e,
+  # after native-driver provisioning). The lane needs no tauri-cli
+  # (`--unsigned-test` stops before the bundler); only these bundle steps do.
   bundle-smoke:
     name: Bundle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -281,32 +281,17 @@ jobs:
           set -euo pipefail
           # safaridriver ships with macOS; enabling needs root, which runners
           # grant via passwordless sudo. Fail closed when refused: without
-          # enablement no later wave can drive the window either.
-          sudo safaridriver --enable 2>&1 | tee e2e-window-block.log
-          command -v safaridriver | tee -a e2e-window-block.log
-      - name: Real-window E2E (macOS block evidence)
+          # enablement the window cannot be driven either.
+          sudo safaridriver --enable 2>&1 | tee e2e-window.log
+          command -v safaridriver | tee -a e2e-window.log
+      - name: Real-window E2E (macOS)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          command -v tauri-driver | tee -a e2e-window-block.log
-          # The lane and harness are Linux-only by code (the cfg guard in
-          # crates/xtask/src/desktop.rs, resolveNativeDriver in
-          # apps/desktop/tests/window-e2e/harness.mjs): this gate passes on a
-          # real lane pass (a later wave) or on that exact documented guard,
-          # and fails closed on anything else. It records evidence, it does
-          # not weaken the gate: any unexpected failure is red.
-          set +e
-          cargo xtask test desktop --e2e-window >>e2e-window-block.log 2>&1
-          code=$?
-          set -e
-          if [ $code -eq 0 ]; then
-            echo "e2e-window passed on macOS (multi-OS lane wave landed)" | tee -a e2e-window-block.log
-          elif grep -q "runs on Linux in this wave" e2e-window-block.log; then
-            echo "BLOCKED (expected): lane is Linux-only by code; the macOS wave must teach the lane preflight plus the harness safaridriver slot." | tee -a e2e-window-block.log
-          else
-            echo "UNEXPECTED lane failure on macOS (see e2e-window-block.log)" | tee -a e2e-window-block.log
-            exit 1
-          fi
+          command -v tauri-driver | tee -a e2e-window.log
+          # Same lane as ubuntu (no Xvfb: runners provide a GUI session).
+          # pipefail keeps the lane's exit code (tee only records the log).
+          cargo xtask test desktop --e2e-window 2>&1 | tee -a e2e-window.log
       - name: Install msedgedriver pinned to Edge (Windows native driver slot)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -315,46 +300,33 @@ jobs:
           $edgeExe = @('C:\Program Files\Microsoft\Edge\Application\msedge.exe', 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $edgeExe) { throw "BLOCKED: no Edge binary under either Program Files path; install Edge on the runner, then rerun." }
           $edgeVersion = (Get-Item $edgeExe).VersionInfo.ProductVersion
-          "Edge: $edgeVersion ($edgeExe)" | Tee-Object e2e-window-block.log
+          "Edge: $edgeVersion ($edgeExe)" | Tee-Object e2e-window.log
           $zip = "$env:RUNNER_TEMP\edgedriver_win64.zip"
           $dir = "$env:RUNNER_TEMP\edgedriver"
           Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$edgeVersion/edgedriver_win64.zip" -OutFile $zip
           if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
           Expand-Archive -Path $zip -DestinationPath $dir
           $driverOut = & "$dir\msedgedriver.exe" --version
-          $driverOut | Tee-Object e2e-window-block.log -Append
+          $driverOut | Tee-Object e2e-window.log -Append
           # Fail closed on mismatch, naming both versions.
           $edgeMajor = $edgeVersion.Split('.')[0]
           if ($driverOut -notmatch [regex]::Escape($edgeMajor)) { throw "BLOCKED: msedgedriver ($driverOut) does not match Edge ($edgeVersion); re-pin to the runner's Edge and rerun." }
           Add-Content -Path $env:GITHUB_PATH -Value $dir
-      - name: Real-window E2E (Windows block evidence)
+      - name: Real-window E2E (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          (Get-Command tauri-driver).Source | Tee-Object e2e-window-block.log -Append
-          # Same Linux-only guard as the macOS leg (see its comment): pass on
-          # a real lane pass or the exact documented guard, fail closed else.
-          cargo xtask test desktop --e2e-window >> e2e-window-block.log 2>&1
-          $code = $LASTEXITCODE
-          # Neutralize now: the pwsh wrapper fails the step on a nonzero
-          # trailing $LASTEXITCODE, but a nonzero lane code is the expected
-          # input to the gate below, not the gate's verdict (only `throw`
-          # fails this step).
-          $LASTEXITCODE = 0
-          if ($code -eq 0) {
-            "e2e-window passed on Windows (multi-OS lane wave landed)" | Tee-Object e2e-window-block.log -Append
-          } elseif (Select-String -Path e2e-window-block.log -Pattern "runs on Linux in this wave" -Quiet) {
-            "BLOCKED (expected): lane is Linux-only by code; the Windows wave must teach the lane preflight plus the harness msedgedriver slot." | Tee-Object e2e-window-block.log -Append
-          } else {
-            throw "UNEXPECTED lane failure on Windows (see e2e-window-block.log)"
-          }
-      - name: Upload E2E block evidence
+          (Get-Command tauri-driver).Source | Tee-Object e2e-window.log -Append
+          # Same lane as ubuntu (no Xvfb: runners provide a GUI session).
+          cargo xtask test desktop --e2e-window 2>&1 | Tee-Object e2e-window.log -Append
+          if ($LASTEXITCODE -ne 0) { throw "e2e-window failed on Windows (see e2e-window.log)" }
+      - name: Upload E2E evidence (macOS/Windows)
         if: always() && runner.os != 'Linux'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: desktop-e2e-block-${{ matrix.os }}
-          path: e2e-window-block.log
+          name: desktop-e2e-${{ matrix.os }}
+          path: e2e-window.log
           retention-days: 30
       - name: Cache tauri-cli 2.11.4
         id: cli-cache
