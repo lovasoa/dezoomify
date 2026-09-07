@@ -71,8 +71,25 @@ hermetic gate.
 The lane needs a display (`xvfb-run -a` when headless), tauri-driver 2.x
 (`cargo install tauri-driver --version "=2.0.6"`, or `TAURI_DRIVER_BIN`),
 WebKitWebDriver (`WEBKIT_DRIVER_BIN` override), and the webview system
-packages above; each missing piece fails closed naming it. macOS and
-Windows CI wiring is a later wave.
+packages above; each missing piece fails closed naming it. The lane and
+harness run on Linux; macOS/Windows lane support (native-driver discovery
+plus lane preflight) is a later wave.
+
+CI (`.github/workflows/desktop.yml`, matrix ubuntu/macos/windows,
+`fail-fast: false`) proves the app per platform: every leg builds and tests
+the shells, Linux runs the lane for real under Xvfb (apt
+`webkit2gtk-driver`, pinned tauri-driver, lane log uploaded as
+`desktop-e2e-ubuntu-latest`), macOS enables `safaridriver` and Windows
+installs `msedgedriver` pinned to the runner's Edge and each records the
+lane's Linux-only guard as block evidence (pass on a real lane pass or that
+exact guard, fail closed otherwise). Every leg then bundle-smokes:
+Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under
+Xvfb (a 20 s stay-alive proves install + launch + webview init; the window
+shell has no `--version` flag), macOS mounts the `dmg` and execs the binary
+directly (unsigned local build, Gatekeeper/SIP untouched), Windows installs
+silently (`nsis` `/S`, or the direct-exe fallback when WiX/NSIS are absent).
+Smoke logs upload as `desktop-bundle-smoke-<os>`; smokes never precede the
+E2E legs. No update flow is exercised anywhere (updater inert).
 
 ## Bundles
 

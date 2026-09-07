@@ -240,7 +240,7 @@ engine binary fails the run with its install hint, never a narrowed pass.
 cargo xtask test desktop --e2e-window
 ```
 
-The real-window gate launches the window shell under tauri-driver on Linux
+The real-window gate launches the window shell under tauri-driver
 and drives it with selenium-webdriver against hermetic loopback fixtures:
 submit URL, destination grant through the fail-closed E2E fixed-destination
 hook, byte-exact save versus the `native/cli-dzi` golden, cancel with output
@@ -253,8 +253,26 @@ or `TAURI_DRIVER_BIN`), WebKitWebDriver (`WEBKIT_DRIVER_BIN` override), and
 the webview system packages. Ports are ephemeral except the loopback static
 server for the built frontend, which the debug window shell loads from its
 embedded devUrl address. Reports carry origins, hashes, and codes only.
-macOS and Windows CI wiring (native driver, signed runner) is a later wave.
 See [Native apps](native-apps.md#desktop) for the hook contract.
+
+CI runs the lane in `.github/workflows/desktop.yml` (matrix
+ubuntu/macos/windows, `fail-fast: false`). Linux runs the lane for real
+under Xvfb with the `webkit2gtk-driver` apt package and pinned tauri-driver
+2.0.6, and uploads the lane log (redacted reports included) as the
+`desktop-e2e-ubuntu-latest` artifact. macOS enables `safaridriver` and
+Windows installs `msedgedriver` pinned to the runner's Edge (fail closed on
+mismatch, both versions named), then each runs the lane as a block-evidence
+gate: the lane and harness are Linux-only by code, so those legs pass on a
+real lane pass or on that exact documented guard and fail closed on anything
+else. The macOS/Windows wave must teach the lane preflight plus the harness
+native-driver slot. The same workflow then bundle-smokes every leg (Linux
+`dpkg -i` with sudo plus a timed stay-alive launch, macOS `dmg` mount plus
+direct-binary exec with Gatekeeper/SIP untouched, Windows `nsis` `/S`
+silent install or the documented direct-exe fallback) and uploads the
+`desktop-bundle-smoke-<os>` logs; smokes never run before the E2E legs, so a
+smoke failure cannot fail the E2E signal spuriously. The updater stays inert
+in all of this (empty pubkey, plugin not registered): no update flow is
+exercised.
 
 ## Cross-runtime guarantees
 
