@@ -10,33 +10,34 @@ use serde::de::DeserializeOwned;
 pub fn encode<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, String> {
     let mut buf = serde_json::to_string(value).map_err(|e| e.to_string())?;
     let parsed: serde_json::Value = serde_json::from_str(&buf).map_err(|e| e.to_string())?;
-    buf = canonical_json(&parsed);
+    buf = canonical_json(&parsed)?;
     buf.push('\n');
     Ok(buf.into_bytes())
 }
 
-fn canonical_json(value: &serde_json::Value) -> String {
+fn canonical_json(value: &serde_json::Value) -> Result<String, String> {
     match value {
         serde_json::Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort();
-            let parts: Vec<String> = keys
-                .iter()
-                .map(|k| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(k).unwrap(),
-                        canonical_json(&map[*k])
-                    )
-                })
-                .collect();
-            format!("{{{}}}", parts.join(","))
+            let mut parts: Vec<String> = Vec::with_capacity(keys.len());
+            for k in keys {
+                // Serializing a string key cannot fail (escaping only), but
+                // the error stays typed instead of panicking so the deny on
+                // `clippy::unwrap_used` holds for this module.
+                let key = serde_json::to_string(k).map_err(|e| e.to_string())?;
+                parts.push(format!("{key}:{}", canonical_json(&map[k])?));
+            }
+            Ok(format!("{{{}}}", parts.join(",")))
         }
         serde_json::Value::Array(items) => {
-            let parts: Vec<String> = items.iter().map(canonical_json).collect();
-            format!("[{}]", parts.join(","))
+            let mut parts: Vec<String> = Vec::with_capacity(items.len());
+            for item in items {
+                parts.push(canonical_json(item)?);
+            }
+            Ok(format!("[{}]", parts.join(",")))
         }
-        other => serde_json::to_string(other).unwrap(),
+        other => serde_json::to_string(other).map_err(|e| e.to_string()),
     }
 }
 

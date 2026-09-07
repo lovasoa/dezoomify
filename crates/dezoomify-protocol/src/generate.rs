@@ -102,7 +102,7 @@ export interface ImageDto {{ id: string; label: string; format: string; width: n
 export interface LevelDto {{ id: string; width: number; height: number; tileWidth: number; tileHeight: number }}
 export interface CatalogDto {{ images: ImageDto[] }}
 export interface CandidateDto {{ id: string; url: string; formatHint: string; confidence: number; reason: string; dedupKey: string; sourceFrame: string }}
-export interface CapabilitiesDto {{ inputSchemes: string[]; fetchModes: string[]; decoders: string[]; processingOps: string[]; encoders: string[]; destinationModes: string[]; storageModes: string[]; maxConcurrency: number; maxTileBytes: number; bulkSupported: boolean; handoffSupported: boolean }}
+export interface CapabilitiesDto {{ inputSchemes: string[]; fetchModes: string[]; decoders: string[]; processingOps: string[]; encoders: string[]; destinationModes: string[]; storageModes: string[]; maxConcurrency: number; maxTileBytes: number; bulkSupported: boolean; handoffSupported: boolean; pausedSupported: boolean }}
 export interface HandoffDto {{ id: string; sourceUrl: string; candidate?: string; selection?: string; outputIntent?: string; requiredCapabilities: string[]; provenanceLabel: string; expiryHint?: string; opaqueRef?: string }}
 export interface ErrorDto {{ code: string; phase: string; retryable: boolean; message: string; recovery?: unknown[]; transport?: string; blockedReason?: string; resourceKind?: string }}
 "#
@@ -151,25 +151,29 @@ pub fn capability_manifest(capabilities: &CapabilitiesDto) -> serde_json::Value 
 /// pairs without touching the filesystem. The binary writes them.
 #[must_use]
 pub fn artifacts() -> Vec<(String, String)> {
+    // `serde_json::Value` pretty-printing is infallible (string-keyed maps
+    // only); the empty-string fallback is unreachable and fail-closed
+    // downstream (the `--check` drift comparison catches it). It exists so
+    // this module keeps the crate-root deny on `clippy::unwrap_used`.
+    let pretty =
+        |value: &serde_json::Value| serde_json::to_string_pretty(value).unwrap_or_default() + "\n";
     let mut files: Vec<(String, String)> = vec![
         ("src/generated.ts".to_string(), typescript()),
         (
             "schema/protocol-v1.schema.json".to_string(),
-            serde_json::to_string_pretty(&protocol_schema()).unwrap() + "\n",
+            pretty(&protocol_schema()),
         ),
         (
             "schema/capabilities-v1.schema.json".to_string(),
-            serde_json::to_string_pretty(&capabilities_schema()).unwrap() + "\n",
+            pretty(&capabilities_schema()),
         ),
         (
             "fingerprints.json".to_string(),
-            serde_json::to_string_pretty(&serde_json::json!({
+            pretty(&serde_json::json!({
                 "dto": dto_fingerprint(),
                 "limits": limits_fingerprint(),
                 "protocol": PROTOCOL_VERSION,
-            }))
-            .unwrap()
-                + "\n",
+            })),
         ),
     ];
     files.sort_by(|a, b| a.0.cmp(&b.0));

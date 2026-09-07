@@ -1,0 +1,69 @@
+{
+  "sensitive_query_keys": [
+    "access-token",
+    "access_token",
+    "api-key",
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "bearer",
+    "code",
+    "cookie",
+    "cookies",
+    "credential",
+    "key",
+    "passwd",
+    "password",
+    "proxy-authorization",
+    "secret",
+    "session",
+    "sessionid",
+    "sessiontoken",
+    "set-cookie",
+    "sid",
+    "sig",
+    "signature",
+    "state",
+    "ticket",
+    "token",
+    "x-api-key"
+  ],
+  "valid_handoff_urls": [
+    "https://example.com/item/1",
+    "http://example.com/view?view=1&page=2",
+    "https://example.com/cookie-recipe/view?page=1"
+  ],
+  "rejected_handoff_urls": [
+    "https://user:pass@example.com/item",
+    "https://example.com/item?token=secret",
+    "https://example.com/item?apiKey=CANARY",
+    "https://example.com/item?session=abc",
+    "file:///etc/passwd",
+    "ftp://example.com/item",
+    "data:text/plain,hi",
+    "not a url"
+  ],
+  "redaction_cases": [
+    {
+      "input": "fetch https://h/?apiKey=CANARY failed",
+      "must_not_contain": ["CANARY"],
+      "must_contain": ["REDACTED"]
+    },
+    {
+      "input": "failed with token=SECRET123 and cookie=abc",
+      "must_not_contain": ["SECRET123", "abc"],
+      "must_contain": ["REDACTED"]
+    },
+    {
+      "input": "fetch https://h/?apiKey=CANARY&x=1 and auth=TOPSECRET failed",
+      "must_not_contain": ["CANARY", "TOPSECRET"],
+      "must_contain": ["REDACTED"]
+    },
+    {
+      "input": "fetch https://example.com/view?page=1 done",
+      "must_contain": ["page=1"],
+      "must_not_contain": ["REDACTED"]
+    }
+  ]
+}

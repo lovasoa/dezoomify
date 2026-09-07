@@ -8,6 +8,11 @@
 // canonical JSON projection without runtime benefit.
 #![allow(clippy::result_large_err)]
 #![forbid(unsafe_code)]
+// 6.1 unwrap policy: shipped code maps failures to typed protocol errors
+// instead of panicking. Unit tests are exempt via `allow-unwrap-in-tests`
+// in the workspace `clippy.toml`; integration `tests/` targets never inherit
+// this crate-root attribute.
+#![deny(clippy::unwrap_used)]
 
 pub mod codec;
 pub mod dto;

@@ -64,9 +64,11 @@ fn native_baseline_matches_desktop_contract() {
     // Task 6.5: capabilities negotiation declaration. The native baseline is
     // the single source the desktop handshake/capability documents project:
     // http(s) input, native fetch, png/jpeg/tiff codecs, file + iiif-dir
-    // destinations, cache storage, max_concurrency 16, no bulk queue,
+    // destinations, cache storage, max_concurrency 16, sequential bulk queue,
     // handoff supported. The UI gates controls from this declaration and the
-    // engine re-validates the final request.
+    // engine re-validates the final request. Todo 5.3: website single-queue
+    // plus desktop multi-job queue flip bulk_supported true on browser and
+    // native baselines.
     let caps = CapabilitiesDto::native_baseline();
     assert_eq!(
         caps.input_schemes,
@@ -87,8 +89,123 @@ fn native_baseline_matches_desktop_contract() {
     );
     assert_eq!(caps.storage_modes, vec!["cache".to_string()]);
     assert_eq!(caps.max_concurrency, 16);
-    assert!(!caps.bulk_supported);
+    assert!(caps.bulk_supported);
+    assert!(caps.supports_bulk_queue());
     assert!(caps.handoff_supported);
+    // Todo 5.7: Pause v1 flips paused_supported true on both baselines.
+    assert!(caps.paused_supported);
+    assert!(caps.supports_pause());
+    assert!(CapabilitiesDto::browser_baseline().supports_pause());
+    assert!(caps.keys().contains(&"pause".to_string()));
+}
+
+#[test]
+fn bulk_capability_negotiation_with_n_minus_1_compat() {
+    // Todo 5.3: queue availability is capability-negotiated. Website
+    // single-queue plus desktop multi-job queue flip bulk_supported true on
+    // browser and native baselines. Both peers must agree; an N-1 peer
+    // (bulk_supported false, or a payload omitting the field) disables queue
+    // controls without breaking the 1.0 handshake. Current and N-1 are both
+    // 1.0 per release/compatibility.toml.
+    let browser = CapabilitiesDto::browser_baseline();
+    let native = CapabilitiesDto::native_baseline();
+    assert!(browser.bulk_supported);
+    assert!(native.bulk_supported);
+    assert!(browser.supports_bulk_queue());
+    assert!(native.supports_bulk_queue());
+    assert!(CapabilitiesDto::negotiated_bulk(&browser, &native));
+    assert!(CapabilitiesDto::negotiated_bulk(&native, &browser));
+    // N-1 compat: a current peer talking to an N-1 peer (bulk false)
+    // negotiates the queue off but keeps the 1.0 version handshake.
+    let mut n_minus_1 = CapabilitiesDto::native_baseline();
+    n_minus_1.bulk_supported = false;
+    assert!(!CapabilitiesDto::negotiated_bulk(&native, &n_minus_1));
+    assert!(negotiate_version("1.0").is_ok());
+    assert!(negotiate_version("1").is_ok());
+    // Missing bulk_supported (pre-queue N-1 payload) defaults to false, so
+    // old documents still decode and gate the queue off.
+    let legacy = serde_json::json!({
+        "input_schemes": ["https", "http"],
+        "fetch_modes": ["native"],
+        "decoders": ["png"],
+        "processing_ops": ["crop"],
+        "encoders": ["png"],
+        "destination_modes": ["file"],
+        "storage_modes": ["cache"],
+        "max_concurrency": 16,
+        "max_tile_bytes": 8388608
+    });
+    let decoded: CapabilitiesDto = serde_json::from_value(legacy).expect("N-1 decodes");
+    assert!(!decoded.bulk_supported);
+    assert!(!decoded.supports_bulk_queue());
+    assert!(decoded.handoff_supported);
+    assert!(!CapabilitiesDto::negotiated_bulk(&native, &decoded));
+}
+
+#[test]
+fn pause_capability_negotiation_with_n_minus_1_compat() {
+    // Todo 5.7: Pause v1 (suspend-acquisition) is capability-negotiated.
+    // Browser and native baselines flip paused_supported true. Both peers
+    // must agree; an N-1 peer (paused false, or a payload omitting the
+    // field) disables pause controls without breaking the 1.0 handshake.
+    // Current and N-1 are both 1.0 per release/compatibility.toml.
+    let browser = CapabilitiesDto::browser_baseline();
+    let native = CapabilitiesDto::native_baseline();
+    assert!(browser.paused_supported);
+    assert!(native.paused_supported);
+    assert!(browser.supports_pause());
+    assert!(native.supports_pause());
+    assert!(CapabilitiesDto::negotiated_pause(&browser, &native));
+    assert!(CapabilitiesDto::negotiated_pause(&native, &browser));
+    // N-1 compat: a current peer talking to an N-1 peer (paused false)
+    // negotiates pause off but keeps the 1.0 version handshake.
+    let mut n_minus_1 = CapabilitiesDto::native_baseline();
+    n_minus_1.paused_supported = false;
+    assert!(!CapabilitiesDto::negotiated_pause(&native, &n_minus_1));
+    assert!(negotiate_version("1.0").is_ok());
+    assert!(negotiate_version("1").is_ok());
+    // Missing paused_supported (pre-pause N-1 payload) defaults to false, so
+    // old documents still decode and gate pause off.
+    let legacy = serde_json::json!({
+        "input_schemes": ["https", "http"],
+        "fetch_modes": ["native"],
+        "decoders": ["png"],
+        "processing_ops": ["crop"],
+        "encoders": ["png"],
+        "destination_modes": ["file"],
+        "storage_modes": ["cache"],
+        "max_concurrency": 16,
+        "max_tile_bytes": 8388608,
+        "bulk_supported": true
+    });
+    let decoded: CapabilitiesDto = serde_json::from_value(legacy).expect("N-1 decodes");
+    assert!(!decoded.paused_supported);
+    assert!(!decoded.supports_pause());
+    assert!(!CapabilitiesDto::negotiated_pause(&native, &decoded));
+    // Pause/resume commands and paused/resumed events round-trip.
+    let job: JobId = "job:pause-1".parse().unwrap();
+    for command in [
+        JobCommand::Pause { job: job.clone() },
+        JobCommand::Resume { job: job.clone() },
+    ] {
+        let envelope =
+            ControlEnvelope::new(dezoomify_protocol::dto::ControlBody::Command(command)).unwrap();
+        let bytes = codec::encode(&envelope).unwrap();
+        let back: ControlEnvelope = codec::decode(&bytes).unwrap();
+        assert_eq!(codec::encode(&back).unwrap(), bytes);
+    }
+    for event in [
+        JobEvent::Paused { job: job.clone() },
+        JobEvent::Resumed { job: job.clone() },
+    ] {
+        assert_eq!(event.kind(), EventKind::Replayable);
+        assert!(!event.is_terminal());
+        let envelope =
+            ControlEnvelope::new(dezoomify_protocol::dto::ControlBody::Event(event)).unwrap();
+        let bytes = codec::encode(&envelope).unwrap();
+        let back: ControlEnvelope = codec::decode(&bytes).unwrap();
+        assert_eq!(codec::encode(&back).unwrap(), bytes);
+    }
 }
 
 #[test]
@@ -289,6 +406,8 @@ fn all_commands(job: &JobId) -> Vec<JobCommand> {
             granted: true,
         },
         JobCommand::Cancel { job: job.clone() },
+        JobCommand::Pause { job: job.clone() },
+        JobCommand::Resume { job: job.clone() },
     ];
     for command in &commands {
         match command {
@@ -306,7 +425,9 @@ fn all_commands(job: &JobId) -> Vec<JobCommand> {
             | JobCommand::RetryReady { .. }
             | JobCommand::PartialChoice { .. }
             | JobCommand::DestinationResponse { .. }
-            | JobCommand::Cancel { .. } => {}
+            | JobCommand::Cancel { .. }
+            | JobCommand::Pause { .. }
+            | JobCommand::Resume { .. } => {}
         }
     }
     commands
@@ -394,6 +515,8 @@ fn all_events(job: &JobId) -> Vec<JobEvent> {
             error: ErrorDto::new("fetch.failed", ErrorPhase::Acquisition, "gone"),
         },
         JobEvent::Cancelled { job: job.clone() },
+        JobEvent::Paused { job: job.clone() },
+        JobEvent::Resumed { job: job.clone() },
     ];
     for event in &events {
         match event {
@@ -407,7 +530,9 @@ fn all_events(job: &JobId) -> Vec<JobEvent> {
             | JobEvent::Completed { .. }
             | JobEvent::PartialCompleted { .. }
             | JobEvent::Failed { .. }
-            | JobEvent::Cancelled { .. } => {}
+            | JobEvent::Cancelled { .. }
+            | JobEvent::Paused { .. }
+            | JobEvent::Resumed { .. } => {}
         }
     }
     events

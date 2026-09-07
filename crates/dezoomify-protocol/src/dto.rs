@@ -389,6 +389,12 @@ pub enum JobCommand {
     Cancel {
         job: JobId,
     },
+    Pause {
+        job: JobId,
+    },
+    Resume {
+        job: JobId,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -519,6 +525,12 @@ pub enum JobEvent {
     Cancelled {
         job: JobId,
     },
+    Paused {
+        job: JobId,
+    },
+    Resumed {
+        job: JobId,
+    },
 }
 
 impl JobEvent {
@@ -529,7 +541,9 @@ impl JobEvent {
             | Self::JobState { .. }
             | Self::Catalog { .. }
             | Self::Progress { .. }
-            | Self::OutputReady { .. } => EventKind::Replayable,
+            | Self::OutputReady { .. }
+            | Self::Paused { .. }
+            | Self::Resumed { .. } => EventKind::Replayable,
             Self::Warning { .. } => EventKind::Transient,
             Self::RecoveryRequest { .. } => EventKind::DecisionRequesting,
             Self::Completed { .. }
@@ -560,11 +574,34 @@ pub struct CapabilitiesDto {
     pub storage_modes: Vec<String>,
     pub max_concurrency: u64,
     pub max_tile_bytes: u64,
+    #[serde(default)]
     pub bulk_supported: bool,
+    #[serde(default = "default_handoff_supported")]
     pub handoff_supported: bool,
+    /// Pause v1 (suspend-acquisition): the job stops scheduling new tiles,
+    /// finishes in-flight work, retains decoded output, and resumes on
+    /// command. Missing (N-1) defaults to false, disabling pause controls
+    /// without breaking the 1.0 handshake.
+    #[serde(default)]
+    pub paused_supported: bool,
+}
+
+fn default_handoff_supported() -> bool {
+    true
 }
 
 impl CapabilitiesDto {
+    /// Website baseline: 6 concurrent tile workers with per-host 5/s pacing.
+    /// The shared UI gates controls from this declaration and the job engine
+    /// re-validates the final request, so checks are never UI-only.
+    ///
+    /// Todo 5.3: the website runs a single-queue (enqueue while a job runs,
+    /// sequential) in its integration layer, so `bulk_supported` is true.
+    /// The engine stays single-job; the queue never runs concurrent jobs.
+    ///
+    /// Todo 5.7: Pause v1 (suspend-acquisition) is supported, so
+    /// `paused_supported` is true. The website pauses tile scheduling in its
+    /// integration layer; the engine pauses new `acquire-tile` effects.
     #[must_use]
     pub fn browser_baseline() -> Self {
         Self {
@@ -577,17 +614,28 @@ impl CapabilitiesDto {
             storage_modes: vec!["none".into()],
             max_concurrency: 6,
             max_tile_bytes: 8 << 20,
-            bulk_supported: false,
+            bulk_supported: true,
             handoff_supported: true,
+            paused_supported: true,
         }
     }
 
     /// Honest native baseline: PNG, JPEG, and TIFF output to a single file
     /// plus static `iiif-dir` tile trees, with an optional tile resume cache
-    /// and no bulk queue. Deferred bulk-text entries resolve one at a time
-    /// through fresh bounded jobs. Handoff import is supported. Wave 2
+    /// and a sequential bulk queue. Deferred bulk-text entries resolve one at
+    /// a time through fresh bounded jobs. Handoff import is supported. Wave 2
     /// widens these fields only alongside the matching pipeline, encoder,
     /// cache, and bulk-runner implementation.
+    ///
+    /// Todo 5.3: the desktop integration runs a sequential multi-job queue
+    /// (enqueue, progress per job, cancel one/all, retry failed) over the
+    /// single-job engine, so `bulk_supported` is true. The CLI `--bulk` loop
+    /// keeps its one-bounded-run-per-entry shape and shares the same
+    /// per-entry plus totals reporting.
+    ///
+    /// Todo 5.7: Pause v1 (suspend-acquisition) is supported, so
+    /// `paused_supported` is true. The engine stops scheduling new tiles
+    /// while paused; resume re-drives the pending queue.
     #[must_use]
     pub fn native_baseline() -> Self {
         Self {
@@ -597,10 +645,49 @@ impl CapabilitiesDto {
             destination_modes: vec!["file".into(), "iiif-dir".into()],
             storage_modes: vec!["cache".into()],
             max_concurrency: 16,
-            bulk_supported: false,
+            bulk_supported: true,
             handoff_supported: true,
+            paused_supported: true,
             ..Self::browser_baseline()
         }
+    }
+
+    /// Whether this host offers a queue over the single-job engine.
+    ///
+    /// The shared UI gates queue controls from this declaration; the job
+    /// engine still validates each queued request on its own. Branch on this
+    /// helper (stable capability), never on display strings.
+    #[must_use]
+    pub fn supports_bulk_queue(&self) -> bool {
+        self.bulk_supported
+    }
+
+    /// Negotiated bulk availability for a connection: both peers must support
+    /// the queue. An N-1 peer advertising `bulk_supported: false` (or omitting
+    /// the field, which defaults to false) disables queue controls without
+    /// breaking the version handshake.
+    #[must_use]
+    pub fn negotiated_bulk(local: &Self, remote: &Self) -> bool {
+        local.bulk_supported && remote.bulk_supported
+    }
+
+    /// Whether this host supports Pause v1 (suspend-acquisition).
+    ///
+    /// The shared UI gates pause controls from this declaration; the job
+    /// engine still validates each pause/resume on its own. Branch on this
+    /// helper (stable capability), never on display strings.
+    #[must_use]
+    pub fn supports_pause(&self) -> bool {
+        self.paused_supported
+    }
+
+    /// Negotiated pause availability for a connection: both peers must
+    /// support it. An N-1 peer advertising `paused_supported: false` (or
+    /// omitting the field, which defaults to false) disables pause controls
+    /// without breaking the version handshake.
+    #[must_use]
+    pub fn negotiated_pause(local: &Self, remote: &Self) -> bool {
+        local.paused_supported && remote.paused_supported
     }
 
     /// Stable capability keys for manifests and negotiation.
@@ -612,6 +699,7 @@ impl CapabilitiesDto {
             "encoders".into(),
             "bulk".into(),
             "handoff".into(),
+            "pause".into(),
         ]
     }
 }

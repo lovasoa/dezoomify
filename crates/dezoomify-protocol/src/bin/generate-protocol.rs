@@ -1,17 +1,29 @@
 //! `generate-protocol`: deterministic Rust -> TypeScript/schema generator.
 //! Usage: `generate-protocol --out <dir> [--check]`. All filesystem I/O
 //! lives in this binary; `generate.rs` stays a pure projection.
+//!
+//! I/O failures exit non-zero with a message on stderr; this binary never
+//! panics (crate-root deny on `clippy::unwrap_used`).
+
+#![deny(clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};
+
+fn fail(message: String) -> ! {
+    eprintln!("generate-protocol: {message}");
+    std::process::exit(1);
+}
 
 fn write_all(dir: &Path) -> Vec<String> {
     let mut written = Vec::new();
     for (rel, content) in dezoomify_protocol::generate::artifacts() {
         let path = dir.join(&rel);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).expect("create artifact dir");
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|e| fail(format!("create {}: {e}", parent.display())));
         }
-        std::fs::write(&path, content).expect("write artifact");
+        std::fs::write(&path, content)
+            .unwrap_or_else(|e| fail(format!("write {}: {e}", path.display())));
         written.push(rel);
     }
     written.sort();
@@ -49,7 +61,8 @@ fn main() {
             "schema/capabilities-v1.schema.json",
             "fingerprints.json",
         ] {
-            let expected = std::fs::read_to_string(tmp.join(rel)).expect("read tmp artifact");
+            let expected = std::fs::read_to_string(tmp.join(rel))
+                .unwrap_or_else(|e| fail(format!("read tmp artifact {rel}: {e}")));
             let current = std::fs::read_to_string(out.join(rel)).unwrap_or_default();
             if expected != current {
                 drift.push(rel.to_string());

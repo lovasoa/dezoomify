@@ -60,6 +60,10 @@
 //!   exception and runs native conformance instead.
 
 #![forbid(unsafe_code)]
+// 6.1 unwrap policy: shipped adapter code maps failures to typed
+// `AdapterError`s instead of panicking (see the crate-root comment in
+// `dezoomify-protocol` for how tests stay exempt).
+#![deny(clippy::unwrap_used)]
 
 pub mod buffer;
 pub mod codec;
@@ -201,6 +205,9 @@ pub mod wasm_api {
         /// Execute one bounded pure pixel operation on supplied buffers
         /// (`process`). Only `composite-crop` exists in adapter v1; returns
         /// the output digest. `geometry_json` is `{"x":..,"y":..,"w":..,"h":..}`.
+        // 6.1: the `process` export mirrors the fixed JS calling
+        // convention (operation, handles, geometry, extents); packing
+        // them into one object would break the documented JS surface.
         #[allow(clippy::too_many_arguments)]
         #[wasm_bindgen(js_name = "process")]
         pub fn process(

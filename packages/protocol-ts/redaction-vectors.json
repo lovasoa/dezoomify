@@ -1,0 +1,33 @@
+{
+  "fingerprint": "1490e20506fe3114",
+  "sensitive_query_keys": [
+    "access-token",
+    "access_token",
+    "api-key",
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "bearer",
+    "code",
+    "cookie",
+    "cookies",
+    "credential",
+    "key",
+    "passwd",
+    "password",
+    "proxy-authorization",
+    "secret",
+    "session",
+    "sessionid",
+    "sessiontoken",
+    "set-cookie",
+    "sid",
+    "sig",
+    "signature",
+    "state",
+    "ticket",
+    "token",
+    "x-api-key"
+  ]
+}

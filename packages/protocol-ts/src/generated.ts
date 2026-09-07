@@ -48,6 +48,6 @@ export interface ImageDto { id: string; label: string; format: string; width: nu
 export interface LevelDto { id: string; width: number; height: number; tileWidth: number; tileHeight: number }
 export interface CatalogDto { images: ImageDto[] }
 export interface CandidateDto { id: string; url: string; formatHint: string; confidence: number; reason: string; dedupKey: string; sourceFrame: string }
-export interface CapabilitiesDto { inputSchemes: string[]; fetchModes: string[]; decoders: string[]; processingOps: string[]; encoders: string[]; destinationModes: string[]; storageModes: string[]; maxConcurrency: number; maxTileBytes: number; bulkSupported: boolean; handoffSupported: boolean }
+export interface CapabilitiesDto { inputSchemes: string[]; fetchModes: string[]; decoders: string[]; processingOps: string[]; encoders: string[]; destinationModes: string[]; storageModes: string[]; maxConcurrency: number; maxTileBytes: number; bulkSupported: boolean; handoffSupported: boolean; pausedSupported: boolean }
 export interface HandoffDto { id: string; sourceUrl: string; candidate?: string; selection?: string; outputIntent?: string; requiredCapabilities: string[]; provenanceLabel: string; expiryHint?: string; opaqueRef?: string }
 export interface ErrorDto { code: string; phase: string; retryable: boolean; message: string; recovery?: unknown[]; transport?: string; blockedReason?: string; resourceKind?: string }

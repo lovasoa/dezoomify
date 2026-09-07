@@ -518,6 +518,18 @@ impl Session {
                 };
                 self.forward(response)
             }
+            JobCommand::Pause { job } => {
+                self.require_job(&job)?;
+                self.forward(JobResponse::Pause {
+                    job: job.as_str().to_string(),
+                })
+            }
+            JobCommand::Resume { job } => {
+                self.require_job(&job)?;
+                self.forward(JobResponse::Resume {
+                    job: job.as_str().to_string(),
+                })
+            }
             JobCommand::ProvideResource {
                 job,
                 request,
@@ -814,7 +826,7 @@ impl Session {
             match kind {
                 "job-state" | "catalog" | "progress" | "warning" | "recovery-requested"
                 | "missing-work" | "levels" | "completed" | "partial-completed" | "failed"
-                | "cancelled" => self.enqueue_event(kind, value)?,
+                | "cancelled" | "paused" | "resumed" => self.enqueue_event(kind, value)?,
                 _ => self.enqueue_effect(kind, value)?,
             }
         }
@@ -1086,6 +1098,8 @@ impl Session {
                 ),
             },
             "cancelled" => JobEvent::Cancelled { job: job_id },
+            "paused" => JobEvent::Paused { job: job_id },
+            "resumed" => JobEvent::Resumed { job: job_id },
             other => {
                 return Err(AdapterError::new(
                     AdapterErrorCode::Malformed,

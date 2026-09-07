@@ -249,6 +249,9 @@ async fn serve_original_url(
 
 pub struct UrlParts {
     host: String,
+    // 6.1: `port` is parsed and retained so gateway URLs keep an
+    // explicit non-default port through redirects; no route reads it
+    // yet, which is why the field (not the parsing) is exempt.
     #[allow(dead_code)]
     port: Option<u16>,
     path: String,
