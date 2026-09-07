@@ -55,6 +55,9 @@ jobs:
       BROWSER: ${{ inputs.browser || 'chromium' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
+        with:
+          node-version-file: .node-version
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
@@ -68,6 +71,8 @@ jobs:
           cargo build -p dezoomify-wasm --release --target wasm32-unknown-unknown
           wasm-bindgen --target web --out-dir wasm --out-name dezoomify-wasm target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm
           test -f wasm/dezoomify-wasm.js && test -f wasm/dezoomify-wasm_bg.wasm
+      - name: Generate extension vendor mirrors (generated, never committed)
+        run: node scripts/sync-web-js.mjs
       - name: Resolve extension ID from release config
         env:
           CHROME_WS_EXTENSION_ID_OVERRIDE: ${{ secrets.CHROME_WS_EXTENSION_ID }}
