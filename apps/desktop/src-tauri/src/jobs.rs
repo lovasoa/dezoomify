@@ -1353,11 +1353,20 @@ impl JobTable {
                     // Only a still-discovering job moves: an early grant or
                     // choice already advanced the state, and replaying the
                     // transition would clobber it with a spurious event.
+                    // When the grant raced the discovery worker, the grant
+                    // skipped spawning the pipeline (the discovery handle was
+                    // still running); now that the handle is reaped, start the
+                    // worker for the already-granted destination. Idempotent:
+                    // `spawn_pipeline_worker` skips when a worker runs.
                     let discovering = self
                         .jobs
                         .get(&job)
                         .is_some_and(|r| r.state == JobState::Discovering);
                     if !discovering {
+                        let granted = self.jobs.get(&job).is_some_and(|r| r.destination.is_some());
+                        if granted {
+                            self.spawn_pipeline_worker(&job);
+                        }
                         continue;
                     }
                     if let Some(record) = self.jobs.get_mut(&job) {
