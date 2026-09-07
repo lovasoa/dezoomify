@@ -442,11 +442,13 @@ export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, e
     "--port", String(tauriPort),
     "--native-port", String(nativePort),
     "--native-driver", nativeDriverBin,
-  ], { env, stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32" });
+  ], { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
   let logged = "";
-  proc.stderr.on("data", (chunk) => {
+  const capture = (chunk) => {
     logged += chunk.toString();
-  });
+  };
+  if (proc.stdout) proc.stdout.on("data", capture);
+  proc.stderr.on("data", capture);
   // Readiness is the listening port, not log text (tauri-driver stays quiet
   // until the first session).
   trackLaneChild(proc);
@@ -459,8 +461,13 @@ export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, e
     }
     await new Promise((r) => setTimeout(r, 100));
   }
+  const tail = String(logged).trim().split("\n").slice(-15).join("\n");
   killTree(proc);
-  throw new Error(`tauri-driver never became ready on 127.0.0.1:${tauriPort}`);
+  await waitForProcExit(proc, 5000).catch(() => {});
+  throw new Error(
+    `tauri-driver never became ready on 127.0.0.1:${tauriPort} ` +
+      `(native driver ${nativeDriverBin})\ntauri-driver log tail:\n${tail || "(empty)"}`,
+  );
 }
 
 // Fail-closed window-shell check: the lean shell and the window shell share

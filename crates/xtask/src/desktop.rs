@@ -296,7 +296,7 @@ fn ensure_window_e2e_deps() -> Result<(), String> {
         return Ok(());
     }
     println!("test desktop --e2e-window: installing harness dependencies (npm ci)");
-    let status = Command::new("npm")
+    let status = npm_command()?
         .args(["ci", "--no-audit", "--no-fund"])
         .current_dir(root.join("apps/desktop/tests/window-e2e"))
         .status()
@@ -615,6 +615,35 @@ fn pnpm_command_windows() -> Result<Command, String> {
             Ok(cmd)
         }
         None => Err("pnpm not found on PATH (install the pnpm version pinned in the packageManager field of package.json and ensure it is on PATH)".to_string()),
+    }
+}
+
+/// The npm invocation for the window-harness dependency install. Same
+/// Windows `.cmd`-shim rule as pnpm above: Node ships `npm.cmd`, not
+/// `npm.exe`, so a bare `Command::new("npm")` fails with "program not
+/// found" on Windows (observed as the Windows e2e leg failing before any
+/// spec ran). Unix stays a bare `npm` lookup.
+fn npm_command() -> Result<Command, String> {
+    if cfg!(windows) {
+        let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+            .map(|path| std::env::split_paths(&path).collect())
+            .unwrap_or_default();
+        let pathext =
+            std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+        match resolve_windows_program("npm", &dirs, &pathext) {
+            Some((exe, false)) => Ok(Command::new(exe)),
+            Some((shim, true)) => {
+                let mut cmd = Command::new("cmd");
+                cmd.arg("/c").arg(shim);
+                Ok(cmd)
+            }
+            None => Err(
+                "npm not found on PATH (install the Node version pinned in .node-version and ensure npm is on PATH)"
+                    .to_string(),
+            ),
+        }
+    } else {
+        Ok(Command::new("npm"))
     }
 }
 
