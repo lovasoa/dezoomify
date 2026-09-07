@@ -129,6 +129,8 @@ fn element_from_start(start: &BytesStart<'_>) -> Result<XmlElement, DiscoveryErr
     })
 }
 
+// 6.1: `stack` must stay `&mut Vec` (parents are pushed); the
+// `&mut [T]` suggestion cannot push, so the lint stays allowed.
 #[allow(clippy::ptr_arg)]
 fn append_element(
     root: &mut Option<XmlElement>,
