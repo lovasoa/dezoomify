@@ -38,11 +38,21 @@ const SCENARIOS_DIR = path.join(REPO_ROOT, "testdata/scenarios");
 // `cargo build` (lean shell) or frontend rebuild in the same checkout can
 // never swap the binaries mid-run. Direct spec runs without the lane use
 // the in-place build outputs.
-const APP_BIN =
+const APP_BIN_CANDIDATE =
   process.env.DEZOOMIFY_WINDOW_E2E_APP_BIN || path.join(REPO_ROOT, "target/debug/dezoomify-desktop");
+// Windows builds `dezoomify-desktop.exe`; accept the extensionless lane
+// value when the suffixed binary is the one on disk.
+const APP_BIN =
+  process.platform === "win32" && !existsSync(APP_BIN_CANDIDATE) && existsSync(`${APP_BIN_CANDIDATE}.exe`)
+    ? `${APP_BIN_CANDIDATE}.exe`
+    : APP_BIN_CANDIDATE;
 const FRONTEND_DIST =
   process.env.DEZOOMIFY_WINDOW_E2E_DIST || path.join(REPO_ROOT, "apps/desktop/dist");
-const FIXTURE_SERVER_BIN = path.join(REPO_ROOT, "target/debug/dezoomify-fixture-server");
+const FIXTURE_SERVER_CANDIDATE = path.join(REPO_ROOT, "target/debug/dezoomify-fixture-server");
+const FIXTURE_SERVER_BIN =
+  process.platform === "win32" && !existsSync(FIXTURE_SERVER_CANDIDATE) && existsSync(`${FIXTURE_SERVER_CANDIDATE}.exe`)
+    ? `${FIXTURE_SERVER_CANDIDATE}.exe`
+    : FIXTURE_SERVER_CANDIDATE;
 
 // Deterministic seed marker for reports. Inputs are fixed; no run reads
 // clocks or random sources for assertions.
@@ -80,13 +90,19 @@ function resolveOnPath(name) {
     if (!dir) continue;
     const candidate = path.join(dir, name);
     if (existsSync(candidate)) return candidate;
+    // Windows: CreateProcess resolves `.exe` but a bare stem lookup does
+    // not, so probe the suffixed binary too (mirrors the xtask lane).
+    if (process.platform === "win32") {
+      const exe = path.join(dir, `${name}.exe`);
+      if (existsSync(exe)) return exe;
+    }
   }
   return null;
 }
 
-// Fail-closed driver discovery. Linux runs WebKitWebDriver; macOS and
-// Windows keep their native-driver slots open for the later CI wave, which
-// must also teach the xtask lane to build and drive there.
+// Fail-closed driver discovery. Linux runs WebKitWebDriver, macOS runs the
+// platform safaridriver, Windows runs msedgedriver exact-matched to the
+// runner Edge version; the xtask lane mirrors these slots.
 export function resolveTauriDriver() {
   const override = process.env.TAURI_DRIVER_BIN;
   if (override) {
@@ -106,30 +122,73 @@ export function resolveTauriDriver() {
 }
 
 export function resolveNativeDriver() {
-  if (process.platform !== "linux") {
+  // Linux slot (behavior byte-identical to the prior wave).
+  if (process.platform === "linux") {
+    const override = process.env.WEBKIT_DRIVER_BIN;
+    if (override) {
+      if (!existsSync(override)) {
+        throw new Error(
+          `window E2E: WEBKIT_DRIVER_BIN=${override} does not exist`,
+        );
+      }
+      return override;
+    }
+    const found = resolveOnPath("WebKitWebDriver");
+    if (found) return found;
     throw new Error(
-      `window E2E: ${process.platform} has no driver wiring yet; ` +
-        `the macOS/Windows CI wave must add native-driver discovery plus lane support`,
+      `window E2E: WebKitWebDriver not found on PATH (or WEBKIT_DRIVER_BIN unset); ` +
+        `install the platform webview driver package for this Linux host`,
     );
   }
-  const override = process.env.WEBKIT_DRIVER_BIN;
-  if (override) {
-    if (!existsSync(override)) {
-      throw new Error(
-        `window E2E: WEBKIT_DRIVER_BIN=${override} does not exist`,
-      );
+  // macOS slot: the platform safaridriver (ships with macOS, enabled via
+  // `sudo safaridriver --enable` in CI). SAFARI_DRIVER_BIN is canonical;
+  // WEBKIT_DRIVER_BIN stays accepted for a shared CI env.
+  if (process.platform === "darwin") {
+    for (const key of ["SAFARI_DRIVER_BIN", "WEBKIT_DRIVER_BIN"]) {
+      const override = process.env[key];
+      if (override) {
+        if (!existsSync(override)) {
+          throw new Error(`window E2E: ${key}=${override} does not exist`);
+        }
+        return override;
+      }
     }
-    return override;
+    if (existsSync("/usr/bin/safaridriver")) return "/usr/bin/safaridriver";
+    const found = resolveOnPath("safaridriver");
+    if (found) return found;
+    throw new Error(
+      `window E2E: safaridriver not found (or SAFARI_DRIVER_BIN unset); ` +
+        `enable with \`sudo safaridriver --enable\``,
+    );
   }
-  const found = resolveOnPath("WebKitWebDriver");
-  if (found) return found;
+  // Windows slot: msedgedriver exact-matched to the runner Edge version
+  // (the workflow installs it fail-closed naming both versions).
+  // EDGE_DRIVER_BIN is canonical; WEBKIT_DRIVER_BIN stays accepted.
+  if (process.platform === "win32") {
+    for (const key of ["EDGE_DRIVER_BIN", "WEBKIT_DRIVER_BIN"]) {
+      const override = process.env[key];
+      if (override) {
+        if (!existsSync(override)) {
+          throw new Error(`window E2E: ${key}=${override} does not exist`);
+        }
+        return override;
+      }
+    }
+    const found = resolveOnPath("msedgedriver");
+    if (found) return found;
+    throw new Error(
+      `window E2E: msedgedriver not found on PATH (or EDGE_DRIVER_BIN unset); ` +
+        `install the exact runner-Edge match from https://msedgedriver.microsoft.com/<edge-version>/edgedriver_win64.zip`,
+    );
+  }
   throw new Error(
-    `window E2E: WebKitWebDriver not found on PATH (or WEBKIT_DRIVER_BIN unset); ` +
-      `install the platform webview driver package for this Linux host`,
+    `window E2E: ${process.platform} has no native-driver slot (linux, darwin, win32 only)`,
   );
 }
 
 export function ensureDisplay() {
+  // Linux needs Xvfb; macOS and Windows runners provide a GUI session.
+  if (process.platform !== "linux") return;
   if (process.env.DISPLAY) return;
   throw new Error(
     `window E2E: no display (DISPLAY is unset); rerun under \`xvfb-run -a\` ` +
@@ -195,6 +254,7 @@ export async function startFixtureServer(workDir) {
     "--scenarios-dir", SCENARIOS_DIR,
     "--request-log", requestLog,
   ]);
+  trackLaneChild(proc);
   let base = null;
   for (let i = 0; i < 100 && !base; i += 1) {
     const bound = existsSync(addrFile) ? readFileSync(addrFile, "utf8").trim() : null;
@@ -265,6 +325,114 @@ export async function closeFrontend(server) {
   });
 }
 
+// Lane-owned child tracking: every fixture server and tauri-driver this
+// process spawns registers here and unregisters on exit. Pre-launch
+// reaping only ever touches these PIDs (never a system scan), so foreign
+// processes can never be signalled.
+const laneChildren = new Set();
+
+function trackLaneChild(proc) {
+  if (proc && typeof proc.pid === "number") {
+    laneChildren.add(proc);
+    proc.once("exit", () => laneChildren.delete(proc));
+  }
+  return proc;
+}
+
+// Reap any lane-owned children still alive from a prior flow in this
+// process (a failed launch that left the driver tree up). Only PIDs in
+// `laneChildren` are signalled; anything foreign is untouched.
+async function reapLaneOrphans() {
+  const orphans = [...laneChildren];
+  for (const proc of orphans) {
+    if (proc.exitCode === null && proc.signalCode === null) {
+      killTree(proc);
+    }
+  }
+  for (const proc of orphans) {
+    if (proc.exitCode === null && proc.signalCode === null) {
+      await waitForProcExit(proc, 5000).catch(() => {});
+    }
+  }
+}
+
+function waitForProcExit(proc, timeoutMs) {
+  if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    timer.unref?.();
+    proc.once("exit", done);
+  });
+}
+
+// Isolated app environment for one flow: temp HOME plus XDG dirs (no
+// shared caches) plus the explicit E2E flag pair. Mesa shader-cache writes
+// are disabled so teardown never races a late cache flush (the observed
+// Ubuntu `mesa_shader_cache` cleanup race); the directory override stays
+// as belt-and-braces for drivers that ignore the disable flag.
+function laneAppEnv(home, fixedDest) {
+  return {
+    ...process.env,
+    HOME: home,
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+    XDG_DATA_HOME: path.join(home, ".local/share"),
+    XDG_CACHE_HOME: path.join(home, ".cache"),
+    MESA_SHADER_CACHE_DISABLE: "1",
+    MESA_SHADER_CACHE_DIR: path.join(home, ".cache", "mesa_shader_cache"),
+    DEZOOMIFY_E2E_WINDOW: "1",
+    DEZOOMIFY_E2E_FIXED_DESTINATION: fixedDest,
+  };
+}
+
+// Deterministic temp-tree removal: a SIGKILLed webview can still hold a
+// cache file for a tick after its exit event, so retry a bounded number
+// of times instead of racing it. No assertions, cleanup only.
+async function rmRfWithRetries(target) {
+  for (let i = 0; i < 5; i += 1) {
+    try {
+      rmSync(target, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  try {
+    rmSync(target, { recursive: true, force: true });
+  } catch {
+    // Best-effort: temp dirs are reaped by the OS eventually; never fail
+    // a green run on a late cache flush.
+  }
+}
+
+async function quitDriver(driver) {
+  if (!driver) return;
+  try {
+    await driver.quit();
+  } catch {
+    // Already gone.
+  }
+}
+
+async function stopFixture(fixture) {
+  if (!fixture) return;
+  try {
+    fixture.proc.kill();
+  } catch {
+    // Already gone.
+  }
+  await waitForProcExit(fixture.proc, 5000).catch(() => {});
+}
+
+async function stopDriverProc(driverProc) {
+  if (!driverProc) return;
+  killTree(driverProc.proc);
+  await waitForProcExit(driverProc.proc, 5000).catch(() => {});
+}
+
 export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, env) {
   const driverBin = resolveTauriDriver();
   // Detached on POSIX so the driver leads its own process group and the
@@ -281,6 +449,7 @@ export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, e
   });
   // Readiness is the listening port, not log text (tauri-driver stays quiet
   // until the first session).
+  trackLaneChild(proc);
   for (let i = 0; i < 100; i += 1) {
     try {
       const res = await fetch(`http://127.0.0.1:${tauriPort}/status`);
@@ -307,8 +476,17 @@ export function ensureWindowShell() {
       `window E2E: ${APP_BIN} is missing; run \`cargo xtask test desktop --e2e-window\` (it builds the window shell first)`,
     );
   }
-  const probe = spawnSync("grep", ["-a", "-F", "-q", WINDOW_SHELL_MARKER, APP_BIN]);
-  if (probe.status !== 0) {
+  // Cross-platform marker probe (no `grep` dependency for Windows): the
+  // marker only exists in the window shell (`tauri_shell.rs` behind the
+  // `tauri` feature). Read the binary and search the bytes directly.
+  let hasMarker = false;
+  try {
+    const bytes = readFileSync(APP_BIN);
+    hasMarker = bytes.includes(Buffer.from(WINDOW_SHELL_MARKER, "utf8"));
+  } catch {
+    hasMarker = false;
+  }
+  if (!hasMarker) {
     throw new Error(
       `window E2E: ${APP_BIN} is not the window shell (lean shell on disk); ` +
         `rebuild with \`cargo xtask build desktop --unsigned-test\` and rerun`,
@@ -320,33 +498,69 @@ export function ensureWindowShell() {
 // optional deep-link argv entry; `appEnv` carries the isolated HOME plus the
 // explicit E2E flag pair. Resolves once the idle form or the deep-link
 // confirm gate is visible.
+//
+// Session establishment retries at the harness level only (never inside
+// specs): a late-run `no WebDriver session` flake gets two more attempts
+// with backoff before the flow fails with the driver log tail attached by
+// the caller.
 export async function launchApp({ tauriPort, appArgs = [] }) {
   const options = { application: APP_BIN };
   if (appArgs.length > 0) options.args = appArgs;
   const sessionTimeoutMs = 90000;
-  const driver = await Promise.race([
-    new webdriver.Builder()
+  const attempts = 3;
+  const backoffsMs = [2000, 4000];
+  let lastErr = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let timedOut = false;
+    const buildPromise = new webdriver.Builder()
       .usingServer(`http://127.0.0.1:${tauriPort}/`)
       .withCapabilities({ "tauri:options": options })
       .forBrowser("wry")
-      .build(),
-    new Promise((_, reject) => setTimeout(
-      () => reject(new Error(
-        `window E2E: no WebDriver session after ${sessionTimeoutMs / 1000}s; ` +
-          `the app binary may be stale (see ensureWindowShell) or the display is gone`,
-      )),
-      sessionTimeoutMs,
-    )),
-  ]);
-  try {
-    await driver.wait(async () => driver
-      .executeScript("return !!document.querySelector('#dz-url-input, #dz-deep-link-confirm')")
-      .catch(() => false), 60000);
-  } catch (err) {
-    await driver.quit().catch(() => {});
-    throw new Error(`window E2E: app window never reached idle: ${String(err).slice(0, 200)}`);
+      .build();
+    // If the timeout wins, a late-resolving builder would otherwise leak
+    // its session; reaps it only in that case (a winning builder is the
+    // live session below and must not be quit).
+    buildPromise.then((late) => {
+      if (timedOut && late && typeof late.quit === "function") {
+        late.quit().catch(() => {});
+      }
+    }, () => {});
+    let driver = null;
+    try {
+      let timeoutId = null;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          reject(new Error(
+            `window E2E: no WebDriver session after ${sessionTimeoutMs / 1000}s (attempt ${attempt}/${attempts}); ` +
+              `the app binary may be stale (see ensureWindowShell) or the display is gone`,
+          ));
+        }, sessionTimeoutMs);
+        timeoutId.unref?.();
+      });
+      driver = await Promise.race([buildPromise, timeoutPromise]);
+      clearTimeout(timeoutId);
+    } catch (err) {
+      lastErr = err;
+      // The late builder above reaps itself; back off and retry unless
+      // this was the final attempt.
+      if (attempt < attempts) {
+        await new Promise((r) => setTimeout(r, backoffsMs[attempt - 1] ?? 2000));
+        continue;
+      }
+      throw err;
+    }
+    try {
+      await driver.wait(async () => driver
+        .executeScript("return !!document.querySelector('#dz-url-input, #dz-deep-link-confirm')")
+        .catch(() => false), 60000);
+    } catch (err) {
+      await driver.quit().catch(() => {});
+      throw new Error(`window E2E: app window never reached idle: ${String(err).slice(0, 200)}`);
+    }
+    return driver;
   }
-  return driver;
+  throw lastErr ?? new Error("window E2E: no WebDriver session (no attempts ran)");
 }
 
 // Redacted origin (scheme://host[:port]) for reports. Never userinfo, path,
@@ -381,11 +595,13 @@ export function deepLinkArgv(input) {
 
 // Full lifecycle for one flow: isolated profile, fixture server,
 // tauri-driver plus app launch, then `body`. Everything is cleaned up
-// (driver quit, child kills, temp profile removal) even on failure.
+// (driver quit, child kills with exit wait, temp profile removal with
+// retries) even on failure.
 export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName = "saved.png", preCreateDest = null, body }) {
   ensureDisplay();
   // Rechecked per flow: the window and lean shells share one binary path.
   ensureWindowShell();
+  await reapLaneOrphans();
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-window-e2e-"));
   const home = path.join(work, "home");
   mkdirSync(home, { recursive: true });
@@ -398,15 +614,7 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
     fixture = await startFixtureServer(work);
     const tauriPort = await freePort();
     const nativePort = await freePort();
-    const appEnv = {
-      ...process.env,
-      HOME: home,
-      XDG_CONFIG_HOME: path.join(home, ".config"),
-      XDG_DATA_HOME: path.join(home, ".local/share"),
-      XDG_CACHE_HOME: path.join(home, ".cache"),
-      DEZOOMIFY_E2E_WINDOW: "1",
-      DEZOOMIFY_E2E_FIXED_DESTINATION: fixedDest,
-    };
+    const appEnv = laneAppEnv(home, fixedDest);
     driverProc = await startTauriDriver(tauriPort, nativePort, nativeDriverBin, appEnv);
     // Deep-link flows build their argv from the allocated loopback base,
     // which only exists after the fixture server starts.
@@ -443,15 +651,69 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
       throw new Error(`${err.message}${note}${fixtureNote}`);
     }
   } finally {
-    // SIGKILL the whole driver tree, never a bare driver kill: an app that
-    // outlives its flow would hold the single devUrl connection (and this
-    // process's pipes) open, blocking the spec's server close and node's
-    // exit after the last test. The fixture server is a single process
-    // (spawned in this group, not detached), so a plain kill reaps it.
-    if (driver) await driver.quit().catch(() => {});
-    if (driverProc) killTree(driverProc.proc);
-    if (fixture) fixture.proc.kill();
-    rmSync(work, { recursive: true, force: true });
+    // Deterministic teardown: quit the session, SIGKILL the whole driver
+    // tree and wait for its exit, stop the fixture server and wait, then
+    // remove the temp profile with retries. Waiting before `rm` fixes the
+    // Mesa-shader-cache cleanup race (a late cache flush after SIGKILL);
+    // the disabled shader cache in `laneAppEnv` removes the writer.
+    await quitDriver(driver);
+    await stopDriverProc(driverProc);
+    await stopFixture(fixture);
+    await rmRfWithRetries(work);
+  }
+}
+
+// Shared-window session for back-to-back completed saves in one app
+// launch: one isolated profile, one fixture server, one tauri-driver plus
+// one app launch, then `body` runs N saves sequentially. Between saves the
+// caller returns to idle through the product "Dezoomify another image"
+// reset and clears the fixed destination, so the next grant succeeds (the
+// E2E fixed destination is one path per launch, hence one output extension
+// per session). Everything is cleaned up even on failure. Use for the
+// formats matrix, where every case is the same completed-save shape;
+// one-off flows keep the isolated runWindowFlow above.
+export async function runSharedWindowSession({ nativeDriverBin, fixedName = "shared.png", body }) {
+  ensureDisplay();
+  ensureWindowShell();
+  await reapLaneOrphans();
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-window-e2e-shared-"));
+  const home = path.join(work, "home");
+  mkdirSync(home, { recursive: true });
+  const fixedDest = path.join(work, fixedName);
+  let fixture = null;
+  let driverProc = null;
+  let driver = null;
+  try {
+    fixture = await startFixtureServer(work);
+    const tauriPort = await freePort();
+    const nativePort = await freePort();
+    const appEnv = laneAppEnv(home, fixedDest);
+    driverProc = await startTauriDriver(tauriPort, nativePort, nativeDriverBin, appEnv);
+    try {
+      driver = await launchApp({ tauriPort });
+    } catch (err) {
+      const tail = String(driverProc.logged()).trim().split("\n").slice(-15).join("\n");
+      throw new Error(`${err.message}\napp log tail:\n${tail || "(empty)"}`);
+    }
+    try {
+      return await body({ driver, work, home, fixedDest, base: fixture.base, appEnv });
+    } catch (err) {
+      const tail = String(driverProc.logged()).trim().split("\n").slice(-15).join("\n");
+      const note = tail ? `\napp log tail:\n${tail}` : "\napp log tail: (empty)";
+      let fixtureNote = "";
+      try {
+        const logText = readFileSync(fixture.requestLog, "utf8").trim().split("\n");
+        fixtureNote = `\nfixture requests (${logText.length}):\n${logText.slice(-10).join("\n")}`;
+      } catch {
+        fixtureNote = "\nfixture requests: (no log)";
+      }
+      throw new Error(`${err.message}${note}${fixtureNote}`);
+    }
+  } finally {
+    await quitDriver(driver);
+    await stopDriverProc(driverProc);
+    await stopFixture(fixture);
+    await rmRfWithRetries(work);
   }
 }
 
@@ -461,6 +723,10 @@ export async function preflight() {
   ensureBinary(FIXTURE_SERVER_BIN, "dezoomify-fixture-server");
   ensureWindowShell();
   ensureDisplay();
+  // Mesa shader-cache writes disabled process-wide so spec-owned flows
+  // (which spread `process.env` into their own `appEnv`) inherit the same
+  // deterministic teardown without spec edits.
+  process.env.MESA_SHADER_CACHE_DISABLE = "1";
   const nativeDriverBin = resolveNativeDriver();
   resolveTauriDriver();
   if (!hasCommand("node")) throw new Error("window E2E: node is required");
