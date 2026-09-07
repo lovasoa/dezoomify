@@ -296,20 +296,11 @@ export function createDesktopIntegration(opts?: {
     if (!invoke) {
       return { opened: true, reason: "external" };
     }
+    // Only the granted opener command is used: the capability document
+    // grants `opener:allow-open-url` alone, so legacy `open` names would be
+    // denied. No fallback is attempted; denial surfaces a typed error.
     try {
       await invoke("plugin:opener|open_url", { url });
-      return { opened: true, reason: "external" };
-    } catch {
-      // Fall through to legacy command names.
-    }
-    try {
-      await invoke("plugin:opener|open", { url });
-      return { opened: true, reason: "external" };
-    } catch {
-      // Fall through to shell fallback.
-    }
-    try {
-      await invoke("plugin:shell|open", { path: url });
       return { opened: true, reason: "external" };
     } catch (error) {
       return {
