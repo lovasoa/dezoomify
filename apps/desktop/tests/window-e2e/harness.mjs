@@ -33,9 +33,16 @@ import webdriver from "selenium-webdriver";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
 const SCENARIOS_DIR = path.join(REPO_ROOT, "testdata/scenarios");
-const FRONTEND_DIST = path.join(REPO_ROOT, "apps/desktop/dist");
+// The lane copies the freshly built window shell and frontend into
+// lane-private paths and points the harness at them, so a concurrent
+// `cargo build` (lean shell) or frontend rebuild in the same checkout can
+// never swap the binaries mid-run. Direct spec runs without the lane use
+// the in-place build outputs.
+const APP_BIN =
+  process.env.DEZOOMIFY_WINDOW_E2E_APP_BIN || path.join(REPO_ROOT, "target/debug/dezoomify-desktop");
+const FRONTEND_DIST =
+  process.env.DEZOOMIFY_WINDOW_E2E_DIST || path.join(REPO_ROOT, "apps/desktop/dist");
 const FIXTURE_SERVER_BIN = path.join(REPO_ROOT, "target/debug/dezoomify-fixture-server");
-const APP_BIN = path.join(REPO_ROOT, "target/debug/dezoomify-desktop");
 
 // Deterministic seed marker for reports. Inputs are fixed; no run reads
 // clocks or random sources for assertions.

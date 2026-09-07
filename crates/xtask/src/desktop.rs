@@ -163,9 +163,70 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         ));
     }
     build_desktop(&["--unsigned-test".to_string()])?;
-    run_node(&["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"])?;
+    // Lane-private copies: the window and lean shells share one binary
+    // path (and the frontend one dist directory), so snapshot both before
+    // the spec runs. A concurrent lean or frontend rebuild in the same
+    // checkout then cannot swap the app mid-run; on CI runners the copies
+    // are simply identical content.
+    let e2e_dir = super::repo_root().join("target/e2e-window");
+    let app_copy = stage_e2e_artifact(
+        &super::repo_root().join("target/debug/dezoomify-desktop"),
+        &e2e_dir.join("dezoomify-desktop"),
+    )?;
+    let dist_copy = stage_e2e_artifact(
+        &super::repo_root().join("apps/desktop/dist"),
+        &e2e_dir.join("dist"),
+    )?;
+    run_node_with_env(
+        &["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"],
+        &[
+            (
+                "DEZOOMIFY_WINDOW_E2E_APP_BIN",
+                app_copy.to_str().unwrap_or(""),
+            ),
+            (
+                "DEZOOMIFY_WINDOW_E2E_DIST",
+                dist_copy.to_str().unwrap_or(""),
+            ),
+        ],
+    )?;
     println!("test desktop --e2e-window: ok (real window, hermetic loopback)");
     Ok(())
+}
+
+/// Copy one build output (file or directory) into the lane-private tree,
+/// replacing any previous copy. Fails closed naming the missing source.
+fn stage_e2e_artifact(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    if !src.exists() {
+        return Err(format!("e2e-window artifact missing: {}", src.display()));
+    }
+    if dst.exists() {
+        std::fs::remove_dir_all(dst)
+            .or_else(|_| std::fs::remove_file(dst))
+            .map_err(|e| format!("cannot clear {}: {e}", dst.display()))?;
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    let status = Command::new("cp")
+        .args([
+            "-r",
+            &src.to_string_lossy().into_owned(),
+            &dst.to_string_lossy().into_owned(),
+        ])
+        .status()
+        .map_err(|e| format!("failed to run cp: {e}"))?;
+    if !status.success() || !dst.exists() {
+        return Err(format!(
+            "failed to stage e2e-window artifact {}",
+            dst.display()
+        ));
+    }
+    Ok(dst.to_path_buf())
 }
 
 /// Selenium client for the window harness, installed once via the pinned
@@ -427,8 +488,13 @@ fn run_cargo(args: &[&str]) -> Result<(), String> {
 }
 
 fn run_node(args: &[&str]) -> Result<(), String> {
+    run_node_with_env(args, &[])
+}
+
+fn run_node_with_env(args: &[&str], env: &[(&str, &str)]) -> Result<(), String> {
     let status = Command::new("node")
         .args(args)
+        .envs(env.iter().copied())
         .current_dir(super::repo_root())
         .status()
         .map_err(|e| format!("failed to run node: {e}"))?;
