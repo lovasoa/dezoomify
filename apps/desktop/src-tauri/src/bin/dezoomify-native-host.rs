@@ -14,6 +14,11 @@
 //   the channel sender; this binary adds no separate identity check and never
 //   authenticates anyone from a self-asserted id, challenge, or nonce.
 
+// 6.1 unwrap policy: malformed stdin, oversized frames, and bad envelopes map
+// to `handoff.rejected`/`protocol.*` framed rejections instead of panicking
+// (see `lib.rs`).
+#![deny(clippy::unwrap_used)]
+
 use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 

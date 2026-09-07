@@ -74,45 +74,53 @@ impl std::fmt::Display for DeepLinkError {
 
 impl std::error::Error for DeepLinkError {}
 
+/// Single shared credential-query vocabulary. Mirrors the canonical
+/// `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS` plus the shared vectors in
+/// `testdata/redaction-vectors.json` and `packages/protocol-ts/src/generated.ts`.
+/// Matching is case-insensitive exact (never substring) so `/cookie-recipe/`
+/// stays valid while `?token=secret` is rejected. This file stays std-only by
+/// design (lean shell); keep the list in sync with the protocol source.
 fn is_secret_key(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "cookie"
-            | "cookies"
-            | "authorization"
-            | "proxy-authorization"
-            | "bearer"
-            | "token"
-            | "signature"
-            | "sig"
-            | "auth"
-            | "secret"
-            | "password"
-            | "session"
-            | "sid"
-            | "apikey"
+        "access-token"
+            | "access_token"
+            | "api-key"
             | "api_key"
+            | "apikey"
+            | "auth"
+            | "authorization"
+            | "bearer"
+            | "code"
+            | "cookie"
+            | "cookies"
+            | "credential"
             | "key"
+            | "passwd"
+            | "password"
+            | "proxy-authorization"
+            | "secret"
+            | "session"
+            | "sessionid"
+            | "sessiontoken"
+            | "set-cookie"
+            | "sid"
+            | "sig"
+            | "signature"
+            | "state"
+            | "ticket"
+            | "token"
+            | "x-api-key"
     )
 }
 
-fn source_contains_secret(text: &str) -> Option<String> {
+/// Local-path markers that never travel in a deep link (separate from secret
+/// query keys above, which are enforced by URL parsing). Substring checks are
+/// confined to these path markers; credential keys always use exact-match URL
+/// parsing so `/cookie-recipe/` stays valid.
+fn source_contains_local_path(text: &str) -> Option<String> {
     let lower = text.to_ascii_lowercase();
-    for needle in [
-        "cookie",
-        "authorization",
-        "bearer",
-        "token=",
-        "signature",
-        "secret",
-        "password",
-        "session=",
-        "apikey",
-        "api_key",
-        "file://",
-        "/etc/",
-        "c:\\",
-    ] {
+    for needle in ["file://", "/etc/", "c:\\"] {
         if lower.contains(needle) {
             return Some(needle.to_string());
         }
@@ -185,7 +193,10 @@ fn validate_source(src: &str) -> Result<(), DeepLinkError> {
     if has_userinfo(src) {
         return Err(DeepLinkError::UserinfoForbidden);
     }
-    if let Some(needle) = source_contains_secret(src) {
+    // Local-path markers never travel in a deep link. Credential query keys
+    // are enforced below by exact-match URL parsing (never substring), so
+    // `/cookie-recipe/` stays valid while `?token=secret` is rejected.
+    if let Some(needle) = source_contains_local_path(src) {
         return Err(DeepLinkError::SecretForbidden(needle));
     }
     Ok(())
@@ -295,12 +306,25 @@ pub fn parse_deep_link(url: &str) -> Result<DeepLink, DeepLinkError> {
     let source_url = percent_decode(&src_raw).map_err(DeepLinkError::MalformedEncoding)?;
     validate_source(&source_url)?;
     // Secret query keys inside the decoded source are also forbidden
-    // (cookie-param style smuggling).
+    // (cookie-param style smuggling). Matching is exact per key
+    // (case-insensitive), never substring, mirroring the protocol DTO.
     if let Some(q) = source_url.split('?').nth(1) {
-        for pair in q.split('&') {
+        let query = q.split('#').next().unwrap_or(q);
+        for pair in query.split('&') {
             if let Some((k, _)) = pair.split_once('=') {
                 if is_secret_key(k) {
                     return Err(DeepLinkError::SecretForbidden(k.to_string()));
+                }
+            }
+        }
+    }
+    // Fragments never reach servers but can leak tokens in labels/logs.
+    if let Some(fragment) = source_url.split('#').nth(1) {
+        for pair in fragment.split('&') {
+            if let Some((k, _)) = pair.split_once('=') {
+                let key = k.trim_start_matches(['?', '#']);
+                if is_secret_key(key) {
+                    return Err(DeepLinkError::SecretForbidden(key.to_string()));
                 }
             }
         }

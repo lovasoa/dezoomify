@@ -291,6 +291,9 @@ impl HostState {
     /// `PipelineConfig::user_headers` RAM only (never logged, never cached,
     /// never serialized). Only cookies scoped to the source URL origin reach
     /// the driver; sibling entries are dropped and never sent elsewhere.
+    // 6.1: credential handling takes explicit scalar params so no secret
+    // bundle struct can leak across the consent boundary; grouping them
+    // would widen what a caller can pass by mistake.
     #[allow(clippy::too_many_arguments)]
     fn handle_credential(
         &mut self,

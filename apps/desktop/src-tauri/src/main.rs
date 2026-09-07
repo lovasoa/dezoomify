@@ -14,6 +14,10 @@
 // The installer and first-run path call `--register-native-host`; the host
 // path defaults to `dezoomify-native-host` next to this executable.
 
+// 6.1 unwrap policy: this binary maps failures to process exit codes and
+// stderr diagnostics instead of panicking (see `lib.rs`).
+#![deny(clippy::unwrap_used)]
+
 #[cfg(feature = "tauri")]
 fn main() {
     // The window shell performs best-effort per-user registration on startup

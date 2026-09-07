@@ -4,7 +4,8 @@
 // cross IPC, guarded by assertNoTileBytes and redactForEvent.
 //
 // Tauri commands used here: start_job, answer_choice, cancel_job,
-// request_destination (via integration.requestSaveDestination).
+// request_destination (via integration.requestSaveDestination), and
+// query_capabilities (one boot handshake; see queryCapabilitiesAtBoot).
 // Event channels subscribed here: dezoomify://job-state,
 // dezoomify://job-progress, dezoomify://job-output, dezoomify://job-error,
 // dezoomify://deep-link-pending.
@@ -17,8 +18,21 @@
 // surface typed choices (retry / choose-output / keep-partial /
 // discard-partial / handoff-to-native) wired to answer_choice (RetryReady /
 // PartialKeep), request_destination, and requestHandoff.
-import { createController, renderView, t } from "@dezoomify/shared-ui";
-import type { ViewContext } from "@dezoomify/shared-ui";
+import {
+  HISTORY_KEY_DESKTOP,
+  HISTORY_OPTIN_KEY_DESKTOP,
+  clearHistory as clearHistoryStore,
+  createController,
+  loadHistory as loadHistoryStore,
+  loadHistoryOptIn,
+  pushHistory,
+  renderView,
+  saveHistory as saveHistoryStore,
+  saveHistoryOptIn,
+  t,
+  toHistoryEntry,
+} from "@dezoomify/shared-ui";
+import type { HistoryEntry, ViewContext } from "@dezoomify/shared-ui";
 import { suggestedNameFor } from "@dezoomify/browser-runtime";
 import {
   asPayload,
@@ -65,6 +79,7 @@ import {
 import type { SettingsPanelEnv } from "./settingsPanel.ts";
 import {
   createDesktopIntegration,
+  DESKTOP_COMMANDS,
   NATIVE_FORMATS,
   PROTOCOL_MAX,
   PROTOCOL_MIN,
@@ -73,6 +88,18 @@ import {
 import type { NativeFormat } from "./desktopIntegration.ts";
 import { DESKTOP_EVENT_CHANNELS, assertNoTileBytes, redactForEvent } from "./events.ts";
 import type { DesktopEventChannel } from "./events.ts";
+import {
+  cancelAllDesktop,
+  cancelDesktopEntry,
+  createDesktopQueue,
+  enqueueDesktopQueue,
+  finishActiveDesktopEntry,
+  humanDesktopQueueSummary,
+  recordDesktopProgress,
+  retryDesktopEntry,
+  summarizeDesktopQueue,
+} from "./queue.ts";
+import type { DesktopQueue } from "./queue.ts";
 import {
   describeSettingsForLog,
   loadSettings,
@@ -133,6 +160,88 @@ let remoteSeqByJob: Record<string, number> = {};
 let submitToken = 0;
 let lastInputUrl = "";
 let grantedFormat: NativeFormat = "png";
+
+// Sequential multi-job queue (todo 5.3): lives in the integration layer
+// (this file plus ./queue.ts), never in the engine. One active native job at
+// a time; further submits wait FIFO. Progress is tracked per job, one entry
+// can be cancelled without touching the rest, cancel-all stops new work, and
+// failed entries retry behind the line. A failed entry never stops the rest;
+// totals mirror the CLI bulk contract. Only redacted origins enter the panel.
+let desktopQueue: DesktopQueue = createDesktopQueue();
+let activeQueueId: string | null = null;
+function desktopQueueEnabled(): boolean {
+  try {
+    return integration.getCapabilities().bulkSupported === true;
+  } catch {
+    return true;
+  }
+}
+
+// Recent-jobs history (todo 5.2): local-only ledger on this device, newest
+// first, at most 20 entries. Only a redacted origin plus a path hash
+// persists by default; the full URL persists only for non-sensitive URLs
+// when the user opts in. Credentials never enter history.
+const desktopMemoryFallback = new Map<string, string>();
+const desktopHistoryStore = {
+  getItem(key: string): string | null {
+    try {
+      const storage = (globalThis as Record<string, unknown>)["localStorage"] as
+        | { getItem?: (key: string) => string | null }
+        | undefined;
+      if (storage && typeof storage.getItem === "function") {
+        return storage.getItem(key);
+      }
+    } catch {
+      // Storage unavailable; fall through to the memory fallback.
+    }
+    return desktopMemoryFallback.get(key) ?? null;
+  },
+  setItem(key: string, value: string): void {
+    try {
+      const storage = (globalThis as Record<string, unknown>)["localStorage"] as
+        | { setItem?: (key: string, value: string) => void }
+        | undefined;
+      if (storage && typeof storage.setItem === "function") {
+        storage.setItem(key, value);
+        return;
+      }
+    } catch {
+      // Storage unavailable; fall through to the memory fallback.
+    }
+    desktopMemoryFallback.set(key, value);
+  },
+  removeItem(key: string): void {
+    try {
+      const storage = (globalThis as Record<string, unknown>)["localStorage"] as
+        | { removeItem?: (key: string) => void }
+        | undefined;
+      if (storage && typeof storage.removeItem === "function") {
+        storage.removeItem(key);
+      }
+    } catch {
+      // Removal must never throw.
+    }
+    desktopMemoryFallback.delete(key);
+  },
+};
+let desktopHistory: Array<HistoryEntry> = loadHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP);
+let desktopHistoryOptIn = loadHistoryOptIn(desktopHistoryStore, HISTORY_OPTIN_KEY_DESKTOP);
+
+function recordDesktopHistory(url: string, width?: number, height?: number, format?: string): void {
+  const entry = toHistoryEntry(
+    url,
+    {
+      ...(typeof width === "number" ? { width } : {}),
+      ...(typeof height === "number" ? { height } : {}),
+      ...(typeof format === "string" ? { format } : {}),
+      at: Date.now(),
+    },
+    desktopHistoryOptIn,
+  );
+  if (!entry) return;
+  desktopHistory = pushHistory(desktopHistory, entry);
+  saveHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP, desktopHistory);
+}
 
 // Native output formats (todo 4.4, todo 5.1): single source is
 // NATIVE_FORMATS in desktopIntegration.ts
@@ -522,7 +631,6 @@ function clearJobViewState(): void {
 }
 
 function handleSubmitUrl(url: string): void {
-  const token = ++submitToken;
   const trimmed = typeof url === "string" ? url.trim() : "";
   if (!isValidInputUrl(trimmed)) {
     controller.dispatch({
@@ -542,20 +650,62 @@ function handleSubmitUrl(url: string): void {
     update();
     return;
   }
-  // A submit after a terminal state starts a fresh job on the same session:
-  // reset to idle first (completed/cancelled only accept reset; failed also
-  // accepts start-discovery, and reset is valid there too).
-  if (isTerminalStatus(controller.getState().status)) {
-    controller.reset();
-    currentSeq = 0;
-    currentJobId = null;
-    retiredJobId = null;
-    remoteSeqByJob = {};
-    clearJobViewState();
+  if (desktopQueueEnabled() && !isTerminalStatus(controller.getState().status)) {
+    // Busy: enqueue behind the active job instead of retiring it. The hash
+    // equivalent here is the save dialog: only the active job ever asks for
+    // a destination, queued entries never do.
+    const res = enqueueDesktopQueue(desktopQueue, trimmed);
+    desktopQueue = res.queue;
+    if (res.code !== "ok" || !res.entry) {
+      controller.dispatch({
+        seq: nextSeq(),
+        sessionId,
+        kind: "fail",
+        transport: NATIVE_TRANSPORT,
+        error: {
+          code: "INVALID_URL",
+          category: "validation",
+          retryable: false,
+          message: t("desktop.url.invalid"),
+          transport: NATIVE_TRANSPORT,
+          phase: "discovery",
+        },
+      });
+      update();
+      return;
+    }
+    if (res.entry.status === "queued") {
+      const position = desktopQueue.entries.filter((e) => e.status === "queued").length;
+      pushLog(`Queued ${res.entry.origin || "the server"} (position ${position} in queue)`);
+      update();
+      return;
+    }
+    activeQueueId = res.entry.id;
   } else {
-    retiredJobId = currentJobId;
-    clearJobViewState();
+    // A submit after a terminal state starts a fresh job on the same session:
+    // reset to idle first (completed/cancelled only accept reset; failed also
+    // accepts start-discovery, and reset is valid there too). N-1 peers
+    // without the queue always take this path: the new submit retires the
+    // previous job id so its late events can never be mistaken for the new job.
+    if (isTerminalStatus(controller.getState().status)) {
+      controller.reset();
+      currentSeq = 0;
+      currentJobId = null;
+      retiredJobId = null;
+      remoteSeqByJob = {};
+      clearJobViewState();
+    } else {
+      retiredJobId = currentJobId;
+      clearJobViewState();
+    }
+    const res = enqueueDesktopQueue(desktopQueue, trimmed);
+    desktopQueue = res.queue;
+    activeQueueId = res.entry ? res.entry.id : null;
   }
+  launchNativeJob(trimmed, ++submitToken);
+}
+
+function launchNativeJob(trimmed: string, token: number): void {
   lastInputUrl = trimmed;
   controller.dispatch({ seq: nextSeq(), sessionId, kind: "start-discovery", transport: NATIVE_TRANSPORT });
   resetActivity(trimmed);
@@ -593,6 +743,7 @@ function handleSubmitUrl(url: string): void {
     });
     pushLog("Settings invalid; job not started");
     stopHeartbeat();
+    settleActiveQueue("failed", { errorCode: "INVALID_SETTINGS" });
     update();
     return;
   }
@@ -621,8 +772,197 @@ function handleSubmitUrl(url: string): void {
       if (token !== submitToken) return;
       const message = error instanceof Error ? error.message : t("desktop.invoke.startFallback");
       dispatchFail(failEnv, "START_FAILED", message);
+      settleActiveQueue("failed", { errorCode: "START_FAILED" });
     },
   );
+}
+
+// Settle the active queue entry at a terminal outcome and start the next
+// queued job, if any. No-op when no queue entry is active (N-1 path or an
+// already-settled job), so duplicate terminals stay exactly-once. A failed
+// entry never stops the rest; totals mirror the CLI bulk contract.
+function settleActiveQueue(
+  outcome: "done" | "failed" | "cancelled",
+  detail?: { outputHash?: string; errorCode?: string },
+): void {
+  if (!activeQueueId) return;
+  const finished = finishActiveDesktopEntry(desktopQueue, outcome, detail);
+  desktopQueue = finished.queue;
+  trimDesktopQueue();
+  const summary = summarizeDesktopQueue(desktopQueue);
+  pushLog(`Queue: ${humanDesktopQueueSummary(summary)}`);
+  activeQueueId = null;
+  const next = finished.next;
+  if (!next) {
+    update();
+    return;
+  }
+  // Fresh view for the next queued job on the same session.
+  controller.reset();
+  currentSeq = 0;
+  currentJobId = null;
+  retiredJobId = null;
+  remoteSeqByJob = {};
+  clearJobViewState();
+  activeQueueId = next.id;
+  pushLog(`Queue: starting next job for ${next.origin || "the server"}`);
+  launchNativeJob(next.inputUrl, ++submitToken);
+}
+
+// Keep the panel bounded: at most 20 settled entries ride alongside live ones.
+function trimDesktopQueue(): void {
+  if (desktopQueue.entries.length <= 24) return;
+  const settled = desktopQueue.entries.filter((e) => e.status !== "queued" && e.status !== "active");
+  const drop = settled.length - 20;
+  if (drop <= 0) return;
+  const dropIds = new Set(settled.slice(0, drop).map((e) => e.id));
+  desktopQueue = {
+    entries: desktopQueue.entries.filter((e) => !dropIds.has(e.id)),
+    activeId: desktopQueue.activeId,
+    nextId: desktopQueue.nextId,
+  };
+}
+
+function handleQueueCancelOne(id: string): void {
+  if (id === activeQueueId) {
+    handleCancel();
+    return;
+  }
+  const res = cancelDesktopEntry(desktopQueue, id);
+  if (res.code !== "ok") return;
+  desktopQueue = res.queue;
+  pushLog("Queue: entry cancelled");
+  update();
+}
+
+function handleQueueCancelAll(): void {
+  const hadActive = activeQueueId !== null;
+  desktopQueue = cancelAllDesktop(desktopQueue);
+  activeQueueId = null;
+  if (hadActive) {
+    // Cancel the running native job too; its terminal event finds no active
+    // queue entry and settles nothing.
+    handleCancel();
+    return;
+  }
+  pushLog("Queue: all entries cancelled");
+  update();
+}
+
+function handleQueueRetry(id: string): void {
+  const res = retryDesktopEntry(desktopQueue, id);
+  if (res.code !== "ok" || !res.entry) return;
+  desktopQueue = res.queue;
+  if (res.entry.status === "active") {
+    if (isTerminalStatus(controller.getState().status)) {
+      controller.reset();
+      currentSeq = 0;
+      currentJobId = null;
+      retiredJobId = null;
+      remoteSeqByJob = {};
+      clearJobViewState();
+    } else {
+      retiredJobId = currentJobId;
+      clearJobViewState();
+    }
+    activeQueueId = res.entry.id;
+    pushLog(`Queue: retrying ${res.entry.origin || "the server"}`);
+    launchNativeJob(res.entry.inputUrl, ++submitToken);
+    return;
+  }
+  pushLog(`Queue: retry queued for ${res.entry.origin || "the server"}`);
+  update();
+}
+
+function desktopQueueStatusLabel(status: string): string {
+  if (status === "active") return t("desktop.queue.statusActive");
+  if (status === "done") return t("desktop.queue.statusDone");
+  if (status === "failed") return t("desktop.queue.statusFailed");
+  if (status === "cancelled") return t("desktop.queue.statusCancelled");
+  return t("desktop.queue.statusQueued");
+}
+
+// Multi-job queue panel (todo 5.3): one row per queued job with its redacted
+// origin, status, and progress, plus cancel-one, cancel-all, and retry
+// actions. Rendered only when the negotiated capabilities offer the queue and
+// at least one entry exists. All actions are native buttons in the existing
+// architectural style; only counts, hashes, codes, and redacted origins ever
+// reach this panel, never full URLs, paths, or secrets.
+function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
+  if (!desktopQueueEnabled()) return;
+  if (desktopQueue.entries.length === 0) return;
+  const box = doc.createElement("div");
+  box.className = "dz-queue-panel";
+  box.setAttribute("role", "region");
+  box.setAttribute("aria-label", t("desktop.queue.title"));
+  const title = doc.createElement("h2");
+  title.className = "dz-notice-title";
+  title.textContent = t("desktop.queue.title");
+  box.appendChild(title);
+  const summary = summarizeDesktopQueue(desktopQueue);
+  const summaryLine = doc.createElement("p");
+  summaryLine.className = "dz-notice-message";
+  summaryLine.setAttribute("role", "status");
+  summaryLine.setAttribute("aria-live", "polite");
+  summaryLine.textContent = t("desktop.queue.summary", {
+    succeeded: summary.succeeded,
+    failed: summary.failed,
+    total: summary.total,
+  });
+  box.appendChild(summaryLine);
+  const list = doc.createElement("ul");
+  list.className = "dz-queue-list";
+  for (const entry of desktopQueue.entries) {
+    const item = doc.createElement("li");
+    item.className = "dz-queue-item";
+    const label = doc.createElement("span");
+    label.className = "dz-queue-label";
+    let text = `${entry.origin || t("desktop.queue.unknownOrigin")} - ${desktopQueueStatusLabel(entry.status)}`;
+    if (entry.status === "active" && entry.progress.total > 0) {
+      text += ` - ${t("desktop.queue.progress", {
+        current: entry.progress.acquired,
+        total: entry.progress.total,
+      })}`;
+    }
+    if (entry.status === "failed" && entry.errorCode) {
+      text += ` - ${entry.errorCode}`;
+    }
+    label.textContent = text;
+    item.appendChild(label);
+    const row = doc.createElement("div");
+    row.className = "dz-actions-row";
+    const addBtn = (btnLabel: string, primary: boolean, onClick: () => void): void => {
+      const btn = doc.createElement("button");
+      btn.type = "button";
+      btn.className = primary ? "dz-btn-tactile" : "dz-btn-secondary";
+      btn.textContent = btnLabel;
+      btn.addEventListener("click", onClick);
+      row.appendChild(btn);
+    };
+    if (entry.status === "queued" || entry.status === "active") {
+      const id = entry.id;
+      addBtn(t("desktop.queue.cancel"), false, () => handleQueueCancelOne(id));
+    }
+    if (entry.status === "failed" || entry.status === "cancelled") {
+      const id = entry.id;
+      addBtn(t("desktop.queue.retry"), true, () => handleQueueRetry(id));
+    }
+    if (row.childElementCount > 0) item.appendChild(row);
+    list.appendChild(item);
+  }
+  box.appendChild(list);
+  if (summary.pending > 0) {
+    const allRow = doc.createElement("div");
+    allRow.className = "dz-actions-row";
+    const allBtn = doc.createElement("button");
+    allBtn.type = "button";
+    allBtn.className = "dz-btn-secondary";
+    allBtn.textContent = t("desktop.queue.cancelAll");
+    allBtn.addEventListener("click", () => handleQueueCancelAll());
+    allRow.appendChild(allBtn);
+    box.appendChild(allRow);
+  }
+  aux.appendChild(box);
 }
 
 function answerChoice(choice: string, onGranted: () => void, failureLabel: string): void {
@@ -688,19 +1028,26 @@ function handleCancel(): void {
     void invoke("cancel_job", { job }).then(
       () => {
         if (isTerminalStatus(controller.getState().status)) return;
+        // The queue may already have settled and advanced on the cancelled
+        // event: only acknowledge a cancel for the job still current, so a
+        // late ack can never cancel a newly started queued job.
+        if (currentJobId !== job) return;
         // Shell acknowledged cleanup: reach cancelled exactly once.
         // The event channel usually delivers the same transition first;
         // the controller guard makes the second a no-op.
         controller.dispatch({ seq: nextSeq(), sessionId, kind: "cancel" });
         pushLog("Cancelled; unfinished file removed");
         stopHeartbeat();
+        settleActiveQueue("cancelled");
         update();
       },
       () => {
         if (isTerminalStatus(controller.getState().status)) return;
+        if (currentJobId !== job) return;
         controller.dispatch({ seq: nextSeq(), sessionId, kind: "cancel" });
         pushLog("Cancelled; unfinished file removed");
         stopHeartbeat();
+        settleActiveQueue("cancelled");
         update();
       },
     );
@@ -709,6 +1056,9 @@ function handleCancel(): void {
   controller.dispatch({ seq: nextSeq(), sessionId, kind: "cancel" });
   pushLog("Cancelled by user; unfinished file removed");
   stopHeartbeat();
+  // No native job exists to echo a cancelled event, so settle the queue entry
+  // here; otherwise it would stay active forever and block the queue.
+  settleActiveQueue("cancelled");
   update();
 }
 
@@ -849,6 +1199,9 @@ function handleReset(): void {
   retiredJobId = null;
   remoteSeqByJob = {};
   lastInputUrl = "";
+  // Reset clears the whole queue: no new work is issued afterwards.
+  desktopQueue = createDesktopQueue();
+  activeQueueId = null;
   clearJobViewState();
   dismissDeepLinkConfirm(false);
   deepLinkReturnFocus = null;
@@ -1177,6 +1530,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
         ...(resourceKind ? { resourceKind } : {}),
         ...(detail ? { detail } : {}),
       });
+      settleActiveQueue("failed", { errorCode: code });
       return;
     }
   }
@@ -1193,6 +1547,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
       ...(typeof retryable === "boolean" ? { retryable } : {}),
       ...(resourceKind ? { resourceKind } : {}),
     });
+    settleActiveQueue("failed", { errorCode: code });
     return;
   }
 
@@ -1210,6 +1565,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     pushLog("Cancelled; unfinished file removed");
     pendingDecision = null;
     stopHeartbeat();
+    settleActiveQueue("cancelled");
     update();
     return;
   }
@@ -1266,13 +1622,22 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
       const short = outputHash.slice(0, 24);
       pushLog(isPartial ? `Partial output ready (${short}…)` : `Output ready (${short}…)`);
     }
-    completeJob(jobEnv, 
+    completeJob(jobEnv,
       typeof width === "number" && typeof height === "number" && width > 0 && height > 0
         ? { width, height, mime }
         : undefined,
       isPartial,
       missing,
     );
+    if (lastInputUrl !== "") {
+      recordDesktopHistory(
+        lastInputUrl,
+        typeof width === "number" ? width : undefined,
+        typeof height === "number" ? height : undefined,
+        grantedFormat,
+      );
+    }
+    settleActiveQueue("done", outputHash ? { outputHash } : undefined);
     return;
   }
 
@@ -1407,6 +1772,10 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     }
     viewCtx.currentProgress = { current, total, ...(message ? { message } : {}) };
     noteProgress(current, total);
+    if (activeQueueId) {
+      const res = recordDesktopProgress(desktopQueue, activeQueueId, current, total);
+      desktopQueue = res.queue;
+    }
     if (kind === "discovery" || text.indexOf("discover") >= 0) {
       setStep(t("view.step.discovering"), t("desktop.step.contacting", { host: hostOf(lastInputUrl || activity().url || "") }));
     } else if (kind === "encoding" || text.indexOf("encod") >= 0) {
@@ -1471,6 +1840,43 @@ function subscribeToDesktopEvents(): void {
       // No host listener available; validation-only fallback stays usable.
     }
   }
+}
+
+// Boot handshake: invoke the granted `query_capabilities` command once at
+// startup so the `dezoomify:allow-query-capabilities` grant always maps to
+// shipped code. Local IPC only, so it works offline; without a Tauri host
+// (unit tests, validation-only fallback) it skips silently. A denied invoke
+// or a protocol/registry mismatch only records a typed log line: the
+// controller has no `fail` transition from idle, so a mismatch surfaces its
+// stable code without bricking the app, and offline use is never blocked.
+function queryCapabilitiesAtBoot(): void {
+  const invoke = tauriInvoke();
+  if (!invoke) return;
+  void invoke("query_capabilities").then(
+    (raw) => {
+      const snapshot = (raw ?? {}) as {
+        protocol_min?: unknown;
+        protocol_max?: unknown;
+        commands?: unknown;
+      };
+      const commands = Array.isArray(snapshot.commands)
+        ? snapshot.commands.map((name) => String(name)).sort()
+        : [];
+      const expected = DESKTOP_COMMANDS.map((name) => String(name)).sort();
+      const mismatch =
+        snapshot.protocol_min !== PROTOCOL_MIN ||
+        snapshot.protocol_max !== PROTOCOL_MAX ||
+        commands.length !== expected.length ||
+        commands.some((name, index) => name !== expected[index]);
+      if (mismatch) {
+        pushLog("Capability handshake mismatch (capability.mismatch)");
+      }
+    },
+    (error: unknown) => {
+      const detail = error instanceof Error ? error.message : "query_capabilities denied";
+      pushLog(`Capability handshake failed: ${detail} (capability.unavailable)`);
+    },
+  );
 }
 
 const viewCtx: ViewContext = {
@@ -1757,6 +2163,8 @@ function ensureDesktopAuxPanel(): void {
     aux.appendChild(note);
   }
 
+  appendDesktopQueuePanel(aux, doc);
+
   if (showCopy) {
     const copyRow = doc.createElement("div");
     copyRow.className = "dz-actions-row";
@@ -1988,6 +2396,30 @@ function update() {
       onOpenExternalLink(url: string) {
         handleOpenExternalLink(url);
       },
+      onOpenHistory(url: string) {
+        handleSubmitUrl(url);
+      },
+      onClearHistory() {
+        desktopHistory = [];
+        clearHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP);
+        update();
+      },
+      onToggleHistoryOptIn(enabled: boolean) {
+        desktopHistoryOptIn = enabled === true;
+        saveHistoryOptIn(desktopHistoryStore, HISTORY_OPTIN_KEY_DESKTOP, desktopHistoryOptIn);
+        if (!desktopHistoryOptIn) {
+          desktopHistory = desktopHistory.map((entry) => ({
+            origin: entry.origin,
+            pathHash: entry.pathHash,
+            ...(typeof entry.width === "number" ? { width: entry.width } : {}),
+            ...(typeof entry.height === "number" ? { height: entry.height } : {}),
+            ...(typeof entry.format === "string" ? { format: entry.format } : {}),
+            at: entry.at,
+          }));
+          saveHistoryStore(desktopHistoryStore, HISTORY_KEY_DESKTOP, desktopHistory);
+        }
+        update();
+      },
     },
     {
       capabilities: {
@@ -2001,6 +2433,8 @@ function update() {
       ...(viewCtx.jobActivity ? { jobActivity: viewCtx.jobActivity } : {}),
       ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
       ...(auxChoice ? { imageChoice: auxChoice } : {}),
+      history: [...desktopHistory],
+      historyOptIn: desktopHistoryOptIn,
     },
   );
   ensureDesktopAuxPanel();
@@ -2018,6 +2452,7 @@ function update() {
 
 initInitialUrl();
 subscribeToDesktopEvents();
+queryCapabilitiesAtBoot();
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("hashchange", () => syncInitialUrlFromLocation());

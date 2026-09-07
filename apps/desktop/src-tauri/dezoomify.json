@@ -33,11 +33,9 @@
     "version": "1.0"
   },
   "updater": {
-    "allowlist": [
-      "https://updates.dezoomify.example"
-    ],
+    "allowlist": [],
     "channel": "stable",
-    "enabled": true,
+    "enabled": false,
     "httpsOnly": true,
     "requiresUserConfirm": true
   },

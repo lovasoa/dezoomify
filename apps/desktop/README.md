@@ -13,13 +13,13 @@ execution with origin-scoped cookies, and per-user initial registration
 - First-run registration is per-user only: `dezoomify-desktop
   --register-native-host` writes the manifests and protocol handler;
   `--check-native-host` inspects, `--unregister-native-host` cleans up.
-- Installers ship unsigned (no paid Apple/Azure signing in this free project); update
-  payloads carry free self-generated signatures.
+- Installers ship unsigned (no paid Apple/Azure signing in this free project);
+  automatic updates are disabled, so check GitHub Releases manually.
 
 - Shell: lean `src-tauri/` (no Tauri SDK vendored); frontend contract from `packages/shared-ui`.
 - Deep links are validated, bounded, and confirmed before any work starts.
-- Installers ship unsigned (no paid Apple/Azure signing in this free project); update
-  payloads carry free self-generated signatures.
+- Installers ship unsigned (no paid Apple/Azure signing in this free project);
+  automatic updates are disabled, so check GitHub Releases manually.
 
 Contributing: talk to the engine only through the narrow validated IPC
 bridge. Tests: `cargo xtask test desktop`.
@@ -88,6 +88,8 @@ produces no bundle. Linux window builds need
 macOS ships WebKit and Windows ships WebView2.
 
 Bundles are unsigned with no paid Apple/Azure signing in this free
-project; update payloads carry free self-generated signatures. The
-user-facing install note lives in the
-[Desktop app guide](../../docs/user/desktop-app.md#install).
+project; automatic updates are disabled (no update host or key), so check
+GitHub Releases manually. Only the Linux `.deb` is buildable; Windows and
+macOS stay unavailable until a matching host builds them. The user-facing
+install note lives in the [Desktop app
+guide](../../docs/user/desktop-app.md#install).

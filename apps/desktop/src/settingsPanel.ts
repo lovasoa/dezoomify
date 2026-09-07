@@ -25,13 +25,14 @@ export function getEffectiveSettings(
   if (typeof document === "undefined" || !root) {
     const validated = validateSettings({
       outputDir: fallback.outputDir,
-      outputFormat: fallback.outputFormat,
+      outputFormat: (fallback as unknown as { outputFormat?: string }).outputFormat,
       compression: fallback.compression,
       maxWidth: fallback.maxWidth,
       maxHeight: fallback.maxHeight,
       retries: fallback.retries,
       cacheDir: fallback.cacheDir,
       headers: { ...fallback.headers },
+      crop: (fallback as unknown as { crop?: string | null }).crop ?? null,
     });
     if (!validated.ok || !validated.settings) return { ok: false, settings: null, errors: validated.errors };
     return { ok: true, settings: validated.settings, errors: [] };
@@ -51,13 +52,14 @@ export function getEffectiveSettings(
     // The output format picker lives in the aux panel (radio group), not in
     // this settings form: preserve the persisted choice here so saving
     // download settings never clobbers the chosen encoder.
-    outputFormat: fallback.outputFormat,
+    outputFormat: (fallback as unknown as { outputFormat?: string }).outputFormat,
     compression: readInput("dz-settings-compression"),
     maxWidth: readInput("dz-settings-max-width"),
     maxHeight: readInput("dz-settings-max-height"),
     retries: readInput("dz-settings-retries"),
     cacheDir: readInput("dz-settings-cache-dir"),
     headers: parsedHeaders.headers,
+    crop: readInput("dz-settings-crop"),
   };
   const errors: Array<string> = [...parsedHeaders.errors];
   const validated = validateSettings(raw);
@@ -215,10 +217,17 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
     view.settings.cacheDir ?? "",
     { placeholder: "/home/you/.cache/dezoomify" },
   );
+  const cropInput = addLabeledInput(
+    "dz-settings-crop",
+    t("desktop.settings.crop"),
+    (view.settings as unknown as { crop?: string | null }).crop ?? "",
+    { placeholder: t("desktop.settings.cropPlaceholder") },
+  );
   void compressionInput;
   void maxWidthInput;
   void maxHeightInput;
   void retriesInput;
+  void cropInput;
 
   function addBrowseButton(forInput: HTMLInputElement, label: string): void {
     const btn = doc.createElement("button");

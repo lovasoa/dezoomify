@@ -122,9 +122,10 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
     assert.deepEqual(x.protocol, { max: "1.0", min: "1.0", version: "1.0" });
     assert.deepEqual(sorted(x.encoders), sorted(EXPECTED_ENCODERS));
     assert.equal(x.nativeHost.name, NATIVE_HOST);
-    assert.equal(x.updater.enabled, true);
+    assert.equal(x.updater.enabled, false);
     assert.equal(x.updater.httpsOnly, true);
     assert.equal(x.updater.requiresUserConfirm, true);
+    assert.deepEqual(x.updater.allowlist ?? [], [], "disabled updater ships an empty allowlist");
     assert.ok((x.updater.allowlist ?? []).every((u) => u.startsWith("https://")), "https allowlist");
   }
   assert.ok(lib.includes(NATIVE_HOST), "lib native host");

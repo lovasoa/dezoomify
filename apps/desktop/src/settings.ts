@@ -24,6 +24,7 @@ export interface DesktopSettings {
   readonly retries: number;
   readonly cacheDir: string | null;
   readonly headers: Readonly<Record<string, string>>;
+  readonly crop: string | null;
 }
 
 export const SETTINGS_STORAGE_KEY = "dezoomify.desktop.settings.v1" as const;
@@ -43,6 +44,7 @@ export function defaultSettings(): DesktopSettings {
     retries: DEFAULT_RETRIES,
     cacheDir: null,
     headers: {},
+    crop: null,
   };
 }
 
@@ -161,6 +163,43 @@ function parseOptionalDimension(
   return undefined;
 }
 
+function parseOptionalCrop(
+  raw: unknown,
+  errors: Array<string>,
+): string | null | undefined {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string") {
+    errors.push("crop must be x,y,w,h in level pixels");
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const parts = trimmed.split(",");
+  if (parts.length !== 4) {
+    errors.push("crop must be x,y,w,h in level pixels");
+    return undefined;
+  }
+  const values: Array<number> = [];
+  for (const part of parts) {
+    const t = part.trim();
+    if (t === "" || t.startsWith("+")) {
+      errors.push("crop must be x,y,w,h in level pixels");
+      return undefined;
+    }
+    const n = Number(t);
+    if (!Number.isInteger(n) || n < 0 || n > 4294967295 || !Number.isSafeInteger(n)) {
+      errors.push("crop must be x,y,w,h in level pixels");
+      return undefined;
+    }
+    values.push(n);
+  }
+  if ((values[2] as number) <= 0 || (values[3] as number) <= 0) {
+    errors.push("crop width and height must be non-zero");
+    return undefined;
+  }
+  return trimmed;
+}
+
 function parseCompression(raw: unknown, errors: Array<string>): number | undefined {
   if (raw === undefined) return DEFAULT_COMPRESSION;
   let n: number | null = null;
@@ -265,6 +304,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
     errors,
   );
   const headers = parseHeadersValue(obj["headers"], errors);
+  const crop = parseOptionalCrop(obj["crop"], errors);
   if (
     compression === undefined ||
     retries === undefined ||
@@ -272,7 +312,8 @@ export function validateSettings(raw: unknown): SettingsValidation {
     maxHeight === undefined ||
     outputDir === undefined ||
     cacheDir === undefined ||
-    headers === undefined
+    headers === undefined ||
+    crop === undefined
   ) {
     return { ok: false, settings: null, errors };
   }
@@ -289,6 +330,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
       retries,
       cacheDir,
       headers,
+      crop,
     },
     errors: [],
   };
@@ -355,6 +397,7 @@ export function saveSettings(settings: DesktopSettings): Array<string> {
     retries: settings.retries,
     cacheDir: settings.cacheDir,
     headers: { ...settings.headers },
+    crop: settings.crop,
   });
   if (!validated.ok || !validated.settings) return validated.errors;
   try {
@@ -376,21 +419,24 @@ export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, 
     output_dir: settings.outputDir,
     cache_dir: settings.cacheDir,
     headers: { ...settings.headers },
+    crop: settings.crop,
   };
 }
 
 // Redacted one-line summary for logs and diagnostics: numeric fields plus
-// presence flags and header names only. Never header values.
+// presence flags and header names only. Never header values. Crop carries
+// only numbers, so its presence is safe to log.
 export function describeSettingsForLog(settings: DesktopSettings): string {
   const names = Object.keys(settings.headers).sort();
   const maxWidth = settings.maxWidth === null ? "none" : String(settings.maxWidth);
   const maxHeight = settings.maxHeight === null ? "none" : String(settings.maxHeight);
   const outputDir = settings.outputDir === null ? "unset" : "set";
   const cacheDir = settings.cacheDir === null ? "unset" : "set";
+  const crop = settings.crop === null ? "none" : settings.crop;
   return (
     `compression=${settings.compression} retries=${settings.retries} ` +
     `max_width=${maxWidth} max_height=${maxHeight} output_dir=${outputDir} ` +
-    `cache_dir=${cacheDir} headers=${names.length} [${names.join(",")}]`
+    `cache_dir=${cacheDir} crop=${crop} headers=${names.length} [${names.join(",")}]`
   );
 }
 

@@ -110,6 +110,9 @@ impl ReplayTable {
 /// Callers supply fresh `challenge`/`nonce` (e.g. 16 random bytes hex each),
 /// `now_ms`, and whether the browser-enforced allowlist admits `extension_id`.
 /// Returns the session to hold server-side until `redeem_once`.
+// 6.1: session binding takes explicit scalar params (challenge, nonce,
+// job, origins) so nothing ambient is captured; a params struct would
+// hide which values bind one consent to one job.
 #[allow(clippy::too_many_arguments)]
 pub fn begin_session(
     extension_allowed: bool,
@@ -192,6 +195,9 @@ pub fn is_valid_cookie_name(name: &str) -> bool {
 }
 
 /// Record explicit UI consent on a pending session (no network).
+// 6.1: session binding takes explicit scalar params (challenge, nonce,
+// job, origins) so nothing ambient is captured; a params struct would
+// hide which values bind one consent to one job.
 #[allow(clippy::too_many_arguments)]
 pub fn bind_consent(
     session: &mut HandoffSession,

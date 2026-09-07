@@ -468,7 +468,7 @@ fn spawn_driver_poller(app: AppHandle) {
 
 /// Run the desktop shell. Exits the process on failure.
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Single-instance first: second launches forward their argv
         // (`dezoomify://open?v=..&src=..`) to this window instead of
         // opening a second window.
@@ -477,24 +477,32 @@ pub fn run() {
             focus_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        // Updater: the generated capability document grants only
-        // `updater:allow-check`; download and install stay denied so nothing
-        // stages without an explicit user-confirmed step. Endpoints live in
-        // `tauri.conf.json` (`plugins.updater.endpoints`) and must stay
-        // within `crate::updater::UPDATER_ALLOWLIST_HOSTS` (HTTPS only); the
-        // policy layer (`src/updater.rs`) additionally validates every
-        // candidate (allowlist, release key, anti-rollback, stale and future
-        // bounds) before anything is offered for confirmation. Missing,
-        // delayed, or older metadata fails closed and the app keeps working.
-        // The production host and key are still TBD (see the TODO in
-        // `src/updater.rs`); the empty `UPDATER_PUBKEY` below never
-        // validates until the real key from release config lands.
-        .plugin(
+        .plugin(tauri_plugin_opener::init());
+    // Updater (todo 5.8 decision): automatic updates are disabled.
+    // No update host or key is deployed; users check GitHub Releases
+    // manually. The capability document sets `updater.enabled: false`
+    // with an empty allowlist, `tauri.conf.json` ships empty
+    // `plugins.updater.endpoints`, and `UPDATER_PUBKEY` stays empty so
+    // the plugin never validates (fail closed). The retained
+    // `src/updater.rs` policy (`validate_candidate`) stays unit-tested
+    // for a future self-hosted updater; production `validate_update`
+    // rejects every candidate with `updater.disabled` and the app keeps
+    // working.
+    // Registration gate (interim): the updater plugin is registered only
+    // once a real public key exists. While `UPDATER_PUBKEY` is empty no
+    // signature could validate, so skipping registration keeps the updater
+    // fully inert (no endpoint is ever polled) until the key ceremony
+    // lands. No host or key is invented here.
+    let builder = if crate::updater::UPDATER_PUBKEY.is_empty() {
+        builder
+    } else {
+        builder.plugin(
             tauri_plugin_updater::Builder::new()
                 .pubkey(crate::updater::UPDATER_PUBKEY)
                 .build(),
         )
+    };
+    builder
         .manage(Mutex::new(JobTable::new()))
         .invoke_handler(tauri::generate_handler![
             start_job,
@@ -514,7 +522,13 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while running the Dezoomify desktop shell")
+        .unwrap_or_else(|e| {
+            // Startup-only: without a built shell there is no window to
+            // report into, so fail closed with a clean message and a
+            // non-zero exit instead of panicking (6.1 unwrap policy).
+            eprintln!("error: cannot start the Dezoomify desktop shell: {e}");
+            std::process::exit(1);
+        })
         .run(|app_handle, event| {
             // macOS open-url delivery: the OS hands `dezoomify://` URLs to
             // the running instance instead of spawning a second one.
