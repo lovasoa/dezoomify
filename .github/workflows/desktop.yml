@@ -268,7 +268,13 @@ jobs:
           DMG="$(ls -t target/release/bundle/dmg/*.dmg | head -n 1)"
           echo "bundle: $DMG"
           MNT="/Volumes/DezoomifyCI"
-          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT" | tee -a bundle.log
+          # The Tauri dmg embeds our own LICENSE as a UDIF software license
+          # agreement (tauri.conf.json licenseFile), so a bare attach prints
+          # it and cancels without an interactive answer. Answer the CLI
+          # license prompt (Y) from stdin: this agrees to our own project's
+          # GPL text to mount our own just-built image. Gatekeeper and SIP
+          # are never touched here.
+          printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT" | tee -a bundle.log
           APP_BIN="$MNT/Dezoomify.app/Contents/MacOS/Dezoomify"
           test -x "$APP_BIN"
           # Identify: the bundle version from the mounted app metadata.
