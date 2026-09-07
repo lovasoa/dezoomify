@@ -164,6 +164,26 @@ async function clickChooseOutput(driver) {
   })()`);
 }
 
+// Selects an encoder radio atomically in-page: query, click, and read-back
+// happen in one script with no WebElement round-trip. A webdriver
+// findElement/click/isSelected sequence races the settings re-render that
+// the click itself triggers (StaleElementReferenceError on CI); this holds
+// no element reference across the re-render. Returns "missing" when the
+// radio is absent, else "<was>-<now>" checked states ("was-checked:checked"
+// means the choice was already seeded and stayed selected through the click).
+async function selectOutputFormat(driver, value) {
+  const selector = 'input[name="dz-output-format"][value="' + value + '"]';
+  return driver.executeScript(function (sel) {
+    const before = document.querySelector(sel);
+    if (!before) return "missing";
+    const was = before.checked === true ? "was-checked" : "was-unchecked";
+    before.click();
+    const after = document.querySelector(sel);
+    const now = after && after.checked === true ? "checked" : "unchecked";
+    return was + ":" + now;
+  }, selector).catch(() => null);
+}
+
 // Progress samples collected while a save runs: acquired/total pairs plus
 // percents. Must stay monotonic; engine-level seq monotonicity rides the
 // Rust companion, this is the UI-observable edge.
@@ -918,9 +938,8 @@ test("real window: JPEG save pins quality 100-compression (default 95)", { timeo
         await submitUrl(driver, input);
         await waitFor(driver, (s) => s.jobSection, 60000, "job section");
         await waitFor(driver, (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Choose output")), 60000, "destination request");
-        await driver.findElement({ css: 'input[name="dz-output-format"][value="jpeg"]' }).click();
-        const checked = await driver.findElement({ css: 'input[name="dz-output-format"][value="jpeg"]' }).isSelected();
-        assert.equal(checked, true, "JPEG format selected");
+        const jpegState = await selectOutputFormat(driver, "jpeg");
+        assert.ok((jpegState ?? "").endsWith(":checked"), `JPEG format selected (saw ${jpegState})`);
         assert.equal(await clickChooseOutput(driver), true, "choose-output action clicked");
         const terminal = await waitFor(driver, (s) => s.completed || s.error, 150000, "jpeg terminal");
         assert.equal(terminal.error, false, "no error section on the JPEG save");
@@ -953,9 +972,8 @@ test("real window: JPEG save pins quality 100-compression (default 95)", { timeo
         await waitFor(driver, (s) => (s.recoveryButtons ?? []).some((b) => b.includes("Choose output")), 60000, "destination request");
         // Reload round-trip: step 1 persisted the JPEG choice on the shared
         // profile, so the relaunched picker seeds JPEG without a click.
-        const jpegRadio = await driver.findElement({ css: 'input[name="dz-output-format"][value="jpeg"]' });
-        assert.equal(await jpegRadio.isSelected(), true, "persisted JPEG choice seeds the picker after relaunch");
-        await jpegRadio.click();
+        const jpegSeeded = await selectOutputFormat(driver, "jpeg");
+        assert.equal(jpegSeeded, "was-checked:checked", "persisted JPEG choice seeds the picker after relaunch");
         assert.equal(await clickChooseOutput(driver), true, "choose-output action clicked");
         const terminal = await waitFor(driver, (s) => s.completed || s.error, 150000, "jpeg terminal");
         assert.equal(terminal.error, false, "no error section on the recompressed save");
