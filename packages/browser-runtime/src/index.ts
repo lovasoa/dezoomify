@@ -6,4 +6,7 @@ export * from "./readable-canvas-surface.ts";
 export * from "./limits.ts";
 export * from "./save.ts";
 export * from "./cache.ts";
+export * from "./queue.ts";
 export * from "./session.ts";
+export * from "./crop.ts";
+export * from "./save-name.ts";

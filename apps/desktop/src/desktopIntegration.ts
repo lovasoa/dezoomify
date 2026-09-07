@@ -15,6 +15,10 @@ export const APP_IDENTIFIER = "dev.ophir.dezoomify" as const;
 export const NATIVE_ENCODERS = ["png", "jpeg", "tiff"] as const;
 export type NativeEncoder = (typeof NATIVE_ENCODERS)[number];
 
+// Native output formats accepted by the save destination grant. Same list
+// as NATIVE_ENCODERS under a second name for the format-selector call sites.
+export const NATIVE_FORMATS = NATIVE_ENCODERS;
+
 // Exact Tauri command registry. Must match
 // apps/desktop/src-tauri/src/commands.rs COMMANDS and the generated
 // capability documents.
@@ -49,6 +53,7 @@ export interface DesktopCapabilities {
   readonly encoders: readonly string[];
   readonly protocolMin: string;
   readonly protocolMax: string;
+  readonly bulkSupported: true;
 }
 
 export interface SaveRequest {
@@ -164,6 +169,11 @@ export function createDesktopIntegration(opts?: {
       encoders: [...NATIVE_ENCODERS],
       protocolMin: PROTOCOL_MIN,
       protocolMax: PROTOCOL_MAX,
+      // Todo 5.3: the desktop integration runs a sequential multi-job queue
+      // (apps/desktop/src/queue.ts) over the single-job engine, so the queue
+      // is always offered here. The engine still validates each queued
+      // request on its own; the flag only gates the controls.
+      bulkSupported: true,
     };
   }
 
