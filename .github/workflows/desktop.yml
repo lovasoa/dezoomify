@@ -178,6 +178,11 @@ jobs:
           # a real lane pass or the exact documented guard, fail closed else.
           cargo xtask test desktop --e2e-window >> e2e-window-block.log 2>&1
           $code = $LASTEXITCODE
+          # Neutralize now: the pwsh wrapper fails the step on a nonzero
+          # trailing $LASTEXITCODE, but a nonzero lane code is the expected
+          # input to the gate below, not the gate's verdict (only `throw`
+          # fails this step).
+          $LASTEXITCODE = 0
           if ($code -eq 0) {
             "e2e-window passed on Windows (multi-OS lane wave landed)" | Tee-Object e2e-window-block.log -Append
           } elseif (Select-String -Path e2e-window-block.log -Pattern "runs on Linux in this wave" -Quiet) {
