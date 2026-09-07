@@ -1,32 +1,47 @@
-// Shared-UI message dictionary (English only, no locale files yet).
+// Shared-UI message dictionary (English plus French, German, Italian).
 //
-// All user-facing copy in `view.ts`, the desktop `main.tsx`, and the
-// extension `page.ts` renders through `t(key, vars)` against this single
-// `en` table. There is deliberately no locale directory yet: a future locale
-// adds a sibling table plus `setLocale` support, never a second lookup path.
+// User-facing copy renders through `t(key, vars)` against one table per
+// locale. English (`en`) is the canonical source: every other locale mirrors
+// it key for key with identical `{placeholders}`. Lookups fall back to
+// English per key, so a missing translation never renders `undefined`.
+// There is deliberately one lookup path only: a new locale adds a sibling
+// table under `locales/` plus a `SUPPORTED_LOCALES` entry, never a second
+// dictionary shape.
+//
+// Locale selection: hosts call `setLocale()` with an explicit picker choice,
+// or `pickLocale()` with an `Accept-Language` header value or a
+// `navigator.languages` list. Unknown tags fail closed to English.
+// The website documents the picker in `docs/user/website.md`; help bodies
+// stay English and regenerate via `scripts/build-help.mjs`.
 //
 // Rules (see `packages/shared-ui/AGENTS.md`):
 // - User copy goes through `t()`; stable codes, diagnostics, technical logs,
 //   URLs, transport codes, and protocol strings stay literal English.
-// - Brand and product names ("Dezoomify", "Chrome Web Store", format names
-//   such as "PNG") stay literal in code; translators never rewrite them.
+// - Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub
+//   Releases", format names such as "PNG") stay literal in code; translators
+//   never rewrite them.
 // - Interpolation is `{name}` substitution only (no plurals engine, no
 //   markup). Callers escape with `escapeHtml` when composing `innerHTML`.
 // - The extension page ships with no bundler and cannot import this module
 //   by relative path: it renders through its vendored `page/vendor/i18n.js`
-//   codegen mirror (see `scripts/sync-web-js.mjs`), which carries this same
-//   table behind the same `t(key, vars)` shape. `test/ui-i18n.test.mjs`
-//   fails when the page renders a key outside this table.
+//   codegen mirror (see `scripts/sync-web-js.mjs`), which carries these same
+//   tables behind the same `t(key, vars)` shape. `test/ui-i18n.test.mjs`
+//   fails when a renderer uses a key outside this table, when a locale
+//   drops a key, or when placeholders diverge per locale.
 //
 // This module is erasable-syntax-only TypeScript (type aliases, plain
 // functions) so `scripts/sync-web-js.mjs` can mirror it to `i18n.js` for
 // browsers exactly like the other shared-ui modules.
 
-export type Locale = "en";
+import { fr } from "./locales/fr.ts";
+import { de } from "./locales/de.ts";
+import { it } from "./locales/it.ts";
+
+export type Locale = "en" | "fr" | "de" | "it";
 
 export const DEFAULT_LOCALE: Locale = "en";
 
-export const SUPPORTED_LOCALES: ReadonlyArray<Locale> = ["en"];
+export const SUPPORTED_LOCALES: ReadonlyArray<Locale> = ["en", "fr", "de", "it"];
 
 let activeLocale: Locale = DEFAULT_LOCALE;
 
@@ -34,11 +49,67 @@ export function getLocale(): Locale {
   return activeLocale;
 }
 
-/** Accept only known locales; unknown names fail closed and keep English. */
+/** True only for the four shipped locale names (case-insensitive, base tag). */
+export function isSupportedLocaleName(name: string): boolean {
+  return normalizeLocaleName(name) !== null;
+}
+
+/**
+ * Normalize one language tag to a shipped locale (`"fr-CA"` -> `"fr"`,
+ * `"DE_at"` -> `"de"`). Returns null for unknown or empty tags so callers
+ * fail closed to English.
+ */
+export function normalizeLocaleName(tag: string): Locale | null {
+  const base = String(tag ?? "").trim().toLowerCase().split(/[-_]/)[0];
+  if (base === "en" || base === "fr" || base === "de" || base === "it") return base;
+  return null;
+}
+
+/** Accept only known locales; unknown names fail closed and keep the current locale. */
 export function setLocale(locale: string): boolean {
-  if (locale !== "en") return false;
-  activeLocale = locale;
+  const next = normalizeLocaleName(locale);
+  if (next === null) return false;
+  activeLocale = next;
   return true;
+}
+
+/**
+ * Pick the best shipped locale from an `Accept-Language` header value or a
+ * `navigator.languages`-style tag list. Quality values (`q=`) order header
+ * entries; tags without a shipped base are skipped. Anything unparseable,
+ * empty, or without a match falls back to English.
+ */
+export function pickLocale(input: string | ReadonlyArray<string> | null | undefined): Locale {
+  if (input === null || input === undefined) return DEFAULT_LOCALE;
+  const tags: Array<string> = Array.isArray(input) ? [...input] : parseAcceptLanguage(String(input));
+  for (const tag of tags) {
+    const match = normalizeLocaleName(tag);
+    if (match !== null) return match;
+  }
+  return DEFAULT_LOCALE;
+}
+
+/** Order one `Accept-Language` header by descending `q`, dropping `q=0` and `*`. */
+function parseAcceptLanguage(header: string): Array<string> {
+  const ranked: Array<{ tag: string; q: number; order: number }> = [];
+  const parts = String(header ?? "").split(",");
+  for (let i = 0; i < parts.length; i++) {
+    const segments = parts[i].split(";");
+    const tag = segments[0].trim();
+    if (tag === "" || tag === "*") continue;
+    let q = 1;
+    for (let s = 1; s < segments.length; s++) {
+      const pair = segments[s].trim().split("=");
+      if (pair.length === 2 && pair[0].trim().toLowerCase() === "q") {
+        const parsed = Number(pair[1].trim());
+        if (Number.isFinite(parsed)) q = parsed;
+      }
+    }
+    if (!(q > 0)) continue;
+    ranked.push({ tag, q, order: i });
+  }
+  ranked.sort((a, b) => (b.q !== a.q ? b.q - a.q : a.order - b.order));
+  return ranked.map((entry) => entry.tag);
 }
 
 export type I18nVars = Record<string, string | number>;
@@ -53,20 +124,20 @@ const en = {
   "view.desktop.subtitle":
     "High-performance native application for gigapixel museum artworks and local scans",
   "view.desktop.noInstaller":
-    "No installer ships yet. A future installer for {platform} will appear on",
+    "No installer ships for {platform} yet. Only Linux has a .deb (unsigned) on",
   "view.desktop.releasesLink": "GitHub Releases",
   "view.desktop.whyTitle": "Why use the Desktop App?",
   "view.desktop.why1Title": "Handles Larger Artworks:",
   "view.desktop.why1Body":
     "A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory (up to its 8 GiB canvas limit, needing matching free memory) and writes the finished output to disk.",
   "view.desktop.why2Title": "Saves the Finished Picture:",
-  "view.desktop.why2Body": "Each run saves one job to one output file on your computer.",
+  "view.desktop.why2Body": "Each job saves to one output file on your computer. You can queue several jobs; they save one at a time.",
   "view.desktop.why3Title": "When the Website Cannot Finish:",
   "view.desktop.why3Body":
     "The website stops the job with an error and points to the desktop app for the full-size image.",
   "view.desktop.howTitle": "How to use it",
   "view.desktop.step1":
-    "No installer ships yet; a future installer for {platform} will appear on our GitHub Releases page.",
+    "No installer ships for {platform} yet; only Linux has an unsigned .deb on our GitHub Releases page. Verify SHA256SUMS and signatures before installing. There is no auto-update.",
   "view.desktop.step2": "Launch Dezoomify and paste your zoomable image or manifest URL.",
   "view.desktop.step3":
     "Select your desired resolution and destination folder to save the complete composite image.",
@@ -357,6 +428,21 @@ const en = {
   "desktop.cancel.note": "Save cancelled. Cleanup is done and any unfinished file was removed.",
   "desktop.copy.diagnostics": "Copy diagnostics",
   "desktop.copy.copied": "Copied!",
+  // Multi-job queue panel (desktop integration queue, todo 5.3). Jobs save
+  // one at a time in the order they were added; a failed job never stops the
+  // rest. Only redacted origins appear here, never full addresses.
+  "desktop.queue.title": "Queue",
+  "desktop.queue.statusQueued": "Waiting",
+  "desktop.queue.statusActive": "Running",
+  "desktop.queue.statusDone": "Done",
+  "desktop.queue.statusFailed": "Failed",
+  "desktop.queue.statusCancelled": "Cancelled",
+  "desktop.queue.cancel": "Cancel",
+  "desktop.queue.cancelAll": "Cancel all",
+  "desktop.queue.retry": "Retry",
+  "desktop.queue.summary": "{succeeded} done, {failed} failed, {total} total",
+  "desktop.queue.progress": "{current} of {total} tiles",
+  "desktop.queue.unknownOrigin": "the server",
   "desktop.panel.outputFormat": "Output format",
   "desktop.panel.jobActions": "Desktop job actions",
   "desktop.help.title": "Help and about",
@@ -430,12 +516,37 @@ const en = {
 
 export type I18nKey = keyof typeof en;
 
-/** English templates (single locale). Tests enumerate this table. */
+/** Canonical English templates. Tests enumerate this table. */
 export const EN: Record<string, string> = en;
 
-/** Render one English message with `{var}` substitution. */
-export function t(key: I18nKey, vars?: I18nVars): string {
-  const template: string = (en as Record<string, string>)[key as string] ?? (key as string);
+/** French templates (same keys, same placeholders). */
+export const FR: Record<string, string> = fr;
+
+/** German templates (same keys, same placeholders). */
+export const DE: Record<string, string> = de;
+
+/** Italian templates (same keys, same placeholders). */
+export const IT: Record<string, string> = it;
+
+const dictionaries: Record<string, Record<string, string>> = { en, fr, de, it };
+
+/** Read one locale table with English fallback (never undefined). */
+export function getDictionary(locale: string): Record<string, string> {
+  const match = normalizeLocaleName(locale);
+  if (match !== null) return dictionaries[match] ?? EN;
+  return EN;
+}
+
+/**
+ * Render one message with `{var}` substitution in the active locale (or an
+ * explicit locale override). Unknown keys fall back to the key itself; keys
+ * missing from the active locale fall back to English per key.
+ */
+export function t(key: I18nKey, vars?: I18nVars, locale?: string): string {
+  const want: string =
+    typeof locale === "string" && locale !== "" ? (normalizeLocaleName(locale) ?? activeLocale) : activeLocale;
+  const table: Record<string, string> = dictionaries[want] ?? EN;
+  const template: string = table[key as string] ?? EN[key as string] ?? (key as string);
   if (!vars) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) => {
     const value = vars[name];

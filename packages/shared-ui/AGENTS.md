@@ -36,3 +36,9 @@ Retain Dezoomify's authentic parchment aesthetic, wide proportions, and distinct
    - Footer is pinned to the true bottom (`margin-top: auto`), containing only legal and repo links (`Open Source (GPL)`, `FAQ`, `Privacy`, `Terms`, `Donate`). Avoid redundant slogans.
    - Layer error messages: concise plain sentence first, actionable interactive guidance for our Extension and Desktop app, and collapsible diagnostics.
    - Progress displays a smooth track and tabular counts.
+
+8. **Languages (English, French, German, Italian):**
+   - User copy renders through `t(key, vars)` against `src/i18n.ts`; English is the canonical table and `src/locales/fr.ts`, `de.ts`, `it.ts` mirror it key for key with identical `{placeholders}`. Missing keys fall back to English per key, never to `undefined`.
+   - The audience includes multilingual art historians and archivists: translate buttons, messages, and guidance, but keep brand and product names (`Dezoomify`, `Chrome Web Store`, `GitHub Releases`), format names (`PNG`), codes, URLs, and diagnostics literal. Interpolation is `{name}` substitution only, with no plurals engine and no markup.
+   - Hosts pick the locale with `setLocale()` (explicit picker choice) or `pickLocale()` (`Accept-Language` header or `navigator.languages`); unknown tags fail closed to English. A new locale adds a sibling table under `src/locales/` plus a `SUPPORTED_LOCALES` entry, never a second lookup path.
+   - Browser mirrors stay generated: `node scripts/sync-web-js.mjs` mirrors `i18n.ts` plus `locales/` to `.js` and refreshes the extension `page/vendor/` copies (never hand-edited). `test/ui-i18n.test.mjs` fails on missing keys, placeholder drift, or replica tables.
