@@ -1,6 +1,6 @@
 // Programmatic save: only from origin-clean readable surfaces.
 import { SAVE_REQUIRES_READABLE_BYTES } from "./types.ts";
-import { suggestedNameFor } from "../../shared-ui/src/saveName.ts";
+import { suggestedNameFor } from "./save-name.ts";
 
 export type SaveFormat = "png" | "jpeg";
 
