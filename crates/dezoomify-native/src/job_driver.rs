@@ -71,7 +71,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use dezoomify_core::core::adaptive::ObservationResult;
@@ -87,7 +90,8 @@ use crate::output::{
 use crate::pipeline::{
     blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
     fetch_and_decode_cached, merge_headers, probe_tile_bytes, render_iiif_dir, sha256_hex,
-    PartialPolicy, PipelineConfig, PipelineEvent, PipelineOutcome,
+    PartialDecision, PartialGate, PartialPolicy, PartialRequest, PipelineConfig, PipelineEvent,
+    PipelineOutcome,
 };
 
 /// Deferred-resolution bound: the initial discovery plus this many deferred
@@ -316,6 +320,7 @@ struct Published {
     tile_count: usize,
     image_size: Vec2d,
     partial: bool,
+    missing: Vec<String>,
 }
 
 struct Attempt<'a> {
@@ -356,6 +361,11 @@ struct Attempt<'a> {
     /// Pause v1 demonstration ran once (`--pause-after`): prevents repeat
     /// pause cycles within one job attempt.
     pause_demonstrated: bool,
+    /// Interactive partial gate shared with the host shell (`None` answers
+    /// from [`PartialPolicy`] with no wait).
+    partial_gate: Option<Arc<PartialGate>>,
+    /// Latest engine `missing-work` ledger (failed tile ids, redacted).
+    pending_missing: Vec<String>,
 }
 
 impl<'a> Attempt<'a> {
@@ -408,6 +418,8 @@ fn drive_job(
         recovery_attempts: 0,
         cancel_sent: false,
         pause_demonstrated: false,
+        partial_gate: config.partial_gate.clone(),
+        pending_missing: Vec::new(),
     };
 
     loop {
@@ -548,6 +560,7 @@ fn drive_job(
                     .map(|image| image.format.clone())
                     .unwrap_or_default(),
                 partial: published.partial,
+                missing: published.missing,
             }))
         }
         Some("cancelled") => {
@@ -686,6 +699,28 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
                     .unwrap_or("job failed")
                     .to_string(),
             ));
+        }
+        "missing-work" => {
+            // Engine ledger of tiles that exhausted retries. Tile ids only,
+            // never URLs: safe for the host dialog and the honest terminal.
+            let mut missing = Vec::new();
+            if let Some(failed) = event.get("failed").and_then(serde_json::Value::as_array) {
+                for entry in failed {
+                    if let Some(id) = entry.as_str() {
+                        let trimmed = id.trim();
+                        if !trimmed.is_empty()
+                            && trimmed.len() <= 128
+                            && !trimmed.contains("://")
+                            && !trimmed.contains('/')
+                        {
+                            missing.push(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+            if !missing.is_empty() {
+                attempt.pending_missing = missing;
+            }
         }
         _ => {}
     }
@@ -918,14 +953,56 @@ fn execute_effects(
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("");
                 if reason == "partial" {
-                    let keep = attempt.config.partial_policy == PartialPolicy::Keep;
-                    reply(
-                        job,
-                        JobResponse::PartialKeep {
+                    let Some(decision) = await_partial_choice(attempt, effect) else {
+                        // Cancelled while waiting: stop honestly without
+                        // writing output.
+                        let _ = job.on_response(JobResponse::Cancel {
                             job: job_id.clone(),
-                            keep,
-                        },
-                    )?;
+                        });
+                        attempt.cancel_sent = true;
+                        continue;
+                    };
+                    match decision {
+                        PartialDecision::Retry => {
+                            attempt.pending_missing.clear();
+                            if let Some(gate) = attempt.partial_gate.clone() {
+                                gate.clear_pending();
+                            }
+                            attempt.recovery_attempts = attempt.recovery_attempts.saturating_add(1);
+                            let number = attempt.recovery_attempts.max(1);
+                            reply(
+                                job,
+                                JobResponse::RetryReady {
+                                    job: job_id.clone(),
+                                    attempt: format!("att:{number}"),
+                                },
+                            )?;
+                        }
+                        PartialDecision::Keep => {
+                            if let Some(gate) = attempt.partial_gate.clone() {
+                                gate.clear_pending();
+                            }
+                            reply(
+                                job,
+                                JobResponse::PartialKeep {
+                                    job: job_id.clone(),
+                                    keep: true,
+                                },
+                            )?;
+                        }
+                        PartialDecision::Discard => {
+                            if let Some(gate) = attempt.partial_gate.clone() {
+                                gate.clear_pending();
+                            }
+                            reply(
+                                job,
+                                JobResponse::PartialKeep {
+                                    job: job_id.clone(),
+                                    keep: false,
+                                },
+                            )?;
+                        }
+                    }
                 } else {
                     // Destination recovery: one retry re-validates (a
                     // concurrent writer may have gone away); a repeat denial
@@ -972,6 +1049,89 @@ fn is_probe(effect: &serde_json::Value) -> bool {
         .get("probe")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
+}
+
+/// Interactive partial choice: announce the missing ledger for the host
+/// dialog, wait up to 60s for [`PartialGate::answer`], fail-closed to
+/// [`PartialPolicy`]. Returns `None` only when cancelled while waiting
+/// (the caller cancels honestly without output).
+///
+/// Emits `recovery-requested{reason: partial}` plus `missing-work` with the
+/// redacted tile ids and counts, so hosts that forward pipeline events can
+/// surface the typed keep/discard/retry dialog. Hosts without a gate
+/// (CLI) skip the wait and answer from the policy directly, preserving
+/// byte-identical output.
+fn await_partial_choice(
+    attempt: &mut Attempt<'_>,
+    effect: &serde_json::Value,
+) -> Option<PartialDecision> {
+    use std::sync::atomic::Ordering;
+    // Prefer the engine ledger; fall back to plan-minus-decoded so a kept
+    // partial always names its holes even if the event was missed.
+    let mut missing = attempt.pending_missing.clone();
+    if missing.is_empty() {
+        for tile in &attempt.order {
+            if !attempt.decoded.contains_key(tile) {
+                missing.push(tile.clone());
+            }
+        }
+    }
+    missing.sort();
+    missing.dedup();
+    let total = attempt.order.len();
+    let failed = missing.len().max(1);
+    let recovery = effect
+        .get("recovery")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    // Counts only plus redacted tile ids; never URLs, paths, or secrets.
+    let joined = missing.join(",");
+    let mut requested = BTreeMap::new();
+    requested.insert("reason".to_string(), "partial".to_string());
+    requested.insert("failed".to_string(), failed.to_string());
+    requested.insert("total".to_string(), total.to_string());
+    if !joined.is_empty() {
+        requested.insert("missing".to_string(), joined.clone());
+    }
+    if !recovery.is_empty() {
+        requested.insert("recovery".to_string(), recovery);
+    }
+    attempt.emit("recovery-requested", requested.clone());
+    let mut work = BTreeMap::new();
+    work.insert("failed".to_string(), failed.to_string());
+    work.insert("total".to_string(), total.to_string());
+    if !joined.is_empty() {
+        work.insert("missing".to_string(), joined);
+    }
+    attempt.emit("missing-work", work);
+    let Some(gate) = attempt.partial_gate.clone() else {
+        // No host gate (CLI): policy answers immediately, no wait.
+        return Some(if attempt.config.partial_policy == PartialPolicy::Keep {
+            PartialDecision::Keep
+        } else {
+            PartialDecision::Discard
+        });
+    };
+    gate.announce(PartialRequest {
+        missing,
+        failed,
+        total,
+    });
+    // Interactive wait up to 60s, fail-closed to the policy. Cancellation
+    // returns `None` so the caller cancels honestly.
+    const WAIT: Duration = Duration::from_secs(60);
+    if let Some(decision) = gate.wait_for_decision(WAIT, &attempt.config.cancel_flag) {
+        return Some(decision);
+    }
+    if attempt.config.cancel_flag.load(Ordering::SeqCst) {
+        return None;
+    }
+    Some(if attempt.config.partial_policy == PartialPolicy::Keep {
+        PartialDecision::Keep
+    } else {
+        PartialDecision::Discard
+    })
 }
 
 fn acquire_tiles(
@@ -1265,6 +1425,36 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             y: height,
         },
         partial,
+        missing: if partial {
+            let mut missing: Vec<String> = attempt
+                .order
+                .iter()
+                .filter(|tile| !attempt.decoded.contains_key(*tile))
+                .cloned()
+                .collect();
+            missing.sort();
+            missing.dedup();
+            // Prefer the engine ledger when it names the same holes; the
+            // plan-minus-decoded set is authoritative for the bytes written.
+            if !attempt.pending_missing.is_empty() {
+                let mut ledger = attempt.pending_missing.clone();
+                ledger.sort();
+                ledger.dedup();
+                // Union keeps the terminal honest even if the engine named a
+                // subset (e.g. batch mates abandoned at the decision).
+                for id in missing {
+                    if !ledger.contains(&id) {
+                        ledger.push(id);
+                    }
+                }
+                ledger.sort();
+                ledger
+            } else {
+                missing
+            }
+        } else {
+            Vec::new()
+        },
     });
     Ok(())
 }
