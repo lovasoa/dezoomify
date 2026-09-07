@@ -91,7 +91,9 @@ jobs:
             cargo install tauri-driver --version "=2.0.6" --root "$ROOT"
           fi
           echo "$ROOT/bin" >> "$GITHUB_PATH"
-          command -v tauri-driver
+          # GITHUB_PATH only takes effect in later steps, so verify by
+          # absolute path here (later steps resolve it from PATH).
+          test -x "$ROOT/bin/tauri-driver"
       - name: Install tauri-driver 2.0.6 (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -104,7 +106,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-driver failed" }
           }
           Add-Content -Path $env:GITHUB_PATH -Value "$ROOT\bin"
-          Get-Command tauri-driver | Select-Object -ExpandProperty Source
+          # GITHUB_PATH only takes effect in later steps, so verify by
+          # absolute path here (later steps resolve it from PATH).
+          if (-not (Test-Path "$ROOT\bin\tauri-driver.exe")) { throw "tauri-driver missing after install" }
       - name: Real-window E2E (Linux under Xvfb)
         if: runner.os == 'Linux'
         run: |
@@ -211,7 +215,8 @@ jobs:
             cargo install tauri-cli --version "=2.11.4" --root "$ROOT"
           fi
           echo "$ROOT/bin" >> "$GITHUB_PATH"
-          cargo tauri --version
+          # Same-step PATH note as the tauri-driver leg: verify absolute.
+          "$ROOT/bin/cargo-tauri" tauri --version
       - name: Install tauri-cli 2.11.4 (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -224,7 +229,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-cli failed" }
           }
           Add-Content -Path $env:GITHUB_PATH -Value "$ROOT\bin"
-          cargo tauri --version
+          # Same-step PATH note as the tauri-driver leg: verify absolute.
+          & "$ROOT\bin\cargo-tauri.exe" tauri --version
           if ($LASTEXITCODE -ne 0) { throw "cargo tauri --version failed" }
       - name: Bundle, install, and launch smoke (Linux deb)
         if: runner.os == 'Linux'
