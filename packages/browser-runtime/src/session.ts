@@ -159,7 +159,7 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
             worker.postMessage({ type: "provide", id, bytes, finalUri: clean }, [bytes]);
           })
           .catch((error: unknown) => {
-            const structured = error as { code?: string; message?: string; technical?: string };
+            const structured = error as { code?: string; message?: string; technical?: string; retryable?: boolean };
             worker.postMessage({
               type: "fail",
               id,
@@ -168,6 +168,10 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
               message: structured?.technical || structured?.message || String(error),
               userMessage: structured?.message,
               code: structured?.code || "DISCOVERY_FAILED",
+              // Retryability is decided at the failure site (an upstream 403
+              // never becomes retryable downstream); default stays retryable
+              // for unclassified fetch failures.
+              retryable: typeof structured?.retryable === "boolean" ? structured.retryable : true,
             });
           });
         return;
@@ -214,10 +218,12 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
       case "error": {
         const code = (msg.code as string) || "DISCOVERY_FAILED";
         const detail = typeof msg.detail === "string" ? msg.detail : undefined;
+        const retryable =
+          typeof msg.retryable === "boolean" ? (msg.retryable as boolean) : code !== "NO_IMAGE_FOUND";
         const err = failure(
           code,
           (msg.message as string) || "Discovery failed.",
-          code !== "NO_IMAGE_FOUND",
+          retryable,
           detail,
         );
         rejectPending(err);

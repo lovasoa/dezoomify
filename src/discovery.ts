@@ -370,6 +370,31 @@ export function discoveryFailedError(via?: string): DiscoveryStructuredError {
   };
 }
 
+/**
+ * Short plain-words suffix for a relay policy `reason` (the exact reason
+ * still travels in technical diagnostics, never here).
+ */
+function policyReasonSuffix(reason: string): string {
+  switch (reason) {
+    case "loopback-host":
+    case "private-host":
+    case "blocked-ipv4":
+    case "blocked-ipv6":
+    case "dns-rebinding":
+    case "dns-rebinding-v6":
+      return " (the website cannot open private or local addresses)";
+    case "content-type":
+      return " (the site answered with a file type the website does not check here)";
+    case "redirect-limit":
+    case "redirect-target":
+    case "origin":
+      return " (the site redirected in a way the website cannot follow)";
+    case "":
+    default:
+      return "";
+  }
+}
+
 function httpErrorFor(status: number, via: string): DiscoveryStructuredError {
   if (status === 404) {
     return {
@@ -382,6 +407,20 @@ function httpErrorFor(status: number, via: string): DiscoveryStructuredError {
     };
   }
   if (status === 401 || status === 403) {
+    // A 403 through the shared metadata proxy usually means the viewed
+    // site refused our server (bot protection or IP block), not that the
+    // user must sign in; the user's own connection (extension/desktop)
+    // may still work. A direct 403 keeps the sign-in guidance.
+    if (via === "proxy") {
+      return {
+        code: "TRANSPORT_HTTP_ERROR",
+        category: "transport",
+        retryable: false,
+        message: `The site refused to share this file (HTTP ${status}). It may block shared servers; the browser extension or the desktop app may still work.`,
+        transport: via,
+        phase: "discovery",
+      };
+    }
     return {
       code: "TRANSPORT_HTTP_ERROR",
       category: "transport",
@@ -448,11 +487,12 @@ export function classifyDiscovery(
     };
   }
 
-  // Proxy-shaped result: { ok, status, code?, bytes?, contentType? }.
+  // Proxy-shaped result: { ok, status, code?, reason?, bytes?, contentType? }.
   if ("ok" in result) {
     const ok = result["ok"] as boolean;
     const status = typeof result["status"] === "number" ? (result["status"] as number) : 0;
     const code = typeof result["code"] === "string" ? (result["code"] as string) : "";
+    const reason = typeof result["reason"] === "string" ? (result["reason"] as string) : "";
     if (!ok) {
       if (code === "TRANSPORT_CANCELLED") return { found: false, via, cancelled: true };
       if (code === "PROXY_RATE_LIMITED") {
@@ -491,7 +531,7 @@ export function classifyDiscovery(
             code: "TRANSPORT_POLICY_DENIED",
             category: "transport",
             retryable: false,
-            message: "This address cannot be opened here. Check the address and try again.",
+            message: `This address cannot be opened through the website${policyReasonSuffix(reason)}. The browser extension or the desktop app may still work.`,
             transport: via,
             phase: "discovery",
           },

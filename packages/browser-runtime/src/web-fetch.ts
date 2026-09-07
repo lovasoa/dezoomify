@@ -218,6 +218,7 @@ export interface ProxyTransportLike {
     status: number;
     bytes?: ArrayBuffer;
     code?: string;
+    reason?: string;
     finalUrl?: string;
     retryAfterMs?: number;
   }>;
@@ -263,6 +264,7 @@ export interface WebFetcher {
     status: number;
     bytes?: ArrayBuffer;
     code?: string;
+    reason?: string;
     finalUrl?: string;
     retryAfterMs?: number;
   }>;
@@ -270,6 +272,128 @@ export interface WebFetcher {
   fetchTileFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
   getActiveTransport(): string | null;
   resetActiveTransport(): void;
+}
+
+/**
+ * Plain words for a relay policy `reason` (never credentials, never URLs).
+ * Keeps the prominent message specific without leaking jargon: the exact
+ * `reason` still travels in the technical chain.
+ */
+export function proxyPolicyReasonText(reason?: string): string | null {
+  switch (reason) {
+    case "invalid-url":
+    case "scheme":
+    case "userinfo":
+    case "signed-query":
+    case "non-standard-port":
+    case "protocol-version":
+    case "malformed-body":
+    case "method":
+      return "Check the address and try again.";
+    case "loopback-host":
+    case "private-host":
+    case "blocked-ipv4":
+    case "blocked-ipv6":
+    case "dns-rebinding":
+    case "dns-rebinding-v6":
+      return "The website cannot open private or local addresses.";
+    case "content-type":
+      return "The site answered with a file type the website does not check here.";
+    case "redirect-limit":
+    case "redirect-target":
+    case "origin":
+      return "The site redirected in a way the website cannot follow.";
+    default:
+      return null;
+  }
+}
+
+export interface ClassifiedProxyFailure {
+  code: string;
+  message: string;
+  retryable: boolean;
+  technical: string;
+}
+
+/**
+ * Classify a failed proxy result into a user sentence plus a dense
+ * technical chain. Our policy denial and an upstream HTTP refusal are
+ * genuinely different (retrying a 403 from the viewed site never helps,
+ * while a 502 might), so they never share a message or a retryable flag.
+ */
+export function classifyProxyFailure(
+  proxied: { status: number; code?: string; reason?: string },
+  target: string,
+): ClassifiedProxyFailure {
+  const code = proxied.code ?? "PROXY_ERROR";
+  const status = proxied.status || 0;
+  const reasonSuffix =
+    typeof proxied.reason === "string" && proxied.reason !== "" ? `, reason=${proxied.reason}` : "";
+  const technical = `metadata proxy: ${code} (HTTP ${status}${reasonSuffix}) fetching ${target}`;
+  if (code === "PROXY_POLICY_DENIED") {
+    const hint = proxyPolicyReasonText(proxied.reason) ?? "Check the address and try again.";
+    return {
+      code: "TRANSPORT_POLICY_DENIED",
+      message:
+        `This address cannot be opened through the website. ${hint} ` +
+        "The browser extension or the desktop app may still work.",
+      retryable: false,
+      technical,
+    };
+  }
+  if (code === "PROXY_BUDGET_EXCEEDED") {
+    return {
+      code: "PROXY_BUDGET_EXCEEDED",
+      message: "This page is too large to check here. Try the desktop app for very large images.",
+      retryable: false,
+      technical,
+    };
+  }
+  if (code === "TRANSPORT_HTTP_ERROR" || status === 401 || status === 403) {
+    if (status === 404) {
+      return {
+        code: "TRANSPORT_HTTP_ERROR",
+        message: "This page could not be found. Check the address and try again.",
+        retryable: false,
+        technical,
+      };
+    }
+    if (status === 401 || status === 403) {
+      return {
+        code: "TRANSPORT_HTTP_ERROR",
+        message:
+          `The site refused to share this file (HTTP ${status}). It may block shared servers; ` +
+          "the browser extension or the desktop app may still work.",
+        retryable: false,
+        technical,
+      };
+    }
+    if (status >= 500 && status <= 599) {
+      return {
+        code: "TRANSPORT_HTTP_ERROR",
+        message: "The site had a problem opening this page. Try again shortly.",
+        retryable: true,
+        technical,
+      };
+    }
+    if (status >= 400 && status <= 499) {
+      return {
+        code: "TRANSPORT_HTTP_ERROR",
+        message: "This page could not be opened. Check the address and try again.",
+        retryable: false,
+        technical,
+      };
+    }
+  }
+  if (code === "TRANSPORT_NETWORK_ERROR" || code === "PROXY_NETWORK_ERROR" || code === "PROXY_ERROR") {
+    return {
+      code: "PROXY_ERROR",
+      message: "The metadata proxy could not fetch this address. Try again shortly.",
+      retryable: true,
+      technical,
+    };
+  }
+  return { code, message: "The metadata proxy could not fetch this address. Try again shortly.", retryable: status >= 500 || status === 0, technical };
 }
 
 function defaultFetchImpl(): FetchImplLike | null {
@@ -348,7 +472,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   async function fetchViaProxy(
     targetUrl: string,
     signal?: AbortSignal,
-  ): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; finalUrl?: string; retryAfterMs?: number }> {
+  ): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; reason?: string; finalUrl?: string; retryAfterMs?: number }> {
     if (!deps.proxyTransport) return { ok: false, status: 502, code: "PROXY_ERROR" };
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
     const slot = await acquireProxySlot(signal);
@@ -363,6 +487,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           ok: false,
           status: res.status,
           code: res.code ?? "PROXY_ERROR",
+          ...(typeof res.reason === "string" && res.reason !== "" ? { reason: res.reason } : {}),
           ...(typeof res.retryAfterMs === "number" ? { retryAfterMs: res.retryAfterMs } : {}),
         };
       }
@@ -464,13 +589,8 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
             `metadata proxy: upstream rate limit (HTTP 429, PROXY_RATE_LIMITED) fetching ${target}`,
           );
         }
-        throw failure(
-          "PROXY_ERROR",
-          "The metadata proxy could not fetch this address. Try again shortly.",
-          false,
-          undefined,
-          `metadata proxy: ${proxied.code ?? "PROXY_ERROR"} (HTTP ${proxied.status || 0}) fetching ${target}`,
-        );
+        const classified = classifyProxyFailure(proxied, target);
+        throw failure(classified.code, classified.message, classified.retryable, undefined, classified.technical);
       }
       bytes = proxied.bytes;
       if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "") finalUri = proxied.finalUrl;

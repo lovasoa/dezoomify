@@ -25,6 +25,9 @@ function noteFailure(msg) {
     // Dense technical diagnostics (HTTP status, transport) for the engine
     // and the technical-details section.
     technical: msg.message || "fetch failed",
+    // Retryability is decided at the failure site (an upstream 403 or our
+    // own policy denial never becomes retryable downstream).
+    retryable: typeof msg.retryable === "boolean" ? msg.retryable : true,
   };
 }
 
@@ -40,7 +43,7 @@ function postDiscoveryFailure(error) {
   lastFailure = null;
   if (failure) {
     const detail = [failure.technical, engineDetail].filter(Boolean).join("\n\n");
-    post({ type: "error", code: failure.code, message: failure.message, detail });
+    post({ type: "error", code: failure.code, message: failure.message, detail, retryable: failure.retryable });
     return;
   }
   if (engineDetail.includes("no discovery candidate accepted")) {

@@ -16,9 +16,9 @@ function websiteOriginOf(url: string): string {
   }
 }
 
-function policyJsonResponse(status: number, cors: Record<string, string>): Response {
+function policyJsonResponse(status: number, cors: Record<string, string>, reason?: string): Response {
   return Response.json(
-    { code: "PROXY_POLICY_DENIED" },
+    { code: "PROXY_POLICY_DENIED", ...(reason !== undefined ? { reason } : {}) },
     { status, headers: { ...cors, "cache-control": "no-store" } },
   );
 }
@@ -41,14 +41,14 @@ export async function onRequestPost(context: { request: Request }): Promise<Resp
   const cors = buildProxyCorsHeaders(websiteOrigin, request.headers.get("origin") ?? undefined);
   const parsed = await readBoundedJson(request);
   if (parsed === null || typeof parsed !== "object") {
-    return policyJsonResponse(400, cors);
+    return policyJsonResponse(400, cors, "malformed-body");
   }
   const body = parsed as {
     targetUrl?: unknown;
     protocolVersion?: unknown;
   };
   if (typeof body.targetUrl !== "string" || typeof body.protocolVersion !== "number") {
-    return policyJsonResponse(422, cors);
+    return policyJsonResponse(422, cors, "protocol-version");
   }
   const result = await handleProxyRequest(
     {
@@ -76,7 +76,11 @@ export async function onRequestPost(context: { request: Request }): Promise<Resp
     return new Response(result.body, { status: result.status, headers: result.headers });
   }
   return Response.json(
-    { code: result.code ?? "PROXY_ERROR", requestId: result.requestId },
+    {
+      code: result.code ?? "PROXY_ERROR",
+      ...(result.reason !== undefined ? { reason: result.reason } : {}),
+      requestId: result.requestId,
+    },
     { status: result.status, headers: result.headers },
   );
 }

@@ -11,6 +11,12 @@ export interface ProxyFetchResult {
   ok: boolean;
   status: number;
   code?: string;
+  /** Machine-readable policy reason from the relay (`scheme`,
+   * `private-host`, `content-type`, `redirect-limit`, ...) or from the
+   * client-side guard (`invalid-url`, `userinfo`). Present on
+   * `PROXY_POLICY_DENIED` results so callers can tell our policy apart
+   * from an upstream HTTP status. */
+  reason?: string;
   bytes?: ArrayBuffer;
   contentType?: string;
   /** Post-redirect upstream URL reported by the relay (success only). */
@@ -286,6 +292,25 @@ function globalLimiter(): ProxyRateLimiter {
   return globalProxyRateLimiter;
 }
 
+/**
+ * Decode a relay error body (`{code, reason?}` JSON) without ever throwing.
+ * Returns an empty object when the body is not a relay error payload, in
+ * which case callers fall back to status-based classification.
+ */
+export function parseRelayError(bytes: ArrayBuffer): { code?: string; reason?: string } {
+  try {
+    if (bytes.byteLength === 0 || bytes.byteLength > 4096) return {};
+    const text = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(text) as { code?: unknown; reason?: unknown };
+    if (typeof parsed?.code !== "string" || parsed.code === "") return {};
+    const out: { code?: string; reason?: string } = { code: parsed.code };
+    if (typeof parsed.reason === "string" && parsed.reason !== "") out.reason = parsed.reason;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /** Test seam: drop global proxy rate state between isolated checks. */
 export function resetProxyRateLimit(): void {
   try {
@@ -321,10 +346,10 @@ export function createProxyTransport(
     try {
       parsed = new URL(targetUrl);
     } catch {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED" };
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "invalid-url" };
     }
     if (parsed.username !== "" || parsed.password !== "") {
-      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED" };
+      return { ok: false, status: 0, code: "PROXY_POLICY_DENIED", reason: "userinfo" };
     }
     if (callOpts?.signal?.aborted) {
       return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
@@ -384,10 +409,24 @@ export function createProxyTransport(
       };
     }
     if (response.status === 413) return { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" };
-    if (response.status === 403 || response.status === 422) {
-      return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED" };
-    }
     if (response.status < 200 || response.status > 299) {
+      // The relay reports its own decision as JSON `{code, reason?}`; an
+      // upstream 403/404 arrives as TRANSPORT_HTTP_ERROR while our own
+      // policy arrives as PROXY_POLICY_DENIED. Never infer the cause from
+      // the HTTP status alone: a 403 from the viewed site used to
+      // masquerade as a policy denial.
+      const relay = parseRelayError(bytes);
+      if (relay.code !== undefined) {
+        return {
+          ok: false,
+          status: response.status,
+          code: relay.code,
+          ...(relay.reason !== undefined ? { reason: relay.reason } : {}),
+        };
+      }
+      if (response.status === 403 || response.status === 422) {
+        return { ok: false, status: response.status, code: "PROXY_POLICY_DENIED" };
+      }
       return { ok: false, status: response.status, code: "TRANSPORT_HTTP_ERROR" };
     }
     const upstream = headers[PROXY_UPSTREAM_URL_HEADER];

@@ -60,8 +60,13 @@ function sendJson(
   headers: Record<string, string>,
   code: string,
   requestId?: string,
+  reason?: string,
 ): void {
-  const body = JSON.stringify({ code, ...(requestId !== undefined ? { requestId } : {}) });
+  const body = JSON.stringify({
+    code,
+    ...(reason !== undefined ? { reason } : {}),
+    ...(requestId !== undefined ? { requestId } : {}),
+  });
   const bytes = Buffer.from(body);
   res.writeHead(status, {
     ...headers,
@@ -108,18 +113,18 @@ export async function handleNodeProxyRequest(
   }
 
   if (req.method !== "POST") {
-    sendJson(res, 405, cors, "PROXY_POLICY_DENIED");
+    sendJson(res, 405, cors, "PROXY_POLICY_DENIED", undefined, "method");
     return;
   }
 
   const parsed = await readBoundedJson(req);
   if (parsed === null || typeof parsed !== "object") {
-    sendJson(res, 400, cors, "PROXY_POLICY_DENIED");
+    sendJson(res, 400, cors, "PROXY_POLICY_DENIED", undefined, "malformed-body");
     return;
   }
   const body = parsed as { targetUrl?: unknown; protocolVersion?: unknown };
   if (typeof body.targetUrl !== "string" || typeof body.protocolVersion !== "number") {
-    sendJson(res, 422, cors, "PROXY_POLICY_DENIED");
+    sendJson(res, 422, cors, "PROXY_POLICY_DENIED", undefined, "protocol-version");
     return;
   }
 
@@ -151,5 +156,5 @@ export async function handleNodeProxyRequest(
     res.end(bytes);
     return;
   }
-  sendJson(res, result.status, result.headers, result.code ?? "PROXY_ERROR", result.requestId);
+  sendJson(res, result.status, result.headers, result.code ?? "PROXY_ERROR", result.requestId, result.reason);
 }
