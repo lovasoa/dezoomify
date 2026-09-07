@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native tile-cache resume across runs: identical 512x512 DZI pyramid with the default-on resume cache; an interrupted first run caches completed tiles and a repeated run with the same cache folder reuses them without re-fetching",
+  "id": "native/cli-resume-cache",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/cli/resume/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

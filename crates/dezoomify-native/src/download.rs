@@ -15,7 +15,7 @@ pub struct SchedulerConfig {
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self {
-            max_concurrent: 6,
+            max_concurrent: crate::pipeline::MAX_CONCURRENT,
             max_tiles: 1 << 20,
             max_retries: 3,
         }

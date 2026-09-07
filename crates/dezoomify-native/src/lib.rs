@@ -4,6 +4,10 @@
 //! counters, image decode/assemble/encode pipeline (PNG, JPEG, TIFF, ZIF
 //! pyramid, WebP, and static `iiif-dir` tile trees), and real output hashing.
 #![forbid(unsafe_code)]
+// 6.1 unwrap policy: shipped runtime code maps failures to typed
+// `NativeError`s instead of panicking (see the crate-root comment in
+// `dezoomify-protocol` for how tests stay exempt).
+#![deny(clippy::unwrap_used)]
 
 pub mod auth;
 pub mod cache;
@@ -14,6 +18,7 @@ pub mod http;
 pub mod job_driver;
 pub mod output;
 pub mod pipeline;
+pub mod pool;
 pub mod progress;
 pub mod runtime;
 

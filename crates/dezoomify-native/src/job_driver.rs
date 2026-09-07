@@ -85,9 +85,9 @@ use crate::output::{
     partial_path_for, validate_destination, write_atomic, write_iiif_dir, OutputFormat,
 };
 use crate::pipeline::{
-    blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
-    fetch_and_decode_cached, merge_headers, probe_tile_bytes, render_iiif_dir, sha256_hex,
-    PartialPolicy, PipelineConfig, PipelineEvent, PipelineOutcome,
+    blit_onto, blit_onto_cropped, clamped_crop_for, encode_jpeg, encode_png, encode_tiff,
+    encode_webp, encode_zif_pyramid, fetch_and_decode_cached, merge_headers, probe_tile_bytes,
+    render_iiif_dir, sha256_hex, PartialPolicy, PipelineConfig, PipelineEvent, PipelineOutcome,
 };
 
 /// Deferred-resolution bound: the initial discovery plus this many deferred
@@ -324,8 +324,8 @@ struct Attempt<'a> {
     output_path: PathBuf,
     overwrite: bool,
     format: OutputFormat,
-    /// Resume cache as `(cache_dir, job_namespace)`; `None` refetches all
-    /// tiles every run.
+    /// Resume cache as `(cache_dir, job_namespace)`; always set (the cache
+    /// is on by default, see [`crate::pipeline::effective_cache_dir`]).
     cache: Option<(PathBuf, String)>,
     on_event: &'a mut dyn FnMut(PipelineEvent),
     discovery_resources: usize,
@@ -353,6 +353,9 @@ struct Attempt<'a> {
     destination_error: Option<NativeError>,
     recovery_attempts: u32,
     cancel_sent: bool,
+    /// Pause v1 demonstration ran once (`--pause-after`): prevents repeat
+    /// pause cycles within one job attempt.
+    pause_demonstrated: bool,
 }
 
 impl<'a> Attempt<'a> {
@@ -384,10 +387,10 @@ fn drive_job(
         output_path: PathBuf::from(output_path),
         overwrite,
         format,
-        cache: config
-            .cache_dir
-            .clone()
-            .map(|dir| (dir, crate::cache::job_namespace(input_url))),
+        cache: Some((
+            crate::pipeline::effective_cache_dir(config),
+            crate::cache::job_namespace(input_url),
+        )),
         on_event,
         discovery_resources: 0,
         catalog: Vec::new(),
@@ -404,6 +407,7 @@ fn drive_job(
         destination_error: None,
         recovery_attempts: 0,
         cancel_sent: false,
+        pause_demonstrated: false,
     };
 
     loop {
@@ -474,6 +478,55 @@ fn drive_job(
             ));
         }
         execute_effects(&mut job, &mut attempt, effects)?;
+        // Pause v1 demonstration (`--pause-after N`): once N tiles are
+        // acquired, suspend acquisition (no new `acquire-tile` while paused,
+        // in-flight finishes, decoded retained), verify the overlay, then
+        // resume and re-drive. Hosts still own clocks; the engine only stops
+        // scheduling until resume.
+        if let Some(threshold) = attempt.config.pause_after {
+            if !attempt.pause_demonstrated
+                && attempt.acquired >= threshold
+                && job.state() == JobState::AcquiringTiles
+                && !job.is_terminal()
+                && !job.is_paused()
+            {
+                attempt.pause_demonstrated = true;
+                job.on_response(JobResponse::Pause {
+                    job: job_id.clone(),
+                })
+                .map_err(|e| {
+                    NativeError::new(
+                        "native.internal",
+                        format!("pause rejected ({}): {}", e.code, e.message),
+                    )
+                })?;
+                for event in job.drain_events() {
+                    handle_event(&mut attempt, &event)?;
+                }
+                debug_assert!(job.is_paused());
+                attempt.emit(
+                    "paused",
+                    BTreeMap::from([("acquired".to_string(), attempt.acquired.to_string())]),
+                );
+                job.on_response(JobResponse::Resume {
+                    job: job_id.clone(),
+                })
+                .map_err(|e| {
+                    NativeError::new(
+                        "native.internal",
+                        format!("resume rejected ({}): {}", e.code, e.message),
+                    )
+                })?;
+                for event in job.drain_events() {
+                    handle_event(&mut attempt, &event)?;
+                }
+                debug_assert!(!job.is_paused());
+                attempt.emit(
+                    "resumed",
+                    BTreeMap::from([("acquired".to_string(), attempt.acquired.to_string())]),
+                );
+            }
+        }
     }
 
     match job.terminal_kind() {
@@ -826,6 +879,41 @@ fn execute_effects(
                 if let Some(canvas) = effect.get("canvas").filter(|v| !v.is_null()) {
                     attempt.canvas = attempt.canvas.or(Some(point(canvas)));
                 }
+                // Crop subset (plan_from_tiles subset in level pixels,
+                // clamped, overflow-safe): tiles that cannot intersect the
+                // clamped crop are acknowledged without fetching so the
+                // engine still completes, but they never enter the output
+                // plan. Unknown extents are fetched conservatively and
+                // filtered at publish time. Empty or out-of-bounds crops
+                // fail before acquisition with typed `output.crop-invalid`.
+                if let Some(requested) = attempt.config.crop {
+                    if let Some(canvas) = attempt.canvas {
+                        let clamped = clamped_crop_for(Some(requested), canvas)?;
+                        if let Some(crop) = clamped {
+                            if let Some(extent) = need.extent {
+                                if !dezoomify_core::core::crop::tile_intersects(
+                                    need.destination.x,
+                                    need.destination.y,
+                                    extent.x,
+                                    extent.y,
+                                    &crop,
+                                ) {
+                                    // Outside the crop: acknowledge without
+                                    // fetching or planning for output.
+                                    reply(
+                                        job,
+                                        JobResponse::TileOutcome {
+                                            job: job_id.clone(),
+                                            tile: need.tile.clone(),
+                                            ok: true,
+                                        },
+                                    )?;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
                 if !attempt.order.contains(&need.tile) {
                     attempt.order.push(need.tile.clone());
                     attempt.geoms.insert(
@@ -1061,6 +1149,25 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             height = height.max(geom.destination.y.saturating_add(decoded.image.height()));
         }
     }
+    // Crop subset: clamp the requested rectangle against the full level
+    // size before allocating. Empty or out-of-bounds crops fail here (and
+    // earlier before acquisition) with typed `output.crop-invalid`; the
+    // canvas-limit gate below then checks the cropped size, so estimates
+    // reflect the cropped job.
+    let cropped: Option<dezoomify_core::core::crop::CropRect> = if attempt.config.crop.is_some() {
+        let full = Vec2d {
+            x: width,
+            y: height,
+        };
+        let clamped = clamped_crop_for(attempt.config.crop, full)?;
+        if let Some(rect) = clamped {
+            width = rect.w;
+            height = rect.h;
+        }
+        clamped
+    } else {
+        None
+    };
     // Explicit memory check before allocating: the canvas holds 4 bytes per
     // pixel plus transient encode buffers, so the required bytes (checked
     // against overflow) must fit the configured budget. The default budget
@@ -1132,7 +1239,17 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             destination: Vec2d::default(),
             extent: None,
         });
-        blit_onto(&mut target, geom.destination, geom.extent, &decoded.image);
+        if let Some(crop) = cropped {
+            blit_onto_cropped(
+                &mut target,
+                geom.destination,
+                geom.extent,
+                &decoded.image,
+                &crop,
+            );
+        } else {
+            blit_onto(&mut target, geom.destination, geom.extent, &decoded.image);
+        }
     }
     let output_hash = match attempt.format {
         OutputFormat::Png => {

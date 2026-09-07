@@ -1,0 +1,13 @@
+{
+  "description": "CLI/native pipeline honors --crop by saving only the intersecting region (256x256 top-left of the 512 pyramid)",
+  "id": "native/cli-crop",
+  "input": {
+    "mode": "gateway",
+    "url": "http://{{origin}}/fetch?url=https://fixtures.test/cli/pyramid.dzi"
+  },
+  "operation": "download",
+  "source_evidence": {
+    "path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+    "snapshot": "local"
+  }
+}

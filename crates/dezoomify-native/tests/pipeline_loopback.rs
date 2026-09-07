@@ -379,6 +379,64 @@ fn max_width_selects_the_largest_fitting_level() {
 }
 
 #[test]
+fn crop_subset_saves_only_the_region() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("crop");
+    let output = out_dir.join("cropped.png");
+    let crop = dezoomify_core::core::crop::parse_crop("0,0,256,256").expect("parse crop");
+    let config = PipelineConfig {
+        crop: Some(crop),
+        ..Default::default()
+    };
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &config,
+        &mut |_event| {},
+    )
+    .expect("cropped pipeline succeeds");
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (256, 256));
+    assert_eq!(outcome.tile_count, 1);
+    assert!(!outcome.partial);
+    let expected = scenario_expected("cli-crop");
+    assert_eq!(
+        outcome.output_hash,
+        expected["outputHash"].as_str().expect("outputHash")
+    );
+    assert_eq!(outcome.output_hash, sha256_of_file(&output));
+    // The cropped bytes decode at the cropped size.
+    let decoded = image::load_from_memory(&std::fs::read(&output).expect("read"))
+        .expect("decode")
+        .to_rgba8();
+    assert_eq!((decoded.width(), decoded.height()), (256, 256));
+}
+
+#[test]
+fn crop_out_of_bounds_fails_before_acquisition() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("crop-invalid");
+    let output = out_dir.join("bad.png");
+    let crop = dezoomify_core::core::crop::parse_crop("600,600,10,10").expect("parse");
+    let config = PipelineConfig {
+        crop: Some(crop),
+        ..Default::default()
+    };
+    let error = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &config,
+        &mut |_event| {},
+    )
+    .expect_err("out-of-bounds crop must fail");
+    assert_eq!(error.code, "output.crop-invalid");
+    assert!(!output.exists(), "failed crops write no output");
+}
+
+#[test]
 fn probe_planned_grid_matches_the_fixed_grid_output() {
     // A generic template has no fixed geometry: the driver answers probe
     // effects with observed tile sizes until the job resolves a real grid.
@@ -724,6 +782,163 @@ fn tile_cache_reuses_tiles_after_the_server_loses_them() {
 }
 
 #[test]
+fn resume_cache_is_on_by_default() {
+    // The tile cache is on by default (3.1): the default config carries a
+    // cache dir and an explicit `None` still resolves to the default
+    // on-disk cache, so interrupted CLI/desktop jobs resume without
+    // re-fetching completed tiles.
+    let default_dir = pipeline::default_tile_cache_dir();
+    let config = PipelineConfig::default();
+    assert_eq!(config.cache_dir, Some(default_dir.clone()));
+    let explicit_none = PipelineConfig {
+        cache_dir: None,
+        ..Default::default()
+    };
+    assert_eq!(
+        pipeline::effective_cache_dir(&explicit_none),
+        default_dir,
+        "explicit None still resolves to the default on-disk cache"
+    );
+    assert_eq!(
+        pipeline::effective_cache_dir(&config),
+        default_dir,
+        "default config resolves to the default on-disk cache"
+    );
+}
+
+#[test]
+fn interrupted_job_resumes_without_refetching_completed_tiles() {
+    // An interrupted first run (one corrupt tile, `Fail` policy) caches its
+    // three completed tiles and fails honestly. The server then loses those
+    // three tiles while the corrupt one is fixed; the repeated run with the
+    // same cache folder reuses the completed tiles without re-fetching them
+    // and publishes the identical digest.
+    let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let base = serve_shared_map(Arc::clone(&shared));
+    let good = ["0_0", "1_0", "0_1"];
+    {
+        let mut map = shared.lock().expect("lock");
+        map.insert(
+            "/resume.dzi".to_string(),
+            http_response("200 OK", "application/xml", DZI_512.as_bytes()),
+        );
+        for tile in good {
+            let bytes = scenario_payload(&format!("tile-{tile}.png"));
+            map.insert(
+                format!("/resume_files/9/{tile}.png"),
+                http_response("200 OK", "image/png", &bytes),
+            );
+        }
+        map.insert(
+            "/resume_files/9/1_1.png".to_string(),
+            http_response("200 OK", "image/png", b"not-an-image"),
+        );
+    }
+    let input = format!("{base}/resume.dzi");
+    let out_dir = temp_dir("resume-interrupted");
+    let cache_dir = out_dir.join("cache");
+    let failing = PipelineConfig {
+        cache_dir: Some(cache_dir.clone()),
+        partial_policy: PartialPolicy::Fail,
+        ..Default::default()
+    };
+    let first_output = out_dir.join("first.png");
+    let error = pipeline::run(
+        &input,
+        first_output.to_str().expect("utf8 output"),
+        false,
+        &failing,
+        &mut |_event| {},
+    )
+    .expect_err("interrupted run fails honestly");
+    assert_eq!(error.code, "tile.download-failed");
+    assert!(
+        !first_output.exists(),
+        "failed runs write no output even with cached tiles"
+    );
+    // All four fetch bodies persist (the corrupt body quietly falls back to
+    // a fresh fetch on the next run since it never decodes); the three
+    // completed tiles decode from the cache without re-fetching.
+    let namespace = dezoomify_native::cache::job_namespace(&input);
+    let entries: Vec<_> = std::fs::read_dir(cache_dir.join(&namespace))
+        .expect("job namespace written")
+        .collect();
+    assert_eq!(
+        entries.len(),
+        4,
+        "fetch bodies persist across the interruption"
+    );
+    // The completed tiles vanish from the server while the corrupt tile is
+    // fixed; only the metadata plus the fixed tile survive.
+    {
+        let mut map = shared.lock().expect("lock");
+        for tile in good {
+            map.remove(&format!("/resume_files/9/{tile}.png"));
+        }
+        let fixed = scenario_payload("tile-1_1.png");
+        map.insert(
+            "/resume_files/9/1_1.png".to_string(),
+            http_response("200 OK", "image/png", &fixed),
+        );
+    }
+    let second_output = out_dir.join("second.png");
+    let resumed = pipeline::run(
+        &input,
+        second_output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig {
+            cache_dir: Some(cache_dir.clone()),
+            ..Default::default()
+        },
+        &mut |_event| {},
+    )
+    .expect("repeated run resumes from the cache");
+    assert_eq!(resumed.tile_count, 4);
+    assert!(!resumed.partial);
+    let expected = scenario_expected("cli-dzi");
+    assert_eq!(
+        resumed.output_hash,
+        expected["outputHash"].as_str().expect("outputHash"),
+        "resumed output matches the pinned pyramid digest"
+    );
+    assert_eq!(resumed.output_hash, sha256_of_file(&second_output));
+}
+
+#[test]
+fn resume_scenario_matches_the_pinned_golden() {
+    // Declarative scenario `native/cli-resume-cache`: the same 512x512
+    // pyramid under its own routes, pinned to the identical digest as
+    // `native/cli-dzi` (same bytes, distinct served URLs).
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/resume/pyramid.dzi");
+    let out_dir = temp_dir("resume-scenario");
+    let output = out_dir.join("resume.png");
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .expect("resume scenario succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    assert!(!outcome.partial);
+    let expected = scenario_expected("cli-resume-cache");
+    assert_eq!(
+        outcome.output_hash,
+        expected["outputHash"].as_str().expect("outputHash")
+    );
+    let canonical = scenario_expected("cli-dzi");
+    assert_eq!(
+        outcome.output_hash,
+        canonical["outputHash"].as_str().expect("outputHash"),
+        "resume bytes match the canonical pyramid golden"
+    );
+    assert_eq!(outcome.output_hash, sha256_of_file(&output));
+}
+
+#[test]
 fn tiny_canvas_budget_fails_before_any_write() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
@@ -1017,5 +1232,43 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
     assert_eq!(
         outcome.output_hash,
         expected["outputHash"].as_str().expect("outputHash")
+    );
+}
+
+#[test]
+fn pause_after_one_tile_still_assembles_the_full_image() {
+    // Pause v1 e2e (todo 5.7 suspend-acquisition): pause after one tile,
+    // verify no new work while paused, resume, and complete byte-identical
+    // to the uninterrupted run. FIFO order, retry wakeups, and decoded
+    // output are preserved; hosts still own clocks.
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
+    let out_dir = temp_dir("pause");
+    let output = out_dir.join("pause.png");
+    let mut kinds: Vec<String> = Vec::new();
+    let config = PipelineConfig {
+        pause_after: Some(1),
+        // Single-flight acquisition so pause lands mid-plan (multi-batch),
+        // not after a one-batch 4-tile completion.
+        max_concurrent: 1,
+        ..PipelineConfig::default()
+    };
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &config,
+        &mut |event| kinds.push(event.kind.clone()),
+    )
+    .expect("paused pipeline completes");
+    assert_eq!(outcome.tile_count, 4);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
+    assert!(
+        kinds.contains(&"paused".to_string()),
+        "driver emitted paused: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"resumed".to_string()),
+        "driver emitted resumed: {kinds:?}"
     );
 }

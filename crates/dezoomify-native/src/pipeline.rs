@@ -35,6 +35,66 @@ pub const WEBP_MAX_SIDE: u32 = 16_383;
 
 /// `iiif-dir` tile width: one entry of the `tiles` block in `info.json`.
 pub const IIIF_TILE_WIDTH: u32 = 512;
+
+/// Fixed tile-worker pool width (todo 3.1): every scheduler, pipeline batch,
+/// and perf smoke uses 16 workers on scoped std threads with backpressure.
+pub const MAX_CONCURRENT: usize = 16;
+
+/// Spill decision threshold (todo 3.1): canvases beyond 512 MiB spill decoded
+/// tiles to a temp dir one at a time and stream the encode, so peak memory
+/// stays near one canvas plus one tile.
+pub const SPILL_THRESHOLD_BYTES: u64 = 512 << 20;
+
+/// CLI canvas budget: 1 GiB of composed RGBA bytes (plus one transient encode
+/// buffer, see [`required_memory_bytes`]). Jobs needing more fail with typed
+/// `output.canvas-limit` before any allocation.
+pub const CLI_MAX_CANVAS_BYTES: u64 = 1 << 30;
+
+/// Desktop canvas budget: 8 GiB of composed RGBA bytes (plus one transient
+/// encode buffer). Matches [`PipelineConfig::default`].
+pub const DESKTOP_MAX_CANVAS_BYTES: u64 = 8 << 30;
+
+/// Composed canvas bytes (RGBA, 4 bytes/pixel) for a `width` by `height`
+/// image. `None` on overflow (callers fail closed with
+/// `output.canvas-limit`).
+#[must_use]
+pub fn canvas_bytes(width: u32, height: u32) -> Option<u64> {
+    u64::from(width)
+        .checked_mul(u64::from(height))?
+        .checked_mul(4)
+}
+
+/// Legacy peak estimate: decoded tile set plus canvas plus transient encode
+/// buffer (three canvases). The 20k by 20k fixture peaks at 4.8 GiB here.
+#[must_use]
+pub fn estimated_peak_legacy_bytes(width: u32, height: u32) -> Option<u64> {
+    canvas_bytes(width, height)?.checked_mul(3)
+}
+
+/// Streaming peak estimate: one canvas plus one 512px tile plus a 64 KiB file
+/// buffer. The 20k by 20k fixture peaks near 1.6 GiB, under half the legacy
+/// peak (see `tests/perf-baseline.json`).
+#[must_use]
+pub fn estimated_peak_streaming_bytes(width: u32, height: u32) -> Option<u64> {
+    canvas_bytes(width, height)?
+        .checked_add(u64::from(IIIF_TILE_WIDTH) * u64::from(IIIF_TILE_WIDTH) * 4)?
+        .checked_add(64 << 10)
+}
+
+/// Required memory for the canvas gate: canvas bytes plus one transient
+/// encode buffer (twice the canvas). The driver compares this against the
+/// configured budget before any allocation (`docs/native-apps.md`).
+#[must_use]
+pub fn required_memory_bytes(width: u32, height: u32) -> Option<u64> {
+    canvas_bytes(width, height)?.checked_mul(2)
+}
+
+/// Spill decision: true when the canvas exceeds [`SPILL_THRESHOLD_BYTES`].
+/// Overflow (`None`) spills fail-closed rather than allocating.
+#[must_use]
+pub fn should_spill(width: u32, height: u32) -> bool {
+    canvas_bytes(width, height).is_some_and(|bytes| bytes > SPILL_THRESHOLD_BYTES)
+}
 /// What to do when required tiles still fail after retries.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PartialPolicy {
@@ -83,10 +143,12 @@ pub struct PipelineConfig {
     /// higher compression only trades slower encodes for smaller files,
     /// never quality.
     pub compression: u8,
-    /// Tile resume cache: when set, each successfully fetched tile body is
-    /// stored under `<cache_dir>/<job>/<key>` (see [`crate::cache`]) and a
-    /// later run of the same job skips the fetch when the stored bytes still
-    /// decode. `None` keeps no tile bytes between runs.
+    /// Tile resume cache: tile response bodies persist under
+    /// `<cache_dir>/<job>/<key>` (see [`crate::cache`]) and a later run of
+    /// the same job skips the fetch when the stored bytes still decode.
+    /// `None` selects the default on-disk cache
+    /// ([`default_tile_cache_dir`]); the cache is on by default for retries
+    /// and resume. Pass an explicit temp dir per run only to isolate a job.
     pub cache_dir: Option<PathBuf>,
     /// Legacy parity: cap the output width. The largest level whose width
     /// fits is downloaded; when none fits, the smallest level is used.
@@ -119,10 +181,22 @@ pub struct PipelineConfig {
     /// Default `Keep` matches the reference `PartialDownload` file behavior
     /// (partial output kept, blank regions, `partial: true`).
     pub partial_policy: PartialPolicy,
+    /// Optional crop rectangle in level pixels (`x,y,w,h`). When set, only
+    /// tiles intersecting the clamped rectangle are fetched and the output
+    /// canvas is the clamped size. Empty or out-of-bounds crops fail before
+    /// acquisition with typed `output.crop-invalid`. Parsed by the CLI
+    /// `--crop` flag (see `dezoomify_core::core::crop::parse_crop`).
+    pub crop: Option<dezoomify_core::core::crop::CropRect>,
     /// Cooperative cancellation: when set, the driver stops issuing new
     /// work at the next effect boundary, cleans up, and reports
     /// `job.cancelled` without writing output. Clones share the flag.
     pub cancel_flag: Arc<AtomicBool>,
+    /// Pause v1 demonstration (todo 5.7 `--pause-after`): when `Some(n)`,
+    /// the driver pauses the engine after `n` tiles are acquired (suspending
+    /// new `acquire-tile` scheduling, finishing in-flight, retaining
+    /// decoded output), verifies no new work while paused, then resumes and
+    /// completes. `None` disables the demonstration. Never set by default.
+    pub pause_after: Option<usize>,
 }
 
 impl Default for PipelineConfig {
@@ -137,7 +211,7 @@ impl Default for PipelineConfig {
             min_interval: Duration::ZERO,
             max_canvas_bytes: 8 << 30,
             compression: 5,
-            cache_dir: None,
+            cache_dir: Some(default_tile_cache_dir()),
             max_width: None,
             max_height: None,
             zoom_level: None,
@@ -145,9 +219,29 @@ impl Default for PipelineConfig {
             largest: false,
             format: None,
             partial_policy: PartialPolicy::Keep,
+            crop: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            pause_after: None,
         }
     }
+}
+
+/// Default on-disk tile-cache root: `<tmp>/dezoomify-tile-cache`. The cache
+/// holds response bodies only (never headers or credentials) under a
+/// versioned per-job namespace; a corrupt entry falls back to a fresh fetch.
+#[must_use]
+pub fn default_tile_cache_dir() -> PathBuf {
+    std::env::temp_dir().join("dezoomify-tile-cache")
+}
+
+/// Effective cache directory: the configured dir, or the default on-disk
+/// cache when `cache_dir` is `None`. The tile cache is on by default.
+#[must_use]
+pub fn effective_cache_dir(config: &PipelineConfig) -> PathBuf {
+    config
+        .cache_dir
+        .clone()
+        .unwrap_or_else(default_tile_cache_dir)
 }
 
 impl PipelineConfig {
@@ -398,6 +492,76 @@ pub(crate) fn blit_onto(
     );
 }
 
+/// Blit one tile onto a cropped canvas.
+///
+/// `destination`/`extent` are level-pixel coordinates from the engine plan;
+/// `crop` is the already-clamped rectangle the target canvas was sized to.
+/// Only the tile/crop intersection is copied, so edge tiles that start
+/// before the crop still assemble seamlessly. Out-of-intersection tiles are
+/// skipped. Overflow-safe via [`dezoomify_core::core::crop`].
+pub(crate) fn blit_onto_cropped(
+    target: &mut image::RgbaImage,
+    destination: Vec2d,
+    extent: Option<Vec2d>,
+    tile: &image::RgbaImage,
+    crop: &dezoomify_core::core::crop::CropRect,
+) {
+    use dezoomify_core::core::crop::crop_intersection;
+    let extent = extent.unwrap_or(Vec2d {
+        x: tile.width(),
+        y: tile.height(),
+    });
+    let tile_w = extent.x.min(tile.width());
+    let tile_h = extent.y.min(tile.height());
+    if tile_w == 0 || tile_h == 0 {
+        return;
+    }
+    let Some((src_x, src_y, copy_w, copy_h, dst_x, dst_y)) =
+        crop_intersection(destination.x, destination.y, tile_w, tile_h, crop)
+    else {
+        return;
+    };
+    if copy_w == 0 || copy_h == 0 {
+        return;
+    }
+    let src_w = copy_w.min(tile.width().saturating_sub(src_x));
+    let src_h = copy_h.min(tile.height().saturating_sub(src_y));
+    if src_w == 0 || src_h == 0 {
+        return;
+    }
+    if dst_x >= target.width() || dst_y >= target.height() {
+        return;
+    }
+    let dst_w = src_w.min(target.width() - dst_x);
+    let dst_h = src_h.min(target.height() - dst_y);
+    if dst_w == 0 || dst_h == 0 {
+        return;
+    }
+    let cropped = image::imageops::crop_imm(tile, src_x, src_y, dst_w, dst_h).to_image();
+    image::imageops::overlay(target, &cropped, i64::from(dst_x), i64::from(dst_y));
+}
+
+/// Clamp a configured crop against the level canvas, mapping empty or
+/// out-of-bounds crops to typed `output.crop-invalid` before acquisition.
+pub(crate) fn clamped_crop_for(
+    crop: Option<dezoomify_core::core::crop::CropRect>,
+    canvas: Vec2d,
+) -> Result<Option<dezoomify_core::core::crop::CropRect>, NativeError> {
+    let Some(requested) = crop else {
+        return Ok(None);
+    };
+    match dezoomify_core::core::crop::clamp_crop(requested, canvas) {
+        Some(clamped) => Ok(Some(clamped)),
+        None => Err(NativeError::new(
+            "output.crop-invalid",
+            format!(
+                "crop {}x{} at {},{} is empty or outside the {}x{} image; choose x,y,w,h inside the level size",
+                requested.w, requested.h, requested.x, requested.y, canvas.x, canvas.y,
+            ),
+        )),
+    }
+}
+
 /// Encode the assembled canvas as PNG at the configured deflate tier.
 /// The default tier is fast, matching the previous fixed encoder byte for
 /// byte; higher `--compression` values trade smaller files for slower
@@ -405,7 +569,7 @@ pub(crate) fn blit_onto(
 /// and EXIF metadata ride in the header when present (reference
 /// `png_encoder.rs:45-117`); tiles without metadata encode identically to
 /// before.
-pub(crate) fn encode_png(
+pub fn encode_png(
     image: &image::RgbaImage,
     compression: image::codecs::png::CompressionType,
     icc_profile: Option<&[u8]>,

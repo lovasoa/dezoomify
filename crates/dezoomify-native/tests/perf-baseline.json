@@ -1,0 +1,8 @@
+{
+  "png_32_len": 2331,
+  "jpeg_32_len": 1947,
+  "tiff_32_len": 3035,
+  "legacy_20k": 4800000000,
+  "streaming_20k": 1601114112,
+  "note": "todo 3.1 perf baseline: deterministic encode sizes for the 32px sweep plus the 20k memory model; wall-time is tracked by criterion benches, byte sizes must stay within 20 percent"
+}

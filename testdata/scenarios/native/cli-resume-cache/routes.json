@@ -1,0 +1,49 @@
+{
+  "routes": [
+    {
+      "route_id": "cli-resume-cache-metadata",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/resume/pyramid.dzi",
+      "status": 200,
+      "headers": {"Content-Type": "application/xml"},
+      "payload": "payloads/fixtures.test/cli/resume/pyramid.dzi"
+    },
+    {
+      "route_id": "cli-resume-cache-tile-0-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/resume/pyramid_files/9/0_0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/resume/tile-0_0.png"
+    },
+    {
+      "route_id": "cli-resume-cache-tile-1-0",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/resume/pyramid_files/9/1_0.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/resume/tile-1_0.png"
+    },
+    {
+      "route_id": "cli-resume-cache-tile-0-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/resume/pyramid_files/9/0_1.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/resume/tile-0_1.png"
+    },
+    {
+      "route_id": "cli-resume-cache-tile-1-1",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/resume/pyramid_files/9/1_1.png",
+      "status": 200,
+      "headers": {"Content-Type": "image/png"},
+      "payload": "payloads/fixtures.test/cli/resume/tile-1_1.png"
+    }
+  ]
+}
