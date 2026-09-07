@@ -38,11 +38,102 @@ rest, and the totals mirror the CLI bulk contract
 (`bulk: X succeeded, Y failed, Z total`). The engine still validates each
 queued request on its own, so capability checks are never UI-only.
 
+### Desktop output and settings
+
+Each desktop job saves one output; the queue saves entries one at a time in
+submission order. The UI format picker offers `png`, `jpeg`, and `tiff`
+(`NATIVE_FORMATS` in `apps/desktop/src/desktopIntegration.ts`), defaulting to
+`png`. The choice is first-class persisted state: `apps/desktop/src/settings.ts`
+stores `outputFormat` in localStorage (`dezoomify.desktop.settings.v1`),
+validates it fail-closed on load, and seeds both the picker radios and the
+destination-grant format on relaunch. The shell grant gate accepts the full
+`png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir` id set (`SUPPORTED_FORMATS` in
+`apps/desktop/src-tauri/src/commands.rs`), but the UI only ever sends the
+three picker ids; the format travels in the `request_destination` grant, never
+in `start_job` (`settingsToInvokeArgs` carries compression, retries, caps,
+directories, and headers only, and the Rust `DesktopSettings` has no format
+field). JPEG quality is `100 - compression` with the shipped default
+compression 5 pinning quality 95; the settings panel (output directory,
+compression, width/height caps, retries, cache directory, `-H` headers) plus
+the aux-panel format radios persist across relaunches and fail closed to
+defaults on invalid drafts. Overwrite is always false: no overwrite
+confirmation UI exists, so `request_destination` validates and grants with
+`overwrite=false` and an existing destination is denied with the typed
+`output.exists` reason for choose-output recovery instead of replaced.
+User-visible behavior lives in the [Desktop app guide](user/desktop-app.md);
+this section states the mechanism only.
+
+The native desktop path emits no catalog notice and no display-only branch.
+The driver folds the catalog internally (first image, largest fitting level;
+only an explicit `answer_choice` overrides them before the grant), the shell
+progress allowlist carries counts only (no `imageCount`), and only the browser
+tainted-canvas path produces display-only. The frontend `catalogNotice` is
+local-only aux geometry for the save-name suggestion, never a protocol notice;
+the shared view's choice-count and display-only sections stay for other apps.
+The window E2E pins both absences on the native save path.
+
+### Desktop partial-output honesty
+
+Partial policy defaults to `Keep` (`PipelineConfig::default`; desktop
+`pipeline_config_for` does not override it). After retries, missing tiles stay
+blank and the kept output publishes to a `.partial` sibling
+(`out.png` becomes `out.partial.png` via `partial_path_for`); the granted
+destination is never touched, so a partial file never masquerades as the
+complete save, and `--no-partial`/`Fail` writes nothing with typed
+`tile.download-failed`. The native driver answers the engine's
+`request-decision{partial}` itself from the configured policy, so the shell
+never surfaces `AwaitingPartialDecision` and no interactive partial dialog is
+expected; `answer_choice` keep/discard markers still map onto the policy for
+the pre-grant window. The shell honors the file-level distinction today but
+not the terminal label: the real-driver pump maps every successful driver
+finish to `Completed`/`completed` on `job-output` (`DriverSuccess` drops the
+`PipelineOutcome.partial` flag), so a kept-partial save reports completion
+while the bytes live at the sibling path. The `PartiallyCompleted` state and
+the `partial-completed` output projection exist and the frontend already
+handles them, but only test helpers reach them today. When the sibling fix
+lands (thread `partial` through `DriverSuccess` and project kept-partial
+finishes as `PartiallyCompleted` with a `partial-completed` event), update
+this paragraph to state the labeled terminal and re-check the window E2E
+sibling assertions.
+
+### Desktop updater
+
+The desktop updater is inert. `tauri.conf.json` ships empty
+`plugins.updater.endpoints` and an empty `pubkey`; `release/config.toml` sets
+`[updater] enabled = false` with empty endpoints and no key file;
+`UPDATER_PUBKEY` stays empty so validation fails closed; the updater plugin is
+not registered (the `tauri_shell.rs` registration gate skips it while the
+pubkey is empty, so no endpoint is ever polled); the frontend issues no update
+calls; and the capability document sets `updater.enabled: false` with an empty
+allowlist while granting only `updater:allow-check`, which no shipped code
+exercises. Users install new versions manually from GitHub Releases with the
+GPG-detached `SHA256SUMS` verification in the
+[Desktop app guide](user/desktop-app.md#install). Activation requires a key
+ceremony that has not happened: a real public key, deployed endpoints,
+`enabled = true`, and plugin registration. No host or key is invented until
+then; see [Releases](releases.md#desktop-updater).
+
 ### Desktop bundles
 
 `cargo xtask build desktop` compiles the lean shell first, then the frontend, then the Tauri window shell, then generates icons, then bundles. `--unsigned-test` stops before the bundler and produces no bundle. The bundle target follows the host: Linux produces `deb` via `cargo tauri build --bundles deb`; Windows produces `msi`/`nsis`; macOS produces `dmg`. A target is available only when its recipe and host tools are present; otherwise the build fails closed naming the exact prerequisites.
 
 Linux needs the webview system packages `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` for the window shell plus `dpkg-deb` (package `dpkg-dev`) for the `deb` bundler; icons come from `scripts/gen-desktop-icons.py`, which runs before the bundler. macOS ships WebKit and needs the Xcode Command Line Tools plus `icons/icon.icns` for the `dmg` target. Windows ships WebView2 and needs WiX v3 for the `msi` target and NSIS for the `nsis` target, plus `icons/icon.ico`. Installers ship unsigned.
+
+Install smoke runs per OS in the desktop CI `bundle-smoke` matrix (see
+[Testing](testing.md#desktop-real-window)): Linux installs the `deb` with
+`dpkg -i` (repairing deps from apt when reported missing) and proves launch
+with a timed stay-alive run under Xvfb; macOS mounts the `dmg` (answering the
+embedded license prompt from stdin) and execs the app binary directly from
+the image; Windows prefers the `nsis` `/S` silent install and falls back to a
+direct release-exe launch smoke when WiX/NSIS are absent from the runner (the
+bundler fails closed by design there, so installer coverage stays with
+nsis-capable hosts). The window shell has no `--version` flag, so every smoke
+proves install plus launch by keeping the app alive for its window
+(15-20 s) and stopping it. Gatekeeper and SIP are never touched on macOS; the
+locally built unsigned Windows binary carries no Mark-of-the-Web, so
+SmartScreen does not intervene and no OS policy is bypassed anywhere. Only
+the Linux `.deb` ships as a release artifact today; the user-facing install
+note lives in the [Desktop app guide](user/desktop-app.md#install).
 
 ### Real-window E2E hook
 
@@ -59,8 +150,9 @@ honors a fail-closed fixed destination: `request_destination` grants
 dialog, so production behavior never changes. Path validation and the typed
 grant still run, so refused destinations keep their stable codes. The lane
 is `cargo xtask test desktop --e2e-window` (Linux, display, tauri-driver,
-and WebKitWebDriver required); the harness lives in
-`apps/desktop/tests/window-e2e/`.
+and WebKitWebDriver required); it runs `window.spec.mjs` (native-feature
+flows) then `formats.spec.mjs` (per-format byte-exact matrix) sequentially.
+The harness lives in `apps/desktop/tests/window-e2e/`.
 
 ## CLI
 

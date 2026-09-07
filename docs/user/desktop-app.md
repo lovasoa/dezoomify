@@ -94,21 +94,47 @@ itself as coming from there. On the command line, this is the
 
 ## Choosing the file format
 
-The output name selects the format. The app saves PNG for names ending in
-`.png`, JPEG at quality 95 for `.jpg` or `.jpeg`, TIFF for `.tif` or
-`.tiff`, and a IIIF tile folder for a name with no extension. Any other
-extension stops the job with a typed error before anything is saved, so
-rename the output instead.
+Before saving, pick the output format: PNG, JPEG, or TIFF. The app remembers
+your choice and offers it again next time. The output name carries the matching
+extension. The app saves PNG for names ending in `.png`, JPEG at quality 95
+for `.jpg` or `.jpeg`, and TIFF for `.tif` or `.tiff`. Any other extension
+stops the job with a typed error before anything is saved, so rename the
+output instead. For IIIF tile folders use the
+[command-line tool](./command-line.md), which saves them directly.
 
 JPEG versions stay small and suit on-screen viewing; TIFF and PNG suit
 archiving and further editing. JPEG cannot address images larger than
-65535 pixels per side; such images save as PNG, TIFF, or a IIIF tile
-folder. The IIIF tile folder holds an `info.json` file plus JPEG tiles and
-suits viewers that read IIIF image folders.
+65535 pixels per side; such images save as PNG or TIFF. The compression
+setting changes the JPEG quality (quality is 100 minus compression, so the
+default 5 means 95); TIFF stays lossless at every level.
 
-If a save stops partway, run it again with the same resume folder so
-already-saved tiles are reused; see
-[resuming an interrupted save](#resuming-an-interrupted-save).
+Each save writes exactly one output, and the app never replaces an existing
+file by itself: if the chosen name already exists, the save is refused with a
+typed error and you pick another name instead.
+
+If some tiles cannot be fetched, the app still writes what it got: the kept
+output lands next to the chosen name with `.partial` inserted before the
+extension (`photo.png` becomes `photo.partial.png`), and the chosen name
+itself stays untouched, so a partial file never masquerades as the complete
+save. Run the job again with the same resume folder to reuse already-saved
+tiles; see [resuming an interrupted save](#resuming-an-interrupted-save).
+
+## Settings
+
+The settings panel holds the output folder suggestion, the compression level,
+optional width and height caps, the retry budget, the resume cache folder,
+and extra request headers. Every setting is validated when you change it:
+invalid values are refused and the last good settings stay in force. Settings
+persist on the device across restarts, together with the output format
+choice.
+
+## If a save fails
+
+A failed save says what went wrong and whether retrying can help; the queue
+row offers **Retry**, and a failed entry never stops the rest. A refused
+destination stops that save with a typed error and the job waits for you to
+choose another name instead. Partially fetched saves need no decision from
+you: they are kept automatically as the `.partial` file described above.
 
 ## Next steps
 
