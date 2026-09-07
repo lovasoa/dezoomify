@@ -59,7 +59,7 @@ test("zoom and reset apply transform-only styles", () => {
   assert.match(canvas.style.transform, /scale\(0.5\)/);
 });
 
-test("controls wire buttons, wheel, and drag without pixel reads", () => {
+test("controls wire buttons, wheel, and bounded drag without pixel reads", () => {
   const d = doc();
   const preview = createPreviewControls();
   preview.initControls(d);
@@ -68,15 +68,26 @@ test("controls wire buttons, wheel, and drag without pixel reads", () => {
   assert.equal(preview.getTransform().scale, 0.625);
   d.ids["preview-zoom-out"].fire("click");
   assert.equal(preview.getTransform().scale, 0.5);
-  d.ids["canvas-wrapper"].fire("wheel", { deltaY: -100, preventDefault: () => {} });
+  let stopped = false;
+  d.ids["canvas-wrapper"].fire("wheel", {
+    deltaY: -100,
+    preventDefault: () => {},
+    stopPropagation: () => { stopped = true; },
+  });
   assert.equal(preview.getTransform().scale, 0.625);
+  assert.equal(preview.getTransform().tx, 0);
+  assert.equal(preview.getTransform().ty, 0);
+  assert.equal(stopped, true);
   d.ids["preview-zoom-reset"].fire("click");
+  d.ids["preview-zoom-100"].fire("click");
   canvas.fire("pointerdown", { clientX: 10, clientY: 20, pointerId: 1 });
-  canvas.fire("pointermove", { clientX: 15, clientY: 30 });
+  canvas.fire("pointermove", { clientX: 1010, clientY: 1020 });
   canvas.fire("pointerup", {});
   const moved = preview.getTransform();
-  assert.equal(moved.tx, 5);
-  assert.equal(moved.ty, 10);
+  assert.equal(moved.tx, 400);
+  assert.equal(moved.ty, 300);
+  d.ids["preview-zoom-reset"].fire("click");
+  assert.deepEqual(preview.getTransform(), { scale: 0.5, tx: 0, ty: 0 });
   d.ids["preview-zoom-100"].fire("click");
   assert.equal(preview.getTransform().scale, 1);
 });

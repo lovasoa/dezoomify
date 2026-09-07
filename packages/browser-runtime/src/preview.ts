@@ -67,7 +67,7 @@ export function createPreviewControls(): PreviewControls {
     try {
       const canvas = doc.getElementById("rendering-canvas");
       if (!canvas) return;
-      canvas.style.transformOrigin = "0 0";
+      canvas.style.transformOrigin = "center center";
       canvas.style.transform = `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`;
       const label = doc.getElementById("preview-zoom-label");
       if (label) label.textContent = `${Math.round(transform.scale * 100)}%`;
@@ -76,8 +76,13 @@ export function createPreviewControls(): PreviewControls {
     }
   }
 
-  function fitScale(doc?: PreviewDocumentLike | null): number {
-    if (!doc) return 1;
+  function geometry(doc?: PreviewDocumentLike | null): {
+    width: number;
+    height: number;
+    viewportWidth: number;
+    viewportHeight: number;
+  } | null {
+    if (!doc) return null;
     try {
       const wrapper = doc.getElementById("canvas-wrapper");
       const canvas = doc.getElementById("rendering-canvas");
@@ -85,11 +90,29 @@ export function createPreviewControls(): PreviewControls {
       const height = canvas?.height ?? 0;
       const viewportWidth = wrapper?.clientWidth ?? 0;
       const viewportHeight = wrapper?.clientHeight ?? 0;
-      if (!(width > 0 && height > 0 && viewportWidth > 0 && viewportHeight > 0)) return 1;
-      return clampPreviewScale(Math.min(1, viewportWidth / width, viewportHeight / height));
+      if (!(width > 0 && height > 0 && viewportWidth > 0 && viewportHeight > 0)) return null;
+      return { width, height, viewportWidth, viewportHeight };
     } catch {
-      return 1;
+      return null;
     }
+  }
+
+  function clampTranslation(doc?: PreviewDocumentLike | null): void {
+    const size = geometry(doc);
+    if (!size) return;
+    const maxTx = Math.max(0, (size.width * transform.scale - size.viewportWidth) / 2);
+    const maxTy = Math.max(0, (size.height * transform.scale - size.viewportHeight) / 2);
+    transform = {
+      ...transform,
+      tx: Math.max(-maxTx, Math.min(maxTx, transform.tx)),
+      ty: Math.max(-maxTy, Math.min(maxTy, transform.ty)),
+    };
+  }
+
+  function fitScale(doc?: PreviewDocumentLike | null): number {
+    const size = geometry(doc);
+    if (!size) return 1;
+    return clampPreviewScale(Math.min(1, size.viewportWidth / size.width, size.viewportHeight / size.height));
   }
 
   function resetTransform(doc?: PreviewDocumentLike | null): PreviewTransform {
@@ -102,12 +125,14 @@ export function createPreviewControls(): PreviewControls {
     const value = typeof factor === "number" ? factor : Number(factor);
     const next = clampPreviewScale(transform.scale * (Number.isFinite(value) ? value : 1));
     transform = { ...transform, scale: next };
+    clampTranslation(doc);
     applyTransform(doc);
     return getTransform();
   }
 
   function setScale(scale: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
     transform = { ...transform, scale: clampPreviewScale(scale) };
+    clampTranslation(doc);
     applyTransform(doc);
     return getTransform();
   }
@@ -115,6 +140,7 @@ export function createPreviewControls(): PreviewControls {
   function panBy(dx: number, dy: number, doc?: PreviewDocumentLike | null): void {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
     transform = { ...transform, tx: transform.tx + dx, ty: transform.ty + dy };
+    clampTranslation(doc);
     applyTransform(doc);
   }
 
@@ -139,6 +165,7 @@ export function createPreviewControls(): PreviewControls {
         (event) => {
           if (wrapper.style.display === "none") return;
           (event as { preventDefault?: () => void }).preventDefault?.();
+          (event as { stopPropagation?: () => void }).stopPropagation?.();
           const delta = (event as { deltaY?: number }).deltaY ?? 0;
           if (!Number.isFinite(delta) || delta === 0) return;
           // Use a continuous curve so high-frequency trackpad events do not

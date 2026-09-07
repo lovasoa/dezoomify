@@ -52,6 +52,8 @@ test("preview controls exist in the page and theme", () => {
   }
   const css = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/styles/theme.css"), "utf8");
   assert.ok(css.includes(".dz-preview-controls"), "theme styles the preview toolbar");
+  assert.ok(css.includes("overflow: hidden"), "preview frame does not natively scroll with zoom");
+  assert.ok(css.includes("overflow: visible"), "canvas stack does not create a second scroll surface");
   assert.ok(css.includes("cursor: grab"), "canvas uses a live grab cursor, not dead zoom-in");
   assert.ok(!css.includes("cursor: zoom-in"), "dead cursor:zoom-in removed");
 });
