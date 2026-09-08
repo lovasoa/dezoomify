@@ -140,7 +140,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download ${{ github.run_id }} -n release-plan -D dist
+          for attempt in 1 2 3 4 5; do
+            rm -rf dist
+            if gh run download ${{ github.run_id }} -n release-plan -D dist; then
+              break
+            fi
+            test "$attempt" -lt 5 && sleep 10
+          done
           v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version"])')"
           mkdir -p target/release-dist
           mv "dist/$v" target/release-dist/
