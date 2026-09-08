@@ -228,14 +228,7 @@ jobs:
           zip=$(ls dezoomify-extension-firefox-*.zip)
           enc=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$guid")
           amo_token() {
-            AMO_JWT_ISSUER="$AMO_JWT_ISSUER" AMO_JWT_SECRET="$AMO_JWT_SECRET" python3 -c '
-            import base64, hashlib, hmac, json, os, time, uuid
-            header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b"=")
-            now = int(time.time())
-            payload = base64.urlsafe_b64encode(json.dumps({"iss": os.environ["AMO_JWT_ISSUER"], "jti": str(uuid.uuid4()), "iat": now, "exp": now + 300}).encode()).rstrip(b"=")
-            sig = base64.urlsafe_b64encode(hmac.new(os.environ["AMO_JWT_SECRET"].encode(), header + b"." + payload, hashlib.sha256).digest()).rstrip(b"=")
-            print((header + b"." + payload + b"." + sig).decode())
-            '
+            AMO_JWT_ISSUER="$AMO_JWT_ISSUER" AMO_JWT_SECRET="$AMO_JWT_SECRET" python3 -c 'import base64,hashlib,hmac,json,os,time,uuid; header=base64.urlsafe_b64encode(json.dumps({"alg":"HS256","typ":"JWT"}).encode()).rstrip(b"="); now=int(time.time()); payload=base64.urlsafe_b64encode(json.dumps({"iss":os.environ["AMO_JWT_ISSUER"],"jti":str(uuid.uuid4()),"iat":now,"exp":now+300}).encode()).rstrip(b"="); sig=base64.urlsafe_b64encode(hmac.new(os.environ["AMO_JWT_SECRET"].encode(),header+b"."+payload,hashlib.sha256).digest()).rstrip(b"="); print((header+b"."+payload+b"."+sig).decode())'
           }
           auth=$(amo_token)
           upload_resp=$(curl -sS --proto '=https' --max-time 300 -w '\n%{http_code}' \
