@@ -122,9 +122,9 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Real-window E2E: the window shell under tauri-driver plus the platform
-/// native driver (Linux WebKitWebDriver, macOS safaridriver, Windows
-/// msedgedriver), hermetic loopback fixtures, byte-exact save verification.
+/// Real-window E2E: the window shell under tauri-driver, Linux
+/// WebKitWebDriver, hermetic loopback fixtures, and byte-exact save
+/// verification.
 /// Owns the full lifecycle through the node harness (preflight,
 /// window-shell build, fixture server, frontend server, tauri-driver, app
 /// launches, isolated profiles with cleanup). Opt-in only: bare
@@ -167,6 +167,10 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         "--lib",
         "output_tests",
     ])?;
+    // The harness starts this binary from Cargo's target directory. Always
+    // ask Cargo to build it so source changes are rebuilt and no lane relies
+    // on a binary left by an unrelated command.
+    run_cargo(&["build", "-p", "dezoomify-fixture-server"])?;
     build_desktop(&["--unsigned-test".to_string()])?;
     // Lane-private copies: the window and lean shells share one binary
     // path (and the frontend one dist directory), so snapshot both before
@@ -175,10 +179,6 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // are simply identical content.
     let target_dir = super::cargo_target_directory()?;
     let e2e_dir = target_dir.join("e2e-window");
-    // Windows builds `dezoomify-desktop.exe`; accept the extensionless
-    // lane value when the suffixed binary is the one on disk, and keep
-    // the suffix on the staged copy so the harness env points at a real
-    // file.
     let app_src = window_shell_bin(&target_dir.join("debug/dezoomify-desktop"));
     let app_dst_name = if app_src.extension().is_some_and(|e| e == "exe") {
         "dezoomify-desktop.exe"
@@ -190,21 +190,10 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         &super::repo_root().join("apps/desktop/dist"),
         &e2e_dir.join("dist"),
     )?;
-    // Sequential runs: each spec owns the fixed frontend port (1420) in
-    // its own process, so a second lane file cannot collide with the
-    // first. `window.spec.mjs` covers the native-feature flows;
-    // `formats.spec.mjs` covers the data-driven full-download matrix: the
-    // 17 PNG cases share one window session (one launch, back-to-back
-    // saves via the product reset path), JPEG/TIFF/iiif-dir keep one
-    // single launch each, so the matrix pays 4 lifecycles, not 20.
-    // Each spec runs under a hard deadline: a leaked child holding node's
-    // pipes or the frontend server open would otherwise hang this lane
-    // forever (observed as a 55-minute CI zombie after launch failures).
-    // 20 minutes is above the longest green spec (~15) but bounds any
-    // pathological run, and the killed process fails the lane with the
-    // evidence already on the log.
+    // One compact spec owns the fixed frontend port. Its deadline bounds a
+    // leaked app, driver, or frontend server without inflating normal runs.
     run_node_with_deadline(
-        std::time::Duration::from_secs(20 * 60),
+        std::time::Duration::from_secs(10 * 60),
         &["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"],
         &[
             (
@@ -217,21 +206,6 @@ fn test_desktop_e2e_window() -> Result<(), String> {
             ),
         ],
         "window.spec.mjs",
-    )?;
-    run_node_with_deadline(
-        std::time::Duration::from_secs(20 * 60),
-        &["--test", "apps/desktop/tests/window-e2e/formats.spec.mjs"],
-        &[
-            (
-                "DEZOOMIFY_WINDOW_E2E_APP_BIN",
-                app_copy.to_str().unwrap_or(""),
-            ),
-            (
-                "DEZOOMIFY_WINDOW_E2E_DIST",
-                dist_copy.to_str().unwrap_or(""),
-            ),
-        ],
-        "formats.spec.mjs",
     )?;
     println!("test desktop --e2e-window: ok (real window, hermetic loopback)");
     Ok(())

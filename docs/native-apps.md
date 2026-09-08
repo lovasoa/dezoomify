@@ -154,11 +154,11 @@ honors a fail-closed fixed destination: `request_destination` grants
 `DEZOOMIFY_E2E_FIXED_DESTINATION` without showing the dialog only when
 `DEZOOMIFY_E2E_WINDOW` is also `1`. Either variable unset restores the
 dialog, so production behavior never changes. Path validation and the typed
-grant still run, so refused destinations keep their stable codes. The lane
-is `cargo xtask test desktop --e2e-window` (Linux, display, tauri-driver,
-and WebKitWebDriver required); it runs `window.spec.mjs` (native-feature
-flows) then `formats.spec.mjs` (per-format byte-exact matrix) sequentially.
-The harness lives in `apps/desktop/tests/window-e2e/`.
+grant still run, so refused destinations keep their stable codes. The Linux-only lane is `cargo xtask test desktop --e2e-window` (display,
+tauri-driver, and WebKitWebDriver required). It explicitly builds the fixture
+server and runs `window.spec.mjs`, which covers submit-to-save, cancellation,
+and confirmed deep-link save through the real window. The harness lives in
+`apps/desktop/tests/window-e2e/`.
 
 ## CLI
 

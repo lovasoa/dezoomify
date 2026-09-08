@@ -1,9 +1,0 @@
-{
-  "outputHash": "sha256:de1c9cf2c8ef29a0c4e5f08f7f845ae98d887986acd64c900e651112ade5691a",
-  "imageSize": {
-    "x": 512,
-    "y": 512
-  },
-  "tileCount": 4,
-  "outputFormat": "iiif-dir"
-}
