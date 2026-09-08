@@ -52,13 +52,13 @@ fn release_sign(plan: &Plan, artifacts: &Path) -> Result<(), String> {
         }
         let sig = artifacts.join(format!("{name}.sig"));
         let mut cmd = Command::new("gpg");
-        cmd.env("GNUPGHOME", &home)
-            .args(["--batch", "--yes", "--detach-sign", "--output"])
-            .arg(&sig)
-            .arg(&file);
+        cmd.env("GNUPGHOME", &home).args(["--batch", "--yes"]);
         if let Ok(pass) = std::env::var(GPG_PASSPHRASE_ENV) {
             cmd.args(["--pinentry-mode", "loopback", "--passphrase", &pass]);
         }
+        cmd.args(["--detach-sign", "--output"])
+            .arg(&sig)
+            .arg(&file);
         let status = cmd
             .status()
             .map_err(|e| format!("failed to run gpg: {e}"))?;
