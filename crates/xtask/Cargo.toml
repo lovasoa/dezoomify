@@ -14,6 +14,9 @@ serde_json.workspace = true
 sha2.workspace = true
 toml.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 
 # 6.1 (unblocked for cargo 1.98): pedantic cleanups pending.

@@ -127,7 +127,8 @@ installed; the app is fully functional from `cargo xtask dev web` alone.
 
 `dev desktop` starts the Vite server on `http://localhost:1420/`, waits for it
 to accept connections, and then launches the Tauri window shell. The frontend
-server is stopped when the shell exits.
+server is non-interactive and its complete process tree is stopped when the
+shell exits, including a second launch forwarded to an existing desktop app.
 
 For example, use `cargo xtask dev extension --browser chromium` or
 `cargo xtask dev web`. Start standalone deterministic origins with

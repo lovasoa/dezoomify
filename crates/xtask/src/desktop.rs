@@ -25,6 +25,9 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 const DESKTOP_PKG: &str = "dezoomify-desktop";
 const DESKTOP_DEV_HOST: &str = "localhost";
 const DESKTOP_DEV_PORT: u16 = 1420;
@@ -472,7 +475,7 @@ pub fn dev_desktop() -> Result<(), String> {
 fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
     let root = super::repo_root();
     let mut command = pnpm_command()?;
-    let mut child = command
+    command
         .args([
             "--filter",
             "./apps/desktop",
@@ -480,23 +483,20 @@ fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
             "--host",
             DESKTOP_DEV_HOST,
         ])
-        .current_dir(&root)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .current_dir(&root);
+    configure_desktop_frontend(&mut command);
+    let child = command
         .spawn()
         .map_err(|e| format!("failed to start the desktop frontend: {e}"))?;
+    let mut frontend = DesktopFrontend { child };
 
-    if let Err(error) = wait_for_desktop_frontend(&mut child) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(error);
-    }
+    wait_for_desktop_frontend(&mut frontend.child)?;
     // A pre-existing server can answer the probe before this Vite child has
     // reported its strict-port collision. Give the child one short turn to
     // fail so the desktop shell never attaches to stale frontend assets.
     std::thread::sleep(Duration::from_secs(1));
-    if let Some(status) = child
+    if let Some(status) = frontend
+        .child
         .try_wait()
         .map_err(|e| format!("cannot inspect the desktop frontend: {e}"))?
     {
@@ -504,7 +504,20 @@ fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
             "desktop frontend exited after startup on http://{DESKTOP_DEV_HOST}:{DESKTOP_DEV_PORT}/ ({status}); another Vite server may already own that port"
         ));
     }
-    Ok(DesktopFrontend { child })
+    Ok(frontend)
+}
+
+/// Vite is a managed background service for this command, not an interactive
+/// terminal peer. A private process group lets cleanup include pnpm's Vite
+/// descendant, while a closed stdin prevents Vite's readline shortcuts from
+/// competing with the shell or failing with EIO when the desktop exits.
+fn configure_desktop_frontend(command: &mut Command) {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    command.process_group(0);
 }
 
 /// Wait until Vite accepts connections, while surfacing an early child exit
@@ -552,10 +565,44 @@ struct DesktopFrontend {
 
 impl Drop for DesktopFrontend {
     fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
+        terminate_frontend_process_tree(&mut self.child);
+    }
+}
+
+fn terminate_frontend_process_tree(child: &mut Child) {
+    #[cfg(unix)]
+    signal_process_group(child.id(), libc::SIGTERM);
+
+    #[cfg(windows)]
+    if child.try_wait().ok().flatten().is_none() {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    if child.try_wait().ok().flatten().is_none() {
+        #[cfg(unix)]
+        signal_process_group(child.id(), libc::SIGKILL);
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+fn signal_process_group(leader: u32, signal: libc::c_int) {
+    if let Ok(leader) = libc::pid_t::try_from(leader) {
+        // SAFETY: `leader` is the id returned for the child placed in its own
+        // process group above. A negative pid targets that group only.
+        unsafe {
+            libc::kill(-leader, signal);
         }
-        let _ = self.child.wait();
     }
 }
 
@@ -1014,5 +1061,50 @@ mod tests {
         // Linux/macOS behavior stays byte-identical: a bare `pnpm` lookup.
         let cmd = super::pnpm_command().expect("pnpm command builds");
         assert_eq!(cmd.get_program(), "pnpm");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn desktop_frontend_drop_kills_descendants() {
+        let root =
+            std::env::temp_dir().join(format!("dezoomify-frontend-cleanup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create cleanup fixture");
+        let pid_file = root.join("descendant.pid");
+        let mut command = std::process::Command::new("sh");
+        command.args([
+            "-c",
+            "sleep 30 & descendant=$!; echo \"$descendant\" > \"$1\"; wait",
+            "sh",
+            pid_file.to_str().expect("utf-8 temp path"),
+        ]);
+        super::configure_desktop_frontend(&mut command);
+        let frontend = super::DesktopFrontend {
+            child: command.spawn().expect("spawn process tree"),
+        };
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !pid_file.is_file() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let descendant: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .expect("descendant pid file")
+            .trim()
+            .parse()
+            .expect("numeric descendant pid");
+
+        drop(frontend);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            // SAFETY: signal 0 only checks the process id written by the test
+            // child and does not alter that process.
+            let exists = unsafe { libc::kill(descendant, 0) } == 0;
+            if !exists || std::time::Instant::now() >= deadline {
+                assert!(!exists, "frontend descendant survived owner cleanup");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 }
