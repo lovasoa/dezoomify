@@ -151,8 +151,32 @@ body {
   padding-top: 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0;
   text-align: left;
+}
+
+#dz-desktop-settings .dz-settings-disclosure {
+  width: 100%;
+}
+
+#dz-desktop-settings .dz-settings-disclosure > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--dz-text-primary);
+  font-weight: 600;
+  padding: 0.15rem 0;
+}
+
+#dz-desktop-settings .dz-settings-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+#dz-desktop-settings .dz-settings-disclosure[open] > summary {
+  margin-bottom: 1rem;
 }
 
 #dz-desktop-settings .dz-notice-title,
@@ -161,9 +185,19 @@ body {
 }
 
 #dz-desktop-settings .dz-settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem 1rem;
+}
+
+#dz-desktop-settings .dz-settings-form > .dz-details,
+#dz-desktop-settings .dz-settings-form > .dz-actions-row {
+  grid-column: 1 / -1;
+}
+
+#dz-desktop-settings .dz-settings-form > .dz-btn-secondary {
+  align-self: end;
+  justify-self: start;
 }
 
 #dz-desktop-settings .dz-settings-field {
@@ -180,7 +214,8 @@ body {
 }
 
 #dz-desktop-settings input,
-#dz-desktop-settings textarea {
+#dz-desktop-settings textarea,
+#dz-desktop-settings select {
   width: 100%;
   font: inherit;
   color: var(--dz-text-primary);
@@ -192,13 +227,21 @@ body {
 
 @media (prefers-color-scheme: dark) {
   #dz-desktop-settings input,
-  #dz-desktop-settings textarea {
+  #dz-desktop-settings textarea,
+  #dz-desktop-settings select {
     background: #1c1a18;
   }
 }
 
 #dz-desktop-settings .dz-actions-row {
   margin-top: 0.5rem;
+}
+
+@media (max-width: 560px) {
+  #dz-desktop-settings .dz-settings-form {
+    grid-template-columns: 1fr;
+  }
+
 }
 
 #dz-settings-error {

@@ -125,6 +125,10 @@ prints its URLs and cleanup instructions:
 (the relay core lives once in `src/server/proxy.ts`). Nothing extra is
 installed; the app is fully functional from `cargo xtask dev web` alone.
 
+`dev desktop` starts the Vite server on `http://localhost:1420/`, waits for it
+to accept connections, and then launches the Tauri window shell. The frontend
+server is stopped when the shell exits.
+
 For example, use `cargo xtask dev extension --browser chromium` or
 `cargo xtask dev web`. Start standalone deterministic origins with
 `cargo xtask fixtures serve --port 0`. Development commands bind local services

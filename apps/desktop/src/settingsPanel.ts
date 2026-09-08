@@ -48,10 +48,7 @@ export function getEffectiveSettings(
   const parsedHeaders = parseHeadersText(headersRaw);
   const raw = {
     outputDir: readInput("dz-settings-output-dir"),
-    // The output format picker lives in the aux panel (radio group), not in
-    // this settings form: preserve the persisted choice here so saving
-    // download settings never clobbers the chosen encoder.
-    outputFormat: fallback.outputFormat,
+    outputFormat: readInput("dz-settings-output-format") || fallback.outputFormat,
     compression: readInput("dz-settings-compression"),
     maxWidth: readInput("dz-settings-max-width"),
     maxHeight: readInput("dz-settings-max-height"),
@@ -142,14 +139,16 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   panel.setAttribute("role", "region");
   panel.setAttribute("aria-labelledby", "dz-settings-title");
 
-  const title = doc.createElement("h2");
-  title.className = "dz-notice-title";
-  title.id = "dz-settings-title";
-  title.textContent = t("desktop.settings.title");
+  const disclosure = doc.createElement("details");
+  disclosure.className = "dz-settings-disclosure";
+  const summary = doc.createElement("summary");
+  summary.id = "dz-settings-title";
+  summary.textContent = t("desktop.settings.title");
+  disclosure.appendChild(summary);
   const desc = doc.createElement("p");
   desc.className = "dz-notice-message";
   desc.textContent = t("desktop.settings.desc");
-  panel.append(title, desc);
+  disclosure.appendChild(desc);
 
   const form = doc.createElement("div");
   form.className = "dz-settings-form";
@@ -185,6 +184,25 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
     view.settings.outputDir ?? "",
     { placeholder: "/home/you/Pictures" },
   );
+  const formatLabel = doc.createElement("label");
+  formatLabel.className = "dz-settings-field";
+  formatLabel.setAttribute("for", "dz-settings-output-format");
+  const formatText = doc.createElement("span");
+  formatText.textContent = t("desktop.panel.outputFormat");
+  const formatSelect = doc.createElement("select");
+  formatSelect.id = "dz-settings-output-format";
+  formatSelect.name = "dz-settings-output-format";
+  formatSelect.className = "dz-input";
+  for (const option of ["png", "jpeg", "tiff"]) {
+    const el = doc.createElement("option");
+    el.value = option;
+    el.textContent = option.toUpperCase();
+    el.selected = option === view.settings.outputFormat;
+    formatSelect.appendChild(el);
+  }
+  formatSelect.addEventListener("change", () => view.onPersist());
+  formatLabel.append(formatText, formatSelect);
+  form.appendChild(formatLabel);
   const compressionInput = addLabeledInput(
     "dz-settings-compression",
     t("desktop.settings.compression"),
@@ -252,7 +270,6 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
 
   const headersDetails = doc.createElement("details");
   headersDetails.className = "dz-details";
-  headersDetails.open = true;
   const headersSummary = doc.createElement("summary");
   headersSummary.className = "dz-summary";
   headersSummary.textContent = t("desktop.settings.headersAdv");
@@ -275,7 +292,7 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   headersDetails.append(headersSummary, headersLabel);
   form.appendChild(headersDetails);
 
-  panel.appendChild(form);
+  disclosure.appendChild(form);
 
   if (view.error) {
     const err = doc.createElement("p");
@@ -284,7 +301,7 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
     err.setAttribute("role", "alert");
     err.setAttribute("aria-live", "assertive");
     err.textContent = view.error;
-    panel.appendChild(err);
+    disclosure.appendChild(err);
   }
 
   const row = doc.createElement("div");
@@ -295,7 +312,8 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   resetBtn.textContent = t("desktop.settings.reset");
   resetBtn.addEventListener("click", () => view.onReset());
   row.appendChild(resetBtn);
-  panel.appendChild(row);
+  disclosure.appendChild(row);
+  panel.appendChild(disclosure);
 
   card.appendChild(panel);
 }

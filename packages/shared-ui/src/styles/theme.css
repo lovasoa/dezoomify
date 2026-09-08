@@ -278,7 +278,7 @@ abbr[title] {
   border: 1px solid var(--dz-surface-border);
   border-radius: var(--dz-radius);
   box-shadow: var(--dz-surface-shadow);
-  padding: 2.5rem 3rem 2.25rem;
+  padding: 2.25rem 2.5rem;
   color: var(--dz-text-primary);
 }
 
@@ -310,11 +310,12 @@ abbr[title] {
 }
 
 .dz-description {
-  text-align: left;
-  font-size: 0.98rem;
-  line-height: 1.65;
-  color: var(--dz-text-primary);
-  margin-bottom: 1.5rem;
+  text-align: center;
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--dz-text-secondary);
+  max-width: 42rem;
+  margin: 0 auto 0.75rem;
 }
 
 .dz-description strong {
@@ -436,7 +437,25 @@ abbr[title] {
 .dz-form {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.7rem;
+}
+
+@media (min-width: 561px) {
+  .dz-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .dz-form .dz-input-wrapper {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .dz-form .dz-button-row {
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
 
 /* Full-Width URL Input */
@@ -637,13 +656,13 @@ abbr[title] {
 /* Primary Tactile Action Button */
 .dz-button-row {
   display: flex;
-  justify-content: center;
-  margin-top: 0.25rem;
+  justify-content: flex-end;
+  margin-top: 0;
 }
 
 .dz-btn-tactile {
-  min-width: 200px;
-  min-height: 46px;
+  min-width: 126px;
+  min-height: 42px;
   height: auto;
   padding: 0.55rem 2rem;
   font-family: inherit;
@@ -663,6 +682,12 @@ abbr[title] {
   text-align: center;
   gap: 0.5rem;
   box-sizing: border-box;
+}
+
+.dz-button-key {
+  color: var(--dz-text-muted);
+  font-size: 0.95em;
+  font-weight: 500;
 }
 
 .dz-btn-tactile:hover {
@@ -1832,6 +1857,10 @@ abbr[title] {
   .dz-btn-tactile {
     width: 100%;
     min-width: 0;
+  }
+
+  .dz-description {
+    text-align: left;
   }
 
   .dz-nav {
