@@ -36,6 +36,9 @@ function startFrontend() {
     cwd: REPO_ROOT,
     stdio: ["ignore", "ignore", "pipe"],
     detached: process.platform !== "win32",
+    // Node cannot execute a .cmd directly on Windows (spawn EINVAL);
+    // run it through the shell, which resolves pnpm.cmd from PATH.
+    shell: process.platform === "win32",
   });
   let stderr = "";
   let spawnError = null;
