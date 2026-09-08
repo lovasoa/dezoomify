@@ -170,7 +170,8 @@ test("desktop footer is a compact external-link bar, not a disclosure", () => {
   assert.match(css, /\.dz-site-footer \{[\s\S]*?min-height: 30px;/, "thin footer bar");
   assert.ok(!css.includes(".dz-site-footer { display: none; }"), "footer stays visible");
   assert.match(main, /handleOpenExternalLink\(resolved\)/, "footer links route through external navigation");
-  assert.match(integration, /plugin:opener\|open_url/, "external navigation uses the native opener");
+  assert.match(integration, /import \{ openUrl \} from "@tauri-apps\/plugin-opener"/, "uses Tauri's opener binding");
+  assert.match(integration, /await openUrl\(url\)/, "external navigation opens the URL through Tauri");
 });
 
 test("generated files are canonical bytes (LF, pretty, no drift)", () => {

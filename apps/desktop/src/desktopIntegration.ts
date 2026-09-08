@@ -4,6 +4,8 @@
 // No imports from apps/web, apps/extension, browser-session fetch, or the
 // metadata CORS proxy. The desktop app uses native effects only.
 
+import { openUrl } from "@tauri-apps/plugin-opener";
+
 // Keep erasable syntax only so node type-stripping can read this file.
 
 export const PROTOCOL_MIN = "1.0" as const;
@@ -301,11 +303,11 @@ export function createDesktopIntegration(opts?: {
     if (!invoke) {
       return { opened: true, reason: "external" };
     }
-    // Only the granted opener command is used: the capability document
-    // grants `opener:allow-open-url` alone, so legacy `open` names would be
-    // denied. No fallback is attempted; denial surfaces a typed error.
+    // Use the official guest binding rather than hand-written plugin IPC.
+    // It targets the registered opener plugin while the capability document
+    // grants `opener:allow-open-url` for this window.
     try {
-      await invoke("plugin:opener|open_url", { url });
+      await openUrl(url);
       return { opened: true, reason: "external" };
     } catch (error) {
       return {

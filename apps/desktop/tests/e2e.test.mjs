@@ -216,6 +216,7 @@ function stubInvoke(grants) {
       if (mode === "cancelled") return { outcome: "cancelled", reason: "user-cancelled" };
       return { outcome: "denied", reason: "destination-denied", code: "output.destination-denied" };
     }
+    if (cmd === "plugin:opener|open_url") return null;
     throw new Error(`command.unknown: ${cmd}`);
   };
   return { calls, invoke };
@@ -228,7 +229,11 @@ test("hermetic desktop job: submit, choose, save, deep-link confirm, cancel", { 
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-desktop-e2e-"));
   let server = null;
   const savedGlobals = globalThis.__TAURI_INTERNALS__;
+  const savedWindow = globalThis.window;
   try {
+    // The official opener binding reaches Tauri through window internals.
+    // Production always supplies window; make the hermetic host match it.
+    globalThis.window = globalThis;
     server = await startFixtureServer(work);
     const input = `${server.base}/fetch?url=${GATEWAY_DZI}`;
 
@@ -274,6 +279,14 @@ test("hermetic desktop job: submit, choose, save, deep-link confirm, cancel", { 
       "answer_choice",
       "request_destination",
     ]);
+
+    const externalUrl = "https://dezoomify.ophir.dev/privacy.html";
+    const opened = await app.openExternalLink(externalUrl);
+    assert.deepEqual(opened, { opened: true, reason: "external" }, "official opener accepts footer URLs");
+    assert.deepEqual(calls.at(-1), {
+      cmd: "plugin:opener|open_url",
+      args: { url: externalUrl, with: undefined },
+    });
 
     // request_destination validation rejects bad jobs, formats, and names
     // before any effect (validation-only, no invoke call needed).
@@ -407,6 +420,8 @@ test("hermetic desktop job: submit, choose, save, deep-link confirm, cancel", { 
   } finally {
     if (savedGlobals === undefined) delete globalThis.__TAURI_INTERNALS__;
     else globalThis.__TAURI_INTERNALS__ = savedGlobals;
+    if (savedWindow === undefined) delete globalThis.window;
+    else globalThis.window = savedWindow;
     if (server) server.proc.kill();
     rmSync(work, { recursive: true, force: true });
   }
