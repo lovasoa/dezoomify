@@ -38,10 +38,8 @@
 // - Encoder matrix: PNG (all formats above), JPEG (deepzoom), TIFF
 //   (deepzoom) pass. `iiif-dir` (extensionless destination) passes via the
 //   E2E destination hook (direct backend `request_destination` with
-//   format=iiif-dir, bypassing the UI which offers only png/jpeg/tiff
-//   radios): product decision is UI parity deferred (docs already promise
-//   extensionless IIIF trees; backend + CLI + lean pipeline cover it in
-//   `desktop/basic-iiif-dir`), window shell proven here.
+//   format=iiif-dir). The UI exposes the same directory format; the direct
+//   hook isolates native publication behavior from frontend interaction.
 // Adding tile chains needed new `desktop/e2e-formats` scenario payloads
 // plus manifest.json entries (all consumers benefit; `cargo xtask fixtures
 // verify` stays green).
@@ -564,16 +562,11 @@ test("formats: deepzoom saves a byte-exact TIFF", { timeout: 180000 }, async () 
 // find the token in the page", gateway fails "host fetch failed".
 test("formats: google_arts_and_culture has no servable hermetic fixture", { timeout: 60000, skip: "no deterministic hermetic input: core PageInfo regex forbids ':' (no scheme, no :PORT) so direct loopback can never parse, and the gateway outer breaks UrlSuffix(=g); CLI: direct 'Unable to find the token', gateway 'host fetch failed'" }, async () => {});
 
-// Encoder matrix gap closed via the E2E destination hook (no app change):
-// the window UI offers only png/jpeg/tiff radios
-// (#dz-output-format-group input[name="dz-output-format"]), so no DOM path
-// can request format=iiif-dir. The backend accepts it (SUPPORTED_FORMATS
-// includes iiif-dir; lean coverage in desktop/basic-iiif-dir). This case
-// proves the real window shell backend via direct Tauri invokes (start_job
+// The window UI and backend both expose iiif-dir. This case proves the real
+// window shell backend via direct Tauri invokes (start_job
 // plus request_destination with format iiif-dir, granted to the E2E fixed
-// destination), bypassing the frontend NATIVE_ENCODERS gate. Product
-// decision: UI encoder parity deferred (docs/user/desktop-app.md already
-// promises extensionless IIIF trees); no production UI change here.
+// destination), keeping the byte-exact encoder assertion independent of DOM
+// interaction. The ordinary window suite covers picker persistence.
 test("formats: iiif-dir destination saves a byte-exact tile tree", { timeout: 180000 }, async () => {
   const expected = e2eGolden("iiif-dir");
   await runWindowFlow({

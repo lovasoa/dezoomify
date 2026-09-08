@@ -57,7 +57,7 @@ const EXPECTED_CHANNELS = [
   "dezoomify://job-error",
   "dezoomify://deep-link-pending",
 ];
-const EXPECTED_ENCODERS = ["png", "jpeg", "tiff"];
+const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
 const NATIVE_HOST = "dev.ophir.dezoomify.native_host";
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");

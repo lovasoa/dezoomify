@@ -12,14 +12,14 @@ export const PROTOCOL_VERSION = "1.0" as const;
 export const NATIVE_HOST_NAME = "dev.ophir.dezoomify.native_host" as const;
 export const APP_IDENTIFIER = "dev.ophir.dezoomify" as const;
 
-export const NATIVE_ENCODERS = ["png", "jpeg", "tiff"] as const;
+export const NATIVE_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"] as const;
 export type NativeEncoder = (typeof NATIVE_ENCODERS)[number];
 
-// Native output formats accepted by the save destination grant. Same list
-// as NATIVE_ENCODERS under a second name for the format-selector call sites.
-export const NATIVE_FORMATS = NATIVE_ENCODERS;
+// Native output formats accepted by the save destination grant. File
+// encoders plus the IIIF directory output exposed by the desktop picker.
 export type NativeFormat = NativeEncoder | "iiif-dir";
-const SUPPORTED_SAVE_FORMATS: readonly NativeFormat[] = [...NATIVE_ENCODERS, "iiif-dir"];
+export const NATIVE_FORMATS: readonly NativeFormat[] = [...NATIVE_ENCODERS, "iiif-dir"];
+const SUPPORTED_SAVE_FORMATS: readonly NativeFormat[] = NATIVE_FORMATS;
 
 // Exact Tauri command registry. Must match
 // apps/desktop/src-tauri/src/commands.rs COMMANDS and the generated
@@ -133,7 +133,9 @@ function extensionFor(format: NativeFormat): string {
   if (format === "png") return ".png";
   if (format === "jpeg") return ".jpg";
   if (format === "iiif-dir") return ".iiif";
-  return ".tif";
+  if (format === "tiff") return ".tif";
+  if (format === "zif") return ".zif";
+  return ".webp";
 }
 
 // Minimal Tauri IPC access. The Tauri runtime always injects

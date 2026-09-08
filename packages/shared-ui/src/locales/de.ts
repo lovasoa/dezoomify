@@ -207,6 +207,13 @@ export const de = {
   "view.history.open": "Erneut offnen",
   "view.history.clear": "Verlauf loschen",
   "view.history.dims": "{w} mal {h} Pixel",
+  "view.input.eyebrow": "Neues Bild",
+  "view.input.title": "Bild in voller Aufloesung speichern",
+  "view.input.description":
+    "Fuegen Sie eine Betrachterseite, ein Manifest oder eine Kachel-Adresse ein. Dezoomify findet das Bild und waehlt die beste verfuegbare Aufloesung.",
+  "view.input.placeholder": "Adresse eines Bildbetrachters oder Manifests einfuegen",
+  "view.input.aria": "Adresse der Webseite mit dem zoombaren Bild",
+  "view.input.start": "Bild finden",
   // Failure "What happened" explainer.
   "view.fail.whatHappened": "Was geschehen ist",
   "view.fail.rateProxy":
@@ -346,9 +353,12 @@ export const de = {
   "desktop.help.privacy": "Datenschutz",
   "desktop.help.terms": "Bedingungen",
   "desktop.help.donate": "Spenden",
-  "desktop.settings.title": "Einstellungen",
+  "desktop.settings.title": "Anpassen",
   "desktop.settings.desc":
     "Minimale Download-Einstellungen. Auf diesem Gerat gespeichert und fuer den nachsten Auftrag verwendet. Kopfzeilen gehen nur an die Bildquelle und werden nie protokolliert.",
+  "desktop.settings.fileGroup": "Datei",
+  "desktop.settings.imageGroup": "Bild",
+  "desktop.settings.networkGroup": "Netzwerk und Wiederaufnahme",
   "desktop.settings.outputDir": "Ausgabeordner (optional)",
   "desktop.settings.compression": "Kompression 0-100 (Standard 5)",
   "desktop.settings.maxWidth": "Max. Breite in px (optional)",

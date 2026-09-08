@@ -7,6 +7,7 @@
 
 import { renderAppChoice } from "./controller.js";
 
+import { t } from "./i18n.js";
 import {
   renderTransportLabel,
   renderSaveGuidance,
@@ -427,10 +428,10 @@ export function renderView(
     header = container.ownerDocument.createElement("div");
     header.className = "dz-header";
     header.innerHTML = `
-      <h1 class="dz-title">
+      <div class="dz-product-mark" aria-label="Dezoomify">
+        ${getDezoomifyLogoSvg(30)}
         <span>Dezoomify</span>
-        ${getDezoomifyLogoSvg(28)}
-      </h1>
+      </div>
     `;
     card.prepend(header);
   }
@@ -693,24 +694,15 @@ function mountInputSection(
   const body = parent.ownerDocument.createElement("div");
   body.className = "dz-view-body dz-fade-in";
 
-  // Description
+  // Keep the first decision wonderfully small: paste a source and start.
+  // Host-specific save preferences are appended below this form by the
+  // desktop integration; the website intentionally has no configuration.
   const desc = parent.ownerDocument.createElement("div");
   desc.className = "dz-description";
   desc.innerHTML = `
-    <p>
-      <strong>Dezoomify</strong> allows you to save
-      <abbr title="Large images in which you can navigate inside a webpage.">zoomable images</abbr>.
-      Enter the <abbr title="Uniform Resource Locator, the address of a webpage">URL</abbr>
-      of such an image in the text field below. The image will be saved at maximal resolution.
-      You can then right-click on the image, and choose "Save As" in order to save it as a PNG file on your computer.
-      If it doesn't work, read our <a href="./help/troubleshooting.html" target="_blank" rel="noopener">troubleshooting guide</a>.
-      If you want more information, read our <a href="https://github.com/lovasoa/dezoomify#dezoomify" target="_blank" rel="noopener">project page</a>.
-    </p>
-    <p class="dz-license-text">
-      This script is released under the <a href="http://www.gnu.org/licenses/gpl.html" target="_blank" rel="noopener">GPL</a>.
-      <a href="http://github.com/lovasoa/dezoomify" target="_blank" rel="noopener">See the source code</a>.
-      <a href="./terms.html" target="_blank" rel="noopener">We decline any responsibility for an illegal use of this software</a>.
-    </p>
+    <p class="dz-eyebrow">${escapeHtml(t("view.input.eyebrow"))}</p>
+    <h1>${escapeHtml(t("view.input.title"))}</h1>
+    <p>${escapeHtml(t("view.input.description"))}</p>
   `;
   body.appendChild(desc);
 
@@ -736,11 +728,11 @@ function mountInputSection(
       type="url"
       id="dz-url-input"
       class="dz-input"
-      placeholder="URL of the webpage containing your image"
+      placeholder="${escapeHtml(t("view.input.placeholder"))}"
       required
       autofocus
       value="${prefilled}"
-      aria-label="URL of the webpage containing your zoomable image"
+      aria-label="${escapeHtml(t("view.input.aria"))}"
     />
     <button type="button" class="dz-input-clear" id="dz-btn-clear" title="Clear input" aria-label="Clear input">&times;</button>
   `;
@@ -763,14 +755,13 @@ function mountInputSection(
 
   // Discovery detects the image format automatically from the URL and page
   // contents; the submit path carries no manual format override.
-  // Centered Tactile "Dezoomify !" Button
   const btnRow = parent.ownerDocument.createElement("div");
   btnRow.className = "dz-button-row";
 
   const submitBtn = parent.ownerDocument.createElement("button");
   submitBtn.type = "submit";
   submitBtn.className = "dz-btn-tactile";
-  submitBtn.innerHTML = `<span>Dezoomify !</span>`;
+  submitBtn.innerHTML = `<span>${escapeHtml(t("view.input.start"))}</span><span class="dz-button-key" aria-hidden="true">↵</span>`;
   btnRow.appendChild(submitBtn);
   form.appendChild(btnRow);
 

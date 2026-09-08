@@ -211,6 +211,13 @@ export const it = {
   "view.history.open": "Riapri",
   "view.history.clear": "Cancella la cronologia",
   "view.history.dims": "{w} per {h} pixel",
+  "view.input.eyebrow": "Nuova immagine",
+  "view.input.title": "Salva l immagine a piena risoluzione",
+  "view.input.description":
+    "Incolla una pagina del visualizzatore, un manifesto o un indirizzo di tasselli. Dezoomify trova l immagine e sceglie la migliore risoluzione disponibile.",
+  "view.input.placeholder": "Incolla l indirizzo di un visualizzatore o manifesto",
+  "view.input.aria": "Indirizzo della pagina con l immagine ingrandibile",
+  "view.input.start": "Trova immagine",
   // Failure "What happened" explainer.
   "view.fail.whatHappened": "Cosa e successo",
   "view.fail.rateProxy":
@@ -350,9 +357,12 @@ export const it = {
   "desktop.help.privacy": "Privacy",
   "desktop.help.terms": "Termini",
   "desktop.help.donate": "Dona",
-  "desktop.settings.title": "Impostazioni",
+  "desktop.settings.title": "Personalizza",
   "desktop.settings.desc":
     "Impostazioni minime di scaricamento. Salvate su questo dispositivo e usate per la prossima attivita. Le intestazioni vanno solo all origine dell immagine e non sono mai registrate.",
+  "desktop.settings.fileGroup": "File",
+  "desktop.settings.imageGroup": "Immagine",
+  "desktop.settings.networkGroup": "Rete e ripristino",
   "desktop.settings.outputDir": "Cartella di uscita (facoltativa)",
   "desktop.settings.compression": "Compressione 0-100 (predefinita 5)",
   "desktop.settings.maxWidth": "Larghezza max in px (facoltativa)",

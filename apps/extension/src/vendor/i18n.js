@@ -312,6 +312,13 @@ const en = {
   "view.history.open": "Open again",
   "view.history.clear": "Clear history",
   "view.history.dims": "{w} by {h} pixels",
+  "view.input.eyebrow": "New image",
+  "view.input.title": "Save the full-resolution image",
+  "view.input.description":
+    "Paste a viewer page, manifest, or tile address. Dezoomify finds the image and selects the best available resolution.",
+  "view.input.placeholder": "Paste an image viewer or manifest URL",
+  "view.input.aria": "Address of the webpage containing your zoomable image",
+  "view.input.start": "Find image",
   // Failure "What happened" explainer.
   "view.fail.whatHappened": "What happened",
   "view.fail.rateProxy":
@@ -451,9 +458,12 @@ const en = {
   "desktop.help.privacy": "Privacy",
   "desktop.help.terms": "Terms",
   "desktop.help.donate": "Donate",
-  "desktop.settings.title": "Settings",
+  "desktop.settings.title": "Customize",
   "desktop.settings.desc":
     "Minimal download settings. Saved on this device and used for the next job. Headers are sent to the image origin only and never logged.",
+  "desktop.settings.fileGroup": "File",
+  "desktop.settings.imageGroup": "Image",
+  "desktop.settings.networkGroup": "Network and recovery",
   "desktop.settings.outputDir": "Output directory (optional)",
   "desktop.settings.compression": "Compression 0-100 (default 5)",
   "desktop.settings.maxWidth": "Max width px (optional)",

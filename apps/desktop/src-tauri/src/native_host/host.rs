@@ -104,7 +104,7 @@ impl HostState {
             "version": HOST_VERSION,
             "protocol": HOST_PROTOCOL,
             "nativeProtocol": {"min": MIN_NATIVE_PROTOCOL, "max": CURRENT_NATIVE_PROTOCOL},
-            "capabilities": {"encoders": ["png", "jpeg", "tiff"], "handoff": true},
+            "capabilities": {"encoders": ["png", "jpeg", "tiff", "zif", "webp"], "handoff": true},
         })
     }
 
