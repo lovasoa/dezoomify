@@ -19,16 +19,25 @@ indefinite: it carries no deadline and never polls in the background. It
 stops on the first terminal signal: detection, a second click (replace and
 cancel), tab close, or navigation away. A reload never rearms scanning and
 stopped monitoring never restarts itself. Monitoring never enumerates tabs:
-it touches only the clicked tab via `tabs.get`/`tabs.reload` plus a bounded
-webRequest collector filtered to the exact target tab and the `http(s)`
-schemes before at most one reload. The unbound first-run page shows guidance
-only and makes zero tabs API calls.
+it touches only the clicked tab via `tabs.get`/`tabs.reload` plus at most
+one reload. The unbound first-run page shows guidance only and makes zero
+tabs API calls.
 
-Candidates are the observed request URLs; `crates/dezoomify-core` (wasm,
-loaded inline in the tab) performs format recognition and discovery on
-each candidate's fetched bytes, since URL text alone cannot recognize most
-formats. The first candidate whose bytes yield an image is the detection:
-it stops URL collection and reveals the job UI. A Shadow-DOM host in the
+Candidates come from the monitored tab itself: the injected loader reads
+the tab's own performance timeline, which needs no permission at all. The
+background observes no traffic on purpose: a `webRequest` listener without
+host permissions is deaf (the platform only delivers events the extension
+has host access to, and activeTab does not enable observation), so a
+background collector would pass tests that grant loopback hosts yet hear
+nothing in production. No permanent host permissions are declared.
+`crates/dezoomify-core` (wasm, loaded inline in the tab) performs format
+recognition and discovery on each candidate's fetched bytes, since URL text
+alone cannot recognize most formats. The first candidate whose bytes yield
+an image is the detection: it stops URL collection and reveals the job UI.
+The bound `page.html?tab=` fallback still scans via `webRequest`, so it
+requests a one-time optional grant for exactly the bound tab's origin on
+the explicit Scan gesture first; a refusal fails honestly naming the
+missing access instead of scanning deaf. A Shadow-DOM host in the
 same tab holds a `chrome.runtime.getURL` iframe (`modal/modal.html`,
 web-accessible on http/https only) that runs the job through the shared-ui
 `renderView` geometry with tab-origin direct fetch, origin-clean save or
@@ -101,3 +110,14 @@ and is never used for store payloads.
 User-facing job behavior comes from the same protocol and scenarios as web
 and desktop. See [Testing](testing.md) and [Releases](releases.md). For
 user-facing use, see [browser extension](user/browser-extension.md).
+
+## Diagnostics
+
+The background worker logs structured console lines
+(`[dezoomify:background] <level> <code> <detail>`) at debug/info/warn/error:
+lifecycle milestones (armed, injected, byte-confirmed, closed) at info,
+recoverable states (privileged reject, candidate cap, panel fallback) at
+warn, and terminal monitor failures (reload/injection failure) at error.
+Per-URL candidate noise is debug-gated off by default. Every logged URL is
+redacted (userinfo, sensitive query values, fragments); user-visible state
+still travels via the existing tab messages into the in-tab modal log.

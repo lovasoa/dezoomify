@@ -134,13 +134,19 @@ function createFakeDom() {
 
 function createFakeChrome() {
   const sent = [];
+  const runtimeListeners = new Set();
   return {
     sent,
+    runtimeListeners,
     runtime: {
       getURL: (p) => `chrome-extension://test-id/${p}`,
       sendMessage: (msg) => { sent.push(msg); return Promise.resolve({}); },
-      onMessage: { addListener() {}, removeListener() {} },
+      onMessage: {
+        addListener(fn) { runtimeListeners.add(fn); },
+        removeListener(fn) { runtimeListeners.delete(fn); },
+      },
     },
+    fireRuntime(message) { for (const fn of [...runtimeListeners]) fn(message); },
   };
 }
 
@@ -215,6 +221,25 @@ test("monitor updates refresh the status line; background stop detaches", () => 
   assert.equal(modal.mounted, true);
   modal.onMessage({ type: "dezoomify-stop-monitor" });
   assert.equal(modal.mounted, false, "background stop detaches");
+});
+
+test("mount wires runtime.onMessage; background messages arrive live; detach unwires", () => {
+  // Production regression gate: the loader previously exposed onMessage
+  // without ever registering it, so background updates and second-click
+  // Stop never reached a real tab (tests called onMessage directly and
+  // could not see the missing wire).
+  const { doc, modal, chromeApi } = mountModal();
+  assert.equal(chromeApi.runtimeListeners.size, 1, "mount must register exactly one runtime listener");
+  chromeApi.fireRuntime({ type: "dezoomify-monitor-update", seen: 5 });
+  const host = doc.documentElement.children.find((c) => c.id === "dezoomify-in-tab");
+  assert.ok(host && host.textContent.includes("5"), "live background update must reach the card");
+  assert.equal(modal.mounted, true);
+  chromeApi.fireRuntime({ type: "dezoomify-stop-monitor" });
+  assert.equal(modal.mounted, false, "live background stop must detach the card");
+  assert.equal(chromeApi.runtimeListeners.size, 0, "detach must remove the runtime listener");
+  // Post-detach traffic is ignored, never re-arms.
+  chromeApi.fireRuntime({ type: "dezoomify-monitor-update", seen: 9 });
+  assert.equal(modal.mounted, false);
 });
 
 test("Escape detaches and notifies the background for grey restore", () => {

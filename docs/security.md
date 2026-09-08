@@ -38,11 +38,16 @@ second click, tab close, or navigation away, with no auto-rearm and no
 deadline; a worker restart fails closed to idle; see [Extension](extension.md).
 The extension never enumerates tabs and its toolbar icon always reports
 idle versus monitoring (grey idle action icon, blue brand icons). The in-tab
-modal is injected programmatically on the explicit click only (`scripting`
-on the clicked tab, no declared content scripts, no `<all_urls>`); it runs
-with tab-origin authority:
+modal is injected programmatically after the monitored reload completes on
+the explicit click only (`scripting` on the clicked tab, no declared
+content scripts, no `<all_urls>`); it runs with tab-origin authority:
 the monitored tab's origin under activeTab plus explicitly granted host
 permissions, with every redirect hop revalidated and the metadata CORS proxy
-never used. Content scripts cannot invoke arbitrary browser-session fetches. Tauri exposes an allowlisted command surface and passes opaque file handles instead of unrestricted paths where practical. The desktop app declares only the permissions its shipped code uses: the capability documents grant exactly the commands, event channels, and updater check the shipped shell and frontend exercise. The frontend invokes `query_capabilities` once at boot so the grant always maps to a live negotiation, and external links leave only through the single granted `opener:allow-open-url` command for valid `https` URLs with no fallback attempted.
+never used. The background observes no traffic: `webRequest` without host
+permissions is deaf (activeTab does not enable observation), so candidate
+collection lives in the injected tab's own timeline and no permanent host
+permissions are declared. The bound-page fallback requests a one-time
+optional grant for exactly the bound tab's origin on the Scan gesture and
+fails honestly on refusal. Content scripts cannot invoke arbitrary browser-session fetches. Tauri exposes an allowlisted command surface and passes opaque file handles instead of unrestricted paths where practical. The desktop app declares only the permissions its shipped code uses: the capability documents grant exactly the commands, event channels, and updater check the shipped shell and frontend exercise. The frontend invokes `query_capabilities` once at boot so the grant always maps to a live negotiation, and external links leave only through the single granted `opener:allow-open-url` command for valid `https` URLs with no fallback attempted.
 
 Website and deep-link handoffs are bounded, non-secret, untrusted input that native validates and the user confirms; they use no client-side signing. For Native Messaging, browser enforcement of the native host's allowed extension IDs authenticates the extension sender to the native host. A fresh challenge and one-use nonce bind messages to one session and prevent replay; they do not establish identity. Security regressions are covered by shared and host-specific tests in [Testing](testing.md).

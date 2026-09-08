@@ -1,9 +1,26 @@
 // Headless extension E2E: the REAL store-shaped package (staged by
-// package-store.sh, with loopback host permissions for the E2E only, since
-// browser chrome cannot be clicked headlessly to grant activeTab) runs a
-// complete job in both engines: open a fixture page -> traffic scan observes
-// the zoomable source -> wasm core discovers -> tiles fetched -> image
-// assembled -> saved bytes verified against the fixture pyramid.
+// package-store.sh) runs a complete job in both engines: open a fixture
+// page -> traffic scan observes the zoomable source -> wasm core discovers
+// -> tiles fetched -> image assembled -> saved bytes verified against the
+// fixture pyramid.
+//
+// Two lanes per engine:
+// - grants lane (loopback host permissions injected for the E2E only, since
+//   browser chrome cannot be clicked headlessly to grant activeTab): stands
+//   in for a user who approved the one-time per-site origin access the
+//   bound Scan requests. Full job, bytes verified.
+// - no-grants lane (the TRUE store package, host_permissions: []): the
+//   production shape without a click (headless drivers cannot press the
+//   toolbar button, so no activeTab grant exists and `tabs.get` hides the
+//   target URL). Asserts the failure modes stay honest: no webRequest
+//   host-permission warnings from any extension context (a permissionless
+//   webRequest listener is deaf), and the bound Scan fails fast with a
+//   no-target-access message guiding back to the toolbar button instead of
+//   scanning deaf for 20s and reporting a misleading "no candidate". The
+//   prompt-denial path (`permissions.request` -> false) cannot settle
+//   headlessly (an undisplayable prompt never resolves), so it is covered
+//   by unit tests (`ensureOriginAccess` matrix) plus the static gate that
+//   the denial throws before any listener is installed.
 //
 // Chromium: Playwright persistent context with --load-extension.
 // Firefox: Selenium + geckodriver (WebDriver moz/addon/install), downloads
@@ -28,12 +45,16 @@ const PACKAGE_SCRIPT = path.join(REPO_ROOT, "apps/extension/scripts/package-stor
 const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 
-function stagePackage(browser, dir) {
+function stagePackage(browser, dir, grants = true, origin = "") {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
   const staged = spawnSync("bash", [PACKAGE_SCRIPT, browser, zip], {
     cwd: REPO_ROOT,
     encoding: "utf8",
-    env: { ...process.env, DEZOOMIFY_TEST_HOST_PERMISSIONS: "1" },
+    env: {
+      ...process.env,
+      DEZOOMIFY_TEST_HOST_PERMISSIONS: grants ? "1" : "0",
+      DEZOOMIFY_TEST_ORIGIN: grants ? origin : "",
+    },
   });
   assert.equal(staged.status, 0, `package-store.sh ${browser} failed:\n${staged.stderr}`);
   return zip;
@@ -178,10 +199,13 @@ test("chromium: packaged extension runs a full job end to end", { timeout: 18000
   let context = null;
   let server = null;
   try {
-    const zip = stagePackage("chromium", work);
+    // Server first: the staged grant names the exact fixture origin
+    // (scheme://host:port), which strict matchers (Firefox `contains`)
+    // require to observe anything.
+    server = await startFixtureServer(work);
+    const zip = stagePackage("chromium", work, true, server.base);
     const pkgDir = path.join(work, "pkg");
     spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
-    server = await startFixtureServer(work);
     context = await chromium.launchPersistentContext(path.join(work, "profile"), {
       channel: "chromium",
       headless: true,
@@ -247,11 +271,13 @@ test("firefox: packaged extension runs a full job end to end", { timeout: 180000
   let driver = null;
   let server = null;
   try {
-    const zip = stagePackage("firefox", work);
+    // Server first (see chromium lane): the staged grant names the exact
+    // fixture origin, which strict matchers require.
+    server = await startFixtureServer(work);
+    const zip = stagePackage("firefox", work, true, server.base);
     const staging = path.join(work, "pkg");
     spawnSync("python3", ["-m", "zipfile", "-e", zip, staging], { encoding: "utf8" });
     assertClassicScripts(staging);
-    server = await startFixtureServer(work);
 
     const binary = findFirefoxBinary();
     assert.ok(binary, "no Firefox binary found; set DEZOOMIFY_FIREFOX_BIN");
@@ -340,6 +366,164 @@ test("firefox: packaged extension runs a full job end to end", { timeout: 180000
       }),
     };
     await runExtensionJob(driverApi, server.base);
+  } finally {
+    if (driver) await driver.quit();
+    if (server) server.proc.kill();
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+// --- no-grants negative lane (true store shape) ---
+//
+// Regression lane for total-but-silent production breakage: with
+// host_permissions: [] (what ships), the bound Scan must fail honestly
+// naming the missing origin access, and no extension context may emit
+// webRequest host-permission warnings (a permissionless listener is deaf).
+
+function assertStoreManifest(zip) {
+  const listed = spawnSync(
+    "python3",
+    ["-c", "import json,sys,zipfile; print(json.load(zipfile.ZipFile(sys.argv[1]).open('manifest.json')).get('host_permissions'))", zip],
+    { encoding: "utf8" },
+  );
+  assert.equal(listed.stdout.trim(), "[]", "negative lane must stage the true store manifest (host_permissions: [])");
+}
+
+test("chromium without host grants: no deaf APIs, honest permission denial", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-nogrants-"));
+  let context = null;
+  let server = null;
+  try {
+    const zip = stagePackage("chromium", work, false);
+    assertStoreManifest(zip);
+    const pkgDir = path.join(work, "pkg");
+    spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
+    server = await startFixtureServer(work);
+    context = await chromium.launchPersistentContext(path.join(work, "profile"), {
+      channel: "chromium",
+      headless: true,
+      args: [`--disable-extensions-except=${pkgDir}`, `--load-extension=${pkgDir}`],
+    });
+    const warnings = [];
+    const note = (text) => {
+      if (/host permission/i.test(String(text ?? ""))) warnings.push(String(text));
+    };
+    context.on("console", (msg) => note(msg.text()));
+    context.on("page", (p) => p.on("console", (msg) => note(msg.text())));
+    let ext = null;
+    for (let i = 0; i < 60 && !ext; i++) {
+      ext = context.pages().find((p) => p.url().includes("page.html")) ?? null;
+      if (!ext) await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.ok(ext, "first-run extension page never opened");
+    await ext.waitForSelector("#tabs p", { timeout: 15000 });
+    // Service-worker console too (the background owns no webRequest now).
+    for (const worker of context.serviceWorkers()) worker.on("console", (msg) => note(msg.text()));
+
+    const targetTabId = await ext.evaluate(
+      (u) => browser.tabs.create({ url: u, active: false }).then((t) => t.id),
+      `${server.base}/target.html`,
+    );
+    assert.ok(Number.isInteger(targetTabId), "tabs.create must return a tab id");
+    const baseExt = ext.url().split("page.html")[0];
+    await ext.goto(`${baseExt}page.html?tab=${targetTabId}`, { timeout: 20000 });
+    await ext.waitForSelector(`button[data-tabid="${targetTabId}"]`, { timeout: 15000 });
+    await ext.click(`button[data-tabid="${targetTabId}"]`);
+    await ext.waitForFunction(
+      () => document.body.dataset.outcome === "failed",
+      null,
+      { timeout: 30000 },
+    );
+    const log = await ext.evaluate(() => document.getElementById("log").textContent);
+    assert.match(log, /cannot see the target tab/, "hidden tab URL must fail fast and honestly, got:\n" + log);
+    assert.ok(!log.includes("scan stopped"), "must not burn a deaf 20s scan before failing");
+    assert.equal(
+      warnings.length,
+      0,
+      "no webRequest host-permission warnings allowed, got:\n" + warnings.join("\n"),
+    );
+  } finally {
+    if (context) await context.close();
+    if (server) server.proc.kill();
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("firefox without host grants: honest permission denial", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-nogrants-ff-"));
+  let driver = null;
+  let server = null;
+  try {
+    const zip = stagePackage("firefox", work, false);
+    assertStoreManifest(zip);
+    server = await startFixtureServer(work);
+
+    const binary = findFirefoxBinary();
+    assert.ok(binary, "no Firefox binary found; set DEZOOMIFY_FIREFOX_BIN");
+    const options = new firefox.Options();
+    options.addArguments("-headless");
+    options.setBinary(binary);
+    driver = await new webdriver.Builder().forBrowser("firefox").setFirefoxOptions(options).build();
+
+    const addonId = await driver.installAddon(zip, true);
+    assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
+
+    let extHandle = null;
+    for (let i = 0; i < 60 && !extHandle; i++) {
+      for (const handle of await driver.getAllWindowHandles()) {
+        await driver.switchTo().window(handle);
+        if ((await driver.getCurrentUrl()).includes("page.html")) { extHandle = handle; break; }
+      }
+      if (!extHandle) await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.ok(extHandle, "first-run extension page never opened");
+    await driver.wait(async () => (await driver.findElements({ css: "#tabs p" })).length > 0, 15000);
+
+    const targetTabId = await driver.executeScript(
+      "return browser.tabs.create({ url: arguments[0], active: false }).then((t) => t.id);",
+      `${server.base}/target.html`,
+    );
+    assert.ok(Number.isInteger(targetTabId), "tabs.create must return a tab id");
+    await driver.sleep(1500);
+    await driver.switchTo().window(extHandle);
+    const extUrl = await driver.getCurrentUrl();
+    const baseExt = extUrl.split("page.html")[0];
+    const before = new Set(await driver.getAllWindowHandles());
+    await driver.executeScript(
+      "return browser.tabs.create({ url: arguments[0], active: true }).then(() => null);",
+      `${baseExt}page.html?tab=${targetTabId}`,
+    );
+    let boundHandle = null;
+    for (let i = 0; i < 60 && !boundHandle; i++) {
+      for (const handle of await driver.getAllWindowHandles()) {
+        if (before.has(handle)) continue;
+        await driver.switchTo().window(handle);
+        if ((await driver.getCurrentUrl()).includes(`page.html?tab=${targetTabId}`)) {
+          boundHandle = handle;
+          break;
+        }
+      }
+      if (!boundHandle) await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.ok(boundHandle, "bound extension page never opened");
+    await driver.wait(
+      async () => (await driver.findElements({ css: `button[data-tabid="${targetTabId}"]` })).length > 0,
+      15000,
+    );
+    await driver.findElement({ css: `button[data-tabid="${targetTabId}"]` }).click();
+    const deadline = Date.now() + 30000;
+    for (;;) {
+      const state = await driver.executeScript(
+        "return { outcome: document.body.dataset.outcome ?? null, log: document.getElementById('log')?.textContent ?? '' };",
+      );
+      if (state.outcome === "failed") {
+        assert.match(state.log, /cannot see the target tab/, "hidden tab URL must fail fast and honestly, got:\n" + state.log);
+        assert.ok(!state.log.includes("scan stopped"), "must not burn a deaf 20s scan before failing");
+        break;
+      }
+      if (Date.now() > deadline) assert.fail("denial never surfaced; log:\n" + state.log);
+      await new Promise((r) => setTimeout(r, 500));
+    }
   } finally {
     if (driver) await driver.quit();
     if (server) server.proc.kill();

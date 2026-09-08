@@ -161,12 +161,19 @@ test("declared permissions are used by shipped code", () => {
   assert.ok(page.includes("api.cookies.getAll"), "cookies must be used by consented handoff");
   assert.ok(page.includes("api.webRequest.onBeforeRequest"), "webRequest must be used by scan");
   assert.ok(!page.includes("chrome.downloads"), "downloads API must stay unused (blob anchor save)");
-  // The background click-to-monitor owns the exact-tabId observer, the
-  // single reload, and the grey<->blue+dot icon transitions, and injects
-  // the in-tab modal on the clicked tab only, after its monitored reload
-  // completes (pre-reload injection would be wiped by the reload).
+  // The background click-to-monitor owns the single reload and the
+  // grey<->blue+dot icon transitions, and injects the in-tab modal on the
+  // clicked tab only, after its monitored reload completes (pre-reload
+  // injection would be wiped by the reload). It observes NO traffic: a
+  // `webRequest` listener without host permissions is deaf (activeTab does
+  // not enable observation), and candidates come from the injected tab's
+  // own timeline instead.
   const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
-  assert.ok(background.includes("onBeforeRequest"), "webRequest observer must live in the background monitor");
+  const backgroundCode = background
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+    .join("\n");
+  assert.ok(!backgroundCode.includes("webRequest"), "background must not touch webRequest (deaf without host perms)");
   assert.ok(background.includes("tabs.reload"), "background must perform the single monitored reload");
   assert.ok(background.includes("setIcon"), "background must swap grey<->blue icons");
   assert.ok(background.includes("setBadgeText"), "background must show the monitoring badge dot");
@@ -186,26 +193,45 @@ test("declared permissions are used by shipped code", () => {
   }
   assert.ok(background.includes("urls"), "background monitor-update must stream candidate urls");
   assert.ok(!background.includes("dezoomify-detected"), "background must not emit retired URL-text detection");
+  // The bound page DOES observe via webRequest, so it must earn host access
+  // first: a one-time optional grant for exactly the bound tab's origin on
+  // the explicit Scan gesture. Without it the listener would be deaf and
+  // the scan would fail silently with "no candidate". The scope resolves
+  // from the handover `origin` param (click-time grant) or the tab URL; a
+  // hidden tab URL with no handover fails honestly instead of scanning deaf.
+  assert.ok(page.includes("parseBoundOrigin"), "bound scan must accept the click-time origin handover");
+  assert.ok(page.includes("ensureOriginAccess"), "bound scan must gate observation behind one-time origin access");
+  assert.ok(page.includes("permission-denied"), "refused origin access must fail honestly, never silently");
+  assert.ok(page.includes("no-target-access"), "hidden tab URL must fail honestly, never silently");
+  assert.ok(
+    page.lastIndexOf("parseBoundOrigin") < page.lastIndexOf("ensureOriginAccess"),
+    "handover parsing must precede the access gate",
+  );
+  assert.ok(
+    page.lastIndexOf("ensureOriginAccess") < page.indexOf("api.webRequest.onBeforeRequest"),
+    "origin access must precede the webRequest listener",
+  );
+  assert.ok(background.includes("&origin="), "open-panel fallback must hand over the click-time origin");
   const loader = readFileSync(new URL("../../src/content/modal.js", import.meta.url), "utf8");
   for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-open-panel"]) {
     assert.ok(loader.includes(kind), `injected loader must speak ${kind}`);
   }
 });
 
-test("click-to-monitor least privilege: observer-before-reload, no enumeration, no offscreen", () => {
+test("click-to-monitor least privilege: reload+inject, no enumeration, no offscreen, no webRequest", () => {
   const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
   const code = background
     .split("\n")
     .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
     .join("\n");
   // The clicked tab id comes from the action event only; the background
-  // never enumerates tabs and never requests broad hosts.
+  // never enumerates tabs, never requests broad hosts, and never observes
+  // traffic (a host-permissionless webRequest listener is deaf; the
+  // injected tab collects its own candidates permission-free).
   assert.ok(code.includes("onClicked"), "monitor must arm on the explicit action click");
   assert.ok(!code.includes("tabs.query"), "background must never enumerate tabs");
-  assert.ok(!code.includes("<all_urls>"), "background filter must be http/https, never <all_urls>");
-  assert.ok(code.includes('"http://*/*"'), "background filter must cover http");
-  assert.ok(code.includes('"https://*/*"'), "background filter must cover https");
-  assert.ok(code.includes("tabId,"), "background observer must filter by exact tabId");
+  assert.ok(!code.includes("webRequest"), "background must not observe traffic (deaf without host perms)");
+  assert.ok(!code.includes("permissions.request"), "background must not prompt (activeTab covers reload+inject)");
   assert.ok(code.includes("onRemoved"), "monitor must stop when the tab closes");
   assert.ok(code.includes("onUpdated"), "monitor must stop when the tab navigates");
   assert.ok(code.includes("onInstalled"), "install must open first-run guidance only");
@@ -276,11 +302,13 @@ test("generated manifests are the deterministic generator output (base+overlay, 
 // --- Click-to-monitor modal policy (additive; least privilege) ---
 //
 // Monitoring (grey idle action icon, blue brand icons + badge dot while
-// watching) observes via an exact-tabId webRequest filter before a single
-// reload, then injects the in-tab modal on the clicked tab only (`scripting`
-// on detection, never declared content scripts): no tab enumeration, no
-// permanent hosts, no downloads, tab-origin fetch only, and no metadata
-// proxy.
+// watching) performs a single reload, then injects the in-tab modal on the
+// clicked tab only (`scripting` after reload-complete, never declared
+// content scripts): no tab enumeration, no permanent hosts, no downloads,
+// no traffic observation in the background (in-tab timeline instead),
+// tab-origin fetch only, and no metadata proxy. The bound-page fallback
+// observes via webRequest only after a one-time optional grant for exactly
+// the bound tab's origin, requested on the explicit Scan gesture.
 
 test("monitoring adds no permissions (no tabs/downloads/cookies/hosts; scripting reviewed)", () => {
   for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {

@@ -206,31 +206,46 @@ cargo xtask test native-messaging
 
 Verify manifests and permissions (narrow host grants, no remote code, strict
 CSP with `wasm-unsafe-eval` for the page core), monitoring state machines with
-observer-before-reload ordering and indefinite explicit-action bounds (no
-deadline, single reload, stop on detection/second-click/close/navigate, no
-auto-rearm, worker restart fails closed), candidate caps and windowing,
-browser-session fetch
+indefinite explicit-action bounds (no deadline, single reload, injection
+after reload-complete, same-page reload survival, stop on
+detection/second-click/close/navigate, no auto-rearm, worker restart fails
+closed), candidate caps and windowing, browser-session fetch
 scoping, and handoff envelope validation with replay/expiry/origin rejection
 and zero side effects on rejection. These gates run the unit suites plus a
-hermetic headless browser E2E in both engines: the real store-shaped package
-(with an E2E-only loopback grant) opens a fixture page, runs the
-click-to-monitor flow, discovers through the wasm core, fetches the tiles, assembles
-the image, saves it, and the test verifies the saved PNG bytes against the
-fixture pyramid. Chromium runs under Playwright; Firefox under
-Selenium/geckodriver (binary via `DEZOOMIFY_FIREFOX_BIN`, a system install,
-or the Playwright cache; deps auto-install via npm on first run). Full
-user-facing UI flows remain manual or CI-runner work.
+hermetic headless browser E2E in both engines. Chromium runs under
+Playwright; Firefox under Selenium/geckodriver (binary via
+`DEZOOMIFY_FIREFOX_BIN`, a system install, or the Playwright cache; deps
+auto-install via npm on first run). Full user-facing UI flows remain manual
+or CI-runner work.
 
-The headless E2E drives the modal-in-tab flow: toolbar click arms monitoring
-on the fixture tab (grey icon becomes blue with a dot and badge), at most one
-reload runs, detection stops monitoring and opens the modal in the same tab
-(no new tab, no `page.html?tab=` navigation in the new flow; the bound page
-stays as the headless fallback), a clean save asserts byte-exact PNG pixels
-versus the fixture pyramid, a CORS-blocked fixture asserts tainted
-display-only with no pixel reads (`originClean` false, `<img>` visible, no
+Browser chrome cannot be clicked headlessly, so no E2E presses the toolbar
+button; each side of the click is covered where it can be observed instead:
+unit harnesses drive the real background module with production-faithful
+fakes (notably WITHOUT `webRequest` or host access, the activeTab-only
+shape) through arm, own-reload survival, post-complete injection, and every
+disarm rule; a no-deaf-API static gate forbids `webRequest` in shipped
+background code and requires the bound scan to earn its origin grant before
+listening. The headless E2E then runs two lanes per engine over the
+loopback fixture-server with no public network. The grants lane stages the
+store-shaped package with an E2E-only loopback grant naming the exact
+fixture origin (standing in for a user who approved the one-time per-site
+origin access; exactness matters because strict matchers compare ports)
+and runs the full job through the bound `page.html?tab=` fallback: wasm
+discovery, tile fetch, assembly, save, with the saved PNG bytes verified
+against the fixture pyramid. The no-grants lane stages the TRUE store
+package (`host_permissions: []`, asserted from the zip) without a click,
+so no activeTab grant exists and `tabs.get` hides the target URL exactly
+as in production without approval; it proves the failure modes stay
+honest: no webRequest host-permission warnings from any extension context,
+and the bound Scan fails fast with a no-target-access message guiding back
+to the toolbar button instead of scanning deaf for 20s and reporting a
+misleading "no candidate". The prompt-denial path cannot settle headlessly
+(an undisplayable permission prompt never resolves), so it is covered by
+unit tests (`ensureOriginAccess` matrix) plus the static gate that the
+denial throws before any listener is installed. A CORS-blocked fixture asserts tainted display-only with no
+pixel reads (`originClean` false, `<img>` visible, no
 `toBlob`/`toDataURL`/hashing), and a cookie/auth fixture asserts the pass
-through tab-context fetch. All legs run over the loopback fixture-server with
-no public network.
+through tab-context fetch.
 
 ### Browser tainted canvas
 

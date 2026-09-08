@@ -138,8 +138,12 @@ mkdir -p "$staging/wasm"
 cp "$WASM/dezoomify-wasm.js" "$WASM/dezoomify-wasm_bg.wasm" "$staging/wasm/"
 
 if [ "${DEZOOMIFY_TEST_HOST_PERMISSIONS:-0}" = "1" ]; then
-  python3 - "$staging/manifest.json" <<'PY'
-import json, sys
+  # DEZOOMIFY_TEST_ORIGIN (E2E-only): exact `scheme://host[:port]` fixture
+  # origin, appended so `permissions.contains` matches it exactly. Firefox's
+  # matching is strict about ports, so the portless loopback patterns alone
+  # do not satisfy a port-specific request there.
+  DEZOOMIFY_TEST_ORIGIN="${DEZOOMIFY_TEST_ORIGIN:-}" python3 - "$staging/manifest.json" <<'PY'
+import json, os, sys
 path = sys.argv[1]
 d = json.load(open(path))
 # E2E-only variant: headless drivers cannot click browser chrome to grant
@@ -147,7 +151,11 @@ d = json.load(open(path))
 # code never enumerates tabs (bound `tabs.get` only), so no `tabs`
 # permission is ever injected: the harness creates its target via a single
 # `tabs.create` returning one id and drives the bound `?tab=` flow.
-d["host_permissions"] = ["http://127.0.0.1/*", "http://localhost/*"]
+hosts = ["http://127.0.0.1/*", "http://localhost/*"]
+extra = os.environ.get("DEZOOMIFY_TEST_ORIGIN", "")
+if extra and (extra.startswith("http://") or extra.startswith("https://")) and len(extra) <= 256:
+    hosts.append(extra + "/*")
+d["host_permissions"] = hosts
 json.dump(d, open(path, "w"), indent=2)
 print("staged manifest: loopback host permissions injected (E2E only, no tabs)")
 PY

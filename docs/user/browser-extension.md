@@ -41,9 +41,10 @@ Firefox version is on its way.
 2. Press the Dezoomify magnifying-glass button in the browser toolbar.
    The grey icon turns blue with a dot: the extension is now watching that
    tab for a zoomable image.
-3. The first time on a new site, the browser asks for permission to look at
-   that site. Approve it. Dezoomify only asks for the sites you use it on,
-   never for all your browsing.
+3. Pressing the button needs no extra permission: Dezoomify only ever looks
+   at the tab you pointed it at, never at all your browsing. If the image
+   or its tiles live on other addresses, the browser may ask for permission
+   to look at those too; approve it to continue.
 4. The page reloads once automatically. Keep the tab open; a second press
    of the button, closing the tab, or navigating away stops watching.
 5. When an image is found, a small window opens inside the same page.

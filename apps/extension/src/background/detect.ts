@@ -3,10 +3,13 @@
  *
  * Stages: URL collection -> wasm rank -> confirm -> detected event.
  *
- * - Collection: the background observes webRequest URLs while a monitor is
- *   armed on exactly one tab (explicit toolbar click only). Records are
- *   `{ url }` in memory, first-seen order, first-window cap; format
- *   recognition is never guessed from URL text here.
+ * - Collection: the injected tab reports its own performance-timeline URLs
+ *   while a monitor is armed on exactly that tab (explicit toolbar click
+ *   only); the background itself observes no traffic (a `webRequest`
+ *   listener without host permissions is deaf, and activeTab does not
+ *   enable observation). Records are `{ url }` in memory, first-seen
+ *   order, first-window cap; format recognition is never guessed from URL
+ *   text here.
  * - Rank: one `rankCandidates` batch over the core registry (URL text only,
  *   no fetching, no bytes). Falls back to first-seen order when the wasm
  *   export is missing (same pattern as `rankUrls` in `page/page.ts`).

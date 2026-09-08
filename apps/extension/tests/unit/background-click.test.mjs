@@ -13,15 +13,18 @@ import { readFileSync } from "node:fs";
 //     injected content script / probe iframe even when the monitor survived.
 //
 // Contract under test (basic functionality must never silently die):
-//  - click arms the exact tab (blue + badge dot), observer armed BEFORE the
-//    single reload, exactly one `tabs.reload`;
+//  - click arms the exact tab (blue + badge dot), exactly one `tabs.reload`;
 //  - the monitor SURVIVES its own reload: `onUpdated` with the SAME url
-//    (loading + complete) must not disarm, and the modal is (re-)injected
-//    AFTER reload completes (injection never precedes the reload that would
+//    (loading + complete) must not disarm, and the modal is injected AFTER
+//    reload completes (injection never precedes the reload that would
 //    wipe it);
 //  - navigation to a DIFFERENT url disarms (grey, no stale results);
 //  - injection failure disarms (grey) instead of claiming a monitor;
-//  - webRequest traffic from the armed tab streams updates while armed.
+//  - the whole flow works with activeTab-only capabilities: the fake
+//    browser exposes NO `webRequest` and NO host access at all (production
+//    truth: a `webRequest` listener without host permissions is deaf, and
+//    activeTab does not enable observation). If shipped code ever touches
+//    `api.webRequest`, this harness throws and the suite goes red.
 //
 // The harness drives the real shipped module with a fake browser namespace:
 // `globalThis.chrome` is installed before the data: URL import, so the
@@ -36,15 +39,14 @@ function createFakeBrowser() {
     setIcon: [], setBadgeText: [], reload: [], insertCSS: [], executeScript: [],
     sendMessage: [], tabsGet: [], tabsCreate: [],
   };
-  let webRequestHandler = null;
+  // No webRequest, no permissions, no host access: the activeTab-only
+  // production shape. The click flow must complete to injection anyway;
+  // candidates come from the injected tab's own timeline.
   const api = {
     action: {
       onClicked: { addListener(fn) { listeners.onClicked.push(fn); } },
       setIcon(args) { calls.setIcon.push(args); },
       setBadgeText(args) { calls.setBadgeText.push(args); },
-    },
-    webRequest: {
-      onBeforeRequest: { addListener(fn) { webRequestHandler = fn; } },
     },
     tabs: {
       get(tabId) { calls.tabsGet.push(tabId); return Promise.resolve({ id: tabId, url: "https://gallery.example/work" }); },
@@ -64,7 +66,7 @@ function createFakeBrowser() {
       getURL(path) { return "chrome-extension://fake/" + path; },
     },
   };
-  return { api, listeners, calls, webRequest: () => webRequestHandler };
+  return { api, listeners, calls };
 }
 
 let backgroundImportSeq = 0;
@@ -92,13 +94,13 @@ const TAB = { id: 7, url: "https://gallery.example/work" };
 test("click survives its own reload: stays blue, injects after complete", async () => {
   const fake = createFakeBrowser();
   await loadBackground(fake);
-  const { listeners, calls, webRequest } = fake;
+  const { listeners, calls } = fake;
 
   assert.equal(listeners.onClicked.length, 1, "background must listen for the toolbar click");
   await listeners.onClicked[0]({ ...TAB });
   await tick(); await tick();
 
-  // Armed: blue icon + badge dot, observer armed BEFORE the single reload.
+  // Armed: blue icon + badge dot, exactly one reload of the clicked tab.
   assert.equal(calls.reload.length, 1, "exactly one reload of exactly the clicked tab");
   assert.equal(calls.reload[0], TAB.id);
   const lastIcon = calls.setIcon.at(-1);
@@ -122,14 +124,10 @@ test("click survives its own reload: stays blue, injects after complete", async 
   assert.ok(iconAfter && iconAfter.path["16"] === "icons/icon16.png", "icon stays blue through its own reload (not grey)");
   assert.ok(badgeAfter && badgeAfter.text === "•", "badge dot stays while monitoring");
 
-  // Traffic from the armed tab streams while armed (basic functionality alive).
-  const handler = webRequest();
-  assert.ok(typeof handler === "function", "webRequest observer must be installed");
-  handler({ tabId: TAB.id, url: "https://gallery.example/iiif/manifest.json" });
+  // The fresh content script gets an armed snapshot (it seeds its own
+  // candidates from the tab timeline, which needs no permission).
   const updates = calls.sendMessage.filter((c) => c.message && c.message.type === "dezoomify-monitor-update");
-  assert.ok(updates.length > 0, "armed monitor must stream candidate updates to the tab");
-  const update = updates.at(-1);
-  assert.ok(update.message.urls.includes("https://gallery.example/iiif/manifest.json"), "update must carry the observed url");
+  assert.ok(updates.length > 0, "fresh content script must be told monitoring is armed");
 });
 
 test("navigation to a different url disarms (grey, no stale results)", async () => {
@@ -172,6 +170,39 @@ test("injection failure disarms instead of claiming a monitor", async () => {
   const lastIcon = calls.setIcon.at(-1);
   assert.ok(lastIcon && lastIcon.path["16"] === "icons/icon16-grey.png", "failed injection restores grey (never claims a monitor)");
   assert.equal(calls.reload.length, 1, "the single reload still ran once");
+});
+
+test("open-panel fallback carries the click-time origin for precise scoping", async () => {
+  // The bound page can only scope its observation (and its one-time origin
+  // request) when it knows the origin. The background learned the clicked
+  // tab's URL under the click-time grant, so it threads the origin through
+  // `&origin=`; without it the page would face a hidden tab URL with no way
+  // to name the scope (and must fail honestly instead).
+  const fake = createFakeBrowser();
+  await loadBackground(fake);
+  const { listeners, calls } = fake;
+
+  await listeners.onClicked[0]({ ...TAB });
+  await tick(); await tick();
+  for (const fn of listeners.onUpdated) fn(TAB.id, { status: "complete", url: TAB.url });
+  await tick(); await tick();
+  assert.equal(calls.executeScript.length, 1, "modal injected post-reload");
+
+  // The injected loader reports a blocked job iframe from the armed tab.
+  for (const fn of listeners.onMessage) {
+    fn({ type: "dezoomify-open-panel" }, { tab: { id: TAB.id } }, () => {});
+  }
+  assert.equal(calls.tabsCreate.length, 1, "fallback opens exactly one bound page");
+  const opened = calls.tabsCreate[0].url;
+  assert.ok(
+    opened.startsWith("chrome-extension://fake/page/page.html?tab=7"),
+    "fallback targets exactly the armed tab, got: " + opened,
+  );
+  assert.ok(
+    opened.includes("origin=" + encodeURIComponent("https://gallery.example")),
+    "fallback hands over the click-time origin, got: " + opened,
+  );
+  assert.equal(calls.setIcon.at(-1).path["16"], "icons/icon16-grey.png", "fallback disarms (grey restored)");
 });
 
 test("rejecting setIcon/setBadgeText never surfaces (cosmetic only)", async () => {

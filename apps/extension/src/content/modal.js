@@ -3,19 +3,20 @@
  *
  * Shipped as `content/modal.js` (export-stripped classic script) and injected
  * programmatically by the background via `scripting.executeScript` on exactly
- * the clicked tab (activeTab grant), after detection; styles come from
- * `content/modal.css` via `scripting.insertCSS`. Never declared in the
- * manifest (no `content_scripts`), never runs without that explicit click.
+ * the clicked tab (activeTab grant), after the monitored reload completes;
+ * styles come from `content/modal.css` via `scripting.insertCSS`. Never
+ * declared in the manifest (no `content_scripts`), never runs without that
+ * explicit click.
  *
  * Two phases in the SAME tab, never a new tab:
  * - Monitoring: a status card (`#dezoomify-in-tab`, "Monitoring this tab…")
- *   with live seen-counts from the background (`dezoomify-monitor-update`,
- *   which also carries the candidate URL window) and dismiss paths (Escape,
- *   Stop, background `dezoomify-stop-monitor`) that notify the background
- *   (`dezoomify-modal-closed`) so it disposes the collector and restores
- *   the grey icon. A hidden probe iframe is mounted alongside the card on
- *   mount: it receives every candidate and byte-confirms each one via the
- *   wasm `DiscoverySession` (actual response bytes, never URL text).
+ *   and dismiss paths (Escape, Stop, background `dezoomify-stop-monitor`
+ *   on `runtime.onMessage`, wired at mount) that notify the background
+ *   (`dezoomify-modal-closed`) so it disarms and restores the grey icon.
+ *   Candidates come from the tab's own performance timeline (no permission
+ *   needed); a hidden probe iframe is mounted alongside the card on mount
+ *   and byte-confirms each candidate via the wasm `DiscoverySession`
+ *   (actual response bytes, never URL text).
  * - Job: only after the probe reports `dz-byte-confirmed` (an image was
  *   found in bytes) is the card replaced by the visible Shadow-DOM host
  *   (`#dezoomify-modal-host`) holding the `chrome.runtime.getURL` iframe
@@ -106,6 +107,8 @@ export function createInTabModal(deps) {
   let observer = null;
   /** @type {any} */
   let readyTimer = null;
+  /** @type {((message: any) => void) | null} */
+  let runtimeListener = null;
   let mounted = false;
   let jobPhase = false;
   let byteConfirmed = false;
@@ -448,6 +451,15 @@ export function createInTabModal(deps) {
     }
     observer = null;
     try {
+      const onMsg = chromeApi && chromeApi.runtime && chromeApi.runtime.onMessage;
+      if (runtimeListener && onMsg && typeof onMsg.removeListener === "function") {
+        onMsg.removeListener(runtimeListener);
+      }
+    } catch {
+      // ignore
+    }
+    runtimeListener = null;
+    try {
       if (host && typeof host.remove === "function") host.remove();
     } catch {
       // ignore
@@ -492,6 +504,18 @@ export function createInTabModal(deps) {
     buildStatusCard();
     // Hidden probe starts wasm byte-confirmation at once, not on first URL.
     enterJobPhase();
+    // Background lifecycle channel (monitor updates, second-click/background
+    // stop, legacy snapshots): without this the card can neither show
+    // progress nor honor Stop from outside the tab.
+    try {
+      const onMsg = chromeApi && chromeApi.runtime && chromeApi.runtime.onMessage;
+      if (onMsg && typeof onMsg.addListener === "function") {
+        runtimeListener = (message) => onMessage(message);
+        onMsg.addListener(runtimeListener);
+      }
+    } catch {
+      // Listener wiring is best-effort; timeline probing works without it.
+    }
     try {
       win.addEventListener("message", onWindowMessage);
     } catch {

@@ -3,12 +3,21 @@
  * on exactly the clicked tab. Nothing runs before that explicit click (no
  * background monitoring, no tab enumeration, no timers, no polling).
  *
+ * Deliberately, the background observes NO network traffic itself. A
+ * `webRequest` listener without host permissions is deaf: the platform only
+ * notifies requests the extension has host access to, and the transient
+ * activeTab grant does not enable observation (verified: an identical
+ * listener with `host_permissions: []` sees zero requests where the same
+ * listener with the origin granted sees all of them). Candidate collection
+ * therefore lives entirely in the injected tab, via the page's own
+ * performance timeline (`content/modal.js`), which needs no permission at
+ * all. No permanent host permissions are declared, so there is nothing to
+ * warn about and no `webRequest` usage here to go deaf.
+ *
  * On click (activeTab grant on the clicked tab only):
  * 1. Privileged pages (chrome://, about:, stores) are rejected before any
- *    observer or reload, mirroring the scan state machine.
- * 2. A bounded webRequest collector (exact tab id, http/https only,
- *    first-seen first window of 100, proxy-forbidden) is armed BEFORE the
- *    single reload; exactly one reload runs.
+ *    reload, mirroring the scan state machine.
+ * 2. Exactly one reload of exactly that tab runs.
  * 3. The toolbar icon reports state (grey idle, blue while monitoring, badge
  *    dot) via `action.setIcon`/`setBadgeText`.
  * 4. The in-tab monitor (`content/modal.js` + `content/modal.css`) is
@@ -18,13 +27,13 @@
  *    scripts do not survive navigation), so pre-reload injection is
  *    forbidden here; the `tabs.onUpdated` `complete` handler owns injection.
  *
- * The background streams candidate URLs (`dezoomify-monitor-update`) while
- * armed; it never declares detection from URL text. The modal iframe fetches
- * each candidate's bytes tab-side (cookies/auth carried) and confirms via
- * the wasm `DiscoverySession`; on success it reports `dezoomify-byte-confirmed`
- * (collector stops, blue badge kept for the job). The modal closes via
- * `dezoomify-modal-closed` (grey icon restored), and a blocked job iframe
- * falls back to the bound page (`dezoomify-open-panel` opens
+ * The background never declares detection from URL text. The injected modal
+ * collects candidate URLs from the tab's own timeline, fetches each
+ * candidate's bytes tab-side (cookies/auth carried under the click grant)
+ * and confirms via the wasm `DiscoverySession`; on success it reports
+ * `dezoomify-byte-confirmed` (blue badge kept for the job). The modal closes
+ * via `dezoomify-modal-closed` (grey icon restored), and a blocked job
+ * iframe falls back to the bound page (`dezoomify-open-panel` opens
  * `page.html?tab=` for exactly that tab).
  *
  * Monitoring is indefinite: no deadline, no polling. It stops collecting on
@@ -45,6 +54,15 @@
  * (no bundler). Top-level browser wiring is guarded so the file stays
  * loadable with no browser effects under node. No offscreen document:
  * offscreen is Chromium-only and unnecessary for an in-tab modal.
+ *
+ * Logging: structured console logs (`[dezoomify:background] <level> <code>
+ * <detail>`) at debug/info/warn/error; debug is gated off by default via
+ * `setBackgroundLogLevel("debug")`. User-visible state still travels via
+ * the existing tab messages (rendered into the in-tab modal's visible log);
+ * console is the diagnosis surface here since the worker has no DOM. Every
+ * logged URL is redacted (userinfo, sensitive query values, fragments);
+ * failures that previously vanished into empty catches now log at
+ * debug/warn/error without changing behavior.
  */
 
 const api = globalThis.browser ?? globalThis.chrome;
@@ -60,34 +78,174 @@ const ACTIVE_ICON = {
   128: "icons/icon128.png",
 };
 
-// tabId -> { urls, seen, confirmed, url, injected } for armed monitors.
-// `url` is the clicked-tab URL at arm time (fragment stripped): the monitor
-// survives its OWN reload (same URL reported back by tabs.onUpdated) and
-// stops only on navigation to a DIFFERENT page. `injected` gates the
-// post-reload modal injection (exactly once). Memory only: never persisted,
-// never restored, dropped when the context suspends/unloads (fail closed).
-// URL collection alone is NEVER detection: many formats require actual
-// response bytes (DiscoverySession) to confirm an image. The background only
-// streams candidate URLs; byte confirmation runs tab-side in the modal
-// iframe (wasm + tab-origin fetch with cookies/auth) and reports back via
-// `dezoomify-byte-confirmed`. Monitoring stops only then (or on cancel /
-// close / navigation).
+// tabId -> { confirmed, url, injected } for armed monitors.
+// `url` is the clicked-tab URL at arm time: the monitor survives its OWN
+// reload (same page reported back by tabs.onUpdated) and stops only on
+// navigation to a DIFFERENT page. `injected` gates the post-reload modal
+// injection (exactly once). Memory only: never persisted, never restored,
+// dropped when the context suspends/unloads (fail closed). URL collection
+// lives in the injected tab (performance timeline, no permission needed);
+// byte confirmation runs in the modal iframe (wasm + tab-origin fetch with
+// cookies/auth) and reports back via `dezoomify-byte-confirmed`.
 const armed = new Map();
 
-// First-window cap for indefinite collection (mirrors MAX_CANDIDATES in
-// background/detect.ts and page/candidates.ts).
-const MAX_CANDIDATES = 100;
-const MAX_URL_LENGTH = 2048;
-const PROXY_PATH = "/api/proxy";
+// --- Structured background logging (console + tab-streamed UI) ---
+//
+// Levels: debug (per-URL/per-update noise, gated off by default), info
+// (lifecycle milestones: armed, injected, confirmed, closed), warn
+// (recoverable: privileged reject, cap reached, injection retry surface),
+// error (terminal for this monitor: reload failed, injection failed).
+// Console is the primary sink (service worker / event page have no DOM);
+// user-visible state still travels via the existing tab messages
+// (`dezoomify-monitor-update` / `dezoomify-stop-monitor`), which the in-tab
+// modal renders into its visible log. Logging never changes behavior, never
+// throws, never persists, and never carries raw URLs, credentials, cookies,
+// or fragments: every URL goes through `redactBackgroundUrl` first.
+// `export` is used only so node unit tests can load this file via a data:
+// URL; `package-store.sh` strips the `export` prefix for the shipped classic
+// script (same pattern as the content loader).
+
+/** Log severity, lowest (debug) to highest (error). */
+export const BACKGROUND_LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
+
+/** Query keys whose values must never appear in logs. Must stay identical
+ * to SENSITIVE_QUERY_KEYS in background/detect.ts, page/candidates.ts, and
+ * page/redaction.ts. */
+export const BACKGROUND_SENSITIVE_QUERY_KEYS = Object.freeze([
+  "token",
+  "auth",
+  "authorization",
+  "session",
+  "sessionid",
+  "sid",
+  "key",
+  "apikey",
+  "api_key",
+  "secret",
+  "password",
+  "passwd",
+  "code",
+  "state",
+  "sessiontoken",
+]);
+
+/** Max chars per logged detail line (bounded service-worker logging). */
+export const BACKGROUND_LOG_MAX_CHARS = 500;
+
+let backgroundLogLevel = BACKGROUND_LOG_LEVELS.info;
+let backgroundLogSink = null;
+
+/**
+ * Redact a URL for logs: strip userinfo, redact sensitive query values,
+ * drop fragments. Never returns raw credentials.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+export function redactBackgroundUrl(raw) {
+  if (typeof raw !== "string" || raw.length === 0) return "[empty-url]";
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return "[invalid-url]";
+  }
+  if (parsed.username || parsed.password) {
+    parsed.username = "***";
+    try {
+      parsed.password = "";
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (BACKGROUND_SENSITIVE_QUERY_KEYS.includes(key.toLowerCase())) {
+        parsed.searchParams.set(key, "***");
+      }
+    }
+  } catch {
+    // keep the unredacted-query fallback below from leaking: bail out.
+    return "[unredactable-url]";
+  }
+  if (parsed.hash && parsed.hash.length > 1) {
+    parsed.hash = "";
+  }
+  return parsed.toString();
+}
+
+/**
+ * Override the minimum level logged (`debug` enables per-URL noise).
+ * @param {unknown} level one of `debug|info|warn|error` or numeric rank
+ */
+export function setBackgroundLogLevel(level) {
+  if (typeof level === "string" && level in BACKGROUND_LOG_LEVELS) {
+    backgroundLogLevel = BACKGROUND_LOG_LEVELS[level];
+    return;
+  }
+  if (typeof level === "number" && Number.isFinite(level)) {
+    backgroundLogLevel = level;
+  }
+}
+
+/**
+ * Override the log sink (tests). The sink receives `{ level, code, line }`.
+ * Pass null to restore console logging.
+ * @param {((entry: { level: string, code: string, line: string }) => void) | null} sink
+ */
+export function setBackgroundLogSink(sink) {
+  backgroundLogSink = typeof sink === "function" ? sink : null;
+}
+
+function backgroundLogTarget(level) {
+  if (backgroundLogSink) return { write: backgroundLogSink, console: false };
+  try {
+    const c = globalThis.console;
+    if (!c || typeof c[level] !== "function") return null;
+    return { write: null, console: true };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Emit one structured background log line. Never throws, never logs raw
+ * URLs: callers must redact before calling; this layer truncates only.
+ * @param {"debug"|"info"|"warn"|"error"} level
+ * @param {string} code stable machine code (`armed`, `reload-failed`, ...)
+ * @param {string} [detail] already-redacted human detail
+ */
+export function backgroundLog(level, code, detail) {
+  let rank = BACKGROUND_LOG_LEVELS.info;
+  try {
+    rank = BACKGROUND_LOG_LEVELS[level] ?? BACKGROUND_LOG_LEVELS.info;
+    if (rank < backgroundLogLevel) return;
+    const safeCode = typeof code === "string" && code ? code : "event";
+    let text = typeof detail === "string" ? detail : detail === undefined ? "" : String(detail ?? "");
+    if (text.length > BACKGROUND_LOG_MAX_CHARS) text = text.slice(0, BACKGROUND_LOG_MAX_CHARS) + "…";
+    const line = "[dezoomify:background] " + level + " " + safeCode + (text ? " " + text : "");
+    const target = backgroundLogTarget(level);
+    if (!target) return;
+    if (target.console) {
+      const c = globalThis.console;
+      try {
+        c[level](line);
+      } catch {
+        // Logging must never break monitoring.
+      }
+      return;
+    }
+    try {
+      target.write({ level, code: safeCode, line });
+    } catch {
+      // Logging must never break monitoring.
+    }
+  } catch {
+    // Logging must never break monitoring.
+  }
+}
 
 function isPrivilegedUrl(url) {
   return typeof url !== "string" || (!url.startsWith("http://") && !url.startsWith("https://"));
-}
-
-function isCollectableUrl(raw) {
-  if (typeof raw !== "string" || raw.length === 0 || raw.length > MAX_URL_LENGTH) return false;
-  if (raw.includes(PROXY_PATH)) return false;
-  return raw.startsWith("http://") || raw.startsWith("https://");
 }
 
 /**
@@ -108,28 +266,48 @@ function setArmedBadge(tabId, active) {
       // so swallow the rejection like sendToTab does (try/catch alone
       // cannot catch it: it surfaces as Uncaught (in promise)).
       const iconPending = api.action.setIcon({ tabId, path: active ? ACTIVE_ICON : IDLE_ICON });
-      if (iconPending && typeof iconPending.catch === "function") iconPending.catch(() => {});
+      if (iconPending && typeof iconPending.catch === "function") {
+        iconPending.catch((e) => {
+          backgroundLog("debug", "icon-rejected", "tab " + tabId + " " + ((e && e.message) || e));
+        });
+      }
     }
     if (api.action && typeof api.action.setBadgeText === "function") {
       const badgePending = api.action.setBadgeText({ tabId, text: active ? "•" : "" });
-      if (badgePending && typeof badgePending.catch === "function") badgePending.catch(() => {});
+      if (badgePending && typeof badgePending.catch === "function") {
+        badgePending.catch((e) => {
+          backgroundLog("debug", "badge-rejected", "tab " + tabId + " " + ((e && e.message) || e));
+        });
+      }
     }
-  } catch {
+  } catch (e) {
     // Icon/badge state is cosmetic only; monitoring never depends on it.
+    backgroundLog("debug", "icon-failed", "tab " + tabId + " " + ((e && e.message) || e));
   }
 }
 
 function sendToTab(tabId, message) {
   try {
     const pending = api.tabs.sendMessage(tabId, message);
-    if (pending && typeof pending.catch === "function") pending.catch(() => {});
-  } catch {
+    if (pending && typeof pending.catch === "function") {
+      pending.catch((e) => {
+        backgroundLog("debug", "send-to-tab-rejected", "tab " + tabId + " " + ((e && e.message) || e));
+      });
+    }
+  } catch (e) {
     // The tab may already be gone; monitor state is unaffected.
+    backgroundLog("debug", "send-to-tab-failed", "tab " + tabId + " " + ((e && e.message) || e));
   }
 }
 
-function reportUpdate(tabId, entry) {
-  sendToTab(tabId, { type: "dezoomify-monitor-update", seen: entry.urls.length, urls: [...entry.urls] });
+/**
+ * Tell the fresh content script monitoring is armed. The loader seeds its
+ * own candidates from the tab's performance timeline (no permission needed),
+ * so this snapshot carries no URLs; it exists so the card can confirm the
+ * background is still watching (protocol compat with the loader handshake).
+ */
+function reportUpdate(tabId) {
+  sendToTab(tabId, { type: "dezoomify-monitor-update", seen: 0, urls: [] });
 }
 
 function disarm(tabId, notify) {
@@ -148,39 +326,27 @@ async function injectModal(tabId) {
   await api.scripting.executeScript({ target: { tabId }, files: ["content/modal.js"] });
 }
 
-function observeRequests(details) {
-  const entry = armed.get(details.tabId);
-  // After tab-side byte confirmation the collector stops (job takes over);
-  // before that, every new URL is only a candidate, never a detection.
-  if (!entry || entry.confirmed) return;
-  // Exact-tab correlation only; first-seen wins, the first window is kept,
-  // overflow is rejected (never evicts: deterministic for the rank batch).
-  if (!isCollectableUrl(details.url)) return;
-  if (entry.seen.has(details.url)) return;
-  if (entry.urls.length >= MAX_CANDIDATES) return;
-  entry.seen.add(details.url);
-  entry.urls.push(details.url);
-  reportUpdate(details.tabId, entry);
-}
-
 let wired = false;
 function wire() {
   if (wired) return;
   wired = true;
-  try {
-    if (api.webRequest && api.webRequest.onBeforeRequest) {
-      api.webRequest.onBeforeRequest.addListener(observeRequests, { urls: ["http://*/*", "https://*/*"] });
-    }
-  } catch {
-    // Observation is best-effort; the in-tab modal still collects its own
-    // performance-timeline candidates.
-  }
+  // No webRequest listener here, ever: without host permissions the
+  // platform never delivers request events (activeTab does not enable
+  // observation), so a background collector would be silently deaf in
+  // production while passing every test that grants loopback hosts. The
+  // injected tab collects its own candidates permission-free.
 
   api.action.onClicked.addListener(async (tab) => {
     const tabId = tab && tab.id;
-    if (typeof tabId !== "number") return;
+    if (typeof tabId !== "number") {
+      backgroundLog("debug", "click-ignored", "no tab id");
+      return;
+    }
     // Second click on the armed tab cancels monitoring (replace and cancel).
-    if (disarm(tabId, true)) return;
+    if (disarm(tabId, true)) {
+      backgroundLog("info", "cancelled", "tab " + tabId + " second click");
+      return;
+    }
     // Single-tab read for the privileged-URL guard only, never enumeration.
     let url = tab.url;
     try {
@@ -188,30 +354,37 @@ function wire() {
         const fresh = await api.tabs.get(tabId);
         url = fresh && fresh.url;
       }
-    } catch {
+    } catch (e) {
       // Keep the event URL; the guard below fails closed on unknown URLs.
+      backgroundLog("debug", "tabs-get-failed", "tab " + tabId + " " + ((e && e.message) || e));
     }
     if (isPrivilegedUrl(url)) {
+      backgroundLog("warn", "privileged-rejected", "tab " + tabId + " " + redactBackgroundUrl(url));
       setArmedBadge(tabId, false);
       return;
     }
-    // Arm BEFORE the single reload so pre-reload traffic is observed.
-    // Injection happens after the reload completes (see the tabs.onUpdated
-    // handler): anything injected now would be wiped by the reload.
-    armed.set(tabId, { urls: [], seen: new Set(), confirmed: false, url, injected: false });
+    // Arm BEFORE the single reload; injection happens after the reload
+    // completes (see the tabs.onUpdated handler): anything injected now
+    // would be wiped by the reload.
+    armed.set(tabId, { confirmed: false, url, injected: false });
+    backgroundLog("info", "armed", "tab " + tabId + " " + redactBackgroundUrl(url));
     setArmedBadge(tabId, true);
     try {
       // Exactly one reload of exactly that tab.
       await api.tabs.reload(tabId);
-    } catch {
+      backgroundLog("debug", "reloaded", "tab " + tabId);
+    } catch (e) {
       // Reload can fail (tab gone): disarm so the icon never lies.
+      backgroundLog("error", "reload-failed", "tab " + tabId + " " + ((e && e.message) || e));
       disarm(tabId, false);
     }
   });
 
   // Tab close drops a known armed id only; never enumerates tabs.
   api.tabs.onRemoved.addListener((tabId) => {
-    disarm(tabId, false);
+    if (disarm(tabId, false)) {
+      backgroundLog("info", "tab-closed", "tab " + tabId);
+    }
   });
 
   // Tab updates while armed (no tab enumeration: only known armed ids):
@@ -226,16 +399,21 @@ function wire() {
     if (!entry) return;
     if (changeInfo && typeof changeInfo.url === "string" && !samePage(changeInfo.url, entry.url)) {
       disarm(tabId, false);
+      backgroundLog("info", "navigated-away", "tab " + tabId);
       return;
     }
     if (changeInfo && changeInfo.status === "complete" && !entry.injected) {
       entry.injected = true;
+      backgroundLog("debug", "reload-complete", "tab " + tabId + " injecting modal");
       injectModal(tabId).then(() => {
-        // Deliver the pre-reload traffic to the fresh content script.
-        reportUpdate(tabId, entry);
-      }, () => {
+        // Confirm to the fresh content script that monitoring is armed; it
+        // seeds its own candidates from the tab timeline.
+        backgroundLog("info", "injected", "tab " + tabId);
+        reportUpdate(tabId);
+      }, (e) => {
         // Injection can fail (navigated away, privileged target): disarm so
         // the icon never claims a monitor that has no modal.
+        backgroundLog("error", "injection-failed", "tab " + tabId + " " + ((e && e.message) || e));
         disarm(tabId, false);
       });
     }
@@ -245,36 +423,59 @@ function wire() {
     const tabId = sender && sender.tab && sender.tab.id;
     if (!message || typeof message.type !== "string" || typeof tabId !== "number") return;
     if (message.type === "dezoomify-byte-confirmed") {
-      // Tab-side DiscoverySession confirmed an image from bytes. Stop the
-      // URL collector (job takes over) but keep the blue badge until the
-      // modal closes.
+      // Tab-side DiscoverySession confirmed an image from bytes. The job
+      // takes over in the tab; keep the blue badge until the modal closes.
       const entry = armed.get(tabId);
       if (entry) entry.confirmed = true;
+      backgroundLog("info", "byte-confirmed", "tab " + tabId);
       try {
         sendResponse({ confirmed: true });
-      } catch {
+      } catch (e) {
         // The sender may be gone; state is already updated.
+        backgroundLog("debug", "respond-failed", "tab " + tabId + " " + ((e && e.message) || e));
       }
       return true;
     }
     if (message.type === "dezoomify-modal-closed") {
       // Modal close disposes the monitor and restores the grey icon.
       disarm(tabId, false);
+      backgroundLog("info", "modal-closed", "tab " + tabId);
       try {
         sendResponse({ stopped: true });
-      } catch {
+      } catch (e) {
         // The sender may be gone; state is already updated.
+        backgroundLog("debug", "respond-failed", "tab " + tabId + " " + ((e && e.message) || e));
       }
       return true;
     }
     if (message.type === "dezoomify-open-panel") {
       // Blocked job iframe fallback: open the bound page flow for exactly
-      // this tab instead of stranding the user.
-      disarm(tabId, false);
+      // this tab instead of stranding the user. The click-time origin goes
+      // along (`&origin=`), so the bound page can scope its observation (and
+      // its one-time permission request) precisely even when `tabs.get`
+      // later hides the tab URL. Origin only (never userinfo, path, query,
+      // or fragment); omitted when unparseable.
+      let originParam = "";
       try {
-        api.tabs.create({ url: api.runtime.getURL("page/page.html?tab=" + tabId) });
+        const entry = armed.get(tabId);
+        if (entry && typeof entry.url === "string") {
+          const origin = new URL(entry.url).origin;
+          if ((origin.startsWith("http://") || origin.startsWith("https://")) && origin.length <= 256) {
+            originParam = origin;
+          }
+        }
       } catch {
+        originParam = "";
+      }
+      disarm(tabId, false);
+      backgroundLog("warn", "panel-fallback", "tab " + tabId);
+      try {
+        const pageUrl = "page/page.html?tab=" + tabId +
+          (originParam !== "" ? "&origin=" + encodeURIComponent(originParam) : "");
+        api.tabs.create({ url: api.runtime.getURL(pageUrl) });
+      } catch (e) {
         // Tab creation failure strands nothing: monitoring already stopped.
+        backgroundLog("error", "panel-failed", "tab " + tabId + " " + ((e && e.message) || e));
       }
       return;
     }
@@ -292,6 +493,7 @@ try {
   if (typeof api !== "undefined" && api && api.action && api.action.onClicked) {
     wire();
   }
-} catch {
+} catch (e) {
   // Wiring must never throw (node imports, hostile contexts).
+  backgroundLog("error", "wire-failed", String((e && e.message) || e));
 }

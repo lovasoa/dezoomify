@@ -26,7 +26,7 @@
 
 import { createScanner, isPrivilegedUrl } from "./scan.js";
 import { validateCandidateUrl, redactUrlForLabel } from "./candidates.js";
-import { createSessionFetcher, originOf } from "./fetch.js";
+import { createSessionFetcher, ensureOriginAccess, originOf, parseBoundOrigin } from "./fetch.js";
 import { requestNativeHandoff, NATIVE_HOST_NAME } from "./nativeHandoff.js";
 import { pickLevel, BROWSER_MAX_PLAN_TILES } from "./vendor/limits.js";
 import init, * as wasm from "../wasm/dezoomify-wasm.js";
@@ -118,7 +118,7 @@ const fail = (code, detail) => {
 // reach the DOM via `textContent`, never markup. Scan, fetch, candidate
 // ranking, and save naming are unchanged.
 
-const uiState = { cancelRequested: false, lastTabId: null };
+const uiState = { cancelRequested: false, lastTabId: null, scanOrigin: "" };
 
 // Recent-jobs history per tab (todo 5.2): local-only ledger for this page
 // instance (one page per bound tab, so session storage is already per-tab).
@@ -467,6 +467,36 @@ async function runScan(tabId) {
     throw Object.assign(new Error("privileged URL: " + JSON.stringify(url)), { code: "privileged-url" });
   }
 
+  // Observation requires host access: a `webRequest` listener without it
+  // is deaf (activeTab does not enable observation). Resolve the scope from
+  // the handover `origin` param first (the background learned the clicked
+  // tab's URL under the click-time grant), then from the tab URL itself.
+  // Ask once for exactly that origin on the explicit Scan gesture. Either
+  // failure fails honestly here instead of scanning deaf and reporting a
+  // misleading "no candidate"; the toolbar-click modal flow collects in-tab
+  // and needs no such grant.
+  const handoverOrigin = parseBoundOrigin(typeof location !== "undefined" ? location.search : "");
+  const rawTabUrl = typeof tab.url === "string" ? tab.url : "";
+  const scanOrigin = handoverOrigin !== "" ? handoverOrigin : tabOriginOf(rawTabUrl);
+  if (scanOrigin === "") {
+    throw Object.assign(
+      new Error(
+        "cannot see the target tab's address (tab " + tabId + "); open the image tab and press the Dezoomify toolbar button there, then try again",
+      ),
+      { code: "no-target-access" },
+    );
+  }
+  uiState.scanOrigin = scanOrigin;
+  if (!(await ensureOriginAccess(api, scanOrigin))) {
+    throw Object.assign(
+      new Error(
+        "need permission to watch requests on " + scanOrigin +
+        "; grant access and try again, or press the Dezoomify toolbar button on the image page (no extra permission needed)",
+      ),
+      { code: "permission-denied" },
+    );
+  }
+
   const listener = { ref: null };
   const scanner = createScanner({
     queryActiveTab: async () => ({ id: tabId, url }),
@@ -746,6 +776,7 @@ function rankUrls(urls) {
 async function run(tabId) {
   uiState.lastTabId = tabId;
   uiState.cancelRequested = false;
+  uiState.scanOrigin = "";
   clearResult();
   setOutcome(null);
   const job = uiEl("dz-job");
@@ -770,12 +801,16 @@ async function run(tabId) {
     if (urls.length === 0) {
       throw Object.assign(new Error("no zoomable candidate observed"), { code: "no-candidate" });
     }
-    let tabOrigin = "";
-    try {
-      const tab = await api.tabs.get(tabId);
-      if (tab?.url) tabOrigin = tabOriginOf(tab.url);
-    } catch {
-      tabOrigin = "";
+    // Reuse the granted scan scope resolved in runScan (handover origin or
+    // tab URL); fall back to a fresh tabs.get read only if unset.
+    let tabOrigin = typeof uiState.scanOrigin === "string" ? uiState.scanOrigin : "";
+    if (!tabOrigin) {
+      try {
+        const tab = await api.tabs.get(tabId);
+        if (tab?.url) tabOrigin = tabOriginOf(tab.url);
+      } catch {
+        tabOrigin = "";
+      }
     }
     await init();
     const ranked = rankUrls(urls);
