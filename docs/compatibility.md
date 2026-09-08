@@ -70,6 +70,7 @@ formats](user/supported-formats.md) for what to paste per format.
 | Format | Website | Extension | Desktop app | CLI |
 |---|---|---|---|---|
 | Zoomify | Yes | Yes | Yes | Yes |
+| Gigapan | Yes | Yes | Yes | Yes |
 | Deep Zoom (Seadragon) | Yes | Yes | Yes | Yes |
 | IIIF | Yes | Yes | Yes | Yes |
 | Arts and Culture | Yes | Yes | Yes | Yes |

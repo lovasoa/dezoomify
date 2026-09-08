@@ -431,6 +431,7 @@ pub fn known_dezoomers() -> &'static [&'static str] {
         "custom",
         "google_arts_and_culture",
         "zoomify",
+        "gigapan",
         "iiif",
         "deepzoom",
         "generic",

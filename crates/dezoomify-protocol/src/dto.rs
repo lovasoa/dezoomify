@@ -172,11 +172,12 @@ pub const DIRECT_TRANSPORT_LABEL: &str = "Direct from your browser";
 pub const PROXY_TRANSPORT_LABEL: &str = "Metadata proxy";
 
 /// Format grid in registry precedence order: (id, display name).
-/// Mirrors `dezoomify-core/src/core/registry.rs` BUILTINS snapshot (18 entries).
+/// Mirrors `dezoomify-core/src/core/registry.rs` BUILTINS snapshot (19 entries).
 pub const FORMAT_GRID: &[(&str, &str)] = &[
     ("custom", "Custom tiles"),
     ("google_arts_and_culture", "Arts & Culture"),
     ("zoomify", "Zoomify"),
+    ("gigapan", "Gigapan"),
     ("iiif", "IIIF"),
     ("deepzoom", "Seadragon (Deep Zoom Image)"),
     ("generic", "Generic dezoomer"),
