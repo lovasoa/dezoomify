@@ -105,7 +105,8 @@ test("desktop dev server serves the real entrypoint and shared theme", { timeout
     assert.equal(child.exitCode, null, `desktop frontend exited after startup:\n${getStderr()}`);
 
     const html = await response.text();
-    assert.match(html, /<script[^>]+src=["']\/src\/main\.tsx["']/);
+    // Vite appends a cache-busting query when a hot-reloaded module changes.
+    assert.match(html, /<script[^>]+src=["']\/src\/main\.tsx(?:\?[^"']*)?["']/);
     assert.doesNotMatch(html, /packages\/shared-ui\/src\/styles\/theme\.css/);
 
     const main = await fetchWithTimeout(new URL("/src/main.tsx", DEV_URL));

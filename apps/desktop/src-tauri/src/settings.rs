@@ -461,6 +461,20 @@ mod tests {
     }
 
     #[test]
+    fn network_profiles_apply_real_pacing_and_concurrency() {
+        let balanced = parse_settings(&json!({"network_profile": "balanced"})).unwrap();
+        let balanced_config = pipeline_config_for(&balanced);
+        assert_eq!(balanced_config.max_concurrent, 8);
+        assert_eq!(balanced_config.min_interval, Duration::from_millis(200));
+
+        let gentle = parse_settings(&json!({"network_profile": "gentle"})).unwrap();
+        let gentle_config = pipeline_config_for(&gentle);
+        assert_eq!(gentle_config.max_concurrent, 4);
+        assert_eq!(gentle_config.min_interval, Duration::from_millis(500));
+        assert!(parse_settings(&json!({"network_profile": "unsafe"})).is_err());
+    }
+
+    #[test]
     fn dimensions_must_be_positive() {
         assert!(parse_settings(&json!({"max_width": 0})).is_err());
         assert!(parse_settings(&json!({"max_width": 800})).is_ok());

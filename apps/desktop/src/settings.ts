@@ -17,6 +17,9 @@
 // Keep erasable syntax only so node type-stripping can read this file. No
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
 
+import { downloadDir } from "@tauri-apps/api/path";
+import { invoke } from "@tauri-apps/api/core";
+
 export interface DesktopSettings {
   readonly outputDir: string | null;
   readonly outputFormat: DesktopOutputFormat;
@@ -65,6 +68,21 @@ export function defaultSettings(): DesktopSettings {
     cacheDir: null,
     headers: {},
   };
+}
+
+// Resolve the OS Downloads directory through Tauri instead of guessing a
+// platform path. This is deliberately asynchronous: localStorage settings
+// still render immediately, then first-run/null output paths are upgraded
+// before the user starts a job. Browser and test hosts have no Tauri bridge.
+export async function defaultOutputDirectory(): Promise<string | null> {
+  const internals = (globalThis as Record<string, unknown>)["__TAURI_INTERNALS__"];
+  if (!internals || typeof internals !== "object") return null;
+  try {
+    const path = await downloadDir();
+    return path.length > 0 && path.length <= MAX_PATH_LEN && !path.includes("\0") ? path : null;
+  } catch {
+    return null;
+  }
 }
 
 const HEADER_NAME_RE = /^[a-z0-9!#$%&'*+\-.^_`|~]+$/;
@@ -449,20 +467,21 @@ export function describeSettingsForLog(settings: DesktopSettings): string {
 // Returns the chosen directory or null when unavailable, denied, or
 // cancelled. Never throws. Falls back to null (manual entry) outside Tauri.
 export async function pickDirectory(current: string | null): Promise<string | null> {
-  const internals = (globalThis as Record<string, unknown>)["__TAURI_INTERNALS__"] as
-    | { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> }
-    | undefined;
-  const invoke = internals?.invoke;
-  if (typeof invoke !== "function") return null;
+  const internals = (globalThis as Record<string, unknown>)["__TAURI_INTERNALS__"];
+  if (!internals || typeof internals !== "object") return null;
   const attempts: Array<Record<string, unknown>> = [
     { directory: true, multiple: false },
     { directory: true },
   ];
   for (const options of attempts) {
     try {
+      // The dialog plugin receives its configuration under `options`; sending
+      // it at the top level is silently rejected by the native command.
       const raw = await invoke("plugin:dialog|open", {
-        ...options,
-        ...(current ? { defaultPath: current } : {}),
+        options: {
+          ...options,
+          ...(current ? { defaultPath: current } : {}),
+        },
       });
       if (typeof raw === "string" && raw.length > 0) return raw;
       if (Array.isArray(raw) && typeof raw[0] === "string" && (raw[0] as string).length > 0) {

@@ -100,6 +100,7 @@ import {
 } from "./queue.ts";
 import type { DesktopQueue } from "./queue.ts";
 import {
+  defaultOutputDirectory,
   describeSettingsForLog,
   loadSettings,
   parseHeadersText,
@@ -594,6 +595,19 @@ function runPersistSettingsFromPanel(): void {
 
 function runResetDesktopSettings(): void {
   resetDesktopSettings(settingsEnv);
+  void applyPlatformOutputDefault();
+}
+
+// A null output folder represents only legacy/first-run settings. Upgrade it
+// to the platform Downloads directory as soon as the native bridge is ready,
+// so the compact Folder control always starts somewhere useful.
+async function applyPlatformOutputDefault(): Promise<void> {
+  if (desktopSettings.outputDir !== null) return;
+  const outputDir = await defaultOutputDirectory();
+  if (!outputDir || desktopSettings.outputDir !== null) return;
+  desktopSettings = { ...desktopSettings, outputDir };
+  saveSettings(desktopSettings);
+  update();
 }
 
 function diagnosticsSnapshot() {
@@ -2341,13 +2355,15 @@ function ensureDesktopHelpAbout(): void {
   const row = doc.createElement("div");
   row.className = "dz-actions-row dz-help-actions";
   for (const link of DESKTOP_HELP_LINKS) {
-    const btn = doc.createElement("button");
-    btn.type = "button";
-    btn.className = "dz-btn-secondary";
-    btn.textContent = link.label;
-    btn.setAttribute("aria-label", link.label);
-    btn.addEventListener("click", () => handleOpenExternalLink(link.url));
-    row.appendChild(btn);
+    const anchor = doc.createElement("a");
+    anchor.className = "dz-help-link";
+    anchor.href = link.url;
+    anchor.textContent = link.label;
+    anchor.addEventListener("click", (event) => {
+      event.preventDefault();
+      handleOpenExternalLink(link.url);
+    });
+    row.appendChild(anchor);
   }
   disclosure.appendChild(row);
   region.appendChild(disclosure);
@@ -2441,6 +2457,7 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 
 if (root !== null) {
   update();
+  void applyPlatformOutputDefault();
 }
 
 function getCurrentJobId(): string | null {
