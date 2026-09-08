@@ -5,9 +5,10 @@ name: store-submit
 # Default is dry-run: package the store payload, validate it, and upload it
 # as a workflow artifact. Pass upload=true to push to the existing listing
 # (Chromium: draft upload; Firefox/AMO: listed-channel version upload, which
-# auto-submits for review), and publish=true to publish the Chromium draft
-# after upload. Draft upload and publish fail closed with a clear message
-# when any required secret is missing.
+# auto-submits for review), and publish=true to publish the Chromium draft.
+# Chromium publish can be retried without another upload when a draft already
+# exists. Draft upload and publish fail closed with a clear message when any
+# required secret is missing.
 # Chromium secrets (OAuth only, no IDs): CHROME_WS_CLIENT_ID,
 # CHROME_WS_CLIENT_SECRET, CHROME_WS_REFRESH_TOKEN (one-time owner authorize).
 # Uploads use the /upload/ media endpoint; publish uses the items endpoint.
@@ -40,7 +41,7 @@ on:
         type: boolean
         default: false
       publish:
-        description: "Publish the uploaded draft after upload (needs secrets)"
+        description: "Publish the existing Chromium draft (needs secrets; upload may be false for retry)"
         required: false
         type: boolean
         default: false
@@ -155,7 +156,7 @@ jobs:
           echo "http: $put_code"
           [ "$(printf '%s' "$put_out" | tail -n1)" = "SUCCESS" ] || { echo "upload not accepted (see itemError above)"; exit 1; }
       - name: Publish uploaded draft
-        if: inputs.browser == 'chromium' && inputs.upload == true && inputs.publish == true
+        if: inputs.browser == 'chromium' && inputs.publish == true
         env:
           CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
           CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
@@ -189,7 +190,22 @@ jobs:
           pub_code=$(printf '%s' "$pub_resp" | tail -n1)
           pub_body=$(printf '%s' "$pub_resp" | head -n -1)
           pub_out=$(printf '%s' "$pub_body" \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("publish:", d.get("status","unknown")); print("OK" if d.get("status") == ["OK"] else "NOT-OK")') \
+            | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          status = d.get("status")
+          if status is not None:
+              print("publish:", status)
+          else:
+              error = d.get("error", {})
+              print("publish error:", error.get("message", "unknown"))
+              reasons = sorted({item.get("reason", "unknown") for item in error.get("errors", [])})
+              if reasons:
+                  print("reasons:", ", ".join(reasons))
+          accepted = 200 <= int(sys.argv[1]) < 300 and status == ["OK"]
+          already_queued = status == ["ITEM_PENDING_REVIEW"]
+          print("OK" if accepted or already_queued else "NOT-OK")
+          ' "$pub_code") \
             || { echo "publish failed: HTTP $pub_code: $(printf '%s' "$pub_body" | head -c 500)"; exit 1; }
           printf '%s\n' "$pub_out" | head -n -1
           echo "http: $pub_code"
@@ -210,27 +226,70 @@ jobs:
             *) echo "bad AMO guid in release/config.toml: $guid"; exit 1 ;;
           esac
           zip=$(ls dezoomify-extension-firefox-*.zip)
-          version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "apps/extension/generated/manifest.firefox.json")
           enc=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$guid")
-          auth=$(AMO_JWT_ISSUER="$AMO_JWT_ISSUER" AMO_JWT_SECRET="$AMO_JWT_SECRET" python3 -c '
-          import base64, hashlib, hmac, json, os, time, uuid
-          header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b"=")
-          now = int(time.time())
-          payload = base64.urlsafe_b64encode(json.dumps({"iss": os.environ["AMO_JWT_ISSUER"], "jti": str(uuid.uuid4()), "iat": now, "exp": now + 300}).encode()).rstrip(b"=")
-          sig = base64.urlsafe_b64encode(hmac.new(os.environ["AMO_JWT_SECRET"].encode(), header + b"." + payload, hashlib.sha256).digest()).rstrip(b"=")
-          print((header + b"." + payload + b"." + sig).decode())
-          ')
-          resp=$(curl -sS --proto '=https' --max-time 300 -w '\n%{http_code}' \
+          amo_token() {
+            AMO_JWT_ISSUER="$AMO_JWT_ISSUER" AMO_JWT_SECRET="$AMO_JWT_SECRET" python3 -c '
+            import base64, hashlib, hmac, json, os, time, uuid
+            header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b"=")
+            now = int(time.time())
+            payload = base64.urlsafe_b64encode(json.dumps({"iss": os.environ["AMO_JWT_ISSUER"], "jti": str(uuid.uuid4()), "iat": now, "exp": now + 300}).encode()).rstrip(b"=")
+            sig = base64.urlsafe_b64encode(hmac.new(os.environ["AMO_JWT_SECRET"].encode(), header + b"." + payload, hashlib.sha256).digest()).rstrip(b"=")
+            print((header + b"." + payload + b"." + sig).decode())
+            '
+          }
+          auth=$(amo_token)
+          upload_resp=$(curl -sS --proto '=https' --max-time 300 -w '\n%{http_code}' \
             -H "Authorization: JWT ${auth}" \
             -F "upload=@${zip}" -F "channel=listed" \
-            -X PUT "https://addons.mozilla.org/api/v5/addons/${enc}/versions/${version}/") \
-            || { echo "AMO endpoint unreachable"; exit 1; }
-          http_code=$(printf '%s' "$resp" | tail -n1)
-          body=$(printf '%s' "$resp" | head -n -1)
-          echo "http: $http_code"
-          case "$http_code" in
+            -X POST "https://addons.mozilla.org/api/v5/addons/upload/") \
+            || { echo "AMO upload endpoint unreachable"; exit 1; }
+          upload_code=$(printf '%s' "$upload_resp" | tail -n1)
+          upload_body=$(printf '%s' "$upload_resp" | head -n -1)
+          echo "upload http: $upload_code"
+          case "$upload_code" in
+            200|201|202) : ;;
+            *) echo "AMO upload failed: $(printf '%s' "$upload_body" | head -c 500)"; exit 1 ;;
+          esac
+          upload_uuid=$(printf '%s' "$upload_body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("uuid", ""))')
+          upload_url=$(printf '%s' "$upload_body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url", ""))')
+          [ -n "$upload_uuid" ] || { echo "AMO upload response lacks uuid"; exit 1; }
+          case "$upload_url" in
+            https://addons.mozilla.org/api/v5/addons/upload/*/) : ;;
+            *) echo "AMO upload response has an invalid status URL"; exit 1 ;;
+          esac
+          processed=no
+          for _attempt in $(seq 1 60); do
+            auth=$(amo_token)
+            detail_resp=$(curl -sS --proto '=https' --max-time 30 -w '\n%{http_code}' \
+              -H "Authorization: JWT ${auth}" "$upload_url") \
+              || { echo "AMO validation endpoint unreachable"; exit 1; }
+            detail_code=$(printf '%s' "$detail_resp" | tail -n1)
+            detail_body=$(printf '%s' "$detail_resp" | head -n -1)
+            [ "$detail_code" = "200" ] || { echo "AMO validation failed: HTTP $detail_code"; exit 1; }
+            processed=$(printf '%s' "$detail_body" | python3 -c 'import json,sys; print("yes" if json.load(sys.stdin).get("processed") else "no")')
+            [ "$processed" = "yes" ] && break
+            sleep 5
+          done
+          [ "$processed" = "yes" ] || { echo "AMO validation timed out"; exit 1; }
+          valid=$(printf '%s' "$detail_body" | python3 -c 'import json,sys; print("yes" if json.load(sys.stdin).get("valid") else "no")')
+          if [ "$valid" != "yes" ]; then
+            printf '%s' "$detail_body" | python3 -c 'import json,sys; print("AMO validation errors:", json.dumps(json.load(sys.stdin).get("validation", {}))[:1000])'
+            exit 1
+          fi
+          version=$(printf '%s' "$detail_body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", "?"))')
+          payload=$(python3 -c 'import json,sys; print(json.dumps({"version": {"upload": sys.argv[1]}}))' "$upload_uuid")
+          auth=$(amo_token)
+          submit_resp=$(curl -sS --proto '=https' --max-time 300 -w '\n%{http_code}' \
+            -H "Authorization: JWT ${auth}" -H "Content-Type: application/json" \
+            --data "$payload" -X PUT "https://addons.mozilla.org/api/v5/addons/addon/${enc}/") \
+            || { echo "AMO submission endpoint unreachable"; exit 1; }
+          submit_code=$(printf '%s' "$submit_resp" | tail -n1)
+          submit_body=$(printf '%s' "$submit_resp" | head -n -1)
+          echo "submit http: $submit_code"
+          case "$submit_code" in
             200|201|202) : ;;
             409) echo "version ${version} already exists on the listing; bump the version and re-run"; exit 1 ;;
-            *) echo "AMO upload failed: $(printf '%s' "$body" | head -c 500)"; exit 1 ;;
+            *) echo "AMO submission failed: $(printf '%s' "$submit_body" | head -c 500)"; exit 1 ;;
           esac
-          echo "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("version:", d.get("version","?")); print("review url:", d.get("url","?")); print("status: submitted for review (listed channel)")' || printf '%s\n' "$body"
+          echo "version: $version"
+          echo "status: submitted for review (listed channel)"
