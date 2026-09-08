@@ -41,15 +41,16 @@ queued request on its own, so capability checks are never UI-only.
 ### Desktop output and settings
 
 Each desktop job saves one output; the queue saves entries one at a time in
-submission order. The UI format picker offers `png`, `jpeg`, and `tiff`
-(`NATIVE_FORMATS` in `apps/desktop/src/desktopIntegration.ts`), defaulting to
-`png`. The choice is first-class persisted state: `apps/desktop/src/settings.ts`
+submission order. The UI format picker offers `png`, `jpeg`, `tiff`, `zif`,
+`webp`, and `iiif-dir` (`NATIVE_FORMATS` plus the directory output in
+`apps/desktop/src/desktopIntegration.ts`), defaulting to `png`. The choice is
+first-class persisted state: `apps/desktop/src/settings.ts`
 stores `outputFormat` in localStorage (`dezoomify.desktop.settings.v1`),
 validates it fail-closed on load, and seeds both the picker radios and the
-destination-grant format on relaunch. The shell grant gate accepts the full
-`png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir` id set (`SUPPORTED_FORMATS` in
-`apps/desktop/src-tauri/src/commands.rs`), but the UI only ever sends the
-three picker ids; the format travels in the `request_destination` grant, never
+destination-grant format on relaunch. The shell grant gate accepts the same
+full `png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir` id set (`SUPPORTED_FORMATS`
+in `apps/desktop/src-tauri/src/commands.rs`); the format travels in the
+`request_destination` grant, never
 in `start_job` (`settingsToInvokeArgs` carries compression, retries, caps,
 directories, and headers only, and the Rust `DesktopSettings` has no format
 field). JPEG quality is `100 - compression` with the shipped default

@@ -81,7 +81,13 @@ fn native_baseline_matches_desktop_contract() {
     );
     assert_eq!(
         caps.encoders,
-        vec!["png".to_string(), "jpeg".to_string(), "tiff".to_string()]
+        vec![
+            "png".to_string(),
+            "jpeg".to_string(),
+            "tiff".to_string(),
+            "zif".to_string(),
+            "webp".to_string(),
+        ]
     );
     assert_eq!(
         caps.destination_modes,

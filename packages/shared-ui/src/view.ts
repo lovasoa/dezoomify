@@ -4,6 +4,7 @@
 import type { ControllerState, StructuredError, AppCapabilities } from "./controller.ts";
 import { renderAppChoice } from "./controller.ts";
 import type { HistoryEntry } from "./history.ts";
+import { t } from "./i18n.ts";
 import {
   renderTransportLabel,
   renderSaveGuidance,
@@ -564,10 +565,10 @@ export function renderView(
     header = container.ownerDocument.createElement("div");
     header.className = "dz-header";
     header.innerHTML = `
-      <h1 class="dz-title">
+      <div class="dz-product-mark" aria-label="Dezoomify">
+        ${getDezoomifyLogoSvg(30)}
         <span>Dezoomify</span>
-        ${getDezoomifyLogoSvg(28)}
-      </h1>
+      </div>
     `;
     card.prepend(header);
   }
@@ -836,7 +837,9 @@ function mountInputSection(
   const desc = parent.ownerDocument.createElement("div");
   desc.className = "dz-description";
   desc.innerHTML = `
-    <p>Paste the address of a zoomable image or manifest. Dezoomify detects the format and chooses the largest available image automatically.</p>
+    <p class="dz-eyebrow">${escapeHtml(t("view.input.eyebrow"))}</p>
+    <h1>${escapeHtml(t("view.input.title"))}</h1>
+    <p>${escapeHtml(t("view.input.description"))}</p>
   `;
   body.appendChild(desc);
 
@@ -862,11 +865,11 @@ function mountInputSection(
       type="url"
       id="dz-url-input"
       class="dz-input"
-      placeholder="URL of the webpage containing your image"
+      placeholder="${escapeHtml(t("view.input.placeholder"))}"
       required
       autofocus
       value="${prefilled}"
-      aria-label="URL of the webpage containing your zoomable image"
+      aria-label="${escapeHtml(t("view.input.aria"))}"
     />
     <button type="button" class="dz-input-clear" id="dz-btn-clear" title="Clear input" aria-label="Clear input">&times;</button>
   `;
@@ -895,7 +898,7 @@ function mountInputSection(
   const submitBtn = parent.ownerDocument.createElement("button");
   submitBtn.type = "submit";
   submitBtn.className = "dz-btn-tactile";
-  submitBtn.innerHTML = `<span>Start</span><span class="dz-button-key" aria-hidden="true">↵</span>`;
+  submitBtn.innerHTML = `<span>${escapeHtml(t("view.input.start"))}</span><span class="dz-button-key" aria-hidden="true">↵</span>`;
   btnRow.appendChild(submitBtn);
   form.appendChild(btnRow);
 

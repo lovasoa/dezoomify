@@ -59,6 +59,7 @@
 
   /* Crisp, architectural border radius (No rounded pill shapes) */
   --dz-radius: 4px;
+  --dz-radius-large: 10px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -141,6 +142,10 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-image:
+    radial-gradient(circle at 18% 0%, rgba(60, 123, 255, 0.055), transparent 34rem),
+    linear-gradient(180deg, rgba(255,255,255,0.42), transparent 22rem);
+  background-attachment: fixed;
 }
 
 /* Refined, dignified links */
@@ -173,7 +178,7 @@ abbr[title] {
   align-items: center;
   justify-content: space-between;
   padding: 0 1.25rem;
-  height: 36px;
+  height: 52px;
   flex-shrink: 0;
   background: var(--dz-surface-gradient);
   border-bottom: 1px solid var(--dz-surface-border);
@@ -265,7 +270,7 @@ abbr[title] {
 .dz-main {
   flex: 1 0 auto;
   width: min(92%, 960px);
-  margin: 2.5rem auto 3rem;
+  margin: clamp(2.5rem, 8vh, 5.5rem) auto 4rem;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -276,16 +281,25 @@ abbr[title] {
 .dz-card {
   background: var(--dz-surface-gradient);
   border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
+  border-radius: var(--dz-radius-large);
   box-shadow: var(--dz-surface-shadow);
-  padding: 2.25rem 2.5rem;
+  padding: clamp(2rem, 5vw, 4.5rem);
   color: var(--dz-text-primary);
 }
 
 /* Title & Description */
 .dz-header {
-  text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2.25rem;
+}
+
+.dz-product-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--dz-text-secondary);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .dz-card[data-view-phase]:not([data-view-phase="idle"]) .dz-header {
@@ -310,12 +324,31 @@ abbr[title] {
 }
 
 .dz-description {
-  text-align: center;
+  text-align: left;
   font-size: 1rem;
   line-height: 1.55;
   color: var(--dz-text-secondary);
-  max-width: 42rem;
-  margin: 0 auto 0.75rem;
+  max-width: 45rem;
+  margin: 0 0 1.6rem;
+}
+
+.dz-description h1 {
+  margin: 0.3rem 0 0.75rem;
+  color: var(--dz-text-primary);
+  font-size: clamp(1.85rem, 4vw, 3rem);
+  font-weight: 720;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+
+.dz-description p { margin: 0; }
+
+.dz-eyebrow {
+  color: var(--dz-link-color);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .dz-description strong {
@@ -437,7 +470,7 @@ abbr[title] {
 .dz-form {
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 0.65rem;
 }
 
 @media (min-width: 561px) {
@@ -662,7 +695,7 @@ abbr[title] {
 
 .dz-btn-tactile {
   min-width: 126px;
-  min-height: 42px;
+  min-height: 52px;
   height: auto;
   padding: 0.55rem 2rem;
   font-family: inherit;
@@ -1396,14 +1429,14 @@ abbr[title] {
 
 /* Recent-jobs history (local-only ledger, idle view) */
 .dz-history-section {
-  margin-top: 2rem;
-  padding-top: 1.25rem;
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
   border-top: 1px solid var(--dz-surface-border);
 }
 
 .dz-history-title {
   margin: 0 0 0.25rem;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: var(--dz-text-primary);
 }
@@ -1786,12 +1819,20 @@ abbr[title] {
   flex-shrink: 0;
   margin-top: auto;
   width: 100%;
-  padding: 1.75rem 1.5rem 2.25rem;
+  padding: 1.25rem 1.5rem 1.5rem;
   border-top: 1px solid var(--dz-surface-border);
   background: var(--dz-footer-bg);
   text-align: center;
   color: var(--dz-text-muted);
   font-size: 0.85rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-image:
+      radial-gradient(circle at 16% 0%, rgba(172, 175, 80, 0.055), transparent 34rem),
+      linear-gradient(180deg, rgba(255,255,255,0.012), transparent 24rem);
+  }
 }
 
 .dz-footer-links {

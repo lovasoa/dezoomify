@@ -241,7 +241,7 @@ test("hermetic desktop job: submit, choose, save, deep-link confirm, cancel", { 
     const caps = app.getCapabilities();
     assert.equal(caps.nativeAvailable, true);
     assert.equal(caps.proxyAllowed, false);
-    assert.deepEqual([...caps.encoders].sort(), ["jpeg", "png", "tiff"]);
+    assert.deepEqual([...caps.encoders].sort(), ["jpeg", "png", "tiff", "webp", "zif"]);
     assert.equal(caps.protocolMin, "1.0");
     assert.equal(caps.protocolMax, "1.0");
 
@@ -416,12 +416,12 @@ test("desktop settings: outputFormat is a validated first-class persisted settin
   const settings = await import("../src/settings.ts");
   // Registry parity: the picker (NATIVE_FORMATS) plus the default that
   // seeds the encoder choice at boot.
-  assert.deepEqual([...settings.OUTPUT_FORMATS].sort(), ["jpeg", "png", "tiff"]);
+  assert.deepEqual([...settings.OUTPUT_FORMATS].sort(), ["iiif-dir", "jpeg", "png", "tiff", "webp", "zif"]);
   assert.equal(settings.DEFAULT_OUTPUT_FORMAT, "png");
   assert.equal(settings.defaultSettings().outputFormat, "png");
   // Validation bounds: known encoders pass (case-insensitive, snake_case
   // alias accepted); missing/null falls back to the PNG default.
-  for (const ok of ["png", "jpeg", "tiff", "PNG", "Jpeg"]) {
+  for (const ok of ["png", "jpeg", "tiff", "zif", "webp", "iiif-dir", "PNG", "Jpeg"]) {
     const validated = settings.validateSettings({ outputFormat: ok });
     assert.equal(validated.ok, true, `${ok} validates`);
     assert.equal(validated.settings.outputFormat, ok.toLowerCase());
@@ -438,7 +438,7 @@ test("desktop settings: outputFormat is a validated first-class persisted settin
     "null format defaults to PNG",
   );
   // Anything else fails closed with no settings (never a silent fallback).
-  for (const bad of ["exe", "webp", "zif", "iiif-dir", "jpg", "", 42]) {
+  for (const bad of ["exe", "jpg", "", 42]) {
     const validated = settings.validateSettings({ outputFormat: bad });
     assert.equal(validated.ok, false, `${JSON.stringify(bad)} fails closed`);
     assert.equal(validated.settings, null);

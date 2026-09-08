@@ -19,7 +19,9 @@
   "encoders": [
     "png",
     "jpeg",
-    "tiff"
+    "tiff",
+    "zif",
+    "webp"
   ],
   "eventChannels": [
     "dezoomify://job-state",

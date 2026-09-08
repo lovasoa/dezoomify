@@ -241,9 +241,9 @@ function recordDesktopHistory(url: string, width?: number, height?: number, form
 }
 
 // Native output formats (todo 4.4, todo 5.1): single source is
-// NATIVE_FORMATS in desktopIntegration.ts (png/jpeg/tiff), a subset of
+// NATIVE_FORMATS in desktopIntegration.ts matches the formats accepted by
 // SUPPORTED_FORMATS in commands.rs and the tauri_shell.rs dialog filters.
-// The 3-radio selector below writes grantedFormat; requestOutputAndResume
+// The selector below writes grantedFormat; requestOutputAndResume
 // reads it so the Save and choose-output paths never hard-code a format.
 function normalizeNativeFormat(value: unknown): NativeFormat {
   if (typeof value === "string") {
@@ -1905,8 +1905,8 @@ function syncInitialUrlFromLocation(): void {
   }
 }
 
-// Output format selector (todo 4.4, todo 5.1): 3 native radios
-// (PNG/JPEG/TIFF, NATIVE_FORMATS) bound to grantedFormat. Flat flow
+// Output format selector (todo 4.4, todo 5.1): native format radios bound to
+// grantedFormat. Flat flow
 // inside the aux panel, native inputs so Tab and screen readers work; the
 // crisp 2px focus ring comes from desktop.css. Changing a radio updates
 // grantedFormat and persists it via persistOutputFormat (settings.ts
@@ -2326,16 +2326,17 @@ function ensureDesktopHelpAbout(): void {
   region.setAttribute("role", "region");
   region.setAttribute("aria-labelledby", "dz-help-title");
 
-  const title = doc.createElement("h2");
-  title.className = "dz-notice-title";
-  title.id = "dz-help-title";
+  const disclosure = doc.createElement("details");
+  disclosure.className = "dz-help-disclosure";
+  const summary = doc.createElement("summary");
+  summary.id = "dz-help-title";
+  const title = doc.createElement("span");
   title.textContent = t("desktop.help.title");
-  region.appendChild(title);
-
-  const version = doc.createElement("p");
-  version.className = "dz-notice-message";
-  version.textContent = `Dezoomify Desktop ${DESKTOP_APP_VERSION}`;
-  region.appendChild(version);
+  const version = doc.createElement("span");
+  version.className = "dz-help-version";
+  version.textContent = `Desktop ${DESKTOP_APP_VERSION}`;
+  summary.append(title, version);
+  disclosure.appendChild(summary);
 
   const row = doc.createElement("div");
   row.className = "dz-actions-row dz-help-actions";
@@ -2348,7 +2349,8 @@ function ensureDesktopHelpAbout(): void {
     btn.addEventListener("click", () => handleOpenExternalLink(link.url));
     row.appendChild(btn);
   }
-  region.appendChild(row);
+  disclosure.appendChild(row);
+  region.appendChild(disclosure);
 
   card.appendChild(region);
 }

@@ -94,13 +94,14 @@ itself as coming from there. On the command line, this is the
 
 ## Choosing the file format
 
-Before saving, pick the output format: PNG, JPEG, or TIFF. The app remembers
-your choice and offers it again next time. The output name carries the matching
-extension. The app saves PNG for names ending in `.png`, JPEG at quality 95
-for `.jpg` or `.jpeg`, and TIFF for `.tif` or `.tiff`. Any other extension
-stops the job with a typed error before anything is saved, so rename the
-output instead. For IIIF tile folders use the
-[command-line tool](./command-line.md), which saves them directly.
+Open **Customize** before saving to pick PNG, JPEG, TIFF, ZIF, WebP, or an
+IIIF tile folder. The app remembers your choice and summarizes it while the
+panel is closed. The output name carries the matching extension. The app saves
+PNG for names ending in `.png`, JPEG at quality 95 for `.jpg` or `.jpeg`, TIFF
+for `.tif` or `.tiff`, ZIF for `.zif`, and lossless WebP for `.webp`. Any
+other extension stops the job with a typed error before anything is saved, so
+rename the output instead. An IIIF folder contains `info.json` and the image
+tiles, ready to serve from a static file server.
 
 JPEG versions stay small and suit on-screen viewing; TIFF and PNG suit
 archiving and further editing. JPEG cannot address images larger than

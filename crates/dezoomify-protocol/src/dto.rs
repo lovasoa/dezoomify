@@ -693,8 +693,8 @@ impl CapabilitiesDto {
         }
     }
 
-    /// Honest native baseline: PNG, JPEG, and TIFF output to a single file
-    /// plus static `iiif-dir` tile trees, with an optional tile resume cache
+    /// Honest native baseline: PNG, JPEG, TIFF, ZIF, and WebP output to a
+    /// single file plus static `iiif-dir` tile trees, with an optional tile resume cache
     /// and a sequential bulk queue. Deferred bulk-text entries resolve one at
     /// a time through fresh bounded jobs. Handoff import is supported. Wave 2
     /// widens these fields only alongside the matching pipeline, encoder,
@@ -714,7 +714,13 @@ impl CapabilitiesDto {
         Self {
             fetch_modes: vec!["native".into()],
             decoders: vec!["png".into(), "jpeg".into(), "tiff".into()],
-            encoders: vec!["png".into(), "jpeg".into(), "tiff".into()],
+            encoders: vec![
+                "png".into(),
+                "jpeg".into(),
+                "tiff".into(),
+                "zif".into(),
+                "webp".into(),
+            ],
             destination_modes: vec!["file".into(), "iiif-dir".into()],
             storage_modes: vec!["cache".into()],
             max_concurrency: 16,

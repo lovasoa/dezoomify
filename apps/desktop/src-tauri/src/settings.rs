@@ -36,6 +36,14 @@ pub const MAX_PATH_LEN: usize = 4096;
 /// Upper bound for trusted user headers (repeatable -H, last wins).
 pub const MAX_HEADERS: usize = 32;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NetworkProfile {
+    #[default]
+    Maximum,
+    Balanced,
+    Gentle,
+}
+
 /// Validated desktop settings. All bounds are enforced by
 /// `parse_settings`; direct construction (e.g. `Default`) is already valid.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -51,6 +59,8 @@ pub struct DesktopSettings {
     pub max_height: Option<u32>,
     /// Tile retry budget (default 3, 0 = no retries).
     pub retries: u32,
+    /// Request pacing preset exposed by the desktop app.
+    pub network_profile: NetworkProfile,
     /// Optional resume-cache directory (tile bodies only).
     pub cache_dir: Option<PathBuf>,
     /// Trusted user headers, lowercased names (origin-scoped, never logged).
@@ -66,6 +76,7 @@ impl DesktopSettings {
             max_width: None,
             max_height: None,
             retries: DEFAULT_RETRIES,
+            network_profile: NetworkProfile::Maximum,
             cache_dir: None,
             headers: BTreeMap::new(),
         }
@@ -78,14 +89,19 @@ impl DesktopSettings {
 /// Referer is added: only explicit user headers are sent (origin-scoped by
 /// the native `UserHeaders` layer, never logged or cached).
 pub fn pipeline_config_for(settings: &DesktopSettings) -> PipelineConfig {
+    let (max_concurrent, min_interval) = match settings.network_profile {
+        NetworkProfile::Maximum => (16, Duration::ZERO),
+        NetworkProfile::Balanced => (8, Duration::from_millis(200)),
+        NetworkProfile::Gentle => (4, Duration::from_millis(500)),
+    };
     PipelineConfig {
         user_headers: settings.headers.clone(),
         max_width: settings.max_width,
         max_height: settings.max_height,
-        max_concurrent: 16,
+        max_concurrent,
         max_retries: settings.retries,
         retry_delay: Duration::from_secs(2),
-        min_interval: Duration::ZERO,
+        min_interval,
         compression: settings.compression,
         cache_dir: settings
             .cache_dir
@@ -111,9 +127,10 @@ pub fn describe_settings_for_log(settings: &DesktopSettings) -> String {
     let mut names: Vec<&str> = settings.headers.keys().map(String::as_str).collect();
     names.sort();
     format!(
-        "compression={} retries={} max_width={} max_height={} output_dir={} cache_dir={} headers={} [{}]",
+        "compression={} retries={} network={:?} max_width={} max_height={} output_dir={} cache_dir={} headers={} [{}]",
         settings.compression,
         settings.retries,
+        settings.network_profile,
         settings
             .max_width
             .map(|v| v.to_string())
@@ -358,6 +375,16 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         None => DEFAULT_RETRIES,
         Some(v) => parse_retries_field(v)?,
     };
+    let network_profile = match obj.get("network_profile") {
+        None => NetworkProfile::Maximum,
+        Some(serde_json::Value::String(value)) => match value.as_str() {
+            "maximum" => NetworkProfile::Maximum,
+            "balanced" => NetworkProfile::Balanced,
+            "gentle" => NetworkProfile::Gentle,
+            _ => return Err("network_profile must be maximum, balanced, or gentle".to_string()),
+        },
+        Some(_) => return Err("network_profile must be a string".to_string()),
+    };
     let max_width = match obj.get("max_width") {
         None => None,
         Some(v) => parse_opt_dimension(v, "max_width")?,
@@ -385,6 +412,7 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         max_width,
         max_height,
         retries,
+        network_profile,
         cache_dir,
         headers,
     })

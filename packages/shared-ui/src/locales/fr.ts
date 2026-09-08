@@ -207,6 +207,13 @@ export const fr = {
   "view.history.open": "Rouvrir",
   "view.history.clear": "Effacer l historique",
   "view.history.dims": "{w} par {h} pixels",
+  "view.input.eyebrow": "Nouvelle image",
+  "view.input.title": "Enregistrez l image en pleine resolution",
+  "view.input.description":
+    "Collez une page de visionneuse, un manifeste ou une adresse de tuiles. Dezoomify trouve l image et choisit la meilleure resolution disponible.",
+  "view.input.placeholder": "Collez l adresse d une visionneuse ou d un manifeste",
+  "view.input.aria": "Adresse de la page contenant votre image zoomable",
+  "view.input.start": "Trouver l image",
   // Failure "What happened" explainer.
   "view.fail.whatHappened": "Ce qui s est passe",
   "view.fail.rateProxy":
@@ -346,9 +353,12 @@ export const fr = {
   "desktop.help.privacy": "Confidentialite",
   "desktop.help.terms": "Conditions",
   "desktop.help.donate": "Faire un don",
-  "desktop.settings.title": "Parametres",
+  "desktop.settings.title": "Personnaliser",
   "desktop.settings.desc":
     "Parametres de telechargement minimaux. Enregistres sur cet appareil et utilises pour la prochaine tache. Les entetes sont envoyes uniquement a l origine de l image et ne sont jamais journalises.",
+  "desktop.settings.fileGroup": "Fichier",
+  "desktop.settings.imageGroup": "Image",
+  "desktop.settings.networkGroup": "Reseau et reprise",
   "desktop.settings.outputDir": "Dossier de sortie (facultatif)",
   "desktop.settings.compression": "Compression 0-100 (defaut 5)",
   "desktop.settings.maxWidth": "Largeur max en px (facultatif)",

@@ -2,7 +2,7 @@
 //
 // Fields:
 // - output dir (native dir picker; text input plus Browse button)
-// - output format (encoder picker: png/jpeg/tiff, default png)
+// - output format (native encoder/directory picker, default png)
 // - compression 0-100, default 5 (JPEG quality 100-x, PNG tier)
 // - max-width / max-height caps, optional positive ints
 // - retries, default 3 (0 allowed = no retries), bounded 0-100
@@ -24,6 +24,7 @@ export interface DesktopSettings {
   readonly maxWidth: number | null;
   readonly maxHeight: number | null;
   readonly retries: number;
+  readonly networkProfile: NetworkProfile;
   readonly cacheDir: string | null;
   readonly headers: Readonly<Record<string, string>>;
 }
@@ -32,11 +33,21 @@ export const SETTINGS_STORAGE_KEY = "dezoomify.desktop.settings.v1" as const;
 // Encoder picker choices. Must stay identical to NATIVE_FORMATS in
 // desktopIntegration.ts (the radio group) and a subset of SUPPORTED_FORMATS
 // in apps/desktop/src-tauri/src/commands.rs (the grant gate).
-export type DesktopOutputFormat = "png" | "jpeg" | "tiff";
-export const OUTPUT_FORMATS: ReadonlyArray<DesktopOutputFormat> = ["png", "jpeg", "tiff"] as const;
+export type DesktopOutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
+export const OUTPUT_FORMATS: ReadonlyArray<DesktopOutputFormat> = [
+  "png",
+  "jpeg",
+  "tiff",
+  "zif",
+  "webp",
+  "iiif-dir",
+] as const;
 export const DEFAULT_OUTPUT_FORMAT: DesktopOutputFormat = "png" as const;
 export const DEFAULT_COMPRESSION = 5 as const;
 export const DEFAULT_RETRIES = 3 as const;
+export type NetworkProfile = "maximum" | "balanced" | "gentle";
+export const NETWORK_PROFILES: ReadonlyArray<NetworkProfile> = ["maximum", "balanced", "gentle"] as const;
+export const DEFAULT_NETWORK_PROFILE: NetworkProfile = "maximum";
 export const MAX_RETRIES = 100 as const;
 export const MAX_DIMENSION = 1000000 as const;
 export const MAX_PATH_LEN = 4096 as const;
@@ -50,6 +61,7 @@ export function defaultSettings(): DesktopSettings {
     maxWidth: null,
     maxHeight: null,
     retries: DEFAULT_RETRIES,
+    networkProfile: DEFAULT_NETWORK_PROFILE,
     cacheDir: null,
     headers: {},
   };
@@ -178,7 +190,7 @@ function parseOutputFormat(raw: unknown, errors: Array<string>): DesktopOutputFo
       return lower as DesktopOutputFormat;
     }
   }
-  errors.push("output format must be one of png, jpeg, tiff");
+  errors.push("output format must be one of png, jpeg, tiff, zif, webp, iiif-dir");
   return undefined;
 }
 
@@ -212,6 +224,15 @@ function parseRetries(raw: unknown, errors: Array<string>): number | undefined {
     return undefined;
   }
   return n;
+}
+
+function parseNetworkProfile(raw: unknown, errors: Array<string>): NetworkProfile | undefined {
+  if (raw === undefined || raw === null) return DEFAULT_NETWORK_PROFILE;
+  if (typeof raw === "string" && (NETWORK_PROFILES as ReadonlyArray<string>).includes(raw)) {
+    return raw as NetworkProfile;
+  }
+  errors.push("network profile must be maximum, balanced, or gentle");
+  return undefined;
 }
 
 function parseHeadersValue(raw: unknown, errors: Array<string>): Record<string, string> | undefined {
@@ -278,6 +299,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
   const outputFormat = parseOutputFormat(obj["outputFormat"] ?? obj["output_format"], errors);
   const compression = parseCompression(obj["compression"], errors);
   const retries = parseRetries(obj["retries"], errors);
+  const networkProfile = parseNetworkProfile(obj["networkProfile"] ?? obj["network_profile"], errors);
   const maxWidth = parseOptionalDimension(obj["maxWidth"] ?? obj["max_width"], "max-width", errors);
   const maxHeight = parseOptionalDimension(obj["maxHeight"] ?? obj["max_height"], "max-height", errors);
   const outputDir = parseOptionalDir(obj["outputDir"] ?? obj["output_dir"], "output dir", errors);
@@ -291,6 +313,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
     outputFormat === undefined ||
     compression === undefined ||
     retries === undefined ||
+    networkProfile === undefined ||
     maxWidth === undefined ||
     maxHeight === undefined ||
     outputDir === undefined ||
@@ -311,6 +334,7 @@ export function validateSettings(raw: unknown): SettingsValidation {
       maxWidth,
       maxHeight,
       retries,
+      networkProfile,
       cacheDir,
       headers,
     },
@@ -378,6 +402,7 @@ export function saveSettings(settings: DesktopSettings): Array<string> {
     maxWidth: settings.maxWidth,
     maxHeight: settings.maxHeight,
     retries: settings.retries,
+    networkProfile: settings.networkProfile,
     cacheDir: settings.cacheDir,
     headers: { ...settings.headers },
   });
@@ -396,6 +421,7 @@ export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, 
   return {
     compression: settings.compression,
     retries: settings.retries,
+    network_profile: settings.networkProfile,
     max_width: settings.maxWidth,
     max_height: settings.maxHeight,
     output_dir: settings.outputDir,
@@ -413,7 +439,7 @@ export function describeSettingsForLog(settings: DesktopSettings): string {
   const outputDir = settings.outputDir === null ? "unset" : "set";
   const cacheDir = settings.cacheDir === null ? "unset" : "set";
   return (
-    `output_format=${settings.outputFormat} compression=${settings.compression} retries=${settings.retries} ` +
+    `output_format=${settings.outputFormat} compression=${settings.compression} retries=${settings.retries} network=${settings.networkProfile} ` +
     `max_width=${maxWidth} max_height=${maxHeight} output_dir=${outputDir} ` +
     `cache_dir=${cacheDir} headers=${names.length} [${names.join(",")}]`
   );
