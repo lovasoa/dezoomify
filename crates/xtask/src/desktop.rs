@@ -492,6 +492,18 @@ fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
         let _ = child.wait();
         return Err(error);
     }
+    // A pre-existing server can answer the probe before this Vite child has
+    // reported its strict-port collision. Give the child one short turn to
+    // fail so the desktop shell never attaches to stale frontend assets.
+    std::thread::sleep(Duration::from_secs(1));
+    if let Some(status) = child
+        .try_wait()
+        .map_err(|e| format!("cannot inspect the desktop frontend: {e}"))?
+    {
+        return Err(format!(
+            "desktop frontend exited after startup on http://{DESKTOP_DEV_HOST}:{DESKTOP_DEV_PORT}/ ({status}); another Vite server may already own that port"
+        ));
+    }
     Ok(DesktopFrontend { child })
 }
 
