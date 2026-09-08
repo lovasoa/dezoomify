@@ -133,6 +133,12 @@ const TARGETS: &[LiveTarget] = &[
         accept_invalid_certs: false,
     },
     LiveTarget {
+        name: "krpano_eiffeltower_viewer",
+        url: "https://krpano.com/releases/1.24/viewer/krpano.html?xml=examples/minimap/eiffeltower_minimap.xml",
+        headers: &[],
+        accept_invalid_certs: false,
+    },
+    LiveTarget {
         name: "deepzoom_academia_sinica",
         url: "https://bronze.asdc.sinica.edu.tw/filePool/R/05395-1.html",
         headers: &[],

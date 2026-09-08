@@ -7,6 +7,7 @@ use std::sync::{Arc, LazyLock};
 use itertools::Itertools;
 use memchr::memmem;
 use regex::Regex;
+use url::Url;
 
 use krpano_decrypt::{decrypt_xml, is_encrypted_xml};
 use krpano_metadata::{KrpanoMetadata, XY, all_sides};
@@ -46,7 +47,9 @@ fn handle_html(
         return handle_viewer_js(context, resource);
     }
     let html = resource.text_lossy();
-    let xml_uri = extract_xml_from_embedpano(&html).map_or_else(
+    let xml_reference =
+        extract_xml_from_query(resource.final_uri()).or_else(|| extract_xml_from_embedpano(&html));
+    let xml_uri = xml_reference.map_or_else(
         || sibling_uri(resource.final_uri(), "tour.xml"),
         |reference| resolve_relative(resource.final_uri(), &reference),
     );
@@ -280,6 +283,13 @@ fn extract_xml_from_embedpano(html: &str) -> Option<String> {
         .map(|captures| captures[1].to_owned())
 }
 
+fn extract_xml_from_query(uri: &str) -> Option<String> {
+    Url::parse(uri)
+        .ok()?
+        .query_pairs()
+        .find_map(|(name, value)| (name == "xml" && !value.is_empty()).then(|| value.into_owned()))
+}
+
 fn extract_src_attr(tag: &str) -> Option<String> {
     let captures = SCRIPT_SRC_RE.captures(tag)?;
     captures
@@ -483,6 +493,11 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
             levels,
             warnings,
         }));
+    }
+    if entries.is_empty() {
+        return Err(DiscoveryError::Session(
+            "krpano XML contains no tiled images".into(),
+        ));
     }
     Ok(ImageCatalog::new(entries))
 }
@@ -907,6 +922,47 @@ mod tests {
         assert_eq!(
             extract_xml_from_embedpano("embedpano({\n xml: \"panos/tour.xml\"\n}\n);"),
             Some("panos/tour.xml".into())
+        );
+    }
+
+    #[test]
+    fn query_xml_overrides_the_viewer_default() {
+        assert_eq!(
+            extract_xml_from_query(
+                "https://example.com/viewer/krpano.html?xml=examples%2Ftour.xml&skin=default"
+            ),
+            Some("examples/tour.xml".into())
+        );
+        assert_eq!(
+            extract_xml_from_query("https://example.com/viewer/krpano.html?skin=default"),
+            None
+        );
+    }
+
+    #[test]
+    fn html_query_xml_is_followed_instead_of_the_viewer_default() {
+        let mut registry = crate::core::Registry::new();
+        registry.register(SPEC);
+        let mut operation =
+            registry.start("https://example.com/viewer/krpano.html?xml=examples/tour.xml");
+        let page = operation.missing_resources().unwrap().pop().unwrap();
+        operation
+            .provide(ResourceResponse::new(
+                page.id,
+                br#"<html><script src="krpano.js"></script><script>
+                    embedpano({xml:"krpano.xml", passQueryParameters:"xml"});
+                </script></html>"#,
+            ))
+            .unwrap();
+        assert_eq!(
+            operation
+                .missing_resources()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .request
+                .uri,
+            "https://example.com/viewer/examples/tour.xml"
         );
     }
 

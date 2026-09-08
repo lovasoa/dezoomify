@@ -21,6 +21,7 @@ import {
   SITE_BUSY_MESSAGE,
   classifyReadableBytes,
   discoveryFailedError,
+  noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import { errorTransportFor, isOrdinaryImageTile, isProxyEligible } from "./webIntegration.ts";
@@ -1410,9 +1411,17 @@ async function runJob(url: string): Promise<void> {
     pushLog(`Starting discovery for ${shortUrl(url)}`);
     const catalog: WebCatalog = await client.start(url);
     if (token !== jobToken) return;
+    const via = activeTransport === PROXY_LABEL ? "proxy" : "direct";
+    if (catalog.images.length === 0) {
+      throw failure(
+        "NO_IMAGE_FOUND",
+        noImageFoundError(via).message,
+        false,
+        "discovery returned an empty image catalog",
+      );
+    }
     pushLog(`Found ${catalog.images.length} image${catalog.images.length === 1 ? "" : "s"}`);
     const image = catalog.images[0];
-    const via = activeTransport === PROXY_LABEL ? "proxy" : "direct";
     controller.dispatch(
       nextEvent("images-found", { imageCount: catalog.images.length, transport: via }) as never,
     );
