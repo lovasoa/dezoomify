@@ -2199,6 +2199,22 @@ mod tests {
     fn destination_grant_validates_path_before_any_work() {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
+        // Quiesce the spawned discovery worker first: start_job records
+        // Discovering synchronously but the worker announces completion
+        // asynchronously through the driver channel, so an exact event
+        // count is only stable once the pump has folded it. Same bounded
+        // pump as discovery_completion_requests_destination (which owns
+        // the pattern); without it the count below races the worker and
+        // flakes under CI timing.
+        let start = std::time::Instant::now();
+        while table.state_of(&id) == Some(JobState::Discovering) {
+            table.poll_drivers();
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "discovery worker never reported completion"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         // Unknown extensions fail before any work: no destination, no event
         // beyond discovering, no worker outcome.
         let bad = scratch_path("validate", "out.bmp");
