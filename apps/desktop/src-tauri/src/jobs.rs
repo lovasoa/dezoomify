@@ -855,7 +855,7 @@ impl JobTable {
     }
 
     /// Start one job with validated desktop settings (compression,
-    /// retries, caps, cache dir, trusted headers, output dir). Bounds are
+    /// retries, caps, cache dir, trusted headers, output folder, and format). Bounds are
     /// enforced by `settings::parse_settings` before this call; the fixed
     /// transport mirrors the CLI (`pipeline_config_for`).
     pub fn start_job_with_settings(
@@ -868,6 +868,7 @@ impl JobTable {
         let id = self.start_job_with_config(input_url, config)?;
         if let Some(record) = self.jobs.get_mut(&id) {
             record.output_dir = output_dir;
+            record.destination_format = Some(settings.output_format.clone());
         }
         Ok(id)
     }
@@ -1458,18 +1459,31 @@ impl JobTable {
         }
     }
 
-    /// Ensure the real `pipeline::run` worker is running for a job with a
-    /// granted destination. Non-blocking; progress and the terminal outcome
-    /// flow back through the driver channel and are folded in by `pump`.
-    /// The worker publishes the stored real path atomically with the stored
-    /// overwrite policy; without a granted destination nothing runs.
+    /// Ensure the real pipeline worker is running. A desktop setting starts
+    /// with an automatic directory destination; its final file name is
+    /// derived from the selected catalog title inside the native driver.
     fn spawn_pipeline_worker(&mut self, job: &str) {
         let Some(record) = self.jobs.get(job) else {
             return;
         };
-        let Some(destination) = record.destination.clone() else {
-            return;
+        let destination = record.destination.clone();
+        let auto_destination = if destination.is_none() {
+            record
+                .destination_format
+                .as_deref()
+                .and_then(output_format_for_id)
+                .map(|format| {
+                    (
+                        record.output_dir.clone().unwrap_or_else(std::env::temp_dir),
+                        format,
+                    )
+                })
+        } else {
+            None
         };
+        if destination.is_none() && auto_destination.is_none() {
+            return;
+        }
         if let Some(handle) = self.driver_handles.get(job) {
             if !handle.is_finished() {
                 return;
@@ -1477,7 +1491,6 @@ impl JobTable {
         }
         let job_id = record.id.clone();
         let input_url = record.input_url.clone();
-        let output_str = destination.to_string_lossy().into_owned();
         let overwrite = record.destination_overwrite;
         let config = record.pipeline_config.clone();
         let tx = self.driver_tx.clone();
@@ -1506,13 +1519,25 @@ impl JobTable {
                         detail: event.detail,
                     });
                 };
-                let result = dezoomify_native::pipeline::run(
-                    &input_url,
-                    &output_str,
-                    overwrite,
-                    &config,
-                    &mut on_event,
-                );
+                let result = match (destination, auto_destination) {
+                    (Some(destination), _) => dezoomify_native::pipeline::run(
+                        &input_url,
+                        &destination.to_string_lossy(),
+                        overwrite,
+                        &config,
+                        &mut on_event,
+                    ),
+                    (None, Some((output_dir, format))) => {
+                        dezoomify_native::pipeline::run_auto_named(
+                            &input_url,
+                            &output_dir,
+                            format,
+                            &config,
+                            &mut on_event,
+                        )
+                    }
+                    (None, None) => return,
+                };
                 let outcome = match result {
                     Ok(outcome) => {
                         // Sibling basename only: the granted path never
@@ -1667,26 +1692,49 @@ impl JobTable {
                     // Only a still-discovering job moves: an early grant or
                     // choice already advanced the state, and replaying the
                     // transition would clobber it with a spurious event.
-                    // When the grant raced the discovery worker, the grant
-                    // skipped spawning the pipeline (the discovery handle was
-                    // still running); now that the handle is reaped, start the
-                    // worker for the already-granted destination. Idempotent:
-                    // `spawn_pipeline_worker` skips when a worker runs.
                     let discovering = self
                         .jobs
                         .get(&job)
                         .is_some_and(|r| r.state == JobState::Discovering);
                     if !discovering {
-                        let granted = self.jobs.get(&job).is_some_and(|r| r.destination.is_some());
-                        if granted {
+                        let ready = self.jobs.get(&job).is_some_and(|r| {
+                            r.destination.is_some() || r.destination_format.is_some()
+                        });
+                        if ready {
                             self.spawn_pipeline_worker(&job);
                         }
                         continue;
                     }
-                    if let Some(record) = self.jobs.get_mut(&job) {
-                        record.state = JobState::AwaitingDestination;
+                    let automatic = self
+                        .jobs
+                        .get(&job)
+                        .is_some_and(|r| r.destination.is_none() && r.destination_format.is_some());
+                    if automatic {
+                        let format = self
+                            .jobs
+                            .get(&job)
+                            .and_then(|r| r.destination_format.clone())
+                            .unwrap_or_else(|| "png".to_string());
+                        if let Some(record) = self.jobs.get_mut(&job) {
+                            record.state = JobState::Planning;
+                        }
+                        // The event tells the frontend that saving starts;
+                        // no file dialog or extra choice is required.
+                        self.push_event(&job, "destination", &format);
+                        // The discovery worker has sent its final message;
+                        // join it before replacing its handle with the real
+                        // pipeline worker so the automatic start cannot be
+                        // lost to a narrow scheduling race.
+                        if let Some(handle) = self.driver_handles.remove(&job) {
+                            let _ = handle.join();
+                        }
+                        self.spawn_pipeline_worker(&job);
+                    } else {
+                        if let Some(record) = self.jobs.get_mut(&job) {
+                            record.state = JobState::AwaitingDestination;
+                        }
+                        self.push_event(&job, "job-state", "AwaitingDestination");
                     }
-                    self.push_event(&job, "job-state", "AwaitingDestination");
                 }
                 DriverMessage::RecoveryRequested {
                     job,
@@ -2117,6 +2165,40 @@ mod tests {
             s
         };
         assert_eq!(seqs, sorted, "seq stays monotonic");
+    }
+
+    #[test]
+    fn settings_start_automatically_enters_the_native_save_pipeline() {
+        let mut table = JobTable::new();
+        let mut settings = DesktopSettings::with_defaults();
+        settings.output_dir = Some(std::env::temp_dir().join("dezoomify-auto-output-test"));
+        settings.output_format = "webp".to_string();
+        let id = table
+            .start_job_with_settings("http://127.0.0.1:9/item", &settings)
+            .unwrap();
+
+        // Drive the discovery-complete signal directly so this test only
+        // asserts desktop orchestration, never public-network behavior.
+        table
+            .driver_tx
+            .send(DriverMessage::Discovered { job: id.clone() })
+            .unwrap();
+        table.pump_drivers();
+
+        let events = table.events_for(&id);
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == "destination" && event.detail == "webp"),
+            "the main-screen settings start saving without a dialog"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.detail == "AwaitingDestination"),
+            "automatic saves never expose a choose-output step"
+        );
+        let _ = table.cancel_job(&id);
     }
 
     #[test]

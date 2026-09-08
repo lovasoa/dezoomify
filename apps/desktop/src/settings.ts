@@ -437,6 +437,7 @@ export function saveSettings(settings: DesktopSettings): Array<string> {
 // Header values travel here; never pass this object to logs.
 export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, unknown> {
   return {
+    output_format: settings.outputFormat,
     compression: settings.compression,
     retries: settings.retries,
     network_profile: settings.networkProfile,

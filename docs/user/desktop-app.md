@@ -69,8 +69,10 @@ hosts).
 ## Save an image
 
 Paste the address of the page (or of the image description file) into the
-app and choose where to save the result, exactly like on the
-[website](./website.md). You can also start the app with the address as an
+app and start dezooming. The app immediately saves to the folder selected on
+the main screen; it does not ask for a second file choice. The native engine
+uses the image title it finds to determine the file name and adds the extension
+for the selected format. You can also start the app with the address as an
 argument, or drive it from the terminal; see the
 [command-line guide](./command-line.md).
 
@@ -96,12 +98,10 @@ itself as coming from there. On the command line, this is the
 
 Open **Customize** before saving to pick PNG, JPEG, TIFF, ZIF, WebP, or an
 IIIF tile folder. The app remembers your choice and summarizes it while the
-panel is closed. The output name carries the matching extension. The app saves
-PNG for names ending in `.png`, JPEG at quality 95 for `.jpg` or `.jpeg`, TIFF
-for `.tif` or `.tiff`, ZIF for `.zif`, and lossless WebP for `.webp`. Any
-other extension stops the job with a typed error before anything is saved, so
-rename the output instead. An IIIF folder contains `info.json` and the image
-tiles, ready to serve from a static file server.
+panel is closed. The native engine uses that choice to add the matching
+extension to its derived output name: `.png`, `.jpg`, `.tif`, `.zif`, `.webp`,
+or `.iiif`. An IIIF folder contains `info.json` and the image tiles, ready to
+serve from a static file server.
 
 JPEG versions stay small and suit on-screen viewing; TIFF and PNG suit
 archiving and further editing. JPEG cannot address images larger than
@@ -109,12 +109,11 @@ archiving and further editing. JPEG cannot address images larger than
 setting changes the JPEG quality (quality is 100 minus compression, so the
 default 5 means 95); TIFF stays lossless at every level.
 
-Each save writes exactly one output, and the app never replaces an existing
-file by itself: if the chosen name already exists, the save is refused with a
-typed error and you pick another name instead.
+Each save writes exactly one output. If the derived name already exists, the
+app adds a numeric suffix rather than replacing the existing file.
 
 If some tiles cannot be fetched, the app still writes what it got: the kept
-output lands next to the chosen name with `.partial` inserted before the
+output lands next to the derived name with `.partial` inserted before the
 extension (`photo.png` becomes `photo.partial.png`), and the chosen name
 itself stays untouched, so a partial file never masquerades as the complete
 save. Run the job again with the same resume folder to reuse already-saved
@@ -122,7 +121,7 @@ tiles; see [resuming an interrupted save](#resuming-an-interrupted-save).
 
 ## Settings
 
-The settings panel holds the output folder suggestion, the compression level,
+The settings panel holds the output folder, the compression level,
 optional width and height caps, the retry budget, the resume cache folder,
 and extra request headers. Every setting is validated when you change it:
 invalid values are refused and the last good settings stay in force. Settings
@@ -132,10 +131,9 @@ choice.
 ## If a save fails
 
 A failed save says what went wrong and whether retrying can help; the queue
-row offers **Retry**, and a failed entry never stops the rest. A refused
-destination stops that save with a typed error and the job waits for you to
-choose another name instead. Partially fetched saves need no decision from
-you: they are kept automatically as the `.partial` file described above.
+row offers **Retry**, and a failed entry never stops the rest. Partially
+fetched saves need no decision from you: they are kept automatically as the
+`.partial` file described above.
 
 ## Next steps
 

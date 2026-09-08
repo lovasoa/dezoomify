@@ -35,6 +35,8 @@ pub const MAX_DIMENSION: u32 = 1_000_000;
 pub const MAX_PATH_LEN: usize = 4096;
 /// Upper bound for trusted user headers (repeatable -H, last wins).
 pub const MAX_HEADERS: usize = 32;
+/// Output formats selected on the desktop main screen.
+pub const OUTPUT_FORMATS: &[&str] = &["png", "jpeg", "tiff", "zif", "webp", "iiif-dir"];
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NetworkProfile {
@@ -51,6 +53,9 @@ pub struct DesktopSettings {
     /// Destination directory for derived output paths. `None` keeps the
     /// temp-dir fallback.
     pub output_dir: Option<PathBuf>,
+    /// Encoder selected on the main screen. The native pipeline derives the
+    /// matching extension after selecting an image title.
+    pub output_format: String,
     /// Output compression 0-100 (default 5).
     pub compression: u8,
     /// Optional width cap (positive int).
@@ -72,6 +77,7 @@ impl DesktopSettings {
     pub fn with_defaults() -> Self {
         Self {
             output_dir: None,
+            output_format: "png".to_string(),
             compression: DEFAULT_COMPRESSION,
             max_width: None,
             max_height: None,
@@ -173,6 +179,21 @@ fn parse_opt_dir(value: &serde_json::Value, field: &str) -> Result<Option<PathBu
         serde_json::Value::Null => Ok(None),
         serde_json::Value::String(s) => validate_dir_field(s, field),
         _ => Err(format!("{field} must be a string path or null")),
+    }
+}
+
+fn parse_output_format(value: Option<&serde_json::Value>) -> Result<String, String> {
+    let Some(value) = value else {
+        return Ok("png".to_string());
+    };
+    let format = value
+        .as_str()
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| "output_format must be a string".to_string())?;
+    if OUTPUT_FORMATS.contains(&format.as_str()) {
+        Ok(format)
+    } else {
+        Err("output_format must be png, jpeg, tiff, zif, webp, or iiif-dir".to_string())
     }
 }
 
@@ -397,6 +418,7 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         None => None,
         Some(v) => parse_opt_dir(v, "output_dir")?,
     };
+    let output_format = parse_output_format(obj.get("output_format"))?;
     // Accept both snake_case and kebab-case aliases from the frontend.
     let cache_dir = match obj.get("cache_dir").or_else(|| obj.get("cache-dir")) {
         None => None,
@@ -408,6 +430,7 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
     };
     Ok(DesktopSettings {
         output_dir,
+        output_format,
         compression,
         max_width,
         max_height,
@@ -426,6 +449,7 @@ mod tests {
     #[test]
     fn defaults_match_cli() {
         let settings = parse_settings(&serde_json::Value::Null).unwrap();
+        assert_eq!(settings.output_format, "png");
         assert_eq!(settings.compression, 5);
         assert_eq!(settings.retries, 3);
         assert_eq!(settings.max_width, None);
@@ -449,6 +473,17 @@ mod tests {
         assert!(parse_settings(&json!({"compression": 101})).is_err());
         assert!(parse_settings(&json!({"compression": -1})).is_err());
         assert!(parse_settings(&json!({"compression": "x"})).is_err());
+    }
+
+    #[test]
+    fn output_format_is_validated_for_automatic_saves() {
+        assert_eq!(
+            parse_settings(&json!({"output_format": "webp"}))
+                .unwrap()
+                .output_format,
+            "webp"
+        );
+        assert!(parse_settings(&json!({"output_format": "exe"})).is_err());
     }
 
     #[test]

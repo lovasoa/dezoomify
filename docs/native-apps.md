@@ -22,7 +22,7 @@ Native is the authoritative runtime for images larger than a browser tab and loc
 
 ## Desktop
 
-The Tauri application hosts the same shared UI used by the website and extension. Its integration maps generated protocol commands to Tauri invocations and maps native events back to the shared UI. File pickers and save destinations are represented as native handles rather than browser paths.
+The Tauri application hosts the same shared UI used by the website and extension. Its integration maps generated protocol commands to Tauri invocations and maps native events back to the shared UI. A desktop start carries every output setting from the main screen; the native driver derives the output basename from the selected catalog title and saves directly in the configured folder, with no second save dialog.
 
 Desktop treats website and deep-link [handoffs](protocol.md#handoff) as bounded, non-secret, untrusted input. It validates them and asks the user to confirm the source and output; these handoffs use no client-side signing. Extension handoff uses allowlisted Native Messaging: browser enforcement of allowed extension IDs authenticates the extension sender to the native host, while a fresh challenge and one-use nonce bind one session and prevent replay rather than establish identity. Cookies transfer only after separate origin-scoped consent and are not intentionally persisted.
 
@@ -46,21 +46,16 @@ submission order. The UI format picker offers `png`, `jpeg`, `tiff`, `zif`,
 `apps/desktop/src/desktopIntegration.ts`), defaulting to `png`. The choice is
 first-class persisted state: `apps/desktop/src/settings.ts`
 stores `outputFormat` in localStorage (`dezoomify.desktop.settings.v1`),
-validates it fail-closed on load, and seeds both the picker radios and the
-destination-grant format on relaunch. The shell grant gate accepts the same
-full `png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir` id set (`SUPPORTED_FORMATS`
-in `apps/desktop/src-tauri/src/commands.rs`); the format travels in the
-`request_destination` grant, never
-in `start_job` (`settingsToInvokeArgs` carries compression, retries, caps,
-directories, and headers only, and the Rust `DesktopSettings` has no format
-field). JPEG quality is `100 - compression` with the shipped default
+validates it fail-closed on load, and sends it with `start_job` alongside the
+configured output directory. The native driver uses the selected catalog
+title as the basename, adds the format extension, and appends a numeric suffix
+when needed rather than replacing an existing output. JPEG quality is `100 - compression` with the shipped default
 compression 5 pinning quality 95; the settings panel (output directory,
 compression, width/height caps, retries, cache directory, `-H` headers) plus
 the aux-panel format radios persist across relaunches and fail closed to
 defaults on invalid drafts. Overwrite is always false: no overwrite
-confirmation UI exists, so `request_destination` validates and grants with
-`overwrite=false` and an existing destination is denied with the typed
-`output.exists` reason for choose-output recovery instead of replaced.
+confirmation UI exists, so automatic desktop output never replaces an
+existing destination.
 User-visible behavior lives in the [Desktop app guide](user/desktop-app.md);
 this section states the mechanism only.
 
