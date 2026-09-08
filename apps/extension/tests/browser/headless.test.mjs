@@ -91,6 +91,26 @@ function assertPng(bytes) {
   }
 }
 
+async function readCompletedPng(output, deadline) {
+  let lastError = "file was never created";
+  while (Date.now() <= deadline) {
+    if (existsSync(output)) {
+      try {
+        const bytes = readFileSync(output);
+        // Firefox creates the destination before the download stream has
+        // finished. Decode the bytes before returning so the E2E observes a
+        // completed save, not merely a visible pathname.
+        PNG.sync.read(bytes);
+        return bytes;
+      } catch (error) {
+        lastError = String(error?.message ?? error);
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`Firefox saved an incomplete PNG: ${lastError}`);
+}
+
 async function runChromiumJob(base, work) {
   const zip = stagePackage("chromium", work, base, true);
   const pkgDir = path.join(work, "pkg");
@@ -163,19 +183,7 @@ async function runFirefoxJob(base, work) {
     assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
     const output = path.join(downloadsDir, "dezoomify-512x512.png");
     const deadline = Date.now() + 90000;
-    while (!existsSync(output)) {
-      if (Date.now() > deadline) {
-        const handles = await driver.getAllWindowHandles();
-        const states = [];
-        for (const handle of handles) {
-          await driver.switchTo().window(handle);
-          states.push((await driver.getCurrentUrl()).slice(-40));
-        }
-        throw new Error(`Firefox job did not save in time. windows=${JSON.stringify(states)}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    return readFileSync(output);
+    return await readCompletedPng(output, deadline);
   } finally {
     await driver.quit();
   }
