@@ -111,9 +111,30 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
         with:
           node-version-file: .node-version
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 9.12.0
+          standalone: true
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
+          targets: wasm32-unknown-unknown
+      - id: bindgen
+        uses: ./.github/actions/setup-wasm-bindgen
+      - name: Install Linux desktop bundling dependencies
+        if: matrix.target == 'desktop-linux-x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential dpkg-dev
+      - name: Install tauri-cli 2.11.4
+        if: matrix.target == 'desktop-linux-x86_64'
+        run: |
+          set -euo pipefail
+          root="$HOME/.tauri-cli-2.11.4"
+          cargo install tauri-cli --version "=2.11.4" --root "$root"
+          echo "$root/bin" >> "$GITHUB_PATH"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Download release plan
         env:
