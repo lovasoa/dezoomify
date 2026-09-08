@@ -205,11 +205,10 @@ cargo xtask test native-messaging
 ```
 
 Verify manifests and permissions (narrow host grants, no remote code, strict
-CSP with `wasm-unsafe-eval` for the page core), monitoring state machines with
-indefinite explicit-action bounds (no deadline, single reload, injection
-after reload-complete, same-page reload survival, stop on
-detection/second-click/close/navigate, no auto-rearm, worker restart fails
-closed), candidate caps and windowing, browser-session fetch
+CSP with `wasm-unsafe-eval` for the page core), explicit-action job state with
+finite source-operation dispatch (no reload, no persistent collector, stop on
+second-click/close/navigate, worker restart fails closed), candidate caps and
+windowing, browser-session fetch
 scoping, and handoff envelope validation with replay/expiry/origin rejection
 and zero side effects on rejection. These gates run the unit suites plus a
 hermetic headless browser E2E in both engines. Chromium runs under
@@ -220,11 +219,12 @@ or CI-runner work.
 
 Browser chrome cannot be clicked headlessly, so the toolbar lifecycle is
 covered by unit harnesses driving the real background module with
-production-faithful fakes through arm, own-reload survival, post-complete
-injection, error-badge presentation, and every disarm rule. The headless E2E
-runs the actual in-browser modal flow in both engines over the loopback
-fixture-server with an E2E-only exact-origin host grant: the injected loader
-collects the tab's performance timeline, the modal performs WASM discovery,
+production-faithful fakes through job readiness, finite snapshot/fetch
+dispatch, stale-generation rejection, error-badge presentation, and every
+disarm rule. The headless E2E runs the actual in-browser job flow in both
+engines over the loopback fixture-server with an E2E-only exact-origin host
+grant: the background snapshots the tab's retained performance timeline, the
+job tab performs WASM discovery,
 fetches tiles, assembles, and saves, with the saved PNG verified against the
 fixture pyramid. A CORS-blocked fixture asserts tainted display-only with no
 pixel reads (`originClean` false, `<img>` visible, no

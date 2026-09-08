@@ -14,8 +14,8 @@ hidden, open the puzzle-piece menu and pin it.
 
 ## 2. Let the page settle
 
-The page reloads so Dezoomify can see the viewer. Wait for it to finish, then
-zoom in on the image once.
+Dezoomify reads the page's retained resource entries without reloading it. Wait
+for the job tab to open, then zoom in on the image once.
 
 ## 3. Start dezooming
 
@@ -39,18 +39,17 @@ Firefox version is on its way.
 
 1. Open the page that shows the zoomable image.
 2. Press the Dezoomify magnifying-glass button in the browser toolbar.
-   The grey icon turns blue with a dot: the extension is now watching that
-   tab for a zoomable image.
+   The grey icon turns blue with a dot: the extension is now working on that
+   tab's explicit job.
 3. Pressing the button needs no extra permission: Dezoomify only ever looks
    at the tab you pointed it at, never at all your browsing. If the image
    or its tiles live on other addresses, the browser may ask for permission
    to look at those too; approve it to continue.
-4. The page reloads once automatically. Keep the tab open; a second press
-   of the button, closing the tab, or navigating away stops watching.
-5. When an image is found, a small window opens inside the same page.
-   Pick the image and save it at the highest resolution that fits in a
-   browser tab.
-   There is no list to pick from in the extension.
+4. The dedicated job tab starts from the source page's retained resource
+   entries. Keep both tabs open; a second press of the button, closing a tab,
+   or navigating away stops the active job.
+5. Pick the image in the job tab and save it at the highest resolution that
+   fits in a browser tab. There is no list to pick from in the extension.
    For a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).
 
 ## What the extension does with your data

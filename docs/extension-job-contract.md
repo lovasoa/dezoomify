@@ -1,8 +1,8 @@
 # Extension source and job-tab contract
 
-The extension has one background coordinator, a source-tab script, and one
-dedicated extension job tab per job. The coordinator owns the bindings between
-them. Webpage `postMessage` is not a job-control channel.
+The extension has one background coordinator, finite source operations in the
+clicked tab, and one dedicated extension job tab per job. The coordinator owns
+the bindings between them. Webpage `postMessage` is not a job-control channel.
 
 ## Binding and ordering
 
@@ -22,12 +22,12 @@ cancels the relevant in-flight work and releases the binding.
 
 ## Discovery and bytes
 
-The source-tab script begins only after a toolbar action. It offers the
-document URL, supported embedded metadata, accessible-frame inputs, retained
-resource-timing URLs, and subsequent performance-observer URLs. It keeps a
-bounded pending queue and bounded recent deduplication set. Candidate chunks
-are acknowledged before more are sent; processed entries are drained. Overflow
-is visible diagnostics, not permanent rejection of later candidates.
+The source operations begin only after a toolbar action and job-tab readiness.
+`collectCandidates` takes a bounded snapshot containing the document URL and
+retained resource-timing URLs in one batch. A later snapshot is optional,
+bounded, and deduplicated by the coordinator; there is no persistent observer
+or source-tab runtime listener. Overflow is returned as diagnostics, not
+silently discarded.
 
 Candidates use `CandidateChunkDto` and never include response bytes. Source
 requests use `SourceFetchRequestDto`; responses use `ByteChunkDto` and
@@ -37,10 +37,9 @@ the source fetch before more chunks are retained.
 ## Internal extension envelopes
 
 The current extension uses these host-internal envelope names while generated
-protocol bindings are consumed by the entrypoints: `dz.source.ready`,
-`dz.source.candidates`, `dz.source.candidates-ack`, `dz.source.fetch`,
-`dz.source.fetch-chunk`, `dz.source.fetch-complete`, `dz.source.invalidated`,
-`dz.source.stop`, `dz.job.ready`, `dz.job.binding`, `dz.job.candidates`,
+protocol bindings are consumed by the entrypoints: `dz.source.fetch-chunk`,
+`dz.source.fetch-complete`, `dz.job.ready`, `dz.job.binding`, `dz.job.candidates`,
+`dz.job.candidates-more`,
 `dz.job.fetch`, `dz.job.cancel`, `dz.job.permission-required`, and
 `dz.job.closed`. All are runtime messages; no webpage frame receives them.
 

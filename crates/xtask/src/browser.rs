@@ -491,11 +491,8 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("stage manifest: {e}"))?;
     // Stage exactly what apps/extension/scripts/package-store.sh ships
     // (least privilege): background/index.js as a CLASSIC script
-    // (export-free), the injected in-tab modal (content/modal.js classic
-    // export-free plus its host CSS) with the job iframe document and its
-    // module app, the page entry plus its direct imports, icons (brand plus
-    // grey idle set), and the wasm glue. Never app/ or helper-only files;
-    // src/content/* otherwise stays unit-test only.
+    // (export-free) with finite source operations, the job tab, icons (brand
+    // plus grey idle set), and the wasm glue. Never app/ or helper-only files.
     let bg_src = std::fs::read_to_string(src.join("background/index.ts"))
         .map_err(|e| format!("read background/index.ts: {e}"))?;
     let mut bg_out = String::new();
@@ -507,22 +504,6 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&bg_dir).map_err(|e| format!("create background: {e}"))?;
     std::fs::write(bg_dir.join("index.js"), bg_out)
         .map_err(|e| format!("stage background/index.js: {e}"))?;
-    let modal_src = std::fs::read_to_string(src.join("content/modal.js"))
-        .map_err(|e| format!("read content/modal.js: {e}"))?;
-    let mut modal_out = String::new();
-    for line in modal_src.lines() {
-        modal_out.push_str(line.strip_prefix("export ").unwrap_or(line));
-        modal_out.push('\n');
-    }
-    let content_dir = staging.join("content");
-    std::fs::create_dir_all(&content_dir).map_err(|e| format!("create content: {e}"))?;
-    std::fs::write(content_dir.join("modal.js"), modal_out)
-        .map_err(|e| format!("stage content/modal.js: {e}"))?;
-    std::fs::copy(
-        src.join("content").join("modal.css"),
-        content_dir.join("modal.css"),
-    )
-    .map_err(|e| format!("stage content/modal.css: {e}"))?;
     let modal_dir = staging.join("modal");
     std::fs::create_dir_all(&modal_dir).map_err(|e| format!("create modal: {e}"))?;
     std::fs::copy(
@@ -601,7 +582,6 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     }
     for rel in [
         "background/index.js",
-        "content/modal.js",
         "modal/modal.js",
         "page/page.js",
         "page/scan.js",

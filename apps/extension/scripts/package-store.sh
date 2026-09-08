@@ -4,37 +4,26 @@
 #
 # Extension sources are plain JavaScript with JSDoc kept in `.ts` files
 # (no TypeScript syntax; unit tests import them as text/javascript).
-# Staging rules (least privilege: ship only what the manifest loads or the
-# background injects):
+# Staging rules (least privilege: ship only what the manifest loads):
 # - background/ ships ONLY background/index.js as a CLASSIC script in both
 #   browsers (Chromium MV3 service worker is declared without type:module;
 #   Firefox MV3 event pages do not support modules), so `export` is stripped
-#   and the result must parse as a classic script. The entry is the
-#   click-to-monitor owner: the toolbar click arms an indefinite exact-tabId
-#   observer, performs a single reload, and on detection injects the in-tab
-#   modal on the clicked tab only via scripting (no tab enumeration).
+#   and the result must parse as a classic script. The entry owns the
+#   explicit toolbar action and invokes finite source operations with
+#   scripting.executeScript on the clicked tab only (no tab enumeration).
 #   background helpers are pure unit-tested libraries, never loaded by the
 #   manifest, and never shipped.
-# - content/ ships ONLY the injected in-tab modal (content/modal.js as a
-#   CLASSIC script with `export` stripped, plus content/modal.css): injected
-#   programmatically via scripting on the clicked tab only, never declared
-#   via content_scripts.
-# - modal/ ships the job iframe document (modal/modal.html + modal/modal.js
-#   from modal/modal.ts as an ES module): the extension page mounted by the
-#   injected modal in the SAME tab. It reuses the page entry's direct imports
-#   plus the vendored shared-ui view graph (theme + renderView geometry,
-#   never a visual fork).
-# - runtime/ ships the tab-side fetch, candidate, and native-handoff modules
-#   imported by the modal job. vendor/ ships generated shared-ui and
-#   browser-runtime mirrors. There is no fallback page.
+# - job/ ships the dedicated extension job tab and its Rust engine worker.
+#   vendor/ ships generated shared-ui and browser-runtime mirrors. There is no
+#   source-tab content script or fallback page.
 # - icons/ ships the declared manifest icons (blue brand set) plus the grey
 #   idle set the background swaps out via action.setIcon (grey idle, blue
-#   with a badge dot while monitoring).
+#   with a badge dot while the job is active).
 # - wasm/ artifacts are copied from the repository build output (generated;
 #   run `cargo xtask build web` or `cargo xtask build extension` first) and
-#   placed at the top-level wasm/; the modal iframe imports it as ../wasm/.
+#   placed at the top-level wasm/; the job tab imports it as ../wasm/.
 # - No offscreen document ships (and none is declared): offscreen is
-#   Chromium-only and unnecessary for a reload monitor.
+#   Chromium-only and unnecessary for finite source operations.
 #
 # DEZOOMIFY_TEST_HOST_PERMISSIONS=1 additionally grants loopback host
 # permissions in the STAGED manifest only. This is for browser E2E and must
@@ -116,7 +105,6 @@ fi
 
 # The compiled classic entries must parse before packaging.
 node --check "$staging/background/index.js" || { echo "syntax error: background/index.js"; exit 1; }
-node --check "$staging/content/modal.js" || { echo "syntax error: content/modal.js"; exit 1; }
 
 (cd "$staging" && python3 -c '
 import json, os, sys
@@ -125,7 +113,7 @@ need = list(d.get("icons", {}).values())
 need += list(d.get("action", {}).get("default_icon", {}).values())
 bg = d.get("background", {})
 need += ([bg["service_worker"]] if "service_worker" in bg else []) + bg.get("scripts", [])
-need += ["content/modal.js", "content/modal.css", "job/job.html", "job/index.js", "job/worker.js", "vendor/theme.css", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
+need += ["job/job.html", "job/index.js", "job/worker.js", "vendor/theme.css", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
 if os.path.exists("test/driver.html"):
     need += ["test/driver.html"]
 for war in d.get("web_accessible_resources", []):
@@ -135,11 +123,11 @@ sys.exit(f"missing in package: {missing}") if missing else print(f"package conte
 # Least-privilege ship guard: fail on dead/never-loaded files.
 import glob
 shipped = set(glob.glob("background/*.js") + glob.glob("vendor/*.js") + glob.glob("content/**/*.js", recursive=True) + glob.glob("job/*.js", recursive=True))
-allowed = {"background/index.js", "content/modal.js", "job/index.js", "job/worker.js", "vendor/theme.css"}
+allowed = {"background/index.js", "job/index.js", "job/worker.js", "vendor/theme.css"}
 extra = shipped - allowed
 sys.exit(f"dead files shipped (never loaded by manifest/page): {sorted(extra)}") if extra else print("package contents: no dead files")
 ') || exit 1
 
 rm -f "$out_zip"
-(cd "$staging" && zip -qr "$out_zip" manifest.json icons background content job vendor wasm ${DEZOOMIFY_TEST_DRIVER:+test})
+(cd "$staging" && zip -qr "$out_zip" manifest.json icons background job vendor wasm ${DEZOOMIFY_TEST_DRIVER:+test})
 echo "package: $name v$version ($browser) -> $out_zip"

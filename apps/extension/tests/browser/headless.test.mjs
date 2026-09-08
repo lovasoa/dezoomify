@@ -106,8 +106,11 @@ async function runChromiumJob(base, work) {
     }, targetUrl);
     const target = await waitForPage(context, (p) => p.url().startsWith(targetUrl));
     await target.waitForFunction(() => window.__sourceFetched === true, null, { timeout: 15000 });
-    // Toolbar-equivalent start: the coordinator opens the job tab and
-    // injects the source collector on the clicked tab.
+    const sourceTimeOrigin = await target.evaluate(() => performance.timeOrigin);
+    const sourceEntries = await target.evaluate(() => performance.getEntriesByType("resource").map((entry) => entry.name));
+    assert.ok(sourceEntries.some((url) => url.includes("/fetch/")), "source performance entries were retained before the job started");
+    // Toolbar-equivalent start: the coordinator opens the job tab and takes
+    // a finite source snapshot; it does not inject a persistent collector.
     const started = await driverPage.evaluate(async ({ tabId, url }) => {
       const api = globalThis.browser ?? globalThis.chrome;
       return api.runtime.sendMessage({ type: "dezoomify-test-start-job", requestId: "e2e-start", tabId, url });
@@ -122,6 +125,7 @@ async function runChromiumJob(base, work) {
     assert.ok(download, "the job tab did not save the assembled image in time");
     const output = path.join(work, "saved-chromium.png");
     await download.saveAs(output);
+    assert.equal(await target.evaluate(() => performance.timeOrigin), sourceTimeOrigin, "source page was not reloaded");
     return readFileSync(output);
   } finally {
     await context.close();
@@ -173,6 +177,19 @@ async function runFirefoxJob(base, work) {
       targetUrl,
     );
     await driver.sleep(1500);
+    let sourceHandle = null;
+    for (const handle of await driver.getAllWindowHandles()) {
+      await driver.switchTo().window(handle);
+      if ((await driver.getCurrentUrl()).startsWith(targetUrl)) {
+        sourceHandle = handle;
+        break;
+      }
+    }
+    assert.ok(sourceHandle, "Firefox source tab did not open");
+    const sourceTimeOrigin = await driver.executeScript("return performance.timeOrigin;");
+    const sourceEntries = await driver.executeScript("return performance.getEntriesByType('resource').map((entry) => entry.name);");
+    assert.ok(sourceEntries.some((url) => url.includes("/fetch/")), "Firefox retained source performance entries before the job started");
+    await driver.switchTo().window(driverHandle);
     const started = await driver.executeScript(
       "const api = globalThis.browser ?? globalThis.chrome; return api.runtime.sendMessage({type: 'dezoomify-test-start-job', requestId: 'e2e-start', tabId: arguments[0], url: arguments[1]});",
       targetId,
@@ -201,6 +218,9 @@ async function runFirefoxJob(base, work) {
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
+    await driver.switchTo().window(sourceHandle);
+    assert.equal(await driver.getCurrentUrl(), targetUrl, "Firefox source page URL changed");
+    assert.equal(await driver.executeScript("return performance.timeOrigin;"), sourceTimeOrigin, "Firefox source page was not reloaded");
     return readFileSync(output);
   } finally {
     await driver.quit();

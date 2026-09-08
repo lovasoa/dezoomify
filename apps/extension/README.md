@@ -4,14 +4,14 @@ Detects zoomable images in your current tab and hands the job to Dezoomify,
 using your browser's own session so logged-in and interactive viewers work.
 
 - **Use:** click the extension button on a page with a zoomable image (grey
-  idle becomes blue with a dot while monitoring); the page reloads once;
-  when an image is found a modal opens in the same tab; pick the image and
-  save it or hand it to the desktop app. A second click cancels monitoring.
+  idle becomes blue with a dot while the job is active); the dedicated job tab
+  snapshots the source page and saves the result. The source page is not
+  reloaded, and a second click cancels the active job.
   Full steps: [browser extension](../../docs/user/browser-extension.md).
-- Indefinite explicit-action monitoring only: no deadline, no background
-  watching, no auto-rearm; monitoring stops on detection, second click, tab
-  close, or navigation. Detection runs in the core wasm; fetching is
-  tab-origin direct fetch with no metadata proxy.
+- Explicit-action jobs only: no background watching, auto-rearm, or unrelated
+  tab monitoring. Navigation invalidates the source binding. Detection runs
+  in the core wasm; fetching is tab-origin direct fetch with no metadata
+  proxy.
 - Cookie handoff to the desktop app is native-only, explicitly consented, and
   memory-only.
 

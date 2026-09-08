@@ -1,5 +1,5 @@
 {
-  "_compatNote": "Firefox runs background/index.js as an MV3 event page (non-persistent scripts entry; modules unsupported, so the entry ships as a classic script). Firefox temporarily registers content/modal.js for the clicked tab origin and reloads once because scripting.executeScript does not retain a content-script message listener; Chromium injects it directly. No offscreen document: offscreen is Chromium-only and unnecessary for a source collector.",
+  "_compatNote": "Firefox runs background/index.js as an MV3 event page (non-persistent scripts entry; modules unsupported, so the entry ships as a classic script). Firefox and Chromium use the same finite scripting.executeScript source operations; no registered collector, reload, or persistent source-tab listener is used. No offscreen document: offscreen is Chromium-only and unnecessary for source operations.",
   "background": {
     "scripts": ["background/index.js"]
   },

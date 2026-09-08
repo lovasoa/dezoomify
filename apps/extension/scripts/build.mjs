@@ -20,7 +20,6 @@ await mkdir(output, { recursive: true });
 
 const entries = [
   ["background/index.ts", "background/index.js", "iife"],
-  ["content/modal.js", "content/modal.js", "iife"],
   ["job/index.ts", "job/index.js", "esm"],
   ["job/worker.ts", "job/worker.js", "esm"],
 ];
@@ -48,7 +47,7 @@ for (const [entry, outfile, format] of entries) {
 await cp(path.join(source, "icons"), path.join(output, "icons"), { recursive: true });
 await mkdir(path.join(output, "vendor"), { recursive: true });
 await cp(path.join(source, "vendor/theme.css"), path.join(output, "vendor/theme.css"));
-for (const file of ["job/job.html", "content/modal.css"]) {
+for (const file of ["job/job.html"]) {
   const to = path.join(output, file);
   await mkdir(path.dirname(to), { recursive: true });
   await cp(path.join(source, file), to);

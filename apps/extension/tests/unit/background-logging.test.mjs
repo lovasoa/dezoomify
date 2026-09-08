@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const text = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
+const operations = readFileSync(new URL("../../src/background/source-operations.ts", import.meta.url), "utf8").replace(/^export\s+/gm, "");
+const text = `${operations}\n${readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8").replace(/^import .*source-operations\.js";\s*$/m, "")}`;
 
 function browser() {
   const listeners = { click: [] };

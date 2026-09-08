@@ -62,7 +62,7 @@ export function createJobController(deps) {
     const useSource = request.purpose === "metadata" || request.purpose === "probe";
     try {
       const result = useSource
-        ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: request.id, uri: request.uri, headers: request.headers, purpose: request.purpose })
+        ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: request.id, uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose })
         : await deps.extensionTransport.fetchResource(request.uri, { requestId: request.id, purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
       if (cancelled) return;
       if (effect.type === "acquire-tile" && effect.tile && effect.placement) {

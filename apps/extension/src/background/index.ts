@@ -7,11 +7,21 @@
  * envelopes are local compatibility glue pending generated protocol bindings.
  */
 
+import { collectCandidates, fetchSource } from "./source-operations.js";
+
 const api = globalThis.browser ?? globalThis.chrome;
 const STORAGE_KEY = "dezoomify.sourceBindings.v1";
 const IDLE_ICON = { 16: "icons/icon16-grey.png", 48: "icons/icon48-grey.png", 128: "icons/icon128-grey.png" };
 const ACTIVE_ICON = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
 const HELD_CANDIDATE_LIMIT = 64;
+const MAX_SNAPSHOTS = 4;
+const MAX_URL_LENGTH = 2048;
+const MAX_CANDIDATES = 100;
+const MAX_HEADER_COUNT = 64;
+const MAX_HEADER_NAME_LENGTH = 256;
+const MAX_HEADER_VALUE_LENGTH = 4096;
+const MAX_FETCH_CHUNK_BYTES = 32 * 1024;
+const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
 
 export const BACKGROUND_LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
 export const BACKGROUND_LOG_MAX_CHARS = 500;
@@ -77,7 +87,6 @@ function sameDocumentUrl(a, b) {
   } catch { return a === b; }
 }
 function sourceBindingKey(entry) { return `${entry.jobId}:${entry.tabId}:${entry.frameId}`; }
-function sourceRegistrationId(entry) { return `dezoomify-source-${entry.jobId.replace(/[^a-z0-9_-]/gi, "-")}`; }
 function bindingOf(entry) {
   return {
     jobId: entry.jobId, tabId: entry.tabId, frameId: entry.frameId,
@@ -122,7 +131,6 @@ function serializableEntry(entry) {
   return {
     ...bindingOf(entry), jobTabId: entry.jobTabId, sourceUrl: entry.sourceUrl,
     grantedOrigins: [...entry.grantedOrigins], primary: entry.primary === true,
-    sourceRegistrationId: entry.sourceRegistrationId ?? null,
   };
 }
 async function persistBindings() {
@@ -143,8 +151,8 @@ async function restoreBindings() {
       const entry = {
         jobId: raw.jobId, tabId: raw.tabId, frameId: raw.frameId, documentGeneration: raw.documentGeneration,
         jobTabId: raw.jobTabId, sourceUrl: typeof raw.sourceUrl === "string" ? raw.sourceUrl : "",
-        sourceActive: false, jobReady: false, jobRunning: false, heldCandidates: [],
-        sourceRegistrationId: typeof raw.sourceRegistrationId === "string" ? raw.sourceRegistrationId : null,
+        sourceValid: false, jobActive: false, jobReady: false, jobRunning: false, heldCandidates: [],
+        seenCandidates: new Set(), snapshotCount: 0,
         grantedOrigins: new Set(Array.isArray(raw.grantedOrigins) ? raw.grantedOrigins.filter(isPublicHttpUrl) : []),
         primary: raw.primary === true,
       };
@@ -155,87 +163,24 @@ async function restoreBindings() {
   } catch (error) { backgroundLog("debug", "storage-read-failed", String(error?.message ?? error)); }
 }
 
-function findSourceJob(sender, message) {
-  const tabId = sender?.tab?.id;
-  const frameId = sender?.frameId;
-  if (typeof tabId !== "number" || typeof frameId !== "number") return null;
-  const entry = sourceBindings.get(`${message?.jobId}:${tabId}:${frameId}`);
-  return entry?.sourceActive && bindingMatches(message, entry) ? entry : null;
-}
 function findJobSender(sender, message) {
   const tabId = sender?.tab?.id;
-  if (typeof tabId !== "number") return null;
+  const senderFrameId = sender?.frameId;
+  if (typeof tabId !== "number" || typeof senderFrameId !== "number") return null;
   const job = jobs.get(message?.jobId);
   if (!job || job.jobTabId !== tabId) return null;
   // The first ready notification only proves the job tab owns the opaque id
   // placed in its extension URL. It cannot yet include a source binding.
-  if (message?.type === "dz.job.ready") return job;
+  if (message?.type === "dz.job.ready") return senderFrameId === 0 ? job : null;
   const source = sourceBindings.get(`${message.jobId}:${message.tabId}:${message.frameId}`);
-  return source && bindingMatches(message, source) ? source : null;
+  return source && senderFrameId === source.frameId && bindingMatches(message, source) ? source : null;
 }
 
-async function injectSource(entry) {
-  try {
-    // Firefox discards programmatically executed content scripts as soon as
-    // the invocation returns, including their runtime message listeners.
-    // Register a narrow, temporary script and reload once so the collector
-    // has a persistent content-script lifetime there. Chromium keeps the
-    // direct injection path, which avoids an unnecessary reload.
-    if (typeof api?.runtime?.getBrowserInfo === "function" && typeof api?.scripting?.registerContentScripts === "function") {
-      const origin = permissionOrigin(entry.sourceUrl);
-      if (!origin) throw new Error("source-registration-invalid-url");
-      const id = sourceRegistrationId(entry);
-      await api.scripting.registerContentScripts([{ id, matches: [`${origin}/*`], js: ["content/modal.js"], allFrames: true, runAt: "document_idle", persistAcrossSessions: false }]);
-      entry.sourceRegistrationId = id;
-      await persistBindings();
-      await api.tabs.reload(entry.tabId);
-      backgroundLog("info", "source-registered", `tab ${entry.tabId}`);
-      return;
-    }
-    const injections = await api?.scripting?.executeScript?.({ target: { tabId: entry.tabId, allFrames: true }, files: ["content/modal.js"] });
-    const frameIds = new Set([entry.frameId]);
-    for (const result of injections ?? []) if (typeof result?.frameId === "number") frameIds.add(result.frameId);
-    for (const frameId of frameIds) {
-      const bound = frameId === entry.frameId ? entry : {
-        ...entry, frameId, sourceActive: true, heldCandidates: [], primary: false,
-      };
-      sourceBindings.set(sourceBindingKey(bound), bound);
-      sendToTab(bound.tabId, { type: "dz.source.bind", ...bindingOf(bound), requestId: makeRequestId("source-bind") }, bound.frameId);
-    }
-    await persistBindings();
-    backgroundLog("info", "source-injected", `tab ${entry.tabId}`);
-  } catch (error) {
-    entry.sourceActive = false;
-    setBadge(entry.tabId, true, true);
-    sendToJob(entry, "dz.job.binding", makeRequestId("source-injection-failed"), { sourceValid: false, code: "source-injection-failed" });
-    backgroundLog("error", "source-injection-failed", String(error?.message ?? error));
-  }
-}
-
-function sourceByRegistration(sender) {
-  const tabId = sender?.tab?.id;
-  const frameId = sender?.frameId;
-  if (typeof tabId !== "number" || typeof frameId !== "number") return null;
-  for (const entry of sourceBindings.values()) {
-    if (entry.tabId === tabId && entry.frameId === frameId && entry.sourceActive && entry.sourceRegistrationId) return entry;
-  }
-  return null;
-}
-
-function stopSource(entry, reason) {
-  if (!entry.sourceActive) return;
-  sendToTab(entry.tabId, { type: "dz.source.stop", ...bindingOf(entry), requestId: makeRequestId("source-stop"), reason }, entry.frameId);
-  entry.sourceActive = false;
-}
 async function removeJob(entry, reason) {
   for (const source of [...sourceBindings.values()]) if (source.jobId === entry.jobId) {
-    stopSource(source, reason);
     sourceBindings.delete(sourceBindingKey(source));
   }
   jobs.delete(entry.jobId);
-  if (entry.sourceRegistrationId) {
-    try { await api?.scripting?.unregisterContentScripts?.({ ids: [entry.sourceRegistrationId] }); } catch {}
-  }
   setBadge(entry.tabId, false);
   await persistBindings();
   backgroundLog("info", "job-removed", `${entry.jobId} ${reason}`);
@@ -252,8 +197,9 @@ async function createJob(tab) {
       try { await api?.tabs?.update?.(entry.jobTabId, { active: true }); } catch {}
       return;
     }
-    if (entry.tabId === tabId && entry.sourceActive) {
-      stopSource(entry, "toolbar-cancel");
+    if (entry.tabId === tabId && entry.jobActive) {
+      entry.jobActive = false;
+      entry.sourceValid = false;
       sendToJob(entry, "dz.job.cancel", makeRequestId("toolbar-cancel"), { reason: "toolbar-cancel" });
       setBadge(tabId, false);
       await persistBindings();
@@ -278,22 +224,65 @@ async function createJob(tab) {
   }
   const entry = {
     jobId, tabId, frameId: 0, documentGeneration: 0, jobTabId: jobTab.id, sourceUrl: tab.url,
-    sourceActive: true, jobReady: false, jobRunning: false, heldCandidates: [], grantedOrigins: new Set(), primary: true,
+    sourceValid: true, jobActive: true, jobReady: false, jobRunning: false, heldCandidates: [],
+    seenCandidates: new Set(), snapshotCount: 0, grantedOrigins: new Set(), primary: true,
   };
   jobs.set(jobId, entry);
   sourceBindings.set(sourceBindingKey(entry), entry);
   setBadge(tabId, true);
   await persistBindings();
   backgroundLog("info", "job-created", `source ${tabId}, job ${jobTab.id}`);
-  void injectSource(entry);
 }
 
-function forwardCandidates(entry, message) {
+function validSourceHeaders(headers) {
+  if (!Array.isArray(headers) || headers.length > MAX_HEADER_COUNT) return null;
+  const result = [];
+  for (const header of headers) {
+    if (!header || typeof header.name !== "string" || typeof header.value !== "string" ||
+      header.name.length === 0 || header.name.length > MAX_HEADER_NAME_LENGTH || header.value.length > MAX_HEADER_VALUE_LENGTH ||
+      /[\r\n]/.test(header.name) || /[\r\n]/.test(header.value)) return null;
+    result.push({ name: header.name, value: header.value });
+  }
+  return result;
+}
+
+function validSourceMethod(method) {
+  if (method === undefined) return "GET";
+  if (typeof method !== "string" || method.length === 0 || method.length > 16 || !/^[A-Za-z]+$/.test(method)) return null;
+  const normalized = method.toUpperCase();
+  return ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(normalized) ? normalized : null;
+}
+
+function sourceOperationAllowed(entry) {
+  return entry?.jobActive === true && entry.sourceValid === true && isPublicHttpUrl(entry.sourceUrl) &&
+    sourceBindings.get(sourceBindingKey(entry)) === entry;
+}
+
+async function executeSourceOperation(entry, func, args = []) {
+  if (!sourceOperationAllowed(entry)) return null;
+  const generation = entry.documentGeneration;
+  const results = await api?.scripting?.executeScript?.({
+    target: { tabId: entry.tabId, frameIds: [entry.frameId] },
+    func,
+    args,
+  });
+  if (!sourceOperationAllowed(entry) || entry.documentGeneration !== generation) return null;
+  if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== entry.frameId) throw new Error("invalid-source-operation-result");
+  return results[0].result;
+}
+
+function forwardCandidates(entry, snapshot) {
   const job = jobs.get(entry.jobId) ?? entry;
-  const candidate = { requestId: message.requestId, urls: Array.isArray(message.urls) ? message.urls : [], overflow: Number(message.overflow) || 0, documentUrl: message.documentUrl };
+  const urls = [];
+  for (const url of snapshot.urls) {
+    if (entry.seenCandidates.has(url)) continue;
+    entry.seenCandidates.add(url);
+    urls.push(url);
+  }
+  const candidate = { requestId: makeRequestId("candidates"), urls, overflow: snapshot.overflow, documentUrl: snapshot.documentUrl };
+  if (!urls.length && !candidate.overflow) return;
   if (job.jobReady) sendToJob(entry, "dz.job.candidates", candidate.requestId, candidate);
   else if (job.heldCandidates.length < HELD_CANDIDATE_LIMIT) job.heldCandidates.push({ entry, candidate });
-  sendToTab(entry.tabId, { type: "dz.source.candidates-ack", ...bindingOf(entry), requestId: message.requestId, urls: candidate.urls }, entry.frameId);
 }
 function flushHeldCandidates(entry) {
   while (entry.jobReady && entry.heldCandidates.length) {
@@ -315,14 +304,98 @@ async function handlePermission(entry, message) {
 }
 
 function invalidateSourceDocument(entry, reason) {
-  const oldBinding = bindingOf(entry);
   entry.documentGeneration += 1;
-  entry.sourceActive = false;
+  entry.sourceValid = false;
+  entry.jobActive = false;
   entry.heldCandidates.length = 0;
-  sendToTab(entry.tabId, { type: "dz.source.invalidated", ...oldBinding, requestId: makeRequestId("source-invalidated"), reason }, entry.frameId);
   sendToJob(entry, "dz.job.binding", makeRequestId("source-invalidated"), { sourceValid: false, reason });
   void persistBindings();
   backgroundLog("info", "source-invalidated", `tab ${entry.tabId} ${reason}`);
+}
+
+async function requestCandidateSnapshot(entry) {
+  if (!sourceOperationAllowed(entry) || entry.snapshotCount >= MAX_SNAPSHOTS) return;
+  entry.snapshotCount += 1;
+  try {
+    const snapshot = await executeSourceOperation(entry, collectCandidates);
+    if (!snapshot || snapshot.ok !== true || !Array.isArray(snapshot.urls) ||
+      typeof snapshot.documentUrl !== "string" || !isPublicHttpUrl(snapshot.documentUrl) ||
+      !Number.isSafeInteger(snapshot.overflow) || snapshot.overflow < 0 ||
+      snapshot.urls.length > MAX_CANDIDATES ||
+      snapshot.urls.some((url) => typeof url !== "string" || url.length > MAX_URL_LENGTH || !isPublicHttpUrl(url))) {
+      throw new Error("invalid-candidate-snapshot");
+    }
+    if (!sameDocumentUrl(snapshot.documentUrl, entry.sourceUrl)) {
+      invalidateSourceDocument(entry, "snapshot-document-mismatch");
+      return;
+    }
+    forwardCandidates(entry, snapshot);
+  } catch (error) {
+    if (!sourceOperationAllowed(entry)) return;
+    entry.sourceValid = false;
+    setBadge(entry.tabId, true, true);
+    sendToJob(entry, "dz.job.binding", makeRequestId("source-snapshot-failed"), { sourceValid: false, code: "source-snapshot-failed" });
+    backgroundLog("error", "source-snapshot-failed", "operation-rejected");
+  }
+}
+
+async function dispatchSourceFetch(entry, message) {
+  const method = validSourceMethod(message.method);
+  const headers = validSourceHeaders(message.headers);
+  if (!isPublicHttpUrl(message.url) || !method || !headers) {
+    sendToJob(entry, "dz.job.fetch", message.requestId, {
+      sourceType: "dz.source.fetch-complete", ok: false, code: "invalid-source-request",
+    });
+    return;
+  }
+  let result;
+  try {
+    result = await executeSourceOperation(entry, fetchSource, [{ url: message.url, method, headers }]);
+  } catch {
+    sendToJob(entry, "dz.job.fetch", message.requestId, {
+      sourceType: "dz.source.fetch-complete", ok: false, code: "source-operation-failed",
+    });
+    return;
+  }
+  if (!result) {
+    sendToJob(entry, "dz.job.fetch", message.requestId, {
+      sourceType: "dz.source.fetch-complete", ok: false, code: "source-invalidated",
+    });
+    return;
+  }
+  if (!result || typeof result !== "object" || typeof result.ok !== "boolean") {
+    sendToJob(entry, "dz.job.fetch", message.requestId, {
+      sourceType: "dz.source.fetch-complete", ok: false, code: "invalid-source-fetch-result",
+    });
+    return;
+  }
+  if (!result.ok) {
+    const code = typeof result.code === "string" && /^[a-z0-9-]{1,64}$/.test(result.code) ? result.code : "source-fetch-failed";
+    sendToJob(entry, "dz.job.fetch", message.requestId, {
+      sourceType: "dz.source.fetch-complete", ok: false, code, ...(Number.isInteger(result.status) ? { status: result.status } : {}),
+    });
+    return;
+  }
+  const chunkBytes = result.chunks?.reduce?.((sum, chunk) => sum + (Array.isArray(chunk?.bytes) ? chunk.bytes.length : MAX_SOURCE_FETCH_BYTES + 1), 0);
+  if (!Array.isArray(result.chunks) || !Number.isSafeInteger(result.bytes) || result.bytes < 0 || result.bytes > MAX_SOURCE_FETCH_BYTES ||
+    !Number.isInteger(result.status) || result.status < 200 || result.status >= 300 || !isPublicHttpUrl(result.url) ||
+    chunkBytes !== result.bytes || chunkBytes > MAX_SOURCE_FETCH_BYTES ||
+    result.chunks.some((chunk) => !chunk || !Number.isSafeInteger(chunk.sequence) || chunk.sequence < 0 ||
+      !Array.isArray(chunk.bytes) || chunk.bytes.length > MAX_FETCH_CHUNK_BYTES ||
+      chunk.bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255))) {
+    sendToJob(entry, "dz.job.fetch", message.requestId, {
+      sourceType: "dz.source.fetch-complete", ok: false, code: "invalid-source-fetch-result",
+    });
+    return;
+  }
+  for (const chunk of result.chunks) {
+    sendToJob(entry, "dz.job.fetch", message.requestId, {
+      sourceType: "dz.source.fetch-chunk", sequence: chunk.sequence, bytes: chunk.bytes,
+    });
+  }
+  sendToJob(entry, "dz.job.fetch", message.requestId, {
+    sourceType: "dz.source.fetch-complete", ok: true, status: result.status, url: result.url, bytes: result.bytes,
+  });
 }
 
 function wire() {
@@ -337,7 +410,7 @@ function wire() {
   });
   api.tabs?.onUpdated?.addListener?.((tabId, changeInfo) => {
     if (typeof changeInfo?.url !== "string") return;
-    for (const entry of sourceBindings.values()) if (entry.tabId === tabId && entry.sourceActive && !sameDocumentUrl(changeInfo.url, entry.sourceUrl)) invalidateSourceDocument(entry, "navigation");
+    for (const entry of sourceBindings.values()) if (entry.tabId === tabId && entry.sourceValid && !sameDocumentUrl(changeInfo.url, entry.sourceUrl)) invalidateSourceDocument(entry, "navigation");
   });
   api.permissions?.onRemoved?.addListener?.((removed) => {
     const removedOrigins = new Set((removed?.origins ?? []).map((origin) => origin.replace(/\/\*$/, "")));
@@ -351,16 +424,6 @@ function wire() {
   });
   api.runtime?.onMessage?.addListener?.((message, sender, sendResponse) => {
     if (!message || typeof message.type !== "string") return;
-    // The Firefox-only registered collector has no binding on its first
-    // message. Its mount acknowledgement is the proof that its persistent
-    // listener exists; only then do we disclose and send the binding.
-    if (message.type === "dz.source.mounted") {
-      const entry = sourceByRegistration(sender);
-      if (!entry) return;
-      sendToTab(entry.tabId, { type: "dz.source.bind", ...bindingOf(entry), requestId: makeRequestId("source-bind") }, entry.frameId);
-      try { sendResponse?.({ ok: true }); } catch {}
-      return true;
-    }
     if (!requestId(message)) return;
     // Test-only toolbar equivalent: headless browsers cannot click browser
     // chrome, so the E2E driver asks for the same createJob path the
@@ -373,34 +436,24 @@ function wire() {
       try { sendResponse?.({ ok: true }); } catch {}
       return true;
     }
-    if (message.type.startsWith("dz.source.")) {
-      const entry = findSourceJob(sender, message);
-      if (!entry) return;
-      if (message.type === "dz.source.ready") {
-        sendToJob(entry, "dz.job.binding", message.requestId, { sourceValid: true, documentUrl: message.documentUrl });
-        flushHeldCandidates(jobs.get(entry.jobId) ?? entry);
-      } else if (message.type === "dz.source.candidates") forwardCandidates(entry, message);
-      else if (message.type === "dz.source.fetch-chunk" || message.type === "dz.source.fetch-complete" || message.type === "dz.source.invalidated") {
-        const { type: sourceType, ...payload } = message;
-        sendToJob(entry, "dz.job.fetch", message.requestId, { sourceType, ...payload });
-      }
-      try { sendResponse?.({ ok: true }); } catch {}
-      return true;
-    }
     if (message.type.startsWith("dz.job.")) {
       const entry = findJobSender(sender, message);
       if (!entry) return;
       if (message.type === "dz.job.ready") {
         const job = jobs.get(entry.jobId) ?? entry;
         job.jobReady = true;
-        sendToJob(entry, "dz.job.binding", message.requestId, { sourceValid: entry.sourceActive, documentUrl: entry.sourceUrl });
+        sendToJob(entry, "dz.job.binding", message.requestId, { sourceValid: entry.sourceValid, documentUrl: entry.sourceUrl });
         flushHeldCandidates(job);
-      } else if (message.type === "dz.job.fetch" && entry.sourceActive) {
+        void requestCandidateSnapshot(entry);
+      } else if (message.type === "dz.job.fetch" && entry.sourceValid && entry.jobActive) {
         (jobs.get(entry.jobId) ?? entry).jobRunning = true;
-        sendToTab(entry.tabId, { type: "dz.source.fetch", ...bindingOf(entry), requestId: message.requestId, url: message.url, method: message.method, headers: message.headers }, entry.frameId);
+        void dispatchSourceFetch(entry, message);
+      } else if (message.type === "dz.job.candidates-more" && entry.sourceValid && entry.jobActive) {
+        void requestCandidateSnapshot(entry);
       } else if (message.type === "dz.job.cancel") {
         entry.jobRunning = false;
-        stopSource(entry, "job-cancel");
+        entry.jobActive = false;
+        entry.sourceValid = false;
         void persistBindings();
       } else if (message.type === "dz.job.closed") {
         void removeJob(entry, "job-closed");

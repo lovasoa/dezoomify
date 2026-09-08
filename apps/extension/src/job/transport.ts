@@ -30,7 +30,7 @@ function responseBytes(value) {
 export function createCoordinatorSourceTransport(deps) {
   const pending = new Map();
   return {
-    /** @param {{ binding: JobBinding, requestId: string, uri: string, headers: unknown, purpose: string }} request */
+    /** @param {{ binding: JobBinding, requestId: string, uri: string, method?: string, headers: unknown, purpose: string }} request */
     async fetchResource(request) {
       if (!isJobBinding(request.binding) || typeof request.requestId !== "string" || !request.requestId.startsWith("req:")) {
         throw Object.assign(new Error("invalid source fetch binding"), { category: "malformed" });
@@ -40,6 +40,7 @@ export function createCoordinatorSourceTransport(deps) {
         ...request.binding,
         requestId: request.requestId,
         url: request.uri,
+        method: request.method,
         headers: request.headers,
         purpose: request.purpose,
       });

@@ -168,17 +168,16 @@ test("declared permissions are used by shipped code", () => {
   assert.ok(background.includes("tabs?.create"), "background must create the dedicated job tab");
   assert.ok(background.includes("setIcon"), "background must swap grey<->blue icons");
   assert.ok(background.includes("setBadgeText"), "background must show the monitoring badge dot");
-  assert.ok(background.includes("executeScript"), "background must inject the modal on the detected tab");
-  assert.ok(background.includes("content/modal.js"), "background must inject the reviewed source collector");
+    assert.ok(background.includes("executeScript"), "background must invoke source operations on the clicked tab");
+    assert.ok(background.includes("collectCandidates"), "background must invoke the candidate snapshot operation");
+    assert.ok(background.includes("fetchSource"), "background must invoke the source fetch operation");
   assert.ok(!background.includes("tabs.query"), "background must never enumerate tabs");
-  for (const kind of ["dz.source.bind", "dz.source.candidates", "dz.job.binding", "dz.job.fetch"]) {
+  for (const kind of ["dz.source.fetch-chunk", "dz.source.fetch-complete", "dz.job.binding", "dz.job.fetch"]) {
     assert.ok(background.includes(kind), `background must speak ${kind}`);
   }
   assert.ok(!background.includes("postMessage"), "background must not bridge privileged work through webpage messages");
-  const loader = readFileSync(new URL("../../src/content/modal.js", import.meta.url), "utf8");
-  for (const kind of ["dz.source.bind", "dz.source.candidates", "dz.source.fetch"]) {
-    assert.ok(loader.includes(kind), `injected loader must speak ${kind}`);
-  }
+  const operations = readFileSync(new URL("../../src/background/source-operations.ts", import.meta.url), "utf8");
+  assert.ok(!operations.includes("runtime.onMessage"), "source operations must not install a source-tab listener");
 });
 
 test("job coordinator retains least privilege", () => {
@@ -189,8 +188,7 @@ test("job coordinator retains least privilege", () => {
     .join("\n");
   // The clicked tab id comes from the action event only; the background
   // never enumerates tabs, never requests broad hosts, and never observes
-  // traffic (a host-permissionless webRequest listener is deaf; the
-  // injected tab collects its own candidates permission-free).
+  // traffic; source operations run only after the explicit action.
   assert.ok(code.includes("onClicked"), "monitor must arm on the explicit action click");
   assert.ok(!code.includes("tabs.query"), "background must never enumerate tabs");
   assert.ok(!code.includes("webRequest"), "background must not observe traffic (deaf without host perms)");
@@ -198,7 +196,7 @@ test("job coordinator retains least privilege", () => {
   assert.ok(code.includes("onRemoved"), "monitor must stop when the tab closes");
   assert.ok(code.includes("onUpdated"), "monitor must stop when the tab navigates");
   assert.ok(!code.includes("onInstalled"), "install must not open a fallback extension page");
-  assert.ok(!code.includes("offscreen"), "no offscreen document (unnecessary for a reload monitor)");
+  assert.ok(!code.includes("offscreen"), "no offscreen document is needed for source operations");
   assert.ok(!code.includes("host_permissions"), "background must not touch broad host permissions");
   // No offscreen declared in either generated manifest either.
   for (const gen of [genChromium, genFirefox]) {
@@ -209,15 +207,12 @@ test("job coordinator retains least privilege", () => {
 test("store package ships only loaded files (no dead code)", () => {
   const script = readFileSync(new URL("../../scripts/package-store.sh", import.meta.url), "utf8");
   const build = readFileSync(new URL("../../scripts/build.mjs", import.meta.url), "utf8");
-  // No content_scripts declared: the programmatically injected source
-  // collector plus the dedicated job tab ship; src/content/* stays
-  // unit-test only. There is no extension-page fallback.
-  assert.ok(script.includes("content/modal.js"), "package must stage the injected loader entry");
-  assert.ok(script.includes("content/modal.css"), "package must stage the injected host CSS");
+  // No content_scripts declared: only the background source operations and
+  // dedicated job tab ship. There is no extension-page fallback.
   assert.ok(script.includes("scripts/build.mjs"), "package must compile the reviewed entrypoint graph");
   assert.ok(script.includes("job/job.html"), "package must stage the dedicated job tab");
   assert.ok(script.includes("job/worker.js"), "package must stage the dedicated job worker");
-  assert.ok(script.includes("icons background content job vendor wasm"), "package must zip only the in-browser flow");
+  assert.ok(script.includes("icons background job vendor wasm"), "package must zip only the in-browser flow");
   // The grey idle set swapped via action.setIcon must ship with the brand icons.
   assert.ok(build.includes('"icons"'), "compiled graph must stage the declared icon directory");
   // Vendored .js modules are esbuild inputs bundled into the compiled
@@ -246,25 +241,20 @@ test("generated manifests are the deterministic generator output (base+overlay, 
   }
 });
 
-// --- Click-to-monitor modal policy (additive; least privilege) ---
+// --- Explicit-action source-operation policy (additive; least privilege) ---
 //
-// Monitoring (grey idle action icon, blue brand icons + badge dot while
-// watching) performs a single reload, then injects the in-tab modal on the
-// clicked tab only (`scripting` after reload-complete, never declared
-// content scripts): no tab enumeration, no permanent hosts, no downloads,
-// no traffic observation in the background (in-tab timeline instead),
-// tab-origin fetch only, and no metadata proxy. The bound-page fallback
-// observes via webRequest only after a one-time optional grant for exactly
-// the bound tab's origin, requested on the explicit Scan gesture.
+// The explicit-action source path uses scripting.executeScript snapshots and
+// fetches on the clicked tab only: no reload, registered content script,
+// persistent listener, tab enumeration, permanent hosts, downloads, or
+// background traffic observation.
 
 test("monitoring adds no permissions (no tabs/downloads/cookies/hosts; scripting reviewed)", () => {
   for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
     for (const forbidden of ["tabs", "downloads", "cookies"]) {
       assert.ok(!(manifest.permissions ?? []).includes(forbidden), `${name} monitoring must not add ${forbidden}`);
     }
-    // `scripting` is the one reviewed addition: detected-tab-only modal
-    // injection (executeScript/insertCSS on the clicked tab, used by the
-    // background monitor).
+    // `scripting` is the reviewed capability for finite source operations on
+    // the clicked tab.
     assert.ok((manifest.permissions ?? []).includes("scripting"), `${name} modal injection requires scripting`);
     assert.deepEqual(manifest.host_permissions, [], `${name} monitoring adds no permanent hosts`);
     assert.deepEqual(
