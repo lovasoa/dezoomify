@@ -65,9 +65,10 @@ jobs:
   window-e2e:
     name: Window E2E (real window, ubuntu)
     runs-on: ubuntu-latest
-    # Green ~25 min; the per-spec deadlines in the lane (~30 min each) are
-    # the real bound. Generous so slow legs fail on signal, never on clock.
-    timeout-minutes: 90
+    # A healthy run is ~25 min. The owned-process cleanup in xtask bounds
+    # individual Node specs; this is the small final backstop for toolchain
+    # or runner failures outside that ownership.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
@@ -175,9 +176,9 @@ jobs:
   bundle-smoke:
     name: Bundle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Release Tauri builds plus (cold) tauri-cli installs; generous so slow
-    # legs fail on signal, never on clock.
-    timeout-minutes: 90
+    # A healthy run is ~25 min; retain ample cold-cache headroom while
+    # preventing a runner-level stall from consuming the old 90-minute cap.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       max-parallel: 3

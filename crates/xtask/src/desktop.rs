@@ -200,11 +200,11 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // Each spec runs under a hard deadline: a leaked child holding node's
     // pipes or the frontend server open would otherwise hang this lane
     // forever (observed as a 55-minute CI zombie after launch failures).
-    // 30 minutes is far above the longest green spec (~15) but bounds any
+    // 20 minutes is above the longest green spec (~15) but bounds any
     // pathological run, and the killed process fails the lane with the
     // evidence already on the log.
     run_node_with_deadline(
-        std::time::Duration::from_secs(30 * 60),
+        std::time::Duration::from_secs(20 * 60),
         &["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"],
         &[
             (
@@ -219,7 +219,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         "window.spec.mjs",
     )?;
     run_node_with_deadline(
-        std::time::Duration::from_secs(30 * 60),
+        std::time::Duration::from_secs(20 * 60),
         &["--test", "apps/desktop/tests/window-e2e/formats.spec.mjs"],
         &[
             (
@@ -494,7 +494,7 @@ fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
             DESKTOP_DEV_HOST,
         ])
         .current_dir(&root);
-    configure_desktop_frontend(&mut command);
+    configure_owned_process_tree(&mut command);
     let child = command
         .spawn()
         .map_err(|e| format!("failed to start the desktop frontend: {e}"))?;
@@ -517,11 +517,10 @@ fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
     Ok(frontend)
 }
 
-/// Vite is a managed background service for this command, not an interactive
-/// terminal peer. A private process group lets cleanup include pnpm's Vite
-/// descendant, while a closed stdin prevents Vite's readline shortcuts from
-/// competing with the shell or failing with EIO when the desktop exits.
-fn configure_desktop_frontend(command: &mut Command) {
+/// An owned process is never an interactive terminal peer. A private process
+/// group lets deadline cleanup include descendants (Vite, Node, or a window
+/// driver), while closed stdin prevents a child from waiting on the terminal.
+fn configure_owned_process_tree(command: &mut Command) {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
@@ -575,22 +574,35 @@ struct DesktopFrontend {
 
 impl Drop for DesktopFrontend {
     fn drop(&mut self) {
-        terminate_frontend_process_tree(&mut self.child);
+        terminate_owned_process_tree(&mut self.child);
     }
 }
 
-fn terminate_frontend_process_tree(child: &mut Child) {
+/// Stop an owned process tree. The leader is created in its own Unix process
+/// group; Windows requires taskkill's `/T` traversal instead.
+fn terminate_owned_process_tree(child: &mut Child) {
     #[cfg(unix)]
     signal_process_group(child.id(), libc::SIGTERM);
 
     #[cfg(windows)]
     if child.try_wait().ok().flatten().is_none() {
-        let _ = Command::new("taskkill")
+        let taskkill = Command::new("taskkill")
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status();
+            .spawn();
+        if let Ok(mut taskkill) = taskkill {
+            let taskkill_deadline = Instant::now() + Duration::from_secs(5);
+            while taskkill.try_wait().ok().flatten().is_none() && Instant::now() < taskkill_deadline
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            if taskkill.try_wait().ok().flatten().is_none() {
+                let _ = taskkill.kill();
+            }
+            let _ = taskkill.wait();
+        }
     }
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -900,7 +912,11 @@ fn run_cargo(args: &[&str]) -> Result<(), String> {
 }
 
 fn run_node(args: &[&str]) -> Result<(), String> {
-    run_node_with_env(args, &[])
+    // Lean desktop suites normally finish in seconds. Preserve headroom for
+    // cold Cargo work in the deep-link test, while failing a leaked Node or
+    // Vite descendant with the owning spec named instead of letting CI hang.
+    let label = args.join(" ");
+    run_node_with_deadline(std::time::Duration::from_secs(6 * 60), args, &[], &label)
 }
 
 /// Run node under a hard deadline: when the child outlives it, the process
@@ -914,10 +930,13 @@ fn run_node_with_deadline(
     env: &[(&str, &str)],
     label: &str,
 ) -> Result<(), String> {
-    let mut child = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .args(args)
         .envs(env.iter().copied())
-        .current_dir(super::repo_root())
+        .current_dir(super::repo_root());
+    configure_owned_process_tree(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|e| format!("failed to run node: {e}"))?;
     let start = std::time::Instant::now();
@@ -931,8 +950,7 @@ fn run_node_with_deadline(
             }
             Ok(None) => {
                 if start.elapsed() > deadline {
-                    child.kill().ok();
-                    let _ = child.wait();
+                    terminate_owned_process_tree(&mut child);
                     return Err(format!(
                         "desktop node tests killed after {:.0} s ({label}): the spec process did not exit; \
                          a leaked child is holding its pipes or the frontend server open",
@@ -944,19 +962,6 @@ fn run_node_with_deadline(
             Err(e) => return Err(format!("failed to wait for node ({label}): {e}")),
         }
     }
-}
-
-fn run_node_with_env(args: &[&str], env: &[(&str, &str)]) -> Result<(), String> {
-    let status = Command::new("node")
-        .args(args)
-        .envs(env.iter().copied())
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run node: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "desktop node tests failed".to_string())
 }
 
 #[cfg(test)]
@@ -1088,7 +1093,7 @@ mod tests {
             "sh",
             pid_file.to_str().expect("utf-8 temp path"),
         ]);
-        super::configure_desktop_frontend(&mut command);
+        super::configure_owned_process_tree(&mut command);
         let frontend = super::DesktopFrontend {
             child: command.spawn().expect("spawn process tree"),
         };

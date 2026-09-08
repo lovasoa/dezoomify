@@ -7,7 +7,7 @@
 // is involved.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,6 +55,19 @@ function startFrontend() {
 function stopFrontend(child) {
   if (child.exitCode !== null) return;
   if (process.platform === "win32") {
+    // `pnpm.cmd` starts Vite under a command shell. Killing only the shell
+    // leaves Vite alive with inherited pipes, so node:test never exits and
+    // the desktop CI step stalls. Reap the owned tree, bounded, before the
+    // direct-child fallback.
+    try {
+      const stopped = spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        timeout: 5000,
+      });
+      if (stopped.status === 0) return;
+    } catch {
+      // Fall through to the direct child kill.
+    }
     child.kill();
     return;
   }
