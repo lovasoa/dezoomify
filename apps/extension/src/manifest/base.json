@@ -22,5 +22,5 @@
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "optional_permissions": ["cookies"],
   "permissions": ["activeTab", "scripting", "nativeMessaging"],
-  "version": "3.0.1"
+  "version": "3.0.2"
 }

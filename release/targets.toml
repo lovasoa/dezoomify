@@ -4,7 +4,7 @@ os = "linux"
 
 # Linux desktop bundle: `cargo xtask build desktop` produces a real unsigned
 # .deb from the Tauri window shell behind the `tauri` feature (verified at
-# target/release/bundle/deb/Dezoomify_3.0.1_amd64.deb; installers ship
+# target/release/bundle/deb/Dezoomify_3.0.2_amd64.deb; installers ship
 # unsigned, no paid signing).
 [[target]]
 name = "desktop-linux-x86_64"

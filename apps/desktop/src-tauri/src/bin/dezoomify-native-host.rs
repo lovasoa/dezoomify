@@ -27,7 +27,7 @@ use dezoomify_desktop::native_host::host::HostState;
 use dezoomify_desktop::native_host::redaction;
 
 pub const HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
-pub const HOST_VERSION: &str = "3.0.1";
+pub const HOST_VERSION: &str = "3.0.2";
 pub const HOST_PROTOCOL: &str = "1.0";
 
 fn now_ms() -> u64 {
