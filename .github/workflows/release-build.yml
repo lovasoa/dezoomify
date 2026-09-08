@@ -121,6 +121,8 @@ jobs:
         run: |
           gh run download ${{ github.run_id }} -n release-plan -D dist
           v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version"])')"
+          mkdir -p target/release-dist
+          mv "dist/$v" target/release-dist/
           test -f "target/release-dist/$v/plan.json"
       - run: |
           v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version"])')"
