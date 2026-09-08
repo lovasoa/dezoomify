@@ -38,7 +38,12 @@ types, not host-specific implementation details.
 
 The browser host owns workers, readable-byte fetching, active-transport
 reporting, image decode, canvas and save surfaces, and an optional bounded
-browser cache. Hosts supply transport eligibility and fallback
+browser cache. It is the shared effect executor for browser hosts of the
+job engine: the extension job tab drives the engine through the WASM
+session today, and the website's own orchestration migrates onto the same
+executor; the executor owns canvas execution and host limits, never job
+policy (retries, cancellation, partial output, and ordering stay in the
+engine). Hosts supply transport eligibility and fallback
 policy: the web integration tries a direct browser fetch first, with browser
 credentials omitted, and may automatically use the metadata CORS proxy only
 after a classified CORS or network failure, or a direct fetch that does not

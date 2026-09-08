@@ -10,8 +10,12 @@
       // Simulates an embedded viewer: requests the zoomable source so the
       // extension's traffic scan can observe it. The fixture gateway on this
       // loopback origin serves the DZI for the virtual fixtures.test host.
+      // The query-preserving `/fetch/<original-path>` form keeps the `.dzi`
+      // suffix visible to URL-shape discovery (the bare `/fetch` outer path
+      // is opaque to it).
+      const source = "https://fixtures.test/cli/pyramid.dzi";
       fetch(
-        location.origin + "/fetch?url=" + encodeURIComponent("https://fixtures.test/cli/pyramid.dzi"),
+        location.origin + "/fetch/" + source + "?url=" + encodeURIComponent(source),
       )
         .then((r) => {
           if (!r.ok) throw new Error("status " + r.status);

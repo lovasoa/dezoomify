@@ -1,3 +1,7 @@
+// GENERATED from packages/browser-runtime/src/tile-policy.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/browser-runtime/src/tile-policy.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // Website tile policy (todo 2.2 home): politeness, resilience, timeouts.
 //
 // Moved from `src/main.ts` so the website orchestrator stays thin: this
@@ -6,8 +10,7 @@
 // signal, and the proxy rate-limit delay. Pure and dependency-injected where
 // the host clock or randomness is involved, so node tests drive it with
 // fakes. Keep erasable-syntax-only for the browser `.js` mirrors.
-import { failure } from "./failure.ts";
-import type { StructuredFailure } from "./failure.ts";
+import { failure } from "./failure.js";
 
 /** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
@@ -60,23 +63,21 @@ export const TILE_RTT_SLOW_MS = 800;
  * clamped to 6-12, then within the capability cap with a floor of 4.
  * Slow networks back off so extra workers do not pile onto timeouts.
  */
-export function pickTileConcurrency(opts?: {
-  hardwareConcurrency?: unknown;
-  rttMs?: unknown;
-  capabilityCap?: unknown;
-}): number {
+export function pickTileConcurrency(opts
+
+ )         {
   let cap = TILE_CONCURRENCY_CAP;
-  if (typeof opts?.capabilityCap === "number" && Number.isFinite(opts.capabilityCap as number)) {
-    cap = Math.floor(opts.capabilityCap as number);
+  if (typeof opts?.capabilityCap === "number" && Number.isFinite(opts.capabilityCap          )) {
+    cap = Math.floor(opts.capabilityCap          );
   }
   let cores = 4;
   if (
     typeof opts?.hardwareConcurrency === "number" &&
-    Number.isFinite(opts.hardwareConcurrency as number)
+    Number.isFinite(opts.hardwareConcurrency          )
   ) {
-    cores = Math.floor(opts.hardwareConcurrency as number);
+    cores = Math.floor(opts.hardwareConcurrency          );
   }
-  let base: number;
+  let base        ;
   if (cores <= 2) base = TILE_CONCURRENCY_MIN;
   else if (cores <= 4) base = 8;
   else if (cores <= 8) base = 10;
@@ -90,11 +91,6 @@ export function pickTileConcurrency(opts?: {
   return Math.max(TILE_CONCURRENCY_FLOOR, Math.min(clamped, cap));
 }
 
-export interface HostConcurrencyHints {
-  hardwareConcurrency?: unknown;
-  connection?: { rtt?: unknown };
-}
-
 /**
  * Website concurrency from host hints, negotiated to the browser capability
  * baseline (6). hardwareConcurrency sizes the pool and NetworkInformation.rtt
@@ -105,14 +101,14 @@ export interface HostConcurrencyHints {
  * respects the floor. Pass explicit hints in tests; when omitted, the global
  * navigator is read best-effort and ignored when absent.
  */
-export function websiteTileConcurrency(host?: HostConcurrencyHints): number {
+export function websiteTileConcurrency(host                       )         {
   let cores = 4;
-  let rtt: number | undefined;
+  let rtt                    ;
   try {
     const nav =
       host ??
       (typeof navigator !== "undefined"
-        ? (navigator as unknown as HostConcurrencyHints)
+        ? (navigator                                   )
         : undefined);
     if (
       nav &&
@@ -129,7 +125,7 @@ export function websiteTileConcurrency(host?: HostConcurrencyHints): number {
   return pickTileConcurrency({ hardwareConcurrency: cores, rttMs: rtt, capabilityCap: BROWSER_CAPABILITY_MAX_CONCURRENCY });
 }
 
-export function tileHostOf(url: string): string {
+export function tileHostOf(url        )         {
   try {
     return new URL(url).host.toLowerCase();
   } catch {
@@ -137,13 +133,8 @@ export function tileHostOf(url: string): string {
   }
 }
 
-export function sleep(ms: number): Promise<void> {
+export function sleep(ms        )                {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export interface ThrottleClock {
-  now(): number;
-  sleep(ms: number): Promise<void>;
 }
 
 /**
@@ -153,19 +144,18 @@ export interface ThrottleClock {
  * the next waiter. The clock is injectable so tests assert spacing without
  * wall-clock waits.
  */
-export function createTileThrottle(clock?: ThrottleClock): {
-  throttle(url: string): Promise<void>;
-  reset(): void;
-} {
+export function createTileThrottle(clock                )
+
+  {
   const now = clock?.now ?? Date.now;
   const wait = clock?.sleep ?? sleep;
-  const last = new Map<string, number>();
-  const queue = new Map<string, Promise<void>>();
-  function throttle(url: string): Promise<void> {
+  const last = new Map                ();
+  const queue = new Map                       ();
+  function throttle(url        )                {
     const host = tileHostOf(url) || "global";
     const prev = queue.get(host) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
+    let release             ;
+    const current = new Promise      ((resolve) => {
       release = resolve;
     });
     queue.set(host, current);
@@ -179,7 +169,7 @@ export function createTileThrottle(clock?: ThrottleClock): {
     })();
     return run.finally(release);
   }
-  function reset(): void {
+  function reset()       {
     last.clear();
     queue.clear();
   }
@@ -187,7 +177,7 @@ export function createTileThrottle(clock?: ThrottleClock): {
 }
 
 /** Exponential backoff with jitter between tile attempts. */
-export function tileRetryDelayMs(retryIndex: number, random: () => number = Math.random): number {
+export function tileRetryDelayMs(retryIndex        , random               = Math.random)         {
   return TILE_RETRY_BASE_MS * Math.pow(2, retryIndex) + random() * 100;
 }
 
@@ -200,7 +190,7 @@ export function tileRetryDelayMs(retryIndex: number, random: () => number = Math
 export const PROXY_RATE_LIMIT_RETRY_BASE_MS = 1000;
 export const PROXY_RATE_LIMIT_RETRY_MAX_MS = 5000;
 
-export function proxyRateLimitDelayMs(retryAfterMs?: number): number | null {
+export function proxyRateLimitDelayMs(retryAfterMs         )                {
   if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)) {
     if (retryAfterMs <= 0) return 0;
     if (retryAfterMs > PROXY_RATE_LIMIT_RETRY_MAX_MS) return null;
@@ -209,38 +199,31 @@ export function proxyRateLimitDelayMs(retryAfterMs?: number): number | null {
   return PROXY_RATE_LIMIT_RETRY_BASE_MS;
 }
 
-export interface TimeoutCombined {
-  signal: AbortSignal;
-  cleanup(): void;
-  timedOut?: () => boolean;
-}
-
 /**
  * Combine a caller signal with the per-request timeout.
  * Uses AbortSignal.any/timeout when available, manual wiring otherwise.
  */
-export function combineTimeout(parentSignal?: AbortSignal, ms: number = REQUEST_TIMEOUT_MS): TimeoutCombined {
-  const AS = AbortSignal as unknown as {
-    timeout?: (ms: number) => AbortSignal;
-    any?: (signals: AbortSignal[]) => AbortSignal;
-  };
+export function combineTimeout(parentSignal              , ms         = REQUEST_TIMEOUT_MS)                  {
+  const AS = AbortSignal
+
+   ;
   if (typeof AbortSignal !== "undefined" && typeof AS.timeout === "function") {
-    const timeout = (AS.timeout as (ms: number) => AbortSignal)(ms);
+    const timeout = (AS.timeout                               )(ms);
     if (parentSignal && typeof AS.any === "function") {
-      return { signal: (AS.any as (s: AbortSignal[]) => AbortSignal)([parentSignal, timeout]), cleanup() {} };
+      return { signal: (AS.any                                     )([parentSignal, timeout]), cleanup() {} };
     }
     if (!parentSignal) return { signal: timeout, cleanup() {} };
   }
   const ctrl = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let onAbort: (() => void) | null = null;
+  let timer                                       = null;
+  let onAbort                      = null;
   const cleanup = () => {
     if (timer) clearTimeout(timer);
     timer = null;
     if (parentSignal && onAbort) parentSignal.removeEventListener("abort", onAbort);
   };
   if (parentSignal?.aborted) {
-    ctrl.abort((parentSignal as AbortSignal & { reason?: unknown }).reason);
+    ctrl.abort((parentSignal                                      ).reason);
     return { signal: ctrl.signal, cleanup() {}, timedOut: () => false };
   }
   let timedOut = false;
@@ -256,7 +239,7 @@ export function combineTimeout(parentSignal?: AbortSignal, ms: number = REQUEST_
     onAbort = () => {
       cleanup();
       try {
-        ctrl.abort((parentSignal as AbortSignal & { reason?: unknown }).reason);
+        ctrl.abort((parentSignal                                      ).reason);
       } catch {
         ctrl.abort();
       }
@@ -266,7 +249,7 @@ export function combineTimeout(parentSignal?: AbortSignal, ms: number = REQUEST_
   return { signal: ctrl.signal, cleanup, timedOut: () => timedOut };
 }
 
-export function shortUrl(url: string): string {
+export function shortUrl(url        )         {
   try {
     const u = new URL(url);
     const path = u.pathname.length > 40 ? `…${u.pathname.slice(-39)}` : u.pathname;
@@ -277,7 +260,7 @@ export function shortUrl(url: string): string {
 }
 
 /** Hostname of a job's website, for plain-language progress messages. */
-export function hostOf(url: string): string {
+export function hostOf(url        )         {
   try {
     return new URL(url).host;
   } catch {
@@ -287,10 +270,10 @@ export function hostOf(url: string): string {
 
 /** Exhausted tile retries map to TILE_FAILED (never a display string). */
 export function tileFailedError(
-  lastOutcome: string,
-  lastStatus: number | undefined,
-  url: string,
-): StructuredFailure {
+  lastOutcome        ,
+  lastStatus                    ,
+  url        ,
+)                    {
   return failure(
     "TILE_FAILED",
     "Part of the image could not be saved. Try again in a moment.",
@@ -299,4 +282,3 @@ export function tileFailedError(
     `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) from ${shortUrl(url)} after ${TILE_MAX_RETRIES + 1} attempts`,
   );
 }
-

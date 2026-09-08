@@ -1,3 +1,7 @@
+// GENERATED from packages/browser-runtime/src/plan-gates.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/browser-runtime/src/plan-gates.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // Browser plan gates (todo 2.2 home, moved from `src/main.ts`).
 //
 // Declared sizes fail fast with a desktop handoff link without planning, so
@@ -5,20 +9,20 @@
 // the declared gate (probe-driven) and rely on the worker `limit-exceeded`
 // guard plus the post-plan gates. Pure: limits come from `./limits.ts`, the
 // structured failure from `./session.ts`. Keep erasable-syntax-only.
-import { failure } from "./failure.ts";
-import type { StructuredFailure } from "./failure.ts";
+import { failure } from "./failure.js";
+
 import {
   BROWSER_LIMITS,
   BROWSER_MAX_PLAN_TILES,
   estimateTileCount,
   probeLimits,
-} from "./limits.ts";
+} from "./limits.js";
 
 /** Desktop handoff link for images beyond the browser tab (`dezoomify://`).
  * Returns "" for non-http(s) sources (for example local `file:` URLs): the
  * desktop deep link only carries bounded http(s) input, so local files show
  * the local-only note instead of a broken link. */
-export function desktopHandoffLink(sourceUrl: string): string {
+export function desktopHandoffLink(sourceUrl        )         {
   try {
     const u = new URL(String(sourceUrl ?? "").trim());
     if (u.protocol !== "http:" && u.protocol !== "https:") return "";
@@ -29,11 +33,11 @@ export function desktopHandoffLink(sourceUrl: string): string {
 }
 
 export function canvasTooLargeFailure(
-  width: number,
-  height: number,
-  sourceUrl: string,
-  extra?: string,
-): StructuredFailure {
+  width        ,
+  height        ,
+  sourceUrl        ,
+  extra         ,
+)                    {
   const handoff = desktopHandoffLink(sourceUrl);
   const technical = extra
     ? `canvas ${width}x${height} exceeds the browser limit (${extra}); desktop handoff ${handoff}`
@@ -48,15 +52,10 @@ export function canvasTooLargeFailure(
 }
 
 /** Whether a declared size fits the browser tab plus the plan tile cap. */
-export function levelFitsBrowser(width: number, height: number): boolean {
+export function levelFitsBrowser(width        , height        )          {
   if (probeLimits({ width, height }, BROWSER_LIMITS).verdict !== "ok") return false;
   const estimate = estimateTileCount(width, height);
   return estimate !== null && estimate <= BROWSER_MAX_PLAN_TILES;
-}
-
-export interface DeclaredSize {
-  x: number;
-  y: number;
 }
 
 /**
@@ -65,9 +64,9 @@ export interface DeclaredSize {
  * probe-driven path continue); otherwise the structured failure to throw.
  */
 export function assertDeclaredSizeFitsBrowser(
-  size: DeclaredSize | undefined,
-  sourceUrl: string,
-): StructuredFailure | null {
+  size                          ,
+  sourceUrl        ,
+)                           {
   if (!size) return null;
   if (probeLimits({ width: size.x, height: size.y }, BROWSER_LIMITS).verdict !== "ok") {
     return canvasTooLargeFailure(size.x, size.y, sourceUrl);
@@ -91,11 +90,11 @@ export function assertDeclaredSizeFitsBrowser(
  * Returns null when the plan fits; otherwise the structured failure to throw.
  */
 export function assertPlanFitsBrowser(
-  width: number,
-  height: number,
-  tileCount: number,
-  sourceUrl: string,
-): StructuredFailure | null {
+  width        ,
+  height        ,
+  tileCount        ,
+  sourceUrl        ,
+)                           {
   if (!(width > 0 && height > 0)) {
     return failure(
       "PLAN_INVALID",
@@ -126,12 +125,12 @@ export function assertPlanFitsBrowser(
  * generic WORKER_FAILED. Returns the mapped failure, or null to rethrow.
  */
 export function mapWorkerLimitExceeded(
-  error: unknown,
-  fallbackWidth: number,
-  fallbackHeight: number,
-  sourceUrl: string,
-): StructuredFailure | null {
-  const structured = error as { code?: string; detail?: string; technical?: string };
+  error         ,
+  fallbackWidth        ,
+  fallbackHeight        ,
+  sourceUrl        ,
+)                           {
+  const structured = error                                                          ;
   const hay = `${structured?.code ?? ""} ${structured?.detail ?? ""} ${structured?.technical ?? ""}`;
   if (hay.includes("limit-exceeded")) {
     return canvasTooLargeFailure(
@@ -144,7 +143,7 @@ export function mapWorkerLimitExceeded(
   return null;
 }
 
-export function isAllowedSourceUrl(urlString: string): boolean {
+export function isAllowedSourceUrl(urlString        )          {
   try {
     const u = new URL(urlString);
     return u.protocol === "http:" || u.protocol === "https:";
@@ -156,7 +155,7 @@ export function isAllowedSourceUrl(urlString: string): boolean {
 /** True for `file:` URLs pasted into the website input. The website cannot
  * read local files from the browser, so these are accepted-then-explained
  * (desktop-app handoff) instead of rejected as a silent invalid URL. */
-export function isLocalFileUrl(urlString: string): boolean {
+export function isLocalFileUrl(urlString        )          {
   try {
     return new URL(String(urlString ?? "").trim()).protocol === "file:";
   } catch {
@@ -165,7 +164,7 @@ export function isLocalFileUrl(urlString: string): boolean {
 }
 
 /** Stable error classification derived from the code, never from text. */
-export function categoryFor(code: string): string {
+export function categoryFor(code        )         {
   if (code === "NO_IMAGE_FOUND") return "discovery";
   if (code === "INVALID_URL") return "validation";
   if (code.startsWith("OUTPUT_")) return "output";
@@ -173,7 +172,7 @@ export function categoryFor(code: string): string {
   return "transport";
 }
 
-export function phaseFor(code: string): string {
+export function phaseFor(code        )         {
   if (code === "NO_IMAGE_FOUND") return "discovery";
   if (code.startsWith("OUTPUT_")) return "output";
   return "acquisition";

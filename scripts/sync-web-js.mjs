@@ -21,8 +21,10 @@ import { stripTypeScriptTypes } from "node:module";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 // (ts, js) pairs: the js mirror is served to browsers, the ts is tested.
-// This list is exactly the browser-served module graph (index.html ->
-// src/main.js -> ...); node-only modules (caches, surfaces, save helpers)
+// This list is exactly the checked mirror graph: the browser-served website
+// modules (index.html -> src/main.js -> ...) plus the browser-runtime
+// engine-effect modules whose canonical `.js` mirrors feed the extension
+// vendor graph below. Node-only modules (caches, surfaces, save helpers)
 // stay TypeScript-only and are never shipped.
 const PAIRS = [
   ["src/discovery.ts", "src/discovery.js"],
@@ -39,9 +41,17 @@ const PAIRS = [
   ["packages/browser-runtime/src/limits.ts", "packages/browser-runtime/src/limits.js"],
   ["packages/browser-runtime/src/queue.ts", "packages/browser-runtime/src/queue.js"],
   ["packages/browser-runtime/src/session.ts", "packages/browser-runtime/src/session.js"],
+  ["packages/browser-runtime/src/failure.ts", "packages/browser-runtime/src/failure.js"],
   ["packages/browser-runtime/src/preview.ts", "packages/browser-runtime/src/preview.js"],
   ["packages/browser-runtime/src/transport-labels.ts", "packages/browser-runtime/src/transport-labels.js"],
   ["packages/browser-runtime/src/save-name.ts", "packages/browser-runtime/src/save-name.js"],
+  ["packages/browser-runtime/src/tile-decode.ts", "packages/browser-runtime/src/tile-decode.js"],
+  ["packages/browser-runtime/src/tile-policy.ts", "packages/browser-runtime/src/tile-policy.js"],
+  ["packages/browser-runtime/src/tile-draw.ts", "packages/browser-runtime/src/tile-draw.js"],
+  ["packages/browser-runtime/src/canvas-save.ts", "packages/browser-runtime/src/canvas-save.js"],
+  ["packages/browser-runtime/src/plan-gates.ts", "packages/browser-runtime/src/plan-gates.js"],
+  ["packages/browser-runtime/src/assembly.ts", "packages/browser-runtime/src/assembly.js"],
+  ["packages/browser-runtime/src/engine-selection.ts", "packages/browser-runtime/src/engine-selection.js"],
   ["packages/shared-ui/src/i18n.ts", "packages/shared-ui/src/i18n.js"],
   ["packages/shared-ui/src/locales/fr.ts", "packages/shared-ui/src/locales/fr.js"],
   ["packages/shared-ui/src/locales/de.ts", "packages/shared-ui/src/locales/de.js"],
@@ -68,6 +78,14 @@ const VENDOR_PAIRS = [
   ["packages/browser-runtime/src/limits.js", "apps/extension/src/vendor/limits.js"],
   ["packages/browser-runtime/src/transport-labels.js", "apps/extension/src/vendor/transport-labels.js"],
   ["packages/browser-runtime/src/save-name.js", "apps/extension/src/vendor/save-name.js"],
+  ["packages/browser-runtime/src/failure.js", "apps/extension/src/vendor/failure.js"],
+  ["packages/browser-runtime/src/tile-decode.js", "apps/extension/src/vendor/tile-decode.js"],
+  ["packages/browser-runtime/src/tile-policy.js", "apps/extension/src/vendor/tile-policy.js"],
+  ["packages/browser-runtime/src/tile-draw.js", "apps/extension/src/vendor/tile-draw.js"],
+  ["packages/browser-runtime/src/canvas-save.js", "apps/extension/src/vendor/canvas-save.js"],
+  ["packages/browser-runtime/src/plan-gates.js", "apps/extension/src/vendor/plan-gates.js"],
+  ["packages/browser-runtime/src/assembly.js", "apps/extension/src/vendor/assembly.js"],
+  ["packages/browser-runtime/src/engine-selection.js", "apps/extension/src/vendor/engine-selection.js"],
 ];
 
 const VENDOR_CSS_PAIRS = [

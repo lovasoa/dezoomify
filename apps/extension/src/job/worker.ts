@@ -46,6 +46,30 @@ export function createJobWorkerHost(deps) {
     dispatch({ type: "start", job: message.jobId, input_url: message.inputUrl });
   }
 
+  /**
+   * Rank candidate URLs with the core preference order. Runs before any
+   * session exists; the wasm module load is shared with engine.start.
+   * Unknown or failing rank calls fall back to the caller-supplied order.
+   */
+  async function rank(message) {
+    const urls = Array.isArray(message.urls) ? message.urls.filter((url) => typeof url === "string") : [];
+    let ranked = [];
+    try {
+      const wasm = await deps.wasm();
+      // The glue must be initialized before any binding call, exactly like
+      // engine.start: an uninitialized call throws and would silently fall
+      // back to the unranked input order.
+      await wasm.default?.();
+      if (!disposed && typeof wasm.rankCandidates === "function") {
+        const parsed = JSON.parse(wasm.rankCandidates(JSON.stringify(urls)));
+        if (Array.isArray(parsed)) ranked = parsed.map((entry) => entry?.url).filter((url) => typeof url === "string");
+      }
+    } catch {
+      ranked = [];
+    }
+    deps.postMessage({ type: "engine.ranked", requestId: message.requestId, urls: ranked.length ? ranked : urls });
+  }
+
   /** @param {any} message */
   function provideBytes(message) {
     if (!session || disposed || !(message.bytes instanceof Uint8Array)) return;
@@ -53,7 +77,10 @@ export function createJobWorkerHost(deps) {
     const handleJson = JSON.stringify(handle);
     session.writeBuffer(handleJson, 0, message.bytes);
     session.commitBuffer(handleJson, message.bytes.byteLength);
-    dispatch({ type: "provide-resource", job: message.jobId, request: message.requestId, buffer: handle });
+    // The command envelope carries the canonical protocol reference, not the
+    // arena form allocateBuffer returns.
+    const buffer = JSON.parse(session.protocolHandle(handleJson));
+    dispatch({ type: "provide-resource", job: message.jobId, request: message.requestId, buffer });
   }
 
   return {
@@ -62,6 +89,7 @@ export function createJobWorkerHost(deps) {
       if (!message || typeof message !== "object" || disposed) return;
       try {
         if (message.type === "engine.start") await start(message);
+        else if (message.type === "engine.rank") await rank(message);
         else if (message.type === "engine.bytes") provideBytes(message);
         else if (message.type === "engine.failure") dispatch({ type: "provide-fetch-failure", job: message.jobId, request: message.requestId, error: message.error });
         else if (message.type === "engine.command") dispatch(object(message.command));

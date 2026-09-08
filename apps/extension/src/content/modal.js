@@ -108,10 +108,9 @@ export function createSourceCollector(deps) {
     while (recent.size > MAX_RECENT_CANDIDATES) recent.delete(recent.keys().next().value);
   }
 
-  function addCandidates(entries) {
-    if (!binding || stopped) return 0;
+  function seedPending(urls) {
     let added = 0;
-    for (const url of collectInTabUrls(entries)) {
+    for (const url of urls) {
       if (recent.has(url) || pendingSet.has(url)) continue;
       if (pending.length >= MAX_PENDING_CANDIDATES) {
         overflow += 1;
@@ -121,6 +120,12 @@ export function createSourceCollector(deps) {
       pendingSet.add(url);
       added += 1;
     }
+    return added;
+  }
+
+  function addCandidates(entries) {
+    if (!binding || stopped) return 0;
+    const added = seedPending(collectInTabUrls(entries));
     flushCandidates();
     return added;
   }
@@ -229,8 +234,12 @@ export function createSourceCollector(deps) {
   function seedTimeline() {
     // The main document is not a resource timing entry, so it is always an
     // explicit input. Child frames run their own copy with their own frame id.
-    addCandidates([String(win?.location?.href ?? "")]);
-    try { addCandidates(perf?.getEntriesByType?.("resource") ?? []); } catch {}
+    // Both the document and the retained resource entries seed ONE batch:
+    // flushing the document URL alone would make a downstream host commit to
+    // the page itself before the viewer traffic arrives.
+    seedPending([String(win?.location?.href ?? "")]);
+    try { seedPending(collectInTabUrls(perf?.getEntriesByType?.("resource") ?? [])); } catch {}
+    flushCandidates();
   }
 
   function observe() {
@@ -299,7 +308,13 @@ try {
   const api = g?.browser ?? g?.chrome;
   if (g && !g.__dezoomifySourceMounted && api?.runtime && typeof document !== "undefined" && typeof window !== "undefined") {
     const collector = createSourceCollector({ document, window, chromeApi: api, performance: window.performance, PerformanceObserver: window.PerformanceObserver, crypto: window.crypto });
-    if (collector.mount()) g.__dezoomifySourceMounted = collector;
+    if (collector.mount()) {
+      g.__dezoomifySourceMounted = collector;
+      // A registered Firefox content script starts without a binding. This
+      // acknowledgement lets the coordinator bind only after its persistent
+      // runtime listener is live.
+      try { api.runtime.sendMessage({ type: "dz.source.mounted" }); } catch {}
+    }
   }
 } catch {
   // A hostile document must never make injection fail noisily.

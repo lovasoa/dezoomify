@@ -41,9 +41,13 @@ for (const [entry, outfile, format] of entries) {
   });
 }
 
-for (const directory of ["icons", "vendor"]) {
-  await cp(path.join(source, directory), path.join(output, directory), { recursive: true });
-}
+// Icons ship whole (declared manifest icons plus the grey/blue sets the
+// background swaps via setIcon). Vendor ships only what a packaged page
+// loads at runtime (the theme): the vendored .js modules are esbuild
+// inputs bundled into the compiled entries, never standalone loads.
+await cp(path.join(source, "icons"), path.join(output, "icons"), { recursive: true });
+await mkdir(path.join(output, "vendor"), { recursive: true });
+await cp(path.join(source, "vendor/theme.css"), path.join(output, "vendor/theme.css"));
 for (const file of ["job/job.html", "content/modal.css"]) {
   const to = path.join(output, file);
   await mkdir(path.dirname(to), { recursive: true });

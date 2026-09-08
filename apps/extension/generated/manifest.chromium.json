@@ -13,7 +13,7 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'"
   },
-  "description": "Click to monitor the active tab for zoomable images. Explicit-action indefinite monitoring only: one reload, stops on detection, second click, tab close, or navigation; no background monitoring.",
+  "description": "Click to find zoomable images on the current page and rebuild them at full resolution in a dedicated tab. Explicit-action only: no background monitoring.",
   "host_permissions": [],
   "icons": {
     "16": "icons/icon16.png",
@@ -35,16 +35,5 @@
     "scripting",
     "nativeMessaging"
   ],
-  "version": "3.0.0",
-  "web_accessible_resources": [
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "resources": [
-        "modal/modal.html"
-      ]
-    }
-  ]
+  "version": "3.0.0"
 }

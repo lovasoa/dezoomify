@@ -77,6 +77,28 @@ arithmetic), FIFO effect/event queues, and exactly one terminal event.
 Post-terminal inputs return stable `job.post-terminal` rejection with no work.
 Duplicates return `Outcome::Ignored` with no state change.
 
+## Host-effect contract
+
+Effects are host-neutral and carry everything a host needs to execute them;
+no host re-derives job policy or tile geometry.
+
+- `acquire-tile` carries the request (URI, headers, purpose), the engine
+  tile id, and the complete output placement: top-left position, planned
+  extent when declared, the declared output canvas, and the processing
+  recipe id. Native assembly and browser canvas hosts consume the same
+  values. Hosts decode during acquisition (the native model), so decode
+  failures surface through the tile outcome.
+- `request-destination` carries the output format.
+- `decode-pixels` names the tile whose decoded pixels the host must hold;
+  tile bytes never cross the effect (each host kept its own decoded tile
+  from acquisition).
+- `open-encoder` carries the output format and the declared canvas size
+  (null when the plan does not declare one; hosts derive it from the
+  accumulated placements).
+- `finalize-encoder`, `publish-output`, and `release-bytes` carry no
+  payload: the host encodes what it assembled, persists it exactly once,
+  and closes its retained per-tile resources (decoded bitmaps, surfaces).
+
 Discovery delegates to the core registry: the engine emits one
 `acquire-resource` effect per outstanding core request and forwards host
 results to the core operation, which owns candidate ordering and fallback.

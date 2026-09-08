@@ -77,6 +77,7 @@ function sameDocumentUrl(a, b) {
   } catch { return a === b; }
 }
 function sourceBindingKey(entry) { return `${entry.jobId}:${entry.tabId}:${entry.frameId}`; }
+function sourceRegistrationId(entry) { return `dezoomify-source-${entry.jobId.replace(/[^a-z0-9_-]/gi, "-")}`; }
 function bindingOf(entry) {
   return {
     jobId: entry.jobId, tabId: entry.tabId, frameId: entry.frameId,
@@ -121,6 +122,7 @@ function serializableEntry(entry) {
   return {
     ...bindingOf(entry), jobTabId: entry.jobTabId, sourceUrl: entry.sourceUrl,
     grantedOrigins: [...entry.grantedOrigins], primary: entry.primary === true,
+    sourceRegistrationId: entry.sourceRegistrationId ?? null,
   };
 }
 async function persistBindings() {
@@ -142,6 +144,7 @@ async function restoreBindings() {
         jobId: raw.jobId, tabId: raw.tabId, frameId: raw.frameId, documentGeneration: raw.documentGeneration,
         jobTabId: raw.jobTabId, sourceUrl: typeof raw.sourceUrl === "string" ? raw.sourceUrl : "",
         sourceActive: false, jobReady: false, jobRunning: false, heldCandidates: [],
+        sourceRegistrationId: typeof raw.sourceRegistrationId === "string" ? raw.sourceRegistrationId : null,
         grantedOrigins: new Set(Array.isArray(raw.grantedOrigins) ? raw.grantedOrigins.filter(isPublicHttpUrl) : []),
         primary: raw.primary === true,
       };
@@ -173,6 +176,22 @@ function findJobSender(sender, message) {
 
 async function injectSource(entry) {
   try {
+    // Firefox discards programmatically executed content scripts as soon as
+    // the invocation returns, including their runtime message listeners.
+    // Register a narrow, temporary script and reload once so the collector
+    // has a persistent content-script lifetime there. Chromium keeps the
+    // direct injection path, which avoids an unnecessary reload.
+    if (typeof api?.runtime?.getBrowserInfo === "function" && typeof api?.scripting?.registerContentScripts === "function") {
+      const origin = permissionOrigin(entry.sourceUrl);
+      if (!origin) throw new Error("source-registration-invalid-url");
+      const id = sourceRegistrationId(entry);
+      await api.scripting.registerContentScripts([{ id, matches: [`${origin}/*`], js: ["content/modal.js"], allFrames: true, runAt: "document_idle", persistAcrossSessions: false }]);
+      entry.sourceRegistrationId = id;
+      await persistBindings();
+      await api.tabs.reload(entry.tabId);
+      backgroundLog("info", "source-registered", `tab ${entry.tabId}`);
+      return;
+    }
     const injections = await api?.scripting?.executeScript?.({ target: { tabId: entry.tabId, allFrames: true }, files: ["content/modal.js"] });
     const frameIds = new Set([entry.frameId]);
     for (const result of injections ?? []) if (typeof result?.frameId === "number") frameIds.add(result.frameId);
@@ -193,6 +212,16 @@ async function injectSource(entry) {
   }
 }
 
+function sourceByRegistration(sender) {
+  const tabId = sender?.tab?.id;
+  const frameId = sender?.frameId;
+  if (typeof tabId !== "number" || typeof frameId !== "number") return null;
+  for (const entry of sourceBindings.values()) {
+    if (entry.tabId === tabId && entry.frameId === frameId && entry.sourceActive && entry.sourceRegistrationId) return entry;
+  }
+  return null;
+}
+
 function stopSource(entry, reason) {
   if (!entry.sourceActive) return;
   sendToTab(entry.tabId, { type: "dz.source.stop", ...bindingOf(entry), requestId: makeRequestId("source-stop"), reason }, entry.frameId);
@@ -204,6 +233,9 @@ async function removeJob(entry, reason) {
     sourceBindings.delete(sourceBindingKey(source));
   }
   jobs.delete(entry.jobId);
+  if (entry.sourceRegistrationId) {
+    try { await api?.scripting?.unregisterContentScripts?.({ ids: [entry.sourceRegistrationId] }); } catch {}
+  }
   setBadge(entry.tabId, false);
   await persistBindings();
   backgroundLog("info", "job-removed", `${entry.jobId} ${reason}`);
@@ -318,7 +350,29 @@ function wire() {
     void persistBindings();
   });
   api.runtime?.onMessage?.addListener?.((message, sender, sendResponse) => {
-    if (!message || typeof message.type !== "string" || !requestId(message)) return;
+    if (!message || typeof message.type !== "string") return;
+    // The Firefox-only registered collector has no binding on its first
+    // message. Its mount acknowledgement is the proof that its persistent
+    // listener exists; only then do we disclose and send the binding.
+    if (message.type === "dz.source.mounted") {
+      const entry = sourceByRegistration(sender);
+      if (!entry) return;
+      sendToTab(entry.tabId, { type: "dz.source.bind", ...bindingOf(entry), requestId: makeRequestId("source-bind") }, entry.frameId);
+      try { sendResponse?.({ ok: true }); } catch {}
+      return true;
+    }
+    if (!requestId(message)) return;
+    // Test-only toolbar equivalent: headless browsers cannot click browser
+    // chrome, so the E2E driver asks for the same createJob path the
+    // toolbar uses. Inert in store packages: the flag is set only by the
+    // test-driver block that package-store.sh appends under
+    // DEZOOMIFY_TEST_DRIVER=1, and no webpage can execute here.
+    if (message.type === "dezoomify-test-start-job") {
+      if (!globalThis.__DEZOOMIFY_TEST__ || typeof message.tabId !== "number" || !isPublicHttpUrl(message.url)) return;
+      void createJob({ id: message.tabId, url: message.url });
+      try { sendResponse?.({ ok: true }); } catch {}
+      return true;
+    }
     if (message.type.startsWith("dz.source.")) {
       const entry = findSourceJob(sender, message);
       if (!entry) return;

@@ -52,3 +52,32 @@ malformed responses, streaming limits, and native/channel disconnection.
 `access-required` pauses the job with host names and rationale; only a visible
 job-tab action can invoke the browser permission prompt. Automatic redirects
 are not retrospectively accepted as validated.
+
+## Job-tab engine hosting
+
+The job tab is a full browser host of the Rust job engine: its dedicated
+worker owns one WASM `Session`, and the shared browser-runtime assembly
+executor (vendored from `packages/browser-runtime`) executes the engine's
+effects. The controller never grows a second state machine:
+
+- Catalog selection is deterministic (`engine-selection.ts`): largest ready
+  image, largest level that fits the browser canvas. Selection commands
+  (`select-image`, `select-level`) are correlated to the job.
+- `request-destination` is always granted (`dst:0`): the browser
+  destination is the blob anchor save, which needs no permission.
+- Tile bytes are decoded during acquisition (the native model): a tile
+  that cannot decode fails its acquisition outcome and flows through the
+  engine's retry and partial policy. The wasm adapter releases its arena
+  copy when the outcome settles.
+- `open-encoder` validates actual dimensions and area before canvas
+  allocation; a plan beyond the browser limits fails typed with a desktop
+  handoff and cancels the engine job (the engine does not yet await codec
+  outcomes).
+- `request-decision` (partial) renders an explicit keep/discard choice in
+  the job tab; only the user's action sends `partial-choice`.
+- Host execution failures are terminal: the failure is rendered, the
+  engine job is cancelled, and later effects are never faked.
+- Processing recipes beyond `none` fail typed
+  (`TILE_PROCESSING_UNAVAILABLE`) rather than silently dropping the
+  recipe; those sources need the native app until the engine contract
+  grows processing effects.

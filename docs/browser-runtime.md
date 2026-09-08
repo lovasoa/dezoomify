@@ -5,6 +5,42 @@ effects; it does not contain the shared UI. The runtime owns workers, image
 decode, canvas and save surfaces, and an optional bounded browser cache. WASM
 only adapts core, job, and pure processing code.
 
+## Engine-effect assembly
+
+The runtime is the shared effect executor for every browser host of the Rust
+job engine (the extension job tab today, the website after its migration).
+It owns no job policy: retries, cancellation, partial-output decisions, and
+ordering belong to the engine. The executor maps typed host effects onto
+browser execution:
+
+- `acquire-tile` carries the complete output placement (position, planned
+  extent, declared canvas, processing recipe) plus the engine-declared
+  request headers. Hosts decode during acquisition (the native model), so a
+  tile that cannot decode fails its acquisition outcome and flows through
+  the engine's retry and partial policy.
+- `decode-pixels` verifies the held decoded tile; tile bytes never cross
+  the effect (the wasm adapter releases its arena copy when the tile
+  outcome settles).
+- `open-encoder` carries the output format and declared canvas size; the
+  host validates actual dimensions and area before allocating the surface
+  and fails typed (`PLAN_INVALID` with a desktop handoff) beyond the
+  browser limits. Undeclared sizes are derived from the accumulated
+  placements.
+- `finalize-encoder` draws every held tile at its planned placement (the
+  plan is trusted for layout; decoded bitmaps are scaled to the planned
+  extent), closes the bitmaps deterministically, and encodes the surface.
+- `publish-output` persists the encoded output exactly once (blob anchor
+  save; no `downloads` permission).
+- `release-bytes` closes every host-retained per-tile resource.
+
+Processing recipes beyond `none` are not executable by the engine-host
+assembly yet and fail typed (`TILE_PROCESSING_UNAVAILABLE`) instead of
+silently dropping the recipe; the website's discovery-session path keeps
+full processing support until the engine contract grows it. The
+deterministic catalog selection for engine hosts lives in
+`engine-selection.ts` (largest ready image, largest level that fits the
+browser canvas, smallest declared level as the fail-fast fallback).
+
 ## Ordinary image display
 
 For ordinary website tiles with `ProcessingRecipe::None`, the runtime may load through `<img>` and draw into a canvas even when the source taints it. The canvas remains visible, and the user can use the browser's right-click or other user-agent save support where available.

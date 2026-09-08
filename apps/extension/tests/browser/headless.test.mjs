@@ -1,7 +1,8 @@
-// Browser E2E for the only supported extension flow: inject the in-tab
-// monitor, discover from the tab's resource timeline, run the modal job, and
-// verify the saved PNG. The old bound `page.html?tab=` flow is intentionally
-// not part of this harness.
+// Browser E2E for the only supported extension flow: the toolbar action
+// starts a job (headless drivers use the test-only trigger), the source
+// collector observes the tab's resource timeline, the dedicated job tab runs
+// the engine job end to end, and the output saves as a PNG. The old bound
+// `page.html?tab=` flow is intentionally not part of this harness.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -78,7 +79,7 @@ async function waitForPage(context, predicate, timeout = 15000) {
 }
 
 async function runChromiumJob(base, work) {
-  const zip = stagePackage("chromium", work, base);
+  const zip = stagePackage("chromium", work, base, true);
   const pkgDir = path.join(work, "pkg");
   spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
   const context = await chromium.launchPersistentContext(path.join(work, "profile"), {
@@ -86,26 +87,41 @@ async function runChromiumJob(base, work) {
     headless: true,
     args: [`--disable-extensions-except=${pkgDir}`, `--load-extension=${pkgDir}`],
   });
+  // Downloads are tracked from context level: the job tab saves via a blob
+  // anchor, which can fire before a page-level listener attaches.
+  const downloads = [];
+  context.on("page", (page) => page.on("download", (download) => downloads.push(download)));
   try {
     const serviceWorker = context.serviceWorkers()[0] ?? await context.waitForEvent("serviceworker", { timeout: 15000 });
     assert.ok(serviceWorker, "background service worker did not start");
     const extensionId = new URL(serviceWorker.url()).hostname;
-    const extensionPage = await context.newPage();
-    await extensionPage.goto(`chrome-extension://${extensionId}/modal/modal.html`);
-    const targetId = await extensionPage.evaluate(async (url) => {
+    // The test-driver build opens test/driver.html on install; it is the
+    // extension-context page the harness drives (tabs + runtime messages).
+    const driverPage = await context.newPage();
+    await driverPage.goto(`chrome-extension://${extensionId}/test/driver.html`);
+    const targetUrl = `${base}/target.html`;
+    const targetId = await driverPage.evaluate(async (url) => {
       const api = globalThis.browser ?? globalThis.chrome;
-      return (await api.tabs.create({ url, active: false })).id;
-    }, `${base}/target.html`);
-    const target = await waitForPage(context, (p) => p.url().startsWith(`${base}/target.html`));
-    const download = target.waitForEvent("download", { timeout: 90000 });
-    await extensionPage.evaluate(async (tabId) => {
+      return (await api.tabs.create({ url, active: true })).id;
+    }, targetUrl);
+    const target = await waitForPage(context, (p) => p.url().startsWith(targetUrl));
+    await target.waitForFunction(() => window.__sourceFetched === true, null, { timeout: 15000 });
+    // Toolbar-equivalent start: the coordinator opens the job tab and
+    // injects the source collector on the clicked tab.
+    const started = await driverPage.evaluate(async ({ tabId, url }) => {
       const api = globalThis.browser ?? globalThis.chrome;
-      await api.scripting.insertCSS({ target: { tabId }, files: ["content/modal.css"] });
-      await api.scripting.executeScript({ target: { tabId }, files: ["content/modal.js"] });
-    }, targetId);
-    const result = await download;
+      return api.runtime.sendMessage({ type: "dezoomify-test-start-job", requestId: "e2e-start", tabId, url });
+    }, { tabId: targetId, url: targetUrl });
+    assert.ok(started?.ok, `chromium job start failed: ${JSON.stringify(started)}`);
+    await waitForPage(context, (p) => p.url().includes("job/job.html"));
+    const deadline = Date.now() + 90000;
+    while (downloads.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    const download = downloads[0];
+    assert.ok(download, "the job tab did not save the assembled image in time");
     const output = path.join(work, "saved-chromium.png");
-    await result.saveAs(output);
+    await download.saveAs(output);
     return readFileSync(output);
   } finally {
     await context.close();
@@ -151,21 +167,37 @@ async function runFirefoxJob(base, work) {
       if (!driverHandle) await new Promise((resolve) => setTimeout(resolve, 250));
     }
     assert.ok(driverHandle, "Firefox test driver page never opened");
+    const targetUrl = `${base}/target.html`;
     const targetId = await driver.executeScript(
       "const api = globalThis.browser ?? globalThis.chrome; return (api.tabs.create({ url: arguments[0], active: true })).then((t) => t.id);",
-      `${base}/target.html`,
+      targetUrl,
     );
     await driver.sleep(1500);
-    const injected = await driver.executeScript(
-      "const api = globalThis.browser ?? globalThis.chrome; return api.runtime.sendMessage({type: 'dezoomify-test-inject', tabId: arguments[0]});",
+    const started = await driver.executeScript(
+      "const api = globalThis.browser ?? globalThis.chrome; return api.runtime.sendMessage({type: 'dezoomify-test-start-job', requestId: 'e2e-start', tabId: arguments[0], url: arguments[1]});",
       targetId,
+      targetUrl,
     );
-    assert.equal(injected?.ok, true, `Firefox background failed to inject the in-tab monitor: ${injected?.error ?? "unknown error"}`);
+    assert.equal(started?.ok, true, `Firefox job start failed: ${JSON.stringify(started)}`);
     const output = path.join(downloadsDir, "dezoomify-512x512.png");
     const deadline = Date.now() + 90000;
     while (!existsSync(output)) {
       if (Date.now() > deadline) {
-        throw new Error("Firefox job did not save in time");
+        const handles = await driver.getAllWindowHandles();
+        const states = [];
+        for (const handle of handles) {
+          await driver.switchTo().window(handle);
+          states.push((await driver.getCurrentUrl()).slice(-40));
+        }
+        let jobText = "";
+        for (const handle of handles) {
+          await driver.switchTo().window(handle);
+          if ((await driver.getCurrentUrl()).includes("job/job.html")) {
+            jobText = await driver.executeScript("return document.body.innerText.slice(0, 400);");
+            break;
+          }
+        }
+        throw new Error(`Firefox job did not save in time. windows=${JSON.stringify(states)} job=${JSON.stringify(jobText)}`);
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
@@ -175,7 +207,7 @@ async function runFirefoxJob(base, work) {
   }
 }
 
-test("chromium: packaged extension runs the in-tab modal job", { timeout: 180000 }, async () => {
+test("chromium: packaged extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));
   let server = null;
   try {
@@ -187,7 +219,7 @@ test("chromium: packaged extension runs the in-tab modal job", { timeout: 180000
   }
 });
 
-test("firefox: packaged extension runs the in-tab modal job", { timeout: 180000 }, async () => {
+test("firefox: packaged extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-"));
   let server = null;
   try {

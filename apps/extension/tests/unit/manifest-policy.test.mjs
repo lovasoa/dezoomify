@@ -208,18 +208,22 @@ test("job coordinator retains least privilege", () => {
 
 test("store package ships only loaded files (no dead code)", () => {
   const script = readFileSync(new URL("../../scripts/package-store.sh", import.meta.url), "utf8");
-  // No content_scripts declared: the programmatically injected loader plus
-  // the job iframe (modal/, clicked tab only) ship; src/content/* stays
+  const build = readFileSync(new URL("../../scripts/build.mjs", import.meta.url), "utf8");
+  // No content_scripts declared: the programmatically injected source
+  // collector plus the dedicated job tab ship; src/content/* stays
   // unit-test only. There is no extension-page fallback.
   assert.ok(script.includes("content/modal.js"), "package must stage the injected loader entry");
   assert.ok(script.includes("content/modal.css"), "package must stage the injected host CSS");
   assert.ok(script.includes("scripts/build.mjs"), "package must compile the reviewed entrypoint graph");
   assert.ok(script.includes("job/job.html"), "package must stage the dedicated job tab");
   assert.ok(script.includes("job/worker.js"), "package must stage the dedicated job worker");
-  assert.ok(script.includes("vendor/view.js"), "package must stage the modal UI mirror");
   assert.ok(script.includes("icons background content job vendor wasm"), "package must zip only the in-browser flow");
   // The grey idle set swapped via action.setIcon must ship with the brand icons.
-  assert.ok(script.includes('"icons"'), "compiled graph must stage the declared icon directory");
+  assert.ok(build.includes('"icons"'), "compiled graph must stage the declared icon directory");
+  // Vendored .js modules are esbuild inputs bundled into the compiled
+  // entries: only the theme stylesheet ships as a standalone vendor file.
+  assert.ok(build.includes("vendor/theme.css"), "compiled graph must stage the theme stylesheet");
+  assert.ok(!/"vendor"\s*,\s*\{\s*recursive: true \}/.test(build), "compiled graph must not ship the whole vendor tree");
   // E2E-only manifest variant must not inject a tabs permission: shipped
   // code (and the harness) never enumerates tabs.
   assert.ok(!script.includes('"tabs"'), "package must never inject tabs permission");
@@ -291,23 +295,13 @@ test("content-script authority stays tab-origin bounded (absent or http/https on
   }
 });
 
-test("job iframe stays web-accessible on http/https only (hostile-page embed)", () => {
+test("no extension resource is web-accessible (hostile-page embed)", () => {
+  // The dedicated job tab is an extension page opened by the coordinator,
+  // never an embeddable document: a hostile page must not be able to frame
+  // or reference any extension resource.
   for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
     const war = manifest.web_accessible_resources ?? [];
-    const entries = war.filter((entry) => (entry.resources ?? []).includes("modal/modal.html"));
-    assert.ok(entries.length > 0, `${name} must expose modal/modal.html for the in-tab iframe`);
-    for (const entry of entries) {
-      for (const match of entry.matches ?? []) {
-        assert.ok(!match.includes("<all_urls>"), `${name} iframe exposure must never use <all_urls>: ${match}`);
-        assert.ok(
-          match.startsWith("http://") || match.startsWith("https://"),
-          `${name} iframe exposure must be http/https: ${match}`,
-        );
-      }
-    }
-    // The iframe document ships in the store package.
-    const abs = new URL("../../src/modal/modal.html", import.meta.url);
-    assert.ok(existsSync(abs), `${name} web-accessible modal.html missing on disk`);
+    assert.deepEqual(war, [], `${name} must declare no web-accessible resources`);
   }
 });
 
@@ -325,9 +319,9 @@ test("monitoring icons are bundled when declared (idle grey vs monitoring blue+d
   }
 });
 
-test("description stays explicit click-to-monitor with indefinite bounds", () => {
+test("description stays explicit-action with no background monitoring", () => {
   const text = String(base.description ?? "");
-  assert.ok(/click to monitor/i.test(text), "description must name the explicit click-to-monitor action");
-  assert.ok(/indefinite/i.test(text), "description must name indefinite monitoring");
+  assert.ok(/click/i.test(text), "description must name the explicit click action");
+  assert.ok(/current page/i.test(text), "description must scope the action to the current page");
   assert.ok(/no background monitoring/i.test(text), "description must promise no background monitoring");
 });

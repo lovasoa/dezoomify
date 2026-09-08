@@ -25,11 +25,13 @@ recognizes formats from fetched bytes, not URL text. The first candidate whose
 bytes produce an image confirms detection and replaces the monitoring card
 with the job UI in the same tab.
 
-The injected loader is `apps/extension/src/content/modal.js`. It mounts a
-status card, observes resource entries, and hosts the extension-origin job
-iframe (`modal/modal.html`) in a Shadow DOM host. If the iframe cannot start,
-the status card remains visible with an error and the toolbar shows an error
-badge; the extension never silently opens another page.
+The source collector is `apps/extension/src/content/modal.js`. Chromium loads
+it directly into the clicked tab. Firefox temporarily registers it for the
+clicked tab origin and reloads that tab once because programmatic Firefox
+content scripts do not retain runtime listeners. The collector observes
+resource entries and supplies the extension-origin job tab. If the job cannot
+start, the toolbar shows an error badge; the extension never silently opens
+another page.
 
 ## Fetching
 

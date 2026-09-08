@@ -19,6 +19,7 @@ test("worker delegates start and correlated bytes to the WASM Session", async ()
     dispatch(bytes) { calls.push(["dispatch", JSON.parse(new TextDecoder().decode(bytes))]); }
     drainMessages() { return JSON.stringify([{ protocol: "1.0", kind: "effect", type: "acquire-resource", job: "job:one", request: { id: "req:one" } }]); }
     allocateBuffer(length) { calls.push(["allocate", length]); return JSON.stringify({ id: "buf:one", generation: 0, length }); }
+    protocolHandle(handle) { calls.push(["protocolHandle", JSON.parse(handle)]); return handle; }
     writeBuffer(handle, offset, bytes) { calls.push(["write", JSON.parse(handle), offset, [...bytes]]); }
     commitBuffer(handle, length) { calls.push(["commit", JSON.parse(handle), length]); }
     dispose() { calls.push(["dispose"]); }

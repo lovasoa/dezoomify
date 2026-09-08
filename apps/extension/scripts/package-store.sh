@@ -65,26 +65,29 @@ name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name
 
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
-cp "$manifest" "$staging/manifest.json"
 
 # Compile the reviewed entrypoint graph. This is deliberately the only way a
 # source module reaches a package: no extension source is renamed, copied, or
-# transformed with sed during staging.
+# transformed with sed during staging. The build wipes its output directory,
+# so the manifest (and every appended test-only entry below) is staged only
+# after the graph has been compiled.
 node "$REPO_ROOT/apps/extension/scripts/build.mjs" --out "$staging"
+cp "$manifest" "$staging/manifest.json"
 if [ "${DEZOOMIFY_TEST_DRIVER:-0}" = "1" ]; then
   mkdir -p "$staging/test"
   cp "$REPO_ROOT/apps/extension/src/test/driver.html" "$staging/test/driver.html"
   cat >> "$staging/background/index.js" <<'EOF'
 
 // Test-only extension context entry; never present in store packages.
-api.runtime.onInstalled.addListener(() => {
+// Arms the headless-E2E job trigger (the real entry is the toolbar action,
+// which headless browsers cannot click) and opens the driver page. The
+// compiled entry above is an IIFE with its own scope, so this block reaches
+// the extension APIs through the globals only: a reference to bundle
+// internals would throw at load and take the service worker down.
+globalThis.__DEZOOMIFY_TEST__ = true;
+(globalThis.browser ?? globalThis.chrome).runtime.onInstalled.addListener(() => {
+  const api = globalThis.browser ?? globalThis.chrome;
   api.tabs.create({ url: api.runtime.getURL("test/driver.html") });
-});
-api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== "dezoomify-test-inject" || typeof message.tabId !== "number") return;
-  api.scripting.executeScript({ target: { tabId: message.tabId }, files: ["content/modal.js"] })
-    .then(() => sendResponse({ ok: true }), (error) => sendResponse({ ok: false, error: String(error && error.message || error) }));
-  return true;
 });
 EOF
 fi
@@ -122,7 +125,7 @@ need = list(d.get("icons", {}).values())
 need += list(d.get("action", {}).get("default_icon", {}).values())
 bg = d.get("background", {})
 need += ([bg["service_worker"]] if "service_worker" in bg else []) + bg.get("scripts", [])
-need += ["content/modal.js", "content/modal.css", "job/job.html", "job/index.js", "job/worker.js", "vendor/theme.css", "vendor/view.js", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
+need += ["content/modal.js", "content/modal.css", "job/job.html", "job/index.js", "job/worker.js", "vendor/theme.css", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
 if os.path.exists("test/driver.html"):
     need += ["test/driver.html"]
 for war in d.get("web_accessible_resources", []):
@@ -132,7 +135,7 @@ sys.exit(f"missing in package: {missing}") if missing else print(f"package conte
 # Least-privilege ship guard: fail on dead/never-loaded files.
 import glob
 shipped = set(glob.glob("background/*.js") + glob.glob("vendor/*.js") + glob.glob("content/**/*.js", recursive=True) + glob.glob("job/*.js", recursive=True))
-allowed = {"background/index.js", "content/modal.js", "job/index.js", "job/worker.js", "vendor/theme.css", "vendor/view.js"}
+allowed = {"background/index.js", "content/modal.js", "job/index.js", "job/worker.js", "vendor/theme.css"}
 extra = shipped - allowed
 sys.exit(f"dead files shipped (never loaded by manifest/page): {sorted(extra)}") if extra else print("package contents: no dead files")
 ') || exit 1

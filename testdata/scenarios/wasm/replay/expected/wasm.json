@@ -165,52 +165,136 @@
     "effect": "fx:2",
     "job": "job:wasm-basic-1",
     "kind": "effect",
+    "placement": {
+      "canvas": {
+        "height": 512,
+        "width": 512
+      },
+      "expected_size": {
+        "height": 256,
+        "width": 256
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "processing": "none"
+    },
     "protocol": "1.0",
     "request": {
-      "headers": [],
+      "headers": [
+        {
+          "name": "Referer",
+          "value": "https://example.com/image_files/9/0_0.jpg"
+        }
+      ],
       "id": "req:tile-0",
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/0_0.jpg"
     },
+    "tile": "tile:0",
     "type": "acquire-tile"
   },
   {
     "effect": "fx:3",
     "job": "job:wasm-basic-1",
     "kind": "effect",
+    "placement": {
+      "canvas": {
+        "height": 512,
+        "width": 512
+      },
+      "expected_size": {
+        "height": 256,
+        "width": 256
+      },
+      "position": {
+        "x": 256,
+        "y": 0
+      },
+      "processing": "none"
+    },
     "protocol": "1.0",
     "request": {
-      "headers": [],
+      "headers": [
+        {
+          "name": "Referer",
+          "value": "https://example.com/image_files/9/0_0.jpg"
+        }
+      ],
       "id": "req:tile-1",
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/1_0.jpg"
     },
+    "tile": "tile:1",
     "type": "acquire-tile"
   },
   {
     "effect": "fx:4",
     "job": "job:wasm-basic-1",
     "kind": "effect",
+    "placement": {
+      "canvas": {
+        "height": 512,
+        "width": 512
+      },
+      "expected_size": {
+        "height": 256,
+        "width": 256
+      },
+      "position": {
+        "x": 0,
+        "y": 256
+      },
+      "processing": "none"
+    },
     "protocol": "1.0",
     "request": {
-      "headers": [],
+      "headers": [
+        {
+          "name": "Referer",
+          "value": "https://example.com/image_files/9/0_0.jpg"
+        }
+      ],
       "id": "req:tile-2",
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/0_1.jpg"
     },
+    "tile": "tile:2",
     "type": "acquire-tile"
   },
   {
     "effect": "fx:5",
     "job": "job:wasm-basic-1",
     "kind": "effect",
+    "placement": {
+      "canvas": {
+        "height": 512,
+        "width": 512
+      },
+      "expected_size": {
+        "height": 256,
+        "width": 256
+      },
+      "position": {
+        "x": 256,
+        "y": 256
+      },
+      "processing": "none"
+    },
     "protocol": "1.0",
     "request": {
-      "headers": [],
+      "headers": [
+        {
+          "name": "Referer",
+          "value": "https://example.com/image_files/9/0_0.jpg"
+        }
+      ],
       "id": "req:tile-3",
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/1_1.jpg"
     },
+    "tile": "tile:3",
     "type": "acquire-tile"
   },
   {
@@ -246,11 +330,6 @@
     "type": "progress"
   },
   {
-    "buffer": {
-      "generation": 2,
-      "id": "buf:0",
-      "length": 12
-    },
     "effect": "fx:6",
     "job": "job:wasm-basic-1",
     "kind": "effect",
@@ -259,11 +338,6 @@
     "type": "decode-pixels"
   },
   {
-    "buffer": {
-      "generation": 1,
-      "id": "buf:1",
-      "length": 12
-    },
     "effect": "fx:7",
     "job": "job:wasm-basic-1",
     "kind": "effect",
@@ -272,11 +346,6 @@
     "type": "decode-pixels"
   },
   {
-    "buffer": {
-      "generation": 1,
-      "id": "buf:2",
-      "length": 12
-    },
     "effect": "fx:8",
     "job": "job:wasm-basic-1",
     "kind": "effect",
@@ -285,11 +354,6 @@
     "type": "decode-pixels"
   },
   {
-    "buffer": {
-      "generation": 1,
-      "id": "buf:3",
-      "length": 12
-    },
     "effect": "fx:9",
     "job": "job:wasm-basic-1",
     "kind": "effect",
@@ -305,7 +369,12 @@
     "type": "job-state"
   },
   {
+    "canvas": {
+      "height": 512,
+      "width": 512
+    },
     "effect": "fx:10",
+    "format": "png",
     "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "1.0",
@@ -348,47 +417,6 @@
     "type": "job-state"
   },
   {
-    "buffer": {
-      "generation": 2,
-      "id": "buf:0",
-      "length": 12
-    },
-    "effect": "fx:13",
-    "job": "job:wasm-basic-1",
-    "kind": "effect",
-    "protocol": "1.0",
-    "type": "release-bytes"
-  },
-  {
-    "buffer": {
-      "generation": 1,
-      "id": "buf:1",
-      "length": 12
-    },
-    "effect": "fx:13",
-    "job": "job:wasm-basic-1",
-    "kind": "effect",
-    "protocol": "1.0",
-    "type": "release-bytes"
-  },
-  {
-    "buffer": {
-      "generation": 1,
-      "id": "buf:2",
-      "length": 12
-    },
-    "effect": "fx:13",
-    "job": "job:wasm-basic-1",
-    "kind": "effect",
-    "protocol": "1.0",
-    "type": "release-bytes"
-  },
-  {
-    "buffer": {
-      "generation": 1,
-      "id": "buf:3",
-      "length": 12
-    },
     "effect": "fx:13",
     "job": "job:wasm-basic-1",
     "kind": "effect",

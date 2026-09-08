@@ -185,6 +185,17 @@ pub mod wasm_api {
                 .map_err(js_error)
         }
 
+        /// Project an arena handle onto its canonical protocol reference
+        /// (`buffers`): the JSON form `provide-resource` commands carry
+        /// (`{"id":"buf:0","generation":..,"length":..}`), distinct from the
+        /// arena form `allocateBuffer` returns.
+        #[wasm_bindgen(js_name = "protocolHandle")]
+        pub fn protocol_handle_js(&mut self, handle_json: &str) -> Result<String, JsValue> {
+            let handle: ArenaHandle = serde_json::from_str(handle_json).map_err(js_malformed)?;
+            let protocol = self.inner.protocol_handle(handle).map_err(js_error)?;
+            serde_json::to_string(&protocol).map_err(js_malformed)
+        }
+
         /// Move adapter-held bytes out exactly once (`buffers`).
         #[wasm_bindgen(js_name = "takeBuffer")]
         pub fn take_buffer(&mut self, handle_json: &str) -> Result<Vec<u8>, JsValue> {

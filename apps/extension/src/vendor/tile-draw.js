@@ -1,3 +1,7 @@
+// GENERATED from packages/browser-runtime/src/tile-draw.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/browser-runtime/src/tile-draw.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // Tile painting (todo 2.2 home, moved from `src/main.ts`).
 //
 // Readable bytes come first so CORS-granting sites keep the clean save.
@@ -7,67 +11,11 @@
 // decrypt/re-encode needs readable bytes. The host image constructor and
 // timers are injected so node tests drive the fallback with fakes. Keep
 // erasable-syntax-only for the browser `.js` mirrors.
-import { shortUrl } from "./tile-policy.ts";
-import type { PlanTile } from "./session.ts";
-import type { TileBitmap } from "./tile-decode.ts";
-
-export interface TileImageLike {
-  naturalWidth: number;
-  naturalHeight: number;
-}
-
-export interface TileDrawHooks {
-  onRequestStart(label: string): number;
-  onRequestEnd(id: number, ok: boolean): void;
-  onLog(line: string): void;
-  onUpdate(): void;
-}
-
-export interface TileDrawDeps {
-  fetchTile(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
-  decode(bytes: ArrayBuffer): Promise<TileBitmap>;
-  throttle?: (url: string) => Promise<void>;
-  processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
-  loadImage?: (url: string, ms?: number) => Promise<TileImageLike>;
-  imageCtor?: new () => TileImageElementLike;
-  setTimeoutFn?: (cb: () => void, ms: number) => unknown;
-  clearTimeoutFn?: (t: unknown) => void;
-  requestTimeoutMs?: number;
-  isOrdinaryImageTile(processing: unknown): boolean;
-  hooks: TileDrawHooks;
-}
-
-export interface TileImageElementLike {
-  naturalWidth: number;
-  naturalHeight: number;
-  referrerPolicy: string;
-  src: string;
-  addEventListener(type: string, listener: () => void, opts?: { once?: boolean }): void;
-}
-
-export interface Canvas2DLike {
-  drawImage(
-    source: unknown,
-    sx: number,
-    sy: number,
-    sw: number,
-    sh: number,
-    dx: number,
-    dy: number,
-    dw: number,
-    dh: number,
-  ): void;
-}
+import { shortUrl } from "./tile-policy.js";
 
 /** Output placement of one decoded tile, shared by the website painter and
  * the engine-effect assembly executor: top-left corner plus the planned
  * extent when the plan declares one. */
-export interface PlacedTileGeometry {
-  x: number;
-  y: number;
-  w?: number;
-  h?: number;
-}
 
 /**
  * Draw one decoded tile onto an output surface at its planned placement.
@@ -77,17 +25,17 @@ export interface PlacedTileGeometry {
  * line when the decoded and planned sizes disagree.
  */
 export function drawPlacedTile(
-  ctx2d: Canvas2DLike,
-  source: TileBitmap | TileImageLike,
-  geometry: PlacedTileGeometry,
-  onMismatch?: (line: string) => void,
-): void {
+  ctx2d              ,
+  source                            ,
+  geometry                    ,
+  onMismatch                         ,
+)       {
   // Image elements carry naturalWidth/naturalHeight (their layout width
   // would mislead); decoded bitmaps carry width/height. Branch on the
   // image shape first so production <img> fallbacks measure correctly.
-  const isImage = (source as Partial<TileImageLike>).naturalWidth !== undefined;
-  const fullW = isImage ? (source as TileImageLike).naturalWidth : (source as TileBitmap).width;
-  const fullH = isImage ? (source as TileImageLike).naturalHeight : (source as TileBitmap).height;
+  const isImage = (source                          ).naturalWidth !== undefined;
+  const fullW = isImage ? (source                 ).naturalWidth : (source              ).width;
+  const fullH = isImage ? (source                 ).naturalHeight : (source              ).height;
   const planW = geometry.w ?? fullW;
   const planH = geometry.h ?? fullH;
   if (planW !== fullW || planH !== fullH) {
@@ -108,15 +56,11 @@ export function drawPlacedTile(
  * programmatic save.
  */
 export function loadTileImage(
-  url: string,
-  deps: {
-    imageCtor?: new () => TileImageElementLike;
-    setTimeoutFn?: (cb: () => void, ms: number) => unknown;
-    clearTimeoutFn?: (t: unknown) => void;
-    ms?: number;
-    hooks?: Pick<TileDrawHooks, "onRequestStart" | "onRequestEnd" | "onUpdate">;
-  } = {},
-): Promise<TileImageElementLike> {
+  url        ,
+  deps
+
+    = {},
+)                                {
   const ms = deps.ms ?? 30000;
   const hooks = deps.hooks;
   const reqId = hooks ? hooks.onRequestStart("img") : -1;
@@ -126,7 +70,7 @@ export function loadTileImage(
     // is needed and the canvas taints on draw).
     const Ctor =
       deps.imageCtor ??
-      (globalThis as unknown as { Image?: new () => TileImageElementLike }).Image;
+      (globalThis                                                         ).Image;
     if (!Ctor && typeof Image === "undefined") {
       if (hooks) {
         hooks.onRequestEnd(reqId, false);
@@ -136,19 +80,19 @@ export function loadTileImage(
       return;
     }
     const setTimer =
-      deps.setTimeoutFn ?? ((cb: () => void, t: number) => setTimeout(cb, t));
+      deps.setTimeoutFn ?? ((cb            , t        ) => setTimeout(cb, t));
     const clearTimer =
-      deps.clearTimeoutFn ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>));
+      deps.clearTimeoutFn ?? ((t         ) => clearTimeout(t                                 ));
     const img = Ctor ? new Ctor() : new Image();
-    let timer: unknown = null;
-    const done = (ok: boolean, value: TileImageElementLike | Error) => {
+    let timer          = null;
+    const done = (ok         , value                              ) => {
       if (timer) clearTimer(timer);
       timer = null;
       if (hooks) {
         hooks.onRequestEnd(reqId, ok);
         hooks.onUpdate();
       }
-      if (ok) resolve(value as TileImageElementLike);
+      if (ok) resolve(value                        );
       else reject(value);
     };
     img.addEventListener("load", () => done(true, img), { once: true });
@@ -178,22 +122,14 @@ export function loadTileImage(
  * step queues.
  */
 export function createProcessQueue(
-  processTile: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
-): (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer> {
-  let tail: Promise<unknown> = Promise.resolve();
-  return (recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> => {
+  processTile                                                              ,
+)                                                               {
+  let tail                   = Promise.resolve();
+  return (recipe        , bytes             )                       => {
     const run = tail.then(() => processTile(recipe, bytes));
     tail = run.catch(() => undefined);
     return run;
   };
-}
-
-export interface TilePainter {
-  drawTile(
-    ctx2d: Canvas2DLike,
-    tile: PlanTile,
-    opts?: { processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer> },
-  ): Promise<boolean>;
 }
 
 /**
@@ -203,11 +139,11 @@ export interface TilePainter {
  * the original readable failure (with its technical chain) is what the job
  * reports.
  */
-export function createTilePainter(deps: TileDrawDeps): TilePainter {
+export function createTilePainter(deps              )              {
   const processQueue = deps.processTile ? createProcessQueue(deps.processTile) : null;
   const loadImage =
     deps.loadImage ??
-    ((url: string, ms?: number) =>
+    ((url        , ms         ) =>
       loadTileImage(url, {
         ...(deps.imageCtor ? { imageCtor: deps.imageCtor } : {}),
         ...(deps.setTimeoutFn ? { setTimeoutFn: deps.setTimeoutFn } : {}),
@@ -217,11 +153,11 @@ export function createTilePainter(deps: TileDrawDeps): TilePainter {
       }));
 
   async function drawTile(
-    ctx2d: Canvas2DLike,
-    tile: PlanTile,
-    opts?: { processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer> },
-  ): Promise<boolean> {
-    const drawBitmap = async (source: TileBitmap | TileImageLike): Promise<void> => {
+    ctx2d              ,
+    tile          ,
+    opts                                                                                 ,
+  )                   {
+    const drawBitmap = async (source                            )                => {
       drawPlacedTile(
         ctx2d,
         source,
@@ -229,10 +165,10 @@ export function createTilePainter(deps: TileDrawDeps): TilePainter {
         (line) => deps.hooks.onLog(`${line} from ${shortUrl(tile.uri)}`),
       );
     };
-    let readableFailure: unknown = null;
+    let readableFailure          = null;
     try {
       let { bytes } = await deps.fetchTile(tile.uri, tile.headers ?? {});
-      const processTile = opts?.processTile ?? (processQueue ? (r: string, b: ArrayBuffer) => (processQueue as (r: string, b: ArrayBuffer) => Promise<ArrayBuffer>)(r, b) : undefined);
+      const processTile = opts?.processTile ?? (processQueue ? (r        , b             ) => (processQueue                                                       )(r, b) : undefined);
       if (tile.processing && tile.processing !== "none" && processTile) {
         bytes = await processTile(tile.processing, bytes);
       } else if (tile.processing && tile.processing !== "none" && !processTile) {

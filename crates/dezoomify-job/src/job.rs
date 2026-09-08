@@ -1080,7 +1080,12 @@ impl Job {
         self.push_event("job-state", json!({"state": State::ProcessingTiles.name()}))?;
         self.set_state(State::Encoding)?;
         let open_effect = self.alloc_effect_id()?;
-        self.push_effect("open-encoder", json!({"effect": open_effect}))?;
+        let open_detail = json!({
+            "effect": open_effect,
+            "format": "png",
+            "canvas": self.canvas_size.map(|size| json!({"x": size.x, "y": size.y})).unwrap_or(serde_json::Value::Null),
+        });
+        self.push_effect("open-encoder", open_detail)?;
         self.push_event("job-state", json!({"state": State::Encoding.name()}))?;
         self.set_state(State::Finalizing)?;
         let finalize_effect = self.alloc_effect_id()?;

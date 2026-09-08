@@ -7,8 +7,8 @@
 // classifier live in the caller too (`src/discovery.ts`) and arrive as plain
 // data, so this module never imports app layers. Progress and log hooks
 // drive the caller's live job view. Keep erasable-syntax-only.
-import { failure } from "./session.ts";
-import type { StructuredFailure } from "./session.ts";
+import { failure } from "./failure.ts";
+import type { StructuredFailure } from "./failure.ts";
 import {
   DIRECT_METADATA_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,

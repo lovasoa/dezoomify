@@ -18,10 +18,13 @@
 //!   metadata resources). The buffer is consumed exactly once (taken out of
 //!   the arena) and forwarded as `ResourceBytes` with its bytes.
 //! * Tile bytes: each `acquire-tile` effect carries an adapter-minted
-//!   `req:tile-<n>` request id. `ProvideResource` with that id forwards a
-//!   successful `TileOutcome`; the buffer stays live and its protocol
-//!   handle is projected into the following `DecodePixels` effect. Empty
-//!   tile buffers forward a failed `TileOutcome` (the engine retries).
+//!   `req:tile-<n>` request id plus the tile's complete output placement
+//!   (position, planned extent, declared canvas, processing recipe) and the
+//!   engine-declared request headers. Hosts decode during acquisition (the
+//!   native model): `ProvideResource` with that id forwards a successful
+//!   `TileOutcome`, and the adapter takes the buffer out of the arena
+//!   immediately: tile bytes are never retained server-side. Empty tile
+//!   buffers forward a failed `TileOutcome` (the engine retries).
 //! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request) or a
 //!   failed `TileOutcome` (tile request).
 //! * Decisions: `SelectImage`, `SelectLevel`, `DestinationResponse`,
@@ -29,6 +32,12 @@
 //!   `PartialChoice` must reference the outstanding `rec:*` recovery id.
 //! * Codec outcome commands (`ProvideDecodeOutcome`, …) are accepted as
 //!   acknowledged no-ops: this engine does not await them.
+//! * `decode-pixels`/`open-encoder`/`finalize-encoder`/`publish-output`
+//!   carry the placement and output geometry the host needs to assemble
+//!   (the tile placement arrived with the acquisition effect; the encoder
+//!   effect carries the format and declared canvas). `release-bytes`
+//!   instructs the host to close its own retained per-tile resources
+//!   (decoded bitmaps, surfaces).
 //!
 //! Engine resources beyond this model are engine limitations, not adapter
 //! limits: byte lengths pass through, never fabricated. Probe-driven
@@ -44,8 +53,9 @@ use crate::error::{redact, AdapterError, AdapterErrorCode};
 use dezoomify_job::{Job as EngineJob, JobError as EngineJobError, JobResponse, Outcome};
 use dezoomify_protocol::dto::{
     negotiate_version, CatalogDto, ControlBody, ControlEnvelope, EffectId, ErrorDto, ErrorPhase,
-    HostEffect, JobCommand, JobEvent, JobId, OutputId, RecoveryAction, RecoveryId, RecoveryKind,
-    RequestDto, RequestId, RequestPurpose, TileId,
+    HeaderDto, HostEffect, JobCommand, JobEvent, JobId, OutputId, PointDto, RecoveryAction,
+    RecoveryId, RecoveryKind, RequestDto, RequestId, RequestPurpose, SizeDto, TileId,
+    TilePlacementDto,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -179,10 +189,6 @@ pub struct Session {
     live_discovery_requests: HashSet<String>,
     /// Adapter-minted tile request id -> engine tile id.
     outstanding_tile_requests: HashMap<String, String>,
-    /// Engine tile id -> live committed buffer holding its bytes.
-    tile_buffers: HashMap<String, ArenaHandle>,
-    /// Live tile buffers in acquisition order (for release-bytes).
-    live_tile_buffers: Vec<(String, ArenaHandle)>,
     /// Recovery id from the latest request-decision effect.
     pending_recovery: Option<String>,
     /// Adapter-minted tile request counter.
@@ -248,8 +254,6 @@ impl Session {
             max_messages,
             live_discovery_requests: HashSet::new(),
             outstanding_tile_requests: HashMap::new(),
-            tile_buffers: HashMap::new(),
-            live_tile_buffers: Vec::new(),
             pending_recovery: None,
             next_tile_request: 0,
         })
@@ -682,12 +686,15 @@ impl Session {
         match tile {
             Some(tile_id) => {
                 self.require_engine_state(SessionState::AcquiringTiles)?;
-                // Keep the buffer live: the engine's decode stage receives
-                // its protocol handle. Empty bytes forward a failed outcome
-                // so the engine can retry honestly.
+                // Tile bytes are never retained: hosts decode during
+                // acquisition and hold their own decoded tile, so the arena
+                // copy is released as soon as the outcome settles. Empty
+                // bytes forward a failed outcome so the engine can retry
+                // honestly.
                 let ok = buffer.length > 0;
-                self.tile_buffers.insert(tile_id.clone(), handle);
-                self.live_tile_buffers.push((tile_id.clone(), handle));
+                if ok {
+                    self.arena.take_buffer(handle)?;
+                }
                 self.outstanding_tile_requests.remove(request);
                 self.forward(JobResponse::TileOutcome {
                     job: job.as_str().to_string(),
@@ -846,18 +853,35 @@ impl Session {
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("")
                     .to_string();
+                let headers = value
+                    .get("headers")
+                    .and_then(|headers| {
+                        headers.as_object().map(|map| {
+                            map.iter()
+                                .map(|(name, val)| HeaderDto {
+                                    name: name.clone(),
+                                    value: val.as_str().unwrap_or("").to_string(),
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .unwrap_or_default();
                 let request = RequestDto {
                     id: RequestId::new(self.mint_tile_request(&tile)).ok_or_else(|| {
                         AdapterError::new(AdapterErrorCode::Malformed, "tile request id")
                     })?,
                     uri,
-                    headers: Vec::new(),
+                    headers,
                     purpose: RequestPurpose::Tile,
                 };
                 HostEffect::AcquireTile {
                     effect,
                     job: job_id,
                     request,
+                    tile: TileId::new(tile).ok_or_else(|| {
+                        AdapterError::new(AdapterErrorCode::Malformed, "engine tile id")
+                    })?,
+                    placement: Self::project_placement(value)?,
                 }
             }
             "request-destination" => HostEffect::RequestDestination {
@@ -874,21 +898,23 @@ impl Session {
                     .get("tile")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("");
-                let handle = self.tile_buffers.get(tile).copied().ok_or_else(|| {
-                    AdapterError::new(AdapterErrorCode::WrongState, "tile bytes not held")
-                })?;
                 HostEffect::DecodePixels {
                     effect,
                     job: job_id,
                     tile: TileId::new(tile).ok_or_else(|| {
                         AdapterError::new(AdapterErrorCode::Malformed, "engine tile id")
                     })?,
-                    buffer: self.arena.to_protocol_handle(handle)?,
                 }
             }
             "open-encoder" => HostEffect::OpenEncoder {
                 effect,
                 job: job_id,
+                format: value
+                    .get("format")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("png")
+                    .to_string(),
+                canvas: Self::project_size(value.get("canvas")),
             },
             "finalize-encoder" => HostEffect::FinalizeEncoder {
                 effect,
@@ -907,23 +933,10 @@ impl Session {
                     AdapterError::new(AdapterErrorCode::Malformed, "engine output id")
                 })?,
             },
-            "release-bytes" => {
-                // The lean engine does not track handles; the adapter releases
-                // every live tile buffer it holds, one message per buffer.
-                let live = std::mem::take(&mut self.live_tile_buffers);
-                for (tile, handle) in live {
-                    let buffer = self.arena.to_protocol_handle(handle)?;
-                    self.arena.free(handle)?;
-                    self.tile_buffers.remove(&tile);
-                    let body = ControlBody::Effect(HostEffect::ReleaseBytes {
-                        effect: effect.clone(),
-                        job: job_id.clone(),
-                        buffer,
-                    });
-                    self.enqueue(body)?;
-                }
-                return Ok(());
-            }
+            "release-bytes" => HostEffect::ReleaseBytes {
+                effect,
+                job: job_id,
+            },
             "cancel-work" => HostEffect::CancelWork {
                 effect,
                 job: job_id,
@@ -951,6 +964,58 @@ impl Session {
             }
         };
         self.enqueue(ControlBody::Effect(body))
+    }
+
+    /// Project the engine's tile placement JSON (`destination`,
+    /// `expected_size`, `canvas`, `processing`) onto the protocol DTO.
+    fn project_placement(value: &serde_json::Value) -> Result<TilePlacementDto, AdapterError> {
+        let point = |field: &str| -> Result<PointDto, AdapterError> {
+            let raw = value.get(field).ok_or_else(|| {
+                AdapterError::new(
+                    AdapterErrorCode::Malformed,
+                    "tile placement lacks destination",
+                )
+            })?;
+            let x = raw
+                .get("x")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| {
+                    AdapterError::new(AdapterErrorCode::Malformed, "tile placement x")
+                })?;
+            let y = raw
+                .get("y")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| {
+                    AdapterError::new(AdapterErrorCode::Malformed, "tile placement y")
+                })?;
+            Ok(PointDto { x, y })
+        };
+        Ok(TilePlacementDto {
+            position: point("destination")?,
+            expected_size: Self::project_size_x_y(value.get("expected_size")),
+            canvas: Self::project_size_x_y(value.get("canvas")),
+            processing: value
+                .get("processing")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("none")
+                .to_string(),
+        })
+    }
+
+    /// Project an engine `{"x","y"}` size (or JSON null) onto `SizeDto`.
+    fn project_size_x_y(value: Option<&serde_json::Value>) -> Option<SizeDto> {
+        let raw = value?;
+        if raw.is_null() {
+            return None;
+        }
+        let width = raw.get("x").and_then(serde_json::Value::as_u64)?;
+        let height = raw.get("y").and_then(serde_json::Value::as_u64)?;
+        Some(SizeDto { width, height })
+    }
+
+    /// Project an engine open-encoder `canvas` field onto `SizeDto`.
+    fn project_size(value: Option<&serde_json::Value>) -> Option<SizeDto> {
+        Self::project_size_x_y(value)
     }
 
     fn project_discovery_request(

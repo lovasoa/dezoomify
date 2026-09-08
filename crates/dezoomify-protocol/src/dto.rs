@@ -228,6 +228,35 @@ pub struct HeaderDto {
     pub value: String,
 }
 
+/// A position in the output image, in pixels from the top-left corner.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PointDto {
+    pub x: u64,
+    pub y: u64,
+}
+
+/// A pixel size (output canvas or planned tile extent).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SizeDto {
+    pub width: u64,
+    pub height: u64,
+}
+
+/// Host-neutral placement of one tile in the output image, projected from
+/// the core tile plan. `position` is the top-left output corner;
+/// `expected_size` is the planned extent when the plan declares it (absent
+/// when only decoding reveals the extent); `canvas` is the declared output
+/// size when the plan declares one; `processing` is the stable recipe id
+/// the host must apply to the acquired bytes before decoding. Native
+/// assembly and browser canvas hosts consume the same values.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TilePlacementDto {
+    pub position: PointDto,
+    pub expected_size: Option<SizeDto>,
+    pub canvas: Option<SizeDto>,
+    pub processing: String,
+}
+
 /// Out-of-band byte buffer: JSON references the handle, never base64 bytes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BufferHandle {
@@ -486,26 +515,42 @@ pub enum HostEffect {
         effect: EffectId,
         job: JobId,
         request: RequestDto,
+        /// Engine tile id correlating this acquisition with the later
+        /// `decode-pixels` effect for the same tile.
+        tile: TileId,
+        /// Complete output placement for the acquired bytes (see
+        /// [`TilePlacementDto`]). Hosts that assemble images read the
+        /// placement here, at acquisition time, so acquisition failures and
+        /// decode failures surface through the same tile outcome.
+        placement: TilePlacementDto,
     },
     RequestDestination {
         effect: EffectId,
         job: JobId,
         format: String,
     },
+    /// Decode (or verify the earlier acquisition-time decode of) one tile's
+    /// pixels. Hosts that decode during acquisition (the native and browser
+    /// model) find their decoded tile already held and treat this effect as
+    /// the draw/hold checkpoint; tile bytes never cross the effect.
     DecodePixels {
         effect: EffectId,
         job: JobId,
         tile: TileId,
-        buffer: BufferHandle,
     },
     ProcessPixels {
         effect: EffectId,
         job: JobId,
         tile: TileId,
     },
+    /// Allocate the output surface. `canvas` declares the output size when
+    /// the plan knows it; hosts without a declared size derive it from the
+    /// accumulated placements. `format` is the output codec id.
     OpenEncoder {
         effect: EffectId,
         job: JobId,
+        format: String,
+        canvas: Option<SizeDto>,
     },
     WriteOutput {
         effect: EffectId,
@@ -521,10 +566,13 @@ pub enum HostEffect {
         job: JobId,
         output: OutputId,
     },
+    /// Release every per-tile resource this host retained for the job
+    /// (decoded bitmaps, surfaces, buffers). The adapter frees its own
+    /// arena bytes when the tile outcome settles, so no buffer reference
+    /// accompanies this effect.
     ReleaseBytes {
         effect: EffectId,
         job: JobId,
-        buffer: BufferHandle,
     },
     CancelWork {
         effect: EffectId,
