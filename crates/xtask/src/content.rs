@@ -9,8 +9,8 @@
 //! 2000-line warn / 2500-line fail). Build outputs are gitignored, so a
 //! missing artifact skips with a rebuild note instead of failing a fresh
 //! checkout; tracked sources fail closed.
-use regex::RegexBuilder;
 use std::path::Path;
+use std::process::Command;
 const ALLOW: &[&str] = &[
     "--dezoomer",
     "supportedDezoomers",
@@ -305,25 +305,18 @@ fn verify_sizes(r: &Path) -> Result<(), String> {
     Ok(())
 }
 fn g(r: &Path, a: &[&str]) -> Result<String, String> {
-    // Content guards are part of `cargo xtask check`, including hosted CI.
-    // Keep them self-contained: GitHub's standard runners do not guarantee
-    // ripgrep, and installing a host package just for static policy is slow
-    // and platform-specific.
-    let mut line_numbers = false;
-    let mut ignore_case = false;
-    let mut only_matches = false;
-    let mut whole_word = false;
-    let mut glob = None;
+    // Git is required to operate this repository and searches tracked
+    // working-tree files only, so build outputs cannot affect content policy.
+    let mut flags = Vec::new();
+    let mut pathspecs = vec![":(exclude)crates/xtask/src/content.rs".to_string()];
     let mut pattern = None;
+    let mut glob = None;
     let mut paths = Vec::new();
     let mut index = 0;
     while index < a.len() {
         match a[index] {
-            "-n" => line_numbers = true,
-            "-N" => line_numbers = false,
-            "-i" => ignore_case = true,
-            "-o" => only_matches = true,
-            "-w" => whole_word = true,
+            "-n" | "-i" | "-o" | "-w" => flags.push(a[index].to_string()),
+            "-N" => flags.push("--no-line-number".to_string()),
             "--glob" => {
                 index += 1;
                 glob = Some(*a.get(index).ok_or("missing --glob value")?);
@@ -332,114 +325,35 @@ fn g(r: &Path, a: &[&str]) -> Result<String, String> {
                 return Err(format!("unsupported content search flag {value}"));
             }
             value if pattern.is_none() => pattern = Some(value),
-            value => paths.push(value),
+            value => paths.push(value.to_string()),
         }
         index += 1;
     }
     let pattern = pattern.ok_or("missing content search pattern")?;
-    let pattern = if whole_word {
-        format!(r"\b(?:{pattern})\b")
+    if let Some(glob) = glob {
+        // Current policy uses a glob as its complete search scope. Unlike
+        // ripgrep's filtering flag, Git pathspecs are additive, so retaining
+        // the broad path argument here would silently widen the search.
+        pathspecs.push(format!(":(top,glob){glob}"));
     } else {
-        pattern.to_string()
-    };
-    let regex = RegexBuilder::new(&pattern)
-        .case_insensitive(ignore_case)
-        .build()
-        .map_err(|e| format!("invalid content search pattern {pattern:?}: {e}"))?;
-    if paths.is_empty() {
-        paths.push(".");
+        pathspecs.extend(paths);
     }
-    let mut files = Vec::new();
-    for path in paths {
-        collect_content_files(r, &r.join(path), &mut files)?;
-    }
-    files.sort();
-    files.dedup();
-    let mut output = String::new();
-    for file in files {
-        let relative = file
-            .strip_prefix(r)
-            .map_err(|e| format!("content path outside repository: {e}"))?;
-        let relative_text = relative.to_string_lossy();
-        if relative_text == "crates/xtask/src/content.rs"
-            || glob.is_some_and(|glob| !content_glob_matches(glob, &relative_text))
-        {
-            continue;
-        }
-        // Match ripgrep's default binary handling: policy searches apply to
-        // text contracts, while image/icon bytes are neither parseable text
-        // nor a meaningful place for prose markers.
-        let text = match std::fs::read_to_string(&file) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
-            Err(error) => return Err(format!("read {}: {error}", file.display())),
-        };
-        for (number, line) in text.lines().enumerate() {
-            if only_matches {
-                for found in regex.find_iter(line) {
-                    output.push_str(found.as_str());
-                    output.push('\n');
-                }
-            } else if regex.is_match(line) {
-                if line_numbers {
-                    output.push_str(&format!("{}:{}:{line}\n", relative.display(), number + 1));
-                } else {
-                    output.push_str(line);
-                    output.push('\n');
-                }
-            }
-        }
-    }
-    Ok(output)
-}
-
-fn collect_content_files(
-    root: &Path,
-    path: &Path,
-    files: &mut Vec<std::path::PathBuf>,
-) -> Result<(), String> {
-    if path.is_file() {
-        files.push(path.to_path_buf());
-        return Ok(());
-    }
-    if !path.is_dir() {
-        return Err(format!(
-            "content search path does not exist: {}",
-            path.display()
-        ));
-    }
-    for entry in std::fs::read_dir(path).map_err(|e| format!("list {}: {e}", path.display()))? {
-        let entry = entry.map_err(|e| format!("content directory entry: {e}"))?;
-        let child = entry.path();
-        let name = entry.file_name();
-        if child.is_dir() {
-            if matches!(
-                name.to_str(),
-                Some(".git" | "target" | "node_modules" | "dist" | "artifacts" | "testdata")
-            ) {
-                continue;
-            }
-            collect_content_files(root, &child, files)?;
-        } else if child.is_file() {
-            // A caller can pass a path outside the repository only by first
-            // bypassing the task runner; reject it rather than scanning it.
-            if child.starts_with(root) {
-                files.push(child);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn content_glob_matches(glob: &str, relative: &str) -> bool {
-    match glob {
-        "docs/*.md" => {
-            let Some(name) = relative.strip_prefix("docs/") else {
-                return false;
-            };
-            !name.contains('/') && name.ends_with(".md")
-        }
-        _ => false,
+    let output = Command::new("git")
+        .args(["grep", "-I", "-E"])
+        .args(&flags)
+        .arg(pattern)
+        .arg("--")
+        .args(&pathspecs)
+        .current_dir(r)
+        .output()
+        .map_err(|e| format!("failed to run git grep: {e}"))?;
+    match output.status.code() {
+        Some(0) => Ok(String::from_utf8_lossy(&output.stdout).to_string()),
+        Some(1) => Ok(String::new()),
+        _ => Err(format!(
+            "git grep failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )),
     }
 }
 
