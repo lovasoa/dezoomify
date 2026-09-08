@@ -173,7 +173,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // the spec runs. A concurrent lean or frontend rebuild in the same
     // checkout then cannot swap the app mid-run; on CI runners the copies
     // are simply identical content.
-    let target_dir = cargo_target_directory()?;
+    let target_dir = super::cargo_target_directory()?;
     let e2e_dir = target_dir.join("e2e-window");
     // Windows builds `dezoomify-desktop.exe`; accept the extensionless
     // lane value when the suffixed binary is the one on disk, and keep
@@ -458,7 +458,7 @@ pub fn dev_desktop() -> Result<(), String> {
         "dezoomify-desktop",
     ])?;
     let root = super::repo_root();
-    let bin = window_shell_bin(&cargo_target_directory()?.join("debug/dezoomify-desktop"));
+    let bin = window_shell_bin(&super::cargo_debug_binary("dezoomify-desktop")?);
     if !bin.exists() {
         return Err(format!(
             "desktop binary missing after build: {}",
@@ -897,23 +897,6 @@ fn run_cargo(args: &[&str]) -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| format!("cargo {} failed", args.join(" ")))
-}
-
-fn cargo_target_directory() -> Result<std::path::PathBuf, String> {
-    let output = Command::new("cargo")
-        .args(["metadata", "--format-version", "1", "--no-deps"])
-        .current_dir(super::repo_root())
-        .output()
-        .map_err(|e| format!("failed to query Cargo target directory: {e}"))?;
-    if !output.status.success() {
-        return Err("cargo metadata failed while resolving the target directory".to_string());
-    }
-    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("invalid cargo metadata output: {e}"))?;
-    metadata["target_directory"]
-        .as_str()
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| "cargo metadata omitted target_directory".to_string())
 }
 
 fn run_node(args: &[&str]) -> Result<(), String> {

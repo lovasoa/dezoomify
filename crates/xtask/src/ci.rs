@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::process::Command;
 
 const LANES: &[&str] = &[
+    "check",
     "rust",
     "wasm",
     "browser",
@@ -33,22 +34,32 @@ pub fn ci(args: &[String]) -> Result<(), String> {
 
 fn ci_lane(lane: &str) -> Result<(), String> {
     match lane {
-        "rust" => {
-            super::style::verify(&[])?;
-            run_cargo(&[
-                "test",
-                "-p",
-                "dezoomify-core",
-                "-p",
-                "dezoomify-protocol",
-                "-p",
-                "dezoomify-job",
-                "-p",
-                "dezoomify-native",
-                "-p",
-                "dezoomify-desktop",
-            ])
-        }
+        // Keep static contracts, including TypeScript compilation, in a
+        // required, parallel CI lane. Rust test feedback need not wait for
+        // clippy and artifact verification.
+        "check" => super::check::run(&[]),
+        "rust" => run_cargo(&[
+            "test",
+            "-p",
+            "dezoomify-core",
+            "-p",
+            "dezoomify-protocol",
+            "-p",
+            "dezoomify-job",
+            "-p",
+            "dezoomify-native",
+            "-p",
+            "dezoomify-desktop",
+            "-p",
+            "xtask",
+            "-p",
+            "dezoomify-fixture-server",
+            "--",
+            "--skip",
+            // `check` verifies the full fixture corpus in the parallel
+            // static lane, so avoid repeating that expensive assertion.
+            "fixture_manifest",
+        ]),
         "wasm" => super::wasm::run(&[]),
         "browser" => super::browser::test_browser(&[]),
         "web" => super::browser::test_web(&["--e2e".to_string()]),
@@ -58,8 +69,13 @@ fn ci_lane(lane: &str) -> Result<(), String> {
         "protocol" => super::protocol::test_protocol(),
         "security" => {
             super::protocol::run(&["check".to_string()])?;
-            super::supply::run()?;
-            println!("ci security: ok");
+            // The required `check` lane already runs cargo-deny. Run the JS
+            // half here so the sharded workflow covers the complete supply
+            // policy once rather than querying RustSec twice.
+            super::supply::audit_js()?;
+            println!(
+                "ci security: ok (protocol + JS supply audits; Rust supply audit is in ci check)"
+            );
             Ok(())
         }
         _ => Err(format!("unknown lane {lane}")),

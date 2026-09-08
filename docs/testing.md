@@ -144,24 +144,26 @@ unknown lane names and does not evaluate shell input.
 
 | Lane | Scope |
 |---|---|
-| `rust` | core, protocol, job, and native Rust unit and contract tests |
+| `check` | project-wide static verification: formatting, clippy, TypeScript compilation, generated artifacts, architecture, content, and supply-chain checks |
+| `rust` | core, protocol, job, native, desktop, task-runner, and fixture-server Rust unit and contract tests |
 | `wasm` | WASM adapter portability and transcript suites |
 | `browser` | browser-runtime unit matrix |
-| `web` | website integration suites (unit + cross-browser Playwright E2E: chromium, firefox, and webkit) |
+| `web` | website integration suites (unit + Chromium Playwright E2E) |
 | `native` | native runtime and CLI suites |
 | `desktop` | desktop shell suites |
 | `extension` | extension unit, manifest, and Native Messaging API suites |
 | `protocol` | protocol contract suites |
-| `security` | protocol artifact checks plus the supply-chain gate (cargo deny over advisories/licenses/bans/sources and JS audits over the workspace and isolated E2E profiles) |
+| `security` | protocol artifact checks plus JS supply-chain audits over the workspace and isolated E2E profiles; Rust cargo-deny policy runs once in the required `check` lane |
 
 `cargo xtask ci local` runs all lanes listed above. Lanes that need
 installed browsers fail closed when an engine binary is missing instead of
-claiming full platform coverage on a narrowed run: the `web` lane runs the
-E2E on every engine (`--browser all`) and CI installs chromium, firefox,
-and webkit (see `.github/workflows/ci.yml`). Only GPU-dependent paths may
-report a narrowed scope for a missing GPU; the deterministic canvas/worker
-E2E uses software rendering and never narrows. Required CI and `test all` remain
-deterministic; scheduled/manual live CI invokes `test live` separately.
+claiming full platform coverage on a narrowed run. Required CI and `test all`
+execute the controlled website E2E in Chromium, the engine provisioned in
+`.github/workflows/ci.yml`.
+Only GPU-dependent paths may report a narrowed scope for a missing GPU; the
+deterministic canvas/worker E2E uses software rendering and never narrows.
+Required CI and `test all` remain deterministic; scheduled/manual live CI
+invokes `test live` separately.
 
 ## Network coverage
 

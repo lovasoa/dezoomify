@@ -26,14 +26,6 @@ const NPM_AUDIT_DIRS: &[&str] = &[
     "apps/extension/tests/browser",
 ];
 
-/// Full gate for the `security` lane: Rust deny plus JS audits.
-pub fn run() -> Result<(), String> {
-    check_deny()?;
-    audit_js()?;
-    println!("supply chain: ok (cargo deny + JS audits)");
-    Ok(())
-}
-
 /// Rust leg, also used by `cargo xtask check`. Fails closed: a missing
 /// binary or a failed check is an error, never a silent skip.
 pub fn check_deny() -> Result<(), String> {
@@ -68,7 +60,12 @@ fn install_hint(detail: &str) -> String {
     )
 }
 
-fn audit_js() -> Result<(), String> {
+/// JavaScript half of the supply gate.
+///
+/// Required CI runs Rust policy through the ubiquitous `check` lane and this
+/// JS half through the `security` lane. Keeping them separate avoids querying
+/// the RustSec database twice.
+pub fn audit_js() -> Result<(), String> {
     // Workspace audit over pnpm-lock.yaml.
     let status = Command::new("pnpm")
         .args(["audit", "--audit-level", "high"])
@@ -189,6 +186,33 @@ mod tests {
                 text.contains(super::CARGO_DENY_VERSION),
                 "{workflow} does not pin cargo-deny {}",
                 super::CARGO_DENY_VERSION
+            );
+        }
+    }
+
+    #[test]
+    fn required_and_scheduled_supply_gates_cover_each_half_once() {
+        // Required CI deliberately shards Rust and JS dependency policy:
+        // `check` owns cargo-deny and `security` owns lockfile audits. These
+        // guards keep a future workflow edit from silently restoring the
+        // duplicate RustSec query or dropping the scheduled audit half.
+        let ci =
+            std::fs::read_to_string(super::super::repo_root().join(".github/workflows/ci.yml"))
+                .expect("read ci.yml");
+        assert!(
+            ci.contains(
+                "- name: Install cargo-deny 0.20.2\n        if: matrix.lane-group == 'check'"
+            ),
+            "ci.yml must install cargo-deny only for the check lane"
+        );
+        let security = std::fs::read_to_string(
+            super::super::repo_root().join(".github/workflows/security.yml"),
+        )
+        .expect("read security.yml");
+        for command in ["cargo xtask ci check", "cargo xtask ci security"] {
+            assert!(
+                security.contains(command),
+                "scheduled security workflow must run `{command}`"
             );
         }
     }

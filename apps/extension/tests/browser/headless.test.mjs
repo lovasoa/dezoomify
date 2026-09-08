@@ -38,7 +38,18 @@ function stagePackage(browser, dir, origin, testDriver = false) {
 }
 
 async function startFixtureServer(workDir) {
-  const bin = path.join(REPO_ROOT, "target/debug/dezoomify-fixture-server");
+  const metadata = spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  assert.equal(metadata.status, 0, `cargo metadata failed:\n${metadata.stderr}`);
+  const targetDir = JSON.parse(metadata.stdout).target_directory;
+  assert.equal(typeof targetDir, "string", "cargo metadata must report target_directory");
+  const bin = path.join(
+    targetDir,
+    "debug",
+    `dezoomify-fixture-server${process.platform === "win32" ? ".exe" : ""}`,
+  );
   // Like the WASM glue, target/ is an untracked cache, not a source of
   // truth. Cargo's incremental build is cheap and guarantees that the test
   // server implements the routes in this checkout.
