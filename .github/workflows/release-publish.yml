@@ -32,22 +32,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version'])')"
+          v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version"])')"
           gh run download ${{ inputs.run_id }} -n release-signed -D dist
           mkdir -p target/release-dist
+          rm -rf "target/release-dist/$v"
           mv "dist/$v" "target/release-dist/"
           test -f "target/release-dist/$v/SHA256SUMS"
       # Digest verification at the publish transition (docs/releases.md):
       # verify recomputes every digest and checks every GPG signature before
       # anything is published.
       - run: |
-          v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version'])')"
+          v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version"])')"
           cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
       - name: Publish GitHub release and record the checksum inventory
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version'])')"
+          v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version"])')"
           draft=""
           if [ "${{ inputs.draft }}" = "true" ]; then draft="--draft"; fi
           cargo xtask release publish --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v" $draft
