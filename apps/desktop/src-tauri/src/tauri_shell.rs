@@ -15,7 +15,6 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::{self, CommandError};
 use crate::deep_link;
@@ -26,10 +25,75 @@ use dezoomify_native::output::{validate_destination, OutputFormat};
 /// Command registry, mirrored from the pure layer for compile-time checks.
 const COMMANDS: &[&str] = commands::COMMANDS;
 
+#[cfg(all(test, target_os = "linux"))]
+mod output_tests {
+    use super::launch_saved_output;
+    use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+
+    #[test]
+    fn launcher_child() {
+        let Some(root) = std::env::var_os("DEZOOMIFY_TEST_LAUNCH_ROOT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let image = root.join("saved image.png");
+        launch_saved_output(image.clone(), false).unwrap();
+        launch_saved_output(image.clone(), true).unwrap();
+        fs::remove_file(&image).unwrap();
+        assert_eq!(
+            launch_saved_output(image.clone(), false).unwrap_err().code,
+            "output.not-found"
+        );
+        // A moved image does not prevent opening its containing directory.
+        launch_saved_output(image, true).unwrap();
+        fs::write(root.join("gio"), "#!/bin/sh\nexit 1\n").unwrap();
+        assert_eq!(
+            launch_saved_output(root.join("missing.png"), true)
+                .unwrap_err()
+                .code,
+            "output.launch-failed"
+        );
+    }
+
+    #[test]
+    fn checks_launcher_exit_status_and_opens_the_containing_directory() {
+        let root =
+            std::env::temp_dir().join(format!("dezoomify-launch-test-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("saved image.png"), b"fixture").unwrap();
+        // A failing first launcher must fall through to the next supported
+        // desktop handler. Only the child process sees this isolated PATH.
+        for (name, script) in [
+            ("xdg-open", "#!/bin/sh\nexit 1\n"),
+            ("gio", "#!/bin/sh\nprintf '%s\\n' \"$2\" >> \"$DEZOOMIFY_TEST_LAUNCH_ROOT/calls\"\nexit 0\n"),
+        ] {
+            let path = root.join(name);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tauri_shell::output_tests::launcher_child"])
+            .env("PATH", &root)
+            .env("DEZOOMIFY_TEST_LAUNCH_ROOT", &root)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let calls = fs::read_to_string(root.join("calls")).unwrap();
+        let expected = [root.join("saved image.png"), root.clone(), root.clone()];
+        assert_eq!(
+            calls
+                .lines()
+                .map(std::path::PathBuf::from)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
 /// Open only an output published by this app; callers never supply paths.
 #[tauri::command]
 async fn open_saved_output(
-    app: AppHandle,
     table: State<'_, Mutex<JobTable>>,
     job: String,
     reveal: bool,
@@ -42,18 +106,57 @@ async fn open_saved_output(
             code: "output.unavailable".into(),
             message: "The saved image is unavailable.".into(),
         })?;
-    let result = if reveal {
-        app.opener().reveal_item_in_dir(&path)
+    // Launch off the async executor and check the launcher's result. The
+    // opener plugin's detached path reports success before the launcher exits;
+    // its Linux reveal API also requires a FileManager1/portal D-Bus service.
+    // Opening the parent uses the user's default folder handler instead.
+    tauri::async_runtime::spawn_blocking(move || launch_saved_output(path, reveal))
+        .await
+        .map_err(|_| CommandFailure {
+            code: "output.launch-task-failed".into(),
+            message: "The file-opening task could not finish.".into(),
+        })?
+}
+
+fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), CommandFailure> {
+    let target = if reveal {
+        path.parent()
+            .ok_or_else(|| CommandFailure {
+                code: "output.no-parent".into(),
+                message: "The saved image has no containing folder.".into(),
+            })?
+            .to_path_buf()
     } else {
-        app.opener().open_path(path.to_string_lossy(), None::<&str>)
+        path
     };
-    result.map_err(|_| CommandFailure {
-        code: "output.open-failed".into(),
-        message: "Could not open the saved image. It may have been moved or deleted.".into(),
+    std::fs::metadata(&target).map_err(|error| CommandFailure {
+        code: if error.kind() == std::io::ErrorKind::NotFound {
+            "output.not-found"
+        } else {
+            "output.not-accessible"
+        }
+        .into(),
+        message: "The saved image or folder is not accessible.".into(),
+    })?;
+    // `open::that` stops after an installed launcher exits unsuccessfully.
+    // Try the remaining platform launchers on both spawn and exit failures.
+    for mut command in open::commands(&target) {
+        let result = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if result.is_ok_and(|status| status.success()) {
+            return Ok(());
+        }
+    }
+    Err(CommandFailure {
+        code: "output.launch-failed".into(),
+        message: "The system could not launch the default application.".into(),
     })
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct CommandFailure {
     code: String,
     message: String,

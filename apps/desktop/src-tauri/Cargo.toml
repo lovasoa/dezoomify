@@ -52,6 +52,7 @@ tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-opener = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }
+open = { version = "5.4.3", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
@@ -71,4 +72,4 @@ default = []
 # Real Tauri window shell. Requires the platform webview system packages
 # (on Linux: libwebkit2gtk-4.1-dev, libgtk-3-dev, libsoup-3.0-dev); the lean
 # offline shell stays the default so this manifest keeps building anywhere.
-tauri = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-opener", "dep:tauri-plugin-updater", "dep:tauri-plugin-single-instance"]
+tauri = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-opener", "dep:tauri-plugin-updater", "dep:tauri-plugin-single-instance", "dep:open"]

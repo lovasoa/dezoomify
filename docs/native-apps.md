@@ -66,8 +66,14 @@ native saved-output copy and explicit open/reveal callbacks, without browser
 save or color-profile guidance. `open_saved_output` accepts a job id and a
 reveal flag; the job table retains the actual published path natively and
 permits these actions only for completed or partially completed jobs. The
-Tauri opener uses the platform default handler or reveals the item in its
-containing folder. No caller-supplied path is accepted or returned over IPC.
+system launcher opens the image or its containing directory with the platform
+default handler. It runs on a blocking worker and checks the launcher exit
+status, trying supported launcher fallbacks; folder opening does not require
+a Linux FileManager1 or portal service. File existence errors remain distinct
+from launcher and IPC errors. Every failed file action updates the visible
+error and copyable diagnostics, including subsequent attempts. No
+caller-supplied path is accepted or returned over IPC. Encoding progress does
+not erase tile counts already received.
 
 The native desktop path emits no catalog notice and no display-only branch.
 The driver folds the catalog internally (first image, largest fitting level;

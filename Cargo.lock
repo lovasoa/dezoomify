@@ -1141,6 +1141,7 @@ dependencies = [
  "dezoomify-protocol",
  "ed25519-dalek",
  "image",
+ "open",
  "serde",
  "serde_json",
  "sha2 0.10.9",

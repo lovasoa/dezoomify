@@ -20,7 +20,9 @@ export const it = {
   "desktop.done.saved": "Salvata nella cartella scelta.",
   "desktop.done.open": "Apri immagine",
   "desktop.done.reveal": "Mostra nella cartella",
-  "desktop.done.openError": "Impossibile aprire l’immagine. Potrebbe essere stata spostata o eliminata.",
+  "desktop.done.openError": "Impossibile aprire l’immagine. Verifica che sia installato un visualizzatore predefinito.",
+  "desktop.done.folderError": "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
+  "desktop.done.missingError": "L’immagine o la cartella non esiste più.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Capito",
   "view.modal.closeDialog": "Chiudi la finestra",

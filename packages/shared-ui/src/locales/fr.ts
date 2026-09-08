@@ -16,7 +16,9 @@ export const fr = {
   "desktop.done.saved": "Enregistrée dans le dossier choisi.",
   "desktop.done.open": "Ouvrir l’image",
   "desktop.done.reveal": "Afficher dans le dossier",
-  "desktop.done.openError": "Impossible d’ouvrir l’image. Elle a peut-être été déplacée ou supprimée.",
+  "desktop.done.openError": "Impossible d’ouvrir l’image. Vérifiez qu’une visionneuse par défaut est installée.",
+  "desktop.done.folderError": "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
+  "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Compris",
   "view.modal.closeDialog": "Fermer la boite de dialogue",

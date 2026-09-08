@@ -332,6 +332,7 @@ function recoveryKeyFor(decision: PendingDecision | null): string | null {
 let completedPartial = false;
 let completedMissing: Array<string> = [];
 let completedSibling: string | null = null;
+let outputActionError: { action: "open" | "folder"; code: string } | undefined;
 
 // Live heartbeat for the loading view: advances now and longestPendingMs
 // so the pending box and smooth track stay current between IPC snapshots.
@@ -618,6 +619,7 @@ function diagnosticsSnapshot() {
       ? { current: viewCtx.currentProgress.current, total: viewCtx.currentProgress.total }
       : undefined,
     origin: redactedOriginOnly(lastInputUrl),
+    outputActionError,
   };
 }
 
@@ -625,6 +627,7 @@ function diagnosticsSnapshot() {
 
 
 function clearJobViewState(): void {
+  outputActionError = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.jobActivity = undefined;
@@ -1127,16 +1130,25 @@ function requestOutputAndResume(): void {
 
 async function handleOpenOutput(reveal: boolean): Promise<void> {
   const invoke = tauriInvoke();
-  if (!invoke || !currentJobId) return;
+  const job = currentJobId;
+  if (!invoke || !job) return;
+  outputActionError = undefined;
+  root?.querySelector("#dz-open-error")?.remove();
   try {
-    await invoke("open_saved_output", { job: currentJobId, reveal });
-  } catch {
+    await invoke("open_saved_output", { job, reveal });
+  } catch (error) {
+    if (job !== currentJobId) return;
+    const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
+    const code = typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
+      ? rawCode : "output.invoke-failed";
+    outputActionError = { action: reveal ? "folder" : "open", code };
+    pushLog(`File action ${outputActionError.action} failed (${code})`);
     const section = root?.querySelector(".dz-completed-section");
-    if (!section || section.querySelector("#dz-open-error")) return;
+    if (!section) return;
     const note = section.ownerDocument.createElement("p");
     note.id = "dz-open-error";
     note.setAttribute("role", "alert");
-    note.textContent = t("desktop.done.openError");
+    note.textContent = `${t(code === "output.not-found" ? "desktop.done.missingError" : reveal ? "desktop.done.folderError" : "desktop.done.openError")} (${code})`;
     section.appendChild(note);
   }
 }
@@ -1183,6 +1195,7 @@ function handlePartialChoice(keep: boolean): void {
 }
 
 function handleReset(): void {
+  outputActionError = undefined;
   submitToken += 1;
   sessionId = `sess:desktop-${Date.now()}`;
   controller.reset(sessionId);
@@ -1733,9 +1746,10 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     text.indexOf("progress") >= 0 ||
     numField(payload, detailRaw, ["acquired", "completed", "current", "done"]) !== undefined
   ) {
-    const current =
-      numField(payload, detailRaw, ["current", "acquired", "completed", "done", "resources"]) ?? 0;
-    const total = numField(payload, detailRaw, ["total"]) ?? 0;
+    const reportedTotal = numField(payload, detailRaw, ["total"]) ?? 0;
+    const total = Math.max(viewCtx.currentProgress?.total ?? 0, reportedTotal);
+    const current = Math.max(viewCtx.currentProgress?.current ?? 0,
+      reportedTotal > 0 ? numField(payload, detailRaw, ["current", "acquired", "completed", "done"]) ?? 0 : 0);
     const message = strField(payload, ["message"]);
     const progressCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
     preflightThrough(progressCount);

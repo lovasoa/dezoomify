@@ -121,7 +121,9 @@ const en = {
   "desktop.done.saved": "Saved in your chosen folder.",
   "desktop.done.open": "Open image",
   "desktop.done.reveal": "Show in folder",
-  "desktop.done.openError": "Could not open the saved image. It may have been moved or deleted.",
+  "desktop.done.openError": "Could not open the image. Check that a default image viewer is installed.",
+  "desktop.done.folderError": "Could not open the containing folder. Check that a file manager is installed.",
+  "desktop.done.missingError": "The saved image or folder no longer exists.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Got it",
   "view.modal.closeDialog": "Close dialog",

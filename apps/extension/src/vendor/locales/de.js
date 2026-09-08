@@ -20,7 +20,9 @@ export const de = {
   "desktop.done.saved": "Im gewählten Ordner gespeichert.",
   "desktop.done.open": "Bild öffnen",
   "desktop.done.reveal": "Im Ordner anzeigen",
-  "desktop.done.openError": "Das Bild konnte nicht geöffnet werden. Es wurde möglicherweise verschoben oder gelöscht.",
+  "desktop.done.openError": "Das Bild konnte nicht geöffnet werden. Prüfen Sie, ob ein Standard-Bildbetrachter installiert ist.",
+  "desktop.done.folderError": "Der Ordner konnte nicht geöffnet werden. Prüfen Sie, ob ein Dateimanager installiert ist.",
+  "desktop.done.missingError": "Das gespeicherte Bild oder der Ordner ist nicht mehr vorhanden.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Verstanden",
   "view.modal.closeDialog": "Dialog schliessen",

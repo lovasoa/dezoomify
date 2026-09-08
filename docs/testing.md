@@ -263,7 +263,13 @@ cargo xtask test desktop --e2e-window
 ```
 
 The real-window gate launches the window shell under tauri-driver
-and drives it with selenium-webdriver against hermetic loopback fixtures.
+and first tests the native file launcher. On Linux, isolated subprocesses
+verify fallback after a launcher exits unsuccessfully, image and parent-folder
+arguments (including spaces), and distinct missing-file and launcher errors.
+The ordinary desktop lane verifies automatic output-path retention and
+file-action diagnostics.
+The window gate then drives the app with selenium-webdriver against hermetic
+loopback fixtures.
 The lane runs two specs sequentially (`crates/xtask/src/desktop.rs`):
 `window.spec.mjs` covers the native-feature flows and `formats.spec.mjs`
 covers the data-driven per-format full-download matrix. Bare

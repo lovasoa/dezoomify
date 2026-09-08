@@ -103,6 +103,7 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
     run_node(&["apps/desktop/tests/queue.test.mjs"])?;
+    run_node(&["apps/desktop/tests/diagnostics.test.mjs"])?;
     // Development-surface smoke: starts the real Vite entrypoint on the
     // Tauri dev URL and verifies the shared theme resolves through Vite's
     // module graph. No webview or display is needed.
@@ -158,6 +159,15 @@ fn test_desktop_e2e_window() -> Result<(), String> {
             "test desktop --e2e-window needs the webview system packages ({WEBKIT_SYSTEM_PACKAGES})"
         ));
     }
+    run_cargo(&[
+        "test",
+        "-p",
+        DESKTOP_PKG,
+        "--features",
+        "tauri",
+        "--lib",
+        "output_tests",
+    ])?;
     build_desktop(&["--unsigned-test".to_string()])?;
     // Lane-private copies: the window and lean shells share one binary
     // path (and the frontend one dist directory), so snapshot both before

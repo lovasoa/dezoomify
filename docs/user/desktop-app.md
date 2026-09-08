@@ -54,6 +54,9 @@ appears, use **Open image** to open it with your usual image viewer, or
 step. Settings and the queue do not appear on the finished image screen.
 If some parts could not be retrieved, the app labels the image as saved with
 gaps; the open actions use that partial file.
+If opening fails, each attempt shows its own error. **Technical details &
+logs → Copy diagnostics** includes the failed action and its error code.
+You can still open the containing folder if the image has been moved.
 
 ## Install
 
