@@ -113,9 +113,39 @@ body {
   box-shadow: none;
 }
 
-/* Pinned bottom footer: single row of legal/repo links only. */
+/* Pinned bottom footer: a deliberately thin, always-visible link bar. */
 .dz-site-footer {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
   margin-top: auto;
+  padding: 0.3rem 1rem;
+  border-top: 1px solid var(--dz-surface-border);
+  background: var(--dz-footer-bg);
+}
+
+.dz-site-footer .dz-footer-links {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 0;
+  margin: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.dz-site-footer a {
+  flex: 0 0 auto;
+  padding: 0 0.65rem;
+  border-left: 1px solid var(--dz-surface-border);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.dz-site-footer a:first-child {
+  border-left: 0;
 }
 
 /* Desktop aux panel: plain flow inside the single status card.
@@ -656,80 +686,6 @@ body {
   }
 }
 
-/* Desktop Help/About (Task 5.3): link-only region, same flat flow as the
- * aux/settings panels. Transparent, no nested box, only a top separator.
- * Buttons wrap; body copy stays left-aligned. */
-#dz-desktop-help {
-  background: transparent;
-  border: none;
-  border-top: 1px solid var(--dz-surface-border);
-  box-shadow: none;
-  border-radius: 0;
-  margin-top: 1.75rem;
-  padding-top: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  text-align: left;
-}
-
-#dz-desktop-help .dz-help-version {
-  margin-left: auto;
-  color: var(--dz-text-muted);
-  font-size: 0.78rem;
-}
-
-#dz-desktop-help .dz-help-disclosure > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-  list-style: none;
-  color: var(--dz-text-secondary);
-  font-size: 0.88rem;
-  font-weight: 650;
-  padding: 0.45rem 0;
-}
-
-#dz-desktop-help .dz-help-disclosure > summary::-webkit-details-marker { display: none; }
-
-#dz-desktop-help .dz-help-disclosure > summary::after {
-  content: "+";
-  padding-left: 1rem;
-  color: var(--dz-text-muted);
-  font-weight: 400;
-}
-
-#dz-desktop-help .dz-help-disclosure[open] > summary::after { content: "−"; }
-
-#dz-desktop-help .dz-help-actions { margin-top: 0.7rem; }
-
-#dz-desktop-help .dz-notice-title,
-#dz-desktop-help .dz-notice-message {
-  text-align: left;
-}
-
-#dz-desktop-help .dz-help-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.85rem;
-}
-
-#dz-desktop-help .dz-help-link {
-  padding: 0;
-  color: var(--dz-link-subtle);
-  font-size: 0.76rem;
-  line-height: 1.5;
-  text-decoration: none;
-}
-
-#dz-desktop-help .dz-help-link:hover {
-  color: var(--dz-link-hover);
-  text-decoration: underline;
-}
-
-.dz-site-footer { display: none; }
-
 @media (max-width: 680px) {
   .dz-desktop-bar { padding: 0 1rem; }
   .dz-desktop-local { display: none; }
@@ -768,8 +724,6 @@ body {
 #dz-desktop-settings textarea:focus-visible,
 #dz-desktop-settings a:focus-visible,
 #dz-desktop-settings summary:focus-visible,
-#dz-desktop-help button:focus-visible,
-#dz-desktop-help a:focus-visible,
 #dz-deep-link-confirm button:focus-visible,
 #dz-deep-link-confirm a:focus-visible,
 #dz-deep-link-confirm [tabindex]:focus-visible,

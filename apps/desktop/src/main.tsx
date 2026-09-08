@@ -66,7 +66,6 @@ import {
 import type { CatalogNotice, PendingDecision } from "./jobController.ts";
 import {
   buildCopyDiagnostics,
-  DESKTOP_APP_VERSION,
   handleCopyDiagnostics,
 } from "./diagnostics.ts";
 import {
@@ -115,20 +114,9 @@ import { listen as tauriApiListen } from "@tauri-apps/api/event";
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 const integration = createDesktopIntegration();
 
-// Task 5.3 Help/About (docs rule: docs/user/ is the only source of user
-// text; link, never duplicate). Short link labels only; every user guide
-// lives in the published docs pages below, opened via openExternalLink
-// (https-only). No user copy is duplicated here.
+// Shared-view relative documentation links resolve against this published
+// documentation origin. The desktop footer itself is static document markup.
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
-const DESKTOP_HELP_LINKS: Array<{ label: string; url: string }> = [
-  { label: t("desktop.help.help"), url: `${DESKTOP_DOCS_BASE}/help/` },
-  { label: t("desktop.help.desktopGuide"), url: `${DESKTOP_DOCS_BASE}/help/desktop-app.html` },
-  { label: t("desktop.help.troubleshooting"), url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
-  { label: t("desktop.help.faq"), url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
-  { label: t("desktop.help.privacy"), url: `${DESKTOP_DOCS_BASE}/privacy.html` },
-  { label: t("desktop.help.terms"), url: `${DESKTOP_DOCS_BASE}/terms.html` },
-  { label: t("desktop.help.donate"), url: "https://github.com/sponsors/lovasoa/" },
-];
 
 // Transport reported for every desktop controller transition. Pixels stay
 // native, so the badge never claims a browser transport. The "native" code
@@ -2314,61 +2302,6 @@ function ensureDesktopFooter(): void {
   footer.setAttribute("data-dz-wired", "true");
 }
 
-// Task 5.3 Help/About: link-only region inside the single status card.
-// Buttons (never anchors, so no navigation risk) open the published
-// docs/user/ pages, legal pages, and Donate via openExternalLink
-// (https-only). Labels only; no user copy is duplicated here. The version
-// line is app metadata, not docs text.
-//
-// Accessibility: region labelled by its heading; all actions are native
-// buttons reachable by Tab with the crisp 2px focus ring. Rebuilds are
-// skipped while focus sits inside so progress ticks never drop focus.
-function ensureDesktopHelpAbout(): void {
-  if (typeof document === "undefined" || !root) return;
-  const card = root.querySelector(".dz-card");
-  if (!card) return;
-  const existing = document.getElementById("dz-desktop-help");
-  if (existing && existing.contains(document.activeElement)) return;
-  existing?.remove();
-
-  const doc = root.ownerDocument;
-  const region = doc.createElement("div");
-  region.id = "dz-desktop-help";
-  region.className = "dz-view-body dz-desktop-help";
-  region.setAttribute("role", "region");
-  region.setAttribute("aria-labelledby", "dz-help-title");
-
-  const disclosure = doc.createElement("details");
-  disclosure.className = "dz-help-disclosure";
-  const summary = doc.createElement("summary");
-  summary.id = "dz-help-title";
-  const title = doc.createElement("span");
-  title.textContent = t("desktop.help.title");
-  const version = doc.createElement("span");
-  version.className = "dz-help-version";
-  version.textContent = `Desktop ${DESKTOP_APP_VERSION}`;
-  summary.append(title, version);
-  disclosure.appendChild(summary);
-
-  const row = doc.createElement("div");
-  row.className = "dz-actions-row dz-help-actions";
-  for (const link of DESKTOP_HELP_LINKS) {
-    const anchor = doc.createElement("a");
-    anchor.className = "dz-help-link";
-    anchor.href = link.url;
-    anchor.textContent = link.label;
-    anchor.addEventListener("click", (event) => {
-      event.preventDefault();
-      handleOpenExternalLink(link.url);
-    });
-    row.appendChild(anchor);
-  }
-  disclosure.appendChild(row);
-  region.appendChild(disclosure);
-
-  card.appendChild(region);
-}
-
 function update() {
   if (!root) return;
   const state = controller.getState();
@@ -2440,7 +2373,6 @@ function update() {
     onPersist: () => runPersistSettingsFromPanel(),
     onReset: () => runResetDesktopSettings(),
   });
-  ensureDesktopHelpAbout();
   ensureDesktopExternalNav();
   ensureDesktopFooter();
 }

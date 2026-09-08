@@ -150,6 +150,29 @@ test("event channels match and forbid tile bytes", () => {
   }
 });
 
+test("desktop footer is a compact external-link bar, not a disclosure", () => {
+  const html = readText("../index.html");
+  const main = readText("../src/main.tsx");
+  const css = readText("../src/desktop.css");
+  const integration = readText("../src/desktopIntegration.ts");
+
+  assert.match(html, /<nav class="dz-footer-links" aria-label="Dezoomify links">/);
+  for (const href of [
+    "https://github.com/lovasoa/dezoomify",
+    "https://dezoomify.ophir.dev/help/troubleshooting.html",
+    "https://dezoomify.ophir.dev/privacy.html",
+    "https://dezoomify.ophir.dev/terms.html",
+    "https://github.com/sponsors/lovasoa/",
+  ]) {
+    assert.ok(html.includes(`href="${href}"`), `footer link ${href}`);
+  }
+  assert.ok(!main.includes("ensureDesktopHelpAbout"), "no large collapsible footer duplicate");
+  assert.match(css, /\.dz-site-footer \{[\s\S]*?min-height: 30px;/, "thin footer bar");
+  assert.ok(!css.includes(".dz-site-footer { display: none; }"), "footer stays visible");
+  assert.match(main, /handleOpenExternalLink\(resolved\)/, "footer links route through external navigation");
+  assert.match(integration, /plugin:opener\|open_url/, "external navigation uses the native opener");
+});
+
 test("generated files are canonical bytes (LF, pretty, no drift)", () => {
   for (const rel of [
     "../src-tauri/tauri.conf.json",
