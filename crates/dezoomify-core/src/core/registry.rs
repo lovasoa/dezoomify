@@ -2,8 +2,9 @@
 
 use super::discovery::{DezoomerSpec, DiscoveryLimits, DiscoveryOperation};
 use crate::{
-    arcgis, bulk_text, custom_yaml, dzi, fsi, generic, google_arts_and_culture, hungaricana, iiif,
-    iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts, xlimage, zoomify,
+    arcgis, bulk_text, custom_yaml, dzi, fsi, generic, gigapan, google_arts_and_culture,
+    hungaricana, iiif, iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts,
+    xlimage, zoomify,
 };
 
 /// Every built-in dezoomer, in candidate priority order.
@@ -11,6 +12,7 @@ const BUILTINS: &[DezoomerSpec] = &[
     custom_yaml::SPEC,
     google_arts_and_culture::SPEC,
     zoomify::SPEC,
+    gigapan::SPEC,
     iiif::SPEC,
     dzi::SPEC,
     second_canvas::SPEC,
@@ -171,6 +173,7 @@ mod tests {
                 ("custom", "Custom tiles"),
                 ("google_arts_and_culture", "Arts & Culture"),
                 ("zoomify", "Zoomify"),
+                ("gigapan", "Gigapan"),
                 ("iiif", "IIIF"),
                 ("deepzoom", "Seadragon (Deep Zoom Image)"),
                 ("second_canvas", "Second Canvas"),
@@ -223,6 +226,10 @@ mod tests {
             preferred_name("x/TileGroup0/0-0-0.jpg").map(DezoomerSpec::name),
             Some("zoomify")
         );
+        assert_eq!(
+            preferred_name("https://gigapan.com/gigapans/116906/").map(DezoomerSpec::name),
+            Some("gigapan")
+        );
     }
 
     #[test]
@@ -247,6 +254,10 @@ mod tests {
         assert_eq!(
             classify_url("https://example.test/tiles.yaml?version=2"),
             Some("custom")
+        );
+        assert_eq!(
+            classify_url("https://gigapan.com/gigapans/116906/"),
+            Some("gigapan")
         );
         assert_eq!(classify_url("https://example.test/unknown"), None);
     }

@@ -17,12 +17,13 @@ test('single limit/grid/capability generation is pinned', () => {
   assert.match(generated, /PROXY_MAX_BYTES = 2097152/);
   assert.match(generated, /METADATA_WINDOW_MS = 1500/);
   const gridIds = [...generated.matchAll(/\{\s*id:\s*"([^"]+)",\s*displayName:\s*"([^"]+)",\s*powerUser:\s*(true|false)\s*\}/g)];
-  assert.equal(gridIds.length, 18);
+  assert.equal(gridIds.length, 19);
   const ids = gridIds.map((m) => m[1]);
   assert.deepEqual(ids, [
     'custom',
     'google_arts_and_culture',
     'zoomify',
+    'gigapan',
     'iiif',
     'deepzoom',
     'generic',
