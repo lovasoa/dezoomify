@@ -107,15 +107,12 @@ test("desktop dev server serves the real entrypoint and shared theme", { timeout
     const html = await response.text();
     // Vite appends a cache-busting query when a hot-reloaded module changes.
     assert.match(html, /<script[^>]+src=["']\/src\/main\.tsx(?:\?[^"']*)?["']/);
-    assert.doesNotMatch(html, /packages\/shared-ui\/src\/styles\/theme\.css/);
-
     const main = await fetchWithTimeout(new URL("/src/main.tsx", DEV_URL));
     assert.equal(main.status, 200, "Vite serves the desktop entrypoint");
-    const mainSource = await main.text();
-    const themeImport = mainSource.match(/(?:from\s+)?["']([^"']*theme\.css)["']/);
-    assert.ok(themeImport, "desktop entrypoint imports the shared theme");
+    assert.match(html, /packages\/shared-ui\/src\/styles\/theme\.css/, "desktop document links the shared theme");
+    assert.match(html, /src\/desktop\.css/, "desktop document links its native controls stylesheet");
 
-    const theme = await fetchWithTimeout(new URL(themeImport[1], DEV_URL));
+    const theme = await fetchWithTimeout(new URL("/packages/shared-ui/src/styles/theme.css", DEV_URL));
     assert.equal(theme.status, 200, "Vite serves the imported shared theme");
     const themeSource = await theme.text();
     assert.match(themeSource, /--dz-page-bg\s*:/, "shared theme contains page colors");

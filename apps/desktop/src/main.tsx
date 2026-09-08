@@ -110,9 +110,7 @@ import {
   validateSettings,
 } from "./settings.ts";
 import type { DesktopSettings } from "./settings.ts";
-import "../../../packages/shared-ui/src/styles/theme.css";
 import { listen as tauriApiListen } from "@tauri-apps/api/event";
-import "./desktop.css";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 const integration = createDesktopIntegration();
