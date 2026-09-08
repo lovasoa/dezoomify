@@ -211,10 +211,10 @@ export const fr = {
   "view.history.open": "Rouvrir",
   "view.history.clear": "Effacer l historique",
   "view.history.dims": "{w} par {h} pixels",
-  "view.input.eyebrow": "Nouvelle image",
-  "view.input.title": "Enregistrez l image en pleine resolution",
+  "view.input.eyebrow": "Enregistreur d images zoomables",
+  "view.input.title": "Dezoomify",
   "view.input.description":
-    "Collez une page de visionneuse, un manifeste ou une adresse de tuiles. Dezoomify trouve l image et choisit la meilleure resolution disponible.",
+    "Dezoomify permet d enregistrer des images zoomables. Collez ci-dessous l adresse d une visionneuse, d un manifeste ou d une tuile. Dezoomify trouve l image et enregistre la resolution la plus elevee qui tient dans votre navigateur. Lorsqu elle est prete, utilisez le bouton Enregistrer l image pour la conserver sur votre ordinateur.",
   "view.input.placeholder": "Collez l adresse d une visionneuse ou d un manifeste",
   "view.input.aria": "Adresse de la page contenant votre image zoomable",
   "view.input.start": "Trouver l image",

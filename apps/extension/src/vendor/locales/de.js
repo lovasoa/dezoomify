@@ -211,10 +211,10 @@ export const de = {
   "view.history.open": "Erneut offnen",
   "view.history.clear": "Verlauf loschen",
   "view.history.dims": "{w} mal {h} Pixel",
-  "view.input.eyebrow": "Neues Bild",
-  "view.input.title": "Bild in voller Aufloesung speichern",
+  "view.input.eyebrow": "Zoombare Bilder speichern",
+  "view.input.title": "Dezoomify",
   "view.input.description":
-    "Fuegen Sie eine Betrachterseite, ein Manifest oder eine Kachel-Adresse ein. Dezoomify findet das Bild und waehlt die beste verfuegbare Aufloesung.",
+    "Dezoomify speichert zoombare Bilder. Fuegen Sie unten die URL eines Bildbetrachters, Manifests oder einer Kachel-Adresse ein. Dezoomify findet das Bild und speichert die hoechste Aufloesung, die in Ihren Browser passt. Wenn es fertig ist, speichern Sie das Bild mit der Schaltflaeche auf Ihrem Computer.",
   "view.input.placeholder": "Adresse eines Bildbetrachters oder Manifests einfuegen",
   "view.input.aria": "Adresse der Webseite mit dem zoombaren Bild",
   "view.input.start": "Bild finden",

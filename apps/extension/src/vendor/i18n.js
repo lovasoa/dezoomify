@@ -312,10 +312,10 @@ const en = {
   "view.history.open": "Open again",
   "view.history.clear": "Clear history",
   "view.history.dims": "{w} by {h} pixels",
-  "view.input.eyebrow": "New image",
-  "view.input.title": "Save the full-resolution image",
+  "view.input.eyebrow": "Zoomable image saver",
+  "view.input.title": "Dezoomify",
   "view.input.description":
-    "Paste a viewer page, manifest, or tile address. Dezoomify finds the image and selects the best available resolution.",
+    "Dezoomify allows you to save zoomable images. Paste the URL of an image viewer, manifest, or tile address below. Dezoomify finds the image and saves the highest resolution that fits in your browser. When it is ready, use the Save image button to save it on your computer.",
   "view.input.placeholder": "Paste an image viewer or manifest URL",
   "view.input.aria": "Address of the webpage containing your zoomable image",
   "view.input.start": "Find image",
