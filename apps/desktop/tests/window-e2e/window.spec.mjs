@@ -440,12 +440,19 @@ function parseJpegSize(bytes) {
 // Manual lifecycle for flows that relaunch the app on one shared profile
 // (settings round-trip) or navigate the launch URL (idle prefill).
 // `series` runs sequentially: one fixture server, fresh driver ports and one
-// app launch per step, same HOME every step. Teardown SIGKILLs the whole
-// detached driver tree per step (the harness killTree the managed flows
-// use): a plain kill of the driver leader orphans half-booted app children
-// that wedge later series with `no WebDriver session` and hold our pipes
-// open past the spec. Profiles and temp work are removed afterwards even
-// on failure.
+// app launch per step, same HOME every step.
+//
+// Teardown is two-phase, and the split is load-bearing. Between series the
+// app is only quit + SIGTERMed at the driver leader (never SIGKILLed): the
+// lingering app keeps flushing profile storage (localStorage) at leisure,
+// and the next series reads it back, so a group SIGKILL here loses the
+// flush and the relaunched app boots with defaults. The full group SIGKILL
+// (harness killTree) runs only once the test no longer needs the profile:
+// after the last series, or on any throw. Cross-test profiles are always
+// fresh, so that reap truncates nothing, while bounding lingering trees to
+// one test (unreaped trees accumulate across the lane until session
+// creation wedges and the spec hangs on their pipes). Profiles and temp
+// work are removed afterwards even on failure.
 async function runProfileSeries({ nativeDriverBin, fixedName = "saved.png", series }) {
   ensureDisplay();
   ensureWindowShell();
@@ -453,6 +460,14 @@ async function runProfileSeries({ nativeDriverBin, fixedName = "saved.png", seri
   const home = path.join(profile, "home");
   mkdirSync(home, { recursive: true });
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-window-e2e-"));
+  const launched = [];
+  const reapTree = async (proc) => {
+    killTree(proc);
+    const reapUntil = Date.now() + 10000;
+    while (proc.exitCode === null && proc.signalCode === null && Date.now() < reapUntil) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
   let fixture = null;
   try {
     fixture = await startFixtureServer(work);
@@ -471,24 +486,27 @@ async function runProfileSeries({ nativeDriverBin, fixedName = "saved.png", seri
         DEZOOMIFY_E2E_FIXED_DESTINATION: fixedDest,
       };
       const driverProc = await startTauriDriver(tauriPort, nativePort, nativeDriverBin, appEnv);
+      launched.push(driverProc.proc);
       let driver = null;
       try {
         driver = await launchApp({ tauriPort });
         await series[i]({ driver, base: fixture.base, home, fixedDest, work, appEnv, requestLog });
       } finally {
         if (driver) await driver.quit().catch(() => {});
-        killTree(driverProc.proc);
-        const reapUntil = Date.now() + 10000;
-        while (
-          driverProc.proc.exitCode === null
-          && driverProc.proc.signalCode === null
-          && Date.now() < reapUntil
-        ) {
-          await new Promise((r) => setTimeout(r, 100));
+        try {
+          driverProc.proc.kill();
+        } catch {
+          // Already gone; the group reap below is the backstop.
         }
       }
     }
   } finally {
+    // The profile is dead to us here (fresh one per test, or the test
+    // already failed): reap every lingering tree so nothing wedges the
+    // next launch or holds the spec pipes open.
+    for (const proc of launched) {
+      await reapTree(proc);
+    }
     if (fixture) fixture.proc.kill();
     rmSync(work, { recursive: true, force: true });
     rmSync(profile, { recursive: true, force: true });

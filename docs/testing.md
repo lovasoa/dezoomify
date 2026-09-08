@@ -247,6 +247,15 @@ automatic 1500 ms direct-metadata timeout. Cross-browser E2E runs under
 fixture-server setup; `cargo xtask ci web` runs the same legs); a missing
 engine binary fails the run with its install hint, never a narrowed pass.
 
+### Desktop development surface
+
+The default desktop lane also runs a loopback-only development-surface smoke
+test. It starts the real Vite command used by `cargo xtask dev desktop`, checks
+that the HTML entrypoint is reachable, and follows the entrypoint's shared
+theme import through Vite. This keeps the fast lane display-free while
+catching the class of startup and asset-resolution failures that a lean
+Tauri-driver stub cannot observe.
+
 ### Desktop real window
 
 ```sh

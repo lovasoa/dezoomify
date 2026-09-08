@@ -21,9 +21,14 @@
 //! `dezoomify-desktop` is a member of the root workspace and shares the root
 //! `Cargo.lock`; the default features keep it offline-capable.
 
-use std::process::Command;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 const DESKTOP_PKG: &str = "dezoomify-desktop";
+const DESKTOP_DEV_HOST: &str = "localhost";
+const DESKTOP_DEV_PORT: u16 = 1420;
+const DESKTOP_DEV_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const WEBKIT_SYSTEM_PACKAGES: &str =
     "libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential";
 
@@ -95,6 +100,10 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
     run_node(&["apps/desktop/tests/queue.test.mjs"])?;
+    // Development-surface smoke: starts the real Vite entrypoint on the
+    // Tauri dev URL and verifies the shared theme resolves through Vite's
+    // module graph. No webview or display is needed.
+    run_node(&["apps/desktop/tests/dev-smoke.test.mjs"])?;
     // Versioned icon generator (scripts/gen-desktop-icons.py, stdlib-only,
     // deterministic): re-runs the script and asserts byte-identical PNG/ICO/
     // ICNS output plus container magic. Runs before the hermetic E2E so a
@@ -416,16 +425,16 @@ fn check_native_driver() -> Result<(), String> {
     }
 }
 
-/// Desktop development: run the real Tauri development application. Needs
-/// the webview system packages; fails closed with the exact prerequisite
-/// list when they are missing.
+/// Desktop development: run the real Tauri development application together
+/// with the Vite server it loads from `tauri.conf.json`. Needs the webview
+/// system packages; fails closed with the exact prerequisite list when they
+/// are missing.
 pub fn dev_desktop() -> Result<(), String> {
     if !tauri_system_ready() {
         return Err(format!(
             "dev desktop needs the webview system packages ({WEBKIT_SYSTEM_PACKAGES}); the lean shell has no window to develop against"
         ));
     }
-    build_frontend()?;
     run_cargo(&[
         "build",
         "-p",
@@ -443,6 +452,9 @@ pub fn dev_desktop() -> Result<(), String> {
             bin.display()
         ));
     }
+
+    let _frontend = start_desktop_frontend()?;
+    println!("dev desktop: frontend ready at http://{DESKTOP_DEV_HOST}:{DESKTOP_DEV_PORT}/");
     println!("dev desktop: launching {}", bin.display());
     let status = Command::new(&bin)
         .current_dir(&root)
@@ -452,6 +464,87 @@ pub fn dev_desktop() -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| format!("desktop shell exited with {status}"))
+}
+
+/// The Tauri binary embeds `devUrl`, but launching that binary directly does
+/// not run Tauri's `beforeDevCommand`. Keep the xtask workflow independent of
+/// the optional `cargo-tauri` CLI by starting the same frontend command here.
+fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
+    let root = super::repo_root();
+    let mut command = pnpm_command()?;
+    let mut child = command
+        .args([
+            "--filter",
+            "./apps/desktop",
+            "dev",
+            "--host",
+            DESKTOP_DEV_HOST,
+        ])
+        .current_dir(&root)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("failed to start the desktop frontend: {e}"))?;
+
+    if let Err(error) = wait_for_desktop_frontend(&mut child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    Ok(DesktopFrontend { child })
+}
+
+/// Wait until Vite accepts connections, while surfacing an early child exit
+/// (most commonly a port collision or missing workspace dependencies).
+fn wait_for_desktop_frontend(child: &mut Child) -> Result<(), String> {
+    let address = format!("{DESKTOP_DEV_HOST}:{DESKTOP_DEV_PORT}");
+    let deadline = Instant::now() + DESKTOP_DEV_STARTUP_TIMEOUT;
+    let socket_addresses = address
+        .to_socket_addrs()
+        .map_err(|e| format!("cannot resolve desktop frontend address {address}: {e}"))?
+        .collect::<Vec<_>>();
+
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("cannot inspect the desktop frontend: {e}"))?
+        {
+            return Err(format!(
+                "desktop frontend exited before listening on http://{address}/ ({status})"
+            ));
+        }
+
+        if socket_addresses
+            .iter()
+            .any(|socket| TcpStream::connect_timeout(socket, Duration::from_millis(200)).is_ok())
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "desktop frontend did not listen on http://{address}/ within {} seconds",
+                DESKTOP_DEV_STARTUP_TIMEOUT.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Own the Vite child for the duration of the desktop process. This also
+/// covers startup failures and Ctrl-C paths where the shell never reaches its
+/// normal exit status handling.
+struct DesktopFrontend {
+    child: Child,
+}
+
+impl Drop for DesktopFrontend {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+        }
+        let _ = self.child.wait();
+    }
 }
 
 /// Whether the platform webview development packages are available. Linux

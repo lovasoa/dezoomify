@@ -18,6 +18,8 @@ export type NativeEncoder = (typeof NATIVE_ENCODERS)[number];
 // Native output formats accepted by the save destination grant. Same list
 // as NATIVE_ENCODERS under a second name for the format-selector call sites.
 export const NATIVE_FORMATS = NATIVE_ENCODERS;
+export type NativeFormat = NativeEncoder | "iiif-dir";
+const SUPPORTED_SAVE_FORMATS: readonly NativeFormat[] = [...NATIVE_ENCODERS, "iiif-dir"];
 
 // Exact Tauri command registry. Must match
 // apps/desktop/src-tauri/src/commands.rs COMMANDS and the generated
@@ -59,7 +61,7 @@ export interface DesktopCapabilities {
 export interface SaveRequest {
   readonly jobId: string;
   readonly suggestedName: string;
-  readonly format: NativeEncoder;
+  readonly format: NativeFormat;
 }
 
 export type SaveOutcome = "granted" | "denied" | "cancelled";
@@ -127,9 +129,10 @@ function isValidJobId(jobId: string): boolean {
   return jobId.startsWith("job:") && jobId.length > 4 && jobId.length <= 128;
 }
 
-function extensionFor(format: NativeEncoder): string {
+function extensionFor(format: NativeFormat): string {
   if (format === "png") return ".png";
   if (format === "jpeg") return ".jpg";
+  if (format === "iiif-dir") return ".iiif";
   return ".tif";
 }
 
@@ -186,7 +189,7 @@ export function createDesktopIntegration(opts?: {
     if (!isValidJobId(req.jobId)) {
       return { outcome: "denied", reason: "invalid-job-id" };
     }
-    if ((NATIVE_ENCODERS as readonly string[]).includes(req.format) === false) {
+    if (!SUPPORTED_SAVE_FORMATS.includes(req.format)) {
       return { outcome: "denied", reason: "unsupported-format" };
     }
     const wanted = extensionFor(req.format);

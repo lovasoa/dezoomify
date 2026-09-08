@@ -109,6 +109,7 @@ import {
   validateSettings,
 } from "./settings.ts";
 import type { DesktopSettings } from "./settings.ts";
+import "../../../packages/shared-ui/src/styles/theme.css";
 import { listen as tauriApiListen } from "@tauri-apps/api/event";
 import "./desktop.css";
 
@@ -273,6 +274,7 @@ let desktopSettings: DesktopSettings = loadSettings();
 grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
 
 function persistOutputFormat(format: NativeFormat): void {
+  if (format === "iiif-dir") return;
   if (desktopSettings.outputFormat === format) return;
   desktopSettings = { ...desktopSettings, outputFormat: format };
   saveSettings(desktopSettings);
@@ -577,6 +579,7 @@ const settingsEnv: SettingsPanelEnv = {
   getSettings: () => desktopSettings,
   setSettings: (settings: DesktopSettings) => {
     desktopSettings = settings;
+    grantedFormat = normalizeNativeFormat(settings.outputFormat);
   },
   setError: (error: string | null) => {
     settingsError = error;
