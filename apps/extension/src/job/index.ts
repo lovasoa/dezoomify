@@ -105,7 +105,17 @@ function onHostFailure(error) {
   if (hostFailed) return;
   hostFailed = true;
   const failure = error && typeof error.code === "string"
-    ? { code: error.code, category: "extension", retryable: false, message: error.message || "The image could not be assembled in this tab." }
+    ? {
+      code: error.code,
+      category: "extension",
+      retryable: error.retryable === true,
+      message: error.code === "adapter.wrong-state"
+        ? "The extension lost sync while reading this image. Start the scan again."
+        : (error.message || "The image could not be assembled in this tab."),
+      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
+      ...(typeof error.phase === "string" ? { phase: error.phase } : {}),
+      ...(typeof error.transport === "string" ? { transport: error.transport } : {}),
+    }
     : { code: "output-failed", category: "extension", retryable: false, message: "The image could not be assembled in this tab." };
   render("failed", { failure, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
 }

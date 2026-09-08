@@ -703,13 +703,22 @@ impl Session {
                 })
             }
             None => {
-                self.require_engine_state(SessionState::Discovering)?;
                 // Exactly-once consumption: a replayed reference is stale
                 // afterwards. The engine takes the real bytes; a zero-length
                 // resource fails the job (job.empty-resource) and empty
                 // metadata can never yield a fake success.
                 let bytes = self.arena.take_buffer(handle)?;
                 self.live_discovery_requests.remove(request);
+                // Discovery is intentionally concurrent. A sibling metadata
+                // fetch may finish after another candidate has already
+                // produced the catalog and advanced the job into selection,
+                // planning, or tile acquisition. The job engine treats that
+                // response as ignored; the adapter must consume the buffer
+                // and preserve that same stale-response behavior instead of
+                // turning normal fetch reordering into a session failure.
+                if self.state != SessionState::Discovering {
+                    return Ok(());
+                }
                 self.forward(JobResponse::ResourceBytes {
                     job: job.as_str().to_string(),
                     request: request.to_string(),
@@ -751,8 +760,12 @@ impl Session {
                 })
             }
             None => {
-                self.require_engine_state(SessionState::Discovering)?;
                 self.live_discovery_requests.remove(request);
+                // A late sibling failure is also a normal consequence of
+                // concurrent discovery after another candidate has won.
+                if self.state != SessionState::Discovering {
+                    return Ok(());
+                }
                 let _ = error;
                 self.forward(JobResponse::FetchFailure {
                     job: job.as_str().to_string(),

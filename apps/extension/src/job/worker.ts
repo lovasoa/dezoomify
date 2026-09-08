@@ -11,6 +11,26 @@ function object(value) {
   return value && typeof value === "object" ? /** @type {Record<string, any>} */ (value) : {};
 }
 
+/** @param {unknown} error */
+function engineError(error) {
+  const raw = error instanceof Error ? error.message : String(error);
+  let parsed = error;
+  if (typeof parsed === "string") {
+    try { parsed = JSON.parse(parsed); } catch { /* legacy string error */ }
+  }
+  const candidate = object(parsed);
+  const code = typeof candidate.code === "string" ? candidate.code : "adapter.malformed";
+  const message = typeof candidate.message === "string" ? candidate.message : raw;
+  return {
+    code,
+    phase: typeof candidate.phase === "string" ? candidate.phase : "validation",
+    retryable: candidate.retryable === true,
+    message,
+    detail: `${code}: ${message}`,
+    transport: "browser-session",
+  };
+}
+
 /** @param {Record<string, unknown>} command */
 function commandBytes(command) {
   return encoder.encode(`${JSON.stringify({ protocol: "1.0", kind: "command", ...command })}\n`);
@@ -26,7 +46,7 @@ export function createJobWorkerHost(deps) {
     if (!session) return;
     let messages;
     try { messages = JSON.parse(session.drainMessages()); } catch (error) {
-      deps.postMessage({ type: "engine.error", error: { code: "malformed", message: String(error) } });
+      deps.postMessage({ type: "engine.error", error: engineError(error) });
       return;
     }
     if (Array.isArray(messages) && messages.length) deps.postMessage({ type: "engine.messages", messages });
@@ -98,7 +118,7 @@ export function createJobWorkerHost(deps) {
           try { session?.dispose(); } finally { session = null; }
         }
       } catch (error) {
-        deps.postMessage({ type: "engine.error", error: { code: "malformed", message: error instanceof Error ? error.message : String(error) } });
+        deps.postMessage({ type: "engine.error", error: engineError(error) });
       }
     },
   };

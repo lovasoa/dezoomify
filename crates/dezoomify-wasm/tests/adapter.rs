@@ -538,6 +538,108 @@ fn host_error_text_never_reaches_transcripts() {
     }
 }
 
+#[test]
+fn late_sibling_discovery_response_is_ignored_after_job_advances() {
+    const PAGE: &[u8] = br#"<html><body>
+        <a href="image.dzi">zoom</a>
+        <script>embedpano({xml: "tour.xml"})</script>
+    </body></html>"#;
+
+    let mut session = new_session();
+    session
+        .dispatch(&envelope_bytes(ControlBody::Command(JobCommand::Start {
+            job: "job:late-discovery-1".parse().unwrap(),
+            input_url: "https://example.com/viewer/index.html".to_string(),
+        })))
+        .expect("start");
+    let root = discovery_request(&session.drain_messages());
+    let root_handle = seal(&mut session, PAGE);
+    session
+        .dispatch(&provide_resource_bytes(
+            &session,
+            "job:late-discovery-1",
+            root_handle,
+            &root,
+        ))
+        .expect("page response accepted");
+
+    let follow_up = decode_all(&session.drain_messages());
+    let pending = follow_up
+        .iter()
+        .filter_map(|envelope| match envelope.body {
+            ControlBody::Effect(HostEffect::AcquireResource { ref request, .. }) => {
+                Some(request.id.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        pending.len() >= 2,
+        "real page flow should leave sibling fetches pending: {pending:?}"
+    );
+    let dzi_request = pending
+        .iter()
+        .find(|request| {
+            follow_up.iter().any(|envelope| match &envelope.body {
+                ControlBody::Effect(HostEffect::AcquireResource {
+                    request: candidate, ..
+                }) => candidate.id == **request && candidate.uri.ends_with("image.dzi"),
+                _ => false,
+            })
+        })
+        .cloned()
+        .expect("one sibling request");
+    let sibling_request = pending
+        .into_iter()
+        .find(|request| request != &dzi_request)
+        .expect("second sibling request");
+
+    let dzi_handle = seal(&mut session, DZI.as_bytes());
+    session
+        .dispatch(&provide_resource_bytes(
+            &session,
+            "job:late-discovery-1",
+            dzi_handle,
+            &dzi_request,
+        ))
+        .expect("DZI response accepted");
+    session.drain_messages();
+    session
+        .dispatch(&command_bytes(JobCommand::SelectImage {
+            job: "job:late-discovery-1".parse().unwrap(),
+            image: "img:dzi:0".parse().unwrap(),
+        }))
+        .expect("select image");
+    session.drain_messages();
+    session
+        .dispatch(&command_bytes(JobCommand::SelectLevel {
+            job: "job:late-discovery-1".parse().unwrap(),
+            level: "lvl:dzi:0:0".parse().unwrap(),
+        }))
+        .expect("select level");
+    session.drain_messages();
+    session
+        .dispatch(&command_bytes(JobCommand::DestinationResponse {
+            job: "job:late-discovery-1".parse().unwrap(),
+            destination: "dst:0".parse().unwrap(),
+            granted: true,
+        }))
+        .expect("grant destination");
+    assert_eq!(session.state().as_str(), "AcquiringTiles");
+
+    let late_handle = seal(&mut session, b"late sibling response");
+    let result = session.dispatch(&provide_resource_bytes(
+        &session,
+        "job:late-discovery-1",
+        late_handle,
+        &sibling_request,
+    ));
+    assert!(
+        result.is_ok(),
+        "late discovery responses are stale and should be ignored: {result:?}"
+    );
+}
+
 /// P07-WORKFLOWS: the delegated basic-success replay must equal the
 /// checked-in golden transcript byte-for-byte (canonical re-encoding of
 /// each entry). Set `UPDATE_GOLDEN=1` to rewrite the checked-in golden

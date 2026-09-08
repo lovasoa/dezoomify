@@ -42,3 +42,34 @@ test("worker disposal is repeat-safe and does not manufacture effects", async ()
   await host.onMessage({ type: "engine.dispose" });
   assert.deepEqual(calls, ["dispose"]);
 });
+
+test("worker preserves typed WASM diagnostics", async () => {
+  const sent = [];
+  class Session {
+    constructor() {}
+    dispatch() {
+      throw JSON.stringify({
+        code: "adapter.wrong-state",
+        phase: "validation",
+        retryable: false,
+        message: "command not accepted in state AcquiringTiles",
+      });
+    }
+  }
+  const host = createJobWorkerHost({
+    postMessage: (message) => sent.push(message),
+    wasm: async () => ({ Session }),
+  });
+  await host.onMessage({ type: "engine.start", jobId: "job:one", inputUrl: "https://example.test/image.dzi" });
+  assert.deepEqual(sent, [{
+    type: "engine.error",
+    error: {
+      code: "adapter.wrong-state",
+      phase: "validation",
+      retryable: false,
+      message: "command not accepted in state AcquiringTiles",
+      detail: "adapter.wrong-state: command not accepted in state AcquiringTiles",
+      transport: "browser-session",
+    },
+  }]);
+});

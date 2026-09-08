@@ -94,7 +94,11 @@ pub mod wasm_api {
     use wasm_bindgen::prelude::*;
 
     fn js_error(error: super::AdapterError) -> JsValue {
-        JsValue::from_str(&error.to_string())
+        let fallback = error.to_string();
+        match serde_json::to_string(&error.to_error_dto()) {
+            Ok(encoded) => JsValue::from_str(&encoded),
+            Err(_) => JsValue::from_str(&fallback),
+        }
     }
 
     /// Map a non-adapter failure (e.g. handle JSON parsing) to a redacted
