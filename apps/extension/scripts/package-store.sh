@@ -65,6 +65,14 @@ cp "$manifest" "$staging/manifest.json"
 if [ "${DEZOOMIFY_TEST_DRIVER:-0}" = "1" ]; then
   mkdir -p "$staging/test"
   cp "$REPO_ROOT/apps/extension/src/test/driver.html" "$staging/test/driver.html"
+  cp "$REPO_ROOT/apps/extension/src/test/driver.js" "$staging/test/driver.js"
+  DEZOOMIFY_TEST_ORIGIN="${DEZOOMIFY_TEST_ORIGIN:-}" python3 - "$staging/test/config.js" <<'PY'
+import json, os, sys
+origin = os.environ.get("DEZOOMIFY_TEST_ORIGIN", "")
+if not (origin.startswith("http://") or origin.startswith("https://")):
+    raise SystemExit("DEZOOMIFY_TEST_ORIGIN must be an http(s) origin for the E2E driver")
+open(sys.argv[1], "w").write("globalThis.__DEZOOMIFY_TEST_ORIGIN__ = " + json.dumps(origin) + ";\n")
+PY
   cat >> "$staging/background/index.js" <<'EOF'
 
 // Test-only extension context entry; never present in store packages.
@@ -115,7 +123,7 @@ bg = d.get("background", {})
 need += ([bg["service_worker"]] if "service_worker" in bg else []) + bg.get("scripts", [])
 need += ["job/job.html", "job/index.js", "job/worker.js", "vendor/theme.css", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
 if os.path.exists("test/driver.html"):
-    need += ["test/driver.html"]
+    need += ["test/driver.html", "test/config.js", "test/driver.js"]
 for war in d.get("web_accessible_resources", []):
     need += war.get("resources", [])
 missing = [p for p in need if not os.path.exists(p)]

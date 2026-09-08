@@ -2,35 +2,39 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+async function importSource(url) {
+  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(readFileSync(url, "utf8"))}`);
+}
+
+const wasm = await importSource(new URL("../../../../wasm/dezoomify-wasm.js", import.meta.url));
+await wasm.default({
+  module_or_path: readFileSync(new URL("../../../../wasm/dezoomify-wasm_bg.wasm", import.meta.url)),
+});
+
 async function loadWorker() {
-  let src = readFileSync(new URL("../../src/job/worker.ts", import.meta.url), "utf8");
   // The production worker's generated-WASM dynamic import is unreachable in
   // node (no WorkerGlobalScope), so the worker host stays directly testable.
-  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
+  return importSource(new URL("../../src/job/worker.ts", import.meta.url));
 }
 
 const { createJobWorkerHost } = await loadWorker();
 
-test("worker delegates start and correlated bytes to the WASM Session", async () => {
+test("worker and generated WASM complete the first discovery round trip", async () => {
   const sent = [];
-  const calls = [];
-  class Session {
-    constructor(version, quotas) { calls.push(["new", version, quotas]); }
-    dispatch(bytes) { calls.push(["dispatch", JSON.parse(new TextDecoder().decode(bytes))]); }
-    drainMessages() { return JSON.stringify([{ protocol: "1.0", kind: "effect", type: "acquire-resource", job: "job:one", request: { id: "req:one" } }]); }
-    allocateBuffer(length) { calls.push(["allocate", length]); return JSON.stringify({ id: "buf:one", generation: 0, length }); }
-    protocolHandle(handle) { calls.push(["protocolHandle", JSON.parse(handle)]); return handle; }
-    writeBuffer(handle, offset, bytes) { calls.push(["write", JSON.parse(handle), offset, [...bytes]]); }
-    commitBuffer(handle, length) { calls.push(["commit", JSON.parse(handle), length]); }
-    dispose() { calls.push(["dispose"]); }
-  }
-  const host = createJobWorkerHost({ postMessage: (message) => sent.push(message), wasm: async () => ({ default: async () => {}, Session }) });
+  const host = createJobWorkerHost({ postMessage: (message) => sent.push(message), wasm: async () => wasm });
   await host.onMessage({ type: "engine.start", jobId: "job:one", inputUrl: "https://example.test/image.dzi" });
-  await host.onMessage({ type: "engine.bytes", jobId: "job:one", requestId: "req:one", bytes: new Uint8Array([1, 2]) });
-  assert.equal(calls.filter(([kind]) => kind === "new").length, 1);
-  assert.equal(calls.filter(([kind]) => kind === "dispatch").length, 2);
-  assert.deepEqual(calls.find(([kind]) => kind === "write"), ["write", { id: "buf:one", generation: 0, length: 2 }, 0, [1, 2]]);
-  assert.equal(sent.every((message) => message.type === "engine.messages"), true);
+  const first = sent.flatMap((message) => message.messages ?? []);
+  const acquire = first.find((message) => message.type === "acquire-resource");
+  assert.ok(acquire?.request?.id, "engine did not request the input metadata");
+
+  sent.length = 0;
+  const metadata = new TextEncoder().encode('<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>');
+  await host.onMessage({ type: "engine.bytes", jobId: "job:one", requestId: acquire.request.id, bytes: metadata });
+  assert.equal(sent.some((message) => message.type === "engine.error"), false);
+  assert.ok(
+    sent.flatMap((message) => message.messages ?? []).some((message) => message.type === "catalog"),
+    JSON.stringify(sent),
+  );
 });
 
 test("worker disposal is repeat-safe and does not manufacture effects", async () => {

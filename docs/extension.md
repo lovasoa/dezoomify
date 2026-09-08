@@ -76,6 +76,12 @@ only the background finite-operation coordinator, dedicated job tab, generated
 vendor mirrors, icons, and WASM. No source content script or fallback
 extension-page entry is packaged or tested.
 
+Extension build, development, test, and release entry points regenerate the
+WASM glue from the current Rust source before staging. The extension test gate
+does so before its unit suite, whose worker contract runs a real generated WASM
+session through the first discovery round trip; an absent, stale, or
+incompatible binding is a blocking failure before browser E2E starts.
+
 User-facing job behavior comes from the same protocol and scenarios as web and
 desktop. See [Testing](testing.md) and [Releases](releases.md). For user-facing
 use, see [browser extension](user/browser-extension.md).

@@ -478,6 +478,9 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     if !status.success() {
         return Err("sync-web-js failed (scripts/sync-web-js.mjs)".to_string());
     }
+    // Development must load bindings generated from the current Rust tree;
+    // a previous gitignored website build is not a valid extension input.
+    super::extension::build_wasm_glue()?;
     let staging = root.join("target/extension-unpacked");
     if staging.exists() {
         std::fs::remove_dir_all(&staging)

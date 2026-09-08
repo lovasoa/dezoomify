@@ -115,6 +115,10 @@ fn build_cli_artifact(target_os: &str, out: &Path) -> Result<(), String> {
 }
 
 fn build_extension_artifact(browser: &str, out: &Path) -> Result<(), String> {
+    // Release matrix jobs start from a fresh checkout and package-store.sh is
+    // deliberately only a stager. Generate the current Rust binding here so
+    // release builds cannot consume missing or locally stale WASM artifacts.
+    crate::extension::build_wasm_glue()?;
     let script = crate::repo_root()
         .join("apps/extension/scripts/package-store.sh")
         .canonicalize()

@@ -64,7 +64,7 @@ Focused targets are:
 | `web` | website direct-first transport, metadata CORS proxy fallback, and cross-browser end-to-end behavior |
 | `native` | native runtime, CLI, encoders, cache, and scenario parity |
 | `desktop` | Tauri integration, integration registration, disabled-updater fixtures, and E2E |
-| `extension` | manifests, scanning, browser-session fetch, permissions, shared-UI vendoring with web-vs-extension job-card parity, store size gate, and browser E2E |
+| `extension` | fresh generated-WASM worker contract, manifests, scanning, browser-session fetch, permissions, shared-UI vendoring with web-vs-extension job-card parity, store size gate, and browser E2E |
 | `native-messaging` | framing, handoff consent, cookie scope, registration, and cleanup |
 | `scenario` | scenario-corpus gates: native pipeline scenarios over loopback plus CLI snapshots |
 | `perf [--smoke]` | native pool plus streaming plus backpressure benches (criterion `native_pipeline`: tile throughput, encode time, peak RSS on the 20k model) with CI tracking that fails beyond 20 percent regression |
