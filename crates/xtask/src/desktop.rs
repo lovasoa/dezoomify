@@ -100,6 +100,10 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
     run_node(&["apps/desktop/tests/queue.test.mjs"])?;
+    // Development-surface smoke: starts the real Vite entrypoint on the
+    // Tauri dev URL and verifies the shared theme resolves through Vite's
+    // module graph. No webview or display is needed.
+    run_node(&["apps/desktop/tests/dev-smoke.test.mjs"])?;
     // Versioned icon generator (scripts/gen-desktop-icons.py, stdlib-only,
     // deterministic): re-runs the script and asserts byte-identical PNG/ICO/
     // ICNS output plus container magic. Runs before the hermetic E2E so a
