@@ -52,7 +52,7 @@ test("mobile: extension modal links the canonical theme with no inline fork", ()
   assert.ok(!styles.includes("@media"), "page ships no breakpoint fork (theme owns every breakpoint)");
 });
 
-test("mobile: 360px viewports keep every extension action reachable", () => {
+test("mobile CSS contract: 360px rules avoid known reachability blockers", () => {
   // The themed job card comes from the vendored renderView mount, styled by
   // the canonical theme; the static shell only adds the scan tab list.
   const css = read("packages/shared-ui/src/styles/theme.css");
@@ -91,7 +91,7 @@ test("mobile: 360px viewports keep every extension action reachable", () => {
   // column stays within the viewport at every breakpoint.
   assert.match(css, /\.dz-card\s*\{[^}]*overflow:\s*hidden;/, "card never scrolls sideways");
   assert.match(css, /\.dz-main\s*\{[^}]*width:\s*min\(9[24]%,\s*960px\);/, "main column stays fluid");
-  // The scan tab list (the only page-owned chrome) uses the shared
-  // secondary button geometry, so it inherits the same stacking.
-  assert.match(html, /id="tabs"/, "scan tab list stays mounted");
+  // Page-owned chrome stays limited to the close control; interactive job
+  // actions are rendered by the shared UI and covered by the rules above.
+  assert.match(html, /id="dz-modal-dismiss"/, "close control stays mounted");
 });

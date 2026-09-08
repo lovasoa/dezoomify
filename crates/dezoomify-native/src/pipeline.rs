@@ -7,7 +7,7 @@
 //! are honest: the pipeline never fabricates progress, completion, or hashes.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -476,6 +476,20 @@ pub fn run(
 
     let user = user_headers_for(input_url, config);
     crate::job_driver::drive(input_url, output_path, overwrite, config, &user, on_event)
+}
+
+/// Run a desktop-style job that saves directly to a configured directory.
+/// The native driver derives the final basename from the selected catalog
+/// title and reserves the configured format's extension.
+pub fn run_auto_named(
+    input_url: &str,
+    output_dir: &Path,
+    format: OutputFormat,
+    config: &PipelineConfig,
+    on_event: &mut dyn FnMut(PipelineEvent),
+) -> Result<PipelineOutcome, NativeError> {
+    let user = user_headers_for(input_url, config);
+    crate::job_driver::drive_auto_named(input_url, output_dir, format, config, &user, on_event)
 }
 
 // ---------------------------------------------------------------------------

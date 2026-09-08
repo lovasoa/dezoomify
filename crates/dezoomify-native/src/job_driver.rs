@@ -70,7 +70,7 @@
 //! [`sha256_hex`]: crate::pipeline::sha256_hex
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -107,6 +107,13 @@ enum AttemptDone {
     Deferred(String),
 }
 
+struct DriverDestination {
+    output_path: PathBuf,
+    overwrite: bool,
+    format: OutputFormat,
+    auto_output_dir: Option<PathBuf>,
+}
+
 pub(crate) fn drive(
     input_url: &str,
     output_path: &str,
@@ -117,8 +124,14 @@ pub(crate) fn drive(
 ) -> Result<PipelineOutcome, NativeError> {
     let mut url = input_url.to_string();
     let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))?;
+    let destination = DriverDestination {
+        output_path: PathBuf::from(output_path),
+        overwrite,
+        format,
+        auto_output_dir: None,
+    };
     for _ in 0..=MAX_DEFERRED_FOLLOWS {
-        match drive_job(&url, output_path, overwrite, format, config, user, on_event)? {
+        match drive_job(&url, &destination, config, user, on_event)? {
             AttemptDone::Done(outcome) => return Ok(outcome),
             AttemptDone::Deferred(next) => url = next,
         }
@@ -127,6 +140,94 @@ pub(crate) fn drive(
         "discovery.deferred",
         "image metadata stayed deferred after the resolution limit",
     ))
+}
+
+/// Drive a job whose directory and format are configured before discovery.
+/// The selected catalog title supplies the eventual file name.
+pub(crate) fn drive_auto_named(
+    input_url: &str,
+    output_dir: &Path,
+    format: OutputFormat,
+    config: &PipelineConfig,
+    user: &UserHeaders,
+    on_event: &mut dyn FnMut(PipelineEvent),
+) -> Result<PipelineOutcome, NativeError> {
+    let mut url = input_url.to_string();
+    let placeholder = output_dir.join(format!("dezoomify.{}", extension_for(format)));
+    let destination = DriverDestination {
+        output_path: placeholder,
+        overwrite: false,
+        format,
+        auto_output_dir: Some(output_dir.to_path_buf()),
+    };
+    for _ in 0..=MAX_DEFERRED_FOLLOWS {
+        match drive_job(&url, &destination, config, user, on_event)? {
+            AttemptDone::Done(outcome) => return Ok(outcome),
+            AttemptDone::Deferred(next) => url = next,
+        }
+    }
+    Err(NativeError::new(
+        "discovery.deferred",
+        "image metadata stayed deferred after the resolution limit",
+    ))
+}
+
+fn extension_for(format: OutputFormat) -> &'static str {
+    match format {
+        OutputFormat::Png => "png",
+        OutputFormat::Jpeg => "jpg",
+        OutputFormat::Tiff => "tif",
+        OutputFormat::Zif => "zif",
+        OutputFormat::Webp => "webp",
+        OutputFormat::IiifDir => "iiif",
+    }
+}
+
+fn safe_output_stem(title: Option<&str>) -> String {
+    let mut stem = String::new();
+    let mut previous_separator = false;
+    for character in title.unwrap_or("dezoomify").chars() {
+        if character.is_alphanumeric() {
+            stem.push(character);
+            previous_separator = false;
+        } else if !previous_separator {
+            stem.push('-');
+            previous_separator = true;
+        }
+        if stem.len() >= 120 {
+            break;
+        }
+    }
+    let stem = stem.trim_matches('-');
+    let lower = stem.to_ascii_lowercase();
+    let reserved_windows_name = matches!(lower.as_str(), "con" | "prn" | "aux" | "nul")
+        || (lower.len() == 4
+            && (lower.starts_with("com") || lower.starts_with("lpt"))
+            && lower
+                .as_bytes()
+                .last()
+                .is_some_and(|byte| matches!(byte, b'1'..=b'9')));
+    if stem.is_empty() || reserved_windows_name {
+        "dezoomify".to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat) -> PathBuf {
+    let stem = safe_output_stem(title);
+    let extension = extension_for(format);
+    let first = output_dir.join(format!("{stem}.{extension}"));
+    if !first.exists() {
+        return first;
+    }
+    for suffix in 2..=9_999 {
+        let candidate = output_dir.join(format!("{stem}-{suffix}.{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    first
 }
 
 fn mint_job_id() -> String {
@@ -305,6 +406,7 @@ struct CatalogImage {
     id: String,
     ready: bool,
     format: String,
+    title: Option<String>,
     levels: Vec<(String, u64, u64)>,
 }
 
@@ -329,6 +431,9 @@ struct Attempt<'a> {
     output_path: PathBuf,
     overwrite: bool,
     format: OutputFormat,
+    /// When present, derive the output file name from the selected catalog
+    /// title immediately before satisfying the engine destination effect.
+    auto_output_dir: Option<PathBuf>,
     /// Resume cache as `(cache_dir, job_namespace)`; always set (the cache
     /// is on by default, see [`crate::pipeline::effective_cache_dir`]).
     cache: Option<(PathBuf, String)>,
@@ -379,9 +484,7 @@ impl<'a> Attempt<'a> {
 
 fn drive_job(
     input_url: &str,
-    output_path: &str,
-    overwrite: bool,
-    format: OutputFormat,
+    destination: &DriverDestination,
     config: &PipelineConfig,
     user: &UserHeaders,
     on_event: &mut dyn FnMut(PipelineEvent),
@@ -394,9 +497,10 @@ fn drive_job(
     let mut attempt = Attempt {
         config,
         user,
-        output_path: PathBuf::from(output_path),
-        overwrite,
-        format,
+        output_path: destination.output_path.clone(),
+        overwrite: destination.overwrite,
+        format: destination.format,
+        auto_output_dir: destination.auto_output_dir.clone(),
         cache: Some((
             crate::pipeline::effective_cache_dir(config),
             crate::cache::job_namespace(input_url),
@@ -636,6 +740,13 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("")
                         .to_string();
+                    // `label` is the protocol projection of the core image
+                    // title (or its stable fallback), so it is the safe
+                    // cross-boundary source for the automatic basename.
+                    let title = image
+                        .get("label")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string);
                     let mut levels = Vec::new();
                     if let Some(entries) = image.get("levels").and_then(serde_json::Value::as_array)
                     {
@@ -661,6 +772,7 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
                         id,
                         ready,
                         format,
+                        title,
                         levels,
                     });
                 }
@@ -927,6 +1039,14 @@ fn execute_effects(
                 tiles.push(need);
             }
             "request-destination" => {
+                if let Some(output_dir) = attempt.auto_output_dir.as_deref() {
+                    let title = attempt
+                        .selected_image
+                        .and_then(|index| attempt.catalog.get(index))
+                        .or_else(|| attempt.catalog.first())
+                        .and_then(|image| image.title.as_deref());
+                    attempt.output_path = auto_output_path(output_dir, title, attempt.format);
+                }
                 match validate_destination(&attempt.output_path, &attempt.format, attempt.overwrite)
                 {
                     Ok(()) => reply(
@@ -1603,6 +1723,24 @@ mod tests {
         assert_eq!(
             map_failure_code("job.partial-discarded"),
             "tile.download-failed"
+        );
+    }
+
+    #[test]
+    fn automatic_output_names_are_title_based_and_safe() {
+        assert_eq!(
+            safe_output_stem(Some("The / Great: Picture?")),
+            "The-Great-Picture"
+        );
+        assert_eq!(safe_output_stem(Some("...")), "dezoomify");
+        assert_eq!(safe_output_stem(Some("CON")), "dezoomify");
+        assert_eq!(
+            auto_output_path(
+                Path::new("/pictures"),
+                Some("A fine work"),
+                OutputFormat::Jpeg
+            ),
+            PathBuf::from("/pictures/A-fine-work.jpg")
         );
     }
 }

@@ -127,8 +127,8 @@ test("app pages link the in-app docs instead of legacy doc sites", () => {
       `${source} must not link the legacy wiki`,
     );
     assert.ok(
-      code.includes("./help/troubleshooting.html"),
-      `${source} points failures at the in-app troubleshooting page`,
+      code.includes("./help/finding-the-image-address.html"),
+      `${source} points failures at the in-app image-address guide`,
     );
   }
 });

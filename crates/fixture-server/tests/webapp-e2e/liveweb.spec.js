@@ -164,7 +164,7 @@ for (const [id, url] of TARGETS) {
     const input = page.locator("#dz-url-input");
     await expect(input).toBeVisible();
     await input.fill(url);
-    await page.getByRole("button", { name: /dezoomify/i }).first().click();
+    await page.getByRole("button", { name: /find image/i }).click();
 
     // Bounded observation: wait for at least one readable tile (the app
     // planned tiles from real, auto-selected metadata and fetched one), or

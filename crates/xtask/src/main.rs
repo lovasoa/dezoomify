@@ -103,6 +103,40 @@ fn repo_root() -> std::path::PathBuf {
         .unwrap_or(dir)
 }
 
+/// Resolve Cargo's active target directory rather than assuming `target/`.
+///
+/// `CARGO_TARGET_DIR` is a supported cache location used by CI and local
+/// callers. Every task that builds then launches a Cargo binary must use this
+/// path so it executes the artifact Cargo just refreshed.
+pub(crate) fn cargo_target_directory() -> Result<std::path::PathBuf, String> {
+    let root = repo_root();
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .current_dir(&root)
+        .output()
+        .map_err(|e| format!("failed to query Cargo target directory: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cargo metadata failed while resolving the target directory: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("invalid cargo metadata output: {e}"))?;
+    metadata["target_directory"]
+        .as_str()
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "cargo metadata omitted target_directory".to_string())
+}
+
+/// Debug executable path for a binary Cargo has built in this workspace.
+pub(crate) fn cargo_debug_binary(name: &str) -> Result<std::path::PathBuf, String> {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    Ok(cargo_target_directory()?
+        .join("debug")
+        .join(format!("{name}{suffix}")))
+}
+
 /// Targets that take no options must fail on unknown flags instead of
 /// silently widening or skipping coverage (docs/testing.md).
 pub(crate) fn reject_unknown_args(target: &str, args: &[String]) -> Result<(), String> {

@@ -198,17 +198,17 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   const destination = doc.createElement("div");
   destination.className = "dz-quick-option";
   const destinationLabel = doc.createElement("span");
-  destinationLabel.textContent = "Save to";
+  destinationLabel.textContent = t("desktop.quick.folder");
   const destinationButton = doc.createElement("button");
   destinationButton.type = "button";
   destinationButton.className = "dz-quick-button";
-  destinationButton.textContent = outputDir.value ? outputDir.value.split(/[\\/]/).filter(Boolean).pop() ?? "Chosen folder" : "Ask each time";
-  destinationButton.title = outputDir.value || "Choose a starting folder for the save dialog";
+  destinationButton.textContent = outputDir.value ? outputDir.value.split(/[\\/]/).filter(Boolean).pop() ?? t("desktop.quick.chosenFolder") : t("desktop.quick.askEachTime");
+  destinationButton.title = outputDir.value || t("desktop.quick.chooseFolder");
   destinationButton.addEventListener("click", () => {
     void pickDirectory(outputDir.value || null).then((picked) => {
       if (!picked) return;
       outputDir.value = picked;
-      destinationButton.textContent = picked.split(/[\\/]/).filter(Boolean).pop() ?? "Chosen folder";
+      destinationButton.textContent = picked.split(/[\\/]/).filter(Boolean).pop() ?? t("desktop.quick.chosenFolder");
       destinationButton.title = picked;
       view.onPersist();
     });
@@ -216,7 +216,7 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   destination.append(destinationLabel, destinationButton);
   strip.appendChild(destination);
 
-  quickSelect("Format", view.settings.outputFormat, [
+  quickSelect(t("desktop.quick.format"), view.settings.outputFormat, [
     ["png", "PNG"], ["jpeg", "JPEG"], ["tiff", "TIFF"], ["webp", "WebP"], ["zif", "ZIF"], ["iiif-dir", "IIIF folder"],
   ], (value) => {
     formatSelect.value = value;
@@ -226,13 +226,13 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
     ? "full"
     : view.settings.maxWidth === 3840 && view.settings.maxHeight === null ? "3840"
       : view.settings.maxWidth === 2048 && view.settings.maxHeight === null ? "2048" : "custom";
-  quickSelect("Size", sizeValue, [["full", "Full resolution"], ["3840", "Up to 4K"], ["2048", "Up to 2K"], ["custom", "Custom…"]], (value) => {
+  quickSelect(t("desktop.quick.size"), sizeValue, [["full", t("desktop.quick.fullResolution")], ["3840", t("desktop.quick.upTo4k")], ["2048", t("desktop.quick.upTo2k")], ["custom", t("desktop.quick.custom")]], (value) => {
     if (value === "full") { maxWidth.value = ""; maxHeight.value = ""; }
     if (value === "3840" || value === "2048") { maxWidth.value = value; maxHeight.value = ""; }
     if (value !== "custom") view.onPersist();
     else settingsDialog.showModal();
   });
-  quickSelect("Network", view.settings.networkProfile, [["maximum", "Maximum"], ["balanced", "Balanced"], ["gentle", "Gentle"]], (value) => {
+  quickSelect(t("desktop.quick.network"), view.settings.networkProfile, [["maximum", t("desktop.quick.fast")], ["balanced", t("desktop.quick.balanced")], ["gentle", t("desktop.quick.gentle")]], (value) => {
     networkSelect.value = value;
     view.onPersist();
   });
@@ -244,7 +244,7 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   moreButton.type = "button";
   moreButton.id = "dz-settings-title";
   moreButton.className = "dz-settings-more";
-  moreButton.setAttribute("aria-label", "More settings");
+  moreButton.setAttribute("aria-label", t("desktop.quick.more"));
   moreButton.textContent = "⚙";
   moreButton.addEventListener("click", () => settingsDialog.showModal());
   strip.appendChild(moreButton);
@@ -255,11 +255,11 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   sheetHead.className = "dz-settings-sheet-head";
   const heading = doc.createElement("h2");
   heading.id = "dz-settings-dialog-title";
-  heading.textContent = "Advanced settings";
+  heading.textContent = t("desktop.advanced.title");
   const close = doc.createElement("button");
   close.type = "button";
   close.className = "dz-settings-close";
-  close.textContent = "Done";
+  close.textContent = t("desktop.advanced.done");
   close.addEventListener("click", () => settingsDialog.close());
   sheetHead.append(heading, close);
   sheet.appendChild(sheetHead);
@@ -277,20 +277,31 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
     sheet.appendChild(row);
   };
 
-  const compressionWrap = doc.createElement("div");
-  compressionWrap.className = "dz-slider-control";
-  const compression = doc.createElement("input");
-  compression.id = "dz-settings-compression";
-  compression.type = "range";
-  compression.min = "0";
-  compression.max = "100";
-  compression.value = String(view.settings.compression);
-  const compressionValue = doc.createElement("output");
-  compressionValue.textContent = compression.value;
-  compression.addEventListener("input", () => { compressionValue.textContent = compression.value; });
-  compression.addEventListener("change", () => view.onPersist());
-  compressionWrap.append(compression, compressionValue);
-  makeRow("Compression", "Higher values make smaller files but take longer.", compressionWrap);
+  const storedCompression = hidden("dz-settings-compression", String(view.settings.compression));
+  if (view.settings.outputFormat !== "webp" && view.settings.outputFormat !== "iiif-dir") {
+    const compressionWrap = doc.createElement("div");
+    compressionWrap.className = "dz-slider-control";
+    const compression = doc.createElement("input");
+    compression.type = "range";
+    compression.min = "0";
+    compression.max = "100";
+    const jpeg = view.settings.outputFormat === "jpeg";
+    compression.setAttribute("aria-label", jpeg ? t("desktop.advanced.jpegQuality") : t("desktop.advanced.compressionEffort"));
+    compression.value = jpeg ? String(100 - view.settings.compression) : String(view.settings.compression);
+    const compressionValue = doc.createElement("output");
+    compressionValue.textContent = jpeg ? `${compression.value}%` : compression.value;
+    compression.addEventListener("input", () => { compressionValue.textContent = jpeg ? `${compression.value}%` : compression.value; });
+    compression.addEventListener("change", () => {
+      storedCompression.value = jpeg ? String(100 - Number(compression.value)) : compression.value;
+      view.onPersist();
+    });
+    compressionWrap.append(compression, compressionValue);
+    makeRow(
+      jpeg ? t("desktop.advanced.jpegQuality") : t("desktop.advanced.compressionEffort"),
+      jpeg ? t("desktop.advanced.jpegQualityDesc") : t("desktop.advanced.compressionEffortDesc"),
+      compressionWrap,
+    );
+  }
 
   const sizeInputs = doc.createElement("div");
   sizeInputs.className = "dz-size-control";
@@ -298,13 +309,15 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   widthInput.type = "number";
   widthInput.min = "1";
   widthInput.max = "1000000";
-  widthInput.placeholder = "Width";
+  widthInput.placeholder = t("desktop.advanced.width");
+  widthInput.setAttribute("aria-label", t("desktop.advanced.width"));
   widthInput.value = maxWidth.value;
   const heightInput = doc.createElement("input");
   heightInput.type = "number";
   heightInput.min = "1";
   heightInput.max = "1000000";
-  heightInput.placeholder = "Height";
+  heightInput.placeholder = t("desktop.advanced.height");
+  heightInput.setAttribute("aria-label", t("desktop.advanced.height"));
   heightInput.value = maxHeight.value;
   for (const input of [widthInput, heightInput]) input.addEventListener("change", () => {
     maxWidth.value = widthInput.value;
@@ -312,7 +325,7 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
     view.onPersist();
   });
   sizeInputs.append(widthInput, doc.createTextNode("×"), heightInput);
-  makeRow("Custom dimensions", "Leave either value empty to preserve the original proportion.", sizeInputs);
+  makeRow(t("desktop.advanced.dimensions"), t("desktop.advanced.dimensionsDesc"), sizeInputs);
 
   const retries = doc.createElement("input");
   retries.id = "dz-settings-retries";
@@ -321,13 +334,14 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   retries.min = "0";
   retries.max = "100";
   retries.value = String(view.settings.retries);
+  retries.setAttribute("aria-label", t("desktop.advanced.retries"));
   retries.addEventListener("change", () => view.onPersist());
-  makeRow("Retries", "Try failed image tiles again before keeping a partial result.", retries);
+  makeRow(t("desktop.advanced.retries"), t("desktop.advanced.retriesDesc"), retries);
 
   const cacheButton = doc.createElement("button");
   cacheButton.type = "button";
   cacheButton.className = "dz-compact-action";
-  cacheButton.textContent = cacheDir.value ? "Change…" : "Choose…";
+  cacheButton.textContent = cacheDir.value ? t("desktop.advanced.change") : t("desktop.advanced.choose");
   cacheButton.addEventListener("click", () => {
     void pickDirectory(cacheDir.value || null).then((picked) => {
       if (!picked) return;
@@ -335,14 +349,14 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
       view.onPersist();
     });
   });
-  makeRow("Resume cache", "Reuse tiles after an interrupted save.", cacheButton);
+  makeRow(t("desktop.advanced.resumeCache"), t("desktop.advanced.resumeCacheDesc"), cacheButton);
 
   const headersDetails = doc.createElement("details");
   headersDetails.className = "dz-headers-disclosure";
   const headersSummary = doc.createElement("summary");
-  headersSummary.textContent = "Request headers";
+  headersSummary.textContent = t("desktop.advanced.headers");
   const headersHint = doc.createElement("p");
-  headersHint.textContent = "For protected viewers. Sent only to the image origin and never logged.";
+  headersHint.textContent = t("desktop.advanced.headersDesc");
   const headers = doc.createElement("textarea");
   headers.id = "dz-settings-headers";
   headers.rows = 3;
@@ -367,5 +381,7 @@ export function ensureDesktopSettingsPanel(view: SettingsPanelView): void {
   sheet.appendChild(reset);
   settingsDialog.appendChild(sheet);
   panel.append(strip, settingsDialog);
-  card.appendChild(panel);
+  const history = card.querySelector("#dz-history");
+  if (history) history.before(panel);
+  else card.appendChild(panel);
 }

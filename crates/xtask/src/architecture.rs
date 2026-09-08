@@ -24,7 +24,44 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     let root = super::repo_root();
     check_shared_ui(&root.join("packages/shared-ui/src"))?;
     check_runtime(&root.join("packages/browser-runtime/src"))?;
+    check_browser_single_sources(&root)?;
     println!("architecture: ok");
+    Ok(())
+}
+
+fn check_browser_single_sources(root: &Path) -> Result<(), String> {
+    let shim_path = root.join("src/webIntegration.ts");
+    let shim = std::fs::read_to_string(&shim_path)
+        .map_err(|e| format!("read {}: {e}", shim_path.display()))?;
+    let code: String = shim
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if code.trim() != "export * from \"../packages/browser-runtime/src/web-integration.ts\";" {
+        return Err(format!(
+            "website integration duplicate: {} must remain a re-export-only compatibility shim",
+            shim_path.display()
+        ));
+    }
+
+    let types_path = root.join("packages/browser-runtime/src/types.ts");
+    let types = std::fs::read_to_string(&types_path)
+        .map_err(|e| format!("read {}: {e}", types_path.display()))?;
+    for literal in [
+        "Direct from your browser",
+        "Metadata proxy",
+        "Display only",
+        "Browser session",
+        "Native",
+    ] {
+        if types.contains(literal) {
+            return Err(format!(
+                "transport label duplicate: {} contains `{literal}`; labels live only in transport-labels.ts",
+                types_path.display()
+            ));
+        }
+    }
     Ok(())
 }
 

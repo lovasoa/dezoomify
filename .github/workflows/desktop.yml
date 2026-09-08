@@ -1,13 +1,7 @@
 name: desktop
 on:
   pull_request:
-    # Path gate: the full desktop suite (real-window E2E plus per-OS
-    # bundle-install smokes) only runs when something the desktop app
-    # consumes changed. Unrelated pushes (website, extension, docs) skip
-    # this workflow entirely; the lean gate for the desktop crate stays on
-    # every run via the rust lane in ci.yml. Keep this list in sync with
-    # the crate and package boundaries that feed apps/desktop.
-    paths:
+    paths: &desktop-paths
       - apps/desktop/**
       - crates/**
       - packages/shared-ui/**
@@ -29,324 +23,94 @@ on:
       - .github/workflows/desktop.yml
   push:
     branches: [master]
-    # Same gate as pull_request (see above). A desktop-relevant push pays
-    # the full suite; anything else pays nothing here.
-    paths:
-      - apps/desktop/**
-      - crates/**
-      - packages/shared-ui/**
-      - packages/browser-runtime/**
-      - packages/protocol-ts/**
-      - testdata/**
-      - scripts/**
-      - installer/**
-      - generated/**
-      - Cargo.toml
-      - Cargo.lock
-      - rust-toolchain.toml
-      - clippy.toml
-      - deny.toml
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - .node-version
-      - .github/workflows/desktop.yml
+    paths: *desktop-paths
 permissions:
   contents: read
 concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  # Real-window E2E: ubuntu runs here; macOS/Windows run the same lane
-  # in bundle-smoke below (after their compile gates + native-driver
-  # provisioning). The ubuntu leg is the longest single step (~20 min
-  # green); it runs in its own job so the per-OS bundle smokes never queue
-  # behind it (and vice versa).
+  # This is the only supported real-window platform. Other operating systems
+  # prove their release build, installer, and launch below instead of passing
+  # an expected driver failure as an E2E result.
   window-e2e:
-    name: Window E2E (real window, ubuntu)
+    name: Window E2E (ubuntu)
     runs-on: ubuntu-latest
-    # Green ~25 min; the per-spec deadlines in the lane (~30 min each) are
-    # the real bound. Generous so slow legs fail on signal, never on clock.
-    timeout-minutes: 90
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0: sets PATH on Windows too (corepack shims are not found there)
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 9.12.0 # must match packageManager in package.json
+          version: 9.12.0
           standalone: true
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
-          toolchain: 1.98.0 # must match rust-toolchain.toml
+          toolchain: 1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
-      # WebKit system packages are the slowest Linux step (minutes of apt
-      # downloads on every cold run): cache the .deb archives keyed by this
-      # workflow file (the package list lives here), so repeats only pay the
-      # local install. The cache lives under $HOME so the runner user can
-      # read it without sudo; apt is pointed at it explicitly.
-      - name: Cache webkit apt archives
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/apt-cache
-          key: webkit-apt-${{ runner.os }}-${{ hashFiles('.github/workflows/desktop.yml') }}
-          restore-keys: |
-            webkit-apt-${{ runner.os }}-
-      - name: Install Linux webview system packages
+      - run: pnpm install --frozen-lockfile
+      - name: Install Linux webview and driver packages
         run: |
-          mkdir -p "$HOME/apt-cache"
           sudo apt-get update
-          # webkit2gtk-driver provides WebKitWebDriver (the lane's native
-          # driver, resolved from PATH); xvfb provides xvfb-run (the lane
-          # needs a display and fails closed without one).
-          sudo apt-get -o Dir::Cache::Archives="$HOME/apt-cache" install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential webkit2gtk-driver xvfb
-          # Driver pin evidence: record exactly what apt provided for the run log.
-          dpkg -s webkit2gtk-driver | grep -E '^(Package|Version)'
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential webkit2gtk-driver xvfb
           command -v WebKitWebDriver
           command -v xvfb-run
-      - name: Test desktop shell
-        run: cargo xtask test desktop
-      - name: Build desktop window shell (no bundle)
-        run: cargo xtask build desktop --unsigned-test
+      - run: cargo xtask test desktop
+      - run: cargo xtask build desktop --unsigned-test
       - name: Cache tauri-driver 2.0.6
         id: driver-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.tauri-driver-2.0.6
           key: tauri-driver-2.0.6-${{ runner.os }}
-      - name: Install tauri-driver 2.0.6 (unix)
+      - name: Install tauri-driver 2.0.6
         run: |
           set -euo pipefail
-          # Pinned exact: must match TAURI_DRIVER_PIN in
-          # apps/desktop/tests/window-e2e/harness.mjs and the lane message in
-          # crates/xtask/src/desktop.rs (tauri 2 window shell per
-          # apps/desktop/src-tauri/Cargo.toml). Re-pin deliberately, never float.
           ROOT="$HOME/.tauri-driver-2.0.6"
           if [ ! -x "$ROOT/bin/tauri-driver" ]; then
             cargo install tauri-driver --version "=2.0.6" --root "$ROOT"
           fi
           echo "$ROOT/bin" >> "$GITHUB_PATH"
-          # GITHUB_PATH only takes effect in later steps, so verify by
-          # absolute path here (later steps resolve it from PATH).
-          test -x "$ROOT/bin/tauri-driver"
-      # Save the driver cache right after the install, not at job end:
-      # cancel-in-progress kills post steps, and an uncached cold install
-      # (~1-10 min of cargo) would then be re-paid by every cancelled run
-      # in a push burst. Best-effort: on a concurrent-save conflict the
-      # warning is harmless (the entry already exists).
-      - name: Save tauri-driver 2.0.6 cache (early)
-        if: steps.driver-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.tauri-driver-2.0.6
-          key: tauri-driver-2.0.6-${{ runner.os }}
-      # Real-window E2E. The lane (`cargo xtask test desktop --e2e-window`)
-      # runs window.spec.mjs then formats.spec.mjs sequentially against
-      # hermetic loopback fixtures, each under its own hard deadline; it
-      # never contacts public source sites. The updater stays inert
-      # throughout (empty pubkey, plugin not registered): no update flow is
-      # exercised, only install + launch + version/identify, unsigned, no
-      # stores. No bundling here: the bundle smoke owns the release build.
-      - name: Real-window E2E (Linux under Xvfb)
-        run: |
-          set -euo pipefail
-          # DISPLAY comes from xvfb-run; the lane fails closed without it.
-          # pipefail keeps the lane's exit code (tee only records the log).
-          xvfb-run -a cargo xtask test desktop --e2e-window 2>&1 | tee e2e-window.log
-      - name: Upload E2E evidence
+      - name: Real-window E2E
+        run: xvfb-run -a cargo xtask test desktop --e2e-window 2>&1 | tee e2e-window.log
+      - name: Upload E2E log
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-e2e-ubuntu
           path: e2e-window.log
           retention-days: 30
-  # Per-OS release bundle, install, and launch smoke. Ubuntu runs the
-  # bundler only (its compile gates and E2E live in window-e2e, which runs
-  # in parallel); macOS and Windows additionally carry the cross-OS lean
-  # compile gates plus their window-E2E legs after native-driver
-  # provisioning: Windows runs the real lane; macOS runs the same lane to
-  # record the upstream tauri-driver block evidence (no darwin server).
-  # The lane needs no tauri-cli (`--unsigned-test` stops before the
-  # bundler); only these bundle steps do.
+  # Every supported release target builds its real bundle, installs it when
+  # its host tools are available, and verifies that the window stays alive.
   bundle-smoke:
     name: Bundle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Release Tauri builds plus (cold) tauri-cli installs; generous so slow
-    # legs fail on signal, never on clock.
-    timeout-minutes: 90
+    timeout-minutes: 35
     strategy:
       fail-fast: false
-      max-parallel: 3
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0: sets PATH on Windows too (corepack shims are not found there)
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 9.12.0 # must match packageManager in package.json
-          # Standalone pnpm.exe: Rust Command::new("pnpm") only resolves .exe
-          # on Windows, not the .cmd shim a package install leaves behind.
+          version: 9.12.0
           standalone: true
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
-          toolchain: 1.98.0 # must match rust-toolchain.toml
+          toolchain: 1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
-      # WebKit system packages (Linux): the window shell's release build and
-      # the deb bundle both need them. Same .deb archive cache as the E2E
-      # job (same key, shared repo cache), so cold apt is paid once.
-      - name: Cache webkit apt archives
-        if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/apt-cache
-          key: webkit-apt-${{ runner.os }}-${{ hashFiles('.github/workflows/desktop.yml') }}
-          restore-keys: |
-            webkit-apt-${{ runner.os }}-
-      - name: Install Linux webview system packages
+      - run: pnpm install --frozen-lockfile
+      - name: Install Linux webview packages
         if: runner.os == 'Linux'
         run: |
-          mkdir -p "$HOME/apt-cache"
           sudo apt-get update
-          # libwebkit2gtk-4.1-dev and friends drive the window shell compile;
-          # xvfb drives the launch smoke.
-          sudo apt-get -o Dir::Cache::Archives="$HOME/apt-cache" install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential xvfb
-          dpkg -s libwebkit2gtk-4.1-dev | grep -E '^(Package|Version)'
-          command -v xvfb-run
-      # Cross-OS compile gates. Ubuntu's copy runs in the window-e2e job
-      # (parallel), so only macOS and Windows repeat them here; the bundle
-      # steps below are the only ubuntu work in this job.
-      - name: Test desktop shell
-        if: runner.os != 'Linux'
-        run: cargo xtask test desktop
-      - name: Build desktop window shell (no bundle)
-        if: runner.os != 'Linux'
-        run: cargo xtask build desktop --unsigned-test
-      # Native-driver slots (macOS/Windows only): block evidence that the
-      # E2E lane is Linux-only by code, as documented in the steps.
-      - name: Cache tauri-driver 2.0.6
-        if: runner.os != 'Linux'
-        id: driver-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.tauri-driver-2.0.6
-          key: tauri-driver-2.0.6-${{ runner.os }}
-      - name: Install tauri-driver 2.0.6 (unix)
-        if: runner.os != 'Windows' && runner.os != 'Linux'
-        run: |
-          set -euo pipefail
-          # Pinned exact: must match TAURI_DRIVER_PIN in
-          # apps/desktop/tests/window-e2e/harness.mjs and the lane message in
-          # crates/xtask/src/desktop.rs (tauri 2 window shell per
-          # apps/desktop/src-tauri/Cargo.toml). Re-pin deliberately, never float.
-          ROOT="$HOME/.tauri-driver-2.0.6"
-          if [ ! -x "$ROOT/bin/tauri-driver" ]; then
-            cargo install tauri-driver --version "=2.0.6" --root "$ROOT"
-          fi
-          echo "$ROOT/bin" >> "$GITHUB_PATH"
-          # GITHUB_PATH only takes effect in later steps, so verify by
-          # absolute path here (later steps resolve it from PATH).
-          test -x "$ROOT/bin/tauri-driver"
-      - name: Save tauri-driver 2.0.6 cache (early)
-        if: runner.os != 'Linux' && steps.driver-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.tauri-driver-2.0.6
-          key: tauri-driver-2.0.6-${{ runner.os }}
-      - name: Install tauri-driver 2.0.6 (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # Same pin as the unix leg (see its comment for the sources).
-          $ROOT = "$HOME\.tauri-driver-2.0.6"
-          if (-not (Test-Path "$ROOT\bin\tauri-driver.exe")) {
-            cargo install tauri-driver --version "=2.0.6" --root $ROOT
-            if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-driver failed" }
-          }
-          Add-Content -Path $env:GITHUB_PATH -Value "$ROOT\bin"
-          # GITHUB_PATH only takes effect in later steps, so verify by
-          # absolute path here (later steps resolve it from PATH).
-          if (-not (Test-Path "$ROOT\bin\tauri-driver.exe")) { throw "tauri-driver missing after install" }
-      - name: Enable safaridriver (macOS native driver slot)
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          # safaridriver ships with macOS; enabling needs root, which runners
-          # grant via passwordless sudo. Fail closed when refused: without
-          # enablement the window cannot be driven either.
-          sudo safaridriver --enable 2>&1 | tee e2e-window.log
-          command -v safaridriver | tee -a e2e-window.log
-      - name: Real-window E2E (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          command -v tauri-driver | tee -a e2e-window.log
-          # Same lane as ubuntu (no Xvfb: runners provide a GUI session).
-          # Upstream block (log evidence below): tauri-driver 2.0.6 ships no
-          # darwin server (`#[cfg(any(target_os = "linux", windows))]` in
-          # its main.rs; any invocation prints `tauri-driver is not
-          # supported on this platform` and exits 1), so no lane change can
-          # drive the window until upstream ships macOS support. This gate
-          # passes on a real lane pass (that support landing) or on that
-          # exact driver message, and fails closed on anything else.
-          set +e
-          cargo xtask test desktop --e2e-window 2>&1 | tee -a e2e-window.log
-          code=${PIPESTATUS[0]}
-          set -e
-          if [ "$code" -eq 0 ]; then
-            echo "e2e-window passed on macOS (tauri-driver macOS support landed)" | tee -a e2e-window.log
-          elif grep -q "tauri-driver is not supported on this platform" e2e-window.log; then
-            echo "BLOCKED (expected): tauri-driver 2.0.6 has no macOS server; macOS coverage stays lean/unit + window-shell compile + dmg smoke until upstream support lands." | tee -a e2e-window.log
-          else
-            echo "UNEXPECTED lane failure on macOS (see e2e-window.log)" | tee -a e2e-window.log
-            exit 1
-          fi
-      - name: Install msedgedriver pinned to Edge (Windows native driver slot)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $edgeExe = @('C:\Program Files\Microsoft\Edge\Application\msedge.exe', 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $edgeExe) { throw "BLOCKED: no Edge binary under either Program Files path; install Edge on the runner, then rerun." }
-          $edgeVersion = (Get-Item $edgeExe).VersionInfo.ProductVersion
-          "Edge: $edgeVersion ($edgeExe)" | Tee-Object e2e-window.log
-          $zip = "$env:RUNNER_TEMP\edgedriver_win64.zip"
-          $dir = "$env:RUNNER_TEMP\edgedriver"
-          Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$edgeVersion/edgedriver_win64.zip" -OutFile $zip
-          if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
-          Expand-Archive -Path $zip -DestinationPath $dir
-          $driverOut = & "$dir\msedgedriver.exe" --version
-          $driverOut | Tee-Object e2e-window.log -Append
-          # Fail closed on mismatch, naming both versions.
-          $edgeMajor = $edgeVersion.Split('.')[0]
-          if ($driverOut -notmatch [regex]::Escape($edgeMajor)) { throw "BLOCKED: msedgedriver ($driverOut) does not match Edge ($edgeVersion); re-pin to the runner's Edge and rerun." }
-          Add-Content -Path $env:GITHUB_PATH -Value $dir
-      - name: Real-window E2E (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          (Get-Command tauri-driver).Source | Tee-Object e2e-window.log -Append
-          # Same lane as ubuntu (no Xvfb: runners provide a GUI session).
-          cargo xtask test desktop --e2e-window 2>&1 | Tee-Object e2e-window.log -Append
-          if ($LASTEXITCODE -ne 0) { throw "e2e-window failed on Windows (see e2e-window.log)" }
-      - name: Upload E2E evidence (macOS/Windows)
-        if: always() && runner.os != 'Linux'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: desktop-e2e-${{ matrix.os }}
-          path: e2e-window.log
-          retention-days: 30
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential xvfb
       - name: Cache tauri-cli 2.11.4
         id: cli-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -357,120 +121,50 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           set -euo pipefail
-          # 2.11.4: latest tauri-cli 2.x (pairs with the tauri 2 window
-          # shell); re-pin deliberately, never float. Only the bundle steps
-          # need it: `cargo tauri --version` is a bundle-prereq gate in
-          # crates/xtask/src/desktop.rs.
           ROOT="$HOME/.tauri-cli-2.11.4"
           if [ ! -x "$ROOT/bin/cargo-tauri" ]; then
             cargo install tauri-cli --version "=2.11.4" --root "$ROOT"
           fi
           echo "$ROOT/bin" >> "$GITHUB_PATH"
-          # Same-step PATH note as the tauri-driver leg: verify absolute.
-          "$ROOT/bin/cargo-tauri" tauri --version
-      # Save right after the install (see the tauri-driver early-save note):
-      # the ~10 min cold cargo install of tauri-cli must not be re-paid by
-      # every run a push burst cancels.
-      - name: Save tauri-cli 2.11.4 cache (early)
-        if: runner.os != 'Windows' && steps.cli-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.tauri-cli-2.11.4
-          key: tauri-cli-2.11.4-${{ runner.os }}
       - name: Install tauri-cli 2.11.4 (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # Same pin as the unix leg (see its comment).
-          $ROOT = "$HOME\.tauri-cli-2.11.4"
-          if (-not (Test-Path "$ROOT\bin\cargo-tauri.exe")) {
-            cargo install tauri-cli --version "=2.11.4" --root $ROOT
+          $root = "$HOME\.tauri-cli-2.11.4"
+          if (-not (Test-Path "$root\bin\cargo-tauri.exe")) {
+            cargo install tauri-cli --version "=2.11.4" --root $root
             if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-cli failed" }
           }
-          Add-Content -Path $env:GITHUB_PATH -Value "$ROOT\bin"
-          # Same-step PATH note as the tauri-driver leg: verify absolute.
-          & "$ROOT\bin\cargo-tauri.exe" tauri --version
-          if ($LASTEXITCODE -ne 0) { throw "cargo tauri --version failed" }
-      - name: Save tauri-cli 2.11.4 cache (early, windows)
-        if: runner.os == 'Windows' && steps.cli-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.tauri-cli-2.11.4
-          key: tauri-cli-2.11.4-${{ runner.os }}
-      # Bundle-install smokes. Bundle results stay independently visible per
-      # step; a smoke failure can never fail the E2E signal spuriously (the
-      # E2E runs in its own parallel job).
+          Add-Content -Path $env:GITHUB_PATH -Value "$root\bin"
       - name: Bundle, install, and launch smoke (Linux deb)
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           cargo xtask build desktop 2>&1 | tee bundle.log
           DEB="$(ls -t target/release/bundle/deb/*.deb | head -n 1)"
-          echo "bundle: $DEB"
-          # Install needs root (sudo per runner norms); repair deps from apt
-          # when dpkg reports them missing, then fail closed if still broken.
-          sudo dpkg -i "$DEB" 2>&1 | tee -a bundle.log || { sudo apt-get install -f -y | tee -a bundle.log; sudo dpkg -i "$DEB" 2>&1 | tee -a bundle.log; }
+          sudo dpkg -i "$DEB" || { sudo apt-get install -f -y; sudo dpkg -i "$DEB"; }
           PKG="$(dpkg-deb -f "$DEB" Package)"
-          dpkg -s "$PKG" | tee -a bundle.log
           BIN="$(dpkg -L "$PKG" | grep -m1 '/dezoomify-desktop$')"
-          echo "installed binary: $BIN"
-          test -x "$BIN"
-          # The bundled binary is the window shell: it has no --version flag
-          # (the lean shell prints the version with no args; the window shell
-          # opens the window), so the smoke launches it briefly under Xvfb.
-          # Staying alive until the timeout proves install + launch + webview
-          # init; timeout exit 124 is the pass, anything else fails with logs.
-          # (`||` shields the capture from `set -e`: a bare `cmd; code=$?`
-          # would exit the step on cmd's nonzero code before reading it.)
           code=0
           xvfb-run -a timeout 20 "$BIN" >smoke-launch.log 2>&1 || code=$?
-          echo "launch exit: $code (124 means still running at timeout: pass)"
-          if [ "$code" -ne 124 ]; then echo "smoke launch failed:"; cat smoke-launch.log; exit 1; fi
+          test "$code" -eq 124
       - name: Bundle, install, and launch smoke (macOS dmg)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           cargo xtask build desktop 2>&1 | tee bundle.log
           DMG="$(ls -t target/release/bundle/dmg/*.dmg | head -n 1)"
-          echo "bundle: $DMG"
           MNT="/Volumes/DezoomifyCI"
-          # The Tauri dmg embeds our own LICENSE as a UDIF software license
-          # agreement (tauri.conf.json licenseFile), so a bare attach prints
-          # it and cancels without an interactive answer. Answer the CLI
-          # license prompt (Y) from stdin: this agrees to our own project's
-          # GPL text to mount our own just-built image. Gatekeeper and SIP
-          # are never touched here.
-          printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT" | tee -a bundle.log
-          # Discover the app layout from the image instead of hardcoding it:
-          # exactly one .app, binary name from its own Info.plist.
-          ls "$MNT" | tee -a bundle.log
+          printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
           APP_DIR="$(ls -d "$MNT"/*.app | head -n 1)"
-          test -d "$APP_DIR"
           APP_BIN="$APP_DIR/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP_DIR/Contents/Info.plist")"
-          echo "installed binary: $APP_BIN"
-          test -x "$APP_BIN"
-          # Identify: the bundle version from the mounted app metadata.
-          /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_DIR/Contents/Info.plist" | tee -a bundle.log
-          # Unsigned and locally built, so the image carries no quarantine
-          # attribute: direct-binary exec from the mounted image works.
-          # Gatekeeper and SIP are never touched here. Alive after 15 s
-          # proves mount + exec + init (runners provide a GUI session).
           "$APP_BIN" >smoke-launch.log 2>&1 & APP_PID=$!
           sleep 15
-          if kill -0 $APP_PID 2>/dev/null; then
-            echo "smoke: app alive (pid $APP_PID), stopping"
-            kill $APP_PID
-            wait $APP_PID 2>/dev/null || true
-          else
-            echo "smoke launch failed:"
-            cat smoke-launch.log
-            hdiutil detach "$MNT" || true
-            exit 1
-          fi
-          hdiutil detach "$MNT" | tee -a bundle.log
+          kill -0 "$APP_PID"
+          kill "$APP_PID"
+          wait "$APP_PID" 2>/dev/null || true
+          hdiutil detach "$MNT"
       - name: Bundle, install, and launch smoke (Windows nsis or direct exe)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -478,38 +172,23 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $hasWix = [bool](Get-Command candle -ErrorAction SilentlyContinue)
           $hasNsis = [bool](Get-Command makensis -ErrorAction SilentlyContinue)
-          "bundler tools: WiX(candle)=$hasWix NSIS(makensis)=$hasNsis" | Tee-Object bundle.log
           if ($hasWix -and $hasNsis) {
-            cargo xtask build desktop 2>&1 | Tee-Object bundle.log -Append
-            if ($LASTEXITCODE -ne 0) { throw "bundle build failed (see bundle.log)" }
+            cargo xtask build desktop 2>&1 | Tee-Object bundle.log
+            if ($LASTEXITCODE -ne 0) { throw "bundle build failed" }
             $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if (-not $setup) { throw "nsis setup exe missing under target/release/bundle/nsis" }
-            "installer: $($setup.FullName)" | Tee-Object bundle.log -Append
-            # Locally built and unsigned with no Mark-of-the-Web, so
-            # SmartScreen does not intervene; OS policy is never bypassed
-            # here. Prefer the nsis /S silent install over msi.
+            if (-not $setup) { throw "nsis setup exe missing" }
             Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
             $exe = Get-ChildItem "$env:ProgramFiles\Dezoomify" -Recurse -Filter *.exe | Where-Object { $_.Name -notmatch 'uninstall' } | Select-Object -First 1
-            if (-not $exe) { throw "installed exe missing under $env:ProgramFiles\Dezoomify" }
-            "installed binary: $($exe.FullName)" | Tee-Object bundle.log -Append
+            if (-not $exe) { throw "installed exe missing" }
           } else {
-            # Documented fallback: without WiX/NSIS the xtask bundler fails
-            # closed by design (see check_bundle_prereqs), so prove the window
-            # binary itself launches instead of failing the smoke spuriously.
-            # Installer coverage then stays with nsis-capable hosts.
-            "fallback: WiX/NSIS absent, running direct exe smoke (no installer)" | Tee-Object bundle.log -Append
-            cargo build --release -p dezoomify-desktop --features tauri --bin dezoomify-desktop 2>&1 | Tee-Object bundle.log -Append
-            if ($LASTEXITCODE -ne 0) { throw "window release build failed (see bundle.log)" }
+            cargo build --release -p dezoomify-desktop --features tauri --bin dezoomify-desktop 2>&1 | Tee-Object bundle.log
+            if ($LASTEXITCODE -ne 0) { throw "window release build failed" }
             $exe = Get-Item target/release/dezoomify-desktop.exe
           }
-          # The window shell has no --version flag (it opens the window), so
-          # the smoke launches briefly: alive after 15 s proves install (or
-          # direct build) + launch on the runner's GUI session.
-          $p = Start-Process -FilePath $exe.FullName -PassThru
+          $app = Start-Process -FilePath $exe.FullName -PassThru
           Start-Sleep -Seconds 15
-          if ($p.HasExited) { throw "smoke launch exited early (code $($p.ExitCode)); install ok, launch failed" }
-          "smoke: $($exe.FullName) alive after 15 s, stopping" | Tee-Object bundle.log -Append
-          Stop-Process -Id $p.Id -Force
+          if ($app.HasExited) { throw "smoke launch exited early" }
+          Stop-Process -Id $app.Id -Force
       - name: Upload bundle smoke logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

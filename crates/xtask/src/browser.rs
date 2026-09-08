@@ -210,7 +210,7 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
     for rel in [
         "package.json",
         "index.html",
-        "src/webIntegration.ts",
+        "packages/browser-runtime/src/web-integration.ts",
         "src/proxyTransport.ts",
         "src/worker.js",
         "src/server/proxy.ts",
@@ -468,9 +468,8 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     }
     let root = super::repo_root();
     // Regenerate the canonical browser JS mirrors with the single
-    // generator (type-strip plus `.ts` -> `.js` import rewrite) instead of
-    // a naive rename-copy. Extension sources are plain JavaScript in `.ts`
-    // files, so staging below is a plain copy afterwards.
+    // generator (type-strip plus `.ts` -> `.js` import rewrite) before the
+    // extension entrypoint graph is compiled.
     let status = Command::new("node")
         .arg("scripts/sync-web-js.mjs")
         .current_dir(&root)
@@ -479,116 +478,40 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     if !status.success() {
         return Err("sync-web-js failed (scripts/sync-web-js.mjs)".to_string());
     }
+    // Development must load bindings generated from the current Rust tree;
+    // a previous gitignored website build is not a valid extension input.
+    super::extension::build_wasm_glue()?;
     let staging = root.join("target/extension-unpacked");
     if staging.exists() {
         std::fs::remove_dir_all(&staging)
             .map_err(|e| format!("clear {}: {e}", staging.display()))?;
     }
     std::fs::create_dir_all(&staging).map_err(|e| format!("create staging: {e}"))?;
-    let src = root.join("apps/extension/src");
     let manifest = root.join("apps/extension/generated/manifest.chromium.json");
-    std::fs::copy(&manifest, staging.join("manifest.json"))
-        .map_err(|e| format!("stage manifest: {e}"))?;
-    // Stage exactly what apps/extension/scripts/package-store.sh ships
-    // (least privilege): background/index.js as a CLASSIC script
-    // (export-free) with finite source operations, the job tab, icons (brand
-    // plus grey idle set), and the wasm glue. Never app/ or helper-only files.
-    let bg_src = std::fs::read_to_string(src.join("background/index.ts"))
-        .map_err(|e| format!("read background/index.ts: {e}"))?;
-    let mut bg_out = String::new();
-    for line in bg_src.lines() {
-        bg_out.push_str(line.strip_prefix("export ").unwrap_or(line));
-        bg_out.push('\n');
-    }
-    let bg_dir = staging.join("background");
-    std::fs::create_dir_all(&bg_dir).map_err(|e| format!("create background: {e}"))?;
-    std::fs::write(bg_dir.join("index.js"), bg_out)
-        .map_err(|e| format!("stage background/index.js: {e}"))?;
-    let modal_dir = staging.join("modal");
-    std::fs::create_dir_all(&modal_dir).map_err(|e| format!("create modal: {e}"))?;
-    std::fs::copy(
-        src.join("modal").join("modal.html"),
-        modal_dir.join("modal.html"),
-    )
-    .map_err(|e| format!("stage modal/modal.html: {e}"))?;
-    std::fs::copy(
-        src.join("modal").join("modal.ts"),
-        modal_dir.join("modal.js"),
-    )
-    .map_err(|e| format!("stage modal/modal.js: {e}"))?;
-    let page_dir = staging.join("page");
-    std::fs::create_dir_all(&page_dir).map_err(|e| format!("create page: {e}"))?;
-    for name in [
-        "page.html",
-        "page.ts",
-        "scan.ts",
-        "candidates.ts",
-        "fetch.ts",
-        "nativeHandoff.ts",
-    ] {
-        let dest_name = name
-            .strip_suffix(".ts")
-            .map(|s| format!("{s}.js"))
-            .unwrap_or_else(|| name.to_string());
-        std::fs::copy(src.join("page").join(name), page_dir.join(&dest_name))
-            .map_err(|e| format!("stage {name}: {e}"))?;
-    }
-    let vendor_dir = page_dir.join("vendor");
-    std::fs::create_dir_all(&vendor_dir).map_err(|e| format!("create page/vendor: {e}"))?;
-    for name in ["limits.js", "theme.css"] {
-        std::fs::copy(src.join("page/vendor").join(name), vendor_dir.join(name))
-            .map_err(|e| format!("stage page/vendor/{name}: {e}"))?;
-    }
-    let guide = page_dir.join("guide.html");
+    // Stage exactly what apps/extension/scripts/package-store.sh ships:
+    // compile the reviewed background/job entrypoint graph, then copy the
+    // manifest on top. Keeping development and store staging on the same
+    // compiler prevents removed source layouts from drifting back here.
     let status = Command::new("node")
         .args([
-            "scripts/build-extension-guide.mjs",
-            &guide.display().to_string(),
+            "apps/extension/scripts/build.mjs",
+            "--out",
+            &staging.display().to_string(),
         ])
         .current_dir(&root)
         .status()
-        .map_err(|e| format!("failed to build extension guide: {e}"))?;
+        .map_err(|e| format!("failed to build extension entrypoints: {e}"))?;
     if !status.success() {
-        return Err("extension guide build failed (scripts/build-extension-guide.mjs)".to_string());
+        return Err(
+            "extension entrypoint build failed (apps/extension/scripts/build.mjs)".to_string(),
+        );
     }
-    for name in ["guide-step-1.png", "guide-step-2.png", "guide-step-3.png"] {
-        std::fs::copy(src.join("page").join(name), page_dir.join(name))
-            .map_err(|e| format!("stage page/{name}: {e}"))?;
-    }
-    let icons_dir = staging.join("icons");
-    std::fs::create_dir_all(&icons_dir).map_err(|e| format!("create icons: {e}"))?;
-    for icon in [
-        "icon16.png",
-        "icon48.png",
-        "icon128.png",
-        "icon16-grey.png",
-        "icon48-grey.png",
-        "icon128-grey.png",
-    ] {
-        std::fs::copy(src.join("icons").join(icon), icons_dir.join(icon))
-            .map_err(|e| format!("stage {icon}: {e}"))?;
-    }
-    let wasm_dir = staging.join("wasm");
-    std::fs::create_dir_all(&wasm_dir).map_err(|e| format!("create wasm: {e}"))?;
-    for name in ["dezoomify-wasm.js", "dezoomify-wasm_bg.wasm"] {
-        let from = root.join("wasm").join(name);
-        if !from.exists() {
-            return Err(format!(
-                "missing {} (wasm glue; run: cargo xtask build web)",
-                from.display()
-            ));
-        }
-        std::fs::copy(&from, wasm_dir.join(name)).map_err(|e| format!("stage {name}: {e}"))?;
-    }
+    std::fs::copy(&manifest, staging.join("manifest.json"))
+        .map_err(|e| format!("stage manifest: {e}"))?;
     for rel in [
         "background/index.js",
-        "modal/modal.js",
-        "page/page.js",
-        "page/scan.js",
-        "page/candidates.js",
-        "page/fetch.js",
-        "page/nativeHandoff.js",
-        "page/vendor/limits.js",
+        "job/index.js",
+        "job/worker.js",
         "wasm/dezoomify-wasm.js",
     ] {
         let dest = staging.join(rel);

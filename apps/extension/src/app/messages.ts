@@ -29,13 +29,18 @@ export const MESSAGE_TYPES = Object.freeze([
 export const PROTO_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 
+export type MessageKind = (typeof MESSAGE_TYPES)[number];
+export interface MessageIds { scanId?: string; jobId?: string; requestId?: string }
+export interface MessageContext { currentScanId?: string | null; currentJobId?: string | null }
+export type ValidationResult = { ok: true } | { ok: false; code: string; message: string };
+
 /**
  * Build an internal message envelope.
  * @param {string} kind one of MESSAGE_TYPES
  * @param {{ scanId?: string, jobId?: string, requestId?: string }} ids
  * @param {any} [payload]
  */
-export function createMessage(kind, ids, payload = {}) {
+export function createMessage(kind: MessageKind, ids: MessageIds, payload: unknown = {}) {
   if (!MESSAGE_TYPES.includes(kind)) throw new Error(`unknown message kind ${kind}`);
   return Object.freeze({
     kind,
@@ -52,15 +57,15 @@ export function createMessage(kind, ids, payload = {}) {
  * @param {unknown} raw
  * @param {{ currentScanId?: string | null, currentJobId?: string | null }} [ctx]
  */
-export function validateMessage(raw, ctx = {}) {
-  const fail = (code, message) => ({ ok: false, code, message });
+export function validateMessage(raw: unknown, ctx: MessageContext = {}): ValidationResult {
+  const fail = (code: string, message: string): ValidationResult => ({ ok: false, code, message });
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fail("malformed", "message must be object");
-  const msg = /** @type {Record<string, any>} */ (raw);
+  const msg = raw as Record<string, unknown>;
   for (const k of Object.keys(msg)) {
     if (PROTO_KEYS.includes(k)) return fail("malformed", `forbidden key ${k}`);
   }
-  if (!MESSAGE_TYPES.includes(msg.kind)) return fail("unknown-kind", `unknown kind ${msg.kind}`);
-  if (!Number.isInteger(msg.version) || msg.version < MIN_MESSAGE_VERSION || msg.version > MESSAGE_VERSION) {
+  if (typeof msg.kind !== "string" || !MESSAGE_TYPES.includes(msg.kind)) return fail("unknown-kind", `unknown kind ${String(msg.kind)}`);
+  if (typeof msg.version !== "number" || !Number.isInteger(msg.version) || msg.version < MIN_MESSAGE_VERSION || msg.version > MESSAGE_VERSION) {
     return fail("bad-version", `unsupported version ${msg.version}`);
   }
   let size = 0;

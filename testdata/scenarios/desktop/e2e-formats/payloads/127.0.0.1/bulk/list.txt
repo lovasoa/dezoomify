@@ -1,2 +1,0 @@
-# E2E bulk list: single direct IIIF entry (deferred follow, hermetic loopback)
-{{origin}}/fixtures/iiif-v2/info.json

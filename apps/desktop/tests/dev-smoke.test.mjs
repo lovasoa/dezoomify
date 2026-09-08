@@ -7,7 +7,7 @@
 // is involved.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,6 +55,19 @@ function startFrontend() {
 function stopFrontend(child) {
   if (child.exitCode !== null) return;
   if (process.platform === "win32") {
+    // `pnpm.cmd` starts Vite under a command shell. Killing only the shell
+    // leaves Vite alive with inherited pipes, so node:test never exits and
+    // the desktop CI step stalls. Reap the owned tree, bounded, before the
+    // direct-child fallback.
+    try {
+      const stopped = spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        timeout: 5000,
+      });
+      if (stopped.status === 0) return;
+    } catch {
+      // Fall through to the direct child kill.
+    }
     child.kill();
     return;
   }
@@ -105,16 +118,14 @@ test("desktop dev server serves the real entrypoint and shared theme", { timeout
     assert.equal(child.exitCode, null, `desktop frontend exited after startup:\n${getStderr()}`);
 
     const html = await response.text();
-    assert.match(html, /<script[^>]+src=["']\/src\/main\.tsx["']/);
-    assert.doesNotMatch(html, /packages\/shared-ui\/src\/styles\/theme\.css/);
-
-    const main = await fetchWithTimeout(new URL("/src/main.tsx", DEV_URL));
+    // Vite appends a cache-busting query when a hot-reloaded module changes.
+    assert.match(html, /<script[^>]+src=["']\/src\/main\.ts(?:\?[^"']*)?["']/);
+    const main = await fetchWithTimeout(new URL("/src/main.ts", DEV_URL));
     assert.equal(main.status, 200, "Vite serves the desktop entrypoint");
-    const mainSource = await main.text();
-    const themeImport = mainSource.match(/(?:from\s+)?["']([^"']*theme\.css)["']/);
-    assert.ok(themeImport, "desktop entrypoint imports the shared theme");
+    assert.match(html, /src\/theme\.css/, "desktop document links the shared theme");
+    assert.match(html, /src\/desktop\.css/, "desktop document links its native controls stylesheet");
 
-    const theme = await fetchWithTimeout(new URL(themeImport[1], DEV_URL));
+    const theme = await fetchWithTimeout(new URL("/src/theme.css", DEV_URL));
     assert.equal(theme.status, 200, "Vite serves the imported shared theme");
     const themeSource = await theme.text();
     assert.match(themeSource, /--dz-page-bg\s*:/, "shared theme contains page colors");

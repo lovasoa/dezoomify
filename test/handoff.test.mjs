@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { handoffOriginFor, isFileHandoffSource } from "../packages/shared-ui/src/view.ts";
 import { desktopHandoffLink } from "../src/main.ts";
 import { EN, t } from "../packages/shared-ui/src/i18n.ts";
+import { transform } from "esbuild";
 
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 function read(rel) {
@@ -14,7 +15,8 @@ function read(rel) {
 
 async function loadTs(rel) {
   const src = read(rel);
-  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
+  const compiled = await transform(src, { loader: "ts", format: "esm", target: "es2022" });
+  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(compiled.code)}`);
 }
 
 test("handoff 5.5: one-click Send copy names origin/scope with memory-only note", () => {

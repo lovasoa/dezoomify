@@ -25,6 +25,9 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 const DESKTOP_PKG: &str = "dezoomify-desktop";
 const DESKTOP_DEV_HOST: &str = "localhost";
 const DESKTOP_DEV_PORT: u16 = 1420;
@@ -100,6 +103,7 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
     run_node(&["apps/desktop/tests/queue.test.mjs"])?;
+    run_node(&["apps/desktop/tests/diagnostics.test.mjs"])?;
     // Development-surface smoke: starts the real Vite entrypoint on the
     // Tauri dev URL and verifies the shared theme resolves through Vite's
     // module graph. No webview or display is needed.
@@ -109,19 +113,18 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     // ICNS output plus container magic. Runs before the hermetic E2E so a
     // nondeterministic generator fails fast.
     run_node(&["apps/desktop/tests/icons.test.mjs"])?;
-    // Hermetic E2E: loopback fixtures plus the lean driver and frontend
-    // harness (submit -> choose -> request_destination -> save with PNG
-    // verification, deep-link confirm, cancel). No public network, no
-    // webview needed; the real-window path is the opt-in `--e2e-window`
-    // lane below.
+    // Hermetic production-frontend integration: imports the shipped main.ts
+    // entry and drives its rendered controls through recording DOM and Tauri
+    // event/IPC boundaries.
+    // Rendered-window behavior remains in `--e2e-window` below.
     run_node(&["apps/desktop/tests/e2e.test.mjs"])?;
     println!("test desktop: ok");
     Ok(())
 }
 
-/// Real-window E2E: the window shell under tauri-driver plus the platform
-/// native driver (Linux WebKitWebDriver, macOS safaridriver, Windows
-/// msedgedriver), hermetic loopback fixtures, byte-exact save verification.
+/// Real-window E2E: the window shell under tauri-driver, Linux
+/// WebKitWebDriver, hermetic loopback fixtures, and byte-exact save
+/// verification.
 /// Owns the full lifecycle through the node harness (preflight,
 /// window-shell build, fixture server, frontend server, tauri-driver, app
 /// launches, isolated profiles with cleanup). Opt-in only: bare
@@ -155,18 +158,28 @@ fn test_desktop_e2e_window() -> Result<(), String> {
             "test desktop --e2e-window needs the webview system packages ({WEBKIT_SYSTEM_PACKAGES})"
         ));
     }
+    run_cargo(&[
+        "test",
+        "-p",
+        DESKTOP_PKG,
+        "--features",
+        "tauri",
+        "--lib",
+        "output_tests",
+    ])?;
+    // The harness starts this binary from Cargo's target directory. Always
+    // ask Cargo to build it so source changes are rebuilt and no lane relies
+    // on a binary left by an unrelated command.
+    run_cargo(&["build", "-p", "dezoomify-fixture-server"])?;
     build_desktop(&["--unsigned-test".to_string()])?;
     // Lane-private copies: the window and lean shells share one binary
     // path (and the frontend one dist directory), so snapshot both before
     // the spec runs. A concurrent lean or frontend rebuild in the same
     // checkout then cannot swap the app mid-run; on CI runners the copies
     // are simply identical content.
-    let e2e_dir = super::repo_root().join("target/e2e-window");
-    // Windows builds `dezoomify-desktop.exe`; accept the extensionless
-    // lane value when the suffixed binary is the one on disk, and keep
-    // the suffix on the staged copy so the harness env points at a real
-    // file.
-    let app_src = window_shell_bin(&super::repo_root().join("target/debug/dezoomify-desktop"));
+    let target_dir = super::cargo_target_directory()?;
+    let e2e_dir = target_dir.join("e2e-window");
+    let app_src = window_shell_bin(&target_dir.join("debug/dezoomify-desktop"));
     let app_dst_name = if app_src.extension().is_some_and(|e| e == "exe") {
         "dezoomify-desktop.exe"
     } else {
@@ -177,21 +190,10 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         &super::repo_root().join("apps/desktop/dist"),
         &e2e_dir.join("dist"),
     )?;
-    // Sequential runs: each spec owns the fixed frontend port (1420) in
-    // its own process, so a second lane file cannot collide with the
-    // first. `window.spec.mjs` covers the native-feature flows;
-    // `formats.spec.mjs` covers the data-driven full-download matrix: the
-    // 17 PNG cases share one window session (one launch, back-to-back
-    // saves via the product reset path), JPEG/TIFF/iiif-dir keep one
-    // single launch each, so the matrix pays 4 lifecycles, not 20.
-    // Each spec runs under a hard deadline: a leaked child holding node's
-    // pipes or the frontend server open would otherwise hang this lane
-    // forever (observed as a 55-minute CI zombie after launch failures).
-    // 30 minutes is far above the longest green spec (~15) but bounds any
-    // pathological run, and the killed process fails the lane with the
-    // evidence already on the log.
+    // One compact spec owns the fixed frontend port. Its deadline bounds a
+    // leaked app, driver, or frontend server without inflating normal runs.
     run_node_with_deadline(
-        std::time::Duration::from_secs(30 * 60),
+        std::time::Duration::from_secs(10 * 60),
         &["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"],
         &[
             (
@@ -204,21 +206,6 @@ fn test_desktop_e2e_window() -> Result<(), String> {
             ),
         ],
         "window.spec.mjs",
-    )?;
-    run_node_with_deadline(
-        std::time::Duration::from_secs(30 * 60),
-        &["--test", "apps/desktop/tests/window-e2e/formats.spec.mjs"],
-        &[
-            (
-                "DEZOOMIFY_WINDOW_E2E_APP_BIN",
-                app_copy.to_str().unwrap_or(""),
-            ),
-            (
-                "DEZOOMIFY_WINDOW_E2E_DIST",
-                dist_copy.to_str().unwrap_or(""),
-            ),
-        ],
-        "formats.spec.mjs",
     )?;
     println!("test desktop --e2e-window: ok (real window, hermetic loopback)");
     Ok(())
@@ -445,7 +432,7 @@ pub fn dev_desktop() -> Result<(), String> {
         "dezoomify-desktop",
     ])?;
     let root = super::repo_root();
-    let bin = root.join("target/debug/dezoomify-desktop");
+    let bin = window_shell_bin(&super::cargo_debug_binary("dezoomify-desktop")?);
     if !bin.exists() {
         return Err(format!(
             "desktop binary missing after build: {}",
@@ -472,7 +459,7 @@ pub fn dev_desktop() -> Result<(), String> {
 fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
     let root = super::repo_root();
     let mut command = pnpm_command()?;
-    let mut child = command
+    command
         .args([
             "--filter",
             "./apps/desktop",
@@ -480,19 +467,40 @@ fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
             "--host",
             DESKTOP_DEV_HOST,
         ])
-        .current_dir(&root)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .current_dir(&root);
+    configure_owned_process_tree(&mut command);
+    let child = command
         .spawn()
         .map_err(|e| format!("failed to start the desktop frontend: {e}"))?;
+    let mut frontend = DesktopFrontend { child };
 
-    if let Err(error) = wait_for_desktop_frontend(&mut child) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(error);
+    wait_for_desktop_frontend(&mut frontend.child)?;
+    // A pre-existing server can answer the probe before this Vite child has
+    // reported its strict-port collision. Give the child one short turn to
+    // fail so the desktop shell never attaches to stale frontend assets.
+    std::thread::sleep(Duration::from_secs(1));
+    if let Some(status) = frontend
+        .child
+        .try_wait()
+        .map_err(|e| format!("cannot inspect the desktop frontend: {e}"))?
+    {
+        return Err(format!(
+            "desktop frontend exited after startup on http://{DESKTOP_DEV_HOST}:{DESKTOP_DEV_PORT}/ ({status}); another Vite server may already own that port"
+        ));
     }
-    Ok(DesktopFrontend { child })
+    Ok(frontend)
+}
+
+/// An owned process is never an interactive terminal peer. A private process
+/// group lets deadline cleanup include descendants (Vite, Node, or a window
+/// driver), while closed stdin prevents a child from waiting on the terminal.
+fn configure_owned_process_tree(command: &mut Command) {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    command.process_group(0);
 }
 
 /// Wait until Vite accepts connections, while surfacing an early child exit
@@ -540,10 +548,57 @@ struct DesktopFrontend {
 
 impl Drop for DesktopFrontend {
     fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
+        terminate_owned_process_tree(&mut self.child);
+    }
+}
+
+/// Stop an owned process tree. The leader is created in its own Unix process
+/// group; Windows requires taskkill's `/T` traversal instead.
+fn terminate_owned_process_tree(child: &mut Child) {
+    #[cfg(unix)]
+    signal_process_group(child.id(), libc::SIGTERM);
+
+    #[cfg(windows)]
+    if child.try_wait().ok().flatten().is_none() {
+        let taskkill = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Ok(mut taskkill) = taskkill {
+            let taskkill_deadline = Instant::now() + Duration::from_secs(5);
+            while taskkill.try_wait().ok().flatten().is_none() && Instant::now() < taskkill_deadline
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            if taskkill.try_wait().ok().flatten().is_none() {
+                let _ = taskkill.kill();
+            }
+            let _ = taskkill.wait();
         }
-        let _ = self.child.wait();
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    if child.try_wait().ok().flatten().is_none() {
+        #[cfg(unix)]
+        signal_process_group(child.id(), libc::SIGKILL);
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+fn signal_process_group(leader: u32, signal: libc::c_int) {
+    if let Ok(leader) = libc::pid_t::try_from(leader) {
+        // SAFETY: `leader` is the id returned for the child placed in its own
+        // process group above. A negative pid targets that group only.
+        unsafe {
+            libc::kill(-leader, signal);
+        }
     }
 }
 
@@ -831,7 +886,11 @@ fn run_cargo(args: &[&str]) -> Result<(), String> {
 }
 
 fn run_node(args: &[&str]) -> Result<(), String> {
-    run_node_with_env(args, &[])
+    // Lean desktop suites normally finish in seconds. Preserve headroom for
+    // cold Cargo work in the deep-link test, while failing a leaked Node or
+    // Vite descendant with the owning spec named instead of letting CI hang.
+    let label = args.join(" ");
+    run_node_with_deadline(std::time::Duration::from_secs(6 * 60), args, &[], &label)
 }
 
 /// Run node under a hard deadline: when the child outlives it, the process
@@ -845,10 +904,13 @@ fn run_node_with_deadline(
     env: &[(&str, &str)],
     label: &str,
 ) -> Result<(), String> {
-    let mut child = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .args(args)
         .envs(env.iter().copied())
-        .current_dir(super::repo_root())
+        .current_dir(super::repo_root());
+    configure_owned_process_tree(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|e| format!("failed to run node: {e}"))?;
     let start = std::time::Instant::now();
@@ -862,8 +924,7 @@ fn run_node_with_deadline(
             }
             Ok(None) => {
                 if start.elapsed() > deadline {
-                    child.kill().ok();
-                    let _ = child.wait();
+                    terminate_owned_process_tree(&mut child);
                     return Err(format!(
                         "desktop node tests killed after {:.0} s ({label}): the spec process did not exit; \
                          a leaked child is holding its pipes or the frontend server open",
@@ -875,19 +936,6 @@ fn run_node_with_deadline(
             Err(e) => return Err(format!("failed to wait for node ({label}): {e}")),
         }
     }
-}
-
-fn run_node_with_env(args: &[&str], env: &[(&str, &str)]) -> Result<(), String> {
-    let status = Command::new("node")
-        .args(args)
-        .envs(env.iter().copied())
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run node: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "desktop node tests failed".to_string())
 }
 
 #[cfg(test)]
@@ -1002,5 +1050,50 @@ mod tests {
         // Linux/macOS behavior stays byte-identical: a bare `pnpm` lookup.
         let cmd = super::pnpm_command().expect("pnpm command builds");
         assert_eq!(cmd.get_program(), "pnpm");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn desktop_frontend_drop_kills_descendants() {
+        let root =
+            std::env::temp_dir().join(format!("dezoomify-frontend-cleanup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create cleanup fixture");
+        let pid_file = root.join("descendant.pid");
+        let mut command = std::process::Command::new("sh");
+        command.args([
+            "-c",
+            "sleep 30 & descendant=$!; echo \"$descendant\" > \"$1\"; wait",
+            "sh",
+            pid_file.to_str().expect("utf-8 temp path"),
+        ]);
+        super::configure_owned_process_tree(&mut command);
+        let frontend = super::DesktopFrontend {
+            child: command.spawn().expect("spawn process tree"),
+        };
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !pid_file.is_file() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let descendant: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .expect("descendant pid file")
+            .trim()
+            .parse()
+            .expect("numeric descendant pid");
+
+        drop(frontend);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            // SAFETY: signal 0 only checks the process id written by the test
+            // child and does not alter that process.
+            let exists = unsafe { libc::kill(descendant, 0) } == 0;
+            if !exists || std::time::Instant::now() >= deadline {
+                assert!(!exists, "frontend descendant survived owner cleanup");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 }

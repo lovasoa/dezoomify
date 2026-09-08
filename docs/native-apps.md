@@ -22,7 +22,7 @@ Native is the authoritative runtime for images larger than a browser tab and loc
 
 ## Desktop
 
-The Tauri application hosts the same shared UI used by the website and extension. Its integration maps generated protocol commands to Tauri invocations and maps native events back to the shared UI. File pickers and save destinations are represented as native handles rather than browser paths.
+The Tauri application hosts the same shared UI used by the website and extension. Its integration maps generated protocol commands to Tauri invocations and maps native events back to the shared UI. A desktop start carries every output setting from the main screen; the native driver derives the output basename from the selected catalog title and saves directly in the configured folder, with no second save dialog.
 
 Desktop treats website and deep-link [handoffs](protocol.md#handoff) as bounded, non-secret, untrusted input. It validates them and asks the user to confirm the source and output; these handoffs use no client-side signing. Extension handoff uses allowlisted Native Messaging: browser enforcement of allowed extension IDs authenticates the extension sender to the native host, while a fresh challenge and one-use nonce bind one session and prevent replay rather than establish identity. Cookies transfer only after separate origin-scoped consent and are not intentionally persisted.
 
@@ -46,23 +46,34 @@ submission order. The UI format picker offers `png`, `jpeg`, `tiff`, `zif`,
 `apps/desktop/src/desktopIntegration.ts`), defaulting to `png`. The choice is
 first-class persisted state: `apps/desktop/src/settings.ts`
 stores `outputFormat` in localStorage (`dezoomify.desktop.settings.v1`),
-validates it fail-closed on load, and seeds both the picker radios and the
-destination-grant format on relaunch. The shell grant gate accepts the same
-full `png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir` id set (`SUPPORTED_FORMATS`
-in `apps/desktop/src-tauri/src/commands.rs`); the format travels in the
-`request_destination` grant, never
-in `start_job` (`settingsToInvokeArgs` carries compression, retries, caps,
-directories, and headers only, and the Rust `DesktopSettings` has no format
-field). JPEG quality is `100 - compression` with the shipped default
+validates it fail-closed on load, and sends it with `start_job` alongside the
+configured output directory. The native driver uses the selected catalog
+title as the basename, adds the format extension, and appends a numeric suffix
+when needed rather than replacing an existing output. JPEG quality is `100 - compression` with the shipped default
 compression 5 pinning quality 95; the settings panel (output directory,
 compression, width/height caps, retries, cache directory, `-H` headers) plus
-the aux-panel format radios persist across relaunches and fail closed to
+the main-screen format selector persist across relaunches and fail closed to
 defaults on invalid drafts. Overwrite is always false: no overwrite
-confirmation UI exists, so `request_destination` validates and grants with
-`overwrite=false` and an existing destination is denied with the typed
-`output.exists` reason for choose-output recovery instead of replaced.
+confirmation UI exists, so automatic desktop output never replaces an
+existing destination.
 User-visible behavior lives in the [Desktop app guide](user/desktop-app.md);
 this section states the mechanism only.
+
+Settings render only while idle. Format radios appear only for destination
+recovery; the completion screen contains neither settings nor a queue.
+History selection prefills the input without starting work. Completion uses
+native saved-output copy and explicit open/reveal callbacks, without browser
+save or color-profile guidance. `open_saved_output` accepts a job id and a
+reveal flag; the job table retains the actual published path natively and
+permits these actions only for completed or partially completed jobs. The
+system launcher opens the image or its containing directory with the platform
+default handler. It runs on a blocking worker and checks the launcher exit
+status, trying supported launcher fallbacks; folder opening does not require
+a Linux FileManager1 or portal service. File existence errors remain distinct
+from launcher and IPC errors. Every failed file action updates the visible
+error and copyable diagnostics, including subsequent attempts. No
+caller-supplied path is accepted or returned over IPC. Encoding progress does
+not erase tile counts already received.
 
 The native desktop path emits no catalog notice and no display-only branch.
 The driver folds the catalog internally (first image, largest fitting level;
@@ -85,17 +96,11 @@ complete save, and `--no-partial`/`Fail` writes nothing with typed
 `request-decision{partial}` itself from the configured policy, so the shell
 never surfaces `AwaitingPartialDecision` and no interactive partial dialog is
 expected; `answer_choice` keep/discard markers still map onto the policy for
-the pre-grant window. The shell honors the file-level distinction today but
-not the terminal label: the real-driver pump maps every successful driver
-finish to `Completed`/`completed` on `job-output` (`DriverSuccess` drops the
-`PipelineOutcome.partial` flag), so a kept-partial save reports completion
-while the bytes live at the sibling path. The `PartiallyCompleted` state and
-the `partial-completed` output projection exist and the frontend already
-handles them, but only test helpers reach them today. When the sibling fix
-lands (thread `partial` through `DriverSuccess` and project kept-partial
-finishes as `PartiallyCompleted` with a `partial-completed` event), update
-this paragraph to state the labeled terminal and re-check the window E2E
-sibling assertions.
+the pre-grant window. The real-driver pump retains the partial flag, missing
+tile ledger, and actual published path. Kept partials end in
+`PartiallyCompleted` with a `partial-completed` event and a distinct completion
+label. Open and reveal actions resolve the partial sibling, never the
+untouched original destination.
 
 ### Desktop updater
 
@@ -149,11 +154,11 @@ honors a fail-closed fixed destination: `request_destination` grants
 `DEZOOMIFY_E2E_FIXED_DESTINATION` without showing the dialog only when
 `DEZOOMIFY_E2E_WINDOW` is also `1`. Either variable unset restores the
 dialog, so production behavior never changes. Path validation and the typed
-grant still run, so refused destinations keep their stable codes. The lane
-is `cargo xtask test desktop --e2e-window` (Linux, display, tauri-driver,
-and WebKitWebDriver required); it runs `window.spec.mjs` (native-feature
-flows) then `formats.spec.mjs` (per-format byte-exact matrix) sequentially.
-The harness lives in `apps/desktop/tests/window-e2e/`.
+grant still run, so refused destinations keep their stable codes. The Linux-only lane is `cargo xtask test desktop --e2e-window` (display,
+tauri-driver, and WebKitWebDriver required). It explicitly builds the fixture
+server and runs `window.spec.mjs`, which covers submit-to-save, cancellation,
+and confirmed deep-link save through the real window. The harness lives in
+`apps/desktop/tests/window-e2e/`.
 
 ## CLI
 

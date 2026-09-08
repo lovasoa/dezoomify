@@ -41,7 +41,7 @@ pub fn serve(args: &[String]) -> Result<(), String> {
         ));
     }
     let root = crate::repo_root();
-    let exe = root.join("target/debug/dezoomify-fixture-server");
+    let exe = crate::cargo_debug_binary("dezoomify-fixture-server")?;
     let mut cmd = std::process::Command::new(&exe);
     cmd.arg("--port")
         .arg(&port)

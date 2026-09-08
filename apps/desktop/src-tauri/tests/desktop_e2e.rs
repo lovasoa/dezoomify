@@ -347,6 +347,8 @@ fn desktop_e2e_save_flow_verifies_real_png() {
     grant_destination_until_running(&mut table, &job, &dest);
     let state = wait_for_terminal(&mut table, &job, Duration::from_secs(90));
     assert_eq!(state, JobState::Completed, "save flow completes");
+    assert_eq!(table.saved_output_for(&job), Some(dest.clone()));
+    assert!(table.saved_output_for("job:unknown").is_none());
 
     let snapshot = table.output_snapshot_for(&job).expect("output snapshot");
     assert_eq!(
@@ -362,6 +364,39 @@ fn desktop_e2e_save_flow_verifies_real_png() {
     assert_saved_pyramid(&dest, &expected_hash);
     assert_transcript_hygiene(&mut table, &job);
 
+    let _ = std::fs::remove_dir_all(&profile);
+}
+
+#[test]
+fn desktop_automatic_save_retains_openable_output() {
+    let origin = start_fixture_server();
+    let profile = profile_dir("automatic-open");
+    let settings = dezoomify_desktop::settings::parse_settings(&serde_json::json!({
+        "output_dir": profile,
+        "output_format": "png"
+    }))
+    .unwrap();
+    let mut table = JobTable::new();
+    let job = table
+        .start_job_with_settings(&gateway_input(&origin), &settings)
+        .unwrap();
+    assert!(table.saved_output_for(&job).is_none());
+    assert_eq!(
+        wait_for_terminal(&mut table, &job, Duration::from_secs(90)),
+        JobState::Completed
+    );
+    let saved = table
+        .saved_output_for(&job)
+        .expect("automatic output retained");
+    assert_eq!(saved.parent(), Some(profile.as_path()));
+    assert_saved_pyramid(&saved, &golden_output_hash());
+    let completed = table
+        .drain_pending()
+        .into_iter()
+        .filter(|emit| emit.channel == "dezoomify://job-output")
+        .collect::<Vec<_>>();
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].payload["tileCount"], EXPECTED_TILES);
     let _ = std::fs::remove_dir_all(&profile);
 }
 
@@ -496,6 +531,7 @@ fn desktop_e2e_partial_keep_is_honest_with_sibling() {
         "kept partial ends partial-completed, never completed"
     );
     assert!(sibling.exists(), "kept bytes land at the sibling");
+    assert_eq!(table.saved_output_for(&job), Some(sibling.clone()));
     assert!(
         !dest.exists(),
         "granted destination untouched by the partial publish"

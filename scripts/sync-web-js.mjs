@@ -31,6 +31,7 @@ const PAIRS = [
   ["src/hash.ts", "src/hash.js"],
   ["src/main.ts", "src/main.js"],
   ["src/webIntegration.ts", "src/webIntegration.js"],
+  ["packages/browser-runtime/src/web-integration.ts", "packages/browser-runtime/src/web-integration.js"],
   ["src/proxyTransport.ts", "src/proxyTransport.js"],
   ["packages/shared-ui/src/components.ts", "packages/shared-ui/src/components.js"],
   ["packages/shared-ui/src/controller.ts", "packages/shared-ui/src/controller.js"],

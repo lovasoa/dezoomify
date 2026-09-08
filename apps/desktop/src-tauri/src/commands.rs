@@ -9,15 +9,14 @@
 use crate::jobs::JobTable;
 use crate::settings::parse_settings;
 
-/// Exact command registry. Must match the TypeScript integration
-/// DESKTOP_COMMANDS and both generated capability documents.
-pub const COMMANDS: &[&str] = &[
-    "start_job",
-    "cancel_job",
-    "answer_choice",
-    "request_destination",
-    "query_capabilities",
-];
+macro_rules! command_names {
+    ($($command:ident),* $(,)?) => {
+        &[$(stringify!($command)),*]
+    };
+}
+
+/// Exact command registry, derived from `desktop_commands.rs`.
+pub const COMMANDS: &[&str] = desktop_commands!(command_names);
 
 /// Supported output formats for request_destination: the five single-file
 /// native encoders plus the `iiif-dir` tile-tree destination (todo 5.1
@@ -79,7 +78,7 @@ impl CommandError {
     pub fn unknown_command(name: &str) -> Self {
         Self::new(
             "command.unknown",
-            &format!("unknown command {name}; allowed: start_job, cancel_job, answer_choice, request_destination, query_capabilities"),
+            &format!("unknown command {name}; allowed: {}", COMMANDS.join(", ")),
         )
     }
 
@@ -386,7 +385,7 @@ mod tests {
 
     #[test]
     fn registry_lists_exact_commands() {
-        assert_eq!(COMMANDS.len(), 5);
+        assert_eq!(COMMANDS.len(), 6);
         for name in [
             "start_job",
             "cancel_job",

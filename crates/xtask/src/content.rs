@@ -305,32 +305,55 @@ fn verify_sizes(r: &Path) -> Result<(), String> {
     Ok(())
 }
 fn g(r: &Path, a: &[&str]) -> Result<String, String> {
-    let o = Command::new("rg")
-        .args([
-            "--no-heading",
-            "--glob",
-            "!.git/**",
-            "--glob",
-            "!target/**",
-            "--glob",
-            "!node_modules/**",
-            "--glob",
-            "!dist/**",
-            "--glob",
-            "!artifacts/**",
-            "--glob",
-            "!testdata/**",
-            "--glob",
-            "!crates/xtask/src/content.rs",
-        ])
-        .args(a)
+    // Git is required to operate this repository and searches tracked
+    // working-tree files only, so build outputs cannot affect content policy.
+    let mut flags = Vec::new();
+    let mut pathspecs = vec![":(exclude)crates/xtask/src/content.rs".to_string()];
+    let mut pattern = None;
+    let mut glob = None;
+    let mut paths = Vec::new();
+    let mut index = 0;
+    while index < a.len() {
+        match a[index] {
+            "-n" | "-i" | "-o" | "-w" => flags.push(a[index].to_string()),
+            "-N" => flags.push("--no-line-number".to_string()),
+            "--glob" => {
+                index += 1;
+                glob = Some(*a.get(index).ok_or("missing --glob value")?);
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unsupported content search flag {value}"));
+            }
+            value if pattern.is_none() => pattern = Some(value),
+            value => paths.push(value.to_string()),
+        }
+        index += 1;
+    }
+    let pattern = pattern.ok_or("missing content search pattern")?;
+    if let Some(glob) = glob {
+        // Current policy uses a glob as its complete search scope. Unlike
+        // ripgrep's filtering flag, Git pathspecs are additive, so retaining
+        // the broad path argument here would silently widen the search.
+        pathspecs.push(format!(":(top,glob){glob}"));
+    } else {
+        pathspecs.extend(paths);
+    }
+    let output = Command::new("git")
+        .args(["grep", "-I", "-E"])
+        .args(&flags)
+        .arg(pattern)
+        .arg("--")
+        .args(&pathspecs)
         .current_dir(r)
         .output()
-        .map_err(|e| format!("failed to run rg: {e}"))?;
-    match o.status.code() {
-        Some(0) => Ok(String::from_utf8_lossy(&o.stdout).to_string()),
+        .map_err(|e| format!("failed to run git grep: {e}"))?;
+    match output.status.code() {
+        Some(0) => Ok(String::from_utf8_lossy(&output.stdout).to_string()),
         Some(1) => Ok(String::new()),
-        _ => Err(format!("rg failed: {}", String::from_utf8_lossy(&o.stderr))),
+        _ => Err(format!(
+            "git grep failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )),
     }
 }
 

@@ -414,7 +414,7 @@ fn build_cli() -> Result<std::path::PathBuf, String> {
     if !status.success() {
         return Err("cargo build dezoomify-cli failed".to_string());
     }
-    let cli = root.join("target/debug/dezoomify-cli");
+    let cli = super::cargo_debug_binary("dezoomify-cli")?;
     if !cli.exists() {
         return Err("cli binary missing after build".to_string());
     }

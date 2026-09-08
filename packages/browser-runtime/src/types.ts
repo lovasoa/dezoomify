@@ -105,8 +105,13 @@ export type FallbackCapabilityId =
   | "extension"
   | "native";
 
-export const DIRECT_TRANSPORT_LABEL = "Direct from your browser" as const;
-export const PROXY_TRANSPORT_LABEL = "Metadata proxy" as const;
+export {
+  BROWSER_SESSION_TRANSPORT_LABEL,
+  DIRECT_TRANSPORT_LABEL,
+  DISPLAY_TRANSPORT_LABEL,
+  NATIVE_TRANSPORT_LABEL,
+  PROXY_TRANSPORT_LABEL,
+} from "./transport-labels.ts";
 
 export type BrowserSessionEventKind =
   | "transport-attempt"

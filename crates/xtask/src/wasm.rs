@@ -85,6 +85,7 @@ fn browser_focus(name: &str) -> Result<(), String> {
 }
 
 fn run_node_harness() -> Result<(), String> {
+    generate_node_bindings()?;
     let status = Command::new("node")
         .args(["--test", "packages/wasm-harness/src/node.spec.mjs"])
         .current_dir(super::repo_root())
@@ -94,6 +95,43 @@ fn run_node_harness() -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| "wasm node harness failed".to_string())
+}
+
+fn generate_node_bindings() -> Result<(), String> {
+    run_cargo(&[
+        "build",
+        "-p",
+        "dezoomify-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+    ])?;
+    let target_dir = super::cargo_target_directory()?;
+    let input = target_dir.join("wasm32-unknown-unknown/debug/dezoomify_wasm.wasm");
+    let output = target_dir.join("wasm-node-harness");
+    let status = Command::new("wasm-bindgen")
+        .args([
+            "--target",
+            "nodejs",
+            "--out-dir",
+            output
+                .to_str()
+                .ok_or("Cargo target directory is not valid UTF-8")?,
+            "--out-name",
+            "dezoomify_wasm",
+            input
+                .to_str()
+                .ok_or("WASM artifact path is not valid UTF-8")?,
+        ])
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|e| {
+            format!(
+                "failed to generate Node bindings with wasm-bindgen (run `cargo xtask setup`): {e}"
+            )
+        })?;
+    status.success().then_some(()).ok_or_else(|| {
+        "wasm-bindgen failed while generating the Node conformance bindings".to_string()
+    })
 }
 
 fn forbidden_capabilities() -> Result<(), String> {

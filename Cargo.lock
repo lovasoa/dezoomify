@@ -1091,7 +1091,7 @@ dependencies = [
 
 [[package]]
 name = "dezoomify-cli"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axum",
  "dezoomify-core",
@@ -1131,7 +1131,7 @@ dependencies = [
 
 [[package]]
 name = "dezoomify-desktop"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axum",
  "dezoomify-core",
@@ -1141,6 +1141,7 @@ dependencies = [
  "dezoomify-protocol",
  "ed25519-dalek",
  "image",
+ "open",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6491,6 +6492,7 @@ checksum = "2f45bb2c13fec6a6cb4c0f76a7e94839e110a14ec803ec2940777a94c347bc52"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "sha2 0.10.9",

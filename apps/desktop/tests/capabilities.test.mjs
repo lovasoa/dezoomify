@@ -49,7 +49,7 @@ function assertNoTrailingSpaces(content, label) {
   }
 }
 
-const EXPECTED_COMMANDS = ["answer_choice", "cancel_job", "query_capabilities", "request_destination", "start_job"];
+const EXPECTED_COMMANDS = ["answer_choice", "cancel_job", "open_saved_output", "query_capabilities", "request_destination", "start_job"];
 const EXPECTED_CHANNELS = [
   "dezoomify://job-state",
   "dezoomify://job-progress",
@@ -61,6 +61,10 @@ const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
 const NATIVE_HOST = "dev.ophir.dezoomify.native_host";
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
+const registrySource = readText("../src-tauri/desktop_commands.rs");
+const registryBody = registrySource.match(/\$callback!\(\s*([\s\S]*?)\s*\)/)?.[1];
+assert.ok(registryBody, "desktop_commands macro must invoke its callback");
+const RUST_COMMANDS = [...registryBody.matchAll(/\b([a-z][a-z0-9_]*)\b/g)].map((m) => m[1]);
 
 function xdezoomify(doc) {
   return doc["x-dezoomify"] ?? doc;
@@ -68,19 +72,22 @@ function xdezoomify(doc) {
 
 test("rust command registry lists exact commands", () => {
   const src = readText("../src-tauri/src/commands.rs");
-  const commands = extractBracketStrings(src, "COMMANDS");
-  assert.deepEqual(sorted(commands), sorted(EXPECTED_COMMANDS));
+  assert.deepEqual(sorted(RUST_COMMANDS), sorted(EXPECTED_COMMANDS));
   for (const name of EXPECTED_COMMANDS) {
-    assert.ok(src.includes(`"${name}"`), `registry missing ${name}`);
+    assert.ok(RUST_COMMANDS.includes(name), `registry missing ${name}`);
   }
   assert.ok(src.includes("unknown") && src.includes("stale"), "unknown/stale rejection");
   assert.ok(src.includes("seq"), "event ordering");
+  const build = readText("../src-tauri/build.rs");
+  const shell = readText("../src-tauri/src/tauri_shell.rs");
+  assert.match(build, /desktop_commands!\(command_names\)/, "Tauri permissions consume canonical registry");
+  assert.match(shell, /desktop_commands!\(command_handler\)/, "real handler consumes canonical registry");
+  assert.doesNotMatch(shell, /generate_handler!\[\s*start_job/, "handler list is not duplicated");
 });
 
 test("typescript integration commands match registry", () => {
-  const rust = extractBracketStrings(readText("../src-tauri/src/commands.rs"), "COMMANDS");
   const ts = extractBracketStrings(readText("../src/desktopIntegration.ts"), "DESKTOP_COMMANDS");
-  assert.deepEqual(sorted(ts), sorted(rust));
+  assert.deepEqual(sorted(ts), sorted(RUST_COMMANDS));
   assert.deepEqual(sorted(ts), sorted(EXPECTED_COMMANDS));
 });
 
@@ -148,6 +155,30 @@ test("event channels match and forbid tile bytes", () => {
     const raw = readText(rel);
     assert.ok(!raw.includes("tileBytes") && !raw.includes("tile_bytes"), `${rel} must not carry tile bytes`);
   }
+});
+
+test("desktop footer is a compact external-link bar, not a disclosure", () => {
+  const html = readText("../index.html");
+  const main = readText("../src/main.ts");
+  const css = readText("../src/desktop.css");
+  const integration = readText("../src/desktopIntegration.ts");
+
+  assert.match(html, /<nav class="dz-footer-links" aria-label="Dezoomify links">/);
+  for (const href of [
+    "https://github.com/lovasoa/dezoomify",
+    "https://dezoomify.ophir.dev/help/troubleshooting.html",
+    "https://dezoomify.ophir.dev/privacy.html",
+    "https://dezoomify.ophir.dev/terms.html",
+    "https://github.com/sponsors/lovasoa/",
+  ]) {
+    assert.ok(html.includes(`href="${href}"`), `footer link ${href}`);
+  }
+  assert.ok(!main.includes("ensureDesktopHelpAbout"), "no large collapsible footer duplicate");
+  assert.match(css, /\.dz-site-footer \{[\s\S]*?min-height: 30px;/, "thin footer bar");
+  assert.ok(!css.includes(".dz-site-footer { display: none; }"), "footer stays visible");
+  assert.match(main, /handleOpenExternalLink\(resolved\)/, "footer links route through external navigation");
+  assert.match(integration, /import \{ openUrl \} from "@tauri-apps\/plugin-opener"/, "uses Tauri's opener binding");
+  assert.match(integration, /await openUrl\(url\)/, "external navigation opens the URL through Tauri");
 });
 
 test("generated files are canonical bytes (LF, pretty, no drift)", () => {

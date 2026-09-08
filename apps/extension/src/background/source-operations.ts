@@ -14,19 +14,23 @@
  * so ranking can prefer viewer resources without committing to the document
  * URL merely because it was added first.
  */
-export function collectCandidates() {
+type SourceRequest = { url: string; method?: string; headers: Array<{ name: string; value: string }> };
+type FetchFailure = { ok: false; code: string; status?: number };
+type SourceChunk = { sequence: number; bytes: number[] };
+
+export function collectCandidates(): { ok: true; documentUrl: string; urls: string[]; overflow: number } {
   const MAX_URL_LENGTH = 2048;
   const MAX_CANDIDATES = 100;
   const documentUrl = String(globalThis.location?.href ?? "");
-  const raw = [documentUrl];
+  const raw: unknown[] = [documentUrl];
   try {
     for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
       raw.push(typeof entry === "string" ? entry : entry?.name);
     }
   } catch {}
 
-  const urls = [];
-  const seen = new Set();
+  const urls: string[] = [];
+  const seen = new Set<string>();
   let overflow = 0;
   for (const value of raw) {
     if (typeof value !== "string" || value.length === 0 || value.length > MAX_URL_LENGTH) continue;
@@ -49,12 +53,12 @@ export function collectCandidates() {
  * return only bounded, structured-cloneable data. Cookies/session credentials
  * are supplied by the browser; they are never part of this result.
  */
-export async function fetchSource(request) {
+export async function fetchSource(request: SourceRequest): Promise<FetchFailure | { ok: true; status: number; url: string; bytes: number; chunks: SourceChunk[] }> {
   const MAX_URL_LENGTH = 2048;
   const MAX_FETCH_CHUNK_BYTES = 32 * 1024;
   const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
   const validMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
-  const fail = (code, status) => ({ ok: false, code, ...(Number.isInteger(status) ? { status } : {}) });
+  const fail = (code: string, status?: number): FetchFailure => ({ ok: false, code, ...(Number.isInteger(status) ? { status } : {}) });
 
   if (!request || typeof request !== "object" || typeof request.url !== "string" || request.url.length === 0 || request.url.length > MAX_URL_LENGTH) {
     return fail("invalid-url");
@@ -66,7 +70,7 @@ export async function fetchSource(request) {
   const method = typeof request.method === "string" && request.method.length > 0 ? request.method.toUpperCase() : "GET";
   if (!validMethods.has(method)) return fail("invalid-method");
   if (!Array.isArray(request.headers)) return fail("invalid-headers");
-  const headers = {};
+  const headers: Record<string, string> = {};
   for (const header of request.headers) {
     if (!header || typeof header.name !== "string" || typeof header.value !== "string" ||
       !header.name || /[\r\n]/.test(header.name) || /[\r\n]/.test(header.value)) return fail("invalid-headers");
@@ -83,10 +87,10 @@ export async function fetchSource(request) {
     if (!response || typeof response.status !== "number") return fail("invalid-response");
     if (!response.ok) return fail("http-error", response.status);
 
-    const chunks = [];
+    const chunks: SourceChunk[] = [];
     let total = 0;
     let sequence = 0;
-    const append = (part) => {
+    const append = (part: Uint8Array | ArrayBuffer | undefined) => {
       const value = part instanceof Uint8Array ? part : new Uint8Array(part ?? []);
       total += value.byteLength;
       if (total > MAX_SOURCE_FETCH_BYTES) {
@@ -112,7 +116,8 @@ export async function fetchSource(request) {
     }
     return { ok: true, status: response.status, url: responseUrl, bytes: total, chunks };
   } catch (error) {
-    if (error?.code === "too-large") return fail("too-large");
-    return fail(error?.name === "AbortError" ? "cancelled" : "network");
+    const caught = error as { code?: unknown; name?: unknown };
+    if (caught?.code === "too-large") return fail("too-large");
+    return fail(caught?.name === "AbortError" ? "cancelled" : "network");
   }
 }

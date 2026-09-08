@@ -1625,6 +1625,7 @@ async function runJob(url: string): Promise<void> {
       message?: string;
       detail?: string;
       technical?: string;
+      retryable?: boolean;
     };
     const code = structured?.code || "DISCOVERY_FAILED";
     const message = structured?.message || "Could not save this zoomable image.";

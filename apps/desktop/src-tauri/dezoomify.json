@@ -2,6 +2,7 @@
   "commands": [
     "answer_choice",
     "cancel_job",
+    "open_saved_output",
     "query_capabilities",
     "request_destination",
     "start_job"

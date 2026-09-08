@@ -113,9 +113,39 @@ body {
   box-shadow: none;
 }
 
-/* Pinned bottom footer: single row of legal/repo links only. */
+/* Pinned bottom footer: a deliberately thin, always-visible link bar. */
 .dz-site-footer {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
   margin-top: auto;
+  padding: 0.3rem 1rem;
+  border-top: 1px solid var(--dz-surface-border);
+  background: var(--dz-footer-bg);
+}
+
+.dz-site-footer .dz-footer-links {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 0;
+  margin: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.dz-site-footer a {
+  flex: 0 0 auto;
+  padding: 0 0.65rem;
+  border-left: 1px solid var(--dz-surface-border);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.dz-site-footer a:first-child {
+  border-left: 0;
 }
 
 /* Desktop aux panel: plain flow inside the single status card.
@@ -367,66 +397,294 @@ body {
   text-align: left;
 }
 
-/* Desktop Help/About (Task 5.3): link-only region, same flat flow as the
- * aux/settings panels. Transparent, no nested box, only a top separator.
- * Buttons wrap; body copy stays left-aligned. */
-#dz-desktop-help {
-  background: transparent;
-  border: none;
-  border-top: 1px solid var(--dz-surface-border);
-  box-shadow: none;
+/* Compact desktop job options. The URL remains the only large field. */
+#dz-desktop-settings {
+  margin-top: 1.1rem;
+  padding-top: 0;
+  border-top: 0;
+}
+
+#dz-desktop-settings .dz-quick-options {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.25fr) repeat(3, minmax(120px, 1fr)) 30px;
+  gap: 0.45rem;
+  align-items: center;
+  width: 100%;
+}
+
+#dz-desktop-settings .dz-quick-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  height: 30px;
+  min-width: 0;
+  gap: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--dz-page-bg) 82%, var(--dz-surface-border));
+  border: 1px solid color-mix(in srgb, var(--dz-surface-border) 72%, transparent);
+  border-radius: var(--dz-radius);
+  color: color-mix(in srgb, var(--dz-text-muted) 82%, transparent);
+  font-size: 0.59rem;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+#dz-desktop-settings .dz-quick-option > span {
+  padding: 0 0.68rem 0 0.55rem;
+  white-space: nowrap;
+}
+
+#dz-desktop-settings .dz-quick-option select,
+#dz-desktop-settings .dz-quick-button,
+#dz-desktop-settings .dz-settings-more {
+  width: 100%;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 1.55rem 0 0.55rem;
+  overflow: hidden;
+  color: var(--dz-text-primary);
+  background-color: transparent !important;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--dz-surface-border) 78%, transparent);
   border-radius: 0;
-  margin-top: 1.75rem;
-  padding-top: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  font: 550 0.74rem/1 var(--dz-font-sans);
+  letter-spacing: 0;
   text-align: left;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
 }
 
-#dz-desktop-help .dz-help-version {
-  margin-left: auto;
-  color: var(--dz-text-muted);
-  font-size: 0.78rem;
+#dz-desktop-settings .dz-quick-option select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23a89d94' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  background-position: right 0.55rem center;
+  background-repeat: no-repeat;
+  background-size: 9px 5px;
+  cursor: pointer;
 }
 
-#dz-desktop-help .dz-help-disclosure > summary {
+#dz-desktop-settings .dz-quick-button {
+  padding-right: 0.5rem;
+  cursor: pointer;
+}
+
+#dz-desktop-settings .dz-settings-more {
+  width: 30px;
+  padding: 0;
+  background-color: color-mix(in srgb, var(--dz-page-bg) 82%, var(--dz-surface-border));
+  border: 1px solid color-mix(in srgb, var(--dz-surface-border) 72%, transparent);
+  border-radius: var(--dz-radius);
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+#dz-desktop-settings .dz-quick-option select:hover,
+#dz-desktop-settings .dz-quick-button:hover,
+#dz-desktop-settings .dz-settings-more:hover {
+  background: var(--dz-btn-secondary-hover-bg);
+}
+
+#dz-desktop-settings .dz-quick-option:focus-within {
+  border-color: var(--dz-accent-blue);
+  box-shadow: var(--dz-focus-ring);
+}
+
+@media (prefers-color-scheme: dark) {
+  #dz-desktop-settings .dz-quick-option select {
+    color-scheme: dark;
+  }
+
+  #dz-desktop-settings .dz-quick-option select option {
+    color: var(--dz-text-primary);
+    background-color: #211e1b;
+  }
+}
+
+#dz-desktop-settings .dz-settings-dialog {
+  width: min(700px, calc(100vw - 2rem));
+  max-width: none;
+  height: auto;
+  max-height: min(720px, calc(100vh - 3rem));
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  color: var(--dz-text-primary);
+  background: var(--dz-surface-gradient);
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius-large);
+  box-shadow: 0 24px 70px rgba(0,0,0,.5);
+}
+
+#dz-desktop-settings .dz-settings-dialog::backdrop {
+  background: rgba(12, 11, 10, 0.72);
+  backdrop-filter: blur(2px);
+}
+
+#dz-desktop-settings .dz-settings-sheet {
+  max-height: min(720px, calc(100vh - 3rem));
+  overflow-y: auto;
+  padding: 0 1.5rem 1.25rem;
+}
+
+#dz-desktop-settings .dz-settings-sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 64px;
+  margin: 0 -1.5rem;
+  padding: 0 1.5rem;
+  background: color-mix(in srgb, var(--dz-page-bg) 92%, var(--dz-surface-border));
+  border-bottom: 1px solid var(--dz-surface-border);
+}
+
+#dz-desktop-settings .dz-settings-sheet-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+#dz-desktop-settings .dz-settings-close,
+#dz-desktop-settings .dz-compact-action,
+#dz-desktop-settings .dz-settings-reset {
+  min-height: 32px;
+  padding: 0.35rem 0.75rem;
+  color: var(--dz-text-primary);
+  background: var(--dz-btn-secondary-bg);
+  border: 1px solid var(--dz-btn-secondary-border);
+  border-radius: var(--dz-radius);
+  font: 600 0.8rem/1 var(--dz-font-sans);
   cursor: pointer;
-  list-style: none;
-  color: var(--dz-text-secondary);
+}
+
+#dz-desktop-settings .dz-settings-close {
+  color: var(--dz-link-color);
+}
+
+#dz-desktop-settings .dz-preference-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, auto);
+  gap: 1.5rem;
+  align-items: center;
+  min-height: 76px;
+  border-bottom: 1px solid color-mix(in srgb, var(--dz-surface-border) 68%, transparent);
+}
+
+#dz-desktop-settings .dz-preference-row > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+#dz-desktop-settings .dz-preference-row strong {
+  color: var(--dz-text-primary);
   font-size: 0.88rem;
   font-weight: 650;
-  padding: 0.45rem 0;
 }
 
-#dz-desktop-help .dz-help-disclosure > summary::-webkit-details-marker { display: none; }
-
-#dz-desktop-help .dz-help-disclosure > summary::after {
-  content: "+";
-  padding-left: 1rem;
+#dz-desktop-settings .dz-preference-row span {
   color: var(--dz-text-muted);
-  font-weight: 400;
+  font-size: 0.76rem;
+  line-height: 1.4;
 }
 
-#dz-desktop-help .dz-help-disclosure[open] > summary::after { content: "−"; }
-
-#dz-desktop-help .dz-help-actions { margin-top: 0.85rem; }
-
-#dz-desktop-help .dz-notice-title,
-#dz-desktop-help .dz-notice-message {
-  text-align: left;
+#dz-desktop-settings .dz-slider-control {
+  display: grid;
+  grid-template-columns: 160px 2.5rem;
+  gap: 0.7rem;
+  align-items: center;
 }
 
-#dz-desktop-help .dz-help-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+#dz-desktop-settings .dz-slider-control input[type="range"] {
+  width: 160px;
+  height: auto;
+  padding: 0;
+  accent-color: var(--dz-accent-blue);
+  background: transparent;
+  border: 0;
 }
 
-.dz-site-footer { display: none; }
+#dz-desktop-settings .dz-slider-control output {
+  color: var(--dz-text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+}
+
+#dz-desktop-settings .dz-size-control {
+  display: grid;
+  grid-template-columns: 84px auto 84px;
+  gap: 0.45rem;
+  align-items: center;
+  color: var(--dz-text-muted);
+}
+
+#dz-desktop-settings .dz-size-control input,
+#dz-desktop-settings .dz-number-control {
+  width: 84px;
+  height: 34px;
+  padding: 0.3rem 0.45rem;
+  color: var(--dz-text-primary);
+  background: color-mix(in srgb, var(--dz-page-bg) 70%, var(--dz-surface-border));
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  font: 0.82rem var(--dz-font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+#dz-desktop-settings .dz-headers-disclosure {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--dz-surface-border);
+}
+
+#dz-desktop-settings .dz-headers-disclosure summary {
+  cursor: pointer;
+  color: var(--dz-text-primary);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+#dz-desktop-settings .dz-headers-disclosure p {
+  margin: 0.4rem 0 0.65rem;
+  color: var(--dz-text-muted);
+  font-size: 0.76rem;
+}
+
+#dz-desktop-settings .dz-headers-disclosure textarea {
+  width: 100%;
+  height: 76px;
+  padding: 0.55rem 0.65rem;
+  resize: vertical;
+  color: var(--dz-text-primary);
+  background: color-mix(in srgb, var(--dz-page-bg) 70%, var(--dz-surface-border));
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  font: 0.8rem var(--dz-font-mono);
+}
+
+#dz-desktop-settings .dz-settings-reset {
+  margin-top: 1rem;
+  color: var(--dz-text-muted);
+}
+
+@media (max-width: 720px) {
+  #dz-desktop-settings .dz-quick-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) 30px;
+  }
+
+  #dz-desktop-settings .dz-preference-row {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+    padding: 0.9rem 0;
+  }
+}
 
 @media (max-width: 680px) {
   .dz-desktop-bar { padding: 0 1rem; }
@@ -466,13 +724,31 @@ body {
 #dz-desktop-settings textarea:focus-visible,
 #dz-desktop-settings a:focus-visible,
 #dz-desktop-settings summary:focus-visible,
-#dz-desktop-help button:focus-visible,
-#dz-desktop-help a:focus-visible,
 #dz-deep-link-confirm button:focus-visible,
 #dz-deep-link-confirm a:focus-visible,
 #dz-deep-link-confirm [tabindex]:focus-visible,
 .dz-site-footer a:focus-visible {
   outline: none;
+  box-shadow: var(--dz-focus-ring);
+}
+
+.dz-history-main[type="button"] {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.dz-history-main[type="button"]:hover {
+  text-decoration: underline;
+}
+
+.dz-history-main[type="button"]:focus-visible {
   box-shadow: var(--dz-focus-ring);
 }
 

@@ -12,7 +12,7 @@ import {
 // Desktop app version mirrors apps/desktop/package.json. Kept as a literal
 // so the TS layer stays host-neutral (no JSON import, no I/O); bump both
 // together. Used only for copy-diagnostics provenance, never for logic.
-export const DESKTOP_APP_VERSION = "3.0.0";
+export const DESKTOP_APP_VERSION = "3.0.1";
 
 
 // Copy-diagnostics provenance: typed error context, job and attempt ids, app
@@ -35,6 +35,7 @@ export interface DiagnosticsSnapshot {
   } | null;
   progress: { current: number; total: number } | undefined;
   origin: string;
+  outputActionError?: { action: "open" | "folder"; code: string };
 }
 
 export function buildCopyDiagnostics(snapshot: DiagnosticsSnapshot): string {
@@ -57,6 +58,10 @@ export function buildCopyDiagnostics(snapshot: DiagnosticsSnapshot): string {
     if (error.detail) lines.push(`Detail: ${error.detail}`);
   }
   const progress = snapshot.progress;
+  if (snapshot.outputActionError) {
+    lines.push(`File action: ${snapshot.outputActionError.action}`);
+    lines.push(`File action code: ${snapshot.outputActionError.code}`);
+  }
   if (progress) lines.push(`Tiles: ${progress.current} of ${progress.total}`);
   lines.push(`Origin: ${snapshot.origin === "" ? "n/a" : snapshot.origin}`);
   return lines.join("\n");

@@ -11,6 +11,17 @@
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 30_000;
+type TransportCategory = "source-document-lost"|"access-required"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded";
+type Purpose = "metadata" | "tile" | "probe";
+type HeaderSource = Headers | Record<string, string> | Array<{ name?: unknown; value?: unknown }>;
+type FetchResponse = Response & { bytes?: Uint8Array; durationMs?: number };
+type FetchOptions = { requestId?: string; purpose?: Purpose; headers?: HeaderSource; maxBytes?: number; timeoutMs?: number; cancelled?: () => boolean; userIntent?: boolean };
+type FetchDeps = {
+  fetchImpl?: (url: string, init: RequestInit) => Promise<FetchResponse>;
+  hasPermission: (origin: string) => boolean | Promise<boolean>;
+  setTimeoutFn?: typeof setTimeout;
+  clearTimeoutFn?: typeof clearTimeout;
+};
 
 /** @typedef {"source-document-lost"|"access-required"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded"} TransportCategory */
 
@@ -26,24 +37,24 @@ export const ALLOWED_MIME_PREFIXES = Object.freeze([
 ]);
 
 /** @param {string} url */
-export function isProxyUrl(url) {
+export function isProxyUrl(url: string): boolean {
   return typeof url === "string" && url.includes(PROXY_PATH);
 }
 
 /** @param {string} url */
-export function originOf(url) {
+export function originOf(url: string): string {
   const u = new URL(url);
   return `${u.protocol}//${u.hostname.toLowerCase()}${u.port ? `:${u.port}` : ""}`;
 }
 
 /** @param {TransportCategory} category @param {string} message @param {Record<string, unknown>} [extra] */
-export function transportError(category, message, extra = {}) {
+export function transportError(category: TransportCategory, message: string, extra: Record<string, unknown> = {}) {
   return Object.assign(new Error(message), { code: category, category, ...extra });
 }
 
 /** @param {unknown} error */
-export function asFetchFailure(error) {
-  const candidate = /** @type {{ category?: unknown, code?: unknown, message?: unknown }} */ (error);
+export function asFetchFailure(error: unknown) {
+  const candidate = error as { category?: unknown; code?: unknown; message?: unknown } | null;
   const category = typeof candidate?.category === "string" ? candidate.category : "network";
   return {
     code: `extension.${category}`,
@@ -57,9 +68,9 @@ export function asFetchFailure(error) {
 }
 
 /** @param {unknown} headers @param {"metadata"|"tile"|"probe"} purpose */
-export function forwardCoreHeaders(headers, purpose) {
+export function forwardCoreHeaders(headers: unknown, purpose: Purpose): Record<string, string> {
   /** @type {Record<string, string>} */
-  const out = {};
+  const out: Record<string, string> = {};
   const pairs = Array.isArray(headers)
     ? headers.map((header) => [header?.name, header?.value])
     : Object.entries(headers && typeof headers === "object" ? headers : {});
@@ -74,17 +85,19 @@ export function forwardCoreHeaders(headers, purpose) {
 }
 
 /** @param {unknown} value */
-function headerValue(value) {
+function headerValue(value: unknown): string {
+  const headers = value as { get?: (name: string) => string | null; [key: string]: unknown } | null;
   if (!value) return "";
-  if (typeof value.get === "function") return String(value.get("content-type") ?? "");
-  if (typeof value === "object") return String(value["content-type"] ?? value["Content-Type"] ?? "");
+  if (typeof headers?.get === "function") return String(headers.get("content-type") ?? "");
+  if (headers) return String(headers["content-type"] ?? headers["Content-Type"] ?? "");
   return "";
 }
 
 /** @param {unknown} value */
-function contentLength(value) {
+function contentLength(value: unknown): number | null {
+  const headers = value as { get?: (name: string) => string | null; [key: string]: unknown } | null;
   if (!value) return null;
-  const raw = typeof value.get === "function" ? value.get("content-length") : value["content-length"] ?? value["Content-Length"];
+  const raw = typeof headers?.get === "function" ? headers.get("content-length") : headers?.["content-length"] ?? headers?.["Content-Length"];
   const number = Number(raw);
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
@@ -95,7 +108,7 @@ function contentLength(value) {
  * @param {any} response
  * @param {{ maxBytes: number, controller: AbortController, cancelled?: () => boolean }} opts
  */
-export async function readResponseBytes(response, opts) {
+export async function readResponseBytes(response: FetchResponse, opts: { maxBytes: number; controller: AbortController; cancelled?: () => boolean }): Promise<Uint8Array> {
   const declared = contentLength(response?.headers);
   if (declared !== null && declared > opts.maxBytes) {
     opts.controller.abort();
@@ -141,7 +154,7 @@ export async function readResponseBytes(response, opts) {
 }
 
 /** @param {string} url */
-function checkedUrl(url) {
+function checkedUrl(url: string): URL {
   if (isProxyUrl(url)) throw transportError("malformed", "proxy transport is forbidden in the extension");
   let parsed;
   try { parsed = new URL(url); } catch { throw transportError("malformed", "invalid URL"); }
@@ -152,13 +165,13 @@ function checkedUrl(url) {
 /**
  * @param {{ fetchImpl?: (url: string, init: RequestInit) => Promise<any>, hasPermission: (origin: string) => boolean | Promise<boolean>, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout }} deps
  */
-export function createExtensionFetcher(deps) {
-  const fetchImpl = deps.fetchImpl ?? fetch;
+export function createExtensionFetcher(deps: FetchDeps) {
+  const fetchImpl: (url: string, init: RequestInit) => Promise<FetchResponse> = deps.fetchImpl ?? (fetch as (url: string, init: RequestInit) => Promise<FetchResponse>);
   /** @type {Set<AbortController>} */
-  const active = new Set();
+  const active = new Set<AbortController>();
 
   /** @param {string} url @param {{ requestId?: string, purpose?: "metadata"|"tile"|"probe", headers?: unknown, maxBytes?: number, timeoutMs?: number, cancelled?: () => boolean }} [opts] */
-  async function fetchResource(url, opts = {}) {
+  async function fetchResource(url: string, opts: FetchOptions = {}) {
     const parsed = checkedUrl(url);
     const origin = originOf(parsed.href);
     if (!opts.userIntent) throw transportError("access-required", "explicit user intent is required", { code: "intent-required" });
@@ -206,6 +219,6 @@ export function createExtensionFetcher(deps) {
 }
 
 /** Compatibility name; `requestPermission` is deliberately ignored. */
-export function createSessionFetcher(deps) {
+export function createSessionFetcher(deps: FetchDeps & { requestPermission?: unknown }) {
   return createExtensionFetcher({ fetchImpl: deps.fetchImpl, hasPermission: deps.hasPermission, setTimeoutFn: deps.setTimeoutFn, clearTimeoutFn: deps.clearTimeoutFn });
 }

@@ -142,7 +142,9 @@ function createMockElement(tagName) {
       el._focused = true;
       if (el.ownerDocument) el.ownerDocument.activeElement = el;
     },
-    addEventListener() {},
+    _listeners: new Map(),
+    addEventListener(type, handler) { el._listeners.set(type, handler); },
+    click() { el._listeners.get("click")?.({ target: el }); },
     removeEventListener() {},
     contains(node) {
       if (node === el) return true;
@@ -252,7 +254,7 @@ function assertButtonsNamed(root, where) {
   }
 }
 
-test("axe gate: idle form controls are labelled and the submit action is named", () => {
+test("static accessibility contract: idle form controls are labelled and the submit action is named", () => {
   const container = makeContainer();
   renderView(container, { status: "idle", seq: 0, sessionId: "s1", imageCount: 0, transport: null }, callbacks);
   const card = container.querySelector(".dz-card");
@@ -266,7 +268,7 @@ test("axe gate: idle form controls are labelled and the submit action is named",
   assertButtonsNamed(card, "idle");
 });
 
-test("axe gate: live job region announces progress with a labelled progressbar", () => {
+test("static accessibility contract: live job region announces progress with a labelled progressbar", () => {
   const container = makeContainer();
   renderView(
     container,
@@ -291,7 +293,7 @@ test("axe gate: live job region announces progress with a labelled progressbar",
   assertButtonsNamed(card, "job");
 });
 
-test("axe gate: failed view layers guidance with named recovery actions", () => {
+test("static accessibility contract: failed view layers guidance with named recovery actions", () => {
   const container = makeContainer();
   renderView(
     container,
@@ -312,7 +314,46 @@ test("axe gate: failed view layers guidance with named recovery actions", () => 
   assert.ok(report, "bug-report path stays reachable from the failed view");
 });
 
-test("axe gate: completed and display-only views keep every action named", () => {
+test("native completion opens saved output without browser save guidance", () => {
+  const done = makeContainer();
+  renderView(done,
+    { status: "completed", seq: 1, sessionId: "s1", imageCount: 1, transport: "native" },
+    { ...callbacks, onOpenOutput() {}, onRevealOutput() {} },
+    { nativeSaved: { partial: false }, completedInfo: { width: 100, height: 80, mime: "image/png" } },
+  );
+  assert.equal(done.querySelector("#dz-btn-save"), null);
+  assert.equal(done.querySelector("#dz-btn-open").textContent.trim(), "Open image");
+  assert.equal(done.querySelector("#dz-btn-reveal").textContent.trim(), "Show in folder");
+  assert.equal(done.querySelector(".dz-completed-title").textContent.trim(), "Image saved");
+  assert.doesNotMatch(done.querySelector(".dz-completed-guidance").textContent, /browser|color profile/i);
+});
+
+test("history rows select a source without submitting it", () => {
+  const container = makeContainer();
+  const entry = { url: 'https://museum.example/image', origin: 'https://museum.example', at: 1 };
+  let selected;
+  let submitted = false;
+  renderView(container, {status:'idle', seq:1, sessionId:'s1', imageCount:0},
+    {...callbacks, onSubmitUrl() { submitted = true; }, onHistorySelect(value) { selected = value; }},
+    {history:[entry]},
+  );
+  const button = container.querySelector('.dz-history-main');
+  assert.equal(button.tagName, 'BUTTON');
+  button.click();
+  assert.equal(selected, entry);
+  assert.equal(submitted, false);
+});
+
+test("completion treats saved filenames as text", () => {
+  const done = makeContainer();
+  renderView(done,
+    { status: "completed", seq: 1, sessionId: "s1", imageCount: 1 }, callbacks,
+    { savedOutput: { name: '<img src=x onerror=alert(1)>', width: 10, height: 10, doneTiles: 1, totalTiles: 1, failedTiles: 0 } },
+  );
+  assert.equal(done.querySelector(".dz-completed-summary").querySelector("img"), null);
+});
+
+test("static accessibility contract: completed and display-only views keep every action named", () => {
   const done = makeContainer();
   renderView(
     done,
@@ -332,7 +373,7 @@ test("axe gate: completed and display-only views keep every action named", () =>
   assertButtonsNamed(preview.querySelector(".dz-card"), "display-only");
 });
 
-test("axe gate: modal dialogs are labelled, modal, and dismissible by name", () => {
+test("static accessibility contract: modal dialogs are labelled, modal, and dismissible by name", () => {
   openModal(globalThis.document, "Title", "Subtitle", "<p>Body</p>");
   const backdrop = bodyEl.querySelector(".dz-modal-backdrop");
   assert.ok(backdrop, "modal backdrop mounted");
@@ -381,7 +422,7 @@ test("axe gate: modal dialogs are labelled, modal, and dismissible by name", () 
   levels.remove();
 });
 
-test("axe gate: extension modal carries document language, viewport, and the shared mount", () => {
+test("static accessibility contract: extension modal carries document language, viewport, and the shared mount", () => {
   const html = fs.readFileSync(path.join(rootDir, "apps/extension/src/modal/modal.html"), "utf8");
   assert.match(html, /<html[^>]*lang="en"/, "modal declares its language");
   assert.match(html, /name="viewport"[^>]*width=device-width/, "modal keeps the mobile viewport");
@@ -391,7 +432,7 @@ test("axe gate: extension modal carries document language, viewport, and the sha
   assert.doesNotMatch(html, /tabindex="[1-9]/, "no positive tabindex steals Tab order");
 });
 
-test("axe gate: progressbar semantics come from the vendored shared-ui template", () => {
+test("static accessibility contract: progressbar semantics come from the vendored shared-ui template", () => {
   // The job card is mounted at runtime by the vendored renderView (same
   // template as the website); the static shell only hosts the mount.
   const vendorView = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/view.ts"), "utf8");
@@ -400,7 +441,7 @@ test("axe gate: progressbar semantics come from the vendored shared-ui template"
   assert.match(vendorView, /aria-label/, "job template names the progressbar");
 });
 
-test("axe gate: visible focus and reduced-motion guards stay in the theme", () => {
+test("static accessibility contract: visible focus and reduced-motion guards stay in the theme", () => {
   const css = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/styles/theme.css"), "utf8");
   for (const selector of [".dz-btn-tactile:focus-visible", ".dz-btn-secondary:focus-visible", ".dz-summary:focus-visible"]) {
     assert.ok(css.includes(selector), `theme keeps a visible focus ring for ${selector}`);
@@ -412,7 +453,7 @@ test("axe gate: visible focus and reduced-motion guards stay in the theme", () =
   assert.match(modal, /vendor\/theme\.css/, "extension modal inherits the reduced-motion guard from the theme");
 });
 
-test("axe gate: confirm dialog names its actions and focuses decline first", async () => {
+test("static accessibility contract: confirm dialog names its actions and focuses decline first", async () => {
   // Handoff consent geometry (extension): explicit confirm/decline, initial
   // focus on decline so an accidental Enter fails safe, site-influenced
   // lines as text (never markup).
@@ -454,7 +495,7 @@ function contrast(fg, bg) {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-test("axe gate: text and link contrast meets AA in both color schemes", () => {
+test("static accessibility contract: text and link contrast meets AA in both color schemes", () => {
   const pairs = [
     ["#1c1917", "#fcfeff", "light body text"],
     ["#44403c", "#fcfeff", "light secondary text"],

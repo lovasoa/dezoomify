@@ -37,7 +37,9 @@ cargo xtask test all
 
 Bare `cargo xtask test` is the fast deterministic suite. It runs static checks,
 short unit and contract suites, and generated-artifact validation while omitting
-packaging and browser end-to-end suites. `cargo xtask test all` runs every
+packaging and browser end-to-end suites. `cargo xtask check` also runs the
+workspace TypeScript compiler gate; every workspace package with a `typecheck`
+script compiles from the locked root TypeScript dependency. `cargo xtask test all` runs every
 deterministic target, including controlled loopback HTTP and isolated browser
 profiles. Neither command contacts public source sites. Public compatibility
 checks run only through the explicit `cargo xtask test live` target; a live
@@ -58,13 +60,13 @@ Focused targets are:
 | `core` | pure format discovery, catalogs, grids, and processing recipes |
 | `protocol` | Rust/TypeScript schema, goldens, fingerprints, redaction, current/N-1 |
 | `job` | commands, effects, retries, progress, cancellation, and cleanup |
-| `wasm` | WASM portability, bindings, transcripts, and memory ownership |
+| `wasm` | WASM portability, freshly generated Node bindings executed through dispatch/drain/buffer/dispose, transcripts, and memory ownership |
 | `browser` | workers, transports, decoding, canvases, caching, and browser harness |
-| `ui` | shared UI controller, view rendering, accessibility gate, four-locale message dictionary, and mobile CSS parity |
+| `ui` | shared UI controller, view rendering, static accessibility contracts, four-locale message dictionary, and mobile CSS contracts |
 | `web` | website direct-first transport, metadata CORS proxy fallback, and cross-browser end-to-end behavior |
 | `native` | native runtime, CLI, encoders, cache, and scenario parity |
-| `desktop` | Tauri integration, integration registration, disabled-updater fixtures, and E2E |
-| `extension` | manifests, scanning, browser-session fetch, permissions, shared-UI vendoring with web-vs-extension job-card parity, store size gate, and browser E2E |
+| `desktop` | Tauri integration, canonical command registration, disabled-updater fixtures, and a mounted production-frontend integration smoke; `--e2e-window` drives the real webview |
+| `extension` | fresh generated-WASM worker contract, manifests, scanning, browser-session fetch, permissions, shared-UI vendoring with web-vs-extension job-card parity, store size gate, and browser E2E |
 | `native-messaging` | framing, handoff consent, cookie scope, registration, and cleanup |
 | `scenario` | scenario-corpus gates: native pipeline scenarios over loopback plus CLI snapshots |
 | `perf [--smoke]` | native pool plus streaming plus backpressure benches (criterion `native_pipeline`: tile throughput, encode time, peak RSS on the 20k model) with CI tracking that fails beyond 20 percent regression |
@@ -83,12 +85,12 @@ flags instead of silently widening or skipping coverage.
 `node --test test/*.test.mjs` and the `web` and `build web` gates. The `ui`
 gate runs the shared-UI subset plus its gates: `test/controller.test.mjs`,
 `test/view-rendering.test.mjs`, `test/ui-a11y.test.mjs` (static
-accessibility gate over rendered views, theme CSS, the extension page shell,
+accessibility-contract checks over a minimal DOM, theme CSS, the extension page shell,
 and the shared confirm dialog), `test/ui-i18n.test.mjs` (four-locale
 dictionary coverage with per-key English fallback; the extension renders
 through its vendored dictionary mirror with
 no local replica), and `test/ui-mobile.test.mjs` (560/380px parity over the
-canonical theme the extension page links, and 360px reachability). It is
+canonical theme the extension page links, and static 360px CSS reachability invariants). It is
 tracked and always present.
 
 `e2e-artifacts/` (repository root) is not a suite and never runs in any
@@ -142,24 +144,26 @@ unknown lane names and does not evaluate shell input.
 
 | Lane | Scope |
 |---|---|
-| `rust` | core, protocol, job, and native Rust unit and contract tests |
+| `check` | project-wide static verification: formatting, clippy, TypeScript compilation, generated artifacts, architecture, content, and supply-chain checks |
+| `rust` | core, protocol, job, native, desktop, task-runner, and fixture-server Rust unit and contract tests |
 | `wasm` | WASM adapter portability and transcript suites |
 | `browser` | browser-runtime unit matrix |
-| `web` | website integration suites (unit + cross-browser Playwright E2E: chromium, firefox, and webkit) |
+| `web` | website integration suites (unit + Chromium Playwright E2E) |
 | `native` | native runtime and CLI suites |
 | `desktop` | desktop shell suites |
 | `extension` | extension unit, manifest, and Native Messaging API suites |
 | `protocol` | protocol contract suites |
-| `security` | protocol artifact checks plus the supply-chain gate (cargo deny over advisories/licenses/bans/sources and JS audits over the workspace and isolated E2E profiles) |
+| `security` | protocol artifact checks plus JS supply-chain audits over the workspace and isolated E2E profiles; Rust cargo-deny policy runs once in the required `check` lane |
 
 `cargo xtask ci local` runs all lanes listed above. Lanes that need
 installed browsers fail closed when an engine binary is missing instead of
-claiming full platform coverage on a narrowed run: the `web` lane runs the
-E2E on every engine (`--browser all`) and CI installs chromium, firefox,
-and webkit (see `.github/workflows/ci.yml`). Only GPU-dependent paths may
-report a narrowed scope for a missing GPU; the deterministic canvas/worker
-E2E uses software rendering and never narrows. Required CI and `test all` remain
-deterministic; scheduled/manual live CI invokes `test live` separately.
+claiming full platform coverage on a narrowed run. Required CI and `test all`
+execute the controlled website E2E in Chromium, the engine provisioned in
+`.github/workflows/ci.yml`.
+Only GPU-dependent paths may report a narrowed scope for a missing GPU; the
+deterministic canvas/worker E2E uses software rendering and never narrows.
+Required CI and `test all` remain deterministic; scheduled/manual live CI
+invokes `test live` separately.
 
 ## Network coverage
 
@@ -262,87 +266,30 @@ Tauri-driver stub cannot observe.
 cargo xtask test desktop --e2e-window
 ```
 
-The real-window gate launches the window shell under tauri-driver
-and drives it with selenium-webdriver against hermetic loopback fixtures.
-The lane runs two specs sequentially (`crates/xtask/src/desktop.rs`):
-`window.spec.mjs` covers the native-feature flows and `formats.spec.mjs`
-covers the data-driven per-format full-download matrix. Bare
-`test desktop` stays lean and display-free; the window lane is opt-in.
-Prerequisites fail closed with install hints: a display (`xvfb-run -a`
-outside CI), tauri-driver 2.x (`cargo install tauri-driver --version "=2.0.6"`
-or `TAURI_DRIVER_BIN`), WebKitWebDriver (`WEBKIT_DRIVER_BIN` override), and
-the webview system packages. Ports are ephemeral except the loopback static
-server for the built frontend, which the debug window shell loads from its
-embedded devUrl address. Reports carry origins, hashes, and codes only.
-See [Native apps](native-apps.md#desktop) for the hook contract.
+The real-window lane drives the shipped window shell with tauri-driver against
+hermetic loopback fixtures. It keeps only the user journeys that need a real
+window: submit to a granted destination and byte-exact PNG output, cancellation
+without an output, and a deep link that cannot start or save until confirmed.
+The native pipeline and format matrix are covered by the Rust scenario and CLI
+suites; duplicating them through the window adds time without covering a
+distinct UI boundary.
 
-`window.spec.mjs` asserts the UI-observable edge (engine guarantees ride the
-Rust companion `apps/desktop/src-tauri/tests/desktop_e2e.rs`): submit with
-destination grant and byte-exact save versus the `native/cli-dzi` golden,
-cancel with output cleanup, an existing-destination refusal with its stable
-code, and the deep-link confirm gate (pending links perform no effect);
-settings persistence across relaunch with invalid drafts blocked; corrupt and
-missing tiles completing as kept partials published to the `.partial` sibling
-with the granted destination untouched (the driver auto-answers the partial
-decision from the Keep default, so no interactive partial dialog is
-expected); the destination journey (handoff, refusal, try-again); monotonic
-progress with redacted diagnostics copy; idle prefill without auto-start;
-and a JPEG save pinning quality `100 - compression` (default 95) with the
-persisted format choice re-seeding the picker after relaunch. The spec also
-pins that no multi-image notice and no display-only branch appear on the
-native save path.
+The lane is Linux-only because it requires WebKitWebDriver. `cargo xtask test
+desktop --e2e-window` explicitly asks Cargo to build both the window shell and
+the fixture server, so it always uses current sources rather than an existing
+executable. It runs one spec under a ten-minute ownership deadline. Bare `test
+desktop` stays lean and display-free.
 
-`formats.spec.mjs` proves byte-exact output once per site format in registry
-order against direct loopback fixtures, with goldens under
-`testdata/scenarios/desktop/e2e-formats/expected/`: `deepzoom`
-(PNG/JPEG/TIFF encoder paths), `generic`, `custom`, `zoomify`, `xlimage`,
-`iiif`, `krpano`, `iipimage`, `topviewer`, `fsi`, `vls`, `hungaricana`,
-`arcgis`, `lizardtech`, `wmts`, `pnav`, and `bulk_text`. The cases share one
-window session per output extension (one launch per extension, not per
-format). `google_arts_and_culture` skips with proof (its page parser needs a
-schemaless `//host/path` input no loopback ephemeral port can satisfy).
-`iiif-dir` passes via the backend `request_destination` hook with
-`format=iiif-dir`, bypassing the UI picker (which offers only png/jpeg/tiff);
-UI parity for that destination stays deferred.
-
-CI runs the lane in `.github/workflows/desktop.yml` as two parallel jobs.
-The workflow is path-gated: it only starts when a desktop-relevant path
-changed (`apps/desktop`, `crates`, the shared packages it imports, fixtures,
-lockfiles, the workflow itself); unrelated pushes skip it, with the desktop
-crate's lean unit tests still covered by the `rust` lane in `ci.yml`. The
-`window-e2e` job (ubuntu) runs the lean `test desktop` gate, the
-`--unsigned-test` window-shell build, then the real lane under Xvfb with the
-`webkit2gtk-driver` apt package and pinned tauri-driver 2.0.6, and uploads
-the lane log (redacted reports included) as the `desktop-e2e-ubuntu`
-artifact. Each spec file runs under its own hard deadline in the lane, so a
-leaked child can never hang the job (it fails with the log as evidence
-instead). The parallel `bundle-smoke` job matrixes ubuntu/macos/windows
-(`fail-fast: false`): macOS enables `safaridriver` and Windows installs
-`msedgedriver` pinned to the runner's Edge (fail closed on mismatch, both
-versions named), then each of those legs runs the lane as a block-evidence
-gate: the lane and harness are Linux-only by code, so those legs pass on a
-real lane pass or on that exact documented guard and fail closed on anything
-else. The macOS/Windows wave must teach the lane preflight plus the harness
-native-driver slot. Every smoke leg then bundle-smokes (Linux `dpkg -i`
-with sudo plus a timed stay-alive launch, macOS `dmg` mount plus
-direct-binary exec with Gatekeeper/SIP untouched, Windows `nsis` `/S`
-silent install or the documented direct-exe fallback) and uploads the
-`desktop-bundle-smoke-<os>` logs; smokes run in their own job, so a smoke
-failure cannot fail the E2E signal spuriously. The updater stays inert
-in all of this (empty pubkey, plugin not registered): no update flow is
-exercised.
-
-Status is read from the workflow, never assumed. Observed 2026-09-07: run
-34141999155 is fully green (`window-e2e` ubuntu plus all three `bundle-smoke`
-legs). The latest run 34144944026 shows all three `bundle-smoke` legs green
-(ubuntu, macos, windows) with the `window-e2e` job failing at the lean `Test
-desktop shell` step, before the real lane. The macOS/Windows legs carry no
-real window run by code (their E2E steps pass on a real lane pass or on the
-exact documented Linux-only guard and fail closed on anything else), so a
-green `bundle-smoke` on those hosts vouches for compile plus install plus
-launch only, never for cross-OS window E2E.
+Desktop CI is path-gated. The Ubuntu `window-e2e` job installs WebKitWebDriver
+and runs the real lane under Xvfb. The separate `bundle-smoke` matrix still
+performs actual release build, install when the host provides the installer
+tools, and launch smoke on Ubuntu, macOS, and Windows. Those platform smokes
+are not presented as window E2E coverage and do not install browser drivers or
+pass expected driver failures.
 
 ## Cross-runtime guarantees
+
+
 
 Scenario traces are normalized across runtimes. Capability differences may
 select different branches, but equivalent commands and effect results produce

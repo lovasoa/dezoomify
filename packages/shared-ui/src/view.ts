@@ -21,7 +21,10 @@ export interface ViewCallbacks {
   onReset(): void;
   /** Retry the same URL without clearing it (failed-section Try again). Optional for backward compatibility. */
   onRetrySameUrl?(): void;
-  onSave(): void;
+  onSave?(): void;
+  onOpenOutput?(): void;
+  onRevealOutput?(): void;
+  onHistorySelect?(entry: HistoryEntry): void;
   onSelectImage?(index: number): void;
   onSelectLevel?(level: number): void;
   onOpenExternalLink?(url: string): void;
@@ -61,6 +64,7 @@ export interface ViewContext {
   capabilities?: AppCapabilities;
   currentProgress?: { current: number; total: number; message?: string };
   completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
+  nativeSaved?: { partial: boolean };
   savedOutput?: {
     name: string;
     width: number;
@@ -792,7 +796,11 @@ function updateHistorySection(
   for (const entry of entries.slice(0, 20)) {
     const item = doc.createElement("li");
     item.className = "dz-history-item";
-    const main = doc.createElement("span");
+    const main = doc.createElement(callbacks.onHistorySelect ? "button" : "span");
+    if (callbacks.onHistorySelect) {
+      (main as HTMLButtonElement).type = "button";
+      main.addEventListener("click", () => callbacks.onHistorySelect?.(entry));
+    }
     main.className = "dz-history-main";
     const dims = historyDimsLabel(entry);
     const date = historyDateLabel(entry.at);
@@ -1411,7 +1419,7 @@ function mountCompletedSection(
   // "Saved" / "Saved with gaps" with the file name, never a second save.
   let title = "Save complete!";
   let summary = info ? renderCompletion(info.width, info.height, info.mime) : "Your image is ready.";
-  let showSaveButton = isClean;
+  let showSaveButton = isClean && !!callbacks.onSave;
   if (saved) {
     const partial = saved.failedTiles > 0;
     title = partial ? "Saved with gaps" : "Saved";
@@ -1420,7 +1428,14 @@ function mountCompletedSection(
       : `Saved ${saved.name} (${saved.width}x${saved.height}).`;
     showSaveButton = false;
   }
-  const guidance = renderSaveGuidance(isClean);
+  if (ctx?.nativeSaved) {
+    title = t(ctx.nativeSaved.partial ? "desktop.done.partial" : "desktop.done.title");
+    summary = info
+      ? t("desktop.done.size", { width: info.width, height: info.height })
+      : t("desktop.done.saved");
+    showSaveButton = false;
+  }
+  const guidance = ctx?.nativeSaved ? t("desktop.done.saved") : saved ? "" : renderSaveGuidance(isClean);
 
   const section = parent.ownerDocument.createElement("div");
   section.className = "dz-view-body dz-completed-section dz-fade-in";
@@ -1431,12 +1446,14 @@ function mountCompletedSection(
         <polyline points="22 4 12 14.01 9 11.01"></polyline>
       </svg>
       <div>
-        <h2 class="dz-completed-title">${title}</h2>
-        <p class="dz-completed-summary">${summary}</p>
+        <h2 class="dz-completed-title">${escapeHtml(title)}</h2>
+        <p class="dz-completed-summary">${escapeHtml(summary)}</p>
       </div>
     </div>
     <p class="dz-completed-guidance">${guidance}</p>
     <div class="dz-actions-row">
+      ${callbacks.onOpenOutput ? `<button type="button" class="dz-btn-tactile" id="dz-btn-open">${escapeHtml(t("desktop.done.open"))}</button>` : ""}
+      ${callbacks.onRevealOutput ? `<button type="button" class="dz-btn-secondary" id="dz-btn-reveal">${escapeHtml(t("desktop.done.reveal"))}</button>` : ""}
       ${showSaveButton ? `<button type="button" class="dz-btn-tactile" id="dz-btn-save" style="min-width: 180px;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -1450,7 +1467,9 @@ function mountCompletedSection(
     </div>
   `;
 
-  section.querySelector("#dz-btn-save")?.addEventListener("click", () => callbacks.onSave());
+  section.querySelector("#dz-btn-save")?.addEventListener("click", () => callbacks.onSave?.());
+  section.querySelector("#dz-btn-open")?.addEventListener("click", () => callbacks.onOpenOutput?.());
+  section.querySelector("#dz-btn-reveal")?.addEventListener("click", () => callbacks.onRevealOutput?.());
   section.querySelector("#dz-btn-share")?.addEventListener("click", () => callbacks.onCopyShareLink?.());
   section.querySelector("#dz-btn-another")?.addEventListener("click", () => callbacks.onReset());
   parent.appendChild(section);

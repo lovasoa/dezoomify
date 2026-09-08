@@ -1,7 +1,7 @@
 // Real Tauri window shell (behind the `tauri` feature).
 //
 // One local window (`main`), strict navigation policy from
-// tauri.conf.json (no remote IPC access, strict CSP), and the exact five
+// tauri.conf.json (no remote IPC access, strict CSP), and the exact
 // commands of the generated capability documents wired to the pure job
 // table. No tile bytes cross IPC, only protocol progress and events.
 //
@@ -25,7 +25,138 @@ use dezoomify_native::output::{validate_destination, OutputFormat};
 /// Command registry, mirrored from the pure layer for compile-time checks.
 const COMMANDS: &[&str] = commands::COMMANDS;
 
-#[derive(Serialize)]
+#[cfg(all(test, target_os = "linux"))]
+mod output_tests {
+    use super::launch_saved_output;
+    use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+
+    #[test]
+    fn launcher_child() {
+        let Some(root) = std::env::var_os("DEZOOMIFY_TEST_LAUNCH_ROOT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let image = root.join("saved image.png");
+        launch_saved_output(image.clone(), false).unwrap();
+        launch_saved_output(image.clone(), true).unwrap();
+        fs::remove_file(&image).unwrap();
+        assert_eq!(
+            launch_saved_output(image.clone(), false).unwrap_err().code,
+            "output.not-found"
+        );
+        // A moved image does not prevent opening its containing directory.
+        launch_saved_output(image, true).unwrap();
+        fs::write(root.join("gio"), "#!/bin/sh\nexit 1\n").unwrap();
+        assert_eq!(
+            launch_saved_output(root.join("missing.png"), true)
+                .unwrap_err()
+                .code,
+            "output.launch-failed"
+        );
+    }
+
+    #[test]
+    fn checks_launcher_exit_status_and_opens_the_containing_directory() {
+        let root =
+            std::env::temp_dir().join(format!("dezoomify-launch-test-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("saved image.png"), b"fixture").unwrap();
+        // A failing first launcher must fall through to the next supported
+        // desktop handler. Only the child process sees this isolated PATH.
+        for (name, script) in [
+            ("xdg-open", "#!/bin/sh\nexit 1\n"),
+            ("gio", "#!/bin/sh\nprintf '%s\\n' \"$2\" >> \"$DEZOOMIFY_TEST_LAUNCH_ROOT/calls\"\nexit 0\n"),
+        ] {
+            let path = root.join(name);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tauri_shell::output_tests::launcher_child"])
+            .env("PATH", &root)
+            .env("DEZOOMIFY_TEST_LAUNCH_ROOT", &root)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let calls = fs::read_to_string(root.join("calls")).unwrap();
+        let expected = [root.join("saved image.png"), root.clone(), root.clone()];
+        assert_eq!(
+            calls
+                .lines()
+                .map(std::path::PathBuf::from)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+/// Open only an output published by this app; callers never supply paths.
+#[tauri::command]
+async fn open_saved_output(
+    table: State<'_, Mutex<JobTable>>,
+    job: String,
+    reveal: bool,
+) -> Result<(), CommandFailure> {
+    let path = table
+        .lock()
+        .ok()
+        .and_then(|table| table.saved_output_for(&job))
+        .ok_or_else(|| CommandFailure {
+            code: "output.unavailable".into(),
+            message: "The saved image is unavailable.".into(),
+        })?;
+    // Launch off the async executor and check the launcher's result. The
+    // opener plugin's detached path reports success before the launcher exits;
+    // its Linux reveal API also requires a FileManager1/portal D-Bus service.
+    // Opening the parent uses the user's default folder handler instead.
+    tauri::async_runtime::spawn_blocking(move || launch_saved_output(path, reveal))
+        .await
+        .map_err(|_| CommandFailure {
+            code: "output.launch-task-failed".into(),
+            message: "The file-opening task could not finish.".into(),
+        })?
+}
+
+fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), CommandFailure> {
+    let target = if reveal {
+        path.parent()
+            .ok_or_else(|| CommandFailure {
+                code: "output.no-parent".into(),
+                message: "The saved image has no containing folder.".into(),
+            })?
+            .to_path_buf()
+    } else {
+        path
+    };
+    std::fs::metadata(&target).map_err(|error| CommandFailure {
+        code: if error.kind() == std::io::ErrorKind::NotFound {
+            "output.not-found"
+        } else {
+            "output.not-accessible"
+        }
+        .into(),
+        message: "The saved image or folder is not accessible.".into(),
+    })?;
+    // `open::that` stops after an installed launcher exits unsuccessfully.
+    // Try the remaining platform launchers on both spawn and exit failures.
+    for mut command in open::commands(&target) {
+        let result = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if result.is_ok_and(|status| status.success()) {
+            return Ok(());
+        }
+    }
+    Err(CommandFailure {
+        code: "output.launch-failed".into(),
+        message: "The system could not launch the default application.".into(),
+    })
+}
+
+#[derive(Debug, Serialize)]
 struct CommandFailure {
     code: String,
     message: String,
@@ -74,6 +205,7 @@ struct CapabilitySnapshot {
 /// - `job-progress`: `{job,jobId,seq,kind,state,acquired,total,detail,origin}`
 /// - `job-output`: `{job,jobId,seq,kind,state,outputHash,format,width,height,tileCount,detail,origin}`
 /// - `job-error`: `{job,jobId,seq,kind,state,code,phase,retryable,recovery,message,detail,origin,transport,resource-kind}`
+///
 /// Only counts, hashes, codes, and the redacted origin cross IPC; tile
 /// bytes, paths, full URLs, and secrets never do. `resource-kind` is emitted
 /// alongside the `resource_kind` alias for frontend compatibility.
@@ -502,15 +634,14 @@ pub fn run() {
                 .build(),
         )
     };
+    macro_rules! command_handler {
+        ($($command:ident),* $(,)?) => {
+            tauri::generate_handler![$($command),*]
+        };
+    }
     builder
         .manage(Mutex::new(JobTable::new()))
-        .invoke_handler(tauri::generate_handler![
-            start_job,
-            cancel_job,
-            answer_choice,
-            request_destination,
-            query_capabilities,
-        ])
+        .invoke_handler(desktop_commands!(command_handler))
         .setup(|app| {
             // Initial launch may itself carry a deep link
             // (`dezoomify-desktop dezoomify://open?...`).

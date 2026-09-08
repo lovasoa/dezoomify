@@ -66,7 +66,6 @@ import {
 import type { CatalogNotice, PendingDecision } from "./jobController.ts";
 import {
   buildCopyDiagnostics,
-  DESKTOP_APP_VERSION,
   handleCopyDiagnostics,
 } from "./diagnostics.ts";
 import {
@@ -100,6 +99,7 @@ import {
 } from "./queue.ts";
 import type { DesktopQueue } from "./queue.ts";
 import {
+  defaultOutputDirectory,
   describeSettingsForLog,
   loadSettings,
   parseHeadersText,
@@ -109,27 +109,14 @@ import {
   validateSettings,
 } from "./settings.ts";
 import type { DesktopSettings } from "./settings.ts";
-import "../../../packages/shared-ui/src/styles/theme.css";
 import { listen as tauriApiListen } from "@tauri-apps/api/event";
-import "./desktop.css";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 const integration = createDesktopIntegration();
 
-// Task 5.3 Help/About (docs rule: docs/user/ is the only source of user
-// text; link, never duplicate). Short link labels only; every user guide
-// lives in the published docs pages below, opened via openExternalLink
-// (https-only). No user copy is duplicated here.
+// Shared-view relative documentation links resolve against this published
+// documentation origin. The desktop footer itself is static document markup.
 const DESKTOP_DOCS_BASE = "https://dezoomify.ophir.dev";
-const DESKTOP_HELP_LINKS: Array<{ label: string; url: string }> = [
-  { label: t("desktop.help.help"), url: `${DESKTOP_DOCS_BASE}/help/` },
-  { label: t("desktop.help.desktopGuide"), url: `${DESKTOP_DOCS_BASE}/help/desktop-app.html` },
-  { label: t("desktop.help.troubleshooting"), url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
-  { label: t("desktop.help.faq"), url: `${DESKTOP_DOCS_BASE}/help/troubleshooting.html` },
-  { label: t("desktop.help.privacy"), url: `${DESKTOP_DOCS_BASE}/privacy.html` },
-  { label: t("desktop.help.terms"), url: `${DESKTOP_DOCS_BASE}/terms.html` },
-  { label: t("desktop.help.donate"), url: "https://github.com/sponsors/lovasoa/" },
-];
 
 // Transport reported for every desktop controller transition. Pixels stay
 // native, so the badge never claims a browser transport. The "native" code
@@ -274,7 +261,6 @@ let desktopSettings: DesktopSettings = loadSettings();
 grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
 
 function persistOutputFormat(format: NativeFormat): void {
-  if (format === "iiif-dir") return;
   if (desktopSettings.outputFormat === format) return;
   desktopSettings = { ...desktopSettings, outputFormat: format };
   saveSettings(desktopSettings);
@@ -346,6 +332,7 @@ function recoveryKeyFor(decision: PendingDecision | null): string | null {
 let completedPartial = false;
 let completedMissing: Array<string> = [];
 let completedSibling: string | null = null;
+let outputActionError: { action: "open" | "folder"; code: string } | undefined;
 
 // Live heartbeat for the loading view: advances now and longestPendingMs
 // so the pending box and smooth track stay current between IPC snapshots.
@@ -594,6 +581,19 @@ function runPersistSettingsFromPanel(): void {
 
 function runResetDesktopSettings(): void {
   resetDesktopSettings(settingsEnv);
+  void applyPlatformOutputDefault();
+}
+
+// A null output folder represents only legacy/first-run settings. Upgrade it
+// to the platform Downloads directory as soon as the native bridge is ready,
+// so the compact Folder control always starts somewhere useful.
+async function applyPlatformOutputDefault(): Promise<void> {
+  if (desktopSettings.outputDir !== null) return;
+  const outputDir = await defaultOutputDirectory();
+  if (!outputDir || desktopSettings.outputDir !== null) return;
+  desktopSettings = { ...desktopSettings, outputDir };
+  saveSettings(desktopSettings);
+  update();
 }
 
 function diagnosticsSnapshot() {
@@ -619,6 +619,7 @@ function diagnosticsSnapshot() {
       ? { current: viewCtx.currentProgress.current, total: viewCtx.currentProgress.total }
       : undefined,
     origin: redactedOriginOnly(lastInputUrl),
+    outputActionError,
   };
 }
 
@@ -626,6 +627,7 @@ function diagnosticsSnapshot() {
 
 
 function clearJobViewState(): void {
+  outputActionError = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.jobActivity = undefined;
@@ -644,6 +646,17 @@ function clearJobViewState(): void {
 function handleSubmitUrl(url: string): void {
   const trimmed = typeof url === "string" ? url.trim() : "";
   if (!isValidInputUrl(trimmed)) {
+    // Validation failures use the same failed view as later job failures.
+    // The shared controller intentionally has no idle -> failed edge, so
+    // enter the submitted-job lifecycle before recording the failure.
+    if (controller.getState().status === "idle") {
+      controller.dispatch({
+        seq: nextSeq(),
+        sessionId,
+        kind: "start-discovery",
+        transport: NATIVE_TRANSPORT,
+      });
+    }
     controller.dispatch({
       seq: nextSeq(),
       sessionId,
@@ -1073,11 +1086,10 @@ function handleCancel(): void {
   update();
 }
 
-// Shared save-destination grant path for the Save button and the
-// choose-output recovery choice. On grant, walks the controller into saving;
+// Destination recovery grants a replacement output. On grant, walks the controller into saving;
 // completion itself arrives via dezoomify://job-output (exactly-once
 // terminal guard ignores any duplicate).
-function requestOutputAndResume(origin: string): void {
+function requestOutputAndResume(): void {
   const job = currentJobId;
   if (!job || isTerminalStatus(controller.getState().status)) return;
   const format = normalizeNativeFormat(grantedFormat);
@@ -1086,7 +1098,7 @@ function requestOutputAndResume(origin: string): void {
     catalogNotice?.width ?? viewCtx.imageChoice?.width ?? viewCtx.completedInfo?.width,
     catalogNotice?.height ?? viewCtx.imageChoice?.height ?? viewCtx.completedInfo?.height,
   );
-  pushLog(origin === "choose-output" ? "Requesting save destination…" : "Requesting save destination (save)…");
+  pushLog("Requesting save destination…");
   void integration
     .requestSaveDestination({ jobId: job, format, suggestedName })
     .then(
@@ -1127,8 +1139,29 @@ function requestOutputAndResume(origin: string): void {
     );
 }
 
-function handleSave(): void {
-  requestOutputAndResume("save");
+async function handleOpenOutput(reveal: boolean): Promise<void> {
+  const invoke = tauriInvoke();
+  const job = currentJobId;
+  if (!invoke || !job) return;
+  outputActionError = undefined;
+  root?.querySelector("#dz-open-error")?.remove();
+  try {
+    await invoke("open_saved_output", { job, reveal });
+  } catch (error) {
+    if (job !== currentJobId) return;
+    const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
+    const code = typeof rawCode === "string" && /^output\.[a-z-]+$/.test(rawCode)
+      ? rawCode : "output.invoke-failed";
+    outputActionError = { action: reveal ? "folder" : "open", code };
+    pushLog(`File action ${outputActionError.action} failed (${code})`);
+    const section = root?.querySelector(".dz-completed-section");
+    if (!section) return;
+    const note = section.ownerDocument.createElement("p");
+    note.id = "dz-open-error";
+    note.setAttribute("role", "alert");
+    note.textContent = `${t(code === "output.not-found" ? "desktop.done.missingError" : reveal ? "desktop.done.folderError" : "desktop.done.openError")} (${code})`;
+    section.appendChild(note);
+  }
 }
 
 // Recovery: retry the outstanding decision (destination -> back to
@@ -1172,36 +1205,8 @@ function handlePartialChoice(keep: boolean): void {
   );
 }
 
-// Recovery: hand the job to another app. The desktop app is already native,
-// so this validates the bounded non-secret source and records the outcome;
-// the user keeps working here afterwards.
-function handleHandoffToNative(): void {
-  const decision = pendingDecision;
-  if (!decision || isTerminalStatus(controller.getState().status)) return;
-  if (!lastInputUrl) return;
-  pushLog("Checking handoff to another app…");
-  void integration
-    .requestHandoff({ sourceUrl: lastInputUrl, provenanceLabel: "desktop" })
-    .then(
-      (result) => {
-        pushLog(
-          result.accepted
-            ? `Handoff ready: ${result.reason}`
-            : `Handoff rejected: ${result.reason}`,
-        );
-        const a = activity();
-        a.detail = result.accepted ? t("desktop.handoff.acceptedDetail") : t("desktop.handoff.rejectedDetail");
-        touchProgress();
-        update();
-      },
-      (error: unknown) => {
-        pushLog(`Handoff check failed: ${error instanceof Error ? error.message : "unknown error"}`);
-        update();
-      },
-    );
-}
-
 function handleReset(): void {
+  outputActionError = undefined;
   submitToken += 1;
   sessionId = `sess:desktop-${Date.now()}`;
   controller.reset(sessionId);
@@ -1752,9 +1757,10 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     text.indexOf("progress") >= 0 ||
     numField(payload, detailRaw, ["acquired", "completed", "current", "done"]) !== undefined
   ) {
-    const current =
-      numField(payload, detailRaw, ["current", "acquired", "completed", "done", "resources"]) ?? 0;
-    const total = numField(payload, detailRaw, ["total"]) ?? 0;
+    const reportedTotal = numField(payload, detailRaw, ["total"]) ?? 0;
+    const total = Math.max(viewCtx.currentProgress?.total ?? 0, reportedTotal);
+    const current = Math.max(viewCtx.currentProgress?.current ?? 0,
+      reportedTotal > 0 ? numField(payload, detailRaw, ["current", "acquired", "completed", "done"]) ?? 0 : 0);
     const message = strField(payload, ["message"]);
     const progressCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
     preflightThrough(progressCount);
@@ -2028,7 +2034,7 @@ function ensureDesktopAuxPanel(): void {
   aux.className = "dz-view-body dz-desktop-aux";
   aux.setAttribute("role", "region");
   aux.setAttribute("aria-label", t("desktop.panel.jobActions"));
-  appendOutputFormatRadios(aux, doc);
+  if (decision && decision.kind !== "partial-recovery") appendOutputFormatRadios(aux, doc);
 
   let decisionBox: HTMLElement | null = null;
 
@@ -2081,15 +2087,13 @@ function ensureDesktopAuxPanel(): void {
       title.textContent = t("desktop.rec.destTitle");
       desc.textContent = t("desktop.rec.destDesc");
       decisionBox.append(title, desc, row);
-      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume("choose-output"));
+      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
       addButton(t("desktop.rec.tryAgain"), false, () => handleRecoveryRetry());
-      addButton(t("desktop.rec.useOther"), false, () => handleHandoffToNative());
     } else {
       title.textContent = t("desktop.rec.chooseTitle");
       desc.textContent = t("desktop.rec.chooseDesc");
       decisionBox.append(title, desc, row);
-      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume("choose-output"));
-      addButton(t("desktop.rec.useOther"), false, () => handleHandoffToNative());
+      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
     }
     decisionBox.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -2162,7 +2166,7 @@ function ensureDesktopAuxPanel(): void {
     aux.appendChild(note);
   }
 
-  appendDesktopQueuePanel(aux, doc);
+  if (state.status !== "completed" && desktopQueue.entries.length > 1) appendDesktopQueuePanel(aux, doc);
 
   if (showCopy) {
     const copyRow = doc.createElement("div");
@@ -2174,7 +2178,16 @@ function ensureDesktopAuxPanel(): void {
     copyBtn.textContent = t("desktop.copy.diagnostics");
     copyBtn.addEventListener("click", () => handleCopyDiagnostics(() => buildCopyDiagnostics(diagnosticsSnapshot())));
     copyRow.appendChild(copyBtn);
-    aux.appendChild(copyRow);
+    if (state.status === "completed") {
+      const details = doc.createElement("details");
+      details.id = "dz-completed-details";
+      const summary = doc.createElement("summary");
+      summary.textContent = t("view.job.techDetails");
+      details.append(summary, copyRow);
+      aux.appendChild(details);
+    } else {
+      aux.appendChild(copyRow);
+    }
   }
 
   card.appendChild(aux);
@@ -2302,59 +2315,6 @@ function ensureDesktopFooter(): void {
   footer.setAttribute("data-dz-wired", "true");
 }
 
-// Task 5.3 Help/About: link-only region inside the single status card.
-// Buttons (never anchors, so no navigation risk) open the published
-// docs/user/ pages, legal pages, and Donate via openExternalLink
-// (https-only). Labels only; no user copy is duplicated here. The version
-// line is app metadata, not docs text.
-//
-// Accessibility: region labelled by its heading; all actions are native
-// buttons reachable by Tab with the crisp 2px focus ring. Rebuilds are
-// skipped while focus sits inside so progress ticks never drop focus.
-function ensureDesktopHelpAbout(): void {
-  if (typeof document === "undefined" || !root) return;
-  const card = root.querySelector(".dz-card");
-  if (!card) return;
-  const existing = document.getElementById("dz-desktop-help");
-  if (existing && existing.contains(document.activeElement)) return;
-  existing?.remove();
-
-  const doc = root.ownerDocument;
-  const region = doc.createElement("div");
-  region.id = "dz-desktop-help";
-  region.className = "dz-view-body dz-desktop-help";
-  region.setAttribute("role", "region");
-  region.setAttribute("aria-labelledby", "dz-help-title");
-
-  const disclosure = doc.createElement("details");
-  disclosure.className = "dz-help-disclosure";
-  const summary = doc.createElement("summary");
-  summary.id = "dz-help-title";
-  const title = doc.createElement("span");
-  title.textContent = t("desktop.help.title");
-  const version = doc.createElement("span");
-  version.className = "dz-help-version";
-  version.textContent = `Desktop ${DESKTOP_APP_VERSION}`;
-  summary.append(title, version);
-  disclosure.appendChild(summary);
-
-  const row = doc.createElement("div");
-  row.className = "dz-actions-row dz-help-actions";
-  for (const link of DESKTOP_HELP_LINKS) {
-    const btn = doc.createElement("button");
-    btn.type = "button";
-    btn.className = "dz-btn-secondary";
-    btn.textContent = link.label;
-    btn.setAttribute("aria-label", link.label);
-    btn.addEventListener("click", () => handleOpenExternalLink(link.url));
-    row.appendChild(btn);
-  }
-  disclosure.appendChild(row);
-  region.appendChild(disclosure);
-
-  card.appendChild(region);
-}
-
 function update() {
   if (!root) return;
   const state = controller.getState();
@@ -2385,8 +2345,16 @@ function update() {
       onReset() {
         handleReset();
       },
-      onSave() {
-        handleSave();
+      ...(state.status === "completed" ? {
+        onOpenOutput: () => { void handleOpenOutput(false); },
+        onRevealOutput: () => { void handleOpenOutput(true); },
+      } : {}),
+      onHistorySelect(entry: HistoryEntry) {
+        viewCtx.initialUrl = entry.url;
+        const input = root.querySelector<HTMLInputElement>("#dz-url-input");
+        if (input) input.value = entry.url;
+        update();
+        root.querySelector<HTMLInputElement>("#dz-url-input")?.focus();
       },
       onSelectImage(index: number) {
         handleSelectImage(index);
@@ -2412,6 +2380,7 @@ function update() {
       },
       ...(viewCtx.currentProgress ? { currentProgress: viewCtx.currentProgress } : {}),
       ...(viewCtx.completedInfo ? { completedInfo: viewCtx.completedInfo } : {}),
+      ...(state.status === "completed" ? { nativeSaved: { partial: completedPartial } } : {}),
       ...(viewCtx.jobActivity ? { jobActivity: viewCtx.jobActivity } : {}),
       ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
       ...(auxChoice ? { imageChoice: auxChoice } : {}),
@@ -2419,14 +2388,14 @@ function update() {
     },
   );
   ensureDesktopAuxPanel();
-  ensureDesktopSettingsPanel({
+  if (state.status === "idle") ensureDesktopSettingsPanel({
     root,
     settings: desktopSettings,
     error: settingsError,
     onPersist: () => runPersistSettingsFromPanel(),
     onReset: () => runResetDesktopSettings(),
   });
-  ensureDesktopHelpAbout();
+  else root.ownerDocument.getElementById("dz-desktop-settings")?.remove();
   ensureDesktopExternalNav();
   ensureDesktopFooter();
 }
@@ -2441,6 +2410,7 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 
 if (root !== null) {
   update();
+  void applyPlatformOutputDefault();
 }
 
 function getCurrentJobId(): string | null {

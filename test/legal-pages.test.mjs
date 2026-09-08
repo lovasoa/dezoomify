@@ -28,7 +28,7 @@ test("header bar has consistent thin structure and styling across pages", () => 
   const themeCss = readFileSync(themeCssPath, "utf8");
 
   // .dz-nav has thin constant height and cannot shrink
-  assert.match(themeCss, /\.dz-nav\s*\{[^}]*height:\s*36px;/);
+  assert.match(themeCss, /\.dz-nav\s*\{[^}]*height:\s*52px;/);
   assert.match(themeCss, /\.dz-nav\s*\{[^}]*flex-shrink:\s*0;/);
 
   for (const page of ["index.html", "privacy.html", "terms.html"]) {

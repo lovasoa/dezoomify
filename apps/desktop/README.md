@@ -26,26 +26,24 @@ bridge. Tests: `cargo xtask test desktop`.
 
 ## End-to-end
 
-The hermetic E2E always runs with no public network and no webview. It
-serves fixtures on an ephemeral loopback port with the same binary and
-flags as `cargo xtask fixtures serve --port 0`, drives the lean shell plus
-the frontend harness through submit URL, image/level choice,
-request_destination, and save, verifies the saved PNG against the
-`native/cli-dzi` golden (dimensions, quadrant placement, sha256), and
-covers the deep-link confirm flow (no effect while pending) plus the
-cancel flow (terminal once, uncommitted output removed). Reports carry
-redacted origins, hashes, and codes only.
+The hermetic frontend integration test always runs with no public network and
+no webview. It mounts the production `src/main.ts` entry in a lightweight DOM
+and drives its rendered submit, recovery, cancellation, and deep-link controls
+through a recording Tauri IPC and event boundary. It therefore fails when the
+shipped frontend wiring drifts; it does not duplicate URL parsing or job
+sequencing in the test. Native pipeline behavior is covered by the Rust desktop E2E and scenario
+lanes, while rendered-window behavior is covered by the real-window lane.
 
 ```sh
-cargo xtask test desktop    # lean shell tests plus the hermetic E2E
+cargo xtask test desktop    # lean shell tests plus the hermetic integration smoke
 cargo xtask test scenario   # native pipeline scenario gates
 ```
 
 The hermetic pieces are `apps/desktop/src-tauri/tests/desktop_e2e.rs`
 (real job table over an in-process loopback server) and
-`apps/desktop/tests/e2e.test.mjs` (subprocess fixture server, real
-frontend integration, real pipeline save, redacted report). Both use
-allocated ports, isolated profiles, fixed seeds, and no shared state.
+`apps/desktop/tests/e2e.test.mjs` (mounted production frontend entry through a
+recording IPC and event boundary). The Rust test owns native output verification; the
+frontend test owns the shipped UI-to-command and event-to-controller graph.
 
 The real-window E2E runs the window shell under tauri-driver on Linux
 instead of by hand:
@@ -58,10 +56,10 @@ The lane builds the window shell (`--unsigned-test`: lean shell, frontend,
 window shell, no bundle), serves fixtures hermetically on an ephemeral
 loopback port, serves the built frontend over loopback for the debug
 window shell, launches the app under tauri-driver with a fresh profile and
-ephemeral ports, and drives four flows with selenium-webdriver: submit with
+ephemeral ports, and drives three flows with selenium-webdriver: submit with
 destination grant to a byte-exact save versus the `native/cli-dzi` golden,
-cancel with output cleanup, an existing-destination refusal with its stable
-code, and the deep-link confirm gate (pending links perform no effect).
+cancel with output cleanup, and the deep-link confirm gate (pending links
+perform no effect).
 The native save dialog is not WebDriver-automatable, so the run sets the
 fail-closed E2E fixed destination (`DEZOOMIFY_E2E_WINDOW=1` plus
 `DEZOOMIFY_E2E_FIXED_DESTINATION`); production never sets either, so the
@@ -76,24 +74,20 @@ harness run on Linux; macOS/Windows lane support (native-driver discovery
 plus lane preflight) is a later wave.
 
 CI (`.github/workflows/desktop.yml`, path-gated to desktop-relevant changes)
-proves the app per platform in two parallel jobs. The `window-e2e` job
-(ubuntu) runs the lane for real under Xvfb (apt `webkit2gtk-driver`, pinned
-tauri-driver, each spec under a hard deadline so a leaked child fails with
-logs instead of hanging) and uploads the lane log as `desktop-e2e-ubuntu`.
-The `bundle-smoke` job matrixes ubuntu/macos/windows (`fail-fast: false`):
-macOS enables `safaridriver` and Windows installs `msedgedriver` pinned to
-the runner's Edge, and each records the lane's Linux-only guard as block
-evidence (pass on a real lane pass or that exact guard, fail closed
-otherwise). Every smoke leg then bundle-smokes:
+uses a Linux `window-e2e` job for this real lane under Xvfb (apt
+`webkit2gtk-driver`, pinned tauri-driver, one hard deadline) and uploads the
+log as `desktop-e2e-ubuntu`. The `bundle-smoke` job matrixes
+ubuntu/macos/windows (`fail-fast: false`) and keeps actual per-platform
+bundle, install, and launch coverage:
 Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under
 Xvfb (a 20 s stay-alive proves install + launch + webview init; the window
 shell has no `--version` flag), macOS mounts the `dmg` and execs the binary
 directly (unsigned local build, Gatekeeper/SIP untouched), Windows installs
 silently (`nsis` `/S`, or the direct-exe fallback when WiX/NSIS are absent).
-Smoke logs upload as `desktop-bundle-smoke-<os>`; smokes run in their own
-job, so a smoke failure cannot fail the E2E signal spuriously. The desktop
-crate's lean unit tests also run in the `rust` lane of `ci.yml`. No update
-flow is exercised anywhere (updater inert).
+Smoke logs upload as `desktop-bundle-smoke-<os>`. Platform smokes do not
+install browser drivers or claim real-window E2E coverage. The desktop crate's
+lean unit tests also run in the `rust` lane of `ci.yml`. No update flow is
+exercised anywhere (updater inert).
 
 ## Bundles
 

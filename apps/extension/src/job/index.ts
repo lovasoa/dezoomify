@@ -7,17 +7,28 @@ import { createCanvasAssembly } from "../vendor/assembly.js";
 import { pickEngineSelection } from "../vendor/engine-selection.js";
 import { createJobController } from "./controller.js";
 import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
+import type { JobBinding } from "./transport.js";
 
-const api = globalThis.browser ?? globalThis.chrome;
+type ExtensionApi = {
+  runtime?: { sendMessage?(message: unknown): Promise<unknown>; onMessage?: { addListener(listener: (message: Record<string, unknown>) => void): void } };
+  permissions?: { contains?(request: { origins: string[] }): Promise<boolean> };
+};
+type Failure = { code: string; category: string; retryable: boolean; message: string };
+type ViewContext = Record<string, unknown> & { failure?: Failure };
+type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: Failure; catalog?: { images?: unknown[] } };
+type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[] };
+
+const hostGlobal = globalThis as typeof globalThis & { browser?: ExtensionApi; chrome?: ExtensionApi };
+const api = hostGlobal.browser ?? hostGlobal.chrome;
 
 /** @type {any | null} */
-let binding = null;
+let binding: JobBinding | null = null;
 /** @type {ReturnType<typeof createJobController> | null} */
-let controller = null;
-let sourceTransport = null;
-let jobWorker = null;
+let controller: ReturnType<typeof createJobController> | null = null;
+let sourceTransport: ReturnType<typeof createCoordinatorSourceTransport> | null = null;
+let jobWorker: Worker | null = null;
 /** @type {ReturnType<typeof createCanvasAssembly> | null} */
-let assembly = null;
+let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
 let seq = 0;
 let started = false;
 let selected = false;
@@ -25,12 +36,12 @@ let hostFailed = false;
 let lastSource = "";
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 
-function requestId(prefix) { return `${prefix}-${crypto.randomUUID?.() ?? Date.now().toString(36)}`; }
-function boundEnvelope(type, extra = {}) { return { type, ...binding, requestId: requestId(type.replaceAll(".", "-")), ...extra }; }
+function requestId(prefix: string) { return `${prefix}-${crypto.randomUUID?.() ?? Date.now().toString(36)}`; }
+function boundEnvelope(type: string, extra: Record<string, unknown> = {}) { return { type, ...binding, requestId: requestId(type.replaceAll(".", "-")), ...extra }; }
 
 function root() { return document.getElementById("dz-job-app"); }
 
-function render(status, ctx = {}) {
+function render(status: string, ctx: ViewContext = {}) {
   const target = root();
   if (!target) return;
   seq += 1;
@@ -43,7 +54,7 @@ function render(status, ctx = {}) {
   }, ctx);
 }
 
-function send(message) {
+function send(message: unknown): Promise<unknown> {
   if (!api?.runtime?.sendMessage) return Promise.reject(new Error("extension runtime unavailable"));
   return api.runtime.sendMessage(message);
 }
@@ -54,7 +65,7 @@ function closeJob() {
   if (binding) void send(boundEnvelope("dz.job.closed")).catch(() => {});
 }
 
-function showAccessRequired(detail) {
+function showAccessRequired(detail: { hosts: string[] }) {
   const hosts = Array.isArray(detail.hosts) ? detail.hosts : [];
   render("failed", {
     failure: { code: "access-required", category: "extension", retryable: true, message: `This image uses files from: ${hosts.join(", ") || "another site"}` },
@@ -80,7 +91,7 @@ function showAccessRequired(detail) {
  * exhausted its retries. Only an explicit user action chooses keep/discard;
  * the engine owns the consequence (encode with missing regions, or fail).
  */
-function showPartialDecision(recovery) {
+function showPartialDecision(recovery: string) {
   if (typeof recovery !== "string" || !recovery.startsWith("rec:")) return;
   render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Some tiles are missing" } });
   const target = root();
@@ -101,30 +112,33 @@ function showPartialDecision(recovery) {
 }
 
 /** Host-side effect execution failed terminally: render it and stop. */
-function onHostFailure(error) {
+function onHostFailure(error: unknown) {
   if (hostFailed) return;
   hostFailed = true;
-  const failure = error && typeof error.code === "string"
+  const candidate = error && typeof error === "object"
+    ? error as { code?: unknown; message?: unknown; retryable?: unknown; detail?: unknown; phase?: unknown; transport?: unknown }
+    : null;
+  const failure = candidate && typeof candidate.code === "string"
     ? {
-      code: error.code,
+      code: candidate.code,
       category: "extension",
-      retryable: error.retryable === true,
-      message: error.code === "adapter.wrong-state"
+      retryable: candidate.retryable === true,
+      message: candidate.code === "adapter.wrong-state"
         ? "The extension lost sync while reading this image. Start the scan again."
-        : (error.message || "The image could not be assembled in this tab."),
-      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
-      ...(typeof error.phase === "string" ? { phase: error.phase } : {}),
-      ...(typeof error.transport === "string" ? { transport: error.transport } : {}),
+        : (typeof candidate.message === "string" ? candidate.message : "The image could not be assembled in this tab."),
+      ...(typeof candidate.detail === "string" ? { detail: candidate.detail } : {}),
+      ...(typeof candidate.phase === "string" ? { phase: candidate.phase } : {}),
+      ...(typeof candidate.transport === "string" ? { transport: candidate.transport } : {}),
     }
     : { code: "output-failed", category: "extension", retryable: false, message: "The image could not be assembled in this tab." };
   render("failed", { failure, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
 }
 
-function createAssembly(sourceUrl) {
+function createAssembly(sourceUrl: string) {
   const decoder = createTileDecoder();
   return createCanvasAssembly({
-    decode: (bytes) => decoder.decode(bytes),
-    createCanvas: (width, height) => {
+    decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
+    createCanvas: (width: number, height: number) => {
       const element = document.createElement("canvas");
       element.width = width;
       element.height = height;
@@ -134,10 +148,11 @@ function createAssembly(sourceUrl) {
       }
       // The executor draws through ctx2d and encodes through toBlob: expose
       // both on one surface object.
-      return { width, height, ctx2d, toBlob: (cb, mime) => element.toBlob(cb, mime) };
+      return { width, height, ctx2d, toBlob: (cb: BlobCallback, mime?: string) => element.toBlob(cb, mime) };
     },
-    encode: (canvas) => canvasToPngBlob(canvas),
-    save: (blob, width, height) => {
+    encode: (canvas: { toBlob(cb: (blob: unknown | null) => void, mime?: string): void }) => canvasToPngBlob(canvas),
+    save: (blob: unknown, width: number, height: number) => {
+      if (!(blob instanceof Blob)) throw new TypeError("encoded output is not a Blob");
       const url = URL.createObjectURL(blob);
       try {
         saveBlobViaAnchor(document, url, width, height);
@@ -151,7 +166,7 @@ function createAssembly(sourceUrl) {
   });
 }
 
-function handleEvent(event) {
+function handleEvent(event: JobEvent) {
   if (hostFailed) return;
   if (event.type === "progress") render("downloading", { currentProgress: { current: event.acquired, total: event.total }, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
   else if (event.type === "failed") render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
@@ -171,7 +186,7 @@ function handleEvent(event) {
   }
 }
 
-function setup(bound) {
+function setup(bound: unknown) {
   if (!isJobBinding(bound) || binding) return;
   // Keep only the four binding fields: the arriving message carries payload
   // (type, sourceValid, documentUrl) that must never leak into outgoing
@@ -182,6 +197,7 @@ function setup(bound) {
     frameId: bound.frameId,
     documentGeneration: bound.documentGeneration,
   };
+  const activeBinding = binding;
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   jobWorker = worker;
   const extensionTransport = createExtensionFetcher({
@@ -190,31 +206,35 @@ function setup(bound) {
   sourceTransport = createCoordinatorSourceTransport({ sendMessage: send });
   controller = createJobController({
     worker,
-    binding: () => binding,
+    binding: () => activeBinding,
     sourceTransport,
     extensionTransport,
-    get assembly() { return assembly; },
+    get assembly() {
+      if (!assembly) throw new Error("output assembly is not initialized");
+      return assembly;
+    },
     classifyFailure: engineFailure,
     onPermissionRequired: showAccessRequired,
     onPartialDecision: showPartialDecision,
     onHostFailure,
     onEvent: handleEvent,
-    onUnsupportedEffect: (effect) => {
+    onUnsupportedEffect: (effect: unknown) => {
       // An effect this host cannot execute is a contract gap, never a fake
       // success: fail visibly instead of pretending it was performed.
-      onHostFailure(Object.assign(new Error(`This app cannot yet perform the ${effect?.type} step.`), { code: "EFFECT_UNSUPPORTED", retryable: false }));
+      const type = effect && typeof effect === "object" && "type" in effect ? String(effect.type) : "unknown";
+      onHostFailure(Object.assign(new Error(`This app cannot yet perform the ${type} step.`), { code: "EFFECT_UNSUPPORTED", retryable: false }));
       controller?.cancel();
     },
   });
-  worker.addEventListener("message", (event) => {
-    if (event.data?.type === "engine.messages") controller?.handleEngineMessages(event.data.messages);
+  worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
+    if (event.data?.type === "engine.messages") controller?.handleEngineMessages(event.data.messages ?? []);
     else if (event.data?.type === "engine.ranked") ranked(event.data);
     else if (event.data?.type === "engine.error") onHostFailure(event.data.error);
   });
   render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });
 }
 
-function candidates(message) {
+function candidates(message: Record<string, unknown>) {
   if (!binding || !message || message.jobId !== binding.jobId || started) return;
   const values = Array.isArray(message.urls) ? message.urls.filter((candidate) => typeof candidate === "string") : [];
   if (!values.length) return;
@@ -226,7 +246,7 @@ function candidates(message) {
   jobWorker?.postMessage({ type: "engine.rank", requestId: requestId("rank"), urls: values });
 }
 
-function ranked(message) {
+function ranked(message: WorkerMessage) {
   if (!binding || assembly) return;
   const values = Array.isArray(message.urls) ? message.urls : [];
   const first = values.find((candidate) => typeof candidate === "string");

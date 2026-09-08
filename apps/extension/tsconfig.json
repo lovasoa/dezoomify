@@ -4,16 +4,15 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
     "strict": true,
     "noEmit": true,
-    "allowJs": true,
-    "checkJs": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noUnusedLocals": true,
     "noUnusedParameters": false,
     "exactOptionalPropertyTypes": false
   },
-  "include": ["src/**/*.ts", "tests/**/*.mjs"]
+  "include": ["src/**/*.ts"]
 }

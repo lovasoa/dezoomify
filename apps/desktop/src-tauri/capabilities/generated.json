@@ -11,6 +11,7 @@
     "dezoomify:allow-answer-choice",
     "dezoomify:allow-cancel-job",
     "dezoomify:allow-query-capabilities",
+    "dezoomify:allow-open-saved-output",
     "dezoomify:allow-request-destination",
     "dezoomify:allow-start-job"
   ],
@@ -21,6 +22,7 @@
     "commands": [
       "answer_choice",
       "cancel_job",
+      "open_saved_output",
       "query_capabilities",
       "request_destination",
       "start_job"

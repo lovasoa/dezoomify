@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { importTypeScript } from "./ts-source-loader.mjs";
 
 const source = readFileSync(new URL("../../src/background/source-operations.ts", import.meta.url), "utf8");
-const { collectCandidates, fetchSource } = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`);
+const { collectCandidates, fetchSource } = await importTypeScript(new URL("../../src/background/source-operations.ts", import.meta.url));
 
 test("candidate snapshot includes the document and retained resources in one batch", () => {
   const oldLocation = globalThis.location;
