@@ -61,6 +61,10 @@ const EXPECTED_ENCODERS = ["png", "jpeg", "tiff", "zif", "webp"];
 const NATIVE_HOST = "dev.ophir.dezoomify.native_host";
 
 const DESKTOP_META = readJson("../src-tauri/dezoomify.json");
+const registrySource = readText("../src-tauri/desktop_commands.rs");
+const registryBody = registrySource.match(/\$callback!\(\s*([\s\S]*?)\s*\)/)?.[1];
+assert.ok(registryBody, "desktop_commands macro must invoke its callback");
+const RUST_COMMANDS = [...registryBody.matchAll(/\b([a-z][a-z0-9_]*)\b/g)].map((m) => m[1]);
 
 function xdezoomify(doc) {
   return doc["x-dezoomify"] ?? doc;
@@ -68,19 +72,22 @@ function xdezoomify(doc) {
 
 test("rust command registry lists exact commands", () => {
   const src = readText("../src-tauri/src/commands.rs");
-  const commands = extractBracketStrings(src, "COMMANDS");
-  assert.deepEqual(sorted(commands), sorted(EXPECTED_COMMANDS));
+  assert.deepEqual(sorted(RUST_COMMANDS), sorted(EXPECTED_COMMANDS));
   for (const name of EXPECTED_COMMANDS) {
-    assert.ok(src.includes(`"${name}"`), `registry missing ${name}`);
+    assert.ok(RUST_COMMANDS.includes(name), `registry missing ${name}`);
   }
   assert.ok(src.includes("unknown") && src.includes("stale"), "unknown/stale rejection");
   assert.ok(src.includes("seq"), "event ordering");
+  const build = readText("../src-tauri/build.rs");
+  const shell = readText("../src-tauri/src/tauri_shell.rs");
+  assert.match(build, /desktop_commands!\(command_names\)/, "Tauri permissions consume canonical registry");
+  assert.match(shell, /desktop_commands!\(command_handler\)/, "real handler consumes canonical registry");
+  assert.doesNotMatch(shell, /generate_handler!\[\s*start_job/, "handler list is not duplicated");
 });
 
 test("typescript integration commands match registry", () => {
-  const rust = extractBracketStrings(readText("../src-tauri/src/commands.rs"), "COMMANDS");
   const ts = extractBracketStrings(readText("../src/desktopIntegration.ts"), "DESKTOP_COMMANDS");
-  assert.deepEqual(sorted(ts), sorted(rust));
+  assert.deepEqual(sorted(ts), sorted(RUST_COMMANDS));
   assert.deepEqual(sorted(ts), sorted(EXPECTED_COMMANDS));
 });
 
@@ -152,7 +159,7 @@ test("event channels match and forbid tile bytes", () => {
 
 test("desktop footer is a compact external-link bar, not a disclosure", () => {
   const html = readText("../index.html");
-  const main = readText("../src/main.tsx");
+  const main = readText("../src/main.ts");
   const css = readText("../src/desktop.css");
   const integration = readText("../src/desktopIntegration.ts");
 

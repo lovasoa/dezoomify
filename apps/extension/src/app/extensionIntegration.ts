@@ -23,16 +23,23 @@
  *   requestNativeHandoff?: (req: any) => Promise<any>,
  * }} deps
  */
-export function createExtensionIntegration(deps) {
+interface ExtensionIntegrationDeps {
+  validateMessage: (raw: unknown, ctx?: { currentScanId?: string | null; currentJobId?: string | null }) => { ok: boolean; code?: string };
+  startScan?: () => Promise<unknown>;
+  fetchResource?: (url: string, opts?: { userIntent: boolean }) => Promise<unknown>;
+  requestNativeHandoff?: (req: unknown) => Promise<unknown>;
+}
+
+export function createExtensionIntegration(deps: ExtensionIntegrationDeps) {
   if (!deps || typeof deps.validateMessage !== "function") {
     throw new Error("validateMessage required");
   }
   /** @type {string|null} */
-  let currentScanId = null;
+  let currentScanId: string | null = null;
   /** @type {string|null} */
-  let currentJobId = null;
+  let currentJobId: string | null = null;
 
-  function bind(scanId, jobId) {
+  function bind(scanId?: string | null, jobId?: string | null) {
     currentScanId = scanId ?? null;
     currentJobId = jobId ?? null;
   }
@@ -41,22 +48,22 @@ export function createExtensionIntegration(deps) {
    * Handle an inbound internal message. Unknown/stale messages rejected.
    * @param {unknown} raw
    */
-  async function handleMessage(raw) {
+  async function handleMessage(raw: unknown) {
     const v = deps.validateMessage(raw, { currentScanId, currentJobId });
     if (!v.ok) return { ok: false, code: v.code ?? "rejected" };
-    const msg = /** @type {{ kind: string }} */ (raw);
+    const msg = raw as { kind: string; payload?: unknown };
     switch (msg.kind) {
       case "StartScan":
         if (typeof deps.startScan !== "function") return { ok: false, code: "no-handler" };
         return { ok: true, result: await deps.startScan() };
       case "FetchResource": {
         if (typeof deps.fetchResource !== "function") return { ok: false, code: "no-handler" };
-        const payload = /** @type {{ url?: string }} */ (/** @type {any} */ (raw).payload ?? {});
+        const payload = (msg.payload ?? {}) as { url?: string };
         return { ok: true, result: await deps.fetchResource(String(payload.url ?? ""), { userIntent: true }) };
       }
       case "StartNativeHandoff":
         if (typeof deps.requestNativeHandoff !== "function") return { ok: false, code: "no-handler" };
-        return { ok: true, result: await deps.requestNativeHandoff((/** @type {any} */ (raw)).payload ?? {}) };
+        return { ok: true, result: await deps.requestNativeHandoff(msg.payload ?? {}) };
       default:
         // ScanStarted/CandidateFound/ScanSettled/... are notifications: accept.
         return { ok: true, notified: true };

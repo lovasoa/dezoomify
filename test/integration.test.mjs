@@ -253,6 +253,12 @@ test("handoff suggestions come from capabilities; ordinary display always offere
 });
 
 test("shipped webapp uses the shared proxy policy (no inline duplicate)", () => {
+  const shimTs = fs.readFileSync(path.join(REPO_ROOT, "src", "webIntegration.ts"), "utf8");
+  assert.equal(
+    shimTs.split("\n").filter((line) => !line.trimStart().startsWith("//")).join("\n").trim(),
+    'export * from "../packages/browser-runtime/src/web-integration.ts";',
+    "the website compatibility entry point must remain a re-export-only shim",
+  );
   const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
   for (const dup of [
     "function isProxyEligible(",
@@ -326,8 +332,9 @@ test("served browser import graph resolves to generated files", () => {
   }
   for (const expected of [
     "src/webIntegration.js",
+    "packages/browser-runtime/src/web-integration.js",
     "src/proxyTransport.js",
-    "packages/browser-runtime/src/types.js",
+    "packages/browser-runtime/src/transport-labels.js",
     "packages/browser-runtime/src/session.js",
   ]) {
     assert.ok(seen.has(expected), `browser graph must include ${expected}`);
@@ -405,9 +412,9 @@ test("website trusts the tile plan, warns on color profiles, and compresses PNG"
   assert.ok(saveTs.includes("zlibDeflate"), "PNG encoder must compress with DEFLATE");
   assert.ok(!saveTs.includes("zlibStored"), "stored-block encoder must be gone");
   // Extension assembly follows the same trust-the-plan rule.
-  const pageTs = fs.readFileSync(
-    path.join(REPO_ROOT, "apps", "extension", "src", "page", "page.ts"),
+  const tileDrawTs = fs.readFileSync(
+    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "tile-draw.ts"),
     "utf8",
   );
-  assert.ok(pageTs.includes("tile size mismatch"), "extension assembly must log plan/decode mismatches");
+  assert.ok(tileDrawTs.includes("tile size mismatch"), "shared extension assembly must log plan/decode mismatches");
 });

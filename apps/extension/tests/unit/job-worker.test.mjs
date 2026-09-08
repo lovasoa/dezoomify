@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { importTypeScript } from "./ts-source-loader.mjs";
 
 async function importSource(url) {
+  if (url.pathname.endsWith(".ts")) return importTypeScript(url);
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(readFileSync(url, "utf8"))}`);
 }
 

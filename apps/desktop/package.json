@@ -3,7 +3,7 @@
   "version": "3.0.1",
   "private": true,
   "type": "module",
-  "main": "./src/main.tsx",
+  "main": "./src/main.ts",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -17,6 +17,7 @@
     "@tauri-apps/plugin-opener": "2.5.5"
   },
   "devDependencies": {
+    "linkedom": "^0.18.13",
     "typescript": "^7.0.2",
     "vite": "^8.0.0"
   }

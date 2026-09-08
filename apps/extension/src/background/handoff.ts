@@ -27,8 +27,13 @@ export const JOB_BINDING_VERSION = 1;
  * @param {any} message
  * @param {{ sender?: any, binding?: any }} ctx
  */
-export function validateExtensionJobBinding(message, ctx = {}) {
-  const job = message && message.job;
+type JobBinding = { bindingVersion?: number; jobId: string; tabId: number; frameId: number; documentGeneration: string; extensionId?: string };
+type ExtensionSender = { id?: string; frameId?: number; tab?: { id?: number } };
+type Validation = { ok: boolean; code?: string; message?: string; negotiatedVersion?: number; needsConfirm?: boolean };
+
+export function validateExtensionJobBinding(message: unknown, ctx: { sender?: ExtensionSender; binding?: JobBinding } = {}): { ok: boolean; code?: string } {
+  const candidate = message as { job?: Partial<JobBinding> } | null;
+  const job = candidate?.job;
   const expected = ctx.binding;
   if (!job || typeof job !== "object" || job.bindingVersion !== JOB_BINDING_VERSION ||
       typeof job.jobId !== "string" || job.jobId.length === 0 || job.jobId.length > 128 ||
@@ -88,12 +93,12 @@ export const PROTO_KEYS = Object.freeze(["__proto__", "constructor", "prototype"
  * @param {unknown} envelope
  * @returns {{ ok: boolean, code?: string, message?: string, negotiatedVersion?: number, needsConfirm?: boolean }}
  */
-export function validateHandoffEnvelope(envelope, ctx) {
-  const fail = (code, message) => ({ ok: false, code, message });
+export function validateHandoffEnvelope(envelope: unknown, ctx: { senderOrigin?: string; isAllowedSender?: (origin?: string) => boolean }): Validation {
+  const fail = (code: string, message: string): Validation => ({ ok: false, code, message });
   if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
     return fail("malformed", "envelope must be an object");
   }
-  const env = /** @type {Record<string, any>} */ (envelope);
+  const env = envelope as Record<string, unknown>;
   for (const k of Object.keys(env)) {
     if (PROTO_KEYS.includes(k)) return fail("malformed", `forbidden key ${k}`);
   }
@@ -109,9 +114,10 @@ export function validateHandoffEnvelope(envelope, ctx) {
   }
   const v = env.protocolVersion;
   if (!Number.isInteger(v)) return fail("bad-version", "protocolVersion must be an integer");
-  if (v < MIN_HANDOFF_PROTOCOL || v > CURRENT_HANDOFF_PROTOCOL) {
-    if (v < MIN_HANDOFF_PROTOCOL) return fail("unsupported-version", `N-2 version ${v} unsupported`);
-    return fail("unsupported-version", `future version ${v} unsupported`);
+  const version = v as number;
+  if (version < MIN_HANDOFF_PROTOCOL || version > CURRENT_HANDOFF_PROTOCOL) {
+    if (version < MIN_HANDOFF_PROTOCOL) return fail("unsupported-version", `N-2 version ${version} unsupported`);
+    return fail("unsupported-version", `future version ${version} unsupported`);
   }
   const sourceUrl = env.sourceUrl;
   if (typeof sourceUrl !== "string" || sourceUrl.length === 0) {
@@ -177,7 +183,7 @@ export function validateHandoffEnvelope(envelope, ctx) {
   } catch {
     return fail("wrong-origin", "sender check failed");
   }
-  return { ok: true, negotiatedVersion: v, needsConfirm: true };
+  return { ok: true, negotiatedVersion: version, needsConfirm: true };
 }
 
 /**
@@ -187,7 +193,7 @@ export function validateHandoffEnvelope(envelope, ctx) {
  * @param {boolean} userConfirmed explicit checkbox/confirm action
  * @param {{ onConfirmed?: () => void, networkCalls?: { count: number } }} [deps]
  */
-export function confirmHandoff(validation, userConfirmed, deps = {}) {
+export function confirmHandoff(validation: { ok: boolean }, userConfirmed: boolean, deps: { onConfirmed?: () => void; networkCalls?: { count: number } } = {}) {
   if (!validation || validation.ok !== true) {
     return { ok: false, code: "invalid-envelope" };
   }

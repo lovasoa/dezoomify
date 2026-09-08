@@ -19,6 +19,7 @@
 
 export const MAX_URL_LENGTH = 2048;
 export const MAX_CANDIDATES = 100;
+type Candidate = { url: string };
 
 /** Query keys whose values must never appear in UI labels.
  *  Must stay identical to the redaction vocabulary used by background logs. */
@@ -45,7 +46,7 @@ export const SENSITIVE_QUERY_KEYS = Object.freeze([
  * @param {string} url
  * @returns {string}
  */
-export function redactUrlForLabel(url) {
+export function redactUrlForLabel(url: string): string {
   let parsed;
   try {
     parsed = new URL(url);
@@ -73,7 +74,7 @@ export function redactUrlForLabel(url) {
  * @param {unknown} raw
  * @returns {{ ok: boolean, code?: string }}
  */
-export function validateCandidateUrl(raw) {
+export function validateCandidateUrl(raw: unknown): { ok: boolean; code?: string } {
   if (typeof raw !== "string" || raw.length === 0) {
     return { ok: false, code: "empty" };
   }
@@ -101,7 +102,7 @@ export function createCandidateStore() {
    * @param {string} rawUrl
    * @returns {{ added: boolean, code: string, candidate?: Candidate }}
    */
-  function add(rawUrl) {
+  function add(rawUrl: string): { added: boolean; code: string; candidate?: Candidate } {
     const v = validateCandidateUrl(rawUrl);
     if (!v.ok) return { added: false, code: v.code ?? "invalid" };
     if (byUrl.has(rawUrl)) return { added: false, code: "duplicate" };

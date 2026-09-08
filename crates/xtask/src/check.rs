@@ -13,6 +13,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "-D",
         "warnings",
     ])?;
+    run_typecheck()?;
     super::fixtures::verify(&[])?;
     super::style::verify(&[])?;
     super::content::verify(&[])?;
@@ -21,6 +22,18 @@ pub fn run(args: &[String]) -> Result<(), String> {
     super::supply::check_deny()?;
     println!("check: ok");
     Ok(())
+}
+
+fn run_typecheck() -> Result<(), String> {
+    let status = std::process::Command::new("pnpm")
+        .args(["typecheck"])
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|e| format!("failed to run pnpm typecheck: {e}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "pnpm typecheck failed".to_string())
 }
 
 fn run_cargo(args: &[&str]) -> Result<(), String> {

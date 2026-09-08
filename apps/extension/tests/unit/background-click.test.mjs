@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { transpileTypeScript } from "./ts-source-loader.mjs";
 
 const operationsSrc = readFileSync(new URL("../../src/background/source-operations.ts", import.meta.url), "utf8").replace(/^export\s+/gm, "");
-const backgroundSrc = `${operationsSrc}\n${readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8").replace(/^import .*source-operations\.js";\s*$/m, "")}`;
+const backgroundSrc = transpileTypeScript(`${operationsSrc}\n${readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8").replace(/^import .*source-operations\.js";\s*$/m, "")}`, "background-combined.ts");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const TAB = { id: 7, url: "https://gallery.example/work" };
 

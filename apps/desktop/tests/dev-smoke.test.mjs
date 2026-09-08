@@ -106,8 +106,8 @@ test("desktop dev server serves the real entrypoint and shared theme", { timeout
 
     const html = await response.text();
     // Vite appends a cache-busting query when a hot-reloaded module changes.
-    assert.match(html, /<script[^>]+src=["']\/src\/main\.tsx(?:\?[^"']*)?["']/);
-    const main = await fetchWithTimeout(new URL("/src/main.tsx", DEV_URL));
+    assert.match(html, /<script[^>]+src=["']\/src\/main\.ts(?:\?[^"']*)?["']/);
+    const main = await fetchWithTimeout(new URL("/src/main.ts", DEV_URL));
     assert.equal(main.status, 200, "Vite serves the desktop entrypoint");
     assert.match(html, /src\/theme\.css/, "desktop document links the shared theme");
     assert.match(html, /src\/desktop\.css/, "desktop document links its native controls stylesheet");

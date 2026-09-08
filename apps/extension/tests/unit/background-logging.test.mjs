@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { transpileTypeScript } from "./ts-source-loader.mjs";
 
 const operations = readFileSync(new URL("../../src/background/source-operations.ts", import.meta.url), "utf8").replace(/^export\s+/gm, "");
-const text = `${operations}\n${readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8").replace(/^import .*source-operations\.js";\s*$/m, "")}`;
+const text = transpileTypeScript(`${operations}\n${readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8").replace(/^import .*source-operations\.js";\s*$/m, "")}`, "background-combined.ts");
 
 function browser() {
   const listeners = { click: [] };

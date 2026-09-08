@@ -18,14 +18,18 @@ async function globalSetup() {
   });
   if (site.status !== 0) throw new Error("failed to build the site (scripts/build-site.mjs)");
 
-  const bin = path.join(root, "target", "debug", "dezoomify-fixture-server");
-  if (!fs.existsSync(bin)) {
-    const serverBuild = spawnSync("cargo", ["build", "-p", "dezoomify-fixture-server"], {
-      cwd: root,
-      stdio: "inherit",
-    });
-    if (serverBuild.status !== 0) throw new Error("failed to build fixture server");
-  }
+  const targetDir = JSON.parse(spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    cwd: root,
+    encoding: "utf8",
+  }).stdout).target_directory;
+  const bin = path.join(targetDir, "debug", `dezoomify-fixture-server${process.platform === "win32" ? ".exe" : ""}`);
+  // Always enter through Cargo: it cheaply reuses a fresh artifact and
+  // recompiles whenever any source or dependency changed.
+  const serverBuild = spawnSync("cargo", ["build", "-p", "dezoomify-fixture-server"], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if (serverBuild.status !== 0) throw new Error("failed to build fixture server");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dz-webapp-e2e-"));
   const addrFile = path.join(tmp, "server.addr");
   const logFile = path.join(tmp, "requests.log");

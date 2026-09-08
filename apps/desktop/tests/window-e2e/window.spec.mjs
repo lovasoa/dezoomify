@@ -57,7 +57,7 @@ function expectedHash() {
 }
 
 // Stable selectors from the shared UI (`packages/shared-ui/src/view.ts`)
-// plus the desktop aux panel (`apps/desktop/src/main.tsx`).
+// plus the desktop aux panel (`apps/desktop/src/main.ts`).
 const SEL = {
   urlInput: "#dz-url-input",
   submit: ".dz-button-row .dz-btn-tactile",

@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { importTypeScript } from "./ts-source-loader.mjs";
 
 async function loadController() {
-  const src = readFileSync(new URL("../../src/job/controller.ts", import.meta.url), "utf8");
-  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
+  return importTypeScript(new URL("../../src/job/controller.ts", import.meta.url));
 }
 
 const { createJobController } = await loadController();

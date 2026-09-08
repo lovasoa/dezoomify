@@ -26,26 +26,24 @@ bridge. Tests: `cargo xtask test desktop`.
 
 ## End-to-end
 
-The hermetic E2E always runs with no public network and no webview. It
-serves fixtures on an ephemeral loopback port with the same binary and
-flags as `cargo xtask fixtures serve --port 0`, drives the lean shell plus
-the frontend harness through submit URL, image/level choice,
-request_destination, and save, verifies the saved PNG against the
-`native/cli-dzi` golden (dimensions, quadrant placement, sha256), and
-covers the deep-link confirm flow (no effect while pending) plus the
-cancel flow (terminal once, uncommitted output removed). Reports carry
-redacted origins, hashes, and codes only.
+The hermetic frontend integration test always runs with no public network and
+no webview. It mounts the production `src/main.ts` entry in a lightweight DOM
+and drives its rendered submit, recovery, cancellation, and deep-link controls
+through a recording Tauri IPC and event boundary. It therefore fails when the
+shipped frontend wiring drifts; it does not duplicate URL parsing or job
+sequencing in the test. Native pipeline behavior is covered by the Rust desktop E2E and scenario
+lanes, while rendered-window behavior is covered by the real-window lane.
 
 ```sh
-cargo xtask test desktop    # lean shell tests plus the hermetic E2E
+cargo xtask test desktop    # lean shell tests plus the hermetic integration smoke
 cargo xtask test scenario   # native pipeline scenario gates
 ```
 
 The hermetic pieces are `apps/desktop/src-tauri/tests/desktop_e2e.rs`
 (real job table over an in-process loopback server) and
-`apps/desktop/tests/e2e.test.mjs` (subprocess fixture server, real
-frontend integration, real pipeline save, redacted report). Both use
-allocated ports, isolated profiles, fixed seeds, and no shared state.
+`apps/desktop/tests/e2e.test.mjs` (mounted production frontend entry through a
+recording IPC and event boundary). The Rust test owns native output verification; the
+frontend test owns the shipped UI-to-command and event-to-controller graph.
 
 The real-window E2E runs the window shell under tauri-driver on Linux
 instead of by hand:

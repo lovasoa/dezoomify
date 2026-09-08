@@ -7,24 +7,32 @@
 const encoder = new TextEncoder();
 
 /** @param {unknown} value */
-function object(value) {
-  return value && typeof value === "object" ? /** @type {Record<string, any>} */ (value) : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
 /** @param {Record<string, unknown>} command */
-function commandBytes(command) {
+function commandBytes(command: Record<string, unknown>): Uint8Array {
   return encoder.encode(`${JSON.stringify({ protocol: "1.0", kind: "command", ...command })}\n`);
 }
 
 /** @param {{ postMessage: (message: unknown) => void, wasm: () => Promise<any> }} deps */
-export function createJobWorkerHost(deps) {
+interface WasmSession {
+  drainMessages(): string; dispatch(command: Uint8Array): void; allocateBuffer(length: number): string;
+  writeBuffer(handle: string, offset: number, bytes: Uint8Array): void; commitBuffer(handle: string, length: number): void;
+  protocolHandle(handle: string): string; dispose(): void;
+}
+interface WasmModule { default?: () => Promise<void>; Session: new (protocol: string, quotas: string) => WasmSession; rankCandidates?: (urls: string) => string }
+type WorkerMessage = Record<string, unknown> & { type?: string; jobId?: string; inputUrl?: string; requestId?: string; urls?: unknown; bytes?: unknown; command?: unknown; error?: unknown; quotas?: unknown };
+
+export function createJobWorkerHost(deps: { postMessage(message: unknown): void; wasm(): Promise<WasmModule> }) {
   /** @type {any | null} */
-  let session = null;
+  let session: WasmSession | null = null;
   let disposed = false;
 
   function flush() {
     if (!session) return;
-    let messages;
+    let messages: unknown;
     try { messages = JSON.parse(session.drainMessages()); } catch (error) {
       deps.postMessage({ type: "engine.error", error: { code: "malformed", message: String(error) } });
       return;
@@ -32,13 +40,13 @@ export function createJobWorkerHost(deps) {
     if (Array.isArray(messages) && messages.length) deps.postMessage({ type: "engine.messages", messages });
   }
 
-  function dispatch(command) {
+  function dispatch(command: Record<string, unknown>) {
     if (!session || disposed) return;
     session.dispatch(commandBytes(command));
     flush();
   }
 
-  async function start(message) {
+  async function start(message: WorkerMessage) {
     const wasm = await deps.wasm();
     if (disposed) return;
     await wasm.default?.();
@@ -51,9 +59,9 @@ export function createJobWorkerHost(deps) {
    * session exists; the wasm module load is shared with engine.start.
    * Unknown or failing rank calls fall back to the caller-supplied order.
    */
-  async function rank(message) {
-    const urls = Array.isArray(message.urls) ? message.urls.filter((url) => typeof url === "string") : [];
-    let ranked = [];
+  async function rank(message: WorkerMessage) {
+    const urls = Array.isArray(message.urls) ? message.urls.filter((url): url is string => typeof url === "string") : [];
+    let ranked: string[] = [];
     try {
       const wasm = await deps.wasm();
       // The glue must be initialized before any binding call, exactly like
@@ -62,7 +70,7 @@ export function createJobWorkerHost(deps) {
       await wasm.default?.();
       if (!disposed && typeof wasm.rankCandidates === "function") {
         const parsed = JSON.parse(wasm.rankCandidates(JSON.stringify(urls)));
-        if (Array.isArray(parsed)) ranked = parsed.map((entry) => entry?.url).filter((url) => typeof url === "string");
+        if (Array.isArray(parsed)) ranked = parsed.map((entry: unknown) => object(entry).url).filter((url): url is string => typeof url === "string");
       }
     } catch {
       ranked = [];
@@ -71,7 +79,7 @@ export function createJobWorkerHost(deps) {
   }
 
   /** @param {any} message */
-  function provideBytes(message) {
+  function provideBytes(message: WorkerMessage) {
     if (!session || disposed || !(message.bytes instanceof Uint8Array)) return;
     const handle = JSON.parse(session.allocateBuffer(message.bytes.byteLength));
     const handleJson = JSON.stringify(handle);
@@ -85,15 +93,16 @@ export function createJobWorkerHost(deps) {
 
   return {
     /** @param {any} message */
-    async onMessage(message) {
+    async onMessage(message: unknown) {
       if (!message || typeof message !== "object" || disposed) return;
+      const envelope = message as WorkerMessage;
       try {
-        if (message.type === "engine.start") await start(message);
-        else if (message.type === "engine.rank") await rank(message);
-        else if (message.type === "engine.bytes") provideBytes(message);
-        else if (message.type === "engine.failure") dispatch({ type: "provide-fetch-failure", job: message.jobId, request: message.requestId, error: message.error });
-        else if (message.type === "engine.command") dispatch(object(message.command));
-        else if (message.type === "engine.dispose") {
+        if (envelope.type === "engine.start") await start(envelope);
+        else if (envelope.type === "engine.rank") await rank(envelope);
+        else if (envelope.type === "engine.bytes") provideBytes(envelope);
+        else if (envelope.type === "engine.failure") dispatch({ type: "provide-fetch-failure", job: envelope.jobId, request: envelope.requestId, error: envelope.error });
+        else if (envelope.type === "engine.command") dispatch(object(envelope.command));
+        else if (envelope.type === "engine.dispose") {
           disposed = true;
           try { session?.dispose(); } finally { session = null; }
         }

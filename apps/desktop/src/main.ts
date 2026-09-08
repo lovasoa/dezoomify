@@ -646,6 +646,17 @@ function clearJobViewState(): void {
 function handleSubmitUrl(url: string): void {
   const trimmed = typeof url === "string" ? url.trim() : "";
   if (!isValidInputUrl(trimmed)) {
+    // Validation failures use the same failed view as later job failures.
+    // The shared controller intentionally has no idle -> failed edge, so
+    // enter the submitted-job lifecycle before recording the failure.
+    if (controller.getState().status === "idle") {
+      controller.dispatch({
+        seq: nextSeq(),
+        sessionId,
+        kind: "start-discovery",
+        transport: NATIVE_TRANSPORT,
+      });
+    }
     controller.dispatch({
       seq: nextSeq(),
       sessionId,

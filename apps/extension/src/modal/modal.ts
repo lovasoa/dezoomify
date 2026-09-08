@@ -36,15 +36,33 @@ import { pickLevel, BROWSER_MAX_PLAN_TILES } from "../vendor/limits.js";
 import { renderView } from "../vendor/view.js";
 import init, * as wasm from "../wasm/dezoomify-wasm.js";
 
+type JsonObject = Record<string, unknown>;
+type ModalContext = JsonObject & { imageCount?: number; failure?: unknown };
+type JobContextExtra = { url?: string; progress?: { current: number; total: number }; rest?: JsonObject };
+type ImageLevel = { index: number; width?: number; height?: number };
+type CatalogImage = { id: string; levels: ImageLevel[] };
+type Catalog = { images: CatalogImage[] };
+type Tile = { uri: string; x: number; y: number; w?: number; h?: number; processing?: string | null };
+type TilePlan = { kind?: string; uri?: string; canvas: { x: number; y: number }; tiles: Tile[] };
+type RankedCandidate = { url: string; format: unknown };
+type ErrorLike = { code?: unknown; message?: unknown };
+type NativeMessage = JsonObject & { ok?: boolean; type?: string; code?: string };
+type ExtensionApi = {
+  runtime?: { sendNativeMessage?(host: string, message: JsonObject): Promise<NativeMessage> };
+  permissions?: { contains?(request: { origins: string[] }): Promise<boolean>; request?(request: { origins: string[]; permissions?: string[] }): Promise<boolean> };
+  cookies?: { getAll(request: { url: string }): Promise<Array<{ name: string; value: string }>> };
+};
+
 // Tile pacing mirrors the extension page and the browser tile policy
 // (tile-policy `BROWSER_CAPABILITY_MAX_CONCURRENCY` 6): sequential starts
 // with a short per-host stagger, so one job never floods the site.
 const MODAL_TILE_MIN_INTERVAL_MS = 50;
 
-const api = globalThis.browser ?? globalThis.chrome;
+const hostGlobal = globalThis as typeof globalThis & { browser?: ExtensionApi; chrome?: ExtensionApi };
+const api = hostGlobal.browser ?? hostGlobal.chrome;
 
 /** @type {{ cancelRequested: boolean, seq: number, sessionId: string, token: string|null, urls: string[], started: boolean }} */
-const modalState = {
+const modalState: { cancelRequested: boolean; seq: number; sessionId: string; token: string | null; urls: string[]; started: boolean } = {
   cancelRequested: false,
   seq: 0,
   sessionId: "modal-" + Date.now().toString(36),
@@ -54,9 +72,9 @@ const modalState = {
 };
 
 /** @type {string[]} object URLs created by this modal; revoked on dispose. */
-const liveObjectUrls = [];
+const liveObjectUrls: string[] = [];
 
-function trackObjectUrl(url) {
+function trackObjectUrl(url: string) {
   if (typeof url === "string" && url) liveObjectUrls.push(url);
   return url;
 }
@@ -65,7 +83,7 @@ function revokeObjectUrls() {
   while (liveObjectUrls.length > 0) {
     const url = liveObjectUrls.pop();
     try {
-      URL.revokeObjectURL(url);
+      if (url) URL.revokeObjectURL(url);
     } catch {
       // Revocation is best-effort only.
     }
@@ -83,7 +101,7 @@ function modalToken() {
   return null;
 }
 
-function postToLoader(message) {
+function postToLoader(message: JsonObject) {
   try {
     window.parent.postMessage({ ...(message ?? {}), token: modalState.token }, "*");
   } catch {
@@ -103,10 +121,10 @@ function disposeRun() {
 }
 
 /** Indefinite byte-confirmation waiter: resolved by the next candidates post. */
-let moreCandidatesResolve = null;
+let moreCandidatesResolve: (() => void) | null = null;
 
-function waitForMoreCandidates() {
-  return new Promise((resolve) => {
+function waitForMoreCandidates(): Promise<void> {
+  return new Promise<void>((resolve) => {
     moreCandidatesResolve = resolve;
   });
 }
@@ -137,7 +155,7 @@ function throwIfCancelled() {
  * @param {string} status shared-ui UiStatus
  * @param {any} [ctx] ViewContext
  */
-function render(status, ctx) {
+function render(status: string, ctx?: ModalContext) {
   modalState.seq += 1;
   const root = appRoot();
   if (!root) return;
@@ -172,7 +190,7 @@ function render(status, ctx) {
 }
 
 /** @param {string} step */
-function jobCtx(step, extra) {
+function jobCtx(step: string, extra?: JobContextExtra): ModalContext {
   return {
     jobActivity: {
       startedAt: Date.now() - 1000,
@@ -184,7 +202,7 @@ function jobCtx(step, extra) {
   };
 }
 
-function tabOriginOf(url) {
+function tabOriginOf(url: string) {
   try {
     return originOf(url);
   } catch {
@@ -192,25 +210,21 @@ function tabOriginOf(url) {
   }
 }
 
-function makeTabFetcher(tabOrigin) {
+function makeTabFetcher(tabOrigin: string) {
   return createSessionFetcher({
     fetchImpl: async (url, init) => {
       const started = Date.now();
       const res = await fetch(url, init);
       const bytes = new Uint8Array(await res.arrayBuffer());
-      const headers = {};
+      const headers: Record<string, string> = {};
       res.headers.forEach((value, key) => {
         headers[key.toLowerCase()] = value;
       });
-      const finalUrl = res.url || url;
-      return {
-        status: res.status,
-        url: finalUrl,
-        headers,
-        bytes,
-        redirectChain: [url, finalUrl],
-        durationMs: Date.now() - started,
-      };
+      Object.defineProperties(res, {
+        bytes: { value: bytes, configurable: true },
+        durationMs: { value: Date.now() - started, configurable: true },
+      });
+      return res as Response & { bytes: Uint8Array; durationMs: number };
     },
     hasPermission: async (origin) => {
       if (origin === tabOrigin) return true;
@@ -223,7 +237,7 @@ function makeTabFetcher(tabOrigin) {
       }
       return false;
     },
-    requestPermission: async (origin) => {
+    requestPermission: async (origin: string) => {
       if (origin === tabOrigin) return true;
       try {
         if (api?.permissions?.request) {
@@ -237,7 +251,7 @@ function makeTabFetcher(tabOrigin) {
   });
 }
 
-async function discover(sourceUrl, tabOrigin) {
+async function discover(sourceUrl: string, tabOrigin: string): Promise<{ session: wasm.DiscoverySession; catalog: Catalog }> {
   await init();
   const session = new wasm.DiscoverySession(sourceUrl);
   const fetcher = makeTabFetcher(tabOrigin);
@@ -245,29 +259,30 @@ async function discover(sourceUrl, tabOrigin) {
     throwIfCancelled();
     const raw = session.nextNeed();
     if (!raw || raw === "null") break;
-    const need = JSON.parse(raw);
+    const need = JSON.parse(raw) as { id: string; uri: string };
     try {
       const out = await fetcher.fetchResource(need.uri, { userIntent: true });
       session.provide(need.id, out.bytes, out.finalUrl || need.uri);
     } catch (e) {
-      session.provideFailure(need.id, String((e && e.message) || e));
+      session.provideFailure(need.id, e instanceof Error ? e.message : String(e));
     }
   }
-  return { session, catalog: JSON.parse(session.finish()) };
+  return { session, catalog: JSON.parse(session.finish()) as Catalog };
 }
 
-async function planLevel(session, image, tabOrigin) {
+async function planLevel(session: wasm.DiscoverySession, image: CatalogImage, tabOrigin: string): Promise<TilePlan> {
   // Canonical level picking (vendored limits.js, no forked area math).
   const picked = pickLevel({ levels: image.levels });
   const level = image.levels.find((candidate) => candidate.index === picked.index) ?? image.levels[0];
-  let plan = JSON.parse(session.levelTiles(image.id, level.index));
+  let plan = JSON.parse(session.levelTiles(image.id, level.index)) as TilePlan;
   const fetcher = makeTabFetcher(tabOrigin);
   let guard = 0;
   while (plan.kind === "probe" && guard++ < 5) {
     throwIfCancelled();
+    if (!plan.uri) throw new Error("probe plan has no URI");
     const out = await fetcher.fetchResource(plan.uri, { userIntent: true });
-    const bmp = await createImageBitmap(new Blob([out.bytes]));
-    plan = JSON.parse(session.probeSubmit(image.id, level.index, bmp.width > 0, bmp.width, bmp.height));
+    const bmp = await createImageBitmap(new Blob([new Uint8Array(out.bytes).slice().buffer]));
+    plan = JSON.parse(session.probeSubmit(image.id, level.index, bmp.width > 0, bmp.width, bmp.height)) as TilePlan;
   }
   if (plan.tiles && plan.tiles.length > BROWSER_MAX_PLAN_TILES) {
     throw Object.assign(
@@ -286,13 +301,13 @@ async function planLevel(session, image, tabOrigin) {
  * serialized as `"none"`) qualify: processed tiles require readable bytes.
  * @param {unknown} processing stable recipe id, never display text
  */
-function isOrdinaryTile(processing) {
+function isOrdinaryTile(processing: unknown) {
   return processing === undefined || processing === null || processing === "" || processing === "none";
 }
 
 /** @param {string} url ordinary display load, never readable bytes */
-function loadOrdinaryImage(url) {
-  return new Promise((resolve, reject) => {
+function loadOrdinaryImage(url: string): Promise<HTMLImageElement> {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     // Deliberately never set crossOrigin: ordinary display, no byte access.
     img.addEventListener("load", () => resolve(img), { once: true });
@@ -301,11 +316,12 @@ function loadOrdinaryImage(url) {
   });
 }
 
-async function assemble(session, plan, tabOrigin, onProgress) {
+async function assemble(session: wasm.DiscoverySession, plan: TilePlan, tabOrigin: string, onProgress: (current: number, total: number, step: string) => void) {
   const canvas = document.createElement("canvas");
   canvas.width = plan.canvas.x;
   canvas.height = plan.canvas.y;
   const ctx = canvas.getContext("2d");
+  if (!ctx) throw Object.assign(new Error("2D canvas unavailable"), { code: "output-surface-unavailable" });
   const fetcher = makeTabFetcher(tabOrigin);
   let done = 0;
   let failedTiles = 0;
@@ -324,13 +340,13 @@ async function assemble(session, plan, tabOrigin, onProgress) {
       await new Promise((resolve) => setTimeout(resolve, MODAL_TILE_MIN_INTERVAL_MS - sinceLast));
     }
     lastStartMs = Date.now();
-    let drawable = null;
+    let drawable: CanvasImageSource & { width: number; height: number } | null = null;
     let ordinary = false;
     try {
       const out = await fetcher.fetchResource(tile.uri, { userIntent: true });
       let bytes = out.bytes;
       if (tile.processing) bytes = session.applyProcessing(tile.processing, bytes);
-      drawable = await createImageBitmap(new Blob([bytes]));
+      drawable = await createImageBitmap(new Blob([new Uint8Array(bytes).slice().buffer]));
     } catch (e) {
       if (!isOrdinaryTile(tile.processing)) {
         failedTiles += 1;
@@ -384,14 +400,14 @@ async function assemble(session, plan, tabOrigin, onProgress) {
   return { blob, canvas, done, failedTiles, total: plan.tiles.length, originClean, displayOnly: false };
 }
 
-function extensionForSaveFormat(format) {
+function extensionForSaveFormat(format: unknown) {
   const lower = typeof format === "string" ? format.toLowerCase() : "png";
   if (lower === "jpeg" || lower === "jpg") return "jpg";
   if (lower === "tiff" || lower === "tif") return "tif";
   return "png";
 }
 
-function suggestedNameFor(width, height, format) {
+function suggestedNameFor(width: unknown, height: unknown, format: unknown) {
   const ext = extensionForSaveFormat(format);
   const w = typeof width === "number" ? width : Number(width);
   const h = typeof height === "number" ? height : Number(height);
@@ -402,7 +418,7 @@ function suggestedNameFor(width, height, format) {
 }
 
 /** Blob-anchor save (no `downloads` permission). Returns the file name. */
-function save(blob, width, height) {
+function save(blob: Blob, width: number, height: number) {
   const url = trackObjectUrl(URL.createObjectURL(blob));
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -413,14 +429,14 @@ function save(blob, width, height) {
   return anchor.download;
 }
 
-function rankUrls(urls) {
+function rankUrls(urls: string[]): RankedCandidate[] {
   if (typeof wasm.rankCandidates !== "function") {
     return urls.map((url) => ({ url, format: null }));
   }
   try {
-    const ranked = JSON.parse(wasm.rankCandidates(JSON.stringify(urls)));
+    const ranked = JSON.parse(wasm.rankCandidates(JSON.stringify(urls))) as unknown;
     if (Array.isArray(ranked) && ranked.every((entry) => entry && typeof entry.url === "string")) {
-      return ranked;
+      return ranked as RankedCandidate[];
     }
   } catch {
     // Fall through to first-seen order below.
@@ -437,8 +453,8 @@ function rankUrls(urls) {
  * opener). All labels via `textContent`, never markup. Initial focus is the
  * decline action so an accidental Enter fails safe.
  */
-function requestHandoffConsent(details) {
-  return new Promise((resolve) => {
+function requestHandoffConsent(details: { origins: readonly string[]; cookieNames: readonly string[]; host: string; jobId: string }): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
     const doc = document;
     doc.querySelector(".dz-modal-backdrop")?.remove();
     const opener = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
@@ -499,7 +515,7 @@ function requestHandoffConsent(details) {
     backdrop.appendChild(card);
 
     let settled = false;
-    const settle = (value) => {
+    const settle = (value: boolean) => {
       if (settled) return;
       settled = true;
       doc.removeEventListener("keydown", onKeyDown, true);
@@ -513,14 +529,14 @@ function requestHandoffConsent(details) {
       }
       resolve(value);
     };
-    const onKeyDown = (e) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         settle(false);
         return;
       }
       if (e.key !== "Tab") return;
-      const focusables = [...backdrop.querySelectorAll("button")].filter((el) => !el.disabled);
+    const focusables = [...backdrop.querySelectorAll<HTMLButtonElement>("button")].filter((el) => !el.disabled);
       if (focusables.length === 0) {
         e.preventDefault();
         return;
@@ -559,7 +575,7 @@ function requestHandoffConsent(details) {
  * origins and cookie names; values cross once in a bounded message.
  * @param {string} sourceUrl non-secret validated source
  */
-function offerNativeHandoff(sourceUrl) {
+function offerNativeHandoff(sourceUrl: string) {
   let origin;
   try {
     origin = new URL(sourceUrl).origin + "/";
@@ -585,8 +601,8 @@ function offerNativeHandoff(sourceUrl) {
  * @param {string} sourceUrl
  * @param {string} origin exact consented scope (`scheme://host[:port]/`)
  */
-async function handoffToDesktop(sourceUrl, origin) {
-  const sendNativeMessage = (msg) => {
+async function handoffToDesktop(sourceUrl: string, origin: string) {
+  const sendNativeMessage = (msg: JsonObject): Promise<NativeMessage> => {
     const runtime = api && api.runtime;
     if (!runtime || typeof runtime.sendNativeMessage !== "function") {
       return Promise.reject(Object.assign(new Error("native host unavailable"), { code: "native-unavailable" }));
@@ -604,7 +620,7 @@ async function handoffToDesktop(sourceUrl, origin) {
   } catch {
     return;
   }
-  let cookieNames = [];
+  let cookieNames: string[] = [];
   try {
     if (api && api.cookies && typeof api.cookies.getAll === "function") {
       const listed = await api.cookies.getAll({ url: sourceUrl });
@@ -615,6 +631,8 @@ async function handoffToDesktop(sourceUrl, origin) {
     cookieNames = [];
   }
   const jobId = "job:modal-" + Date.now();
+  const cookiesApi = api?.cookies;
+  if (!cookiesApi) return;
   await requestNativeHandoff({
     sourceUrl,
     origins: [origin],
@@ -622,14 +640,14 @@ async function handoffToDesktop(sourceUrl, origin) {
     jobId,
     sendNativeMessage,
     getCookies: async (scope) => {
-      const all = await api.cookies.getAll({ url: scope });
+      const all = await cookiesApi.getAll({ url: scope });
       return all.map((c) => ({ name: c.name, value: c.value }));
     },
     showConsent: (details) => requestHandoffConsent(details),
   });
 }
 
-function failState(code, message) {
+function failState(code: string, message: string) {
   return {
     failure: { code, category: "extension", retryable: true, message },
   };
@@ -645,7 +663,7 @@ async function runDiscovery() {
     // catalog holds an image is detection. When the window is exhausted the
     // run waits for more candidates instead of failing; only Cancel/Escape
     // aborts via throwIfCancelled. Monitoring never times out to failure.
-    const tested = new Set();
+    const tested = new Set<string>();
     for (;;) {
       throwIfCancelled();
       const urls = modalState.urls.filter((u) => validateCandidateUrl(u).ok && !tested.has(u));
@@ -664,7 +682,7 @@ async function runDiscovery() {
       await init();
       const ranked = rankUrls(urls);
       render("discovering", jobCtx("Finding the zoomable image…", { url: redactUrlForLabel(ranked[0]?.url ?? urls[0]) }));
-      let found = null;
+      let found: ({ session: wasm.DiscoverySession; catalog: Catalog; source: string }) | null = null;
       for (let i = 0; i < ranked.length; i++) {
         throwIfCancelled();
         const candidate = ranked[i];
@@ -754,6 +772,7 @@ async function runDiscovery() {
         rest: { imageCount: catalog.images.length },
       }),
     );
+    if (!(result.blob instanceof Blob)) throw Object.assign(new Error("canvas encoding returned no blob"), { code: "output-encode-failed" });
     const savedName = save(result.blob, plan.canvas.x, plan.canvas.y);
     render("completed", {
       jobActivity: { startedAt: Date.now() - 1000, url: redactUrlForLabel(found.source) },
@@ -772,12 +791,13 @@ async function runDiscovery() {
     return;
     } // end indefinite byte-confirmation loop
   } catch (e) {
-    if ((e && e.code) === "cancelled" || modalState.cancelRequested) {
+    const error = e && typeof e === "object" ? e as ErrorLike : {};
+    if (error.code === "cancelled" || modalState.cancelRequested) {
       render("cancelled", jobCtx("Save cancelled"));
     } else {
-      const code = (e && e.code) || "job-failed";
+      const code = typeof error.code === "string" ? error.code : "job-failed";
       render("failed", {
-        ...failState(code, (e && e.message) || "Could not dezoomify image"),
+        ...failState(code, typeof error.message === "string" ? error.message : "Could not dezoomify image"),
         jobActivity: { startedAt: Date.now() - 1000 },
       });
       // The loader keeps the iframe visible and the background marks the
@@ -797,7 +817,7 @@ async function runDiscovery() {
  * visible and the browser's right-click save applies where supported. The
  * canvas is NEVER pixel-read or serialized here.
  */
-function appendDisplayCanvas(canvas, width, height) {
+function appendDisplayCanvas(canvas: HTMLCanvasElement, width: number, height: number) {
   try {
     const section = document.querySelector("#dz-modal-app .dz-notice-section");
     if (!section) return;
@@ -820,7 +840,7 @@ function installFocusTrap() {
       return;
     }
     if (e.key !== "Tab") return;
-    const focusables = [...document.querySelectorAll("button, a[href]")].filter((el) => !el.disabled);
+    const focusables = [...document.querySelectorAll<HTMLElement>("button, a[href]")].filter((el) => !(el instanceof HTMLButtonElement) || !el.disabled);
     if (focusables.length === 0) {
       e.preventDefault();
       return;
@@ -850,12 +870,13 @@ function installDismiss() {
 
 function installHandshake() {
   window.addEventListener("message", (event) => {
-    const data = event && event.data;
+    const data: unknown = event.data;
     if (!data || typeof data !== "object") return;
-    if (data.token !== modalState.token) return;
-    if (data.kind === "dz-modal-candidates" && Array.isArray(data.urls)) {
+    const message = data as { token?: unknown; kind?: unknown; urls?: unknown[] };
+    if (message.token !== modalState.token) return;
+    if (message.kind === "dz-modal-candidates" && Array.isArray(message.urls)) {
       let added = false;
-      for (const url of data.urls) {
+      for (const url of message.urls) {
         if (typeof url === "string" && validateCandidateUrl(url).ok && !modalState.urls.includes(url)) {
           modalState.urls.push(url);
           added = true;

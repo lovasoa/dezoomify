@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
+import { importTypeScript } from "./ts-source-loader.mjs";
 
 async function loadTs(rel) {
-  const src = readFileSync(new URL(rel, import.meta.url), "utf8");
-  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
+  return importTypeScript(new URL(rel, import.meta.url));
 }
 
 const handoff = await loadTs("../../src/background/handoff.ts");

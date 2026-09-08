@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { importTypeScript } from "./ts-source-loader.mjs";
 
 async function loadFetch() {
-  const src = readFileSync(new URL("../../src/runtime/fetch.ts", import.meta.url), "utf8");
-  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
+  return importTypeScript(new URL("../../src/runtime/fetch.ts", import.meta.url));
 }
 
 const { createExtensionFetcher, forwardCoreHeaders } = await loadFetch();

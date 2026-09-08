@@ -33,13 +33,17 @@ import webdriver from "selenium-webdriver";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
 const SCENARIOS_DIR = path.join(REPO_ROOT, "testdata/scenarios");
+const CARGO_TARGET_DIR = JSON.parse(spawnSync(
+  "cargo", ["metadata", "--format-version", "1", "--no-deps"],
+  { cwd: REPO_ROOT, encoding: "utf8" },
+).stdout).target_directory;
 // The lane copies the freshly built window shell and frontend into
 // lane-private paths and points the harness at them, so a concurrent
 // `cargo build` (lean shell) or frontend rebuild in the same checkout can
 // never swap the binaries mid-run. Direct spec runs without the lane use
 // the in-place build outputs.
 const APP_BIN_CANDIDATE =
-  process.env.DEZOOMIFY_WINDOW_E2E_APP_BIN || path.join(REPO_ROOT, "target/debug/dezoomify-desktop");
+  process.env.DEZOOMIFY_WINDOW_E2E_APP_BIN || path.join(CARGO_TARGET_DIR, "debug/dezoomify-desktop");
 // Windows builds `dezoomify-desktop.exe`; accept the extensionless lane
 // value when the suffixed binary is the one on disk.
 const APP_BIN =
@@ -48,7 +52,7 @@ const APP_BIN =
     : APP_BIN_CANDIDATE;
 const FRONTEND_DIST =
   process.env.DEZOOMIFY_WINDOW_E2E_DIST || path.join(REPO_ROOT, "apps/desktop/dist");
-const FIXTURE_SERVER_CANDIDATE = path.join(REPO_ROOT, "target/debug/dezoomify-fixture-server");
+const FIXTURE_SERVER_CANDIDATE = path.join(CARGO_TARGET_DIR, "debug/dezoomify-fixture-server");
 const FIXTURE_SERVER_BIN =
   process.platform === "win32" && !existsSync(FIXTURE_SERVER_CANDIDATE) && existsSync(`${FIXTURE_SERVER_CANDIDATE}.exe`)
     ? `${FIXTURE_SERVER_CANDIDATE}.exe`
@@ -197,7 +201,8 @@ export function ensureDisplay() {
 }
 
 export function ensureBinary(bin, pkg) {
-  if (existsSync(bin)) return;
+  // Existence is not freshness. Let Cargo's dependency graph and incremental
+  // cache decide whether rebuilding is necessary on every E2E invocation.
   const build = spawnSync("cargo", ["build", "-p", pkg], { cwd: REPO_ROOT, encoding: "utf8" });
   if (build.status !== 0) {
     throw new Error(`cargo build -p ${pkg} failed:\n${build.stderr}`);

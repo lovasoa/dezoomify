@@ -634,16 +634,14 @@ pub fn run() {
                 .build(),
         )
     };
+    macro_rules! command_handler {
+        ($($command:ident),* $(,)?) => {
+            tauri::generate_handler![$($command),*]
+        };
+    }
     builder
         .manage(Mutex::new(JobTable::new()))
-        .invoke_handler(tauri::generate_handler![
-            start_job,
-            cancel_job,
-            answer_choice,
-            request_destination,
-            query_capabilities,
-            open_saved_output,
-        ])
+        .invoke_handler(desktop_commands!(command_handler))
         .setup(|app| {
             // Initial launch may itself carry a deep link
             // (`dezoomify-desktop dezoomify://open?...`).

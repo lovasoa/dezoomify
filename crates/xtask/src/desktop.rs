@@ -113,11 +113,10 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     // ICNS output plus container magic. Runs before the hermetic E2E so a
     // nondeterministic generator fails fast.
     run_node(&["apps/desktop/tests/icons.test.mjs"])?;
-    // Hermetic E2E: loopback fixtures plus the lean driver and frontend
-    // harness (submit -> choose -> request_destination -> save with PNG
-    // verification, deep-link confirm, cancel). No public network, no
-    // webview needed; the real-window path is the opt-in `--e2e-window`
-    // lane below.
+    // Hermetic production-frontend integration: imports the shipped main.ts
+    // entry and drives its rendered controls through recording DOM and Tauri
+    // event/IPC boundaries.
+    // Rendered-window behavior remains in `--e2e-window` below.
     run_node(&["apps/desktop/tests/e2e.test.mjs"])?;
     println!("test desktop: ok");
     Ok(())
@@ -174,12 +173,13 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // the spec runs. A concurrent lean or frontend rebuild in the same
     // checkout then cannot swap the app mid-run; on CI runners the copies
     // are simply identical content.
-    let e2e_dir = super::repo_root().join("target/e2e-window");
+    let target_dir = cargo_target_directory()?;
+    let e2e_dir = target_dir.join("e2e-window");
     // Windows builds `dezoomify-desktop.exe`; accept the extensionless
     // lane value when the suffixed binary is the one on disk, and keep
     // the suffix on the staged copy so the harness env points at a real
     // file.
-    let app_src = window_shell_bin(&super::repo_root().join("target/debug/dezoomify-desktop"));
+    let app_src = window_shell_bin(&target_dir.join("debug/dezoomify-desktop"));
     let app_dst_name = if app_src.extension().is_some_and(|e| e == "exe") {
         "dezoomify-desktop.exe"
     } else {
@@ -458,7 +458,7 @@ pub fn dev_desktop() -> Result<(), String> {
         "dezoomify-desktop",
     ])?;
     let root = super::repo_root();
-    let bin = root.join("target/debug/dezoomify-desktop");
+    let bin = window_shell_bin(&cargo_target_directory()?.join("debug/dezoomify-desktop"));
     if !bin.exists() {
         return Err(format!(
             "desktop binary missing after build: {}",
@@ -897,6 +897,23 @@ fn run_cargo(args: &[&str]) -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| format!("cargo {} failed", args.join(" ")))
+}
+
+fn cargo_target_directory() -> Result<std::path::PathBuf, String> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .current_dir(super::repo_root())
+        .output()
+        .map_err(|e| format!("failed to query Cargo target directory: {e}"))?;
+    if !output.status.success() {
+        return Err("cargo metadata failed while resolving the target directory".to_string());
+    }
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("invalid cargo metadata output: {e}"))?;
+    metadata["target_directory"]
+        .as_str()
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "cargo metadata omitted target_directory".to_string())
 }
 
 fn run_node(args: &[&str]) -> Result<(), String> {

@@ -5,9 +5,14 @@
   "dependencies": {
     "markdown-it": "15.0.1"
   },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "esbuild": "0.25.12",
+    "typescript": "7.0.2"
+  },
   "scripts": {
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "tsc --noEmit && pnpm -r typecheck",
     "test": "node scripts/sync-web-js.mjs && node scripts/build-help.mjs && node --test test/*.test.mjs"
   }
 }

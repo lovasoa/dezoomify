@@ -24,11 +24,11 @@ export { failure };
 export type { StructuredFailure };
 
 export interface WorkerLike {
-  postMessage(msg: unknown, transfer?: ArrayBuffer[]): void;
+  postMessage(msg: unknown, transfer?: Transferable[]): void;
   terminate(): void;
-  onmessage: ((ev: { data: unknown }) => void) | null;
+  onmessage: ((ev: MessageEvent<unknown>) => void) | null;
   /** Fired when the worker script itself fails to load or throws at startup. */
-  onerror?: ((ev: { message?: string }) => void) | null;
+  onerror?: ((ev: ErrorEvent) => void) | null;
 }
 
 export interface CatalogLevel {

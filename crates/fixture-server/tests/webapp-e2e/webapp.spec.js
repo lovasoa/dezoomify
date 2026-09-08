@@ -82,7 +82,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   const url = `${ADDR}/fetch?url=https://fixtures.test/cli/pyramid.dzi`;
   await input.fill(url);
 
-  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+  await page.getByRole("button", { name: /find image/i }).click();
 
   // The pipeline must reach the completed state with real dimensions.
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
@@ -125,7 +125,7 @@ test("webapp fails honestly on a page without a zoomable signal", async ({ page 
   await expect(input).toBeVisible();
   const url = `${ADDR}/fetch?url=https://fixtures.test/cli/plain.html`;
   await input.fill(url);
-  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+  await page.getByRole("button", { name: /find image/i }).click();
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
   const body = await page.locator("#app").innerText();
   assert.match(body, /No zoomable image was found/i);
@@ -149,7 +149,7 @@ test("default job attempts the metadata proxy after direct failure", async ({ pa
   });
   await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(UNREACHABLE_METADATA_URL);
-  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+  await page.getByRole("button", { name: /find image/i }).click();
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
   assert.ok(proxyPosts >= 1, "job must attempt the metadata proxy after direct failure");
 });
@@ -195,7 +195,7 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
 
   await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(ARTS_PAGE_URL);
-  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+  await page.getByRole("button", { name: /find image/i }).click();
 
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
   const downloadPromise = page.waitForEvent("download", { timeout: 30000 });
@@ -243,7 +243,7 @@ test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ 
   await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
   const url = `${ADDR}/fetch?url=https://fixtures.test/cli/pyramid.dzi`;
   await page.locator("#dz-url-input").fill(url);
-  await page.getByRole("button", { name: /dezoomify/i }).first().click();
+  await page.getByRole("button", { name: /find image/i }).click();
 
   await expect(page.locator(".dz-notice-section")).toBeVisible({ timeout: 60000 });
   await expect(page.getByText(/Image downloaded/)).toBeVisible();

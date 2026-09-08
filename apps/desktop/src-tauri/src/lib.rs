@@ -10,6 +10,8 @@
 // `clippy.toml`; integration `tests/` targets never inherit this attribute.
 #![deny(clippy::unwrap_used)]
 
+include!(concat!(env!("CARGO_MANIFEST_DIR"), "/desktop_commands.rs"));
+
 pub mod commands;
 pub mod deep_link;
 pub mod install_integration;

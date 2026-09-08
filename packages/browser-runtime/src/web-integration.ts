@@ -35,7 +35,7 @@ export interface ProxyLike {
   fetchViaProxy(
     targetUrl: string,
     opts?: { signal?: AbortSignal },
-  ): Promise<{ ok: boolean; status: number; code?: string; bytes?: ArrayBuffer; contentType?: string }>;
+  ): Promise<{ ok: boolean; status: number; code?: string; reason?: string; bytes?: ArrayBuffer; contentType?: string }>;
 }
 
 const SIGNED_QUERY_KEYS = new Set([

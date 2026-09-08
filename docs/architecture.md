@@ -56,6 +56,10 @@ transport is tab-origin direct fetch followed by `<img>` tainted
 display-only, with the active transport always visible. It connects
 `packages/shared-ui` to
 `crates/dezoomify-wasm` on the website and in the extension.
+The website compatibility module `src/webIntegration.ts` is a re-export-only
+shim; browser integration policy lives in
+`packages/browser-runtime/src/web-integration.ts`. Transport display labels
+live only in `packages/browser-runtime/src/transport-labels.ts`.
 
 ### Metadata CORS proxy
 

@@ -55,10 +55,10 @@ test('single limit/grid/capability generation is pinned', () => {
   assert.equal(byId.bulk_text.displayName, 'Bulk text');
 });
 
-test('transport labels stay single-sourced with browser-runtime types.ts', () => {
-  const types = readFileSync(join(root, '..', 'browser-runtime', 'src', 'types.ts'), 'utf8');
-  const direct = types.match(/DIRECT_TRANSPORT_LABEL\s*=\s*"([^"]+)"/)?.[1];
-  const proxy = types.match(/PROXY_TRANSPORT_LABEL\s*=\s*"([^"]+)"/)?.[1];
+test('transport labels stay single-sourced with browser-runtime transport-labels.ts', () => {
+  const labels = readFileSync(join(root, '..', 'browser-runtime', 'src', 'transport-labels.ts'), 'utf8');
+  const direct = labels.match(/DIRECT_TRANSPORT_LABEL\s*=\s*"([^"]+)"/)?.[1];
+  const proxy = labels.match(/PROXY_TRANSPORT_LABEL\s*=\s*"([^"]+)"/)?.[1];
   assert.equal(direct, 'Direct from your browser');
   assert.equal(proxy, 'Metadata proxy');
   assert.ok(generated.includes(`DIRECT_TRANSPORT_LABEL = "${direct}"`));

@@ -3,15 +3,19 @@ import { asFetchFailure } from "../runtime/fetch.js";
 /** @typedef {{ jobId: string, tabId: number, frameId: number, documentGeneration: number }} JobBinding */
 
 /** @param {unknown} value @returns {value is JobBinding} */
-export function isJobBinding(value) {
-  const binding = /** @type {Partial<JobBinding>} */ (value);
+export interface JobBinding { jobId: string; tabId: number; frameId: number; documentGeneration: number }
+interface SourceReply { bytes: Uint8Array; finalUrl: string }
+interface PendingSource { resolve(value: SourceReply): void; reject(reason: unknown): void; chunks: Uint8Array[]; finalUrl: string }
+
+export function isJobBinding(value: unknown): value is JobBinding {
+  const binding = value as Partial<JobBinding> | null;
   return !!binding && typeof binding.jobId === "string" && binding.jobId.startsWith("job:") &&
     Number.isInteger(binding.tabId) && Number.isInteger(binding.frameId) &&
-    Number.isInteger(binding.documentGeneration) && binding.documentGeneration >= 0;
+    typeof binding.documentGeneration === "number" && Number.isInteger(binding.documentGeneration) && binding.documentGeneration >= 0;
 }
 
 /** @param {unknown} value */
-function responseBytes(value) {
+function responseBytes(value: unknown): Uint8Array | null {
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (Array.isArray(value)) return new Uint8Array(value);
@@ -27,11 +31,11 @@ function responseBytes(value) {
  * This small bridge accepts its final assembled reply for now, preserving the
  * request correlation until the generated chunk bindings land.
  */
-export function createCoordinatorSourceTransport(deps) {
-  const pending = new Map();
+export function createCoordinatorSourceTransport(deps: { sendMessage(message: unknown): Promise<unknown> }) {
+  const pending = new Map<string, PendingSource>();
   return {
     /** @param {{ binding: JobBinding, requestId: string, uri: string, method?: string, headers: unknown, purpose: string }} request */
-    async fetchResource(request) {
+    async fetchResource(request: { binding: JobBinding; requestId: string; uri: string; method?: string; headers: unknown; purpose: string }): Promise<SourceReply> {
       if (!isJobBinding(request.binding) || typeof request.requestId !== "string" || !request.requestId.startsWith("req:")) {
         throw Object.assign(new Error("invalid source fetch binding"), { category: "malformed" });
       }
@@ -44,10 +48,11 @@ export function createCoordinatorSourceTransport(deps) {
         headers: request.headers,
         purpose: request.purpose,
       });
-      return await new Promise((resolve, reject) => pending.set(request.requestId, { resolve, reject, chunks: [], finalUrl: request.uri }));
+      return await new Promise<SourceReply>((resolve, reject) => pending.set(request.requestId, { resolve, reject, chunks: [], finalUrl: request.uri }));
     },
     /** Receive a coordinator-routed `dz.source.fetch-*` message. */
-    handleMessage(message) {
+    handleMessage(message: { requestId?: string; sourceType?: string; bytes?: unknown; ok?: boolean; status?: number; url?: string }): boolean {
+      if (typeof message?.requestId !== "string") return false;
       const state = pending.get(message?.requestId);
       if (!state) return false;
       if (message.sourceType === "dz.source.fetch-chunk") {
@@ -72,6 +77,6 @@ export function createCoordinatorSourceTransport(deps) {
 }
 
 /** @param {unknown} error */
-export function engineFailure(error) {
+export function engineFailure(error: unknown) {
   return asFetchFailure(error);
 }

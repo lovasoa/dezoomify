@@ -318,7 +318,7 @@ test("entries never fabricate tile progress; negatives carry a structured error"
 
 test("regression: heads without zoomable literals still reach WASM discovery (GAC/krpano/IIIF)", () => {
   // Same-URL parity: the extension tries ranked candidates directly
-  // (page.ts discover loop), so these heads succeed there via secondary
+  // (modal.ts discover loop), so these heads succeed there via secondary
   // resources (tile-info XML, tour.xml, info.json). The website's old
   // first-256KiB substring gate failed them with NO_IMAGE_FOUND before the
   // engine ever ran. The classifier stays negative here (hint only); the
@@ -357,7 +357,7 @@ test("regression: heads without zoomable literals still reach WASM discovery (GA
   // Extension parity: ranked candidates are each tried via core discovery,
   // never dropped on a head-text pre-filter.
   const pageTs = fs.readFileSync(
-    path.join(srcDir, "apps", "extension", "src", "page", "page.ts"),
+    path.join(srcDir, "apps", "extension", "src", "modal", "modal.ts"),
     "utf8",
   );
   assert.ok(

@@ -37,7 +37,9 @@ cargo xtask test all
 
 Bare `cargo xtask test` is the fast deterministic suite. It runs static checks,
 short unit and contract suites, and generated-artifact validation while omitting
-packaging and browser end-to-end suites. `cargo xtask test all` runs every
+packaging and browser end-to-end suites. `cargo xtask check` also runs the
+workspace TypeScript compiler gate; every workspace package with a `typecheck`
+script compiles from the locked root TypeScript dependency. `cargo xtask test all` runs every
 deterministic target, including controlled loopback HTTP and isolated browser
 profiles. Neither command contacts public source sites. Public compatibility
 checks run only through the explicit `cargo xtask test live` target; a live
@@ -58,12 +60,12 @@ Focused targets are:
 | `core` | pure format discovery, catalogs, grids, and processing recipes |
 | `protocol` | Rust/TypeScript schema, goldens, fingerprints, redaction, current/N-1 |
 | `job` | commands, effects, retries, progress, cancellation, and cleanup |
-| `wasm` | WASM portability, bindings, transcripts, and memory ownership |
+| `wasm` | WASM portability, freshly generated Node bindings executed through dispatch/drain/buffer/dispose, transcripts, and memory ownership |
 | `browser` | workers, transports, decoding, canvases, caching, and browser harness |
-| `ui` | shared UI controller, view rendering, accessibility gate, four-locale message dictionary, and mobile CSS parity |
+| `ui` | shared UI controller, view rendering, static accessibility contracts, four-locale message dictionary, and mobile CSS contracts |
 | `web` | website direct-first transport, metadata CORS proxy fallback, and cross-browser end-to-end behavior |
 | `native` | native runtime, CLI, encoders, cache, and scenario parity |
-| `desktop` | Tauri integration, integration registration, disabled-updater fixtures, and E2E |
+| `desktop` | Tauri integration, canonical command registration, disabled-updater fixtures, and a mounted production-frontend integration smoke; `--e2e-window` drives the real webview |
 | `extension` | fresh generated-WASM worker contract, manifests, scanning, browser-session fetch, permissions, shared-UI vendoring with web-vs-extension job-card parity, store size gate, and browser E2E |
 | `native-messaging` | framing, handoff consent, cookie scope, registration, and cleanup |
 | `scenario` | scenario-corpus gates: native pipeline scenarios over loopback plus CLI snapshots |
@@ -83,12 +85,12 @@ flags instead of silently widening or skipping coverage.
 `node --test test/*.test.mjs` and the `web` and `build web` gates. The `ui`
 gate runs the shared-UI subset plus its gates: `test/controller.test.mjs`,
 `test/view-rendering.test.mjs`, `test/ui-a11y.test.mjs` (static
-accessibility gate over rendered views, theme CSS, the extension page shell,
+accessibility-contract checks over a minimal DOM, theme CSS, the extension page shell,
 and the shared confirm dialog), `test/ui-i18n.test.mjs` (four-locale
 dictionary coverage with per-key English fallback; the extension renders
 through its vendored dictionary mirror with
 no local replica), and `test/ui-mobile.test.mjs` (560/380px parity over the
-canonical theme the extension page links, and 360px reachability). It is
+canonical theme the extension page links, and static 360px CSS reachability invariants). It is
 tracked and always present.
 
 `e2e-artifacts/` (repository root) is not a suite and never runs in any
