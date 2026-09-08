@@ -37,6 +37,8 @@ export const MAX_COOKIE_NAME_LENGTH = 256;
 export const MAX_COOKIE_VALUE_LENGTH = 4096;
 export const MAX_TOKEN_LENGTH = 128;
 export const MAX_MESSAGE_BYTES = 1024 * 1024;
+export const MAX_NATIVE_FRAME_BYTES = 1024 * 1024;
+export const JOB_BINDING_VERSION = 1;
 
 /** Query keys that must never appear in a handoff source URL. Single shared
  * vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
@@ -259,7 +261,108 @@ export function dropCredentialValues(cookies) {
  * }} args
  * @returns {Promise<{ ok: boolean, code?: string, job?: string, continuedCookieless?: boolean, credentialSent?: boolean, nativeCalls?: number }>}
  */
-export async function requestNativeHandoff(args) {
+/**
+ * Persistent Native Messaging transport. A request is answered only by a
+ * response carrying the same requestId; disconnect rejects every waiter and
+ * is surfaced as a typed native-disconnected result by the caller.
+ * @param {{ connectNative: (host: string) => any, hostName?: string }} args
+ */
+async function requestNativeHandoffViaPort(args) {
+  const fail = (code, extra = {}) => ({ ok: false, code, credentialSent: false, ...extra });
+  const source = validateHandoffSource(args.sourceUrl);
+  if (!source.ok) return fail(source.code ?? "bad-url");
+  const origins = validateHandoffOrigins(args.origins);
+  if (!origins.ok) return fail(origins.code ?? "bad-origins");
+  const names = validateHandoffCookieNames(args.cookieNames);
+  if (!names.ok) return fail(names.code ?? "bad-cookies");
+  if (!validateJobBinding(args.job)) return fail("bad-job-binding");
+  if (typeof args.getCookies !== "function" || typeof args.showConsent !== "function") return fail("bad-request");
+
+  let port;
+  try { port = args.connectNative(args.hostName ?? NATIVE_HOST_NAME); } catch { return fail("native-disconnected"); }
+  if (!port || typeof port.postMessage !== "function") return fail("native-disconnected");
+  let disconnected = false;
+  const waiters = new Map();
+  let sequence = 0;
+  const rejectDisconnected = () => {
+    disconnected = true;
+    for (const waiter of waiters.values()) waiter.reject(Object.assign(new Error("native disconnected"), { code: "native-disconnected" }));
+    waiters.clear();
+  };
+  const onMessage = (message) => {
+    if (!message || typeof message !== "object" || typeof message.requestId !== "string") return;
+    const waiter = waiters.get(message.requestId);
+    if (!waiter) return;
+    waiters.delete(message.requestId);
+    try {
+      if (JSON.stringify(message).length > MAX_NATIVE_FRAME_BYTES) {
+        waiter.reject(Object.assign(new Error("oversize"), { code: "oversize" }));
+        return;
+      }
+    } catch {
+      waiter.reject(Object.assign(new Error("malformed"), { code: "malformed" }));
+      return;
+    }
+    waiter.resolve(message);
+  };
+  const add = (event, listener) => {
+    if (event && typeof event.addListener === "function") event.addListener(listener);
+    else if (event && typeof event.addEventListener === "function") event.addEventListener(listener);
+  };
+  add(port.onMessage, onMessage);
+  add(port.onDisconnect, rejectDisconnected);
+  const close = () => { try { if (typeof port.disconnect === "function") port.disconnect(); } catch {} };
+  const request = (payload) => new Promise((resolve, reject) => {
+    if (disconnected) { reject(Object.assign(new Error("native disconnected"), { code: "native-disconnected" })); return; }
+    const requestId = `native-${Date.now().toString(16)}-${++sequence}`;
+    const message = { ...payload, requestId, bindingVersion: JOB_BINDING_VERSION, job: args.job };
+    let bytes;
+    try { bytes = JSON.stringify(message).length; } catch { reject(Object.assign(new Error("oversize"), { code: "oversize" })); return; }
+    if (bytes > MAX_NATIVE_FRAME_BYTES) { reject(Object.assign(new Error("oversize"), { code: "oversize" })); return; }
+    waiters.set(requestId, { resolve, reject });
+    try { port.postMessage(message); } catch (error) { waiters.delete(requestId); reject(Object.assign(error instanceof Error ? error : new Error("native disconnected"), { code: "native-disconnected" })); }
+  });
+  const nativeFail = (error, credentialSent = false) => fail(error?.code ?? "native-disconnected", { credentialSent });
+  try {
+    const handshake = await request({ kind: "handshake", protocol: NATIVE_PROTOCOL_VERSION, clientVersion: CURRENT_NATIVE_PROTOCOL });
+    if (handshake.error) return fail(handshake.error.code ?? "native-rejected");
+    if (handshake.kind !== "handshake-ack" || handshake.capabilities?.handoff !== true) return fail("capability.unavailable");
+    const negotiated = await request({ kind: "negotiate", clientVersion: CURRENT_NATIVE_PROTOCOL, jobId: args.job.jobId, extensionId: args.extensionId ?? "" });
+    if (negotiated.error) return fail(negotiated.error.code ?? "handoff.rejected");
+    if (negotiated.kind !== "negotiated" || !Number.isInteger(negotiated.negotiatedVersion)) return fail("protocol.incompatible");
+    const { challenge, nonce } = negotiated;
+    if (typeof challenge !== "string" || typeof nonce !== "string" || challenge.length > MAX_TOKEN_LENGTH || nonce.length > MAX_TOKEN_LENGTH) return fail("bad-nonce");
+    let confirmed = false;
+    try { confirmed = (await args.showConsent(buildHandoffConsentDetails({ origins: args.origins, cookieNames: args.cookieNames, jobId: args.job.jobId }))) === true; } catch {}
+    if (!confirmed) { await request({ kind: "decline", challenge }); return { ok: true, continuedCookieless: true, credentialSent: false }; }
+    const consented = await request({ kind: "consent", challenge, nonce, jobId: args.job.jobId, origins: args.origins, cookieNames: args.cookieNames, confirmed: true });
+    if (consented.error || consented.kind !== "consented") return fail(consented.error?.code ?? "handoff.rejected");
+    const cookies = [];
+    try {
+      for (const origin of args.origins) for (const entry of (await args.getCookies(origin)) ?? []) {
+        if (entry && typeof entry.name === "string" && typeof entry.value === "string") cookies.push({ name: entry.name, value: entry.value, origin });
+      }
+    } catch (error) { try { await request({ kind: "decline", challenge }); } catch {} dropCredentialValues(cookies); return fail(error?.code ?? "permission-denied", { continuedCookieless: true }); }
+    const scoped = validateCredentialCookies(cookies, args.origins, args.cookieNames);
+    if (!scoped.ok) { try { await request({ kind: "decline", challenge }); } catch {} dropCredentialValues(cookies); return fail(scoped.code ?? "bad-cookies"); }
+    const started = await request({ kind: "credential", challenge, nonce, jobId: args.job.jobId, sourceUrl: args.sourceUrl, origins: args.origins, cookies });
+    dropCredentialValues(cookies);
+    if (started.error) return fail(started.error.code ?? "handoff.rejected", { credentialSent: true });
+    if (started.kind !== "job-started") return fail("handoff.rejected", { credentialSent: true });
+    return { ok: true, job: typeof started.job === "string" ? started.job : args.job.jobId, credentialSent: true };
+  } catch (error) { return nativeFail(error, false); }
+  finally { close(); }
+}
+
+/** @param {any} job */
+function validateJobBinding(job) {
+  return !!job && typeof job === "object" && typeof job.jobId === "string" && job.jobId.length > 0 && job.jobId.length <= MAX_TOKEN_LENGTH &&
+    Number.isInteger(job.tabId) && job.tabId >= 0 && Number.isInteger(job.frameId) && job.frameId >= 0 &&
+    typeof job.documentGeneration === "string" && job.documentGeneration.length > 0 && job.documentGeneration.length <= MAX_TOKEN_LENGTH;
+}
+
+/** Legacy one-shot compatibility path for older callers/native hosts. */
+async function requestNativeHandoffLegacy(args) {
   let nativeCalls = 0;
   const fail = (code) => ({ ok: false, code, credentialSent: false, nativeCalls });
   const source = validateHandoffSource(args.sourceUrl);
@@ -431,4 +534,9 @@ export async function requestNativeHandoff(args) {
   if (started.error) return { ok: false, code: started.error.code ?? "handoff.rejected", credentialSent: true, nativeCalls };
   if (started.kind !== "job-started") return { ok: false, code: "handoff.rejected", credentialSent: true, nativeCalls };
   return { ok: true, job: typeof started.job === "string" ? started.job : args.jobId, credentialSent: true, nativeCalls };
+}
+
+export async function requestNativeHandoff(args) {
+  if (typeof args?.connectNative === "function") return requestNativeHandoffViaPort(args);
+  return requestNativeHandoffLegacy(args);
 }

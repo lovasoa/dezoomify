@@ -71,7 +71,7 @@ test("permission denial performs zero fetches", async () => {
   assert.equal(h.calls.filter((c) => c.url && !c.permissionRequest).length, 0);
 });
 
-test("cross-origin redirect requires separate permission", async () => {
+test("automatic redirects are unavailable even when the final host is granted", async () => {
   const h = makeHarness();
   h.grant("https://a.example");
   h.deps.fetchImpl = async (url, init) => {
@@ -89,10 +89,9 @@ test("cross-origin redirect requires separate permission", async () => {
     () => f.fetchResource("https://a.example/start", { userIntent: true }),
     /redirect.*permission/i
   );
-  // granting the second origin fixes it
+  // A later grant cannot retrospectively validate an automatic redirect.
   h.grant("https://evil.example");
-  const res = await f.fetchResource("https://a.example/start", { userIntent: true });
-  assert.equal(res.bytes.length, 5);
+  await assert.rejects(() => f.fetchResource("https://a.example/start", { userIntent: true }), /redirect/i);
 });
 
 test("timeout enforced via durationMs", async () => {
@@ -124,7 +123,7 @@ test("oversized body rejected", async () => {
   await assert.rejects(() => f.fetchResource("https://a.example/x.jpg", { userIntent: true, maxBytes: 10 }), /oversized/);
 });
 
-test("unsupported content type rejected", async () => {
+test("metadata accepts HTML while tiles do not", async () => {
   const h = makeHarness();
   h.grant("https://a.example");
   h.deps.fetchImpl = async (url) => ({
@@ -135,10 +134,9 @@ test("unsupported content type rejected", async () => {
     redirectChain: [url],
   });
   const f = createSessionFetcher(h.deps);
-  await assert.rejects(
-    () => f.fetchResource("https://a.example/x", { userIntent: true, allowedMimes: ["image/"] }),
-    /unsupported/
-  );
+  const metadata = await f.fetchResource("https://a.example/x", { userIntent: true, purpose: "metadata" });
+  assert.equal(metadata.bytes.length, 5);
+  await assert.rejects(() => f.fetchResource("https://a.example/x", { userIntent: true, purpose: "tile" }), /unsupported/);
 });
 
 test("401/403 classified without automatic handoff", async () => {

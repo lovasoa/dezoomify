@@ -229,3 +229,61 @@ test("wire shapes match the native host envelope", async () => {
     assert.ok(src.includes(kind), `client must speak ${kind}`);
   }
 });
+
+function fakePortHost({ disconnectAt = null, oversized = false } = {}) {
+  const sent = [];
+  const messageListeners = [];
+  const disconnectListeners = [];
+  const port = {
+    sent,
+    onMessage: { addListener: (fn) => messageListeners.push(fn) },
+    onDisconnect: { addListener: (fn) => disconnectListeners.push(fn) },
+    postMessage(message) {
+      sent.push(message);
+      if (disconnectAt === message.kind) { for (const fn of disconnectListeners) fn(); return; }
+      const reply = oversized ? { requestId: message.requestId, pad: "x".repeat(1024 * 1024 + 1) } :
+        message.kind === "handshake" ? { requestId: message.requestId, kind: "handshake-ack", capabilities: { handoff: true } } :
+        message.kind === "negotiate" ? { requestId: message.requestId, kind: "negotiated", negotiatedVersion: 2, challenge: "ch-1", nonce: "n-1" } :
+        message.kind === "consent" ? { requestId: message.requestId, kind: "consented" } :
+        message.kind === "credential" ? { requestId: message.requestId, kind: "job-started", job: "native-job" } :
+        { requestId: message.requestId, kind: "declined", continuedCookieless: true };
+      queueMicrotask(() => messageListeners.forEach((fn) => fn(reply)));
+    },
+    disconnect() {},
+  };
+  return port;
+}
+
+test("persistent port carries one bound job and requestId on every exchange", async () => {
+  const port = fakePortHost();
+  const r = await handoff.requestNativeHandoff({
+    ...baseArgs(),
+    connectNative: () => port,
+    job: { jobId: "job:ext-1", tabId: 7, frameId: 0, documentGeneration: "doc-1" },
+  });
+  assert.equal(r.ok, true);
+  assert.ok(port.sent.length >= 4);
+  assert.equal(new Set(port.sent.map((m) => m.requestId)).size, port.sent.length);
+  assert.ok(port.sent.every((m) => m.job?.tabId === 7 && m.job?.documentGeneration === "doc-1"));
+});
+
+test("persistent port disconnect is typed at every stage and decline never reads cookies", async () => {
+  for (const stage of ["handshake", "negotiate", "consent", "credential"]) {
+    const port = fakePortHost({ disconnectAt: stage });
+    let reads = 0;
+    const r = await handoff.requestNativeHandoff({
+      ...baseArgs(), connectNative: () => port,
+      job: { jobId: "job:ext-1", tabId: 7, frameId: 0, documentGeneration: "doc-1" },
+      getCookies: async () => { reads++; return [{ name: "session", value: "CANARY" }]; },
+    });
+    assert.equal(r.code, "native-disconnected", stage);
+    if (stage !== "credential") assert.equal(reads, 0);
+  }
+});
+
+test("persistent port rejects missing/stale binding and bounded frames", async () => {
+  const port = fakePortHost();
+  const base = { ...baseArgs(), connectNative: () => port };
+  assert.equal((await handoff.requestNativeHandoff(base)).code, "bad-job-binding");
+  assert.equal((await handoff.requestNativeHandoff({ ...base, job: { jobId: "job:ext-1", tabId: 1, frameId: 0, documentGeneration: "doc-1" }, connectNative: () => fakePortHost({ oversized: true }) })).code, "oversize");
+});

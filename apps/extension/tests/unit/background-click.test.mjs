@@ -2,228 +2,134 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-// Regression gates for the toolbar click-to-monitor flow in
-// `src/background/index.ts`.
-//
-// Bug report: clicking the grey icon flashed blue, then immediately back to
-// grey, with no modal and no monitoring. Two defects combined to produce it:
-//  1. `tabs.onUpdated` disarmed on ANY `changeInfo.url`, including the armed
-//     tab's own monitored reload (browsers report the same URL on reload).
-//  2. The modal was injected BEFORE `tabs.reload`, so the reload wiped the
-//     injected content script / probe iframe even when the monitor survived.
-//
-// Contract under test (basic functionality must never silently die):
-//  - click arms the exact tab (blue + badge dot), exactly one `tabs.reload`;
-//  - the monitor SURVIVES its own reload: `onUpdated` with the SAME url
-//    (loading + complete) must not disarm, and the modal is injected AFTER
-//    reload completes (injection never precedes the reload that would
-//    wipe it);
-//  - navigation to a DIFFERENT url disarms (grey, no stale results);
-//  - injection failure disarms (grey) instead of claiming a monitor;
-//  - the whole flow works with activeTab-only capabilities: the fake
-//    browser exposes NO `webRequest` and NO host access at all (production
-//    truth: a `webRequest` listener without host permissions is deaf, and
-//    activeTab does not enable observation). If shipped code ever touches
-//    `api.webRequest`, this harness throws and the suite goes red.
-//
-// The harness drives the real shipped module with a fake browser namespace:
-// `globalThis.chrome` is installed before the data: URL import, so the
-// module's top-level `const api = globalThis.browser ?? globalThis.chrome`
-// picks up the fake and `wire()` registers test-visible listeners.
-
 const backgroundSrc = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const TAB = { id: 7, url: "https://gallery.example/work" };
 
-function createFakeBrowser() {
-  const listeners = { onClicked: [], onRemoved: [], onUpdated: [], onMessage: [], onInstalled: [] };
-  const calls = {
-    setIcon: [], setBadgeText: [], reload: [], insertCSS: [], executeScript: [],
-    sendMessage: [], tabsGet: [], tabsCreate: [],
-  };
-  // No webRequest, no permissions, no host access: the activeTab-only
-  // production shape. The click flow must complete to injection anyway;
-  // candidates come from the injected tab's own timeline.
+function fakeBrowser(session = {}) {
+  const listeners = { click: [], removed: [], updated: [], message: [], permissionsRemoved: [] };
+  const calls = { create: [], update: [], execute: [], send: [], icon: [], badge: [], storage: [] };
+  let nextTab = 40;
   const api = {
     action: {
-      onClicked: { addListener(fn) { listeners.onClicked.push(fn); } },
-      setIcon(args) { calls.setIcon.push(args); },
-      setBadgeText(args) { calls.setBadgeText.push(args); },
+      onClicked: { addListener(fn) { listeners.click.push(fn); } },
+      setIcon(value) { calls.icon.push(value); return Promise.resolve(); },
+      setBadgeText(value) { calls.badge.push(value); return Promise.resolve(); },
     },
     tabs: {
-      get(tabId) { calls.tabsGet.push(tabId); return Promise.resolve({ id: tabId, url: "https://gallery.example/work" }); },
-      reload(tabId) { calls.reload.push(tabId); return Promise.resolve(); },
-      sendMessage(tabId, message) { calls.sendMessage.push({ tabId, message }); return Promise.resolve(); },
-      create(args) { calls.tabsCreate.push(args); return Promise.resolve({}); },
-      onRemoved: { addListener(fn) { listeners.onRemoved.push(fn); } },
-      onUpdated: { addListener(fn) { listeners.onUpdated.push(fn); } },
+      create(value) { calls.create.push(value); return Promise.resolve({ id: nextTab++ }); },
+      update(id, value) { calls.update.push({ id, value }); return Promise.resolve(); },
+      sendMessage(tabId, message, options) { calls.send.push({ tabId, message, options }); return Promise.resolve(); },
+      onRemoved: { addListener(fn) { listeners.removed.push(fn); } },
+      onUpdated: { addListener(fn) { listeners.updated.push(fn); } },
     },
-    scripting: {
-      insertCSS(args) { calls.insertCSS.push(args); return Promise.resolve(); },
-      executeScript(args) { calls.executeScript.push(args); return Promise.resolve(); },
+    scripting: { executeScript(value) { calls.execute.push(value); return Promise.resolve(); } },
+    storage: { session: {
+      async get(key) { return { [key]: session[key] }; },
+      async set(value) { Object.assign(session, value); calls.storage.push(value); },
+    } },
+    permissions: {
+      onRemoved: { addListener(fn) { listeners.permissionsRemoved.push(fn); } },
+      request: async () => true,
     },
     runtime: {
-      onMessage: { addListener(fn) { listeners.onMessage.push(fn); } },
-      onInstalled: { addListener(fn) { listeners.onInstalled.push(fn); } },
-      getURL(path) { return "chrome-extension://fake/" + path; },
+      getURL(path) { return `chrome-extension://test/${path}`; },
+      onMessage: { addListener(fn) { listeners.message.push(fn); } },
     },
   };
-  return { api, listeners, calls };
+  return { api, calls, listeners, session };
 }
 
-let backgroundImportSeq = 0;
-async function loadBackground(fake) {
-  const prevBrowser = globalThis.browser;
-  const prevChrome = globalThis.chrome;
+let sequence = 0;
+async function load(fake) {
+  const browser = globalThis.browser;
+  const chrome = globalThis.chrome;
   globalThis.browser = undefined;
   globalThis.chrome = fake.api;
   try {
-    // Unique fragment per import: data: URL modules cache by URL, and the
-    // shipped module wires listeners exactly once per evaluation.
-    backgroundImportSeq += 1;
-    await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(backgroundSrc)}//#${backgroundImportSeq}`);
+    sequence += 1;
+    await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(backgroundSrc)}#${sequence}`);
   } finally {
-    globalThis.browser = prevBrowser;
-    globalThis.chrome = prevChrome;
+    globalThis.browser = browser;
+    globalThis.chrome = chrome;
   }
-  return fake;
 }
 
-const tick = () => new Promise((resolve) => setImmediate(resolve));
+function firstBinding(fake) {
+  return fake.calls.send.find((call) => call.message.type === "dz.source.bind")?.message;
+}
 
-const TAB = { id: 7, url: "https://gallery.example/work" };
-
-test("click survives its own reload: stays blue, injects after complete", async () => {
-  const fake = createFakeBrowser();
-  await loadBackground(fake);
-  const { listeners, calls } = fake;
-
-  assert.equal(listeners.onClicked.length, 1, "background must listen for the toolbar click");
-  await listeners.onClicked[0]({ ...TAB });
+test("toolbar opens a dedicated job tab then injects only the source collector", async () => {
+  const fake = fakeBrowser();
+  await load(fake);
+  await fake.listeners.click[0](TAB);
   await tick(); await tick();
 
-  // Armed: blue icon + badge dot, exactly one reload of the clicked tab.
-  assert.equal(calls.reload.length, 1, "exactly one reload of exactly the clicked tab");
-  assert.equal(calls.reload[0], TAB.id);
-  const lastIcon = calls.setIcon.at(-1);
-  assert.ok(lastIcon && lastIcon.tabId === TAB.id, "icon swap targets the clicked tab");
-
-  // The modal must NOT be injected before the reload that would wipe it.
-  assert.equal(calls.executeScript.length, 0, "no injection before reload completes (reload wipes content scripts)");
-
-  // The browser reports the armed tab's OWN reload (same URL): loading...
-  for (const fn of listeners.onUpdated) fn(TAB.id, { status: "loading", url: TAB.url });
-  await tick();
-  // ...and complete. Neither may disarm the monitor.
-  for (const fn of listeners.onUpdated) fn(TAB.id, { status: "complete", url: TAB.url });
-  await tick(); await tick();
-
-  // Injection happens AFTER reload completes, and the icon stays blue.
-  assert.equal(calls.executeScript.length, 1, "modal injected once, after reload completes");
-  assert.deepEqual(calls.executeScript[0], { target: { tabId: TAB.id }, files: ["content/modal.js"] });
-  const iconAfter = calls.setIcon.at(-1);
-  const badgeAfter = calls.setBadgeText.at(-1);
-  assert.ok(iconAfter && iconAfter.path["16"] === "icons/icon16.png", "icon stays blue through its own reload (not grey)");
-  assert.ok(badgeAfter && badgeAfter.text === "•", "badge dot stays while monitoring");
-
-  // The fresh content script gets an armed snapshot (it seeds its own
-  // candidates from the tab timeline, which needs no permission).
-  const updates = calls.sendMessage.filter((c) => c.message && c.message.type === "dezoomify-monitor-update");
-  assert.ok(updates.length > 0, "fresh content script must be told monitoring is armed");
+  assert.equal(fake.calls.create.length, 1, "the explicit action opens the job tab immediately");
+  assert.match(fake.calls.create[0].url, /job\/job.html#jobId=/);
+  assert.deepEqual(fake.calls.execute[0], { target: { tabId: TAB.id, allFrames: true }, files: ["content/modal.js"] });
+  const binding = firstBinding(fake);
+  assert.ok(binding?.jobId && binding.tabId === TAB.id && binding.frameId === 0);
+  assert.equal("reload" in fake.calls, false, "inspect-first never reloads during activation");
 });
 
-test("navigation to a different url disarms (grey, no stale results)", async () => {
-  const fake = createFakeBrowser();
-  await loadBackground(fake);
-  const { listeners, calls } = fake;
-
-  await listeners.onClicked[0]({ ...TAB });
+test("repeated activation cancels source discovery and routes job cancellation", async () => {
+  const fake = fakeBrowser();
+  await load(fake);
+  await fake.listeners.click[0](TAB);
   await tick(); await tick();
-  for (const fn of listeners.onUpdated) fn(TAB.id, { status: "complete", url: TAB.url });
-  await tick(); await tick();
-  assert.equal(calls.executeScript.length, 1);
-
-  for (const fn of listeners.onUpdated) fn(TAB.id, { url: "https://other.example/" });
+  await fake.listeners.click[0](TAB);
   await tick();
-  const lastIcon = calls.setIcon.at(-1);
-  assert.ok(lastIcon && lastIcon.path["16"] === "icons/icon16-grey.png", "navigation away restores the grey icon");
 
-  // Post-navigation traffic from the tab is ignored (stale listener, if any).
-  const before = calls.sendMessage.length;
-  for (const fn of listeners.onUpdated) fn(TAB.id, { url: "https://other.example/" });
-  await tick();
-  assert.equal(calls.sendMessage.length, before, "no updates after navigation away");
+  assert.equal(fake.calls.create.length, 1, "second activation does not open a competing job");
+  assert.ok(fake.calls.send.some((call) => call.tabId === TAB.id && call.message.type === "dz.source.stop"));
+  assert.ok(fake.calls.send.some((call) => call.message.type === "dz.job.cancel"));
 });
 
-test("injection failure remains visible instead of silently returning to idle", async () => {
-  const fake = createFakeBrowser();
-  fake.api.scripting.executeScript = (args) => {
-    fake.calls.executeScript.push(args);
-    return Promise.reject(new Error("cannot access page"));
-  };
-  await loadBackground(fake);
-  const { listeners, calls } = fake;
+test("stale navigation generation rejects old source candidates", async () => {
+  const fake = fakeBrowser();
+  await load(fake);
+  await fake.listeners.click[0](TAB);
+  await tick(); await tick();
+  const binding = firstBinding(fake);
+  for (const listener of fake.listeners.updated) listener(TAB.id, { url: "https://gallery.example/next" });
+  await tick();
+  assert.ok(fake.calls.send.some((call) => call.message.type === "dz.source.invalidated"), "old document is explicitly invalidated");
 
-  await listeners.onClicked[0]({ ...TAB });
-  await tick(); await tick();
-  for (const fn of listeners.onUpdated) fn(TAB.id, { status: "complete", url: TAB.url });
-  await tick(); await tick();
-
-  const lastIcon = calls.setIcon.at(-1);
-  const lastBadge = calls.setBadgeText.at(-1);
-  assert.ok(lastIcon && lastIcon.path["16"] === "icons/icon16.png", "failed injection keeps an actionable error state");
-  assert.equal(lastBadge?.text, "!", "failed injection shows an error badge");
-  assert.equal(calls.reload.length, 1, "the single reload still ran once");
-});
-
-test("modal failure keeps the action visibly failed until a second click", async () => {
-  const fake = createFakeBrowser();
-  await loadBackground(fake);
-  const { listeners, calls } = fake;
-  await listeners.onClicked[0]({ ...TAB });
-  await tick(); await tick();
-  for (const fn of listeners.onUpdated) fn(TAB.id, { status: "complete", url: TAB.url });
-  await tick(); await tick();
-  for (const fn of listeners.onMessage) {
-    fn({ type: "dezoomify-modal-failed", code: "modal-start-failed" }, { tab: { id: TAB.id } }, () => {});
+  const before = fake.calls.send.length;
+  for (const listener of fake.listeners.message) {
+    listener({ type: "dz.source.candidates", ...binding, requestId: "old", urls: ["https://gallery.example/info.json"] }, { tab: { id: TAB.id }, frameId: 0 }, () => {});
   }
-  assert.equal(calls.setBadgeText.at(-1).text, "!", "modal failure shows an error badge");
-  await listeners.onClicked[0]({ ...TAB });
-  assert.equal(calls.setBadgeText.at(-1).text, "", "second click dismisses the failed monitor");
+  assert.equal(fake.calls.send.length, before, "old generation cannot affect the replacement document/job");
 });
 
-test("rejecting setIcon/setBadgeText never surfaces (cosmetic only)", async () => {
-  // Regression gate: MV3 setIcon/setBadgeText return promises that reject
-  // (e.g. "Failed to fetch" for a navigating/gone tab). The background's
-  // try/catch cannot catch those; without an explicit .catch they escape as
-  // Uncaught (in promise) and spam the console on every arm/disarm.
-  const fake = createFakeBrowser();
-  fake.api.action.setIcon = (args) => {
-    fake.calls.setIcon.push(args);
-    return Promise.reject(new Error("Failed to fetch"));
-  };
-  fake.api.action.setBadgeText = (args) => {
-    fake.calls.setBadgeText.push(args);
-    return Promise.reject(new Error("Failed to fetch"));
-  };
-  const unhandled = [];
-  const onUnhandled = (reason) => unhandled.push(reason);
-  process.on("unhandledRejection", onUnhandled);
-  try {
-    await loadBackground(fake);
-    const { listeners } = fake;
+test("worker restart restores only bindings and reconnects a ready job without auto-start", async () => {
+  const session = {};
+  const first = fakeBrowser(session);
+  await load(first);
+  await first.listeners.click[0](TAB);
+  await tick(); await tick();
+  assert.ok(session["dezoomify.sourceBindings.v1"], "minimal binding is session-persisted");
 
-    await listeners.onClicked[0]({ ...TAB });
-    await tick(); await tick();
-    for (const fn of listeners.onUpdated) fn(TAB.id, { status: "complete", url: TAB.url });
-    await tick(); await tick();
-    // Disarm path (navigation away) also swaps the icon: must not reject.
-    for (const fn of listeners.onUpdated) fn(TAB.id, { url: "https://other.example/" });
-    await tick(); await tick();
-    await tick();
-  } finally {
-    process.removeListener("unhandledRejection", onUnhandled);
+  const restarted = fakeBrowser(session);
+  await load(restarted);
+  await tick(); await tick();
+  assert.equal(restarted.calls.create.length, 0, "restart never opens or restarts a job");
+  assert.equal(restarted.calls.execute.length, 0, "restart never reinjects source discovery");
+  const saved = session["dezoomify.sourceBindings.v1"][0];
+  for (const listener of restarted.listeners.message) {
+    listener({ type: "dz.job.ready", jobId: saved.jobId, tabId: saved.tabId, frameId: saved.frameId, documentGeneration: saved.documentGeneration, requestId: "job-ready" }, { tab: { id: saved.jobTabId }, frameId: 0 }, () => {});
   }
+  assert.ok(restarted.calls.send.some((call) => call.message.type === "dz.job.binding" && call.message.sourceValid === false));
+});
 
-  assert.equal(unhandled.length, 0, "rejected icon/badge updates must be swallowed, never unhandled");
-  assert.equal(fake.calls.reload.length, 1, "monitoring still arms despite icon failures");
-  assert.ok(fake.calls.setIcon.length > 0, "icon swaps were still attempted");
+test("job tab closure removes the binding and stops the source collector", async () => {
+  const fake = fakeBrowser();
+  await load(fake);
+  await fake.listeners.click[0](TAB);
+  await tick(); await tick();
+  for (const listener of fake.listeners.removed) listener(40);
+  await tick(); await tick();
+  assert.ok(fake.calls.send.some((call) => call.message.type === "dz.source.stop"));
+  assert.equal(fake.session["dezoomify.sourceBindings.v1"].length, 0, "disconnect cleanup is persisted");
 });

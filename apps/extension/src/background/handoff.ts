@@ -19,6 +19,29 @@ export const MAX_SOURCE_URL_LENGTH = 2048;
 export const MAX_CAPABILITIES = 10;
 export const MAX_CAPABILITY_LENGTH = 64;
 export const MAX_REQUEST_ID_LENGTH = 128;
+export const JOB_BINDING_VERSION = 1;
+
+/**
+ * Bind extension messages to the browser-reported sender and the registered
+ * job. Page postMessage data is never sufficient authentication.
+ * @param {any} message
+ * @param {{ sender?: any, binding?: any }} ctx
+ */
+export function validateExtensionJobBinding(message, ctx = {}) {
+  const job = message && message.job;
+  const expected = ctx.binding;
+  if (!job || typeof job !== "object" || job.bindingVersion !== JOB_BINDING_VERSION ||
+      typeof job.jobId !== "string" || job.jobId.length === 0 || job.jobId.length > 128 ||
+      !Number.isInteger(job.tabId) || !Number.isInteger(job.frameId) ||
+      typeof job.documentGeneration !== "string" || job.documentGeneration.length === 0 || job.documentGeneration.length > 128) {
+    return { ok: false, code: "bad-job-binding" };
+  }
+  const sender = ctx.sender;
+  if (!sender || !sender.tab || sender.tab.id !== job.tabId || (sender.frameId ?? 0) !== job.frameId) return { ok: false, code: "bad-sender" };
+  if (expected && expected.extensionId !== undefined && sender.id !== expected.extensionId) return { ok: false, code: "bad-sender" };
+  if (!expected || expected.jobId !== job.jobId || expected.tabId !== job.tabId || expected.frameId !== job.frameId || expected.documentGeneration !== job.documentGeneration) return { ok: false, code: "stale-job-binding" };
+  return { ok: true };
+}
 
 /** Keys that must never appear in a non-secret handoff envelope. Single shared
  * vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,

@@ -48,7 +48,6 @@ case "$2" in /*) out_zip="$2" ;; *) out_zip="$PWD/$2" ;; esac
 case "$browser" in chromium|firefox) ;; *) echo "unknown browser: $browser"; exit 1 ;; esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-SRC="$REPO_ROOT/apps/extension/src"
 WASM="$REPO_ROOT/wasm"
 manifest="$REPO_ROOT/apps/extension/generated/manifest.$browser.json"
 test -f "$manifest" || { echo "missing $manifest"; exit 1; }
@@ -68,18 +67,13 @@ staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
 cp "$manifest" "$staging/manifest.json"
 
-# background/index.js ships as a CLASSIC script (service worker / event page):
-# strip `export` so it parses without module syntax.
-strip_exports() {
-  sed -E 's/^export[[:space:]]+//' "$1"
-}
-
-# Ship only the background entry the manifest loads (never handoff/native libs).
-mkdir -p "$staging/background"
-strip_exports "$SRC/background/index.ts" > "$staging/background/index.js"
+# Compile the reviewed entrypoint graph. This is deliberately the only way a
+# source module reaches a package: no extension source is renamed, copied, or
+# transformed with sed during staging.
+node "$REPO_ROOT/apps/extension/scripts/build.mjs" --out "$staging"
 if [ "${DEZOOMIFY_TEST_DRIVER:-0}" = "1" ]; then
   mkdir -p "$staging/test"
-  cp "$SRC/test/driver.html" "$staging/test/driver.html"
+  cp "$REPO_ROOT/apps/extension/src/test/driver.html" "$staging/test/driver.html"
   cat >> "$staging/background/index.js" <<'EOF'
 
 // Test-only extension context entry; never present in store packages.
@@ -94,44 +88,6 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 EOF
 fi
-# Ship only the injected in-tab modal (classic; exports stripped like the
-# background entry).
-# (Staged by exact file, never by directory copy: src/content/* as a tree
-# stays unit-test only.)
-CONTENT="$SRC/content"
-mkdir -p "$staging/content"
-strip_exports "$CONTENT/modal.js" > "$staging/content/modal.js"
-cp "$CONTENT/modal.css" "$staging/content/modal.css"
-# Ship the job iframe document mounted by the injected modal in the same tab.
-mkdir -p "$staging/modal"
-cp "$SRC/modal/modal.html" "$staging/modal/modal.html"
-cp "$SRC/modal/modal.ts" "$staging/modal/modal.js"
-# Ship the modal's direct extension runtime imports.
-mkdir -p "$staging/runtime"
-for f in candidates.ts fetch.ts nativeHandoff.ts; do
-  src="$SRC/runtime/$f"
-  test -f "$src" || { echo "missing $src"; exit 1; }
-  cp "$src" "$staging/runtime/${f%.ts}.js"
-done
-# Ship the generated no-bundler shared-ui mirrors used by the modal.
-mkdir -p "$staging/vendor"
-for f in vendor/limits.js vendor/theme.css vendor/view.js vendor/controller.js vendor/components.js vendor/transport-labels.js vendor/save-name.js vendor/i18n.js vendor/locales/fr.js vendor/locales/de.js vendor/locales/it.js; do
-  src="$SRC/$f"
-  test -f "$src" || { echo "missing $src (run: node scripts/sync-web-js.mjs)"; exit 1; }
-  mkdir -p "$(dirname "$staging/$f")"
-  cp "$src" "$staging/$f"
-done
-# Ship the declared manifest icons (blue brand set) plus the grey idle set
-# the background swaps via action.setIcon (grey idle, blue + badge dot
-# while monitoring).
-mkdir -p "$staging/icons"
-for icon in icon16.png icon48.png icon128.png icon16-grey.png icon48-grey.png icon128-grey.png; do
-  test -f "$SRC/icons/$icon" || { echo "missing $SRC/icons/$icon"; exit 1; }
-  cp "$SRC/icons/$icon" "$staging/icons/$icon"
-done
-
-mkdir -p "$staging/wasm"
-cp "$WASM/dezoomify-wasm.js" "$WASM/dezoomify-wasm_bg.wasm" "$staging/wasm/"
 
 if [ "${DEZOOMIFY_TEST_HOST_PERMISSIONS:-0}" = "1" ]; then
   # DEZOOMIFY_TEST_ORIGIN (E2E-only): exact `scheme://host[:port]` fixture
@@ -155,7 +111,7 @@ print("staged manifest: loopback host permissions injected (E2E only, no tabs)")
 PY
 fi
 
-# The shipped background entry and injected loader must parse as CLASSIC scripts.
+# The compiled classic entries must parse before packaging.
 node --check "$staging/background/index.js" || { echo "syntax error: background/index.js"; exit 1; }
 node --check "$staging/content/modal.js" || { echo "syntax error: content/modal.js"; exit 1; }
 
@@ -166,7 +122,7 @@ need = list(d.get("icons", {}).values())
 need += list(d.get("action", {}).get("default_icon", {}).values())
 bg = d.get("background", {})
 need += ([bg["service_worker"]] if "service_worker" in bg else []) + bg.get("scripts", [])
-need += ["runtime/candidates.js", "runtime/fetch.js", "runtime/nativeHandoff.js", "vendor/limits.js", "vendor/theme.css", "vendor/view.js", "vendor/controller.js", "vendor/components.js", "vendor/transport-labels.js", "vendor/save-name.js", "vendor/i18n.js", "vendor/locales/fr.js", "vendor/locales/de.js", "vendor/locales/it.js", "content/modal.js", "content/modal.css", "modal/modal.html", "modal/modal.js", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
+need += ["content/modal.js", "content/modal.css", "job/job.html", "job/index.js", "job/worker.js", "vendor/theme.css", "vendor/view.js", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
 if os.path.exists("test/driver.html"):
     need += ["test/driver.html"]
 for war in d.get("web_accessible_resources", []):
@@ -175,12 +131,12 @@ missing = [p for p in need if not os.path.exists(p)]
 sys.exit(f"missing in package: {missing}") if missing else print(f"package contents: ok ({len(need)} referenced files present)")
 # Least-privilege ship guard: fail on dead/never-loaded files.
 import glob
-shipped = set(glob.glob("background/*.js") + glob.glob("runtime/*.js") + glob.glob("vendor/*.js") + glob.glob("content/**/*.js", recursive=True) + glob.glob("modal/*.js", recursive=True))
-allowed = {"background/index.js", "runtime/candidates.js", "runtime/fetch.js", "runtime/nativeHandoff.js", "vendor/limits.js", "vendor/theme.css", "vendor/view.js", "vendor/controller.js", "vendor/components.js", "vendor/transport-labels.js", "vendor/save-name.js", "vendor/i18n.js", "content/modal.js", "modal/modal.js"}
+shipped = set(glob.glob("background/*.js") + glob.glob("vendor/*.js") + glob.glob("content/**/*.js", recursive=True) + glob.glob("job/*.js", recursive=True))
+allowed = {"background/index.js", "content/modal.js", "job/index.js", "job/worker.js", "vendor/theme.css", "vendor/view.js"}
 extra = shipped - allowed
 sys.exit(f"dead files shipped (never loaded by manifest/page): {sorted(extra)}") if extra else print("package contents: no dead files")
 ') || exit 1
 
 rm -f "$out_zip"
-(cd "$staging" && zip -qr "$out_zip" manifest.json icons background content modal runtime vendor wasm ${DEZOOMIFY_TEST_DRIVER:+test})
+(cd "$staging" && zip -qr "$out_zip" manifest.json icons background content job vendor wasm ${DEZOOMIFY_TEST_DRIVER:+test})
 echo "package: $name v$version ($browser) -> $out_zip"

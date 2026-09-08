@@ -315,6 +315,79 @@ pub struct ScanSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Extension source/job bindings
+// ---------------------------------------------------------------------------
+
+/// Browser-verified ownership for one extension job. `tab_id` and `frame_id`
+/// are supplied by the browser message sender, never trusted from webpage
+/// content. A navigation increments `document_generation`, invalidating all
+/// source-context work associated with an earlier document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceBindingDto {
+    pub job: JobId,
+    pub tab_id: i64,
+    pub frame_id: i64,
+    pub document_generation: u32,
+}
+
+/// A bounded, acknowledged discovery delivery from a source-tab script.
+/// Candidates are metadata only; response bytes use chunked transfer and are
+/// never embedded in a control message.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateChunkDto {
+    pub binding: SourceBindingDto,
+    pub request: RequestId,
+    pub candidates: Vec<CandidateDto>,
+    pub complete: bool,
+}
+
+/// A source-context acquisition request. The coordinator routes this only to
+/// the browser sender named by `binding`; page content never supplies a
+/// binding or authorizes an origin itself.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceFetchRequestDto {
+    pub binding: SourceBindingDto,
+    pub request: RequestDto,
+}
+
+/// One bounded out-of-band byte chunk. `buffer` ownership follows the normal
+/// buffer lifecycle and `sequence` is acknowledged before another chunk is
+/// retained, providing backpressure across Chromium's JSON message boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ByteChunkDto {
+    pub binding: SourceBindingDto,
+    pub request: RequestId,
+    pub sequence: u32,
+    pub buffer: BufferHandle,
+    pub final_chunk: bool,
+}
+
+/// Receiver acknowledgement for one `ByteChunkDto` sequence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChunkAcknowledgementDto {
+    pub binding: SourceBindingDto,
+    pub request: RequestId,
+    pub sequence: u32,
+}
+
+/// Source-tab response state for one correlated request. These stable values
+/// let a job retain independent extension transport while accurately reporting
+/// loss of the source document or a required user grant.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExtensionTransportOutcome {
+    SourceDocumentLost,
+    AccessRequired,
+    RedirectUnavailable,
+    Cancelled,
+    Network,
+    Throttled,
+    Malformed,
+    LimitExceeded,
+    Disconnected,
+}
+
+// ---------------------------------------------------------------------------
 // Job commands (shared UI/CLI -> job)
 // ---------------------------------------------------------------------------
 

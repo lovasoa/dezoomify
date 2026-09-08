@@ -617,6 +617,27 @@ mod tests {
     }
 
     #[test]
+    fn inline_preview_does_not_trigger_an_include_request() {
+        let xml = br#"<krpano>
+            <include url="%VIEWER%/plugins/minimap_zoomrect.xml"/>
+            <layer name="minimap" url="minimap.jpg"/>
+            <image>
+                <preview url="https://krpano.com/panos/eiffeltower/eiffeltower.tiles/preview.jpg"/>
+                <flat url="https://krpano.com/panos/eiffeltower/eiffeltower.tiles/l%l/%00v/l%l_%00v_%00h.jpg" multires="512,512x844,1152x1898,2176x3586,4352x7172,8832x14554,17664x29110,35328x58220"/>
+            </image>
+        </krpano>"#;
+        let image = image(discover_single_resource(
+            "https://krpano.com/releases/1.24/viewer/examples/minimap/eiffeltower_minimap.xml",
+            xml.to_vec(),
+        ));
+        let (tile_uri, _) = tile_requests(&image.levels[0], 1).pop().unwrap();
+        assert_eq!(
+            tile_uri,
+            "https://krpano.com/panos/eiffeltower/eiffeltower.tiles/l1/001/l1_001_001.jpg"
+        );
+    }
+
+    #[test]
     fn test_cube() {
         let image = image(catalog_from_xml(
             "http://test.com",

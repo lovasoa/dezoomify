@@ -117,11 +117,18 @@ struct KrpanoMetaData<'a> {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Default)]
+struct PreviewDesc {}
+
+#[derive(Debug, Deserialize, PartialEq, Eq, Default)]
 pub struct KrpanoImage {
     #[serde(rename = "@tilesize")]
     pub tilesize: Option<u32>,
     #[serde(default = "default_base_index", rename = "@baseindex")]
     pub baseindex: u32,
+    // Preview imagery is not a tiled level. Keep it out of the #content
+    // sequence so it cannot collide with the level parser.
+    #[serde(default, rename = "preview")]
+    _preview: Vec<PreviewDesc>,
     #[serde(default, rename = "#content")]
     pub level: Vec<KrpanoLevel>,
     #[serde(default)]

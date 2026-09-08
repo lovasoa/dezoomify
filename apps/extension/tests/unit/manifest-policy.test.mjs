@@ -156,49 +156,32 @@ test("least-privilege: activeTab present, nativeMessaging declared", () => {
 });
 
 test("declared permissions are used by shipped code", () => {
-  const modal = readFileSync(new URL("../../src/modal/modal.ts", import.meta.url), "utf8");
-  assert.ok(modal.includes("sendNativeMessage"), "nativeMessaging must be used by modal handoff");
-  assert.ok(modal.includes("api.cookies.getAll"), "cookies must be used by consented handoff");
-  assert.ok(!modal.includes("chrome.downloads"), "downloads API must stay unused (blob anchor save)");
-  // The background click-to-monitor owns the single reload and the
-  // grey<->blue+dot icon transitions, and injects the in-tab modal on the
-  // clicked tab only, after its monitored reload completes (pre-reload
-  // injection would be wiped by the reload). It observes NO traffic: a
-  // `webRequest` listener without host permissions is deaf (activeTab does
-  // not enable observation), and candidates come from the injected tab's
-  // own timeline instead.
+  const native = readFileSync(new URL("../../src/runtime/nativeHandoff.ts", import.meta.url), "utf8");
+  assert.ok(native.includes("connectNative"), "nativeMessaging must use one persistent port");
+  assert.ok(!native.includes("window.postMessage"), "webpage messages cannot control a native handoff");
   const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
   const backgroundCode = background
     .split("\n")
     .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
     .join("\n");
   assert.ok(!backgroundCode.includes("webRequest"), "background must not touch webRequest (deaf without host perms)");
-  assert.ok(background.includes("tabs.reload"), "background must perform the single monitored reload");
+  assert.ok(background.includes("tabs?.create"), "background must create the dedicated job tab");
   assert.ok(background.includes("setIcon"), "background must swap grey<->blue icons");
   assert.ok(background.includes("setBadgeText"), "background must show the monitoring badge dot");
   assert.ok(background.includes("executeScript"), "background must inject the modal on the detected tab");
-  assert.ok(background.includes("insertCSS"), "background must inject the modal host CSS on the detected tab");
-  assert.ok(background.includes("content/modal.js"), "background must inject only the reviewed loader entry");
-  assert.ok(background.includes("content/modal.css"), "background must inject only the reviewed host CSS");
+  assert.ok(background.includes("content/modal.js"), "background must inject the reviewed source collector");
   assert.ok(!background.includes("tabs.query"), "background must never enumerate tabs");
-  // Loader protocol parity: background and content/modal.js share the
-  // `{ type }` runtime messages (streaming update with urls, tab-side byte
-  // confirmation, close, failure). URL-text-only `dezoomify-detected` is
-  // retired: the background never emits it (many formats require response
-  // bytes); the loader still accepts it as candidates-only (covered in
-  // modal-in-tab.test.mjs).
-  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-modal-failed"]) {
+  for (const kind of ["dz.source.bind", "dz.source.candidates", "dz.job.binding", "dz.job.fetch"]) {
     assert.ok(background.includes(kind), `background must speak ${kind}`);
   }
-  assert.ok(background.includes("urls"), "background monitor-update must stream candidate urls");
-  assert.ok(!background.includes("dezoomify-detected"), "background must not emit retired URL-text detection");
+  assert.ok(!background.includes("postMessage"), "background must not bridge privileged work through webpage messages");
   const loader = readFileSync(new URL("../../src/content/modal.js", import.meta.url), "utf8");
-  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-modal-failed"]) {
+  for (const kind of ["dz.source.bind", "dz.source.candidates", "dz.source.fetch"]) {
     assert.ok(loader.includes(kind), `injected loader must speak ${kind}`);
   }
 });
 
-test("click-to-monitor least privilege: reload+inject, no enumeration, no offscreen, no webRequest", () => {
+test("job coordinator retains least privilege", () => {
   const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
   const code = background
     .split("\n")
@@ -211,7 +194,7 @@ test("click-to-monitor least privilege: reload+inject, no enumeration, no offscr
   assert.ok(code.includes("onClicked"), "monitor must arm on the explicit action click");
   assert.ok(!code.includes("tabs.query"), "background must never enumerate tabs");
   assert.ok(!code.includes("webRequest"), "background must not observe traffic (deaf without host perms)");
-  assert.ok(!code.includes("permissions.request"), "background must not prompt (activeTab covers reload+inject)");
+  assert.ok(code.includes("permissions?.request"), "only the visible job access action can request a host grant");
   assert.ok(code.includes("onRemoved"), "monitor must stop when the tab closes");
   assert.ok(code.includes("onUpdated"), "monitor must stop when the tab navigates");
   assert.ok(!code.includes("onInstalled"), "install must not open a fallback extension page");
@@ -230,13 +213,13 @@ test("store package ships only loaded files (no dead code)", () => {
   // unit-test only. There is no extension-page fallback.
   assert.ok(script.includes("content/modal.js"), "package must stage the injected loader entry");
   assert.ok(script.includes("content/modal.css"), "package must stage the injected host CSS");
-  assert.ok(script.includes("modal/modal.html"), "package must stage the job iframe document");
-  assert.ok(script.includes("modal/modal.js"), "package must stage the job iframe runner");
-  assert.ok(script.includes('SRC/runtime/$f'), "package must stage the modal runtime");
+  assert.ok(script.includes("scripts/build.mjs"), "package must compile the reviewed entrypoint graph");
+  assert.ok(script.includes("job/job.html"), "package must stage the dedicated job tab");
+  assert.ok(script.includes("job/worker.js"), "package must stage the dedicated job worker");
   assert.ok(script.includes("vendor/view.js"), "package must stage the modal UI mirror");
-  assert.ok(script.includes("icons background content modal runtime vendor wasm"), "package must zip only the in-browser flow");
+  assert.ok(script.includes("icons background content job vendor wasm"), "package must zip only the in-browser flow");
   // The grey idle set swapped via action.setIcon must ship with the brand icons.
-  assert.ok(script.includes("icon16-grey.png"), "package must stage the grey idle icons");
+  assert.ok(script.includes('"icons"'), "compiled graph must stage the declared icon directory");
   // E2E-only manifest variant must not inject a tabs permission: shipped
   // code (and the harness) never enumerates tabs.
   assert.ok(!script.includes('"tabs"'), "package must never inject tabs permission");

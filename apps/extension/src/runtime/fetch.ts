@@ -1,159 +1,211 @@
 /**
- * Browser-session fetch (Phase 12).
+ * Bounded readable-byte transport for the extension job tab.
  *
- * - Uses injected `fetchImpl` with `credentials: "include"` under the
- *   browser's existing session and granted host permissions.
- * - Requires explicit user intent + per-exact-origin permission BEFORE fetch.
- * - Validates every redirect hop against permission scope.
- * - Enforces byte/time/type limits on the returned payload.
- * - Never routes through `/api/proxy` or any proxy relay.
- *
- * Plain JavaScript + JSDoc. `fetchImpl` is injected so unit tests use fakes
- * and request logs can prove cookies only reach allowed origins.
+ * This module deliberately has no permission prompt. A job tab can inspect a
+ * missing host grant and ask the coordinator to show an explicit UI action,
+ * but it must never turn a background fetch into a surprise browser prompt.
+ * Source-document requests are owned by the coordinator/source script; this
+ * transport is only for extension-origin requests with an existing host grant.
  */
 
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
-export const DEFAULT_TIMEOUT_MS = 30000;
+export const DEFAULT_TIMEOUT_MS = 30_000;
 
-// The in-tab flow collects candidates from Performance Timeline instead of
-// using a webRequest observer or a bound extension page.
+/** @typedef {"source-document-lost"|"access-required"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded"} TransportCategory */
 
-/** MIME families the extension is willing to decode as image/metadata. */
-export const ALLOWED_MIME_PREFIXES = Object.freeze([
-  "image/",
-  "application/xml",
-  "text/xml",
-  "application/json",
-  "text/plain",
-  "application/octet-stream",
+/** Headers the core may safely ask a browser fetch to forward. */
+export const CORE_REQUEST_HEADERS = Object.freeze([
+  "accept", "accept-language", "if-modified-since", "if-none-match", "range",
 ]);
 
-/**
- * @param {string} url
- * @returns {boolean} true when the URL targets the metadata CORS proxy
- */
+/** MIME families accepted for bytes intended for an image or metadata parser. */
+export const ALLOWED_MIME_PREFIXES = Object.freeze([
+  "image/", "application/xml", "text/xml", "application/json", "text/plain",
+  "text/html", "application/octet-stream",
+]);
+
+/** @param {string} url */
 export function isProxyUrl(url) {
   return typeof url === "string" && url.includes(PROXY_PATH);
 }
 
-/**
- * Origin key `scheme://host[:port]` (effective port, lowercase host).
- * @param {string} url
- */
+/** @param {string} url */
 export function originOf(url) {
   const u = new URL(url);
-  const host = u.hostname.toLowerCase();
-  const port = u.port ? `:${u.port}` : "";
-  return `${u.protocol}//${host}${port}`;
+  return `${u.protocol}//${u.hostname.toLowerCase()}${u.port ? `:${u.port}` : ""}`;
+}
+
+/** @param {TransportCategory} category @param {string} message @param {Record<string, unknown>} [extra] */
+export function transportError(category, message, extra = {}) {
+  return Object.assign(new Error(message), { code: category, category, ...extra });
+}
+
+/** @param {unknown} error */
+export function asFetchFailure(error) {
+  const candidate = /** @type {{ category?: unknown, code?: unknown, message?: unknown }} */ (error);
+  const category = typeof candidate?.category === "string" ? candidate.category : "network";
+  return {
+    code: `extension.${category}`,
+    phase: "acquisition",
+    retryable: category === "network" || category === "throttled",
+    message: typeof candidate?.message === "string" ? candidate.message : "Extension transport failed",
+    recovery: [],
+    blocked_reason: category,
+    transport: "extension-origin",
+  };
+}
+
+/** @param {unknown} headers @param {"metadata"|"tile"|"probe"} purpose */
+export function forwardCoreHeaders(headers, purpose) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  const pairs = Array.isArray(headers)
+    ? headers.map((header) => [header?.name, header?.value])
+    : Object.entries(headers && typeof headers === "object" ? headers : {});
+  for (const [rawName, rawValue] of pairs) {
+    if (typeof rawName !== "string" || typeof rawValue !== "string") continue;
+    const name = rawName.toLowerCase();
+    if (!CORE_REQUEST_HEADERS.includes(name) || /\r|\n/.test(rawName) || /\r|\n/.test(rawValue)) continue;
+    if ((name === "if-modified-since" || name === "if-none-match") && purpose !== "metadata") continue;
+    out[name] = rawValue;
+  }
+  return out;
+}
+
+/** @param {unknown} value */
+function headerValue(value) {
+  if (!value) return "";
+  if (typeof value.get === "function") return String(value.get("content-type") ?? "");
+  if (typeof value === "object") return String(value["content-type"] ?? value["Content-Type"] ?? "");
+  return "";
+}
+
+/** @param {unknown} value */
+function contentLength(value) {
+  if (!value) return null;
+  const raw = typeof value.get === "function" ? value.get("content-length") : value["content-length"] ?? value["Content-Length"];
+  const number = Number(raw);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
 
 /**
- * Create a session fetcher.
- * @param {{
- *   fetchImpl: (url: string, init: any) => Promise<{ status: number, url: string, headers: Record<string,string>, bytes: Uint8Array, redirectChain?: string[], durationMs?: number }>,
- *   hasPermission: (origin: string) => boolean | Promise<boolean>,
- *   requestPermission: (origin: string) => boolean | Promise<boolean>,
- *   now?: () => number,
- * }} deps
+ * Consume a Fetch body while the controller remains live. `arrayBuffer()` is
+ * intentionally not used: it would retain an unbounded body before the cap.
+ * @param {any} response
+ * @param {{ maxBytes: number, controller: AbortController, cancelled?: () => boolean }} opts
  */
-export function createSessionFetcher(deps) {
-  /**
-   * Fetch a resource with the browser session.
-   * @param {string} url
-   * @param {{ userIntent?: boolean, maxBytes?: number, timeoutMs?: number, allowedMimes?: string[] }} [opts]
-   */
-  async function fetchResource(url, opts = {}) {
-    if (isProxyUrl(url)) {
-      throw Object.assign(new Error("proxy transport forbidden in extension"), {
-        code: "proxy-forbidden",
-      });
-    }
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw Object.assign(new Error("invalid URL"), { code: "invalid-url" });
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw Object.assign(new Error("unsupported scheme"), { code: "unsupported-scheme" });
-    }
-    if (!opts.userIntent) {
-      throw Object.assign(new Error("explicit user intent required"), {
-        code: "intent-required",
-      });
-    }
-    const origin = originOf(url);
-    const granted = await deps.hasPermission(origin);
-    if (!granted) {
-      const nowGranted = await deps.requestPermission(origin);
-      if (!nowGranted) {
-        throw Object.assign(new Error(`host permission denied for ${origin}`), {
-          code: "permission-denied",
-        });
-      }
-    }
-    const maxBytes = opts.maxBytes ?? MAX_BYTES_DEFAULT;
-    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    /** @type {any} */
-    const res = await deps.fetchImpl(url, { credentials: "include" });
-    // Per-hop redirect scope validation.
-    const chain = Array.isArray(res.redirectChain) ? res.redirectChain : [url, res.url].filter(Boolean);
-    for (const hop of chain) {
-      if (isProxyUrl(hop)) {
-        throw Object.assign(new Error("redirect through proxy forbidden"), {
-          code: "proxy-forbidden",
-        });
-      }
-      let hopUrl;
-      try {
-        hopUrl = new URL(hop);
-      } catch {
-        throw Object.assign(new Error("invalid redirect hop"), { code: "bad-redirect" });
-      }
-      if (hopUrl.protocol !== "http:" && hopUrl.protocol !== "https:") {
-        throw Object.assign(new Error("redirect to unsupported scheme"), { code: "bad-redirect" });
-      }
-      const hopOrigin = originOf(hop);
-      if (hopOrigin !== origin) {
-        const hopGranted = await deps.hasPermission(hopOrigin);
-        if (!hopGranted) {
-          throw Object.assign(new Error(`redirect requires separate permission for ${hopOrigin}`), {
-            code: "redirect-permission-required",
-          });
-        }
-      }
-    }
-    if (typeof res.durationMs === "number" && res.durationMs > timeoutMs) {
-      throw Object.assign(new Error("fetch timeout"), { code: "timeout" });
-    }
-    if (res.status === 401 || res.status === 403) {
-      // Cookie handoff is never automatic on 401/403; surface classified error.
-      throw Object.assign(new Error(`forbidden (${res.status}); cookie handoff requires explicit consent`), {
-        code: res.status === 401 ? "unauthorized" : "forbidden",
-      });
-    }
-    if (!res || typeof res.status !== "number" || res.status < 200 || res.status >= 300) {
-      throw Object.assign(new Error(`bad status ${res ? res.status : "?"}`), { code: "bad-status" });
-    }
-    const contentType = res.headers
-      ? String(res.headers["content-type"] ?? res.headers["Content-Type"] ?? "")
-      : "";
-    const allowed = opts.allowedMimes ?? ALLOWED_MIME_PREFIXES;
-    const typeOk = allowed.some((p) => contentType.toLowerCase().startsWith(p.toLowerCase()));
-    if (contentType && !typeOk) {
-      throw Object.assign(new Error(`unsupported content type ${contentType}`), {
-        code: "unsupported-type",
-      });
-    }
-    const bytes = res.bytes instanceof Uint8Array ? res.bytes : new Uint8Array(0);
-    if (bytes.length > maxBytes) {
-      throw Object.assign(new Error(`oversized body ${bytes.length} > ${maxBytes}`), {
-        code: "oversized",
-      });
-    }
-    return { bytes, finalUrl: res.url ?? url, contentType, redirectChain: chain };
+export async function readResponseBytes(response, opts) {
+  const declared = contentLength(response?.headers);
+  if (declared !== null && declared > opts.maxBytes) {
+    opts.controller.abort();
+    throw transportError("limit-exceeded", `response exceeds ${opts.maxBytes} byte limit`);
   }
+  // Older focused fakes supply bytes directly. Production responses stream.
+  if (response?.bytes instanceof Uint8Array) {
+    if (response.bytes.byteLength > opts.maxBytes) {
+      opts.controller.abort();
+      throw transportError("limit-exceeded", `oversized response exceeds ${opts.maxBytes} byte limit`);
+    }
+    return response.bytes;
+  }
+  const reader = response?.body?.getReader?.();
+  if (!reader) throw transportError("malformed", "response has no readable body");
+  /** @type {Uint8Array[]} */
+  const chunks = [];
+  let length = 0;
+  try {
+    for (;;) {
+      if (opts.cancelled?.() || opts.controller.signal.aborted) throw transportError("cancelled", "request cancelled");
+      const next = await reader.read();
+      if (next.done) break;
+      const value = next.value instanceof Uint8Array ? next.value : new Uint8Array(next.value ?? 0);
+      if (value.byteLength > opts.maxBytes - length) {
+        opts.controller.abort();
+        throw transportError("limit-exceeded", `oversized response exceeds ${opts.maxBytes} byte limit`);
+      }
+      length += value.byteLength;
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error && typeof error === "object" && "category" in error) throw error;
+    if (opts.cancelled?.() || opts.controller.signal.aborted) throw transportError("cancelled", "request cancelled");
+    throw error;
+  } finally {
+    try { await reader.cancel(); } catch { /* stream cleanup is best effort */ }
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
+}
 
-  return { fetchResource };
+/** @param {string} url */
+function checkedUrl(url) {
+  if (isProxyUrl(url)) throw transportError("malformed", "proxy transport is forbidden in the extension");
+  let parsed;
+  try { parsed = new URL(url); } catch { throw transportError("malformed", "invalid URL"); }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw transportError("malformed", "unsupported URL scheme");
+  return parsed;
+}
+
+/**
+ * @param {{ fetchImpl?: (url: string, init: RequestInit) => Promise<any>, hasPermission: (origin: string) => boolean | Promise<boolean>, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout }} deps
+ */
+export function createExtensionFetcher(deps) {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  /** @type {Set<AbortController>} */
+  const active = new Set();
+
+  /** @param {string} url @param {{ requestId?: string, purpose?: "metadata"|"tile"|"probe", headers?: unknown, maxBytes?: number, timeoutMs?: number, cancelled?: () => boolean }} [opts] */
+  async function fetchResource(url, opts = {}) {
+    const parsed = checkedUrl(url);
+    const origin = originOf(parsed.href);
+    if (!opts.userIntent) throw transportError("access-required", "explicit user intent is required", { code: "intent-required" });
+    if (!(await deps.hasPermission(origin))) {
+      throw transportError("access-required", `Access to ${origin} requires an explicit action`, { hosts: [origin], code: "permission-denied" });
+    }
+    const controller = new AbortController();
+    active.add(controller);
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timer = (deps.setTimeoutFn ?? setTimeout)(() => controller.abort(), timeoutMs);
+    try {
+      if (opts.cancelled?.()) throw transportError("cancelled", "request cancelled");
+      // Manual redirect avoids claiming an automatically followed chain was validated.
+      const response = await fetchImpl(parsed.href, {
+        credentials: "include", redirect: "manual", signal: controller.signal,
+        headers: forwardCoreHeaders(opts.headers, opts.purpose ?? "metadata"),
+      });
+      if (response?.type === "opaqueredirect" || (response?.status >= 300 && response?.status < 400)) {
+        throw transportError("redirect-unavailable", "redirect requires a separately observed destination");
+      }
+      if (!response || typeof response.status !== "number") throw transportError("malformed", "malformed fetch response");
+      if (typeof response.durationMs === "number" && response.durationMs > timeoutMs) throw transportError("network", "fetch timeout");
+      if (response.url && response.url !== parsed.href) throw transportError("redirect-unavailable", "redirect permission cannot be validated automatically");
+      if (response.status === 429) throw transportError("throttled", "site is throttling requests");
+      if (response.status === 401 || response.status === 403) {
+        throw transportError("access-required", response.status === 401 ? "unauthorized; access cannot be requested automatically" : "forbidden; access cannot be requested automatically", { hosts: [origin] });
+      }
+      if (response.status < 200 || response.status >= 300) throw transportError("network", `request failed with HTTP ${response.status}`);
+      const contentType = headerValue(response.headers);
+      const accepted = opts.purpose === "metadata" ? ALLOWED_MIME_PREFIXES : ALLOWED_MIME_PREFIXES.filter((mime) => mime !== "text/html");
+      if (contentType && !accepted.some((prefix) => contentType.toLowerCase().startsWith(prefix))) throw transportError("malformed", `unsupported response type ${contentType}`);
+      const bytes = await readResponseBytes(response, { maxBytes: opts.maxBytes ?? MAX_BYTES_DEFAULT, controller, cancelled: opts.cancelled });
+      return { bytes, finalUrl: response.url || parsed.href, contentType, requestId: opts.requestId };
+    } catch (error) {
+      if (error && typeof error === "object" && "category" in error) throw error;
+      if (opts.cancelled?.() || controller.signal.aborted) throw transportError("cancelled", "request cancelled");
+      throw transportError("network", error instanceof Error ? error.message : "network request failed");
+    } finally {
+      (deps.clearTimeoutFn ?? clearTimeout)(timer);
+      active.delete(controller);
+    }
+  }
+  function cancel() { for (const controller of active) controller.abort(); active.clear(); }
+  return { fetchResource, cancel };
+}
+
+/** Compatibility name; `requestPermission` is deliberately ignored. */
+export function createSessionFetcher(deps) {
+  return createExtensionFetcher({ fetchImpl: deps.fetchImpl, hasPermission: deps.hasPermission, setTimeoutFn: deps.setTimeoutFn, clearTimeoutFn: deps.clearTimeoutFn });
 }

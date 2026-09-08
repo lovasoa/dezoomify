@@ -23,6 +23,32 @@ export const MIN_NATIVE_PROTOCOL = 1;
 export const HANDOFF_TTL_MS = 5 * 60 * 1000;
 export const MAX_ORIGINS = 8;
 export const MAX_COOKIE_NAMES = 64;
+export const MAX_NATIVE_FRAME_BYTES = 1024 * 1024;
+export const JOB_BINDING_VERSION = 1;
+
+/** Native handoff binding shared by every request on a persistent port. */
+export function validateNativeJobBinding(job) {
+  if (!job || typeof job !== "object") return { ok: false, code: "bad-job-binding" };
+  if (typeof job.jobId !== "string" || job.jobId.length === 0 || job.jobId.length > 128 ||
+      !Number.isInteger(job.tabId) || job.tabId < 0 || !Number.isInteger(job.frameId) || job.frameId < 0 ||
+      typeof job.documentGeneration !== "string" || job.documentGeneration.length === 0 || job.documentGeneration.length > 128) {
+    return { ok: false, code: "bad-job-binding" };
+  }
+  return { ok: true };
+}
+
+/** Reject unbounded/missing-correlation native frames before dispatch. */
+export function validateNativeFrame(frame, expectedJob) {
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) return { ok: false, code: "malformed" };
+  if (typeof frame.requestId !== "string" || frame.requestId.length === 0 || frame.requestId.length > 128) return { ok: false, code: "missing-request-id" };
+  if (frame.bindingVersion !== JOB_BINDING_VERSION) return { ok: false, code: "bad-binding-version" };
+  const binding = validateNativeJobBinding(frame.job);
+  if (!binding.ok) return binding;
+  if (expectedJob && (frame.job.jobId !== expectedJob.jobId || frame.job.tabId !== expectedJob.tabId || frame.job.frameId !== expectedJob.frameId || frame.job.documentGeneration !== expectedJob.documentGeneration)) return { ok: false, code: "stale-job-binding" };
+  let bytes;
+  try { bytes = JSON.stringify(frame).length; } catch { return { ok: false, code: "malformed" }; }
+  return bytes <= MAX_NATIVE_FRAME_BYTES ? { ok: true } : { ok: false, code: "oversize" };
+}
 
 /**
  * Build consent details shown in UI. Names only, never values.

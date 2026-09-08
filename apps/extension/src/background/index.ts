@@ -1,498 +1,362 @@
 /**
- * Click-to-monitor background: the toolbar action arms indefinite monitoring
- * on exactly the clicked tab. Nothing runs before that explicit click (no
- * background monitoring, no tab enumeration, no timers, no polling).
+ * Extension background coordinator.
  *
- * Deliberately, the background observes NO network traffic itself. A
- * `webRequest` listener without host permissions is deaf: the platform only
- * notifies requests the extension has host access to, and the transient
- * activeTab grant does not enable observation (verified: an identical
- * listener with `host_permissions: []` sees zero requests where the same
- * listener with the origin granted sees all of them). Candidate collection
- * therefore lives entirely in the injected tab, via the page's own
- * performance timeline (`content/modal.js`), which needs no permission at
- * all. No permanent host permissions are declared, so there is nothing to
- * warn about and no `webRequest` usage here to go deaf.
- *
- * On click (activeTab grant on the clicked tab only):
- * 1. Privileged pages (chrome://, about:, stores) are rejected before any
- *    reload, mirroring the scan state machine.
- * 2. Exactly one reload of exactly that tab runs.
- * 3. The toolbar icon reports state (grey idle, blue while monitoring, badge
- *    dot) via `action.setIcon`/`setBadgeText`.
- * 4. The in-tab monitor (`content/modal.js` + `content/modal.css`) is
- *    injected via `scripting.executeScript`/`scripting.insertCSS` - the only
- *    use of the `scripting` permission - AFTER the monitored reload
- *    completes. Injecting before the reload would be wiped by it (content
- *    scripts do not survive navigation), so pre-reload injection is
- *    forbidden here; the `tabs.onUpdated` `complete` handler owns injection.
- *
- * The background never declares detection from URL text. The injected modal
- * collects candidate URLs from the tab's own timeline, fetches each
- * candidate's bytes tab-side (cookies/auth carried under the click grant)
- * and confirms via the wasm `DiscoverySession`; on success it reports
- * `dezoomify-byte-confirmed` (blue badge kept for the job). The modal closes
- * via `dezoomify-modal-closed` (grey icon restored). Startup and job errors
- * remain visible in the tab and are marked with an error badge.
- *
- * Monitoring is indefinite: no deadline, no polling. It stops collecting on
- * the first terminal signal - tab-side byte confirmation, modal
- * close, a second click on the armed tab (cancel), tab close, or
- * navigation away. Stopped monitoring never restarts itself, and a worker
- * restart (service-worker suspend / event-page unload) fails closed: the
- * memory-only armed set is gone, so observation is dead by construction.
- *
- * The scan, discovery, fetch, assembly, and save all live tab-side (the
- * modal iframe); format recognition stays the wasm core's job, never URL-text
- * guessing here.
- *
- * MV3 dual background: Chromium runs this file as a service worker, Firefox
- * as an MV3 event page. Classic script in both: shipped export-free (the
- * store packager strips `export` and gates on `node --check`), import-free
- * (no bundler). Top-level browser wiring is guarded so the file stays
- * loadable with no browser effects under node. No offscreen document:
- * offscreen is Chromium-only and unnecessary for an in-tab modal.
- *
- * Logging: structured console logs (`[dezoomify:background] <level> <code>
- * <detail>`) at debug/info/warn/error; debug is gated off by default via
- * `setBackgroundLogLevel("debug")`. User-visible state still travels via
- * the existing tab messages (rendered into the in-tab modal's visible log);
- * console is the diagnosis surface here since the worker has no DOM. Every
- * logged URL is redacted (userinfo, sensitive query values, fragments);
- * failures that previously vanished into empty catches now log at
- * debug/warn/error without changing behavior.
+ * It owns toolbar actions, the source-document/job-tab binding, optional-host
+ * permission lifetime, and browser sender validation. It intentionally owns
+ * neither discovery nor a job loop. Temporary `dz.source.*` / `dz.job.*`
+ * envelopes are local compatibility glue pending generated protocol bindings.
  */
 
 const api = globalThis.browser ?? globalThis.chrome;
+const STORAGE_KEY = "dezoomify.sourceBindings.v1";
+const IDLE_ICON = { 16: "icons/icon16-grey.png", 48: "icons/icon48-grey.png", 128: "icons/icon128-grey.png" };
+const ACTIVE_ICON = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
+const HELD_CANDIDATE_LIMIT = 64;
 
-const IDLE_ICON = {
-  16: "icons/icon16-grey.png",
-  48: "icons/icon48-grey.png",
-  128: "icons/icon128-grey.png",
-};
-const ACTIVE_ICON = {
-  16: "icons/icon16.png",
-  48: "icons/icon48.png",
-  128: "icons/icon128.png",
-};
-
-// tabId -> { confirmed, failed, url, injected } for armed monitors.
-// `url` is the clicked-tab URL at arm time: the monitor survives its OWN
-// reload (same page reported back by tabs.onUpdated) and stops only on
-// navigation to a DIFFERENT page. `injected` gates the post-reload modal
-// injection (exactly once). Memory only: never persisted, never restored,
-// dropped when the context suspends/unloads (fail closed). URL collection
-// lives in the injected tab (performance timeline, no permission needed);
-// byte confirmation runs in the modal iframe (wasm + tab-origin fetch with
-// cookies/auth) and reports back via `dezoomify-byte-confirmed`.
-const armed = new Map();
-
-// --- Structured background logging (console + tab-streamed UI) ---
-//
-// Levels: debug (per-URL/per-update noise, gated off by default), info
-// (lifecycle milestones: armed, injected, confirmed, closed), warn
-// (recoverable: privileged reject, cap reached, injection retry surface),
-// error (terminal for this monitor: reload failed, injection failed).
-// Console is the primary sink (service worker / event page have no DOM);
-// user-visible state still travels via the existing tab messages
-// (`dezoomify-monitor-update` / `dezoomify-stop-monitor`), which the in-tab
-// modal renders into its visible log. Logging never changes behavior, never
-// throws, never persists, and never carries raw URLs, credentials, cookies,
-// or fragments: every URL goes through `redactBackgroundUrl` first.
-// `export` is used only so node unit tests can load this file via a data:
-// URL; `package-store.sh` strips the `export` prefix for the shipped classic
-// script (same pattern as the content loader).
-
-/** Log severity, lowest (debug) to highest (error). */
 export const BACKGROUND_LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
-
-/** Query keys whose values must never appear in logs. Must stay identical
- * to SENSITIVE_QUERY_KEYS in runtime/candidates.ts. */
-export const BACKGROUND_SENSITIVE_QUERY_KEYS = Object.freeze([
-  "token",
-  "auth",
-  "authorization",
-  "session",
-  "sessionid",
-  "sid",
-  "key",
-  "apikey",
-  "api_key",
-  "secret",
-  "password",
-  "passwd",
-  "code",
-  "state",
-  "sessiontoken",
-]);
-
-/** Max chars per logged detail line (bounded service-worker logging). */
 export const BACKGROUND_LOG_MAX_CHARS = 500;
-
+export const BACKGROUND_SENSITIVE_QUERY_KEYS = Object.freeze([
+  "token", "auth", "authorization", "session", "sessionid", "sid", "key", "apikey", "api_key", "secret", "password", "passwd", "code", "state", "sessiontoken",
+]);
 let backgroundLogLevel = BACKGROUND_LOG_LEVELS.info;
 let backgroundLogSink = null;
 
-/**
- * Redact a URL for logs: strip userinfo, redact sensitive query values,
- * drop fragments. Never returns raw credentials.
- * @param {unknown} raw
- * @returns {string}
- */
 export function redactBackgroundUrl(raw) {
-  if (typeof raw !== "string" || raw.length === 0) return "[empty-url]";
-  let parsed;
+  if (typeof raw !== "string" || !raw) return "[empty-url]";
   try {
-    parsed = new URL(raw);
-  } catch {
-    return "[invalid-url]";
-  }
-  if (parsed.username || parsed.password) {
-    parsed.username = "***";
-    try {
-      parsed.password = "";
-    } catch {
-      // ignore
+    const url = new URL(raw);
+    if (url.username || url.password) { url.username = "***"; url.password = ""; }
+    for (const key of [...url.searchParams.keys()]) {
+      if (BACKGROUND_SENSITIVE_QUERY_KEYS.includes(key.toLowerCase())) url.searchParams.set(key, "***");
     }
-  }
-  try {
-    for (const key of [...parsed.searchParams.keys()]) {
-      if (BACKGROUND_SENSITIVE_QUERY_KEYS.includes(key.toLowerCase())) {
-        parsed.searchParams.set(key, "***");
-      }
-    }
-  } catch {
-    // keep the unredacted-query fallback below from leaking: bail out.
-    return "[unredactable-url]";
-  }
-  if (parsed.hash && parsed.hash.length > 1) {
-    parsed.hash = "";
-  }
-  return parsed.toString();
+    url.hash = "";
+    return url.toString();
+  } catch { return "[invalid-url]"; }
 }
 
-/**
- * Override the minimum level logged (`debug` enables per-URL noise).
- * @param {unknown} level one of `debug|info|warn|error` or numeric rank
- */
 export function setBackgroundLogLevel(level) {
-  if (typeof level === "string" && level in BACKGROUND_LOG_LEVELS) {
-    backgroundLogLevel = BACKGROUND_LOG_LEVELS[level];
+  if (typeof level === "string" && level in BACKGROUND_LOG_LEVELS) backgroundLogLevel = BACKGROUND_LOG_LEVELS[level];
+  else if (typeof level === "number" && Number.isFinite(level)) backgroundLogLevel = level;
+}
+
+export function setBackgroundLogSink(sink) { backgroundLogSink = typeof sink === "function" ? sink : null; }
+
+export function backgroundLog(level, code, detail = "") {
+  try {
+    if ((BACKGROUND_LOG_LEVELS[level] ?? BACKGROUND_LOG_LEVELS.info) < backgroundLogLevel) return;
+    const safeCode = typeof code === "string" && code ? code : "event";
+    let text = typeof detail === "string" ? detail : String(detail ?? "");
+    if (text.length > BACKGROUND_LOG_MAX_CHARS) text = text.slice(0, BACKGROUND_LOG_MAX_CHARS) + "…";
+    const entry = { level, code: safeCode, line: `[dezoomify:background] ${level} ${safeCode}${text ? ` ${text}` : ""}` };
+    if (backgroundLogSink) { try { backgroundLogSink(entry); } catch {} }
+    else { try { globalThis.console?.[level]?.(entry.line); } catch {} }
+  } catch {}
+}
+
+const jobs = new Map();
+const sourceBindings = new Map();
+let wired = false;
+let restoreStarted = false;
+let jobSequence = 0;
+
+function isPublicHttpUrl(value) {
+  try { const url = new URL(value); return url.protocol === "http:" || url.protocol === "https:"; } catch { return false; }
+}
+function permissionOrigin(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : null;
+  } catch { return null; }
+}
+
+function sameDocumentUrl(a, b) {
+  try {
+    const left = new URL(a); const right = new URL(b);
+    left.hash = ""; right.hash = "";
+    return left.href === right.href;
+  } catch { return a === b; }
+}
+function sourceBindingKey(entry) { return `${entry.jobId}:${entry.tabId}:${entry.frameId}`; }
+function bindingOf(entry) {
+  return {
+    jobId: entry.jobId, tabId: entry.tabId, frameId: entry.frameId,
+    documentGeneration: entry.documentGeneration,
+  };
+}
+function bindingMatches(message, entry) {
+  const binding = bindingOf(entry);
+  return Boolean(message && message.jobId === binding.jobId && message.tabId === binding.tabId &&
+    message.frameId === binding.frameId && message.documentGeneration === binding.documentGeneration);
+}
+function requestId(message) { return typeof message?.requestId === "string" && message.requestId.length > 0 && message.requestId.length <= 200; }
+function makeRequestId(prefix) { jobSequence += 1; return `${prefix}-${Date.now().toString(36)}-${jobSequence}`; }
+function makeJobId() {
+  try { if (globalThis.crypto?.randomUUID) return `job:${globalThis.crypto.randomUUID()}`; } catch {}
+  return makeRequestId("job").replace("job-", "job:");
+}
+
+function setBadge(tabId, active, failed = false) {
+  try {
+    const icon = api?.action?.setIcon?.({ tabId, path: active ? ACTIVE_ICON : IDLE_ICON });
+    if (icon?.catch) icon.catch(() => {});
+    const badge = api?.action?.setBadgeText?.({ tabId, text: active ? (failed ? "!" : "•") : "" });
+    if (badge?.catch) badge.catch(() => {});
+  } catch {}
+}
+
+function sendToTab(tabId, message, frameId) {
+  try {
+    const options = typeof frameId === "number" ? { frameId } : undefined;
+    const pending = options === undefined ? api?.tabs?.sendMessage?.(tabId, message) : api?.tabs?.sendMessage?.(tabId, message, options);
+    if (pending?.catch) pending.catch(() => {});
+    return pending;
+  } catch { return null; }
+}
+function sendToJob(entry, type, requestIdValue, extra = {}) {
+  if (typeof entry.jobTabId !== "number") return null;
+  return sendToTab(entry.jobTabId, { type, ...bindingOf(entry), requestId: requestIdValue, ...extra });
+}
+
+function serializableEntry(entry) {
+  return {
+    ...bindingOf(entry), jobTabId: entry.jobTabId, sourceUrl: entry.sourceUrl,
+    grantedOrigins: [...entry.grantedOrigins], primary: entry.primary === true,
+  };
+}
+async function persistBindings() {
+  try {
+    const entries = [...sourceBindings.values()].map(serializableEntry);
+    await api?.storage?.session?.set?.({ [STORAGE_KEY]: entries });
+  } catch (error) { backgroundLog("debug", "storage-write-failed", String(error?.message ?? error)); }
+}
+async function restoreBindings() {
+  if (restoreStarted) return;
+  restoreStarted = true;
+  try {
+    const stored = await api?.storage?.session?.get?.(STORAGE_KEY);
+    const entries = Array.isArray(stored?.[STORAGE_KEY]) ? stored[STORAGE_KEY] : [];
+    for (const raw of entries) {
+      if (!raw || typeof raw.jobId !== "string" || typeof raw.tabId !== "number" || typeof raw.frameId !== "number" ||
+        typeof raw.documentGeneration !== "number" || typeof raw.jobTabId !== "number") continue;
+      const entry = {
+        jobId: raw.jobId, tabId: raw.tabId, frameId: raw.frameId, documentGeneration: raw.documentGeneration,
+        jobTabId: raw.jobTabId, sourceUrl: typeof raw.sourceUrl === "string" ? raw.sourceUrl : "",
+        sourceActive: false, jobReady: false, jobRunning: false, heldCandidates: [],
+        grantedOrigins: new Set(Array.isArray(raw.grantedOrigins) ? raw.grantedOrigins.filter(isPublicHttpUrl) : []),
+        primary: raw.primary === true,
+      };
+      sourceBindings.set(sourceBindingKey(entry), entry);
+      if (entry.primary || !jobs.has(entry.jobId)) jobs.set(entry.jobId, entry);
+    }
+    if (entries.length) backgroundLog("info", "bindings-restored", `${jobs.size} binding(s), no auto-start`);
+  } catch (error) { backgroundLog("debug", "storage-read-failed", String(error?.message ?? error)); }
+}
+
+function findSourceJob(sender, message) {
+  const tabId = sender?.tab?.id;
+  const frameId = sender?.frameId;
+  if (typeof tabId !== "number" || typeof frameId !== "number") return null;
+  const entry = sourceBindings.get(`${message?.jobId}:${tabId}:${frameId}`);
+  return entry?.sourceActive && bindingMatches(message, entry) ? entry : null;
+}
+function findJobSender(sender, message) {
+  const tabId = sender?.tab?.id;
+  if (typeof tabId !== "number") return null;
+  const job = jobs.get(message?.jobId);
+  if (!job || job.jobTabId !== tabId) return null;
+  // The first ready notification only proves the job tab owns the opaque id
+  // placed in its extension URL. It cannot yet include a source binding.
+  if (message?.type === "dz.job.ready") return job;
+  const source = sourceBindings.get(`${message.jobId}:${message.tabId}:${message.frameId}`);
+  return source && bindingMatches(message, source) ? source : null;
+}
+
+async function injectSource(entry) {
+  try {
+    const injections = await api?.scripting?.executeScript?.({ target: { tabId: entry.tabId, allFrames: true }, files: ["content/modal.js"] });
+    const frameIds = new Set([entry.frameId]);
+    for (const result of injections ?? []) if (typeof result?.frameId === "number") frameIds.add(result.frameId);
+    for (const frameId of frameIds) {
+      const bound = frameId === entry.frameId ? entry : {
+        ...entry, frameId, sourceActive: true, heldCandidates: [], primary: false,
+      };
+      sourceBindings.set(sourceBindingKey(bound), bound);
+      sendToTab(bound.tabId, { type: "dz.source.bind", ...bindingOf(bound), requestId: makeRequestId("source-bind") }, bound.frameId);
+    }
+    await persistBindings();
+    backgroundLog("info", "source-injected", `tab ${entry.tabId}`);
+  } catch (error) {
+    entry.sourceActive = false;
+    setBadge(entry.tabId, true, true);
+    sendToJob(entry, "dz.job.binding", makeRequestId("source-injection-failed"), { sourceValid: false, code: "source-injection-failed" });
+    backgroundLog("error", "source-injection-failed", String(error?.message ?? error));
+  }
+}
+
+function stopSource(entry, reason) {
+  if (!entry.sourceActive) return;
+  sendToTab(entry.tabId, { type: "dz.source.stop", ...bindingOf(entry), requestId: makeRequestId("source-stop"), reason }, entry.frameId);
+  entry.sourceActive = false;
+}
+async function removeJob(entry, reason) {
+  for (const source of [...sourceBindings.values()]) if (source.jobId === entry.jobId) {
+    stopSource(source, reason);
+    sourceBindings.delete(sourceBindingKey(source));
+  }
+  jobs.delete(entry.jobId);
+  setBadge(entry.tabId, false);
+  await persistBindings();
+  backgroundLog("info", "job-removed", `${entry.jobId} ${reason}`);
+}
+
+async function createJob(tab) {
+  const tabId = tab?.id;
+  if (typeof tabId !== "number" || !isPublicHttpUrl(tab?.url)) {
+    backgroundLog("warn", "privileged-rejected", redactBackgroundUrl(tab?.url));
     return;
   }
-  if (typeof level === "number" && Number.isFinite(level)) {
-    backgroundLogLevel = level;
-  }
-}
-
-/**
- * Override the log sink (tests). The sink receives `{ level, code, line }`.
- * Pass null to restore console logging.
- * @param {((entry: { level: string, code: string, line: string }) => void) | null} sink
- */
-export function setBackgroundLogSink(sink) {
-  backgroundLogSink = typeof sink === "function" ? sink : null;
-}
-
-function backgroundLogTarget(level) {
-  if (backgroundLogSink) return { write: backgroundLogSink, console: false };
-  try {
-    const c = globalThis.console;
-    if (!c || typeof c[level] !== "function") return null;
-    return { write: null, console: true };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Emit one structured background log line. Never throws, never logs raw
- * URLs: callers must redact before calling; this layer truncates only.
- * @param {"debug"|"info"|"warn"|"error"} level
- * @param {string} code stable machine code (`armed`, `reload-failed`, ...)
- * @param {string} [detail] already-redacted human detail
- */
-export function backgroundLog(level, code, detail) {
-  let rank = BACKGROUND_LOG_LEVELS.info;
-  try {
-    rank = BACKGROUND_LOG_LEVELS[level] ?? BACKGROUND_LOG_LEVELS.info;
-    if (rank < backgroundLogLevel) return;
-    const safeCode = typeof code === "string" && code ? code : "event";
-    let text = typeof detail === "string" ? detail : detail === undefined ? "" : String(detail ?? "");
-    if (text.length > BACKGROUND_LOG_MAX_CHARS) text = text.slice(0, BACKGROUND_LOG_MAX_CHARS) + "…";
-    const line = "[dezoomify:background] " + level + " " + safeCode + (text ? " " + text : "");
-    const target = backgroundLogTarget(level);
-    if (!target) return;
-    if (target.console) {
-      const c = globalThis.console;
-      try {
-        c[level](line);
-      } catch {
-        // Logging must never break monitoring.
-      }
+  for (const entry of jobs.values()) {
+    if (entry.tabId === tabId && entry.jobRunning && typeof entry.jobTabId === "number") {
+      try { await api?.tabs?.update?.(entry.jobTabId, { active: true }); } catch {}
       return;
     }
-    try {
-      target.write({ level, code: safeCode, line });
-    } catch {
-      // Logging must never break monitoring.
+    if (entry.tabId === tabId && entry.sourceActive) {
+      stopSource(entry, "toolbar-cancel");
+      sendToJob(entry, "dz.job.cancel", makeRequestId("toolbar-cancel"), { reason: "toolbar-cancel" });
+      setBadge(tabId, false);
+      await persistBindings();
+      return;
     }
-  } catch {
-    // Logging must never break monitoring.
+    if (entry.tabId === tabId && entry.jobReady && typeof entry.jobTabId === "number") {
+      try { await api?.tabs?.update?.(entry.jobTabId, { active: true }); } catch {}
+      return;
+    }
   }
-}
-
-function isPrivilegedUrl(url) {
-  return typeof url !== "string" || (!url.startsWith("http://") && !url.startsWith("https://"));
-}
-
-/**
- * Compare page URLs ignoring the fragment: zoom viewers routinely rewrite
- * `#zoom=...` in place, which is not a navigation away. A reload reports
- * the same unfragmented URL and must never disarm the monitor it triggered.
- */
-function samePage(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  return a.split("#", 1)[0] === b.split("#", 1)[0];
-}
-
-function setArmedBadge(tabId, state) {
-  const active = state === true || state === "error";
-  const failed = state === "error";
+  const jobId = makeJobId();
+  let jobTab;
   try {
-    if (api.action && typeof api.action.setIcon === "function") {
-      // MV3 returns a promise: a tab that is navigating or already gone
-      // rejects with e.g. "Failed to fetch". Icon state is cosmetic only,
-      // so swallow the rejection like sendToTab does (try/catch alone
-      // cannot catch it: it surfaces as Uncaught (in promise)).
-      const iconPending = api.action.setIcon({ tabId, path: active ? ACTIVE_ICON : IDLE_ICON });
-      if (iconPending && typeof iconPending.catch === "function") {
-        iconPending.catch((e) => {
-          backgroundLog("debug", "icon-rejected", "tab " + tabId + " " + ((e && e.message) || e));
-        });
-      }
-    }
-    if (api.action && typeof api.action.setBadgeText === "function") {
-      const badgePending = api.action.setBadgeText({ tabId, text: active ? (failed ? "!" : "•") : "" });
-      if (badgePending && typeof badgePending.catch === "function") {
-        badgePending.catch((e) => {
-          backgroundLog("debug", "badge-rejected", "tab " + tabId + " " + ((e && e.message) || e));
-        });
-      }
-    }
-    if (api.action && typeof api.action.setTitle === "function") {
-      const titlePending = api.action.setTitle({
-        tabId,
-        title: failed ? "Dezoomify: error (click to dismiss)" : "Dezoomify",
-      });
-      if (titlePending && typeof titlePending.catch === "function") {
-        titlePending.catch((e) => {
-          backgroundLog("debug", "title-rejected", "tab " + tabId + " " + ((e && e.message) || e));
-        });
-      }
-    }
-  } catch (e) {
-    // Icon/badge state is cosmetic only; monitoring never depends on it.
-    backgroundLog("debug", "icon-failed", "tab " + tabId + " " + ((e && e.message) || e));
+    jobTab = await api?.tabs?.create?.({ url: api?.runtime?.getURL?.(`job/job.html#jobId=${encodeURIComponent(jobId)}`), active: true });
+  } catch (error) {
+    backgroundLog("error", "job-tab-create-failed", String(error?.message ?? error));
+    return;
+  }
+  if (typeof jobTab?.id !== "number") {
+    backgroundLog("error", "job-tab-create-failed", "missing tab id");
+    return;
+  }
+  const entry = {
+    jobId, tabId, frameId: 0, documentGeneration: 0, jobTabId: jobTab.id, sourceUrl: tab.url,
+    sourceActive: true, jobReady: false, jobRunning: false, heldCandidates: [], grantedOrigins: new Set(), primary: true,
+  };
+  jobs.set(jobId, entry);
+  sourceBindings.set(sourceBindingKey(entry), entry);
+  setBadge(tabId, true);
+  await persistBindings();
+  backgroundLog("info", "job-created", `source ${tabId}, job ${jobTab.id}`);
+  void injectSource(entry);
+}
+
+function forwardCandidates(entry, message) {
+  const job = jobs.get(entry.jobId) ?? entry;
+  const candidate = { requestId: message.requestId, urls: Array.isArray(message.urls) ? message.urls : [], overflow: Number(message.overflow) || 0, documentUrl: message.documentUrl };
+  if (job.jobReady) sendToJob(entry, "dz.job.candidates", candidate.requestId, candidate);
+  else if (job.heldCandidates.length < HELD_CANDIDATE_LIMIT) job.heldCandidates.push({ entry, candidate });
+  sendToTab(entry.tabId, { type: "dz.source.candidates-ack", ...bindingOf(entry), requestId: message.requestId, urls: candidate.urls }, entry.frameId);
+}
+function flushHeldCandidates(entry) {
+  while (entry.jobReady && entry.heldCandidates.length) {
+    const held = entry.heldCandidates.shift();
+    sendToJob(held.entry, "dz.job.candidates", held.candidate.requestId, held.candidate);
   }
 }
 
-function sendToTab(tabId, message) {
-  try {
-    const pending = api.tabs.sendMessage(tabId, message);
-    if (pending && typeof pending.catch === "function") {
-      pending.catch((e) => {
-        backgroundLog("debug", "send-to-tab-rejected", "tab " + tabId + " " + ((e && e.message) || e));
-      });
-    }
-  } catch (e) {
-    // The tab may already be gone; monitor state is unaffected.
-    backgroundLog("debug", "send-to-tab-failed", "tab " + tabId + " " + ((e && e.message) || e));
-  }
+async function handlePermission(entry, message) {
+  const origins = Array.isArray(message.origins)
+    ? [...new Set(message.origins.map(permissionOrigin).filter(Boolean))]
+    : [];
+  if (!origins.length) return sendToJob(entry, "dz.job.permission-required", message.requestId, { granted: false, code: "invalid-origins" });
+  let granted = false;
+  try { granted = Boolean(await api?.permissions?.request?.({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
+  if (granted) for (const origin of origins) entry.grantedOrigins.add(origin);
+  await persistBindings();
+  sendToJob(entry, "dz.job.permission-required", message.requestId, { granted, origins });
 }
 
-/**
- * Tell the fresh content script monitoring is armed. The loader seeds its
- * own candidates from the tab's performance timeline (no permission needed),
- * so this snapshot carries no URLs; it exists so the card can confirm the
- * background is still watching (protocol compat with the loader handshake).
- */
-function reportUpdate(tabId) {
-  sendToTab(tabId, { type: "dezoomify-monitor-update", seen: 0, urls: [] });
+function invalidateSourceDocument(entry, reason) {
+  const oldBinding = bindingOf(entry);
+  entry.documentGeneration += 1;
+  entry.sourceActive = false;
+  entry.heldCandidates.length = 0;
+  sendToTab(entry.tabId, { type: "dz.source.invalidated", ...oldBinding, requestId: makeRequestId("source-invalidated"), reason }, entry.frameId);
+  sendToJob(entry, "dz.job.binding", makeRequestId("source-invalidated"), { sourceValid: false, reason });
+  void persistBindings();
+  backgroundLog("info", "source-invalidated", `tab ${entry.tabId} ${reason}`);
 }
 
-function disarm(tabId, notify) {
-  if (!armed.has(tabId)) return false;
-  armed.delete(tabId);
-  setArmedBadge(tabId, false);
-  if (notify !== false) sendToTab(tabId, { type: "dezoomify-stop-monitor" });
-  return true;
-}
-
-async function injectModal(tabId) {
-  // Programmatic injection on the clicked tab only (activeTab grant from
-  // the action click; no host permissions consumed, no tab enumeration).
-  // CSS first so the first paint is already styled.
-  await api.scripting.insertCSS({ target: { tabId }, files: ["content/modal.css"] });
-  await api.scripting.executeScript({ target: { tabId }, files: ["content/modal.js"] });
-}
-
-let wired = false;
 function wire() {
-  if (wired) return;
+  if (wired || !api) return;
   wired = true;
-  // No webRequest listener here, ever: without host permissions the
-  // platform never delivers request events (activeTab does not enable
-  // observation), so a background collector would be silently deaf in
-  // production while passing every test that grants loopback hosts. The
-  // injected tab collects its own candidates permission-free.
-
-  api.action.onClicked.addListener(async (tab) => {
-    const tabId = tab && tab.id;
-    if (typeof tabId !== "number") {
-      backgroundLog("debug", "click-ignored", "no tab id");
-      return;
-    }
-    // Second click on the armed tab cancels monitoring (replace and cancel).
-    if (disarm(tabId, true)) {
-      backgroundLog("info", "cancelled", "tab " + tabId + " second click");
-      return;
-    }
-    // Single-tab read for the privileged-URL guard only, never enumeration.
-    let url = tab.url;
-    try {
-      if (typeof url !== "string" || !url) {
-        const fresh = await api.tabs.get(tabId);
-        url = fresh && fresh.url;
-      }
-    } catch (e) {
-      // Keep the event URL; the guard below fails closed on unknown URLs.
-      backgroundLog("debug", "tabs-get-failed", "tab " + tabId + " " + ((e && e.message) || e));
-    }
-    if (isPrivilegedUrl(url)) {
-      backgroundLog("warn", "privileged-rejected", "tab " + tabId + " " + redactBackgroundUrl(url));
-      setArmedBadge(tabId, false);
-      return;
-    }
-    // Arm BEFORE the single reload; injection happens after the reload
-    // completes (see the tabs.onUpdated handler): anything injected now
-    // would be wiped by the reload.
-    armed.set(tabId, { confirmed: false, failed: false, url, injected: false });
-    backgroundLog("info", "armed", "tab " + tabId + " " + redactBackgroundUrl(url));
-    setArmedBadge(tabId, true);
-    try {
-      // Exactly one reload of exactly that tab.
-      await api.tabs.reload(tabId);
-      backgroundLog("debug", "reloaded", "tab " + tabId);
-    } catch (e) {
-      // Keep a visible error state so a failed reload is not an unexplained
-      // blue-to-grey transition. A second click still dismisses it.
-      backgroundLog("error", "reload-failed", "tab " + tabId + " " + ((e && e.message) || e));
-      const entry = armed.get(tabId);
-      if (entry) {
-        entry.failed = true;
-        setArmedBadge(tabId, "error");
-      }
+  void restoreBindings();
+  api.action?.onClicked?.addListener?.((tab) => { void createJob(tab); });
+  api.tabs?.onRemoved?.addListener?.((tabId) => {
+    for (const entry of [...jobs.values()]) {
+      if (entry.tabId === tabId || entry.jobTabId === tabId) void removeJob(entry, entry.tabId === tabId ? "source-tab-closed" : "job-tab-closed");
     }
   });
-
-  // Tab close drops a known armed id only; never enumerates tabs.
-  api.tabs.onRemoved.addListener((tabId) => {
-    if (disarm(tabId, false)) {
-      backgroundLog("info", "tab-closed", "tab " + tabId);
-    }
+  api.tabs?.onUpdated?.addListener?.((tabId, changeInfo) => {
+    if (typeof changeInfo?.url !== "string") return;
+    for (const entry of sourceBindings.values()) if (entry.tabId === tabId && entry.sourceActive && !sameDocumentUrl(changeInfo.url, entry.sourceUrl)) invalidateSourceDocument(entry, "navigation");
   });
-
-  // Tab updates while armed (no tab enumeration: only known armed ids):
-  // - navigation to a DIFFERENT page stops monitoring (no stale-tab
-  //   results); changeInfo.url is visible without any tabs permission.
-  //   The armed tab's own reload (same page, fragment ignored) NEVER
-  //   disarms: disarming on it was the blue-then-instantly-grey bug.
-  // - the monitored reload completing injects the modal exactly once (a
-  //   pre-reload injection would have been wiped by the reload itself).
-  api.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    const entry = armed.get(tabId);
-    if (!entry) return;
-    if (changeInfo && typeof changeInfo.url === "string" && !samePage(changeInfo.url, entry.url)) {
-      disarm(tabId, false);
-      backgroundLog("info", "navigated-away", "tab " + tabId);
-      return;
+  api.permissions?.onRemoved?.addListener?.((removed) => {
+    const removedOrigins = new Set((removed?.origins ?? []).map((origin) => origin.replace(/\/\*$/, "")));
+    for (const entry of jobs.values()) {
+      const revoked = [...entry.grantedOrigins].filter((origin) => removedOrigins.has(origin));
+      if (!revoked.length) continue;
+      for (const origin of revoked) entry.grantedOrigins.delete(origin);
+      sendToJob(entry, "dz.job.permission-required", makeRequestId("permission-revoked"), { granted: false, revoked, code: "permission-revoked" });
     }
-    if (changeInfo && changeInfo.status === "complete" && !entry.injected) {
-      entry.injected = true;
-      backgroundLog("debug", "reload-complete", "tab " + tabId + " injecting modal");
-      injectModal(tabId).then(() => {
-        // Confirm to the fresh content script that monitoring is armed; it
-        // seeds its own candidates from the tab timeline.
-        backgroundLog("info", "injected", "tab " + tabId);
-        reportUpdate(tabId);
-      }, (e) => {
-        // Keep the failure visible in the action state; a second click
-        // dismisses it instead of silently returning to idle.
-        backgroundLog("error", "injection-failed", "tab " + tabId + " " + ((e && e.message) || e));
-        const failedEntry = armed.get(tabId);
-        if (failedEntry) {
-          failedEntry.failed = true;
-          setArmedBadge(tabId, "error");
-        }
-      });
-    }
+    void persistBindings();
   });
-
-  api.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    const tabId = sender && sender.tab && sender.tab.id;
-    if (!message || typeof message.type !== "string" || typeof tabId !== "number") return;
-    if (message.type === "dezoomify-byte-confirmed") {
-      // Tab-side DiscoverySession confirmed an image from bytes. The job
-      // takes over in the tab; keep the blue badge until the modal closes.
-      const entry = armed.get(tabId);
-      if (entry) entry.confirmed = true;
-      backgroundLog("info", "byte-confirmed", "tab " + tabId);
-      try {
-        sendResponse({ confirmed: true });
-      } catch (e) {
-        // The sender may be gone; state is already updated.
-        backgroundLog("debug", "respond-failed", "tab " + tabId + " " + ((e && e.message) || e));
+  api.runtime?.onMessage?.addListener?.((message, sender, sendResponse) => {
+    if (!message || typeof message.type !== "string" || !requestId(message)) return;
+    if (message.type.startsWith("dz.source.")) {
+      const entry = findSourceJob(sender, message);
+      if (!entry) return;
+      if (message.type === "dz.source.ready") {
+        sendToJob(entry, "dz.job.binding", message.requestId, { sourceValid: true, documentUrl: message.documentUrl });
+        flushHeldCandidates(jobs.get(entry.jobId) ?? entry);
+      } else if (message.type === "dz.source.candidates") forwardCandidates(entry, message);
+      else if (message.type === "dz.source.fetch-chunk" || message.type === "dz.source.fetch-complete" || message.type === "dz.source.invalidated") {
+        const { type: sourceType, ...payload } = message;
+        sendToJob(entry, "dz.job.fetch", message.requestId, { sourceType, ...payload });
       }
+      try { sendResponse?.({ ok: true }); } catch {}
       return true;
     }
-    if (message.type === "dezoomify-modal-closed") {
-      // Modal close disposes the monitor and restores the grey icon.
-      disarm(tabId, false);
-      backgroundLog("info", "modal-closed", "tab " + tabId);
-      try {
-        sendResponse({ stopped: true });
-      } catch (e) {
-        // The sender may be gone; state is already updated.
-        backgroundLog("debug", "respond-failed", "tab " + tabId + " " + ((e && e.message) || e));
+    if (message.type.startsWith("dz.job.")) {
+      const entry = findJobSender(sender, message);
+      if (!entry) return;
+      if (message.type === "dz.job.ready") {
+        const job = jobs.get(entry.jobId) ?? entry;
+        job.jobReady = true;
+        sendToJob(entry, "dz.job.binding", message.requestId, { sourceValid: entry.sourceActive, documentUrl: entry.sourceUrl });
+        flushHeldCandidates(job);
+      } else if (message.type === "dz.job.fetch" && entry.sourceActive) {
+        (jobs.get(entry.jobId) ?? entry).jobRunning = true;
+        sendToTab(entry.tabId, { type: "dz.source.fetch", ...bindingOf(entry), requestId: message.requestId, url: message.url, method: message.method, headers: message.headers }, entry.frameId);
+      } else if (message.type === "dz.job.cancel") {
+        entry.jobRunning = false;
+        stopSource(entry, "job-cancel");
+        void persistBindings();
+      } else if (message.type === "dz.job.closed") {
+        void removeJob(entry, "job-closed");
+      } else if (message.type === "dz.job.permission-required") {
+        void handlePermission(entry, message);
       }
+      try { sendResponse?.({ ok: true }); } catch {}
       return true;
     }
-    if (message.type === "dezoomify-modal-failed") {
-      const entry = armed.get(tabId);
-      if (entry) {
-        entry.failed = true;
-        setArmedBadge(tabId, "error");
-      }
-      backgroundLog("error", "modal-failed", "tab " + tabId + " " + String(message.code || "job-failed"));
-      try {
-        sendResponse({ failed: true });
-      } catch (e) {
-        backgroundLog("debug", "respond-failed", "tab " + tabId + " " + ((e && e.message) || e));
-      }
-      return;
-    }
   });
-
 }
 
-// Guarded wiring: a real browser namespace wires listeners on load; node
-// imports get the pure collectors above with no browser effects (`api` is
-// undefined without a browser namespace, so `wire()` never runs there).
-try {
-  if (typeof api !== "undefined" && api && api.action && api.action.onClicked) {
-    wire();
-  }
-} catch (e) {
-  // Wiring must never throw (node imports, hostile contexts).
-  backgroundLog("error", "wire-failed", String((e && e.message) || e));
-}
+try { if (api?.action?.onClicked) wire(); } catch (error) { backgroundLog("error", "wire-failed", String(error?.message ?? error)); }
