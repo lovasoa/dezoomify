@@ -1,3 +1,7 @@
+// GENERATED from packages/shared-ui/src/locales/fr.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/shared-ui/src/locales/fr.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // French message dictionary for the shared UI.
 //
 // Mirrors `../i18n.ts` key for key: every English key has exactly one French
@@ -392,4 +396,4 @@ export const fr = {
   "page.handoff.job": "Tache : {id}",
   "page.handoff.note": "Rien n est envoye avant votre confirmation. Refuser garde la tache dans l extension.",
   "page.ui.techDetails": "Details techniques et journaux",
-} as const;
+}         ;

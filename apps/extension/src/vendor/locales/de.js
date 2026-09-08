@@ -1,3 +1,7 @@
+// GENERATED from packages/shared-ui/src/locales/de.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/shared-ui/src/locales/de.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // German message dictionary for the shared UI.
 //
 // Mirrors `../i18n.ts` key for key: every English key has exactly one German
@@ -392,4 +396,4 @@ export const de = {
   "page.handoff.job": "Auftrag: {id}",
   "page.handoff.note": "Nichts wird gesendet, bis Sie bestatigen. Ablehnen belasst den Auftrag in der Erweiterung.",
   "page.ui.techDetails": "Technische Details und Protokolle",
-} as const;
+}         ;

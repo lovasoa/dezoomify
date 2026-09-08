@@ -317,13 +317,17 @@ test("frame close and backdrop click detach and notify the background", () => {
   assert.ok(second.chromeApi.sent.some((m) => m.type === "dezoomify-modal-closed"), "grey restore notified");
 });
 
-test("blocked iframe falls back to the bound page", () => {
-  const { timers, modal, chromeApi } = mountJob();
+test("blocked iframe keeps a visible error in the clicked tab", () => {
+  const ctx = mountModal();
+  const { timers, modal, chromeApi } = ctx;
   assert.equal(timers.length, 1, "ready timeout armed");
   timers[0]();
-  assert.equal(modal.mounted, false, "blocked frame detaches");
-  assert.ok(chromeApi.sent.some((m) => m.type === "dezoomify-open-panel"), "bound-page fallback requested");
-  assert.deepEqual(modal.snapshotCandidates(), [], "detach clears candidates");
+  assert.equal(modal.mounted, true, "failure remains visible in the clicked tab");
+  const host = ctx.doc.documentElement.children.find((c) => c.id === "dezoomify-in-tab");
+  assert.ok(host && host.dataset.state === "error", "monitor card is marked as failed");
+  assert.ok(host.textContent.includes("could not start"), "startup failure is visible");
+  assert.ok(chromeApi.sent.some((m) => m.type === "dezoomify-modal-failed"), "background receives the visible failure");
+  assert.ok(!chromeApi.sent.some((m) => m.type === "dezoomify-open-panel"), "no fallback page requested");
 });
 
 // --- background <-> loader protocol parity ---------------------------------------
@@ -331,7 +335,7 @@ test("blocked iframe falls back to the bound page", () => {
 test("background and loader speak the same lifecycle protocol", () => {
   const loader = codeLines(readSrc("../../src/content/modal.js"));
   const background = codeLines(readSrc("../../src/background/index.ts"));
-  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-open-panel"]) {
+  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-modal-failed"]) {
     assert.ok(loader.includes(kind), `loader must speak ${kind}`);
     assert.ok(background.includes(kind), `background must speak ${kind}`);
   }
@@ -357,13 +361,13 @@ test("loader and job iframe speak the same handshake protocol", () => {
 
 test("job iframe reuses shared-ui renderView geometry (no visual fork)", () => {
   const html = readSrc("../../src/modal/modal.html");
-  assert.ok(html.includes('<link rel="stylesheet" href="../page/vendor/theme.css" />'), "iframe links the canonical theme");
+  assert.ok(html.includes('<link rel="stylesheet" href="../vendor/theme.css" />'), "iframe links the canonical theme");
   const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join("\n");
   assert.ok(!styles.includes(".dz-"), "iframe shell defines no dz-* geometry (theme owns it)");
   const modal = readSrc("../../src/modal/modal.ts");
   assert.ok(modal.includes("renderView"), "iframe drives shared-ui renderView");
-  assert.ok(modal.includes("../page/vendor/view.js"), "iframe imports the vendored view");
-  const theme = readSrc("../../src/page/vendor/theme.css");
+  assert.ok(modal.includes("../vendor/view.js"), "iframe imports the vendored view");
+  const theme = readSrc("../../src/vendor/theme.css");
   const classes = new Set();
   for (const m of modal.matchAll(/className\s*=\s*"([^"]*)"/g)) {
     for (const token of m[1].split(/\s+/)) {

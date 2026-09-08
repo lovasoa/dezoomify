@@ -32,21 +32,19 @@
  * candidate's bytes tab-side (cookies/auth carried under the click grant)
  * and confirms via the wasm `DiscoverySession`; on success it reports
  * `dezoomify-byte-confirmed` (blue badge kept for the job). The modal closes
- * via `dezoomify-modal-closed` (grey icon restored), and a blocked job
- * iframe falls back to the bound page (`dezoomify-open-panel` opens
- * `page.html?tab=` for exactly that tab).
+ * via `dezoomify-modal-closed` (grey icon restored). Startup and job errors
+ * remain visible in the tab and are marked with an error badge.
  *
  * Monitoring is indefinite: no deadline, no polling. It stops collecting on
  * the first terminal signal - tab-side byte confirmation, modal
- * close/fallback, a second click on the armed tab (cancel), tab close, or
+ * close, a second click on the armed tab (cancel), tab close, or
  * navigation away. Stopped monitoring never restarts itself, and a worker
  * restart (service-worker suspend / event-page unload) fails closed: the
  * memory-only armed set is gone, so observation is dead by construction.
  *
  * The scan, discovery, fetch, assembly, and save all live tab-side (the
- * modal iframe and `page/page.ts`); format recognition stays the wasm
- * core's job, never URL-text guessing here. Pure detection helpers live in
- * `background/detect.ts` (unit-tested, never shipped).
+ * modal iframe); format recognition stays the wasm core's job, never URL-text
+ * guessing here.
  *
  * MV3 dual background: Chromium runs this file as a service worker, Firefox
  * as an MV3 event page. Classic script in both: shipped export-free (the
@@ -78,7 +76,7 @@ const ACTIVE_ICON = {
   128: "icons/icon128.png",
 };
 
-// tabId -> { confirmed, url, injected } for armed monitors.
+// tabId -> { confirmed, failed, url, injected } for armed monitors.
 // `url` is the clicked-tab URL at arm time: the monitor survives its OWN
 // reload (same page reported back by tabs.onUpdated) and stops only on
 // navigation to a DIFFERENT page. `injected` gates the post-reload modal
@@ -109,8 +107,7 @@ const armed = new Map();
 export const BACKGROUND_LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
 
 /** Query keys whose values must never appear in logs. Must stay identical
- * to SENSITIVE_QUERY_KEYS in background/detect.ts, page/candidates.ts, and
- * page/redaction.ts. */
+ * to SENSITIVE_QUERY_KEYS in runtime/candidates.ts. */
 export const BACKGROUND_SENSITIVE_QUERY_KEYS = Object.freeze([
   "token",
   "auth",
@@ -258,7 +255,9 @@ function samePage(a, b) {
   return a.split("#", 1)[0] === b.split("#", 1)[0];
 }
 
-function setArmedBadge(tabId, active) {
+function setArmedBadge(tabId, state) {
+  const active = state === true || state === "error";
+  const failed = state === "error";
   try {
     if (api.action && typeof api.action.setIcon === "function") {
       // MV3 returns a promise: a tab that is navigating or already gone
@@ -273,10 +272,21 @@ function setArmedBadge(tabId, active) {
       }
     }
     if (api.action && typeof api.action.setBadgeText === "function") {
-      const badgePending = api.action.setBadgeText({ tabId, text: active ? "•" : "" });
+      const badgePending = api.action.setBadgeText({ tabId, text: active ? (failed ? "!" : "•") : "" });
       if (badgePending && typeof badgePending.catch === "function") {
         badgePending.catch((e) => {
           backgroundLog("debug", "badge-rejected", "tab " + tabId + " " + ((e && e.message) || e));
+        });
+      }
+    }
+    if (api.action && typeof api.action.setTitle === "function") {
+      const titlePending = api.action.setTitle({
+        tabId,
+        title: failed ? "Dezoomify: error (click to dismiss)" : "Dezoomify",
+      });
+      if (titlePending && typeof titlePending.catch === "function") {
+        titlePending.catch((e) => {
+          backgroundLog("debug", "title-rejected", "tab " + tabId + " " + ((e && e.message) || e));
         });
       }
     }
@@ -366,7 +376,7 @@ function wire() {
     // Arm BEFORE the single reload; injection happens after the reload
     // completes (see the tabs.onUpdated handler): anything injected now
     // would be wiped by the reload.
-    armed.set(tabId, { confirmed: false, url, injected: false });
+    armed.set(tabId, { confirmed: false, failed: false, url, injected: false });
     backgroundLog("info", "armed", "tab " + tabId + " " + redactBackgroundUrl(url));
     setArmedBadge(tabId, true);
     try {
@@ -374,9 +384,14 @@ function wire() {
       await api.tabs.reload(tabId);
       backgroundLog("debug", "reloaded", "tab " + tabId);
     } catch (e) {
-      // Reload can fail (tab gone): disarm so the icon never lies.
+      // Keep a visible error state so a failed reload is not an unexplained
+      // blue-to-grey transition. A second click still dismisses it.
       backgroundLog("error", "reload-failed", "tab " + tabId + " " + ((e && e.message) || e));
-      disarm(tabId, false);
+      const entry = armed.get(tabId);
+      if (entry) {
+        entry.failed = true;
+        setArmedBadge(tabId, "error");
+      }
     }
   });
 
@@ -411,10 +426,14 @@ function wire() {
         backgroundLog("info", "injected", "tab " + tabId);
         reportUpdate(tabId);
       }, (e) => {
-        // Injection can fail (navigated away, privileged target): disarm so
-        // the icon never claims a monitor that has no modal.
+        // Keep the failure visible in the action state; a second click
+        // dismisses it instead of silently returning to idle.
         backgroundLog("error", "injection-failed", "tab " + tabId + " " + ((e && e.message) || e));
-        disarm(tabId, false);
+        const failedEntry = armed.get(tabId);
+        if (failedEntry) {
+          failedEntry.failed = true;
+          setArmedBadge(tabId, "error");
+        }
       });
     }
   });
@@ -448,42 +467,22 @@ function wire() {
       }
       return true;
     }
-    if (message.type === "dezoomify-open-panel") {
-      // Blocked job iframe fallback: open the bound page flow for exactly
-      // this tab instead of stranding the user. The click-time origin goes
-      // along (`&origin=`), so the bound page can scope its observation (and
-      // its one-time permission request) precisely even when `tabs.get`
-      // later hides the tab URL. Origin only (never userinfo, path, query,
-      // or fragment); omitted when unparseable.
-      let originParam = "";
-      try {
-        const entry = armed.get(tabId);
-        if (entry && typeof entry.url === "string") {
-          const origin = new URL(entry.url).origin;
-          if ((origin.startsWith("http://") || origin.startsWith("https://")) && origin.length <= 256) {
-            originParam = origin;
-          }
-        }
-      } catch {
-        originParam = "";
+    if (message.type === "dezoomify-modal-failed") {
+      const entry = armed.get(tabId);
+      if (entry) {
+        entry.failed = true;
+        setArmedBadge(tabId, "error");
       }
-      disarm(tabId, false);
-      backgroundLog("warn", "panel-fallback", "tab " + tabId);
+      backgroundLog("error", "modal-failed", "tab " + tabId + " " + String(message.code || "job-failed"));
       try {
-        const pageUrl = "page/page.html?tab=" + tabId +
-          (originParam !== "" ? "&origin=" + encodeURIComponent(originParam) : "");
-        api.tabs.create({ url: api.runtime.getURL(pageUrl) });
+        sendResponse({ failed: true });
       } catch (e) {
-        // Tab creation failure strands nothing: monitoring already stopped.
-        backgroundLog("error", "panel-failed", "tab " + tabId + " " + ((e && e.message) || e));
+        backgroundLog("debug", "respond-failed", "tab " + tabId + " " + ((e && e.message) || e));
       }
       return;
     }
   });
 
-  api.runtime.onInstalled.addListener(() => {
-    api.tabs.create({ url: api.runtime.getURL("page/page.html") });
-  });
 }
 
 // Guarded wiring: a real browser namespace wires listeners on load; node

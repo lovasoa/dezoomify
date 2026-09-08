@@ -21,7 +21,7 @@
   "name": "Dezoomify",
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "optional_permissions": ["cookies"],
-  "permissions": ["activeTab", "scripting", "webRequest", "nativeMessaging"],
+  "permissions": ["activeTab", "scripting", "nativeMessaging"],
   "version": "3.0.0",
   "web_accessible_resources": [
     {

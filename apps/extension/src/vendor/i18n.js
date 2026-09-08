@@ -1,3 +1,7 @@
+// GENERATED from packages/shared-ui/src/i18n.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/shared-ui/src/i18n.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // Shared-UI message dictionary (English plus French, German, Italian).
 //
 // User-facing copy renders through `t(key, vars)` against one table per
@@ -33,24 +37,22 @@
 // functions) so `scripts/sync-web-js.mjs` can mirror it to `i18n.js` for
 // browsers exactly like the other shared-ui modules.
 
-import { fr } from "./locales/fr.ts";
-import { de } from "./locales/de.ts";
-import { it } from "./locales/it.ts";
+import { fr } from "./locales/fr.js";
+import { de } from "./locales/de.js";
+import { it } from "./locales/it.js";
 
-export type Locale = "en" | "fr" | "de" | "it";
+export const DEFAULT_LOCALE         = "en";
 
-export const DEFAULT_LOCALE: Locale = "en";
+export const SUPPORTED_LOCALES                        = ["en", "fr", "de", "it"];
 
-export const SUPPORTED_LOCALES: ReadonlyArray<Locale> = ["en", "fr", "de", "it"];
+let activeLocale         = DEFAULT_LOCALE;
 
-let activeLocale: Locale = DEFAULT_LOCALE;
-
-export function getLocale(): Locale {
+export function getLocale()         {
   return activeLocale;
 }
 
 /** True only for the four shipped locale names (case-insensitive, base tag). */
-export function isSupportedLocaleName(name: string): boolean {
+export function isSupportedLocaleName(name        )          {
   return normalizeLocaleName(name) !== null;
 }
 
@@ -59,14 +61,14 @@ export function isSupportedLocaleName(name: string): boolean {
  * `"DE_at"` -> `"de"`). Returns null for unknown or empty tags so callers
  * fail closed to English.
  */
-export function normalizeLocaleName(tag: string): Locale | null {
+export function normalizeLocaleName(tag        )                {
   const base = String(tag ?? "").trim().toLowerCase().split(/[-_]/)[0];
   if (base === "en" || base === "fr" || base === "de" || base === "it") return base;
   return null;
 }
 
 /** Accept only known locales; unknown names fail closed and keep the current locale. */
-export function setLocale(locale: string): boolean {
+export function setLocale(locale        )          {
   const next = normalizeLocaleName(locale);
   if (next === null) return false;
   activeLocale = next;
@@ -79,9 +81,9 @@ export function setLocale(locale: string): boolean {
  * entries; tags without a shipped base are skipped. Anything unparseable,
  * empty, or without a match falls back to English.
  */
-export function pickLocale(input: string | ReadonlyArray<string> | null | undefined): Locale {
+export function pickLocale(input                                                   )         {
   if (input === null || input === undefined) return DEFAULT_LOCALE;
-  const tags: Array<string> = Array.isArray(input) ? [...input] : parseAcceptLanguage(String(input));
+  const tags                = Array.isArray(input) ? [...input] : parseAcceptLanguage(String(input));
   for (const tag of tags) {
     const match = normalizeLocaleName(tag);
     if (match !== null) return match;
@@ -90,8 +92,8 @@ export function pickLocale(input: string | ReadonlyArray<string> | null | undefi
 }
 
 /** Order one `Accept-Language` header by descending `q`, dropping `q=0` and `*`. */
-function parseAcceptLanguage(header: string): Array<string> {
-  const ranked: Array<{ tag: string; q: number; order: number }> = [];
+function parseAcceptLanguage(header        )                {
+  const ranked                                                   = [];
   const parts = String(header ?? "").split(",");
   for (let i = 0; i < parts.length; i++) {
     const segments = parts[i].split(";");
@@ -111,8 +113,6 @@ function parseAcceptLanguage(header: string): Array<string> {
   ranked.sort((a, b) => (b.q !== a.q ? b.q - a.q : a.order - b.order));
   return ranked.map((entry) => entry.tag);
 }
-
-export type I18nVars = Record<string, string | number>;
 
 const en = {
   // Modal chrome (shared view.ts openModal).
@@ -497,26 +497,24 @@ const en = {
   "page.handoff.job": "Job: {id}",
   "page.handoff.note": "Nothing is sent until you confirm. Declining keeps the job in the extension.",
   "page.ui.techDetails": "Technical details & logs",
-} as const;
-
-export type I18nKey = keyof typeof en;
+}         ;
 
 /** Canonical English templates. Tests enumerate this table. */
-export const EN: Record<string, string> = en;
+export const EN                         = en;
 
 /** French templates (same keys, same placeholders). */
-export const FR: Record<string, string> = fr;
+export const FR                         = fr;
 
 /** German templates (same keys, same placeholders). */
-export const DE: Record<string, string> = de;
+export const DE                         = de;
 
 /** Italian templates (same keys, same placeholders). */
-export const IT: Record<string, string> = it;
+export const IT                         = it;
 
-const dictionaries: Record<string, Record<string, string>> = { en, fr, de, it };
+const dictionaries                                         = { en, fr, de, it };
 
 /** Read one locale table with English fallback (never undefined). */
-export function getDictionary(locale: string): Record<string, string> {
+export function getDictionary(locale        )                         {
   const match = normalizeLocaleName(locale);
   if (match !== null) return dictionaries[match] ?? EN;
   return EN;
@@ -527,13 +525,13 @@ export function getDictionary(locale: string): Record<string, string> {
  * explicit locale override). Unknown keys fall back to the key itself; keys
  * missing from the active locale fall back to English per key.
  */
-export function t(key: I18nKey, vars?: I18nVars, locale?: string): string {
-  const want: string =
+export function t(key         , vars           , locale         )         {
+  const want         =
     typeof locale === "string" && locale !== "" ? (normalizeLocaleName(locale) ?? activeLocale) : activeLocale;
-  const table: Record<string, string> = dictionaries[want] ?? EN;
-  const template: string = table[key as string] ?? EN[key as string] ?? (key as string);
+  const table                         = dictionaries[want] ?? EN;
+  const template         = table[key          ] ?? EN[key          ] ?? (key          );
   if (!vars) return template;
-  return template.replace(/\{(\w+)\}/g, (match, name: string) => {
+  return template.replace(/\{(\w+)\}/g, (match, name        ) => {
     const value = vars[name];
     return value === undefined ? match : String(value);
   });

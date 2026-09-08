@@ -85,18 +85,18 @@ test("handoff 5.5: website wires too-large plans to Send, file stays local-only"
 });
 
 test("handoff 5.5: extension result section offers styled one-click Send", () => {
-  const page = read("apps/extension/src/page/page.ts");
-  assert.ok(page.includes("#dz-result .dz-completed-section .dz-actions-row"), "Send lives in the result section");
-  assert.ok(page.includes('button.className = "dz-btn-secondary"'), "Send uses the architectural button class");
-  assert.ok(page.includes("offerNativeHandoff(found.source)"), "completed result offers Send after save");
-  assert.ok(page.includes("Send to desktop app ("), "button names the origin");
-  assert.ok(page.includes("Origins: "), "consent dialog names origins");
-  assert.ok(page.includes("Cookies: "), "consent dialog names cookie names (never values)");
-  assert.ok(!page.includes("document.body.appendChild(button)"), "no orphaned body-level handoff button remains");
+  const modal = read("apps/extension/src/modal/modal.ts");
+  assert.ok(modal.includes(".dz-completed-section .dz-actions-row"), "Send lives in the result section");
+  assert.ok(modal.includes('button.className = "dz-btn-secondary"'), "Send uses the architectural button class");
+  assert.ok(modal.includes("offerNativeHandoff(found.source)"), "completed result offers Send after save");
+  assert.ok(modal.includes("Send to desktop app ("), "button names the origin");
+  assert.ok(modal.includes("Origins: "), "consent dialog names origins");
+  assert.ok(modal.includes("Cookies: "), "consent dialog names cookie names (never values)");
+  assert.ok(!modal.includes("document.body.appendChild(button)"), "no orphaned body-level handoff button remains");
 });
 
 test("handoff 5.5: extension validator uses URL parsing plus exact sensitive keys", async () => {
-  const handoff = await loadTs("apps/extension/src/page/nativeHandoff.ts");
+  const handoff = await loadTs("apps/extension/src/runtime/nativeHandoff.ts");
   assert.equal(handoff.validateHandoffSource("https://example.com/cookie-recipe/view?page=1").ok, true, "/cookie-recipe/ stays valid (no substring false positive)");
   assert.equal(handoff.validateHandoffSource("https://example.com/view?view=1&page=2").ok, true);
   assert.equal(handoff.validateHandoffSource("https://example.com/item?token=secret").ok, false);

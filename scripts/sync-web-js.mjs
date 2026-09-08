@@ -48,30 +48,30 @@ const PAIRS = [
   ["packages/shared-ui/src/locales/it.ts", "packages/shared-ui/src/locales/it.js"],
 ];
 
-// No-bundler extension page mirrors: `apps/extension/src/page/vendor/`
-// carries flattened copies of the canonical `.js` mirrors above (plus the
-// canonical theme), so the page tests the same logic the website serves.
+// No-bundler extension modal mirrors: `apps/extension/src/vendor/` carries
+// flattened copies of the canonical `.js` mirrors above (plus the canonical
+// theme), so the modal tests the same logic the website serves.
 // (canonJs, vendorJs) pairs; the vendor file must equal the canonical file
 // with cross-package `../../browser-runtime/src/` specifiers flattened to
 // `./` siblings. Locale mirrors keep their `./locales/` structure under
 // `vendor/locales/`.
 const VENDOR_PAIRS = [
-  ["packages/shared-ui/src/controller.js", "apps/extension/src/page/vendor/controller.js"],
-  ["packages/shared-ui/src/view.js", "apps/extension/src/page/vendor/view.js"],
-  ["packages/shared-ui/src/components.js", "apps/extension/src/page/vendor/components.js"],
-  ["packages/shared-ui/src/history.js", "apps/extension/src/page/vendor/history.js"],
-  ["packages/shared-ui/src/saveName.js", "apps/extension/src/page/vendor/saveName.js"],
-  ["packages/shared-ui/src/i18n.js", "apps/extension/src/page/vendor/i18n.js"],
-  ["packages/shared-ui/src/locales/fr.js", "apps/extension/src/page/vendor/locales/fr.js"],
-  ["packages/shared-ui/src/locales/de.js", "apps/extension/src/page/vendor/locales/de.js"],
-  ["packages/shared-ui/src/locales/it.js", "apps/extension/src/page/vendor/locales/it.js"],
-  ["packages/browser-runtime/src/limits.js", "apps/extension/src/page/vendor/limits.js"],
-  ["packages/browser-runtime/src/transport-labels.js", "apps/extension/src/page/vendor/transport-labels.js"],
-  ["packages/browser-runtime/src/save-name.js", "apps/extension/src/page/vendor/save-name.js"],
+  ["packages/shared-ui/src/controller.js", "apps/extension/src/vendor/controller.js"],
+  ["packages/shared-ui/src/view.js", "apps/extension/src/vendor/view.js"],
+  ["packages/shared-ui/src/components.js", "apps/extension/src/vendor/components.js"],
+  ["packages/shared-ui/src/history.js", "apps/extension/src/vendor/history.js"],
+  ["packages/shared-ui/src/saveName.js", "apps/extension/src/vendor/saveName.js"],
+  ["packages/shared-ui/src/i18n.js", "apps/extension/src/vendor/i18n.js"],
+  ["packages/shared-ui/src/locales/fr.js", "apps/extension/src/vendor/locales/fr.js"],
+  ["packages/shared-ui/src/locales/de.js", "apps/extension/src/vendor/locales/de.js"],
+  ["packages/shared-ui/src/locales/it.js", "apps/extension/src/vendor/locales/it.js"],
+  ["packages/browser-runtime/src/limits.js", "apps/extension/src/vendor/limits.js"],
+  ["packages/browser-runtime/src/transport-labels.js", "apps/extension/src/vendor/transport-labels.js"],
+  ["packages/browser-runtime/src/save-name.js", "apps/extension/src/vendor/save-name.js"],
 ];
 
 const VENDOR_CSS_PAIRS = [
-  ["packages/shared-ui/src/styles/theme.css", "apps/extension/src/page/vendor/theme.css"],
+  ["packages/shared-ui/src/styles/theme.css", "apps/extension/src/vendor/theme.css"],
 ];
 
 function flattenVendor(source) {

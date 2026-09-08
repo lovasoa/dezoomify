@@ -1,3 +1,7 @@
+// GENERATED from packages/browser-runtime/src/save-name.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/browser-runtime/src/save-name.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // Shared save-name helper (todo 2.2 home: lowest layer, dependency-free).
 //
 // One suggestedNameFor() for every app. Base `dezoomify`, optional `-WxH`
@@ -12,18 +16,8 @@
 // replica; the CLI mirrors the `dezoomify` base in Rust (titles and collision
 // suffixes stay Rust-side). Todo 5.1: desktop GUI parity exposes ZIF, WebP,
 // and `iiif-dir` (`.iiif`) alongside PNG/JPEG/TIFF.
-export type SaveNameFormat =
-  | "png"
-  | "jpeg"
-  | "jpg"
-  | "tiff"
-  | "tif"
-  | "zif"
-  | "webp"
-  | "iiif"
-  | "iiif-dir";
 
-export function extensionForSaveFormat(format: unknown): string {
+export function extensionForSaveFormat(format         )         {
   const lower = typeof format === "string" ? format.toLowerCase() : "png";
   if (lower === "jpeg" || lower === "jpg") return "jpg";
   if (lower === "tiff" || lower === "tif") return "tif";
@@ -34,10 +28,10 @@ export function extensionForSaveFormat(format: unknown): string {
 }
 
 export function suggestedNameFor(
-  width: unknown,
-  height: unknown,
-  format: unknown,
-): string {
+  width         ,
+  height         ,
+  format         ,
+)         {
   const ext = extensionForSaveFormat(format);
   const w = typeof width === "number" ? width : Number(width);
   const h = typeof height === "number" ? height : Number(height);

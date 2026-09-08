@@ -45,6 +45,14 @@
   font-size: 0.9375rem;
 }
 
+#dezoomify-in-tab[data-state="error"] .dz-in-tab-card {
+  border-color: #a33;
+}
+
+#dezoomify-in-tab[data-state="error"] .dz-in-tab-status {
+  color: #7d1717;
+}
+
 #dezoomify-in-tab .dz-in-tab-actions {
   display: flex;
   gap: 0.5rem;

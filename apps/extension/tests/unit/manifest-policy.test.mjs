@@ -32,7 +32,7 @@ const firefoxOverlay = readJson("../../src/manifest/firefox.json");
 const genChromium = readJson("../../generated/manifest.chromium.json");
 const genFirefox = readJson("../../generated/manifest.firefox.json");
 
-const REVIEWED_PERMS = new Set(["activeTab", "scripting", "webRequest", "nativeMessaging"]);
+const REVIEWED_PERMS = new Set(["activeTab", "scripting", "nativeMessaging"]);
 const REVIEWED_OPTIONAL = new Set(["cookies"]);
 const EXPECTED_GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 
@@ -156,11 +156,10 @@ test("least-privilege: activeTab present, nativeMessaging declared", () => {
 });
 
 test("declared permissions are used by shipped code", () => {
-  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
-  assert.ok(page.includes("sendNativeMessage"), "nativeMessaging must be used by page handoff");
-  assert.ok(page.includes("api.cookies.getAll"), "cookies must be used by consented handoff");
-  assert.ok(page.includes("api.webRequest.onBeforeRequest"), "webRequest must be used by scan");
-  assert.ok(!page.includes("chrome.downloads"), "downloads API must stay unused (blob anchor save)");
+  const modal = readFileSync(new URL("../../src/modal/modal.ts", import.meta.url), "utf8");
+  assert.ok(modal.includes("sendNativeMessage"), "nativeMessaging must be used by modal handoff");
+  assert.ok(modal.includes("api.cookies.getAll"), "cookies must be used by consented handoff");
+  assert.ok(!modal.includes("chrome.downloads"), "downloads API must stay unused (blob anchor save)");
   // The background click-to-monitor owns the single reload and the
   // grey<->blue+dot icon transitions, and injects the in-tab modal on the
   // clicked tab only, after its monitored reload completes (pre-reload
@@ -184,36 +183,17 @@ test("declared permissions are used by shipped code", () => {
   assert.ok(!background.includes("tabs.query"), "background must never enumerate tabs");
   // Loader protocol parity: background and content/modal.js share the
   // `{ type }` runtime messages (streaming update with urls, tab-side byte
-  // confirmation, close, fallback). URL-text-only `dezoomify-detected` is
+  // confirmation, close, failure). URL-text-only `dezoomify-detected` is
   // retired: the background never emits it (many formats require response
   // bytes); the loader still accepts it as candidates-only (covered in
   // modal-in-tab.test.mjs).
-  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-open-panel"]) {
+  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-modal-failed"]) {
     assert.ok(background.includes(kind), `background must speak ${kind}`);
   }
   assert.ok(background.includes("urls"), "background monitor-update must stream candidate urls");
   assert.ok(!background.includes("dezoomify-detected"), "background must not emit retired URL-text detection");
-  // The bound page DOES observe via webRequest, so it must earn host access
-  // first: a one-time optional grant for exactly the bound tab's origin on
-  // the explicit Scan gesture. Without it the listener would be deaf and
-  // the scan would fail silently with "no candidate". The scope resolves
-  // from the handover `origin` param (click-time grant) or the tab URL; a
-  // hidden tab URL with no handover fails honestly instead of scanning deaf.
-  assert.ok(page.includes("parseBoundOrigin"), "bound scan must accept the click-time origin handover");
-  assert.ok(page.includes("ensureOriginAccess"), "bound scan must gate observation behind one-time origin access");
-  assert.ok(page.includes("permission-denied"), "refused origin access must fail honestly, never silently");
-  assert.ok(page.includes("no-target-access"), "hidden tab URL must fail honestly, never silently");
-  assert.ok(
-    page.lastIndexOf("parseBoundOrigin") < page.lastIndexOf("ensureOriginAccess"),
-    "handover parsing must precede the access gate",
-  );
-  assert.ok(
-    page.lastIndexOf("ensureOriginAccess") < page.indexOf("api.webRequest.onBeforeRequest"),
-    "origin access must precede the webRequest listener",
-  );
-  assert.ok(background.includes("&origin="), "open-panel fallback must hand over the click-time origin");
   const loader = readFileSync(new URL("../../src/content/modal.js", import.meta.url), "utf8");
-  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-open-panel"]) {
+  for (const kind of ["dezoomify-monitor-update", "dezoomify-byte-confirmed", "dezoomify-modal-closed", "dezoomify-modal-failed"]) {
     assert.ok(loader.includes(kind), `injected loader must speak ${kind}`);
   }
 });
@@ -234,7 +214,7 @@ test("click-to-monitor least privilege: reload+inject, no enumeration, no offscr
   assert.ok(!code.includes("permissions.request"), "background must not prompt (activeTab covers reload+inject)");
   assert.ok(code.includes("onRemoved"), "monitor must stop when the tab closes");
   assert.ok(code.includes("onUpdated"), "monitor must stop when the tab navigates");
-  assert.ok(code.includes("onInstalled"), "install must open first-run guidance only");
+  assert.ok(!code.includes("onInstalled"), "install must not open a fallback extension page");
   assert.ok(!code.includes("offscreen"), "no offscreen document (unnecessary for a reload monitor)");
   assert.ok(!code.includes("host_permissions"), "background must not touch broad host permissions");
   // No offscreen declared in either generated manifest either.
@@ -243,44 +223,24 @@ test("click-to-monitor least privilege: reload+inject, no enumeration, no offscr
   }
 });
 
-test("bound-tab least privilege: no tab enumeration, narrow webRequest filter", () => {
-  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
-  const code = page
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
-    .join("\n");
-  assert.ok(!code.includes("tabs.query"), "shipped page must never enumerate tabs (bound tabs.get only)");
-  assert.ok(!code.includes("onCreated"), "shipped page must not track tab creation");
-  assert.ok(!code.includes("onRemoved"), "shipped page must not track tab removal");
-  assert.ok(!code.includes("<all_urls>"), "webRequest filter must be http/https, never <all_urls>");
-  assert.ok(code.includes('"http://*/*"'), "webRequest filter must cover http");
-  assert.ok(code.includes('"https://*/*"'), "webRequest filter must cover https");
-  assert.ok(code.includes("api.tabs.get"), "bound tab must use single tabs.get");
-  assert.ok(code.includes("api.tabs.reload"), "scan reloads only the bound tab");
-});
-
 test("store package ships only loaded files (no dead code)", () => {
   const script = readFileSync(new URL("../../scripts/package-store.sh", import.meta.url), "utf8");
   // No content_scripts declared: the programmatically injected loader plus
   // the job iframe (modal/, clicked tab only) ship; src/content/* stays
-  // unit-test only. The bound page stays as the injection fallback and E2E path.
+  // unit-test only. There is no extension-page fallback.
   assert.ok(script.includes("content/modal.js"), "package must stage the injected loader entry");
   assert.ok(script.includes("content/modal.css"), "package must stage the injected host CSS");
   assert.ok(script.includes("modal/modal.html"), "package must stage the job iframe document");
   assert.ok(script.includes("modal/modal.js"), "package must stage the job iframe runner");
-  assert.ok(!script.match(/(strip_exports|cp) "\$SRC\/content\/reload-marker/), "package must never stage the reload marker");
-  assert.ok(script.includes('content/reload-marker.js'), "package must guard against the reload marker shipping");
-  assert.ok(script.includes('content/'), "package must guard against content/ shipping");
-  assert.ok(script.includes("icons background content modal page wasm"), "package must zip icons+background+content+modal+page+wasm");
+  assert.ok(script.includes('SRC/runtime/$f'), "package must stage the modal runtime");
+  assert.ok(script.includes("vendor/view.js"), "package must stage the modal UI mirror");
+  assert.ok(script.includes("icons background content modal runtime vendor wasm"), "package must zip only the in-browser flow");
   // The grey idle set swapped via action.setIcon must ship with the brand icons.
   assert.ok(script.includes("icon16-grey.png"), "package must stage the grey idle icons");
   // E2E-only manifest variant must not inject a tabs permission: shipped
   // code (and the harness) never enumerates tabs.
   assert.ok(!script.includes('"tabs"'), "package must never inject tabs permission");
-  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
-  for (const dead of ["redaction.js", "handoff.js", "native.js", "reload-marker"]) {
-    assert.ok(!page.includes(dead), `page must not import dead ${dead}`);
-  }
+  assert.ok(!script.includes("page/page.html"), "package must not stage a fallback page");
 });
 
 test("generated manifests are the deterministic generator output (base+overlay, no underscore keys)", () => {

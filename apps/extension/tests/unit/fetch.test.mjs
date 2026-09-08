@@ -7,7 +7,7 @@ async function loadTs(rel) {
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
 }
 
-const { createSessionFetcher, ensureOriginAccess, isProxyUrl, parseBoundOrigin, PROXY_PATH } = await loadTs("../../src/page/fetch.ts");
+const { createSessionFetcher, isProxyUrl, PROXY_PATH } = await loadTs("../../src/runtime/fetch.ts");
 
 function bytes(n, fill = 1) {
   return new Uint8Array(n).fill(fill);
@@ -169,98 +169,4 @@ test("unsupported scheme rejected", async () => {
   const h = makeHarness();
   const f = createSessionFetcher(h.deps);
   await assert.rejects(() => f.fetchResource("file:///etc/passwd", { userIntent: true }), /scheme/);
-});
-
-// --- ensureOriginAccess: one-time observation grant (bound scan) ------------
-//
-// A `webRequest` listener without host access is deaf, so the bound scan
-// must earn exactly the bound tab's origin BEFORE listening. Matrix:
-// granted-already passes silently; user approval passes once; refusal (or a
-// missing permissions API, e.g. production activeTab-only shape) fails
-// closed so the scan errors honestly instead of observing nothing.
-
-function permsFake({ containsValue = false, requestValue = false, calls = null, throws = null } = {}) {
-  return {
-    calls: calls ?? [],
-    contains: async (pattern) => {
-      (calls ?? []).push({ contains: pattern });
-      if (throws === "contains") throw new Error("denied");
-      return containsValue;
-    },
-    request: async (pattern) => {
-      (calls ?? []).push({ request: pattern });
-      if (throws === "request") throw new Error("dismissed");
-      return requestValue;
-    },
-  };
-}
-
-test("ensureOriginAccess passes silently when already granted", async () => {
-  const calls = [];
-  const ok = await ensureOriginAccess(
-    { permissions: permsFake({ containsValue: true, calls }) },
-    "https://gallery.example",
-  );
-  assert.equal(ok, true);
-  assert.ok(calls.every((c) => c.contains !== undefined), "approved origins must never re-prompt");
-});
-
-test("ensureOriginAccess prompts once for exactly the bound origin", async () => {
-  const calls = [];
-  const ok = await ensureOriginAccess(
-    { permissions: permsFake({ containsValue: false, requestValue: true, calls }) },
-    "https://gallery.example:8443",
-  );
-  assert.equal(ok, true);
-  const asked = calls.filter((c) => c.request !== undefined);
-  assert.equal(asked.length, 1, "exactly one prompt");
-  assert.deepEqual(asked[0].request, { origins: ["https://gallery.example:8443/*"] });
-});
-
-test("ensureOriginAccess fails closed on refusal, dismissal, or missing API", async () => {
-  assert.equal(
-    await ensureOriginAccess({ permissions: permsFake({ requestValue: false }) }, "https://a.example"),
-    false,
-    "refusal must fail closed (honest denial, never silent deaf scan)",
-  );
-  assert.equal(
-    await ensureOriginAccess({ permissions: permsFake({ throws: "request" }) }, "https://a.example"),
-    false,
-    "dismissed prompt must fail closed",
-  );
-  assert.equal(
-    await ensureOriginAccess({ permissions: permsFake({ throws: "contains" }) }, "https://a.example"),
-    false,
-    "contains failure must fail closed",
-  );
-  assert.equal(await ensureOriginAccess({}, "https://a.example"), false, "missing permissions API must fail closed");
-  assert.equal(await ensureOriginAccess({ permissions: {} }, "https://a.example"), false);
-  assert.equal(await ensureOriginAccess({ permissions: permsFake({}) }, ""), false, "empty origin never prompts");
-});
-
-// --- parseBoundOrigin: click-time origin handover ---------------------------
-//
-// The background threads the clicked tab's origin through
-// `page.html?tab=<id>&origin=<...>`. Only exact canonical http(s) origins
-// are accepted; everything else yields "" (caller falls back to the tab
-// URL, then to an honest failure, never to a guess).
-
-test("parseBoundOrigin accepts exact canonical origins", () => {
-  assert.equal(parseBoundOrigin("?tab=7&origin=" + encodeURIComponent("https://gallery.example")), "https://gallery.example");
-  assert.equal(parseBoundOrigin("?tab=7&origin=" + encodeURIComponent("http://127.0.0.1:44177")), "http://127.0.0.1:44177");
-  assert.equal(parseBoundOrigin("origin=" + encodeURIComponent("https://a.example")), "https://a.example");
-});
-
-test("parseBoundOrigin rejects everything but exact origins", () => {
-  assert.equal(parseBoundOrigin("?tab=7"), "", "absent param");
-  assert.equal(parseBoundOrigin(""), "", "empty query");
-  assert.equal(parseBoundOrigin(null), "", "non-string query");
-  assert.equal(parseBoundOrigin("?origin="), "", "empty value");
-  assert.equal(parseBoundOrigin("?origin=" + encodeURIComponent("chrome://settings")), "", "privileged scheme");
-  assert.equal(parseBoundOrigin("?origin=" + encodeURIComponent("https://user:pass@a.example")), "", "userinfo smuggling");
-  assert.equal(parseBoundOrigin("?origin=" + encodeURIComponent("https://a.example/gallery")), "", "path smuggling");
-  assert.equal(parseBoundOrigin("?origin=" + encodeURIComponent("https://a.example/?token=1")), "", "query smuggling");
-  assert.equal(parseBoundOrigin("?origin=" + encodeURIComponent("https://a.example/#frag")), "", "fragment smuggling");
-  assert.equal(parseBoundOrigin("?origin=" + encodeURIComponent("HTTPS://A.EXAMPLE")), "", "non-canonical case rejected");
-  assert.equal(parseBoundOrigin("?origin=not-a-url"), "", "garbage rejected");
 });

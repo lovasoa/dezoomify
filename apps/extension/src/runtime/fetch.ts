@@ -16,86 +16,8 @@ export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 30000;
 
-/**
- * Parse the bound-tab origin handed over in the page URL
- * (`page.html?tab=<id>&origin=<scheme://host[:port]>`).
- *
- * The background learns the clicked tab's URL under the click-time
- * activeTab grant and threads its origin through, so the bound page can
- * scope its observation (and its permission request) precisely even when
- * `tabs.get` later hides the tab URL (no host access (yet), grant lapsed).
- * Returns `""` when absent or invalid. Only exact `scheme://host[:port]`
- * http(s) origins without userinfo, path, query, or fragment are accepted;
- * anything else is ignored (the caller falls back to the tab URL, then to
- * an honest failure, never to a guess).
- *
- * @param {unknown} search the URL query string (`location.search` form)
- * @returns {string} the validated origin or `""`
- */
-export function parseBoundOrigin(search) {
-  let params;
-  try {
-    params = new URLSearchParams(typeof search === "string" ? search : "");
-  } catch {
-    return "";
-  }
-  const raw = params.get("origin");
-  if (typeof raw !== "string" || raw === "") return "";
-  let parsed;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return "";
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
-  if (parsed.username || parsed.password) return "";
-  if (parsed.pathname !== "/" && parsed.pathname !== "") return "";
-  if (parsed.search || parsed.hash) return "";
-  if (!parsed.hostname) return "";
-  if (raw.length > 256) return "";
-  let origin;
-  try {
-    origin = parsed.origin;
-  } catch {
-    return "";
-  }
-  if (origin !== raw) return "";
-  return origin;
-}
-
-/**
- * Ensure one-time origin access for request observation.
- *
- * A `webRequest` listener without host access is deaf: the platform only
- * delivers events the extension may see, and neither the click-time
- * activeTab grant nor an unprompted page enables observation. Call this on
- * an explicit user gesture (the Scan click) BEFORE installing any
- * `webRequest` listener: granted origins (declared or previously approved)
- * pass silently, otherwise the browser prompts once for exactly this
- * origin. A refusal must fail the scan honestly (never a silent empty
- * result); the toolbar-click modal flow needs no such grant.
- *
- * @param {{ permissions?: { contains?: (p: any) => boolean | Promise<boolean>, request?: (p: any) => boolean | Promise<boolean> } }} browserApi
- *   the extension browser namespace (`api`), never raw host globals
- * @param {string} origin exact `scheme://host[:port]` scope (see `originOf`)
- * @returns {Promise<boolean>} true when observation of the origin is allowed
- */
-export async function ensureOriginAccess(browserApi, origin) {
-  if (typeof origin !== "string" || origin === "") return false;
-  const perms = browserApi ? browserApi.permissions : undefined;
-  if (!perms || typeof perms.contains !== "function") return false;
-  try {
-    if (await perms.contains({ origins: [origin + "/*"] })) return true;
-  } catch {
-    return false;
-  }
-  if (typeof perms.request !== "function") return false;
-  try {
-    return (await perms.request({ origins: [origin + "/*"] })) === true;
-  } catch {
-    return false;
-  }
-}
+// The in-tab flow collects candidates from Performance Timeline instead of
+// using a webRequest observer or a bound extension page.
 
 /** MIME families the extension is willing to decode as image/metadata. */
 export const ALLOWED_MIME_PREFIXES = Object.freeze([

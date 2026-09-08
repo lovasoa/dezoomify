@@ -214,18 +214,17 @@ test("i18n: every desktop t() reference resolves in all four locales", () => {
 
 test("i18n: no orphan locale keys; the dictionary stays ready for the view/page migration", () => {
   // The desktop renderer is the only `t()` caller today; the shared view and
-  // the extension page still render hardcoded English literals with this
+  // the extension modal still renders hardcoded English literals with this
   // dictionary as the single source for their migration (see the module
   // header and `packages/shared-ui/AGENTS.md`). Every English key therefore
   // ships in all four locales now, so the migration needs no retranslation.
   const viewRefs = tRefs(read("packages/shared-ui/src/view.ts"));
-  const pageRefs = tRefs(read("apps/extension/src/page/page.ts"));
-  for (const key of [...viewRefs, ...pageRefs]) {
+  for (const key of viewRefs) {
     for (const [label, table] of Object.entries(LOCALES)) {
       assert.ok(Object.hasOwn(table, key), `${label} covers future view/page key: ${key}`);
     }
   }
-  const referenced = new Set([...viewRefs, ...tRefs(readDesktop()), ...pageRefs]);
+  const referenced = new Set([...viewRefs, ...tRefs(readDesktop())]);
   const pending = Object.keys(EN).filter((key) => !referenced.has(key));
   assert.ok(pending.length > 0, "view/page migration keys are staged in the dictionary");
   for (const key of pending) {
@@ -240,17 +239,17 @@ test("i18n: no orphan locale keys; the dictionary stays ready for the view/page 
   }
 });
 
-test("i18n: extension page carries no replica table; its mirror stays generated", () => {
-  const page = read("apps/extension/src/page/page.ts");
-  assert.ok(!page.includes("PAGE_EN"), "page must not carry an i18n replica table");
-  assert.ok(!page.includes("pageT("), "page must not carry a replica lookup");
+test("i18n: extension modal carries no replica table; its mirror stays generated", () => {
+  const modal = read("apps/extension/src/modal/modal.ts");
+  assert.ok(!modal.includes("PAGE_EN"), "modal must not carry an i18n replica table");
+  assert.ok(!modal.includes("pageT("), "modal must not carry a replica lookup");
   for (const replica of ["const fr =", "const de =", "const it =", "FR_DE_IT"]) {
-    assert.ok(!page.includes(replica), `page must not vendor a locale table inline (${replica})`);
+    assert.ok(!modal.includes(replica), `modal must not vendor a locale table inline (${replica})`);
   }
-  // Whatever the page resolves through `t()` today must exist in all four
-  // locales; the page still renders English literals while its migration is
+  // Whatever the modal resolves through `t()` today must exist in all four
+  // locales; the modal still renders English literals while its migration is
   // staged, so zero refs is accepted and resolves vacuously.
-  const refs = tRefs(page);
+  const refs = tRefs(modal);
   for (const key of refs) {
     for (const [label, table] of Object.entries(LOCALES)) {
       assert.ok(Object.hasOwn(table, key), `${label} covers extension key: ${key}`);

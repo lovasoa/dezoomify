@@ -10,8 +10,8 @@ function read(rel) {
   return fs.readFileSync(path.join(rootDir, rel), "utf8");
 }
 
-// The extension page links the vendored canonical theme
-// (`page/vendor/theme.css`, generated at build time by
+// The extension modal links the vendored canonical theme
+// (`vendor/theme.css`, generated at build time by
 // scripts/sync-web-js.mjs from packages/shared-ui/src/styles/theme.css) and
 // ships no inline theme subset. These gates read the canonical theme (the
 // single source of truth, byte-identical to the vendor copy per the
@@ -44,9 +44,9 @@ test("mobile: website theme keeps the 768/560/380px breakpoint stack", () => {
   }
 });
 
-test("mobile: extension page links the canonical theme with no inline fork", () => {
-  const html = read("apps/extension/src/page/page.html");
-  assert.match(html, /<link rel="stylesheet" href="vendor\/theme\.css" \/>/, "page links the vendored canonical theme");
+test("mobile: extension modal links the canonical theme with no inline fork", () => {
+  const html = read("apps/extension/src/modal/modal.html");
+  assert.match(html, /<link rel="stylesheet" href="\.\.\/vendor\/theme\.css" \/>/, "modal links the vendored canonical theme");
   const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join("\n");
   assert.ok(!styles.includes(".dz-"), "page ships no inline theme subset (theme owns all dz-* geometry)");
   assert.ok(!styles.includes("@media"), "page ships no breakpoint fork (theme owns every breakpoint)");
@@ -56,7 +56,7 @@ test("mobile: 360px viewports keep every extension action reachable", () => {
   // The themed job card comes from the vendored renderView mount, styled by
   // the canonical theme; the static shell only adds the scan tab list.
   const css = read("packages/shared-ui/src/styles/theme.css");
-  const html = read("apps/extension/src/page/page.html");
+  const html = read("apps/extension/src/modal/modal.html");
   assert.match(html, /name="viewport"[^>]*width=device-width[^>]*initial-scale=1/, "viewport stays device-width");
 
   // No fixed-width layout container wider than a 360px phone.

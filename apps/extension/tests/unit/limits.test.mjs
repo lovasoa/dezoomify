@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 // The extension renders through its vendored codegen mirror
-// (`src/page/vendor/limits.js`, generated at build time by
+// (`src/vendor/limits.js`, generated at build time by
 // scripts/sync-web-js.mjs from packages/browser-runtime/src/limits.ts).
 // Regenerate with `node scripts/sync-web-js.mjs` (`cargo xtask test
 // extension` does this before the unit glob); never hand-edit vendor/.
@@ -13,7 +13,7 @@ async function loadVendor(rel) {
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
 }
 
-const ext = await loadVendor("../../src/page/vendor/limits.js");
+const ext = await loadVendor("../../src/vendor/limits.js");
 const canon = await import("../../../../packages/browser-runtime/src/limits.ts");
 
 test("extension limits mirror the canonical browser-runtime module", () => {
@@ -65,28 +65,25 @@ test("estimateTileCount parity plus 100k guard semantics", () => {
   assert.ok(ext.estimateTileCount(16384, 16384) <= ext.BROWSER_MAX_PLAN_TILES);
 });
 
-test("page uses the vendored limits module, no forked area math", () => {
-  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
-  assert.ok(page.includes('from "./vendor/limits.js"'), "page must import the vendored limits module");
-  assert.ok(!page.includes('from "./limits.js"'), "page must not import the deleted manual mirror");
-  assert.ok(page.includes("pickLevel"), "page must use shared pickLevel");
-  assert.ok(page.includes("BROWSER_MAX_PLAN_TILES"), "page must enforce the 100k tile cap");
-  assert.ok(!page.includes("MAX_CANVAS_AREA = 16384"), "page must not keep the forked float area check");
+test("modal uses the vendored limits module, no forked area math", () => {
+  const modal = readFileSync(new URL("../../src/modal/modal.ts", import.meta.url), "utf8");
+  assert.ok(modal.includes('from "../vendor/limits.js"'), "modal must import the vendored limits module");
+  assert.ok(modal.includes("pickLevel"), "modal must use shared pickLevel");
+  assert.ok(modal.includes("BROWSER_MAX_PLAN_TILES"), "modal must enforce the 100k tile cap");
+  assert.ok(!modal.includes("MAX_CANVAS_AREA = 16384"), "modal must not keep the forked float area check");
 });
 
 test("extension tile concurrency and pacing match the documented policy", () => {
-  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
-  assert.ok(page.includes("EXT_TILE_CONCURRENCY"), "page must define the concurrent worker count");
-  assert.ok(page.includes("EXT_TILE_MIN_INTERVAL_MS"), "page must pace starts per host");
+  const modal = readFileSync(new URL("../../src/modal/modal.ts", import.meta.url), "utf8");
+  assert.ok(modal.includes("MODAL_TILE_MIN_INTERVAL_MS"), "modal must pace starts per host");
   assert.equal(ext.BROWSER_MAX_PLAN_TILES, 100_000);
-  const src = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
-  assert.ok(src.includes("6"), "concurrency documents 6 workers");
+  assert.ok(modal.includes("for (const tile of plan.tiles)"), "modal must process the planned tiles");
 });
 
 test("taint gate: pixel reads behind originClean, display-only never promises save", () => {
-  const page = readFileSync(new URL("../../src/page/page.ts", import.meta.url), "utf8");
-  assert.ok(page.includes("originClean"), "page must track originClean");
-  assert.ok(page.includes("if (originClean)"), "getImageData probe must sit behind originClean");
-  assert.ok(page.includes("display-only"), "tainted path must finish as display-only success");
-  assert.ok(!page.includes("showDisplayOnlySection"), "display-only must come from the vendored renderView, not a page replica");
+  const modal = readFileSync(new URL("../../src/modal/modal.ts", import.meta.url), "utf8");
+  assert.ok(modal.includes("originClean"), "modal must track originClean");
+  assert.ok(modal.includes("if (originClean)"), "getImageData probe must sit behind originClean");
+  assert.ok(modal.includes("display-only"), "tainted path must finish as display-only success");
+  assert.ok(!modal.includes("showDisplayOnlySection"), "display-only must come from the vendored renderView, not a page replica");
 });

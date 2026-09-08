@@ -1,3 +1,7 @@
+// GENERATED from packages/shared-ui/src/locales/it.ts by scripts/sync-web-js.mjs. Do not hand-edit.
+// Source of truth: packages/shared-ui/src/locales/it.ts (erasable-syntax TypeScript). Regenerate with:
+//   node scripts/sync-web-js.mjs
+
 // Italian message dictionary for the shared UI.
 //
 // Mirrors `../i18n.ts` key for key: every English key has exactly one Italian
@@ -392,4 +396,4 @@ export const it = {
   "page.handoff.job": "Attivita: {id}",
   "page.handoff.note": "Nulla viene inviato finche non confermi. Rifiutare tiene l attivita nell estensione.",
   "page.ui.techDetails": "Dettagli tecnici e registri",
-} as const;
+}         ;

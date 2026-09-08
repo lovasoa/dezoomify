@@ -3,9 +3,9 @@
  *
  * Runs inside the `chrome.runtime.getURL` iframe (`modal/modal.html`) that
  * the content loader mounts in the SAME tab the user clicked. It drives the
- * canonical shared-ui `renderView` geometry (vendored `../page/vendor/`
+ * canonical shared-ui `renderView` geometry (vendored `../vendor/`
  * theme + view: `dz-*` classes only, no visual fork) through the same code
- * paths as the extension page (`page/page.ts` run/discover/planLevel/
+ * paths as the in-tab runtime (run/discover/planLevel/
  * assemble/save + native handoff offer):
  *
  * - candidates arrive from the loader handshake (`dz-modal-candidates`;
@@ -29,11 +29,11 @@
  * reach the DOM via `textContent` (or the view's own escaping), never markup.
  */
 
-import { createSessionFetcher, originOf } from "../page/fetch.js";
-import { validateCandidateUrl, redactUrlForLabel } from "../page/candidates.js";
-import { requestNativeHandoff, NATIVE_HOST_NAME } from "../page/nativeHandoff.js";
-import { pickLevel, BROWSER_MAX_PLAN_TILES } from "../page/vendor/limits.js";
-import { renderView } from "../page/vendor/view.js";
+import { createSessionFetcher, originOf } from "../runtime/fetch.js";
+import { validateCandidateUrl, redactUrlForLabel } from "../runtime/candidates.js";
+import { requestNativeHandoff, NATIVE_HOST_NAME } from "../runtime/nativeHandoff.js";
+import { pickLevel, BROWSER_MAX_PLAN_TILES } from "../vendor/limits.js";
+import { renderView } from "../vendor/view.js";
 import init, * as wasm from "../wasm/dezoomify-wasm.js";
 
 // Tile pacing mirrors the extension page and the browser tile policy
@@ -775,9 +775,18 @@ async function runDiscovery() {
     if ((e && e.code) === "cancelled" || modalState.cancelRequested) {
       render("cancelled", jobCtx("Save cancelled"));
     } else {
+      const code = (e && e.code) || "job-failed";
       render("failed", {
-        ...failState((e && e.code) || "job-failed", (e && e.message) || "Could not dezoomify image"),
+        ...failState(code, (e && e.message) || "Could not dezoomify image"),
         jobActivity: { startedAt: Date.now() - 1000 },
+      });
+      // The loader keeps the iframe visible and the background marks the
+      // action as failed. This prevents fatal startup/job errors from looking
+      // like an unexplained return to the grey idle state.
+      postToLoader({
+        kind: "dz-modal-error",
+        code: String(code),
+        message: "Could not dezoomify image (" + String(code) + ")",
       });
     }
   }

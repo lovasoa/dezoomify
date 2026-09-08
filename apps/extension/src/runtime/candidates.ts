@@ -10,7 +10,7 @@
  * - Never inspects response bodies or page DOM during scanning.
  * - Labels are redacted (userinfo + sensitive query). This module stays
  *   import-free for isolated tests and classic-script loading, so it mirrors
- *   `redaction.ts`; `candidates.test.mjs` asserts the two stay identical.
+ *   the shared redaction vocabulary; candidate labels are always sanitized.
  *
  * Plain JavaScript + JSDoc (no TypeScript-only syntax).
  *
@@ -21,7 +21,7 @@ export const MAX_URL_LENGTH = 2048;
 export const MAX_CANDIDATES = 100;
 
 /** Query keys whose values must never appear in UI labels.
- *  Must stay identical to SENSITIVE_QUERY_KEYS in redaction.ts (tested). */
+ *  Must stay identical to the redaction vocabulary used by background logs. */
 export const SENSITIVE_QUERY_KEYS = Object.freeze([
   "token",
   "auth",

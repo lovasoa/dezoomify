@@ -13,38 +13,32 @@
 #   click-to-monitor owner: the toolbar click arms an indefinite exact-tabId
 #   observer, performs a single reload, and on detection injects the in-tab
 #   modal on the clicked tab only via scripting (no tab enumeration).
-#   background/detect.ts, background/handoff.ts, and background/native.ts are
-#   pure unit-tested libraries, never loaded by the manifest, and never
-#   shipped.
+#   background helpers are pure unit-tested libraries, never loaded by the
+#   manifest, and never shipped.
 # - content/ ships ONLY the injected in-tab modal (content/modal.js as a
 #   CLASSIC script with `export` stripped, plus content/modal.css): injected
 #   programmatically via scripting on the clicked tab only, never declared
-#   via content_scripts. src/content/reload-marker.ts stays unit-test only
-#   and is never staged.
+#   via content_scripts.
 # - modal/ ships the job iframe document (modal/modal.html + modal/modal.js
 #   from modal/modal.ts as an ES module): the extension page mounted by the
 #   injected modal in the SAME tab. It reuses the page entry's direct imports
 #   plus the vendored shared-ui view graph (theme + renderView geometry,
 #   never a visual fork).
-# - page/ ships verbatim as ES modules ONLY the files page.js imports
-#   (page.html + first-run guide + page/scan/candidates/fetch/nativeHandoff):
-#   the page is a module document and imports the wasm glue.
-#   page/redaction.ts and app/* are unit-tested helpers, never imported by
-#   the page, and never shipped.
+# - runtime/ ships the tab-side fetch, candidate, and native-handoff modules
+#   imported by the modal job. vendor/ ships generated shared-ui and
+#   browser-runtime mirrors. There is no fallback page.
 # - icons/ ships the declared manifest icons (blue brand set) plus the grey
 #   idle set the background swaps out via action.setIcon (grey idle, blue
 #   with a badge dot while monitoring).
 # - wasm/ artifacts are copied from the repository build output (generated;
 #   run `cargo xtask build web` or `cargo xtask build extension` first) and
-#   placed at the top-level wasm/ the page and modal iframe import as
-#   ../wasm/.
+#   placed at the top-level wasm/; the modal iframe imports it as ../wasm/.
 # - No offscreen document ships (and none is declared): offscreen is
 #   Chromium-only and unnecessary for a reload monitor.
 #
 # DEZOOMIFY_TEST_HOST_PERMISSIONS=1 additionally grants loopback host
-# permissions in the STAGED manifest only. This is for the headless E2E
-# (which cannot click browser chrome to grant activeTab) and must never be
-# used for store payloads.
+# permissions in the STAGED manifest only. This is for browser E2E and must
+# never be used for store payloads.
 #
 # Usage: ./package-store.sh <chromium|firefox> <output-zip>
 set -euo pipefail
@@ -83,8 +77,25 @@ strip_exports() {
 # Ship only the background entry the manifest loads (never handoff/native libs).
 mkdir -p "$staging/background"
 strip_exports "$SRC/background/index.ts" > "$staging/background/index.js"
+if [ "${DEZOOMIFY_TEST_DRIVER:-0}" = "1" ]; then
+  mkdir -p "$staging/test"
+  cp "$SRC/test/driver.html" "$staging/test/driver.html"
+  cat >> "$staging/background/index.js" <<'EOF'
+
+// Test-only extension context entry; never present in store packages.
+api.runtime.onInstalled.addListener(() => {
+  api.tabs.create({ url: api.runtime.getURL("test/driver.html") });
+});
+api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || message.type !== "dezoomify-test-inject" || typeof message.tabId !== "number") return;
+  api.scripting.executeScript({ target: { tabId: message.tabId }, files: ["content/modal.js"] })
+    .then(() => sendResponse({ ok: true }), (error) => sendResponse({ ok: false, error: String(error && error.message || error) }));
+  return true;
+});
+EOF
+fi
 # Ship only the injected in-tab modal (classic; exports stripped like the
-# background entry). The reload marker stays unit-test only and never ships.
+# background entry).
 # (Staged by exact file, never by directory copy: src/content/* as a tree
 # stays unit-test only.)
 CONTENT="$SRC/content"
@@ -95,35 +106,20 @@ cp "$CONTENT/modal.css" "$staging/content/modal.css"
 mkdir -p "$staging/modal"
 cp "$SRC/modal/modal.html" "$staging/modal/modal.html"
 cp "$SRC/modal/modal.ts" "$staging/modal/modal.js"
-# Ship only the page entry + its direct imports (never redaction/app libs).
-mkdir -p "$staging/page"
-for f in page.html page.ts scan.ts candidates.ts fetch.ts nativeHandoff.ts; do
-  src="$SRC/page/$f"
+# Ship the modal's direct extension runtime imports.
+mkdir -p "$staging/runtime"
+for f in candidates.ts fetch.ts nativeHandoff.ts; do
+  src="$SRC/runtime/$f"
   test -f "$src" || { echo "missing $src"; exit 1; }
-  case "$f" in
-    *.ts) cp "$src" "$staging/page/${f%.ts}.js" ;;
-    *) cp "$src" "$staging/page/$f" ;;
-  esac
+  cp "$src" "$staging/runtime/${f%.ts}.js"
 done
-# Generate the first-run guide from docs/user/browser-extension.md. The
-# documentation is the source of truth; the extension ships only its HTML
-# rendering.
-node "$REPO_ROOT/scripts/build-extension-guide.mjs" "$staging/page/guide.html"
-# Screenshots used by the first-run guide.
-for f in guide-step-1.png guide-step-2.png guide-step-3.png; do
-  src="$SRC/page/$f"
-  test -f "$src" || { echo "missing $src"; exit 1; }
-  cp "$src" "$staging/page/$f"
-done
-# Ship the vendored no-bundler mirrors the page imports plus the theme the
-# page links (generated by scripts/sync-web-js.mjs, never hand-edited),
-# plus the shared-ui view graph the job iframe (modal/modal.js) renders
-# through (renderView geometry, never a visual fork).
-mkdir -p "$staging/page/vendor"
-for f in vendor/limits.js vendor/theme.css vendor/view.js vendor/controller.js vendor/components.js vendor/transport-labels.js vendor/save-name.js; do
-  src="$SRC/page/$f"
+# Ship the generated no-bundler shared-ui mirrors used by the modal.
+mkdir -p "$staging/vendor"
+for f in vendor/limits.js vendor/theme.css vendor/view.js vendor/controller.js vendor/components.js vendor/transport-labels.js vendor/save-name.js vendor/i18n.js vendor/locales/fr.js vendor/locales/de.js vendor/locales/it.js; do
+  src="$SRC/$f"
   test -f "$src" || { echo "missing $src (run: node scripts/sync-web-js.mjs)"; exit 1; }
-  cp "$src" "$staging/page/$f"
+  mkdir -p "$(dirname "$staging/$f")"
+  cp "$src" "$staging/$f"
 done
 # Ship the declared manifest icons (blue brand set) plus the grey idle set
 # the background swaps via action.setIcon (grey idle, blue + badge dot
@@ -148,9 +144,7 @@ path = sys.argv[1]
 d = json.load(open(path))
 # E2E-only variant: headless drivers cannot click browser chrome to grant
 # activeTab, so the staged manifest grants loopback hosts directly. Shipped
-# code never enumerates tabs (bound `tabs.get` only), so no `tabs`
-# permission is ever injected: the harness creates its target via a single
-# `tabs.create` returning one id and drives the bound `?tab=` flow.
+# code never enumerates tabs, so no `tabs` permission is ever injected.
 hosts = ["http://127.0.0.1/*", "http://localhost/*"]
 extra = os.environ.get("DEZOOMIFY_TEST_ORIGIN", "")
 if extra and (extra.startswith("http://") or extra.startswith("https://")) and len(extra) <= 256:
@@ -172,21 +166,21 @@ need = list(d.get("icons", {}).values())
 need += list(d.get("action", {}).get("default_icon", {}).values())
 bg = d.get("background", {})
 need += ([bg["service_worker"]] if "service_worker" in bg else []) + bg.get("scripts", [])
-need += ["page/page.html", "page/page.js", "page/guide.html", "page/guide-step-1.png", "page/guide-step-2.png", "page/guide-step-3.png", "page/vendor/limits.js", "page/vendor/theme.css", "page/vendor/view.js", "page/vendor/controller.js", "page/vendor/components.js", "page/vendor/transport-labels.js", "page/vendor/save-name.js", "content/modal.js", "content/modal.css", "modal/modal.html", "modal/modal.js", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
+need += ["runtime/candidates.js", "runtime/fetch.js", "runtime/nativeHandoff.js", "vendor/limits.js", "vendor/theme.css", "vendor/view.js", "vendor/controller.js", "vendor/components.js", "vendor/transport-labels.js", "vendor/save-name.js", "vendor/i18n.js", "vendor/locales/fr.js", "vendor/locales/de.js", "vendor/locales/it.js", "content/modal.js", "content/modal.css", "modal/modal.html", "modal/modal.js", "wasm/dezoomify-wasm.js", "wasm/dezoomify-wasm_bg.wasm"]
+if os.path.exists("test/driver.html"):
+    need += ["test/driver.html"]
 for war in d.get("web_accessible_resources", []):
     need += war.get("resources", [])
 missing = [p for p in need if not os.path.exists(p)]
 sys.exit(f"missing in package: {missing}") if missing else print(f"package contents: ok ({len(need)} referenced files present)")
 # Least-privilege ship guard: fail on dead/never-loaded files.
 import glob
-shipped = set(glob.glob("background/*.js") + glob.glob("page/*.js") + glob.glob("page/vendor/*.js") + glob.glob("content/**/*.js", recursive=True) + glob.glob("modal/*.js", recursive=True))
-allowed = {"background/index.js", "page/page.js", "page/scan.js", "page/candidates.js", "page/fetch.js", "page/nativeHandoff.js", "page/vendor/limits.js", "page/vendor/view.js", "page/vendor/controller.js", "page/vendor/components.js", "page/vendor/transport-labels.js", "page/vendor/save-name.js", "content/modal.js", "modal/modal.js"}
+shipped = set(glob.glob("background/*.js") + glob.glob("runtime/*.js") + glob.glob("vendor/*.js") + glob.glob("content/**/*.js", recursive=True) + glob.glob("modal/*.js", recursive=True))
+allowed = {"background/index.js", "runtime/candidates.js", "runtime/fetch.js", "runtime/nativeHandoff.js", "vendor/limits.js", "vendor/theme.css", "vendor/view.js", "vendor/controller.js", "vendor/components.js", "vendor/transport-labels.js", "vendor/save-name.js", "vendor/i18n.js", "content/modal.js", "modal/modal.js"}
 extra = shipped - allowed
 sys.exit(f"dead files shipped (never loaded by manifest/page): {sorted(extra)}") if extra else print("package contents: no dead files")
-if os.path.exists("content/reload-marker.js"):
-    sys.exit("content/reload-marker.js must not ship (unit tests only)")
 ') || exit 1
 
 rm -f "$out_zip"
-(cd "$staging" && zip -qr "$out_zip" manifest.json icons background content modal page wasm)
+(cd "$staging" && zip -qr "$out_zip" manifest.json icons background content modal runtime vendor wasm ${DEZOOMIFY_TEST_DRIVER:+test})
 echo "package: $name v$version ($browser) -> $out_zip"

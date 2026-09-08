@@ -218,31 +218,15 @@ Playwright; Firefox under Selenium/geckodriver (binary via
 auto-install via npm on first run). Full user-facing UI flows remain manual
 or CI-runner work.
 
-Browser chrome cannot be clicked headlessly, so no E2E presses the toolbar
-button; each side of the click is covered where it can be observed instead:
-unit harnesses drive the real background module with production-faithful
-fakes (notably WITHOUT `webRequest` or host access, the activeTab-only
-shape) through arm, own-reload survival, post-complete injection, and every
-disarm rule; a no-deaf-API static gate forbids `webRequest` in shipped
-background code and requires the bound scan to earn its origin grant before
-listening. The headless E2E then runs two lanes per engine over the
-loopback fixture-server with no public network. The grants lane stages the
-store-shaped package with an E2E-only loopback grant naming the exact
-fixture origin (standing in for a user who approved the one-time per-site
-origin access; exactness matters because strict matchers compare ports)
-and runs the full job through the bound `page.html?tab=` fallback: wasm
-discovery, tile fetch, assembly, save, with the saved PNG bytes verified
-against the fixture pyramid. The no-grants lane stages the TRUE store
-package (`host_permissions: []`, asserted from the zip) without a click,
-so no activeTab grant exists and `tabs.get` hides the target URL exactly
-as in production without approval; it proves the failure modes stay
-honest: no webRequest host-permission warnings from any extension context,
-and the bound Scan fails fast with a no-target-access message guiding back
-to the toolbar button instead of scanning deaf for 20s and reporting a
-misleading "no candidate". The prompt-denial path cannot settle headlessly
-(an undisplayable permission prompt never resolves), so it is covered by
-unit tests (`ensureOriginAccess` matrix) plus the static gate that the
-denial throws before any listener is installed. A CORS-blocked fixture asserts tainted display-only with no
+Browser chrome cannot be clicked headlessly, so the toolbar lifecycle is
+covered by unit harnesses driving the real background module with
+production-faithful fakes through arm, own-reload survival, post-complete
+injection, error-badge presentation, and every disarm rule. The headless E2E
+runs the actual in-browser modal flow in both engines over the loopback
+fixture-server with an E2E-only exact-origin host grant: the injected loader
+collects the tab's performance timeline, the modal performs WASM discovery,
+fetches tiles, assembles, and saves, with the saved PNG verified against the
+fixture pyramid. A CORS-blocked fixture asserts tainted display-only with no
 pixel reads (`originClean` false, `<img>` visible, no
 `toBlob`/`toDataURL`/hashing), and a cookie/auth fixture asserts the pass
 through tab-context fetch.

@@ -153,7 +153,7 @@ test("navigation to a different url disarms (grey, no stale results)", async () 
   assert.equal(calls.sendMessage.length, before, "no updates after navigation away");
 });
 
-test("injection failure disarms instead of claiming a monitor", async () => {
+test("injection failure remains visible instead of silently returning to idle", async () => {
   const fake = createFakeBrowser();
   fake.api.scripting.executeScript = (args) => {
     fake.calls.executeScript.push(args);
@@ -168,41 +168,26 @@ test("injection failure disarms instead of claiming a monitor", async () => {
   await tick(); await tick();
 
   const lastIcon = calls.setIcon.at(-1);
-  assert.ok(lastIcon && lastIcon.path["16"] === "icons/icon16-grey.png", "failed injection restores grey (never claims a monitor)");
+  const lastBadge = calls.setBadgeText.at(-1);
+  assert.ok(lastIcon && lastIcon.path["16"] === "icons/icon16.png", "failed injection keeps an actionable error state");
+  assert.equal(lastBadge?.text, "!", "failed injection shows an error badge");
   assert.equal(calls.reload.length, 1, "the single reload still ran once");
 });
 
-test("open-panel fallback carries the click-time origin for precise scoping", async () => {
-  // The bound page can only scope its observation (and its one-time origin
-  // request) when it knows the origin. The background learned the clicked
-  // tab's URL under the click-time grant, so it threads the origin through
-  // `&origin=`; without it the page would face a hidden tab URL with no way
-  // to name the scope (and must fail honestly instead).
+test("modal failure keeps the action visibly failed until a second click", async () => {
   const fake = createFakeBrowser();
   await loadBackground(fake);
   const { listeners, calls } = fake;
-
   await listeners.onClicked[0]({ ...TAB });
   await tick(); await tick();
   for (const fn of listeners.onUpdated) fn(TAB.id, { status: "complete", url: TAB.url });
   await tick(); await tick();
-  assert.equal(calls.executeScript.length, 1, "modal injected post-reload");
-
-  // The injected loader reports a blocked job iframe from the armed tab.
   for (const fn of listeners.onMessage) {
-    fn({ type: "dezoomify-open-panel" }, { tab: { id: TAB.id } }, () => {});
+    fn({ type: "dezoomify-modal-failed", code: "modal-start-failed" }, { tab: { id: TAB.id } }, () => {});
   }
-  assert.equal(calls.tabsCreate.length, 1, "fallback opens exactly one bound page");
-  const opened = calls.tabsCreate[0].url;
-  assert.ok(
-    opened.startsWith("chrome-extension://fake/page/page.html?tab=7"),
-    "fallback targets exactly the armed tab, got: " + opened,
-  );
-  assert.ok(
-    opened.includes("origin=" + encodeURIComponent("https://gallery.example")),
-    "fallback hands over the click-time origin, got: " + opened,
-  );
-  assert.equal(calls.setIcon.at(-1).path["16"], "icons/icon16-grey.png", "fallback disarms (grey restored)");
+  assert.equal(calls.setBadgeText.at(-1).text, "!", "modal failure shows an error badge");
+  await listeners.onClicked[0]({ ...TAB });
+  assert.equal(calls.setBadgeText.at(-1).text, "", "second click dismisses the failed monitor");
 });
 
 test("rejecting setIcon/setBadgeText never surfaces (cosmetic only)", async () => {

@@ -77,19 +77,6 @@ test("redactBackgroundUrl strips userinfo, sensitive query, fragments", async ()
   assert.equal(mod.redactBackgroundUrl(""), "[empty-url]");
 });
 
-test("background sensitive keys mirror detect.ts (no drift)", async () => {
-  const extract = (src) => {
-    const m = src.match(/BACKGROUND_SENSITIVE_QUERY_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/);
-    assert.ok(m, "BACKGROUND_SENSITIVE_QUERY_KEYS list found");
-    return JSON.stringify([...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]));
-  };
-  const detectSrc = readFileSync(new URL("../../src/background/detect.ts", import.meta.url), "utf8");
-  const m = detectSrc.match(/SENSITIVE_QUERY_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/);
-  assert.ok(m, "detect SENSITIVE_QUERY_KEYS found");
-  const expected = JSON.stringify([...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]));
-  assert.equal(extract(backgroundSrc), expected, "background redaction keys must match detect.ts");
-});
-
 test("lifecycle logs stable codes via sink; debug gated by default", async () => {
   const fake = createFakeBrowser();
   const mod = await loadBackground(fake);

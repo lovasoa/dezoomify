@@ -22,9 +22,9 @@
  *   (`#dezoomify-modal-host`) holding the `chrome.runtime.getURL` iframe
  *   (`modal/modal.html`). The loader notifies the background
  *   (`dezoomify-byte-confirmed`) so URL collection stops. A blocked iframe
- *   falls back to the bound page (`dezoomify-open-panel`).
+ *   reports a visible failure in the clicked tab if the job iframe is blocked.
  *
- * Candidate rules mirror `page/candidates.ts` (`validateCandidateUrl`):
+ * Candidate rules mirror `runtime/candidates.ts` (`validateCandidateUrl`):
  * http/https only, bounded length. Format recognition stays the core's job
  * (bytes via DiscoverySession); URL text alone is never detection: many
  * formats require response bytes to be recognized.
@@ -169,6 +169,27 @@ export function createInTabModal(deps) {
     }
   }
 
+  function showStartupFailure(message) {
+    if (!mounted) return;
+    try {
+      if (observer && typeof observer.disconnect === "function") observer.disconnect();
+    } catch {
+      // Failure presentation must not be blocked by observer cleanup.
+    }
+    observer = null;
+    try {
+      if (host && host.dataset) host.dataset.state = "error";
+    } catch {
+      // Dataset is cosmetic only.
+    }
+    setStatus("Dezoomify could not start: " + message + " Close this message and try again.");
+    notifyBackground({
+      type: "dezoomify-modal-failed",
+      code: "modal-start-failed",
+      detail: message,
+    });
+  }
+
   function forwardToFrame() {
     // Best-effort live forward: the probe iframe re-reads the snapshot on
     // its own handshake, and the modal iframe accepts repeat
@@ -237,6 +258,17 @@ export function createInTabModal(deps) {
       byteConfirmed = true;
       revealJobPhase();
       notifyBackground({ type: "dezoomify-byte-confirmed" });
+      return;
+    }
+    if (data.kind === "dz-modal-error") {
+      // Keep the failed job iframe visible. Never silently collapse back to a
+      // grey icon when the in-browser job has a user-visible error.
+      revealJobPhase();
+      notifyBackground({
+        type: "dezoomify-modal-failed",
+        code: typeof data.code === "string" ? data.code : "job-failed",
+        detail: typeof data.message === "string" ? data.message : "image job failed",
+      });
       return;
     }
     if (data.kind === "dz-modal-close") {
@@ -413,11 +445,9 @@ export function createInTabModal(deps) {
     readyTimer = timerSet(() => {
       readyTimer = null;
       if (!mounted) return;
-      // The iframe never came alive (blocked embed): fall back to the bound
-      // page flow instead of stranding the user. The background owns the tab
-      // id, so it opens `page.html?tab=` for exactly this tab.
-      notifyBackground({ type: "dezoomify-open-panel" });
-      detach("frame-blocked");
+      // The iframe never came alive. Keep this error in the tab instead of
+      // removing the card or opening a second extension page.
+      showStartupFailure("the job window was blocked by the browser");
     }, 8000);
   }
 
@@ -554,7 +584,6 @@ try {
   const hasDom = typeof document !== "undefined" && typeof window !== "undefined";
   const already = g && g.__dezoomifyInTabMounted === true;
   if (hasBrowser && hasDom && !already) {
-    g.__dezoomifyInTabMounted = true;
     createInTabModal({
       document,
       window,

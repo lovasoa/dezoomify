@@ -10,9 +10,8 @@
  *
  * Plain JavaScript + JSDoc.
  *
- * Status: covered by unit tests; the v1 extension page (`page/page.ts`)
- * drives the guarded session fetcher directly. Wire this integration when
- * the extension page adopts the shared UI.
+ * Status: covered by unit tests; the shipped modal drives the guarded session
+ * fetcher directly. The integration remains host-neutral test infrastructure.
  */
 
 /**

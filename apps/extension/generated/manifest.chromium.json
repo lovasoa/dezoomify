@@ -33,7 +33,6 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "webRequest",
     "nativeMessaging"
   ],
   "version": "3.0.0",

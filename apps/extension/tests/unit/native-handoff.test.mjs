@@ -7,7 +7,7 @@ async function loadTs(rel) {
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(src)}`);
 }
 
-const handoff = await loadTs("../../src/page/nativeHandoff.ts");
+const handoff = await loadTs("../../src/runtime/nativeHandoff.ts");
 
 function fakeHost({ handoffCapable = true, negotiatedVersion = 2 } = {}) {
   const calls = [];
@@ -224,7 +224,7 @@ test("consent details carry names only; drop overwrites values", async () => {
 });
 
 test("wire shapes match the native host envelope", async () => {
-  const src = readFileSync(new URL("../../src/page/nativeHandoff.ts", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../src/runtime/nativeHandoff.ts", import.meta.url), "utf8");
   for (const kind of ['"handshake"', '"negotiate"', '"consent"', '"credential"', '"decline"']) {
     assert.ok(src.includes(kind), `client must speak ${kind}`);
   }

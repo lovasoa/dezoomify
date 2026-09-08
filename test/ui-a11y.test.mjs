@@ -381,13 +381,13 @@ test("axe gate: modal dialogs are labelled, modal, and dismissible by name", () 
   levels.remove();
 });
 
-test("axe gate: extension page shell carries document language, viewport, and the shared mount", () => {
-  const html = fs.readFileSync(path.join(rootDir, "apps/extension/src/page/page.html"), "utf8");
-  assert.match(html, /<html[^>]*lang="en"/, "page declares its language");
-  assert.match(html, /name="viewport"[^>]*width=device-width/, "page keeps the mobile viewport");
-  assert.match(html, /<title>[^<]+<\/title>/, "page keeps a document title");
-  assert.match(html, /id="dz-app"/, "page keeps the shared-UI mount");
-  assert.match(html, /<link rel="stylesheet" href="vendor\/theme\.css" \/>/, "page links the vendored canonical theme");
+test("axe gate: extension modal carries document language, viewport, and the shared mount", () => {
+  const html = fs.readFileSync(path.join(rootDir, "apps/extension/src/modal/modal.html"), "utf8");
+  assert.match(html, /<html[^>]*lang="en"/, "modal declares its language");
+  assert.match(html, /name="viewport"[^>]*width=device-width/, "modal keeps the mobile viewport");
+  assert.match(html, /<title>[^<]+<\/title>/, "modal keeps a document title");
+  assert.match(html, /id="dz-modal-app"/, "modal keeps the shared-UI mount");
+  assert.match(html, /<link rel="stylesheet" href="\.\.\/vendor\/theme\.css" \/>/, "modal links the vendored canonical theme");
   assert.doesNotMatch(html, /tabindex="[1-9]/, "no positive tabindex steals Tab order");
 });
 
@@ -406,10 +406,10 @@ test("axe gate: visible focus and reduced-motion guards stay in the theme", () =
     assert.ok(css.includes(selector), `theme keeps a visible focus ring for ${selector}`);
   }
   assert.match(css, /prefers-reduced-motion/, "theme honors reduced motion");
-  // The extension page links the vendored canonical theme (byte-identical
+  // The extension modal links the vendored canonical theme (byte-identical
   // per the extension shared-ui parity suite), so the guard applies there.
-  const page = fs.readFileSync(path.join(rootDir, "apps/extension/src/page/page.html"), "utf8");
-  assert.match(page, /vendor\/theme\.css/, "extension page inherits the reduced-motion guard from the theme");
+  const modal = fs.readFileSync(path.join(rootDir, "apps/extension/src/modal/modal.html"), "utf8");
+  assert.match(modal, /vendor\/theme\.css/, "extension modal inherits the reduced-motion guard from the theme");
 });
 
 test("axe gate: confirm dialog names its actions and focuses decline first", async () => {
