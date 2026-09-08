@@ -149,6 +149,7 @@ jobs:
           done
           v="$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["release"]["version"])')"
           mkdir -p target/release-dist
+          rm -rf "target/release-dist/$v"
           mv "dist/$v" target/release-dist/
           test -f "target/release-dist/$v/plan.json"
       - run: |
