@@ -1,6 +1,6 @@
 [package]
 name = "dezoomify-desktop"
-version = "3.0.0"
+version = "3.0.1"
 edition.workspace = true
 license.workspace = true
 description = "Dezoomify desktop shell (lean offline shell by default; real Tauri window behind the `tauri` feature)"
