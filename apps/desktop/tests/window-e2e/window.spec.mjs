@@ -31,6 +31,7 @@ import {
   redactedOriginOnly,
   assertReportRedacted,
   closeFrontend,
+  killTree,
 } from "./harness.mjs";
 import { goldenOutputHash, assertSavedPyramid, decodePngSize } from "./png-assert.mjs";
 
@@ -439,8 +440,12 @@ function parseJpegSize(bytes) {
 // Manual lifecycle for flows that relaunch the app on one shared profile
 // (settings round-trip) or navigate the launch URL (idle prefill).
 // `series` runs sequentially: one fixture server, fresh driver ports and one
-// app launch per step, same HOME every step. Profiles and temp work are
-// removed afterwards even on failure.
+// app launch per step, same HOME every step. Teardown SIGKILLs the whole
+// detached driver tree per step (the harness killTree the managed flows
+// use): a plain kill of the driver leader orphans half-booted app children
+// that wedge later series with `no WebDriver session` and hold our pipes
+// open past the spec. Profiles and temp work are removed afterwards even
+// on failure.
 async function runProfileSeries({ nativeDriverBin, fixedName = "saved.png", series }) {
   ensureDisplay();
   ensureWindowShell();
@@ -472,7 +477,15 @@ async function runProfileSeries({ nativeDriverBin, fixedName = "saved.png", seri
         await series[i]({ driver, base: fixture.base, home, fixedDest, work, appEnv, requestLog });
       } finally {
         if (driver) await driver.quit().catch(() => {});
-        driverProc.proc.kill();
+        killTree(driverProc.proc);
+        const reapUntil = Date.now() + 10000;
+        while (
+          driverProc.proc.exitCode === null
+          && driverProc.proc.signalCode === null
+          && Date.now() < reapUntil
+        ) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
       }
     }
   } finally {
