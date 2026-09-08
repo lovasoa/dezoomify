@@ -12,7 +12,7 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 /** @param {unknown} error */
-function engineError(error) {
+function engineError(error: unknown) {
   const raw = error instanceof Error ? error.message : String(error);
   let parsed = error;
   if (typeof parsed === "string") {
