@@ -109,10 +109,10 @@ test("desktop dev server serves the real entrypoint and shared theme", { timeout
     assert.match(html, /<script[^>]+src=["']\/src\/main\.tsx(?:\?[^"']*)?["']/);
     const main = await fetchWithTimeout(new URL("/src/main.tsx", DEV_URL));
     assert.equal(main.status, 200, "Vite serves the desktop entrypoint");
-    assert.match(html, /packages\/shared-ui\/src\/styles\/theme\.css/, "desktop document links the shared theme");
+    assert.match(html, /src\/theme\.css/, "desktop document links the shared theme");
     assert.match(html, /src\/desktop\.css/, "desktop document links its native controls stylesheet");
 
-    const theme = await fetchWithTimeout(new URL("/packages/shared-ui/src/styles/theme.css", DEV_URL));
+    const theme = await fetchWithTimeout(new URL("/src/theme.css", DEV_URL));
     assert.equal(theme.status, 200, "Vite serves the imported shared theme");
     const themeSource = await theme.text();
     assert.match(themeSource, /--dz-page-bg\s*:/, "shared theme contains page colors");

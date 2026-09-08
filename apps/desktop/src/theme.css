@@ -1,0 +1,4 @@
+/* Serve the shared theme through the desktop Vite root. This keeps the
+ * document stylesheet loadable by both the Tauri dev webview and production
+ * bundle, rather than relying on Vite injecting a style tag at runtime. */
+@import "../../../packages/shared-ui/src/styles/theme.css";
