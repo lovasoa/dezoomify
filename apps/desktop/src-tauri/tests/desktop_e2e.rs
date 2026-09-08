@@ -347,6 +347,8 @@ fn desktop_e2e_save_flow_verifies_real_png() {
     grant_destination_until_running(&mut table, &job, &dest);
     let state = wait_for_terminal(&mut table, &job, Duration::from_secs(90));
     assert_eq!(state, JobState::Completed, "save flow completes");
+    assert_eq!(table.saved_output_for(&job), Some(dest.clone()));
+    assert!(table.saved_output_for("job:unknown").is_none());
 
     let snapshot = table.output_snapshot_for(&job).expect("output snapshot");
     assert_eq!(
@@ -496,6 +498,7 @@ fn desktop_e2e_partial_keep_is_honest_with_sibling() {
         "kept partial ends partial-completed, never completed"
     );
     assert!(sibling.exists(), "kept bytes land at the sibling");
+    assert_eq!(table.saved_output_for(&job), Some(sibling.clone()));
     assert!(
         !dest.exists(),
         "granted destination untouched by the partial publish"

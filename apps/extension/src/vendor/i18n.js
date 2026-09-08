@@ -115,6 +115,13 @@ function parseAcceptLanguage(header        )                {
 }
 
 const en = {
+  "desktop.done.title": "Image saved",
+  "desktop.done.partial": "Image saved with gaps",
+  "desktop.done.size": "{width} × {height} pixels",
+  "desktop.done.saved": "Saved in your chosen folder.",
+  "desktop.done.open": "Open image",
+  "desktop.done.reveal": "Show in folder",
+  "desktop.done.openError": "Could not open the saved image. It may have been moved or deleted.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Got it",
   "view.modal.closeDialog": "Close dialog",

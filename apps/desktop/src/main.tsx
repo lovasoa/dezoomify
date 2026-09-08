@@ -261,7 +261,6 @@ let desktopSettings: DesktopSettings = loadSettings();
 grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
 
 function persistOutputFormat(format: NativeFormat): void {
-  if (format === "iiif-dir") return;
   if (desktopSettings.outputFormat === format) return;
   desktopSettings = { ...desktopSettings, outputFormat: format };
   saveSettings(desktopSettings);
@@ -1073,11 +1072,10 @@ function handleCancel(): void {
   update();
 }
 
-// Shared save-destination grant path for the Save button and the
-// choose-output recovery choice. On grant, walks the controller into saving;
+// Destination recovery grants a replacement output. On grant, walks the controller into saving;
 // completion itself arrives via dezoomify://job-output (exactly-once
 // terminal guard ignores any duplicate).
-function requestOutputAndResume(origin: string): void {
+function requestOutputAndResume(): void {
   const job = currentJobId;
   if (!job || isTerminalStatus(controller.getState().status)) return;
   const format = normalizeNativeFormat(grantedFormat);
@@ -1086,7 +1084,7 @@ function requestOutputAndResume(origin: string): void {
     catalogNotice?.width ?? viewCtx.imageChoice?.width ?? viewCtx.completedInfo?.width,
     catalogNotice?.height ?? viewCtx.imageChoice?.height ?? viewCtx.completedInfo?.height,
   );
-  pushLog(origin === "choose-output" ? "Requesting save destination…" : "Requesting save destination (save)…");
+  pushLog("Requesting save destination…");
   void integration
     .requestSaveDestination({ jobId: job, format, suggestedName })
     .then(
@@ -1127,8 +1125,20 @@ function requestOutputAndResume(origin: string): void {
     );
 }
 
-function handleSave(): void {
-  requestOutputAndResume("save");
+async function handleOpenOutput(reveal: boolean): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke || !currentJobId) return;
+  try {
+    await invoke("open_saved_output", { job: currentJobId, reveal });
+  } catch {
+    const section = root?.querySelector(".dz-completed-section");
+    if (!section || section.querySelector("#dz-open-error")) return;
+    const note = section.ownerDocument.createElement("p");
+    note.id = "dz-open-error";
+    note.setAttribute("role", "alert");
+    note.textContent = t("desktop.done.openError");
+    section.appendChild(note);
+  }
 }
 
 // Recovery: retry the outstanding decision (destination -> back to
@@ -1170,35 +1180,6 @@ function handlePartialChoice(keep: boolean): void {
     },
     t("desktop.invoke.partial"),
   );
-}
-
-// Recovery: hand the job to another app. The desktop app is already native,
-// so this validates the bounded non-secret source and records the outcome;
-// the user keeps working here afterwards.
-function handleHandoffToNative(): void {
-  const decision = pendingDecision;
-  if (!decision || isTerminalStatus(controller.getState().status)) return;
-  if (!lastInputUrl) return;
-  pushLog("Checking handoff to another app…");
-  void integration
-    .requestHandoff({ sourceUrl: lastInputUrl, provenanceLabel: "desktop" })
-    .then(
-      (result) => {
-        pushLog(
-          result.accepted
-            ? `Handoff ready: ${result.reason}`
-            : `Handoff rejected: ${result.reason}`,
-        );
-        const a = activity();
-        a.detail = result.accepted ? t("desktop.handoff.acceptedDetail") : t("desktop.handoff.rejectedDetail");
-        touchProgress();
-        update();
-      },
-      (error: unknown) => {
-        pushLog(`Handoff check failed: ${error instanceof Error ? error.message : "unknown error"}`);
-        update();
-      },
-    );
 }
 
 function handleReset(): void {
@@ -2028,7 +2009,7 @@ function ensureDesktopAuxPanel(): void {
   aux.className = "dz-view-body dz-desktop-aux";
   aux.setAttribute("role", "region");
   aux.setAttribute("aria-label", t("desktop.panel.jobActions"));
-  appendOutputFormatRadios(aux, doc);
+  if (decision && decision.kind !== "partial-recovery") appendOutputFormatRadios(aux, doc);
 
   let decisionBox: HTMLElement | null = null;
 
@@ -2081,15 +2062,13 @@ function ensureDesktopAuxPanel(): void {
       title.textContent = t("desktop.rec.destTitle");
       desc.textContent = t("desktop.rec.destDesc");
       decisionBox.append(title, desc, row);
-      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume("choose-output"));
+      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
       addButton(t("desktop.rec.tryAgain"), false, () => handleRecoveryRetry());
-      addButton(t("desktop.rec.useOther"), false, () => handleHandoffToNative());
     } else {
       title.textContent = t("desktop.rec.chooseTitle");
       desc.textContent = t("desktop.rec.chooseDesc");
       decisionBox.append(title, desc, row);
-      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume("choose-output"));
-      addButton(t("desktop.rec.useOther"), false, () => handleHandoffToNative());
+      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
     }
     decisionBox.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -2162,7 +2141,7 @@ function ensureDesktopAuxPanel(): void {
     aux.appendChild(note);
   }
 
-  appendDesktopQueuePanel(aux, doc);
+  if (state.status !== "completed" && desktopQueue.entries.length > 1) appendDesktopQueuePanel(aux, doc);
 
   if (showCopy) {
     const copyRow = doc.createElement("div");
@@ -2174,7 +2153,16 @@ function ensureDesktopAuxPanel(): void {
     copyBtn.textContent = t("desktop.copy.diagnostics");
     copyBtn.addEventListener("click", () => handleCopyDiagnostics(() => buildCopyDiagnostics(diagnosticsSnapshot())));
     copyRow.appendChild(copyBtn);
-    aux.appendChild(copyRow);
+    if (state.status === "completed") {
+      const details = doc.createElement("details");
+      details.id = "dz-completed-details";
+      const summary = doc.createElement("summary");
+      summary.textContent = t("view.job.techDetails");
+      details.append(summary, copyRow);
+      aux.appendChild(details);
+    } else {
+      aux.appendChild(copyRow);
+    }
   }
 
   card.appendChild(aux);
@@ -2332,8 +2320,16 @@ function update() {
       onReset() {
         handleReset();
       },
-      onSave() {
-        handleSave();
+      ...(state.status === "completed" ? {
+        onOpenOutput: () => { void handleOpenOutput(false); },
+        onRevealOutput: () => { void handleOpenOutput(true); },
+      } : {}),
+      onHistorySelect(entry: HistoryEntry) {
+        viewCtx.initialUrl = entry.url;
+        const input = root.querySelector<HTMLInputElement>("#dz-url-input");
+        if (input) input.value = entry.url;
+        update();
+        root.querySelector<HTMLInputElement>("#dz-url-input")?.focus();
       },
       onSelectImage(index: number) {
         handleSelectImage(index);
@@ -2359,6 +2355,7 @@ function update() {
       },
       ...(viewCtx.currentProgress ? { currentProgress: viewCtx.currentProgress } : {}),
       ...(viewCtx.completedInfo ? { completedInfo: viewCtx.completedInfo } : {}),
+      ...(state.status === "completed" ? { nativeSaved: { partial: completedPartial } } : {}),
       ...(viewCtx.jobActivity ? { jobActivity: viewCtx.jobActivity } : {}),
       ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
       ...(auxChoice ? { imageChoice: auxChoice } : {}),
@@ -2366,13 +2363,14 @@ function update() {
     },
   );
   ensureDesktopAuxPanel();
-  ensureDesktopSettingsPanel({
+  if (state.status === "idle") ensureDesktopSettingsPanel({
     root,
     settings: desktopSettings,
     error: settingsError,
     onPersist: () => runPersistSettingsFromPanel(),
     onReset: () => runResetDesktopSettings(),
   });
+  else root.ownerDocument.getElementById("dz-desktop-settings")?.remove();
   ensureDesktopExternalNav();
   ensureDesktopFooter();
 }

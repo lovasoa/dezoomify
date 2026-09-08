@@ -52,12 +52,22 @@ title as the basename, adds the format extension, and appends a numeric suffix
 when needed rather than replacing an existing output. JPEG quality is `100 - compression` with the shipped default
 compression 5 pinning quality 95; the settings panel (output directory,
 compression, width/height caps, retries, cache directory, `-H` headers) plus
-the aux-panel format radios persist across relaunches and fail closed to
+the main-screen format selector persist across relaunches and fail closed to
 defaults on invalid drafts. Overwrite is always false: no overwrite
 confirmation UI exists, so automatic desktop output never replaces an
 existing destination.
 User-visible behavior lives in the [Desktop app guide](user/desktop-app.md);
 this section states the mechanism only.
+
+Settings render only while idle. Format radios appear only for destination
+recovery; the completion screen contains neither settings nor a queue.
+History selection prefills the input without starting work. Completion uses
+native saved-output copy and explicit open/reveal callbacks, without browser
+save or color-profile guidance. `open_saved_output` accepts a job id and a
+reveal flag; the job table retains the actual published path natively and
+permits these actions only for completed or partially completed jobs. The
+Tauri opener uses the platform default handler or reveals the item in its
+containing folder. No caller-supplied path is accepted or returned over IPC.
 
 The native desktop path emits no catalog notice and no display-only branch.
 The driver folds the catalog internally (first image, largest fitting level;
@@ -80,17 +90,11 @@ complete save, and `--no-partial`/`Fail` writes nothing with typed
 `request-decision{partial}` itself from the configured policy, so the shell
 never surfaces `AwaitingPartialDecision` and no interactive partial dialog is
 expected; `answer_choice` keep/discard markers still map onto the policy for
-the pre-grant window. The shell honors the file-level distinction today but
-not the terminal label: the real-driver pump maps every successful driver
-finish to `Completed`/`completed` on `job-output` (`DriverSuccess` drops the
-`PipelineOutcome.partial` flag), so a kept-partial save reports completion
-while the bytes live at the sibling path. The `PartiallyCompleted` state and
-the `partial-completed` output projection exist and the frontend already
-handles them, but only test helpers reach them today. When the sibling fix
-lands (thread `partial` through `DriverSuccess` and project kept-partial
-finishes as `PartiallyCompleted` with a `partial-completed` event), update
-this paragraph to state the labeled terminal and re-check the window E2E
-sibling assertions.
+the pre-grant window. The real-driver pump retains the partial flag, missing
+tile ledger, and actual published path. Kept partials end in
+`PartiallyCompleted` with a `partial-completed` event and a distinct completion
+label. Open and reveal actions resolve the partial sibling, never the
+untouched original destination.
 
 ### Desktop updater
 

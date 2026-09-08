@@ -1,7 +1,7 @@
 // Real Tauri window shell (behind the `tauri` feature).
 //
 // One local window (`main`), strict navigation policy from
-// tauri.conf.json (no remote IPC access, strict CSP), and the exact five
+// tauri.conf.json (no remote IPC access, strict CSP), and the exact
 // commands of the generated capability documents wired to the pure job
 // table. No tile bytes cross IPC, only protocol progress and events.
 //
@@ -15,6 +15,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::{self, CommandError};
 use crate::deep_link;
@@ -24,6 +25,33 @@ use dezoomify_native::output::{validate_destination, OutputFormat};
 
 /// Command registry, mirrored from the pure layer for compile-time checks.
 const COMMANDS: &[&str] = commands::COMMANDS;
+
+/// Open only an output published by this app; callers never supply paths.
+#[tauri::command]
+async fn open_saved_output(
+    app: AppHandle,
+    table: State<'_, Mutex<JobTable>>,
+    job: String,
+    reveal: bool,
+) -> Result<(), CommandFailure> {
+    let path = table
+        .lock()
+        .ok()
+        .and_then(|table| table.saved_output_for(&job))
+        .ok_or_else(|| CommandFailure {
+            code: "output.unavailable".into(),
+            message: "The saved image is unavailable.".into(),
+        })?;
+    let result = if reveal {
+        app.opener().reveal_item_in_dir(&path)
+    } else {
+        app.opener().open_path(path.to_string_lossy(), None::<&str>)
+    };
+    result.map_err(|_| CommandFailure {
+        code: "output.open-failed".into(),
+        message: "Could not open the saved image. It may have been moved or deleted.".into(),
+    })
+}
 
 #[derive(Serialize)]
 struct CommandFailure {
@@ -74,6 +102,7 @@ struct CapabilitySnapshot {
 /// - `job-progress`: `{job,jobId,seq,kind,state,acquired,total,detail,origin}`
 /// - `job-output`: `{job,jobId,seq,kind,state,outputHash,format,width,height,tileCount,detail,origin}`
 /// - `job-error`: `{job,jobId,seq,kind,state,code,phase,retryable,recovery,message,detail,origin,transport,resource-kind}`
+///
 /// Only counts, hashes, codes, and the redacted origin cross IPC; tile
 /// bytes, paths, full URLs, and secrets never do. `resource-kind` is emitted
 /// alongside the `resource_kind` alias for frontend compatibility.
@@ -510,6 +539,7 @@ pub fn run() {
             answer_choice,
             request_destination,
             query_capabilities,
+            open_saved_output,
         ])
         .setup(|app| {
             // Initial launch may itself carry a deep link

@@ -253,6 +253,8 @@ pub struct JobRecord {
     /// and passed to `pipeline::run` for atomic publish. `None` until
     /// `request_destination`.
     pub destination: Option<PathBuf>,
+    /// Actual published output, retained natively for explicit open/reveal actions.
+    pub saved_path: Option<PathBuf>,
     /// Granted format id (`png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir`).
     pub destination_format: Option<String>,
     /// Whether the user confirmed overwriting an existing destination.
@@ -373,6 +375,7 @@ pub struct ProjectedEmit {
 /// Terminal driver result delivered by the background worker.
 #[derive(Debug, Clone)]
 struct DriverSuccess {
+    saved_path: PathBuf,
     output_hash: String,
     format: String,
     width: u32,
@@ -504,6 +507,17 @@ impl JobTable {
     /// Snapshot of the driver destination, if granted.
     pub fn destination_for(&self, job: &str) -> Option<PathBuf> {
         self.jobs.get(job).and_then(|r| r.destination.clone())
+    }
+
+    pub fn saved_output_for(&self, job: &str) -> Option<PathBuf> {
+        let record = self.jobs.get(job)?;
+        if !matches!(
+            record.state,
+            JobState::Completed | JobState::PartiallyCompleted
+        ) {
+            return None;
+        }
+        record.saved_path.clone()
     }
 
     /// Digest of the bytes the driver wrote, if published.
@@ -939,6 +953,7 @@ impl JobTable {
                 cancel_flag,
                 pipeline_config,
                 destination: None,
+                saved_path: None,
                 destination_format: None,
                 destination_overwrite: false,
                 output_dir: None,
@@ -1547,6 +1562,7 @@ impl JobTable {
                             .and_then(|name| name.to_str())
                             .map(str::to_string);
                         Ok(DriverSuccess {
+                            saved_path: outcome.output_path,
                             output_hash: outcome.output_hash,
                             format: outcome.format,
                             width: outcome.image_size.x,
@@ -1790,6 +1806,9 @@ impl JobTable {
                     }
                     match result {
                         Ok(success) => {
+                            if let Some(record) = self.jobs.get_mut(&job) {
+                                record.saved_path = Some(success.saved_path.clone());
+                            }
                             if success.partial {
                                 // Honest partial terminal: `partial-completed`
                                 // with the missing ledger plus the sibling

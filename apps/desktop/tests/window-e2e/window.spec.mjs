@@ -122,6 +122,9 @@ async function snapshot(driver) {
         && !document.querySelector(${JSON.stringify(SEL.completed)})
         && !document.querySelector(${JSON.stringify(SEL.error)}),
       completed: !!document.querySelector(${JSON.stringify(SEL.completed)}),
+      openOutput: !!document.querySelector("#dz-btn-open"),
+      revealOutput: !!document.querySelector("#dz-btn-reveal"),
+      redundantOutputControls: !!document.querySelector("#dz-btn-save, #dz-desktop-settings, .dz-queue-panel, #dz-output-format-group"),
       completedSummary: text(${JSON.stringify(SEL.completedSummary)}),
       error: !!document.querySelector(${JSON.stringify(SEL.error)}),
       errorDiagnostics: text(${JSON.stringify(SEL.errorDiagnostics)}),
@@ -248,8 +251,11 @@ test("real window: submit, destination grant, byte-exact save", { timeout: 18000
         }
       })();
       assert.equal(terminal.error, false, "no error section on the save flow");
+      assert.equal(terminal.openOutput, true, "saved image can be opened");
+      assert.equal(terminal.revealOutput, true, "saved image can be revealed");
+      assert.equal(terminal.redundantOutputControls, false, "completion contains no save, settings, or queue controls");
       assertCountsMonotonic(samples);
-      assert.match(terminal.completedSummary ?? "", /512 by 512/, "completed summary names the geometry");
+      assert.match(terminal.completedSummary ?? "", /512 × 512/, "completed summary names the geometry");
       assert.ok(existsSync(fixedDest), "output written to the fixed destination");
       assertSavedPyramid(readFileSync(fixedDest), hash);
       const text = redactedReport("save", {
@@ -358,7 +364,7 @@ test("real window: deep link waits for confirm, then saves", { timeout: 180000 }
       assert.equal(await clickChooseOutput(driver), true, "choose-output action clicked");
       const terminal = await waitFor(driver, (s) => s.completed || s.error, 120000, "confirmed save terminal");
       assert.equal(terminal.error, false, "no error section on the confirmed save");
-      assert.match(terminal.completedSummary ?? "", /512 by 512/, "completed summary names the geometry");
+      assert.match(terminal.completedSummary ?? "", /512 × 512/, "completed summary names the geometry");
       assertSavedPyramid(readFileSync(fixedDest), hash);
       const text = redactedReport("deep-link", {
         scenario: "native/cli-dzi",
@@ -867,6 +873,7 @@ test("real window: progress is monotonic; diagnostics copy redacted", { timeout:
         return false;
       })()`);
       assert.equal(stubbed, true, "clipboard sink stubbed");
+      await driver.findElement({ css: "#dz-completed-details summary" }).click();
       await driver.findElement({ css: SEL.copyDiag }).click();
       const copied = await (async () => {
         const start = Date.now();

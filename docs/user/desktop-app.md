@@ -41,8 +41,19 @@ its image, remove the resume folder and start fresh.
 ## Recent pictures
 
 The app keeps your last 20 saves on this device only. Each entry shows the
-full address, the picture size, the format, and the date. A **Clear history** button
-removes all entries.
+full address, the picture size, the format, and the date. Click an entry to
+put its address back in the main screen, where you can change the settings
+before starting again. **Clear history** removes all entries.
+
+## Saving and opening images
+
+Choose the folder, format, size, and network settings on the main screen.
+The app saves the image automatically in that folder. When **Image saved**
+appears, use **Open image** to open it with your usual image viewer, or
+**Show in folder** to find it in your file manager. There is no second save
+step. Settings and the queue do not appear on the finished image screen.
+If some parts could not be retrieved, the app labels the image as saved with
+gaps; the open actions use that partial file.
 
 ## Install
 

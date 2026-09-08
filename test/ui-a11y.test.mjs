@@ -142,7 +142,9 @@ function createMockElement(tagName) {
       el._focused = true;
       if (el.ownerDocument) el.ownerDocument.activeElement = el;
     },
-    addEventListener() {},
+    _listeners: new Map(),
+    addEventListener(type, handler) { el._listeners.set(type, handler); },
+    click() { el._listeners.get("click")?.({ target: el }); },
     removeEventListener() {},
     contains(node) {
       if (node === el) return true;
@@ -310,6 +312,45 @@ test("axe gate: failed view layers guidance with named recovery actions", () => 
   assertButtonsNamed(card, "failed");
   const report = card.querySelector(".dz-diagnostics-report");
   assert.ok(report, "bug-report path stays reachable from the failed view");
+});
+
+test("native completion opens saved output without browser save guidance", () => {
+  const done = makeContainer();
+  renderView(done,
+    { status: "completed", seq: 1, sessionId: "s1", imageCount: 1, transport: "native" },
+    { ...callbacks, onOpenOutput() {}, onRevealOutput() {} },
+    { nativeSaved: { partial: false }, completedInfo: { width: 100, height: 80, mime: "image/png" } },
+  );
+  assert.equal(done.querySelector("#dz-btn-save"), null);
+  assert.equal(done.querySelector("#dz-btn-open").textContent.trim(), "Open image");
+  assert.equal(done.querySelector("#dz-btn-reveal").textContent.trim(), "Show in folder");
+  assert.equal(done.querySelector(".dz-completed-title").textContent.trim(), "Image saved");
+  assert.doesNotMatch(done.querySelector(".dz-completed-guidance").textContent, /browser|color profile/i);
+});
+
+test("history rows select a source without submitting it", () => {
+  const container = makeContainer();
+  const entry = { url: 'https://museum.example/image', origin: 'https://museum.example', at: 1 };
+  let selected;
+  let submitted = false;
+  renderView(container, {status:'idle', seq:1, sessionId:'s1', imageCount:0},
+    {...callbacks, onSubmitUrl() { submitted = true; }, onHistorySelect(value) { selected = value; }},
+    {history:[entry]},
+  );
+  const button = container.querySelector('.dz-history-main');
+  assert.equal(button.tagName, 'BUTTON');
+  button.click();
+  assert.equal(selected, entry);
+  assert.equal(submitted, false);
+});
+
+test("completion treats saved filenames as text", () => {
+  const done = makeContainer();
+  renderView(done,
+    { status: "completed", seq: 1, sessionId: "s1", imageCount: 1 }, callbacks,
+    { savedOutput: { name: '<img src=x onerror=alert(1)>', width: 10, height: 10, doneTiles: 1, totalTiles: 1, failedTiles: 0 } },
+  );
+  assert.equal(done.querySelector(".dz-completed-summary").querySelector("img"), null);
 });
 
 test("axe gate: completed and display-only views keep every action named", () => {

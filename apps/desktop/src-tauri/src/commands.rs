@@ -16,6 +16,7 @@ pub const COMMANDS: &[&str] = &[
     "cancel_job",
     "answer_choice",
     "request_destination",
+    "open_saved_output",
     "query_capabilities",
 ];
 
@@ -79,7 +80,7 @@ impl CommandError {
     pub fn unknown_command(name: &str) -> Self {
         Self::new(
             "command.unknown",
-            &format!("unknown command {name}; allowed: start_job, cancel_job, answer_choice, request_destination, query_capabilities"),
+            &format!("unknown command {name}; allowed: {}", COMMANDS.join(", ")),
         )
     }
 
@@ -386,7 +387,7 @@ mod tests {
 
     #[test]
     fn registry_lists_exact_commands() {
-        assert_eq!(COMMANDS.len(), 5);
+        assert_eq!(COMMANDS.len(), 6);
         for name in [
             "start_job",
             "cancel_job",

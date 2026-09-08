@@ -14,6 +14,13 @@
 // `scripts/sync-web-js.mjs` can mirror it to `locales/fr.js` for browsers.
 
 export const fr = {
+  "desktop.done.title": "Image enregistrée",
+  "desktop.done.partial": "Image enregistrée avec des parties manquantes",
+  "desktop.done.size": "{width} × {height} pixels",
+  "desktop.done.saved": "Enregistrée dans le dossier choisi.",
+  "desktop.done.open": "Ouvrir l’image",
+  "desktop.done.reveal": "Afficher dans le dossier",
+  "desktop.done.openError": "Impossible d’ouvrir l’image. Elle a peut-être été déplacée ou supprimée.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Compris",
   "view.modal.closeDialog": "Fermer la boite de dialogue",

@@ -10,6 +10,13 @@
 // `scripts/sync-web-js.mjs` can mirror it to `locales/de.js` for browsers.
 
 export const de = {
+  "desktop.done.title": "Bild gespeichert",
+  "desktop.done.partial": "Bild mit Lücken gespeichert",
+  "desktop.done.size": "{width} × {height} Pixel",
+  "desktop.done.saved": "Im gewählten Ordner gespeichert.",
+  "desktop.done.open": "Bild öffnen",
+  "desktop.done.reveal": "Im Ordner anzeigen",
+  "desktop.done.openError": "Das Bild konnte nicht geöffnet werden. Es wurde möglicherweise verschoben oder gelöscht.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Verstanden",
   "view.modal.closeDialog": "Dialog schliessen",

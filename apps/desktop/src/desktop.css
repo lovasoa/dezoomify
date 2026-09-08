@@ -732,6 +732,26 @@ body {
   box-shadow: var(--dz-focus-ring);
 }
 
+.dz-history-main[type="button"] {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.dz-history-main[type="button"]:hover {
+  text-decoration: underline;
+}
+
+.dz-history-main[type="button"]:focus-visible {
+  box-shadow: var(--dz-focus-ring);
+}
+
 #dz-desktop-settings input:focus,
 #dz-desktop-settings textarea:focus {
   outline: none;

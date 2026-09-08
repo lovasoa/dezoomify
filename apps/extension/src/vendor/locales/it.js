@@ -14,6 +14,13 @@
 // `scripts/sync-web-js.mjs` can mirror it to `locales/it.js` for browsers.
 
 export const it = {
+  "desktop.done.title": "Immagine salvata",
+  "desktop.done.partial": "Immagine salvata con parti mancanti",
+  "desktop.done.size": "{width} × {height} pixel",
+  "desktop.done.saved": "Salvata nella cartella scelta.",
+  "desktop.done.open": "Apri immagine",
+  "desktop.done.reveal": "Mostra nella cartella",
+  "desktop.done.openError": "Impossibile aprire l’immagine. Potrebbe essere stata spostata o eliminata.",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Capito",
   "view.modal.closeDialog": "Chiudi la finestra",

@@ -29,6 +29,7 @@ const SUPPORTED_SAVE_FORMATS: readonly NativeFormat[] = NATIVE_FORMATS;
 export const DESKTOP_COMMANDS = [
   "answer_choice",
   "cancel_job",
+  "open_saved_output",
   "query_capabilities",
   "request_destination",
   "start_job",
