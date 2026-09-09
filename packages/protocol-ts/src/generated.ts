@@ -1,11 +1,11 @@
 // DO NOT EDIT: generated from crates/dezoomify-protocol/src/dto.rs
 // fingerprint: b4bad92b24615c58
-// limits-fingerprint: e820104e045e218d
+// limits-fingerprint: df9bb37ab989d644
 // protocol: 1.0
 
 export const PROTOCOL_VERSION = "1.0" as const;
 export const DTO_FINGERPRINT = "b4bad92b24615c58" as const;
-export const LIMITS_FINGERPRINT = "e820104e045e218d" as const;
+export const LIMITS_FINGERPRINT = "df9bb37ab989d644" as const;
 
 export const MAX_BROWSER_AREA = 268435456 as const;
 export const NATIVE_MAX_BYTES = 8589934592 as const;
@@ -19,6 +19,7 @@ export const FORMAT_GRID = [
   { id: "custom", displayName: "Custom tiles", powerUser: true },
   { id: "google_arts_and_culture", displayName: "Arts & Culture", powerUser: false },
   { id: "zoomify", displayName: "Zoomify", powerUser: false },
+  { id: "gigapan", displayName: "Gigapan", powerUser: false },
   { id: "iiif", displayName: "IIIF", powerUser: false },
   { id: "deepzoom", displayName: "Seadragon (Deep Zoom Image)", powerUser: false },
   { id: "generic", displayName: "Generic dezoomer", powerUser: false },

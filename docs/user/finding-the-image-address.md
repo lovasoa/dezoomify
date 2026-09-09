@@ -28,9 +28,9 @@ in there.
 3. With the log open, **reload the page** (F5) and zoom into the image.
 4. The log fills with rows, one per file. Look for a small file, usually a
    few kilobytes, whose name ends in `.json`, `.xml`, or `.dzi`. Common
-   names are `info.json` (IIIF), `ImageProperties.xml` (Zoomify), and
-   anything ending in `.dzi` (Deep Zoom). Tiles are the big files; ignore
-   them.
+   names are `info.json` (IIIF), `ImageProperties.xml` (Zoomify), a
+   Gigapan `.kml` file, and anything ending in `.dzi` (Deep Zoom). Tiles are
+   the big files; ignore them.
 5. Right-click that row, choose *Copy → Copy URL*, and paste the address
    into Dezoomify.
 

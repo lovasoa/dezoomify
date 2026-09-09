@@ -230,9 +230,9 @@ fn limits_grid_transports_single_generation() {
     // Transport labels stay single-sourced with browser-runtime types.ts.
     assert_eq!(DIRECT_TRANSPORT_LABEL, "Direct from your browser");
     assert_eq!(PROXY_TRANSPORT_LABEL, "Metadata proxy");
-    // Format grid mirrors registry.rs BUILTINS snapshot: 18 entries in
+    // Format grid mirrors registry.rs BUILTINS snapshot: 19 entries in
     // precedence order, with custom and bulk_text as power-user entries.
-    assert_eq!(FORMAT_GRID.len(), 18);
+    assert_eq!(FORMAT_GRID.len(), 19);
     assert_eq!(FORMAT_GRID.first(), Some(&("custom", "Custom tiles")));
     assert_eq!(FORMAT_GRID.last(), Some(&("bulk_text", "Bulk text")));
     assert_eq!(POWER_USER_FORMATS, &["custom", "bulk_text"]);
@@ -249,6 +249,7 @@ fn limits_grid_transports_single_generation() {
             "custom",
             "google_arts_and_culture",
             "zoomify",
+            "gigapan",
             "iiif",
             "deepzoom",
             "generic",
