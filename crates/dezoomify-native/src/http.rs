@@ -138,20 +138,25 @@ pub fn fetch(
     }
     let deadline = Instant::now() + limits.timeout;
     let mut redirects: usize = 0;
-    let mut builder = ureq::AgentBuilder::new()
-        .redirects(0)
-        .timeout_connect(limits.connect_timeout)
+    let mut builder = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .max_redirects(0)
+        .timeout_connect(Some(limits.connect_timeout))
         .max_idle_connections_per_host(limits.max_idle_per_host.max(1));
     if limits.tls.accept_invalid_certs {
-        builder = builder.tls_config(std::sync::Arc::new(insecure_client_config()?));
+        builder = builder.tls_config(
+            ureq::tls::TlsConfig::builder()
+                .disable_verification(true)
+                .build(),
+        );
     }
-    let agent = builder.build();
+    let agent = builder.build().into();
     loop {
         let response = fetch_once(&agent, &request, limits, &deadline)?;
-        let is_redirect =
-            REDIRECT_CODES.contains(&response.status()) && response.header("location").is_some();
+        let is_redirect = REDIRECT_CODES.contains(&response.status().as_u16())
+            && response.headers().get("location").is_some();
         if !is_redirect {
-            let status = response.status();
+            let status = response.status().as_u16();
             let final_uri = request.uri.clone();
             let body = read_body(response, limits)?;
             return Ok(FetchOutcome {
@@ -168,7 +173,9 @@ pub fn fetch(
         }
         redirects += 1;
         let location = response
-            .header("location")
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok())
             .ok_or_else(|| NativeError::new("transport.bad-redirect", "missing location"))?;
         let next = resolve_redirect(&request.uri, location)?;
         request = rebuild_for_redirect(&request, &next, auth)?;
@@ -233,7 +240,7 @@ fn fetch_once(
     request: &EffectiveRequest,
     limits: &FetchLimits,
     deadline: &Instant,
-) -> Result<ureq::Response, NativeError> {
+) -> Result<ureq::http::Response<ureq::Body>, NativeError> {
     let mut attempts = limits.retries.saturating_add(1);
     loop {
         attempts -= 1;
@@ -246,29 +253,39 @@ fn fetch_once(
         }
         let mut call = agent.get(&request.uri);
         for (name, value) in &request.headers {
-            call = call.set(name, value);
+            call = call.header(name.as_str(), value.as_str());
         }
-        let result = call.timeout(remaining).call();
+        let result = call.config().timeout_global(Some(remaining)).build().call();
         match result {
             Ok(response) => return Ok(response),
-            Err(ureq::Error::Status(_status, response)) => return Ok(response),
-            Err(ureq::Error::Transport(transport)) => {
+            Err(ureq::Error::Timeout(_)) => {
+                if attempts > 0 {
+                    continue;
+                }
+                return Err(NativeError::new(
+                    "transport.timeout",
+                    "fetch request timed out",
+                ));
+            }
+            Err(error) => {
                 if attempts > 0 {
                     continue;
                 }
                 return Err(NativeError::new(
                     "transport.network-error",
-                    format!("network failure: {}", transport),
+                    format!("network failure: {error}"),
                 ));
             }
         }
     }
 }
 
-fn read_body(response: ureq::Response, limits: &FetchLimits) -> Result<Vec<u8>, NativeError> {
-    let mut reader = response
-        .into_reader()
-        .take(limits.max_bytes.saturating_add(1));
+fn read_body(
+    response: ureq::http::Response<ureq::Body>,
+    limits: &FetchLimits,
+) -> Result<Vec<u8>, NativeError> {
+    let body = response.into_parts().1;
+    let mut reader = body.into_reader().take(limits.max_bytes.saturating_add(1));
     let mut body = Vec::new();
     reader.read_to_end(&mut body).map_err(|e| {
         NativeError::new("transport.network-error", format!("body read failed: {e}"))
@@ -280,63 +297,6 @@ fn read_body(response: ureq::Response, limits: &FetchLimits) -> Result<Vec<u8>, 
         ));
     }
     Ok(body)
-}
-
-fn insecure_client_config() -> Result<rustls::ClientConfig, NativeError> {
-    use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-    use rustls::crypto::ring as provider;
-    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-    use std::sync::Arc as StdArc;
-
-    #[derive(Debug)]
-    struct AcceptAll;
-    impl ServerCertVerifier for AcceptAll {
-        fn verify_server_cert(
-            &self,
-            _end_entity: &CertificateDer<'_>,
-            _intermediates: &[CertificateDer<'_>],
-            _server_name: &ServerName<'_>,
-            _ocsp_response: &[u8],
-            _now: UnixTime,
-        ) -> Result<ServerCertVerified, rustls::Error> {
-            Ok(ServerCertVerified::assertion())
-        }
-        fn verify_tls12_signature(
-            &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _algorithm: &rustls::DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, rustls::Error> {
-            Ok(HandshakeSignatureValid::assertion())
-        }
-        fn verify_tls13_signature(
-            &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _algorithm: &rustls::DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, rustls::Error> {
-            Ok(HandshakeSignatureValid::assertion())
-        }
-        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-            vec![
-                rustls::SignatureScheme::RSA_PKCS1_SHA256,
-                rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-                rustls::SignatureScheme::ED25519,
-                rustls::SignatureScheme::RSA_PSS_SHA256,
-            ]
-        }
-    }
-
-    let builder =
-        rustls::ClientConfig::builder_with_provider(StdArc::new(provider::default_provider()))
-            .with_safe_default_protocol_versions()
-            .map_err(|e| NativeError::new("transport.tls", format!("tls setup failed: {e}")))?;
-    let mut config = builder
-        .dangerous()
-        .with_custom_certificate_verifier(StdArc::new(AcceptAll))
-        .with_no_client_auth();
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
-    Ok(config)
 }
 
 fn resolve_redirect(base: &str, location: &str) -> Result<String, NativeError> {
