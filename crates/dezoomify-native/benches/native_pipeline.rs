@@ -8,12 +8,13 @@
 //! helpers the driver uses (`estimated_peak_*`, `should_spill`,
 //! `required_memory_bytes`), so the bench tracks the shipped decision.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use dezoomify_native::pipeline::{
     encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
     estimated_peak_streaming_bytes, required_memory_bytes, should_spill, MAX_CONCURRENT,
 };
 use dezoomify_native::pool::run_bounded;
+use std::hint::black_box;
 
 fn sweep_image(width: u32, height: u32) -> image::RgbaImage {
     let mut image = image::RgbaImage::new(width, height);

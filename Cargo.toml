@@ -50,7 +50,7 @@ aes = "0.9"
 cbc = "0.2"
 thiserror = "2"
 html-escape = "0.2"
-ureq = "2.12"
+ureq = "3.4"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 sha2 = "0.10"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
