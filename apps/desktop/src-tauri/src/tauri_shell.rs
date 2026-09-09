@@ -270,7 +270,14 @@ async fn start_job(
                 .start_job(&input_url)
                 .map_err(|e| CommandError::invalid_input(&e))?,
             Some(value) => {
-                let parsed = parse_settings(value).map_err(|e| CommandError::invalid_input(&e))?;
+                let mut parsed =
+                    parse_settings(value).map_err(|e| CommandError::invalid_input(&e))?;
+                // The real-window harness exercises automatic saving in an
+                // isolated temporary directory. This override is gated by
+                // the explicit E2E flag and never changes production starts.
+                if let Some(output_dir) = commands::e2e_output_directory() {
+                    parsed.output_dir = Some(output_dir);
+                }
                 table
                     .start_job_with_settings(&input_url, &parsed)
                     .map_err(|e| CommandError::invalid_input(&e))?

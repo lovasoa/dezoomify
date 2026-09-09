@@ -56,15 +56,13 @@ The lane builds the window shell (`--unsigned-test`: lean shell, frontend,
 window shell, no bundle), serves fixtures hermetically on an ephemeral
 loopback port, serves the built frontend over loopback for the debug
 window shell, launches the app under tauri-driver with a fresh profile and
-ephemeral ports, and drives three flows with selenium-webdriver: submit with
-destination grant to a byte-exact save versus the `native/cli-dzi` golden,
-cancel with output cleanup, and the deep-link confirm gate (pending links
-perform no effect).
-The native save dialog is not WebDriver-automatable, so the run sets the
-fail-closed E2E fixed destination (`DEZOOMIFY_E2E_WINDOW=1` plus
-`DEZOOMIFY_E2E_FIXED_DESTINATION`); production never sets either, so the
-dialog always shows there. Reports stay redacted and seeds fixed as in the
-hermetic gate.
+ephemeral ports, and drives three flows with selenium-webdriver: automatic
+submit/save to an isolated output directory versus the `native/cli-dzi`
+golden, cancel with output cleanup, and the deep-link confirm gate (pending
+links perform no effect). The run sets a fail-closed E2E output-directory
+override (`DEZOOMIFY_E2E_WINDOW=1` plus `DEZOOMIFY_E2E_OUTPUT_DIRECTORY`) so
+generated filenames remain isolated and discoverable; production never sets
+either. Reports stay redacted and seeds fixed as in the hermetic gate.
 
 The lane needs a display (`xvfb-run -a` when headless), tauri-driver 2.x
 (`cargo install tauri-driver --version "=2.0.6"`, or `TAURI_DRIVER_BIN`),
@@ -75,8 +73,7 @@ plus lane preflight) is a later wave.
 
 CI (`.github/workflows/desktop.yml`, path-gated to desktop-relevant changes)
 uses a Linux `window-e2e` job for this real lane under Xvfb (apt
-`webkit2gtk-driver`, pinned tauri-driver, one hard deadline) and uploads the
-log as `desktop-e2e-ubuntu`. The `bundle-smoke` job matrixes
+`webkit2gtk-driver`, pinned tauri-driver, one hard deadline). The `bundle-smoke` job matrixes
 ubuntu/macos/windows (`fail-fast: false`) and keeps actual per-platform
 bundle, install, and launch coverage:
 Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under

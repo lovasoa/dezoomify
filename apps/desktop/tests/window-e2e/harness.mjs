@@ -10,10 +10,10 @@
 // Hermetic notes:
 // - Never contacts public websites: every submit URL is a loopback gateway
 //   (`/fetch?url=<scenario dumping ground>`) served from `testdata/scenarios`.
-// - The native save dialog is not WebDriver-automatable, so the app honors
-//   `DEZOOMIFY_E2E_FIXED_DESTINATION` only together with the explicit
-//   `DEZOOMIFY_E2E_WINDOW=1` flag (see `commands::e2e_fixed_destination`);
-//   production never sets either, so the dialog always shows there.
+// - Automatic desktop saves derive a filename from the selected catalog title;
+//   the app honors `DEZOOMIFY_E2E_OUTPUT_DIRECTORY` only together with the
+//   explicit `DEZOOMIFY_E2E_WINDOW=1` flag, keeping generated files inside the
+//   flow's temporary directory.
 // - The debug window shell loads its embedded devUrl (`http://localhost:1420`,
 //   baked into the disowned `tauri.conf.json`), so the harness serves the
 //   freshly built `apps/desktop/dist` there over loopback. Port 1420 is
@@ -22,7 +22,7 @@
 // - Reports carry origins, hashes, and stable codes only: never credentials,
 //   full URLs, or absolute paths.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import { tmpdir } from "node:os";
@@ -398,7 +398,7 @@ function waitForProcExit(proc, timeoutMs) {
 // flow: a shared or locked profile surfaces as `DevToolsActivePort file
 // doesn't exist` / `Chrome instance exited` session failures), including
 // the explicit WebView2 user-data override.
-function laneAppEnv(home, fixedDest) {
+function laneAppEnv(home, fixedDest, outputDir = null) {
   const env = {
     ...process.env,
     HOME: home,
@@ -410,6 +410,7 @@ function laneAppEnv(home, fixedDest) {
     DEZOOMIFY_E2E_WINDOW: "1",
     DEZOOMIFY_E2E_FIXED_DESTINATION: fixedDest,
   };
+  if (outputDir) env.DEZOOMIFY_E2E_OUTPUT_DIRECTORY = outputDir;
   if (process.platform === "win32") {
     const localAppData = path.join(home, "AppData", "Local");
     const roamingAppData = path.join(home, "AppData", "Roaming");
@@ -639,6 +640,15 @@ export function deepLinkArgv(input) {
   return `dezoomify://open?v=2&src=${encodeURIComponent(input)}`;
 }
 
+// Automatic desktop saves derive their filename from the fixture catalog
+// title. Each flow owns an empty output directory, so the resulting PNG can
+// be located without making the generated basename part of the contract.
+export function outputFiles(outputDir, extension = ".png") {
+  return readdirSync(outputDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(extension))
+    .map((entry) => path.join(outputDir, entry.name));
+}
+
 // Full lifecycle for one flow: isolated profile, fixture server,
 // tauri-driver plus app launch, then `body`. Everything is cleaned up
 // (driver quit, child kills with exit wait, temp profile removal with
@@ -650,7 +660,9 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
   await reapLaneOrphans();
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-window-e2e-"));
   const home = path.join(work, "home");
+  const outputDir = path.join(work, "outputs");
   mkdirSync(home, { recursive: true });
+  mkdirSync(outputDir, { recursive: true });
   const fixedDest = path.join(work, fixedName);
   if (preCreateDest !== null) writeFileSync(fixedDest, preCreateDest);
   let fixture = null;
@@ -660,7 +672,7 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
     fixture = await startFixtureServer(work);
     const tauriPort = await freePort();
     const nativePort = await freePort();
-    const appEnv = laneAppEnv(home, fixedDest);
+    const appEnv = laneAppEnv(home, fixedDest, outputDir);
     driverProc = await startTauriDriver(tauriPort, nativePort, nativeDriverBin, appEnv);
     // Deep-link flows build their argv from the allocated loopback base,
     // which only exists after the fixture server starts.
@@ -678,7 +690,7 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
       throw new Error(`${err.message}\napp log tail:\n${tail || "(empty)"}`);
     }
     try {
-      return await body({ driver, work, home, fixedDest, base: fixture.base, appEnv });
+      return await body({ driver, work, home, fixedDest, outputDir, base: fixture.base, appEnv });
     } catch (err) {
       // The app inherits tauri-driver's stderr, so the tail below carries
       // the shell's own diagnostics (E2E hook engagement, deep-link
@@ -713,10 +725,8 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
 // launch: one isolated profile, one fixture server, one tauri-driver plus
 // one app launch, then `body` runs N saves sequentially. Between saves the
 // caller returns to idle through the product "Dezoomify another image"
-// reset and clears the fixed destination, so the next grant succeeds (the
-// E2E fixed destination is one path per launch, hence one output extension
-// per session). Everything is cleaned up even on failure. Use for the
-// formats matrix, where every case is the same completed-save shape;
+// reset. Everything is cleaned up even on failure. Use for a data-driven
+// formats matrix where every case has the same automatic-save shape;
 // one-off flows keep the isolated runWindowFlow above.
 export async function runSharedWindowSession({ nativeDriverBin, fixedName = "shared.png", body }) {
   ensureDisplay();

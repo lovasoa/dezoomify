@@ -24,15 +24,34 @@ pub const COMMANDS: &[&str] = desktop_commands!(command_names);
 pub const SUPPORTED_FORMATS: &[&str] = &["png", "jpeg", "tiff", "zif", "webp", "iiif-dir"];
 
 /// Explicit window-E2E flag. The real-window harness (`cargo xtask test
-/// desktop --e2e-window`) sets this to `"1"` alongside
-/// `DEZOOMIFY_E2E_FIXED_DESTINATION`; production never sets it, so the
-/// native save dialog always shows there.
+/// desktop --e2e-window`) sets this to `"1"` alongside the other test-only
+/// destination variables; production never sets it.
 pub const E2E_WINDOW_FLAG: &str = "DEZOOMIFY_E2E_WINDOW";
 
 /// Fixed save destination for the real-window harness. Honored only together
 /// with [`E2E_WINDOW_FLAG`], so `request_destination` can grant without the
 /// native save dialog, which WebDriver cannot operate.
 pub const E2E_FIXED_DESTINATION: &str = "DEZOOMIFY_E2E_FIXED_DESTINATION";
+
+/// Temporary output directory for the real-window harness's automatic-save
+/// path. Honored only together with [`E2E_WINDOW_FLAG`], so production keeps
+/// using the configured desktop output directory.
+pub const E2E_OUTPUT_DIRECTORY: &str = "DEZOOMIFY_E2E_OUTPUT_DIRECTORY";
+
+/// Window-E2E automatic-save directory from explicit values (pure,
+/// testable). Empty, oversized, or NUL-containing values are ignored so the
+/// test hook cannot turn malformed environment input into a destination.
+pub fn e2e_output_directory_from(
+    flag: Option<&str>,
+    directory: Option<&str>,
+) -> Option<std::path::PathBuf> {
+    if flag != Some("1") {
+        return None;
+    }
+    let raw =
+        directory.filter(|raw| !raw.is_empty() && raw.len() <= 4096 && !raw.contains('\0'))?;
+    Some(std::path::PathBuf::from(raw))
+}
 
 /// Window-E2E fixed destination from explicit values (pure, for testability).
 /// Returns the fixed path only when the explicit E2E flag is `"1"` and the
@@ -57,6 +76,16 @@ pub fn e2e_fixed_destination() -> Option<std::path::PathBuf> {
     e2e_fixed_destination_from(
         std::env::var(E2E_WINDOW_FLAG).ok().as_deref(),
         std::env::var(E2E_FIXED_DESTINATION).ok().as_deref(),
+    )
+}
+
+/// Window-E2E automatic-save directory from the process environment. The
+/// harness supplies an absolute temporary directory so generated filenames
+/// remain deterministic without exercising an OS file dialog.
+pub fn e2e_output_directory() -> Option<std::path::PathBuf> {
+    e2e_output_directory_from(
+        std::env::var(E2E_WINDOW_FLAG).ok().as_deref(),
+        std::env::var(E2E_OUTPUT_DIRECTORY).ok().as_deref(),
     )
 }
 
@@ -885,5 +914,22 @@ mod tests {
         assert_eq!(e2e_fixed_destination_from(Some("1"), None), None);
         assert_eq!(e2e_fixed_destination_from(Some("1"), Some("")), None);
         assert_eq!(e2e_fixed_destination_from(None, None), None);
+    }
+
+    #[test]
+    fn e2e_output_directory_needs_the_explicit_window_flag() {
+        assert_eq!(
+            e2e_output_directory_from(Some("1"), Some("/tmp/dz-e2e-output")),
+            Some(std::path::PathBuf::from("/tmp/dz-e2e-output"))
+        );
+        assert_eq!(
+            e2e_output_directory_from(None, Some("/tmp/dz-e2e-output")),
+            None
+        );
+        assert_eq!(
+            e2e_output_directory_from(Some("0"), Some("/tmp/dz-e2e-output")),
+            None
+        );
+        assert_eq!(e2e_output_directory_from(Some("1"), Some("")), None);
     }
 }
