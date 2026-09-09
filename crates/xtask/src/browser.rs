@@ -184,26 +184,15 @@ fn generate_web_artifacts() -> Result<(), String> {
 /// `test browser --browser` and `test wasm --browser`.
 pub(crate) fn run_e2e() -> Result<(), String> {
     let root = super::repo_root();
-    let e2e_dir = root.join("crates/fixture-server/tests/webapp-e2e");
-    if !e2e_dir.join("node_modules").exists() {
-        let status = Command::new("npm")
-            .args(["ci"])
-            .current_dir(&e2e_dir)
-            .status()
-            .map_err(|e| format!("failed to run npm: {e}"))?;
-        if !status.success() {
-            return Err("npm ci (webapp-e2e) failed".to_string());
-        }
-    }
-    let status = Command::new("npm")
-        .args(["test"])
-        .current_dir(&e2e_dir)
+    let status = super::desktop::pnpm_command()?
+        .args(["--filter", "webapp-e2e", "test"])
+        .current_dir(&root)
         .status()
-        .map_err(|e| format!("failed to run npm: {e}"))?;
+        .map_err(|e| format!("failed to run pnpm: {e}"))?;
     status
         .success()
         .then_some(())
-        .ok_or_else(|| "webapp E2E failed".to_string())
+        .ok_or_else(|| "webapp E2E failed (run `cargo xtask setup` first)".to_string())
 }
 
 pub fn build_web(_args: &[String]) -> Result<(), String> {

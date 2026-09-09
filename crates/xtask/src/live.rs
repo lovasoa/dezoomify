@@ -381,23 +381,13 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
 /// real-site targets (opt-in, diagnostic).
 fn run_live_webapp() -> Result<(), String> {
     let root = super::repo_root();
-    let e2e_dir = root.join("crates/fixture-server/tests/webapp-e2e");
-    if !e2e_dir.join("node_modules").exists() {
-        let status = Command::new("npm")
-            .args(["ci"])
-            .current_dir(&e2e_dir)
-            .status()
-            .map_err(|e| format!("failed to run npm: {e}"))?;
-        if !status.success() {
-            return Err("npm ci (webapp-e2e) failed".to_string());
-        }
-    }
-    let status = Command::new("npm")
-        .args(["test"])
+    let mut command = super::desktop::pnpm_command()?;
+    let status = command
+        .args(["--filter", "webapp-e2e", "test"])
         .env("DEZOOMIFY_LIVE_WEB", "1")
-        .current_dir(&e2e_dir)
+        .current_dir(&root)
         .status()
-        .map_err(|e| format!("failed to run npm: {e}"))?;
+        .map_err(|e| format!("failed to run pnpm: {e}"))?;
     status
         .success()
         .then_some(())

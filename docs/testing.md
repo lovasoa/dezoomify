@@ -155,7 +155,7 @@ unknown lane names and does not evaluate shell input.
 | `desktop` | desktop shell suites |
 | `extension` | extension unit, manifest, and Native Messaging API suites |
 | `protocol` | protocol contract suites |
-| `security` | protocol artifact checks plus JS supply-chain audits over the workspace and isolated E2E profiles; Rust cargo-deny policy runs once in the required `check` lane |
+| `security` | protocol artifact checks plus JS supply-chain audits over the complete pnpm workspace; Rust cargo-deny policy runs once in the required `check` lane |
 
 `cargo xtask ci local` runs all lanes listed above. Lanes that need
 installed browsers fail closed when an engine binary is missing instead of
@@ -219,8 +219,9 @@ scoping, and handoff envelope validation with replay/expiry/origin rejection
 and zero side effects on rejection. These gates run the unit suites plus a
 hermetic headless browser E2E in both engines. Chromium runs under
 Playwright; Firefox under Selenium/geckodriver (binary via
-`DEZOOMIFY_FIREFOX_BIN`, a system install, or the Playwright cache; deps
-auto-install via npm on first run). Full user-facing UI flows remain manual
+`DEZOOMIFY_FIREFOX_BIN`, a system install, or the Playwright cache; JavaScript
+dependencies come from the root pnpm workspace). Browser binaries are
+installed separately by the E2E setup. Full user-facing UI flows remain manual
 or CI-runner work.
 
 Browser chrome cannot be clicked headlessly, so the toolbar lifecycle is

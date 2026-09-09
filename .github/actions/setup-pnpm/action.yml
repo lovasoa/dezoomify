@@ -1,0 +1,31 @@
+name: setup-node-pnpm
+description: Set up the repository-pinned Node and pnpm versions, optionally installing the workspace
+inputs:
+  install:
+    description: Install all workspace dependencies with the frozen root lockfile
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version-file: .node-version
+    - name: Resolve pnpm version from package.json
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(node -e 'const p=require("./package.json"); const m=p.packageManager ?? ""; if (!m.startsWith("pnpm@")) process.exit(1); process.stdout.write(m.slice(5));')"
+        test -n "$version"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    - name: Set up pnpm
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      with:
+        version: ${{ steps.resolve.outputs.version }}
+        standalone: true
+    - name: Install workspace dependencies
+      if: inputs.install == 'true'
+      shell: bash
+      run: pnpm install --frozen-lockfile

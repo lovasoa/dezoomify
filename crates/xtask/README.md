@@ -60,16 +60,15 @@ the built binary; unit tests in `src/main.rs` pin the dispatcher.
 ## Package managers
 
 The pnpm workspace (`packageManager` in the root `package.json`,
-`pnpm-workspace.yaml`) owns every workspace app and package. The only
-exception is the isolated npm E2E harnesses, each with its own lockfile and
-never part of the workspace: `crates/fixture-server/tests/webapp-e2e`,
-`apps/extension/tests/browser`, and `apps/desktop/tests/window-e2e`. They
-install deterministically with `npm ci` (never `npm install`, never pnpm)
-so a workspace-wide `pnpm -r` can never absorb browser binaries; the
-supply-chain gate (`docs/security.md`) audits the workspace plus each
-isolated lockfile. `wasm-bindgen-cli` is version-coupled to `Cargo.lock`
-in every workflow via `.github/actions/setup-wasm-bindgen`, and
-`cargo xtask setup` verifies the installed version matches.
+`pnpm-workspace.yaml`) owns every active JavaScript package, including the
+webapp, extension, and desktop E2E harnesses. The root `pnpm-lock.yaml` is the
+only active JavaScript lockfile. Playwright browser binaries remain separate
+from package installation and are installed explicitly by the E2E workflows.
+The supply-chain gate audits the complete workspace lockfile. Legacy package
+managers remain only in the historical `legacy/` tree. `wasm-bindgen-cli` is
+version-coupled to `Cargo.lock` in every workflow via
+`.github/actions/setup-wasm-bindgen`, and `cargo xtask setup` verifies the
+installed version matches.
 
 ## Boundaries
 

@@ -19,13 +19,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
     super::content::verify(&[])?;
     super::architecture::verify(&[])?;
     super::protocol::run(&["generate".to_string(), "--check".to_string()])?;
+    super::supply::check_workspace_lockfiles()?;
     super::supply::check_deny()?;
     println!("check: ok");
     Ok(())
 }
 
 fn run_typecheck() -> Result<(), String> {
-    let status = std::process::Command::new("pnpm")
+    let status = super::desktop::pnpm_command()?
         .args(["typecheck"])
         .current_dir(super::repo_root())
         .status()

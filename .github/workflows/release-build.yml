@@ -15,14 +15,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
+      - uses: ./.github/actions/setup-pnpm
         with:
-          node-version-file: .node-version
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: 9.12.0 # must match packageManager in package.json
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
+          install: true
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
@@ -41,19 +36,17 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
-          # Same single JS lockfile set as sharded CI (see ci.yml).
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'crates/fixture-server/tests/webapp-e2e/package-lock.json', 'apps/extension/tests/browser/package-lock.json') }}
+          # The pnpm workspace lock is the complete JavaScript dependency set.
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             playwright-${{ runner.os }}-
       - name: Install Playwright Chromium (webapp E2E)
         run: |
-          npm ci
           if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
+            pnpm --filter webapp-e2e exec playwright install-deps chromium
           else
-            npx playwright install --with-deps chromium
+            pnpm --filter webapp-e2e exec playwright install --with-deps chromium
           fi
-        working-directory: crates/fixture-server/tests/webapp-e2e
       # Release gate (docs/releases.md): the tagged revision must have passed
       # the full deterministic suite. The sharded `ci` workflow already ran it
       # in parallel; when its `attest` job vouches for this exact commit AND
@@ -108,15 +101,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0: matches .node-version
+      - uses: ./.github/actions/setup-pnpm
         with:
-          node-version-file: .node-version
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: 9.12.0
-          standalone: true
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
+          install: true
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml

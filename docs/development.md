@@ -35,10 +35,11 @@ cargo xtask build web
 cargo xtask dev web
 ```
 
-`setup` installs pinned repository-managed Rust, pnpm, WASM, and browser test
-dependencies and is safe to rerun. `check` runs formatting, lint, type checking,
-dependency boundaries, generated-file checks, and manifest validation without
-rewriting source files.
+`setup` verifies the pinned Rust, Node, pnpm, WASM, and wasm-bindgen tools,
+installs the frozen pnpm workspace dependencies, and reports browser status.
+It never installs browser binaries or Rust toolchains. `check` runs formatting,
+lint, type checking, dependency boundaries, generated-file checks, and manifest
+validation without rewriting source files.
 
 Bare `test` is the fast deterministic unit and contract loop. `test all` runs
 the full deterministic suite. Focused targets are documented in

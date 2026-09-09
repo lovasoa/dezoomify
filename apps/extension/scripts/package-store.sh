@@ -42,15 +42,15 @@ manifest="$REPO_ROOT/apps/extension/generated/manifest.$browser.json"
 test -f "$manifest" || { echo "missing $manifest"; exit 1; }
 
 command -v node >/dev/null || { echo "missing: node"; exit 1; }
-command -v npm >/dev/null || { echo "missing: npm"; exit 1; }
 command -v python3 >/dev/null || { echo "missing: python3"; exit 1; }
 command -v zip >/dev/null || { echo "missing: zip"; exit 1; }
 
-# Fresh release/store jobs have no ignored node_modules tree. Install the
-# locked build dependency on demand so every canonical packaging entry point
-# works from a clean checkout instead of depending on a developer's cache.
+# Dependencies belong to the root pnpm workspace. The workflow and
+# `cargo xtask setup` install them before packaging; this script only stages
+# the package and must never silently select a second package manager.
 if [ ! -f "$REPO_ROOT/apps/extension/node_modules/esbuild/package.json" ]; then
-  npm ci --prefix "$REPO_ROOT/apps/extension" --no-audit --no-fund
+  echo "workspace dependencies missing; run 'pnpm install --frozen-lockfile' from the repository root" >&2
+  exit 1
 fi
 
 for f in "$WASM/dezoomify-wasm.js" "$WASM/dezoomify-wasm_bg.wasm"; do
