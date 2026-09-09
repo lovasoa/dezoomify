@@ -45,6 +45,11 @@ the full deterministic suite. Focused targets are documented in
 [Testing](testing.md). No test other than `test live` contacts public source
 sites.
 
+`cargo xtask setup` configures this checkout to use the versioned
+`.githooks/pre-commit` hook. The hook runs `cargo xtask ci check` and
+`cargo xtask test ui`, which catch formatting and generated shared-UI artifact
+failures before a commit.
+
 ## Builds
 
 `cargo xtask build <target>` output:
