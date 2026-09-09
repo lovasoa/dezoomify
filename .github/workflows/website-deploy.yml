@@ -3,31 +3,38 @@ name: website-deploy
 # build-site.mjs: the legacy site (vendored under legacy/) at / and the new
 # app at /beta. It uploads dist/ to the existing Cloudflare Pages project
 # (dezoomify) with wrangler; the project's automatic git deployments are
-# disabled, so this workflow is the only publisher (see plans/
-# website-deploy.md and docs/development.md). Deploys to master are
-# production deployments: dezoomify.ophir.dev. Nothing generated is
-# committed. Until the CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID secrets
-# exist, the deploy and verify steps are skipped with a warning: secrets
-# absent means no deploy, ever.
+# disabled, so this workflow is the only publisher (see docs/development.md).
+# Pushes to master are production deployments; same-repository pull requests
+# get stable PR-number preview aliases. Nothing generated is committed.
 on:
   push:
     branches: [master]
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
   workflow_dispatch: {}
 env:
-  # Verify against the project's pages.dev domain: it serves the same
-  # production deployment as the custom domain, but without the zone's
-  # bot management, which starts blocking curl's TLS fingerprint after a
-  # few bursts and would make the verification flap.
-  SITE_HOST: dezoomify.pages.dev
+  # Verify against Pages' pages.dev host: it avoids the production zone's bot
+  # management, which starts blocking curl's TLS fingerprint after a few
+  # bursts and would make the verification flap.
+  SITE_HOST: ${{ github.event_name == 'pull_request' && format('pr-{0}.dezoomify.pages.dev', github.event.pull_request.number) || 'dezoomify.pages.dev' }}
+  DEPLOY_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
   CLOUDFLARE_PROJECT: dezoomify
 permissions:
   contents: read
+  deployments: write
 concurrency:
   group: website-deploy-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   deploy:
+    # Never give deploy credentials to code from a fork. Same-repository PRs
+    # retain the normal pull_request event and are checked out at the merge ref.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+      url: ${{ github.event_name == 'pull_request' && format('https://pr-{0}.dezoomify.pages.dev', github.event.pull_request.number) || 'https://dezoomify.pages.dev' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,9 +65,9 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::website deploy skipped: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set (Pages project migration pending; see plans/website-deploy.md WD4)"
+            echo "::warning::website deploy skipped: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set"
           fi
-      - name: Deploy to Cloudflare Pages (master = production)
+      - name: Deploy to Cloudflare Pages
         if: steps.creds.outputs.ready == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -68,7 +75,7 @@ jobs:
         run: |
           npx --yes wrangler@4 pages deploy dist \
             --project-name "$CLOUDFLARE_PROJECT" \
-            --branch "${{ github.ref_name }}" \
+            --branch "$DEPLOY_BRANCH" \
             --commit-hash "${{ github.sha }}" \
             --commit-message "deploy ${{ github.sha }}"
       - name: Verify the deployment serves both apps and no repository files

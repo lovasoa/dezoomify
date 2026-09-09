@@ -82,9 +82,8 @@ them locally, and the web test lanes regenerate what they read.
 
 ## Website deployment contract
 
-One Cloudflare Pages project (the original `dezoomify`) receives one build
-from GitHub Actions on every push to `master`
-(`.github/workflows/website-deploy.yml`):
+One Cloudflare Pages project (the original `dezoomify`) receives builds from
+GitHub Actions through `.github/workflows/website-deploy.yml`:
 
 1. `scripts/build-site.mjs` regenerates every derived artifact (mirrors, help,
    wasm glue) and assembles `dist/`: the legacy site (vendored under `legacy/`,
@@ -92,20 +91,28 @@ from GitHub Actions on every push to `master`
    serves `/beta`, and `_routes.json` limits Function invocation to
    `/api/proxy` (new app) and `/proxy` (legacy, re-exported from
    `legacy/functions/proxy.js`).
-2. `wrangler pages deploy dist` uploads the tree to the project; `functions/`
-   at the repository root is compiled by wrangler alongside it. The
-   project's automatic git deployments are disabled, so the workflow is the
-   only publisher; a push can never clobber production with a repository
-   tree.
-3. The workflow verifies the live production deployment
-   (`dezoomify.ophir.dev`): both apps, both proxy routes, wasm content
-   types, the generated help section, and that no repository files are
-   served.
+2. A push to `master` is uploaded as the production deployment. A pull request
+   targeting `master` from this repository is uploaded as a preview on the
+   stable branch alias `pr-<number>.dezoomify.pages.dev`. The preview job uses
+   the pull request merge ref, so it verifies the exact result that reviewers
+   would merge. The project's automatic git deployments are disabled, so this
+   workflow is the only publisher; a push can never clobber production with a
+   repository tree.
+3. GitHub records each deployment in the `production` or `preview` environment
+   and exposes its environment URL as the PR's **View deployment** link. The
+   preview URL remains stable as the PR receives new commits.
+4. The workflow verifies the live deployment (production or preview): both
+   apps, both proxy routes, wasm content types, the generated help section,
+   and that no repository files are served.
 
-`master` is the single branch: pushes to it build and deploy production
-directly. The deployment never serves repository files, so internal docs
-and plans stay private. See [`plans/website-deploy.md`](../plans/
-website-deploy.md) for the phase history.
+`master` is the single production branch. Fork pull requests intentionally do
+not receive previews: the workflow uses the normal `pull_request` event and
+only same-repository PRs can run the credentialed deployment job. This avoids
+checking out untrusted code in a privileged `pull_request_target` workflow.
+Cloudflare preview deployments are public by default and carry `noindex`; the
+preview uses the same restricted metadata proxy and repository-file exposure
+gates as production. The deployment never serves repository files, so
+internal docs and plans stay private.
 
 ## Development servers
 
