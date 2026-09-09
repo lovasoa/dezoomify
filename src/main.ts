@@ -72,6 +72,16 @@ let activeTransport: string | null = null;
 let client: DiscoveryClient | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
+type TileTransport = "readable" | "ordinary-image";
+
+interface TileOriginState {
+  mode?: TileTransport;
+  ready?: Promise<TileTransport>;
+}
+
+// A CORS policy is stable for a job, so one tile classifies each origin while
+// concurrent tiles wait instead of all repeating the same failed fetch.
+let tileOrigins = new Map<string, TileOriginState>();
 // Pause v1 (todo 5.7, suspend-acquisition): the website stops scheduling new
 // tiles while paused, finishes in-flight work, retains the canvas, and
 // re-drives on resume. Integration-layer only; the engine pause lives in
@@ -1102,7 +1112,11 @@ async function fetchMetadataFor(
   return { bytes, finalUri, via };
 }
 
-async function fetchTileFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }> {
+async function fetchTileFor(
+  url: string,
+  headers: Record<string, string>,
+  maxRetries: number = TILE_MAX_RETRIES,
+): Promise<{ bytes: ArrayBuffer }> {
   let lastOutcome = "network-error";
   let lastStatus: number | undefined;
   for (let attempt = 0; ; attempt++) {
@@ -1113,7 +1127,7 @@ async function fetchTileFor(url: string, headers: Record<string, string>): Promi
     }
     lastOutcome = direct.outcome;
     lastStatus = direct.status;
-    if (direct.outcome === "cancelled" || attempt >= TILE_MAX_RETRIES) {
+    if (direct.outcome === "cancelled" || attempt >= maxRetries) {
       break;
     }
     await sleep(tileRetryDelayMs(attempt));
@@ -1123,7 +1137,7 @@ async function fetchTileFor(url: string, headers: Record<string, string>): Promi
     "Part of the image could not be saved. Try again in a moment.",
     true,
     undefined,
-    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) from ${shortUrl(url)} after ${TILE_MAX_RETRIES + 1} attempts`,
+    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) from ${shortUrl(url)} after ${maxRetries + 1} attempts`,
   );
 }
 
@@ -1187,6 +1201,16 @@ function loadTileImage(url: string, ms: number = REQUEST_TIMEOUT_MS): Promise<HT
     img.referrerPolicy = "no-referrer";
     img.src = url;
   });
+}
+
+function tileOrigin(url: string): string {
+  try {
+    return new URL(url, typeof window === "undefined" ? undefined : window.location.href).origin;
+  } catch {
+    // Invalid tile URLs fail later through the normal typed fetch path; keep
+    // their classification isolated rather than accidentally sharing one.
+    return url;
+  }
 }
 
 function setCanvasVisible(visible: boolean): void {
@@ -1330,10 +1354,11 @@ function enqueueProcess(client2: DiscoveryClient, recipe: string, bytes: ArrayBu
  * ordinary image display (canvas now tainted, display-only); false when it
  * arrived as readable bytes (canvas stays clean).
  *
- * Readable bytes come first so CORS-granting sites keep the clean save.
- * After the readable retries are exhausted, an unprocessed tile falls back
- * to a plain <img> (no CORS needed): the user sees the picture and can
- * right-click it, but scripts can no longer read or save the canvas.
+ * Readable bytes come first so CORS-granting sites keep the clean save. One
+ * ordinary tile classifies its origin: a single unreadable fetch followed by
+ * a successful plain <img> sends later ordinary tiles straight to <img>.
+ * The user sees the picture and can right-click it, but scripts can no longer
+ * read or save the canvas.
  * Processed tiles rethrow: decrypt/re-encode needs readable bytes.
  * When the <img> also fails, the original readable failure (with its
  * technical chain) is what the job reports.
@@ -1360,6 +1385,57 @@ async function drawTile(
       ctx2d.drawImage(source, 0, 0, fullW, fullH, tile.x, tile.y, planW, planH);
     }
   };
+  const drawOrdinaryImage = async (): Promise<void> => {
+    await throttleTileStart(tile.uri);
+    const img = await loadTileImage(tile.uri);
+    await drawBitmap(img);
+  };
+  if (isOrdinaryImageTile(tile.processing)) {
+    const origin = tileOrigin(tile.uri);
+    let state = tileOrigins.get(origin);
+    if (state?.ready) {
+      await state.ready;
+    } else if (!state) {
+      let resolveTransport!: (mode: TileTransport) => void;
+      let rejectTransport!: (reason?: unknown) => void;
+      const ready = new Promise<TileTransport>((resolve, reject) => {
+        resolveTransport = resolve;
+        rejectTransport = reject;
+      });
+      // The worker that owns classification reports failures through drawTile;
+      // this handler prevents a second unhandled rejection before waiters run.
+      void ready.catch(() => undefined);
+      state = { ready };
+      tileOrigins.set(origin, state);
+      try {
+        const { bytes } = await fetchTileFor(tile.uri, tile.headers ?? {}, 0);
+        const bitmap = await decodeTileBitmap(bytes);
+        try {
+          await drawBitmap(bitmap);
+        } finally {
+          bitmap.close();
+        }
+        state.mode = "readable";
+        resolveTransport("readable");
+        return false;
+      } catch (readableFailure) {
+        try {
+          await drawOrdinaryImage();
+          state.mode = "ordinary-image";
+          resolveTransport("ordinary-image");
+          return true;
+        } catch {
+          tileOrigins.delete(origin);
+          rejectTransport(readableFailure);
+          throw readableFailure;
+        }
+      }
+    }
+    if (state.mode === "ordinary-image") {
+      await drawOrdinaryImage();
+      return true;
+    }
+  }
   let readableFailure: unknown = null;
   try {
     let { bytes } = await fetchTileFor(tile.uri, tile.headers ?? {});
@@ -1376,19 +1452,12 @@ async function drawTile(
   } catch (error) {
     readableFailure = error;
   }
-  if (!isOrdinaryImageTile(tile.processing)) throw readableFailure;
-  try {
-    await throttleTileStart(tile.uri);
-    const img = await loadTileImage(tile.uri);
-    await drawBitmap(img);
-    return true;
-  } catch {
-    throw readableFailure;
-  }
+  throw readableFailure;
 }
 
 async function runJob(url: string): Promise<void> {
   const token = ++jobToken;
+  tileOrigins = new Map();
   resetActivity(url);
   setCanvasVisible(false);
   jobPaused = false;

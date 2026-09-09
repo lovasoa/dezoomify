@@ -66,14 +66,14 @@ The website uses this order:
 
 1. Direct browser fetch with cookies, `Authorization`, and browser credentials omitted.
 2. After a classified CORS or network failure, or a direct fetch that does not complete within the 1500 ms metadata window, automatic metadata CORS proxy fallback when the metadata request is public and non-credential.
-3. For unprocessed ordinary tiles, an `<img>` element when display is possible without readable bytes.
+3. For unprocessed ordinary tiles, one direct readable attempt classifies each origin. A successful ordinary `<img>` fallback marks that origin display-only for the job, so later ordinary tiles load directly through `<img>`.
 4. A typed recovery action offering the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route can supply readable bytes.
 
 The website always shows the active transport as direct browser fetch or the metadata CORS proxy, including an automatic transition after the classified direct failure. Proxy fallback requires no per-attempt consent.
 
 The extension transport is tab-origin direct fetch followed by `<img>` tainted display-only. The extension fetches readable bytes in the monitored tab's origin context under activeTab or granted host permissions; the active transport stays visible in the modal. When readable bytes are unavailable (CORS-blocked without a grant), tiles render as ordinary `<img>` elements: visible but tainted, with no JavaScript pixel reads, hashing, processing, `toBlob`, or `toDataURL`. The extension never uses the metadata CORS proxy.
 
-The proxy is not a general relay and serves metadata only, never tiles. Both the browser-to-proxy request and the proxy's upstream request omit cookies, `Authorization`, and browser credentials. The proxy accepts only validated metadata requests for eligible public resources, blocks private and local networks, follows bounded redirects, limits size and duration, strips headers outside its allowlist, and returns explicit CORS headers. The frontend additionally holds every proxy request (metadata and any tile images fetched through the proxy) to a single global budget of at most 4 requests in flight and at most 4 request starts per second; direct tile requests never draw from that budget and keep their own per-host pacing. Details are in [Security](security.md).
+The proxy is not a general relay and serves metadata only, never tiles. Both the browser-to-proxy request and the proxy's upstream request omit cookies, `Authorization`, and browser credentials. The proxy accepts only validated metadata requests for eligible public resources, blocks private and local networks, follows bounded redirects, limits size and duration, strips headers outside its allowlist, and returns explicit CORS headers. The frontend holds metadata-proxy requests to a single global budget of at most 4 requests in flight and at most 4 request starts per second; direct tile requests never draw from that budget and keep their own per-host pacing. Details are in [Security](security.md).
 
 ## Limits and capabilities
 

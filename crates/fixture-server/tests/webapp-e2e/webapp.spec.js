@@ -233,11 +233,18 @@ test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ 
   // fetches are same-origin /fetch URLs here; matching on the tile path
   // (not the host) aborts exactly the readable tile fetches while plain
   // <img> loads for the same URLs succeed.
+  let readableRequests = 0;
+  let imageRequests = 0;
   await page.route(
     (url) => url.href.includes("pyramid_files"),
     async (route) => {
-      if (route.request().resourceType() === "image") await route.continue();
-      else await route.abort();
+      if (route.request().resourceType() === "image") {
+        imageRequests += 1;
+        await route.continue();
+      } else {
+        readableRequests += 1;
+        await route.abort();
+      }
     },
   );
   await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
@@ -255,4 +262,6 @@ test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ 
   const size = await canvas.evaluate((el) => ({ width: el.width, height: el.height }));
   assert.equal(size.width, 512, "displayed image width");
   assert.equal(size.height, 512, "displayed image height");
+  assert.equal(readableRequests, 1, "one tile classifies the CORS policy for the origin");
+  assert.ok(imageRequests > 1, "later tiles load directly as ordinary images");
 });
