@@ -5,6 +5,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         return Err("usage: cargo xtask setup (no options)".to_string());
     }
+    configure_git_hooks()?;
     let mut failures: Vec<String> = Vec::new();
 
     let rustc = version_of("rustc", &["--version"])?;
@@ -34,6 +35,22 @@ pub fn run(args: &[String]) -> Result<(), String> {
         Ok(())
     } else {
         Err(failures.join("\n"))
+    }
+}
+
+/// Point this checkout at the versioned pre-commit checks.
+fn configure_git_hooks() -> Result<(), String> {
+    let root = super::repo_root();
+    let status = std::process::Command::new("git")
+        .args(["config", "--local", "core.hooksPath", ".githooks"])
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to configure versioned Git hooks: {e}"))?;
+    if status.success() {
+        println!("git hooks: .githooks");
+        Ok(())
+    } else {
+        Err("failed to configure versioned Git hooks".to_string())
     }
 }
 

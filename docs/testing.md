@@ -91,7 +91,9 @@ dictionary coverage with per-key English fallback; the extension renders
 through its vendored dictionary mirror with
 no local replica), and `test/ui-mobile.test.mjs` (560/380px parity over the
 canonical theme the extension page links, and static 360px CSS reachability invariants). It is
-tracked and always present.
+tracked and always present. The UI target regenerates the ignored browser
+mirrors before these suites so their source and vendor parity checks always
+have their required artifacts.
 
 `e2e-artifacts/` (repository root) is not a suite and never runs in any
 `cargo xtask test` or `cargo xtask ci` lane. It holds only untracked

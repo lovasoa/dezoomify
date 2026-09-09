@@ -86,6 +86,7 @@ pub fn test_ui(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("test ui", args)?;
     // Documented ui gate (docs/testing.md): controller, view rendering,
     // accessibility, i18n, and mobile suites.
+    generate_web_artifacts()?;
     for suite in [
         "test/controller.test.mjs",
         "test/view-rendering.test.mjs",
