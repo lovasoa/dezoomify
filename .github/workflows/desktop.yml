@@ -46,7 +46,6 @@ jobs:
         with:
           toolchain: 1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: pnpm install --frozen-lockfile
       - name: Install Linux webview and driver packages
         run: |
           sudo apt-get update
@@ -97,7 +96,6 @@ jobs:
         with:
           toolchain: 1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: pnpm install --frozen-lockfile
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
         run: |

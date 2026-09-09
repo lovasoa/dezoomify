@@ -11,6 +11,11 @@
     "typescript": "7.0.2",
     "wrangler": "4.130.0"
   },
+  "pnpm": {
+    "overrides": {
+      "sharp": "0.35.4"
+    }
+  },
   "scripts": {
     "lint": "pnpm -r lint",
     "typecheck": "tsc --noEmit && pnpm -r typecheck",

@@ -155,7 +155,7 @@ unknown lane names and does not evaluate shell input.
 | `desktop` | desktop shell suites |
 | `extension` | extension unit, manifest, and Native Messaging API suites |
 | `protocol` | protocol contract suites |
-| `security` | protocol artifact checks plus JS supply-chain audits over the workspace and isolated E2E profiles; Rust cargo-deny policy runs once in the required `check` lane |
+| `security` | protocol artifact checks plus JS supply-chain audits over the complete pnpm workspace; Rust cargo-deny policy runs once in the required `check` lane |
 
 `cargo xtask ci local` runs all lanes listed above. Lanes that need
 installed browsers fail closed when an engine binary is missing instead of

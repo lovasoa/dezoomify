@@ -48,8 +48,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - id: bindgen
         uses: ./.github/actions/setup-wasm-bindgen
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
       - name: Build the site (mirrors, help, wasm glue, dist/)
         run: node scripts/build-site.mjs
       - name: Check deploy credentials
