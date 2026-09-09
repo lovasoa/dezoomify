@@ -1034,11 +1034,18 @@ mod tests {
         while !pid_file.is_file() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let descendant: libc::pid_t = std::fs::read_to_string(&pid_file)
-            .expect("descendant pid file")
-            .trim()
-            .parse()
-            .expect("numeric descendant pid");
+        let descendant: libc::pid_t = loop {
+            if let Ok(contents) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = contents.trim().parse() {
+                    break pid;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "descendant pid file was not populated"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
 
         drop(frontend);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
