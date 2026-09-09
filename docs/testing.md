@@ -219,8 +219,9 @@ scoping, and handoff envelope validation with replay/expiry/origin rejection
 and zero side effects on rejection. These gates run the unit suites plus a
 hermetic headless browser E2E in both engines. Chromium runs under
 Playwright; Firefox under Selenium/geckodriver (binary via
-`DEZOOMIFY_FIREFOX_BIN`, a system install, or the Playwright cache; deps
-auto-install via npm on first run). Full user-facing UI flows remain manual
+`DEZOOMIFY_FIREFOX_BIN`, a system install, or the Playwright cache; JavaScript
+dependencies come from the root pnpm workspace). Browser binaries are
+installed separately by the E2E setup. Full user-facing UI flows remain manual
 or CI-runner work.
 
 Browser chrome cannot be clicked headlessly, so the toolbar lifecycle is

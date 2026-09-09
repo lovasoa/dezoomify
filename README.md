@@ -17,7 +17,7 @@ High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
 ## Quick start
 
 ```sh
-cargo xtask setup     # verify pinned tools (Rust 1.98, Node 22)
+cargo xtask setup     # verify tools and install the pnpm workspace
 cargo xtask check     # formatting, lint, artifact validation
 cargo xtask test      # fast deterministic test suite
 cargo xtask test all  # full deterministic suite (no public network)

@@ -1,4 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+  - "crates/fixture-server/tests/webapp-e2e"
+  - "apps/extension/tests/browser"
+  - "apps/desktop/tests/window-e2e"
   - "tests/**"

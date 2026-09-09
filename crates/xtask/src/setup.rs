@@ -1,5 +1,5 @@
-//! `cargo xtask setup`: verify pinned tools. Idempotent; never installs
-//! toolchains.
+//! `cargo xtask setup`: verify pinned tools and install the frozen JS
+//! workspace. It never installs Rust toolchains or browser binaries.
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
@@ -21,19 +21,23 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if let Err(e) = check_node() {
         failures.push(e);
     }
+    if let Err(e) = check_pnpm() {
+        failures.push(e);
+    }
     if let Err(e) = check_wasm_target() {
         failures.push(e);
     }
     if let Err(e) = check_wasm_bindgen() {
         failures.push(e);
     }
-    // Playwright browsers are report-only: never fail, never install.
-    report_playwright();
-
     if failures.is_empty() {
+        install_workspace_dependencies()?;
+        // Playwright browsers are report-only: never fail, never install.
+        report_playwright();
         println!("setup: pinned tools ok");
         Ok(())
     } else {
+        report_playwright();
         Err(failures.join("\n"))
     }
 }
@@ -88,6 +92,59 @@ fn check_node() -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Verify `pnpm` matches the exact version in the root `packageManager`
+/// field. All workspace packages, including E2E harnesses, use this manager.
+fn check_pnpm() -> Result<(), String> {
+    let root = super::repo_root();
+    let package_path = root.join("package.json");
+    let text = std::fs::read_to_string(&package_path)
+        .map_err(|e| format!("cannot read {}: {e}", package_path.display()))?;
+    let package: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("invalid {}: {e}", package_path.display()))?;
+    let manager = package
+        .get("packageManager")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "package.json lacks an exact pnpm packageManager field".to_string())?;
+    let expected = manager
+        .strip_prefix("pnpm@")
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| {
+            format!("package.json packageManager must be pnpm@<version>, found {manager}")
+        })?;
+    let mut command = super::desktop::pnpm_command()?;
+    let output = command
+        .arg("--version")
+        .current_dir(&root)
+        .output()
+        .map_err(|e| format!("cannot run pnpm: {e}"))?;
+    if !output.status.success() {
+        return Err(format!("pnpm --version failed; install pnpm {expected}"));
+    }
+    let found = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    println!("pnpm pin (package.json): {expected}");
+    println!("pnpm: {found}");
+    if found != expected {
+        return Err(format!(
+            "pnpm version mismatch: package.json expects {expected}, found {found}. Install pnpm {expected}"
+        ));
+    }
+    Ok(())
+}
+
+/// Install every workspace package from the single frozen root lockfile.
+fn install_workspace_dependencies() -> Result<(), String> {
+    let root = super::repo_root();
+    let status = super::desktop::pnpm_command()?
+        .args(["install", "--frozen-lockfile"])
+        .current_dir(root)
+        .status()
+        .map_err(|e| format!("failed to run pnpm install: {e}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "pnpm install --frozen-lockfile failed".to_string())
 }
 
 /// Verify the `wasm32-unknown-unknown` target is installed. Read-only:
@@ -189,21 +246,11 @@ fn report_playwright() {
     } else {
         None
     };
-    let version = version.or_else(|| {
-        std::process::Command::new("npx")
-            .args(["--no-install", "playwright", "--version"])
-            .current_dir(&e2e_dir)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .filter(|s| !s.is_empty())
-    });
     match version {
         Some(v) => println!("playwright: {v}"),
         None => {
             println!(
-                "playwright: not found (report-only; E2E needs it via crates/fixture-server/tests/webapp-e2e `npm ci`; setup never installs)"
+                "playwright: not found (report-only; run `cargo xtask setup` to install workspace dependencies)"
             );
             report_playwright_browsers();
             return;
@@ -234,11 +281,11 @@ fn report_playwright_browsers() {
             dir.display()
         ),
         (Some(dir), false) => println!(
-            "playwright browsers: no chromium under {} (report-only; when E2E is needed run `npx playwright install --with-deps chromium` from crates/fixture-server/tests/webapp-e2e/; setup never installs)",
+            "playwright browsers: no chromium under {} (report-only; when E2E is needed run `pnpm --filter webapp-e2e exec playwright install --with-deps chromium`)",
             dir.display()
         ),
         (None, _) => println!(
-            "playwright browsers: unknown cache location (report-only; when E2E is needed run `npx playwright install --with-deps chromium` from crates/fixture-server/tests/webapp-e2e/; setup never installs)"
+            "playwright browsers: unknown cache location (report-only; when E2E is needed run `pnpm --filter webapp-e2e exec playwright install --with-deps chromium`)"
         ),
     }
 }

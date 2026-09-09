@@ -141,42 +141,20 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
 
 /// Headless browser gate: load the real store-shaped packages in headless
 /// Chromium and Firefox and verify a pixel-correct saved PNG. Node deps live in
-/// `apps/extension/tests/browser` (npm-managed, like the webapp-e2e suite);
-/// install them on first run. Firefox binary discovery is documented in the
+/// `apps/extension/tests/browser` workspace package. Dependencies are
+/// installed by `cargo xtask setup`. Firefox binary discovery is documented in the
 /// test itself (`DEZOOMIFY_FIREFOX_BIN`, system paths, Playwright cache).
 fn test_headless_browser() -> Result<(), String> {
     // `test_extension` has just regenerated the gitignored WASM artifacts;
     // package-store.sh stages those exact bytes for both browser runs.
-    let dir = super::repo_root().join("apps/extension/tests/browser");
-    if !dir.join("node_modules").exists() {
-        let status = Command::new("npm")
-            .args(["ci", "--no-audit", "--no-fund"])
-            .current_dir(&dir)
-            .status()
-            .map_err(|e| format!("failed to run npm: {e}"))?;
-        if !status.success() {
-            return Err("npm ci (extension headless browser tests) failed".to_string());
-        }
-    }
-    let mut files: Vec<String> = Vec::new();
-    for entry in std::fs::read_dir(&dir).map_err(|e| format!("read dir: {e}"))? {
-        let path = entry.map_err(|e| format!("dir entry: {e}"))?.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("mjs") {
-            files.push(path.to_string_lossy().into_owned());
-        }
-    }
-    files.sort();
-    let mut args = vec!["--test".to_string()];
-    args.extend(files);
-    let status = Command::new("node")
-        .args(&args)
+    let status = super::desktop::pnpm_command()?
+        .args(["--filter", "dezoomify-extension-headless", "test"])
         .current_dir(super::repo_root())
         .status()
-        .map_err(|e| format!("failed to run node: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "extension headless browser tests failed".to_string())
+        .map_err(|e| format!("failed to run pnpm: {e}"))?;
+    status.success().then_some(()).ok_or_else(|| {
+        "extension headless browser tests failed (run `cargo xtask setup` first)".to_string()
+    })
 }
 
 pub fn test_native_messaging(args: &[String]) -> Result<(), String> {

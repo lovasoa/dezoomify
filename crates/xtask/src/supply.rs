@@ -1,5 +1,4 @@
-//! Supply-chain gate: Rust (`cargo deny`) and JS (`pnpm`/`npm audit`)
-//! dependency audits.
+//! Supply-chain gate: Rust (`cargo deny`) and JS (`pnpm`) dependency audits.
 //!
 //! Rust uses `cargo deny`, not `cargo audit`, as the single blocking tool:
 //! one pinned binary covers advisories, licenses, bans, and sources from
@@ -8,9 +7,9 @@
 //! only public-network contact outside `test live`, limited to the RustSec
 //! database; everything else resolves from `Cargo.lock` and the JS lockfiles.
 //!
-//! JS audits the pnpm workspace plus the two isolated npm E2E profiles (the
-//! documented exception in `docs/security.md`); installs never bypass
-//! auditing because the blocking audit lives here, not in install flags.
+//! JS audits the complete pnpm workspace. The workspace lockfile is the only
+//! active JavaScript lockfile; installs never bypass auditing because the
+//! blocking audit lives here, not in install flags.
 
 use std::process::Command;
 
@@ -18,13 +17,6 @@ use std::process::Command;
 /// workflows install exactly this version; the missing-binary error below
 /// repeats it, and the `deny_pin_matches_workflows` test enforces the sync.
 pub const CARGO_DENY_VERSION: &str = "0.20.2";
-
-/// Isolated npm E2E profiles with their own lockfiles (documented exception
-/// in `docs/security.md`; deliberately not part of the pnpm workspace).
-const NPM_AUDIT_DIRS: &[&str] = &[
-    "crates/fixture-server/tests/webapp-e2e",
-    "apps/extension/tests/browser",
-];
 
 /// Rust leg, also used by `cargo xtask check`. Fails closed: a missing
 /// binary or a failed check is an error, never a silent skip.
@@ -66,8 +58,7 @@ fn install_hint(detail: &str) -> String {
 /// JS half through the `security` lane. Keeping them separate avoids querying
 /// the RustSec database twice.
 pub fn audit_js() -> Result<(), String> {
-    // Workspace audit over pnpm-lock.yaml.
-    let status = Command::new("pnpm")
+    let status = super::desktop::pnpm_command()?
         .args(["audit", "--audit-level", "high"])
         .current_dir(super::repo_root())
         .status()
@@ -79,21 +70,85 @@ pub fn audit_js() -> Result<(), String> {
     if !status.success() {
         return Err("supply-chain gate failed (`pnpm audit --audit-level high`)".to_string());
     }
-    // Isolated E2E profiles, one lockfile each. `npm audit` reads the
-    // lockfile, so no prior install is required.
-    for dir in NPM_AUDIT_DIRS {
-        let status = Command::new("npm")
-            .args(["audit", "--audit-level=high"])
-            .current_dir(super::repo_root().join(dir))
-            .status()
-            .map_err(|e| format!("failed to run npm audit in {dir}: {e}"))?;
-        if !status.success() {
-            return Err(format!(
-                "supply-chain gate failed (`npm audit --audit-level=high` in {dir})"
-            ));
+    println!("supply chain (pnpm audit): ok");
+    Ok(())
+}
+
+/// Reject a second package-manager lockfile in any pnpm workspace member.
+/// The root pnpm lockfile is the sole exception and is intentionally allowed.
+pub fn check_workspace_lockfiles() -> Result<(), String> {
+    let root = super::repo_root();
+    let workspace = std::fs::read_to_string(root.join("pnpm-workspace.yaml"))
+        .map_err(|e| format!("cannot read pnpm-workspace.yaml: {e}"))?;
+    let mut members = Vec::new();
+    for line in workspace.lines() {
+        let Some(raw) = line.trim().strip_prefix("- ") else {
+            continue;
+        };
+        let pattern = raw.trim().trim_matches(['"', '\'']);
+        if let Some(parent) = pattern.strip_suffix("/*") {
+            let dir = root.join(parent);
+            for entry in std::fs::read_dir(&dir)
+                .map_err(|e| format!("cannot read workspace directory {}: {e}", dir.display()))?
+            {
+                let path = entry
+                    .map_err(|e| format!("cannot read workspace entry {}: {e}", dir.display()))?
+                    .path();
+                if path.join("package.json").is_file() {
+                    members.push(path);
+                }
+            }
+        } else if let Some(parent) = pattern.strip_suffix("/**") {
+            collect_package_dirs(&root.join(parent), &mut members)?;
+        } else {
+            let path = root.join(pattern);
+            if path.join("package.json").is_file() {
+                members.push(path);
+            }
         }
     }
-    println!("supply chain (JS audits): ok");
+
+    for member in members {
+        for lockfile in [
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "bun.lock",
+            "bun.lockb",
+        ] {
+            let path = member.join(lockfile);
+            if path.is_file() {
+                return Err(format!(
+                    "workspace member {} contains {lockfile}; use the root pnpm-lock.yaml",
+                    member.strip_prefix(&root).unwrap_or(&member).display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_package_dirs(
+    dir: &std::path::Path,
+    out: &mut Vec<std::path::PathBuf>,
+) -> Result<(), String> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)
+        .map_err(|e| format!("cannot read workspace directory {}: {e}", dir.display()))?
+    {
+        let path = entry
+            .map_err(|e| format!("cannot read workspace entry {}: {e}", dir.display()))?
+            .path();
+        if path.join("package.json").is_file() {
+            out.push(path.clone());
+        }
+        if path.is_dir() {
+            collect_package_dirs(&path, out)?;
+        }
+    }
     Ok(())
 }
 
@@ -109,66 +164,8 @@ mod tests {
     }
 
     #[test]
-    fn audit_profiles_exist_with_lockfiles() {
-        for dir in super::NPM_AUDIT_DIRS {
-            let root = super::super::repo_root().join(dir);
-            assert!(
-                root.join("package.json").is_file(),
-                "{dir} lacks package.json"
-            );
-            assert!(
-                root.join("package-lock.json").is_file(),
-                "{dir} lacks package-lock.json"
-            );
-        }
-    }
-
-    #[test]
-    fn workspace_excludes_isolated_profiles() {
-        // Single pnpm workspace plus the documented isolated npm exception
-        // (docs/security.md): the workspace member globs must not absorb the
-        // isolated E2E profiles, or `pnpm -r` would widen to browser binaries.
-        // Only the `packages:` member lines count; comments may name the
-        // isolated profiles to document the exception.
-        let text = std::fs::read_to_string(super::super::repo_root().join("pnpm-workspace.yaml"))
-            .expect("pnpm-workspace.yaml");
-        let members: Vec<String> = text
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix("- ").map(str::to_string))
-            .collect();
-        assert!(!members.is_empty(), "pnpm-workspace.yaml lists no members");
-        for dir in super::NPM_AUDIT_DIRS {
-            assert!(
-                !members.iter().any(|m| m.contains(dir)),
-                "pnpm-workspace.yaml must not list isolated profile {dir}"
-            );
-        }
-        for member in ["packages/*", "apps/*"] {
-            assert!(
-                text.contains(member),
-                "pnpm-workspace.yaml lacks workspace member {member}"
-            );
-        }
-    }
-
-    #[test]
-    fn ci_hashes_single_js_lockfile_set() {
-        // The Playwright cache key must hash the single JS lockfile set:
-        // the pnpm workspace lock plus both isolated npm profile locks.
-        // Hashing only a subset would reuse stale browsers after a JS change.
-        let text =
-            std::fs::read_to_string(super::super::repo_root().join(".github/workflows/ci.yml"))
-                .expect("ci.yml");
-        for lock in [
-            "pnpm-lock.yaml",
-            "crates/fixture-server/tests/webapp-e2e/package-lock.json",
-            "apps/extension/tests/browser/package-lock.json",
-        ] {
-            assert!(
-                text.contains(lock),
-                "ci.yml Playwright cache key lacks {lock}"
-            );
-        }
+    fn workspace_lockfile_policy_is_clean() {
+        super::check_workspace_lockfiles().expect("workspace has a second lockfile");
     }
 
     #[test]

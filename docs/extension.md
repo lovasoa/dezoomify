@@ -81,9 +81,9 @@ WASM glue from the current Rust source before staging. The extension test gate
 does so before its unit suite, whose worker contract runs a real generated WASM
 session through the first discovery round trip; an absent, stale, or
 incompatible binding is a blocking failure before browser E2E starts.
-Store staging installs its locked JavaScript build dependency when it is absent,
-so clean release and submission jobs do not depend on a local `node_modules`
-cache.
+Store staging requires the root workspace dependencies installed by
+`cargo xtask setup` or `pnpm install --frozen-lockfile`; it never invokes a
+second package manager.
 
 User-facing job behavior comes from the same protocol and scenarios as web and
 desktop. See [Testing](testing.md) and [Releases](releases.md). For user-facing

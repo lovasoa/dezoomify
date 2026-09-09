@@ -223,6 +223,7 @@ test("store package ships only loaded files (no dead code)", () => {
   // code (and the harness) never enumerates tabs.
   assert.ok(!script.includes('"tabs"'), "package must never inject tabs permission");
   assert.ok(!script.includes("page/page.html"), "package must not stage a fallback page");
+  assert.ok(!/\bnpm\b/.test(script), "package must use the root pnpm workspace");
 });
 
 test("generated manifests are the deterministic generator output (base+overlay, no underscore keys)", () => {
