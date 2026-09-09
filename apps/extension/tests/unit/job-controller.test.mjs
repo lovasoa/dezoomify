@@ -84,6 +84,39 @@ test("a tile that cannot decode reports a failed acquisition, not a broken outpu
   assert.equal(sent.some((message) => message.type === "engine.bytes"), false);
 });
 
+test("an access grant re-drives the paused acquisition instead of failing the job", async () => {
+  let attempts = 0;
+  const sent = [];
+  // Replace the injected transport behavior through a fresh focused harness,
+  // keeping the permission callback observable just like the job page does.
+  const retried = [];
+  const resumed = createJobController({
+    worker: { postMessage: (message) => sent.push(message) },
+    binding: () => BINDING,
+    sourceTransport: { async fetchResource() { throw new Error("not used"); } },
+    extensionTransport: {
+      async fetchResource() {
+        attempts += 1;
+        if (attempts === 1) throw Object.assign(new Error("grant required"), { category: "access-required", hosts: ["https://cdn.test"] });
+        return { bytes: new Uint8Array([1]) };
+      },
+      cancel() {},
+    },
+    assembly: fakeAssembly(),
+    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: true }),
+    onPermissionRequired: (detail) => retried.push(detail),
+    onPartialDecision() {}, onHostFailure() {}, onEvent() {}, onUnsupportedEffect() {},
+  });
+  resumed.handleEngineMessages([TILE_EFFECT]);
+  await flush();
+  assert.equal(sent.some((message) => message.type === "engine.failure"), false, "grantable access waits for the decision");
+  assert.equal(retried.length, 1);
+  resumed.resolvePermission(true);
+  await flush();
+  assert.equal(attempts, 2);
+  assert.ok(sent.some((message) => message.type === "engine.bytes"));
+});
+
 test("metadata requests route through the source transport", async () => {
   const { controller, seen } = harness();
   controller.handleEngineMessages([{

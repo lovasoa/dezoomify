@@ -287,6 +287,55 @@ abbr[title] {
   color: var(--dz-text-primary);
 }
 
+/* Dedicated extension-job consent view. Permission is an intentional pause,
+ * not an error, so it gets one quiet surface and one clear action. */
+.dz-permission-request {
+  width: min(100%, 38rem);
+  margin: auto;
+  padding: clamp(2.5rem, 7vw, 5rem) clamp(1.5rem, 6vw, 4.5rem);
+  text-align: center;
+}
+
+.dz-permission-icon {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  margin: 0 auto 1.5rem;
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  color: var(--dz-link-color);
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dz-permission-icon svg {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+
+.dz-permission-request h1 {
+  margin: 0 0 1rem;
+  color: var(--dz-text-primary);
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.dz-permission-request p {
+  margin: 0 auto 0.65rem;
+  color: var(--dz-text-secondary);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.dz-permission-button {
+  width: min(100%, 24rem);
+  min-height: 3.75rem;
+  margin-top: 1.75rem;
+}
+
 /* Title & Description */
 .dz-header {
   margin-bottom: 2.25rem;

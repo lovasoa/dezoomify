@@ -34,6 +34,10 @@ let started = false;
 let selected = false;
 let hostFailed = false;
 let lastSource = "";
+// The engine emits the initial 0/N tile snapshot before it dispatches tile
+// effects. Keep it while a permission view temporarily replaces the job view
+// so approval resumes the same determinate progress display immediately.
+let lastTileProgress: { current: number; total: number } | null = null;
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 
 function requestId(prefix: string) { return `${prefix}-${crypto.randomUUID?.() ?? Date.now().toString(36)}`; }
@@ -44,6 +48,7 @@ function root() { return document.getElementById("dz-job-app"); }
 function render(status: string, ctx: ViewContext = {}) {
   const target = root();
   if (!target) return;
+  target.className = "";
   seq += 1;
   renderView(target, { status, seq, sessionId: binding?.jobId ?? "job:pending", transport: "browser-session", imageCount: 0, ...(ctx.failure ? { error: ctx.failure } : {}) }, {
     onSubmitUrl: () => {},
@@ -67,23 +72,59 @@ function closeJob() {
 
 function showAccessRequired(detail: { hosts: string[] }) {
   const hosts = Array.isArray(detail.hosts) ? detail.hosts : [];
-  render("failed", {
-    failure: { code: "access-required", category: "extension", retryable: true, message: `This image uses files from: ${hosts.join(", ") || "another site"}` },
-    jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for access" },
-  });
   const target = root();
-  if (!target || target.querySelector("[data-dz-allow-access]")) return;
+  if (!target) return;
+  const origin = hosts.length === 1 ? hosts[0] : "the required image host";
+  target.replaceChildren();
+  target.className = "dz-permission-request";
+  const icon = document.createElement("div");
+  icon.className = "dz-permission-icon";
+  icon.setAttribute("aria-hidden", "true");
+  const lock = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  lock.setAttribute("viewBox", "0 0 24 24");
+  lock.setAttribute("fill", "none");
+  lock.setAttribute("stroke", "currentColor");
+  lock.setAttribute("stroke-width", "1.8");
+  const shackle = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  shackle.setAttribute("d", "M8 10V7a4 4 0 0 1 8 0v3");
+  const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  body.setAttribute("x", "5"); body.setAttribute("y", "10"); body.setAttribute("width", "14"); body.setAttribute("height", "10"); body.setAttribute("rx", "1");
+  lock.append(shackle, body);
+  icon.append(lock);
+  const title = document.createElement("h1");
+  title.textContent = "Allow access to continue";
+  const explanation = document.createElement("p");
+  explanation.textContent = `This image uses files from ${origin}.`;
+  const reason = document.createElement("p");
+  reason.textContent = "Dezoomify needs access to read those files and assemble your image in this browser.";
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "dz-btn-tactile";
+  button.className = "dz-btn-tactile dz-permission-button";
   button.dataset.dzAllowAccess = "true";
   button.textContent = "Allow access and continue";
   button.addEventListener("click", () => {
     // This click is the only path that may cause the coordinator to call the
     // browser permission API. The worker/fetch transport never does so.
-    void send(boundEnvelope("dz.job.permission-required", { origins: hosts })).catch(() => {});
+    button.disabled = true;
+    button.textContent = "Requesting access…";
+    void send(boundEnvelope("dz.job.permission-required", { origins: hosts })).catch(() => {
+      button.disabled = false;
+      button.textContent = "Allow access and continue";
+    });
   });
-  target.append(button);
+  target.append(icon, title, explanation, reason, button);
+}
+
+function resolvePermission(message: Record<string, unknown>) {
+  if (!binding || message.jobId !== binding.jobId || typeof message.granted !== "boolean") return;
+  if (message.granted) {
+    const progress = lastTileProgress;
+    render("downloading", {
+      ...(progress ? { currentProgress: progress } : {}),
+      jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" },
+    });
+  }
+  controller?.resolvePermission(message.granted);
 }
 
 /**
@@ -168,7 +209,11 @@ function createAssembly(sourceUrl: string) {
 
 function handleEvent(event: JobEvent) {
   if (hostFailed) return;
-  if (event.type === "progress") render("downloading", { currentProgress: { current: event.acquired, total: event.total }, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
+  if (event.type === "progress") {
+    if (typeof event.acquired !== "number" || typeof event.total !== "number") return;
+    lastTileProgress = { current: event.acquired, total: event.total };
+    render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
+  }
   else if (event.type === "failed") render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
   else if (event.type === "cancelled") render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } });
   else if (event.type === "completed" || event.type === "partial-completed") render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } });
@@ -197,6 +242,7 @@ function setup(bound: unknown) {
     frameId: bound.frameId,
     documentGeneration: bound.documentGeneration,
   };
+  lastTileProgress = null;
   const activeBinding = binding;
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   jobWorker = worker;
@@ -260,6 +306,7 @@ api?.runtime?.onMessage?.addListener((message) => {
   if (message?.type === "dz.job.binding") setup(message);
   else if (message?.type === "dz.job.candidates") candidates(message);
   else if (message?.type === "dz.job.fetch") sourceTransport?.handleMessage?.(message);
+  else if (message?.type === "dz.job.permission-required") resolvePermission(message);
 });
 
 window.addEventListener("beforeunload", () => {
