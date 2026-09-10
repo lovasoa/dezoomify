@@ -48,7 +48,8 @@ policy: the web integration tries a direct browser fetch first, with browser
 credentials omitted, and may automatically use the metadata CORS proxy only
 after a classified CORS or network failure, or a direct fetch that does not
 complete within the 1500 ms metadata window, for an eligible public,
-non-credential metadata request (never tiles). The active transport is always visible. No cookies,
+non-credential metadata request (never tiles). The active transport is retained
+in the job's technical details and copied diagnostics. No cookies,
 `Authorization`, browser credentials, or user-supplied credential headers are
 sent to or by the proxy. The extension never uses the metadata CORS proxy;
 extension-to-native cookie handoff is separately consent-gated. The extension

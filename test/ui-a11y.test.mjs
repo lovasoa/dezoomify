@@ -286,10 +286,11 @@ test("static accessibility contract: live job region announces progress with a l
   const track = card.querySelector("#dz-job-track");
   assert.equal(track.getAttribute("role"), "progressbar");
   assert.equal(track.getAttribute("aria-valuemin"), "0");
-  assert.equal(track.getAttribute("aria-valuemax"), "100");
+  assert.equal(track.getAttribute("aria-valuemax"), "12");
   const now = Number(track.getAttribute("aria-valuenow"));
-  assert.ok(Number.isFinite(now) && now >= 0 && now <= 100, "aria-valuenow stays within bounds");
+  assert.ok(Number.isFinite(now) && now >= 0 && now <= 12, "aria-valuenow stays within bounds");
   assert.ok((track.getAttribute("aria-label") || "").length > 0, "progressbar has an accessible name");
+  assert.equal(track.getAttribute("aria-valuetext"), "3 done, 0 in progress, 9 remaining");
   assertButtonsNamed(card, "job");
 });
 

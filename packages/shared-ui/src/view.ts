@@ -6,12 +6,9 @@ import { renderAppChoice } from "./controller.ts";
 import type { HistoryEntry } from "./history.ts";
 import { t } from "./i18n.ts";
 import {
-  renderTransportLabel,
   renderSaveGuidance,
-  renderProgress,
   renderCompletion,
   formatElapsed,
-  formatRemaining,
   getDezoomifyLogoSvg,
 } from "./components.ts";
 
@@ -28,7 +25,8 @@ export interface ViewCallbacks {
   onSelectImage?(index: number): void;
   onSelectLevel?(level: number): void;
   onOpenExternalLink?(url: string): void;
-  onCopyShareLink?(): void;
+  /** Copy the current, host-supplied diagnostic snapshot. */
+  onCopyDiagnostics?(text: string): void;
   /** Clear the local history ledger. Absent hides the clear action. */
   onClearHistory?(): void;
   /** Pause the active job (suspend-acquisition). Absent hides the pause control. */
@@ -56,13 +54,26 @@ export interface JobActivity {
   lastProgressAt?: number;
   /** Capped technical log lines (oldest first). Never rendered unescaped. */
   log?: string[];
+  /** Extra bounded, redacted diagnostics supplied by the host runtime. */
+  diagnostics?: string;
   /** Pause v1 overlay (todo 5.7): true while acquisition is suspended. */
   paused?: boolean;
+  /** Epoch when the current pause began; keeps displayed durations frozen. */
+  pausedAt?: number;
+  /** Total completed pause time, excluded from displayed job durations. */
+  pausedDurationMs?: number;
 }
 
 export interface ViewContext {
   capabilities?: AppCapabilities;
-  currentProgress?: { current: number; total: number; message?: string };
+  currentProgress?: {
+    current: number;
+    total: number;
+    active?: number;
+    retrying?: number;
+    estimatedTotalMs?: number;
+    message?: string;
+  };
   completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
   nativeSaved?: { partial: boolean };
   savedOutput?: {
@@ -650,6 +661,16 @@ function truncateMiddle(value: string, max = 90): string {
   return `${s.slice(0, half)}…${s.slice(s.length - half)}`;
 }
 
+/** Display source context without query, fragment, or credentials. */
+function displaySourceUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return truncateMiddle(`${url.host}${url.pathname}`, 90);
+  } catch {
+    return "source unavailable";
+  }
+}
+
 /** The website a request is waiting on, for plain-language messages. */
 function hostFromUrl(url: string | undefined): string {
   try {
@@ -957,43 +978,27 @@ function mountJobSection(
   (sec as unknown as { _callbacks: ViewCallbacks })._callbacks = callbacks;
 
   sec.innerHTML = `
-    <p class="dz-source-line" id="dz-job-source-line" style="display: none;">
-      Working on <span class="dz-source-url" id="dz-job-source-url"></span>
-    </p>
+    <div class="dz-job-source-row" id="dz-job-source-line" style="display: none;">
+      <span class="dz-job-source-label">Source</span>
+      <span class="dz-source-url" id="dz-job-source-url"></span>
+      <span class="dz-job-time" id="dz-job-time"></span>
+    </div>
     <div class="dz-progress-header">
       <span class="dz-progress-status">
         <span class="dz-pulse" aria-hidden="true"></span>
         <span class="dz-progress-step-text" id="dz-job-step-text"></span>
       </span>
-      <span class="dz-progress-percent" id="dz-job-percent"></span>
+      <span class="dz-progress-count" id="dz-job-counts"></span>
     </div>
-    <div class="dz-progress-track dz-indeterminate" id="dz-job-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-      <div class="dz-progress-bar" id="dz-job-bar" style="width: 35%;"></div>
-    </div>
-    <p class="dz-tile-counts" id="dz-job-counts"></p>
-    <p class="dz-job-detail" id="dz-job-images" style="display: none;">
-      <span id="dz-job-images-text"></span>
-      <button type="button" class="dz-btn-link" id="dz-job-change">Change</button>
-    </p>
-    <p class="dz-job-detail" id="dz-job-change-hint" style="display: none;"></p>
-    <div class="dz-pending-box" id="dz-job-pending-box" style="display: none;">
-      <div class="dz-pending-line">
-        <span id="dz-job-pending-status"></span>
-        <span class="dz-pending-time" id="dz-job-pending-time"></span>
+    <div class="dz-progress-rail">
+      <div class="dz-progress-buttons">
+        <button type="button" class="dz-progress-control" id="dz-btn-pause" style="display: none;" aria-label="Pause" title="Pause"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14"></rect><rect x="14" y="5" width="4" height="14"></rect></svg></button>
+        <button type="button" class="dz-progress-control" id="dz-btn-resume" style="display: none;" aria-label="Resume" title="Resume"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg></button>
+        <button type="button" class="dz-progress-control dz-stop-control" id="dz-btn-cancel" aria-label="Stop and return to start" title="Stop and return to start"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12"></rect></svg></button>
       </div>
-      <div class="dz-remaining-track" aria-hidden="true">
-        <div class="dz-remaining-bar" id="dz-job-remaining-bar" style="width: 0%;"></div>
-      </div>
-    </div>
-    <p class="dz-reassure" id="dz-job-reassure" style="display: none;"></p>
-    <p class="dz-job-detail" id="dz-job-detail" style="display: none;"></p>
-    <div class="dz-progress-controls">
-      <span class="dz-transport-badge" id="dz-job-transport">Direct from your browser</span>
-      <div class="dz-job-actions">
-        <button type="button" class="dz-btn-secondary" id="dz-btn-share" style="display: none;">Copy shareable link</button>
-        <button type="button" class="dz-btn-secondary" id="dz-btn-pause" style="display: none;">Pause</button>
-        <button type="button" class="dz-btn-secondary" id="dz-btn-resume" style="display: none;">Resume</button>
-        <button type="button" class="dz-btn-secondary" id="dz-btn-cancel">Cancel</button>
+      <div class="dz-progress-track dz-indeterminate" id="dz-job-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div class="dz-progress-done" id="dz-job-bar" style="width: 0%;"></div>
+        <div class="dz-progress-active" id="dz-job-active" style="width: 0%;"></div>
       </div>
     </div>
     <details class="dz-details" id="dz-job-details">
@@ -1001,6 +1006,7 @@ function mountJobSection(
         <span>Technical details &amp; logs</span>
         <svg class="dz-summary-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </summary>
+      <button type="button" class="dz-copy-diagnostics" id="dz-btn-copy-diagnostics" style="display: none;" aria-label="Copy technical details" title="Copy technical details"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="11" rx="1"></rect><path d="M15 9V5H5v11h4"></path></svg></button>
       <div class="dz-diagnostics" id="dz-job-diagnostics"></div>
       <div class="dz-diagnostics dz-log" id="dz-job-log" style="display: none;"></div>
     </details>
@@ -1018,13 +1024,9 @@ function mountJobSection(
     const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
     cb?.onResume?.();
   });
-  sec.querySelector("#dz-btn-share")?.addEventListener("click", () => {
-    const cb = (sec as unknown as { _callbacks: ViewCallbacks })._callbacks;
-    cb?.onCopyShareLink?.();
-  });
-  sec.querySelector("#dz-job-change")?.addEventListener("click", () => {
-    const hint = sec.querySelector<HTMLElement>("#dz-job-change-hint");
-    if (hint) hint.style.display = hint.style.display === "none" ? "" : "none";
+  sec.querySelector("#dz-btn-copy-diagnostics")?.addEventListener("click", () => {
+    const stored = sec as unknown as { _callbacks: ViewCallbacks; _diagnostics?: string };
+    stored._callbacks?.onCopyDiagnostics?.(stored._diagnostics ?? "");
   });
 
   parent.appendChild(sec);
@@ -1049,26 +1051,40 @@ function updateJobSection(
   const current = ctx?.currentProgress?.current ?? 0;
   const total = ctx?.currentProgress?.total ?? 0;
   const determinate = total > 0;
-  const pct = determinate ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
-  const transport = state.transport ? renderTransportLabel(state.transport) : "Direct from your browser";
+  const donePct = determinate ? Math.max(0, Math.min(100, (current / total) * 100)) : 0;
+  const active = determinate
+    ? Math.max(0, Math.min(ctx?.currentProgress?.active ?? 0, Math.max(0, total - current)))
+    : 0;
+  const activePct = determinate ? (active / total) * 100 : 0;
+  const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
   const paused = ctx?.paused === true || activity.paused === true;
-  const step = paused
-    ? "Paused. No new pieces are being fetched."
-    : activity.stepLabel || ctx?.currentProgress?.message || defaultStepFor(state.status);
+  if (paused) sec.classList.add("dz-job-paused");
+  else sec.classList.remove("dz-job-paused");
   const now = activity.now ?? Date.now();
   const startedAt = activity.startedAt ?? now;
-  const elapsedMs = Math.max(0, now - startedAt);
+  const timerNow = activity.pausedAt ?? now;
+  const elapsedMs = Math.max(0, timerNow - startedAt - (activity.pausedDurationMs ?? 0));
   const elapsed = formatElapsed(elapsedMs);
-  const pending = activity.pendingRequests ?? 0;
-  const completed = activity.completedRequests ?? 0;
-  const failed = activity.failedRequests ?? 0;
-  const longestPending = activity.longestPendingMs ?? 0;
   const timeoutMs = activity.timeoutMs ?? 30000;
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
-  const stalledMs = Math.max(0, now - lastProgressAt);
-  const showPending = pending > 0 && (elapsedMs >= 2000 || longestPending >= 2000);
+  const stalledMs = Math.max(0, timerNow - lastProgressAt);
   const showStalled = stalledMs >= 10000 && state.status !== "saving";
-  const sourceUrl = activity.url ? truncateMiddle(activity.url, 90) : "";
+  const step = paused
+    ? "Paused"
+    : retrying > 0
+      ? `Retrying ${retrying} tile${retrying === 1 ? "" : "s"}…`
+      : showStalled
+        ? `Waiting for ${hostFromUrl(activity.url)}…`
+        : activity.stepLabel || ctx?.currentProgress?.message || defaultStepFor(state.status);
+  const sourceUrl = activity.url ? displaySourceUrl(activity.url) : "";
+  const estimatedTotalMs = ctx?.currentProgress?.estimatedTotalMs ?? (
+    determinate && current >= 2 && elapsedMs >= 2000
+      ? Math.round((elapsedMs / current) * total)
+      : undefined
+  );
+  const timeText = elapsed
+    ? `${elapsed}${typeof estimatedTotalMs === "number" && estimatedTotalMs > elapsedMs ? ` / ~${formatElapsed(estimatedTotalMs)}` : ""}`
+    : "";
 
   // 1. Source Line
   const sourceLine = sec.querySelector<HTMLElement>("#dz-job-source-line");
@@ -1076,7 +1092,7 @@ function updateJobSection(
   if (sourceLine && sourceUrlEl) {
     if (sourceUrl) {
       sourceLine.style.display = "";
-      sourceLine.title = activity.url ?? "";
+      sourceLine.title = sourceUrl;
       if (sourceUrlEl.textContent !== sourceUrl) {
         sourceUrlEl.textContent = sourceUrl;
       }
@@ -1084,147 +1100,48 @@ function updateJobSection(
       sourceLine.style.display = "none";
     }
   }
+  const timeEl = sec.querySelector<HTMLElement>("#dz-job-time");
+  if (timeEl && timeEl.textContent !== timeText) timeEl.textContent = timeText;
 
-  // 2. Step Label & Percent/Elapsed
+  // 2. Phase and exact tile summary.
   const stepEl = sec.querySelector<HTMLElement>("#dz-job-step-text");
   if (stepEl && stepEl.textContent !== step) {
     stepEl.textContent = step;
   }
 
-  const percentEl = sec.querySelector<HTMLElement>("#dz-job-percent");
-  if (percentEl) {
-    const percentText = determinate ? `${pct}%` : (elapsed || "");
-    if (percentEl.textContent !== percentText) {
-      percentEl.textContent = percentText;
-    }
-  }
+  const countsEl = sec.querySelector<HTMLElement>("#dz-job-counts");
+  const countsText = determinate
+    ? `${current} done${active > 0 ? ` + ${active} in progress` : ""} / ${total}`
+    : "";
+  if (countsEl && countsEl.textContent !== countsText) countsEl.textContent = countsText;
 
   // 3. Track and Bar
   const track = sec.querySelector<HTMLElement>("#dz-job-track");
   const bar = sec.querySelector<HTMLElement>("#dz-job-bar");
   if (track && bar) {
-    track.setAttribute("aria-valuenow", String(pct));
+    track.setAttribute("aria-valuenow", String(current));
+    track.setAttribute("aria-valuemax", String(total || 100));
     track.setAttribute("aria-label", step);
+    track.setAttribute(
+      "aria-valuetext",
+      determinate
+        ? `${current} done, ${active} in progress, ${Math.max(0, total - current - active)} remaining`
+        : step,
+    );
     if (determinate) {
       track.classList.remove("dz-indeterminate");
-      bar.style.width = `${pct}%`;
+      bar.style.width = `${donePct}%`;
     } else {
       track.classList.add("dz-indeterminate");
       bar.style.width = "35%";
     }
-  }
-
-  // 4. Counts
-  const countsEl = sec.querySelector<HTMLElement>("#dz-job-counts");
-  if (countsEl) {
-    const countsText = determinate
-      ? `${current} of ${total} tiles${elapsed ? ` · ${elapsed} elapsed` : ""}`
-      : elapsed
-        ? `${elapsed} elapsed`
-        : "";
-    if (countsEl.textContent !== countsText) {
-      countsEl.textContent = countsText;
+    const activeBar = sec.querySelector<HTMLElement>("#dz-job-active");
+    if (activeBar) {
+      activeBar.style.left = determinate ? `${donePct}%` : "0%";
+      activeBar.style.width = determinate ? `${activePct}%` : "0%";
     }
   }
-
-  // 4b. Catalog auto-choice notice (todo 4.3): honest step without a picker.
-  // Uses existing controller imageCount, never a new protocol event. WxH and
-  // tile counts come from local ViewContext.imageChoice when known.
-  const imagesEl = sec.querySelector<HTMLElement>("#dz-job-images");
-  const imagesText = sec.querySelector<HTMLElement>("#dz-job-images-text");
-  const changeHint = sec.querySelector<HTMLElement>("#dz-job-change-hint");
-  const choiceCount = state.imageCount ?? 0;
-  if (imagesEl && imagesText) {
-    if (choiceCount > 0) {
-      const choiceWidth = ctx?.imageChoice?.width ?? ctx?.completedInfo?.width ?? 0;
-      const choiceHeight = ctx?.imageChoice?.height ?? ctx?.completedInfo?.height ?? 0;
-      const choiceTiles = ctx?.imageChoice?.tiles ?? (determinate ? total : 0);
-      const noun = choiceCount === 1 ? "1 image" : `${choiceCount} images`;
-      let suffix = ".";
-      if (choiceWidth > 0 && choiceHeight > 0 && choiceTiles > 0) {
-        suffix = ` (${choiceWidth}×${choiceHeight}, ${choiceTiles} tiles).`;
-      } else if (choiceWidth > 0 && choiceHeight > 0) {
-        suffix = ` (${choiceWidth}×${choiceHeight}).`;
-      } else if (choiceTiles > 0) {
-        suffix = ` (${choiceTiles} tiles).`;
-      }
-      const notice = `Found ${noun}, saving largest that fits${suffix}`;
-      if (imagesText.textContent !== notice) imagesText.textContent = notice;
-      imagesEl.style.display = "";
-      if (changeHint) {
-        const hint = "The website saves the largest image automatically. To choose a different image, use the desktop app.";
-        if (changeHint.textContent !== hint) changeHint.textContent = hint;
-      }
-    } else {
-      imagesEl.style.display = "none";
-      if (changeHint) changeHint.style.display = "none";
-    }
-  }
-
-  // 5. Pending section
-  const pendingBox = sec.querySelector<HTMLElement>("#dz-job-pending-box");
-  const pendingStatus = sec.querySelector<HTMLElement>("#dz-job-pending-status");
-  const pendingTime = sec.querySelector<HTMLElement>("#dz-job-pending-time");
-  const remainingBar = sec.querySelector<HTMLElement>("#dz-job-remaining-bar");
-  if (pendingBox) {
-    if (showPending) {
-      pendingBox.style.display = "";
-      if (pendingStatus) {
-        const text = `${pending} request${pending === 1 ? "" : "s"} in flight${completed > 0 ? ` · ${completed} done` : ""}${failed > 0 ? ` · ${failed} failed, retrying` : ""}`;
-        if (pendingStatus.textContent !== text) {
-          pendingStatus.textContent = text;
-        }
-      }
-      if (pendingTime) {
-        const timeText = `${formatElapsed(longestPending)} waiting · ${formatRemaining(longestPending, timeoutMs)}`;
-        if (pendingTime.textContent !== timeText) {
-          pendingTime.textContent = timeText;
-        }
-      }
-      if (remainingBar) {
-        const remainingPct = Math.max(0, Math.min(100, Math.round((longestPending / timeoutMs) * 100)));
-        remainingBar.style.width = `${remainingPct}%`;
-      }
-    } else {
-      pendingBox.style.display = "none";
-    }
-  }
-
-  // 6. Stalled Reassurance
-  const reassureEl = sec.querySelector<HTMLElement>("#dz-job-reassure");
-  if (reassureEl) {
-    reassureEl.style.display = showStalled ? "" : "none";
-    const reassureText = `Still working, ${hostFromUrl(activity.url)} is slow to answer. You can wait, or cancel and try again later.`;
-    if (reassureEl.textContent !== reassureText) {
-      reassureEl.textContent = reassureText;
-    }
-  }
-
-  // 7. Detail
-  const detailEl = sec.querySelector<HTMLElement>("#dz-job-detail");
-  if (detailEl) {
-    if (activity.detail) {
-      detailEl.style.display = "";
-      if (detailEl.textContent !== activity.detail) {
-        detailEl.textContent = activity.detail;
-      }
-    } else {
-      detailEl.style.display = "none";
-    }
-  }
-
-  // 8. Transport badge & Action buttons
-  const transportEl = sec.querySelector<HTMLElement>("#dz-job-transport");
-  if (transportEl && transportEl.textContent !== transport) {
-    transportEl.textContent = transport;
-  }
-
-  const shareBtn = sec.querySelector<HTMLElement>("#dz-btn-share");
-  if (shareBtn) {
-    shareBtn.style.display = callbacks.onCopyShareLink ? "" : "none";
-  }
-
-  // Pause v1 (todo 5.7): suspend-acquisition controls. Pause shows while
+  // 4. Pause v1: acquisition controls belong to the rail itself. Pause shows while
   // running with a pause handler; Resume shows while paused with a resume
   // handler. Hosts own the effect; the view only renders the overlay.
   const pauseBtn = sec.querySelector<HTMLElement>("#dz-btn-pause");
@@ -1239,13 +1156,15 @@ function updateJobSection(
   }
 
   // 9. Diagnostics & Logs (preserved in-place, keeping details open state intact)
+  const diagText = diagnosticsText(state, ctx, elapsedMs, timeoutMs);
   const diagEl = sec.querySelector<HTMLElement>("#dz-job-diagnostics");
   if (diagEl) {
-    const diagText = diagnosticsText(state, ctx, elapsedMs, timeoutMs);
     if (diagEl.textContent !== diagText) {
       diagEl.textContent = diagText;
     }
   }
+  const copyBtn = sec.querySelector<HTMLElement>("#dz-btn-copy-diagnostics");
+  if (copyBtn) copyBtn.style.display = callbacks.onCopyDiagnostics ? "" : "none";
 
   const logEl = sec.querySelector<HTMLElement>("#dz-job-log");
   if (logEl) {
@@ -1259,6 +1178,8 @@ function updateJobSection(
       logEl.style.display = "none";
     }
   }
+  const copiedLog = activity.log && activity.log.length > 0 ? `\n\nEvents\n${activity.log.join("\n")}` : "";
+  (sec as unknown as { _diagnostics?: string })._diagnostics = `${diagText}${activity.diagnostics ? `\n\n${activity.diagnostics}` : ""}${copiedLog}`;
 }
 
 function diagnosticsText(
@@ -1277,7 +1198,9 @@ function diagnosticsText(
     `Requests: ${a.pendingRequests ?? 0} pending, ${a.completedRequests ?? 0} done, ${a.failedRequests ?? 0} failed`,
   ];
   if (p) lines.push(`Tiles: ${p.current} of ${p.total}`);
-  if (a.url) lines.push(`Source: ${a.url}`);
+  if (p?.active !== undefined) lines.push(`Tiles active: ${p.active}`);
+  if (p?.retrying !== undefined) lines.push(`Tiles retrying: ${p.retrying}`);
+  if (a.url) lines.push(`Source: ${displaySourceUrl(a.url)}`);
   return lines.join("\n");
 }
 
@@ -1462,7 +1385,6 @@ function mountCompletedSection(
         </svg>
         Save image
       </button>` : ""}
-      ${callbacks.onCopyShareLink ? `<button type="button" class="dz-btn-secondary" id="dz-btn-share">Copy shareable link</button>` : ""}
       <button type="button" class="dz-btn-secondary" id="dz-btn-another">Dezoomify another image</button>
     </div>
   `;
@@ -1470,7 +1392,6 @@ function mountCompletedSection(
   section.querySelector("#dz-btn-save")?.addEventListener("click", () => callbacks.onSave?.());
   section.querySelector("#dz-btn-open")?.addEventListener("click", () => callbacks.onOpenOutput?.());
   section.querySelector("#dz-btn-reveal")?.addEventListener("click", () => callbacks.onRevealOutput?.());
-  section.querySelector("#dz-btn-share")?.addEventListener("click", () => callbacks.onCopyShareLink?.());
   section.querySelector("#dz-btn-another")?.addEventListener("click", () => callbacks.onReset());
   parent.appendChild(section);
 }

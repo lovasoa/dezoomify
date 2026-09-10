@@ -54,7 +54,8 @@ test("drawTile trusts the plan and logs size mismatches", async () => {
   await painter.drawTile(ctx, { uri: "https://a.test/1.png", headers: {}, x: 256, y: 0, w: 256, h: 256, processing: "none" });
   assert.equal(ctx.drawn.length, 1);
   assert.equal(ctx.drawn[0].dw, 256);
-  assert.ok(log.some((line) => line.includes("tile size mismatch")), "mismatch logged");
+  assert.ok(log.some((line) => line.includes("A tile size differed from the plan")), "mismatch logged without identifying a tile");
+  assert.ok(log.every((line) => !line.includes("a.test") && !line.includes("256,0")), "mismatch log has no tile URL or coordinates");
 });
 
 test("drawTile falls back to ordinary display for unprocessed tiles", async () => {

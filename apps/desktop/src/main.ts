@@ -1074,32 +1074,11 @@ function handleCancel(): void {
   if (isTerminalStatus(controller.getState().status)) return;
   const job = currentJobId;
   const invoke = tauriInvoke();
-  // Cancellation waits for the native worker's cleanup acknowledgement
-  // before reaching cancelled. The command only requests cancellation;
-  // the terminal state arrives through the cancelled event after any output
-  // path owned by the worker has been cleaned up.
-  pushLog("Cancelling… cleaning up…");
-  setStep(t("view.step.working"), t("desktop.step.cleanupDetail"));
-  pendingDecision = null;
-  catalogNotice = null;
-  if (invoke) {
-    if (!job) {
-      cancelPending = true;
-      pushLog("Waiting for the native job to start before cancelling…");
-      update();
-      return;
-    }
-    requestNativeCancellation(job, invoke);
-    return;
-  }
-  cancelPending = false;
-  controller.dispatch({ seq: nextSeq(), sessionId, kind: "cancel" });
-  pushLog("Cancelled by user; unfinished file removed");
-  stopHeartbeat();
-  // No native job exists to echo a cancelled event, so settle the queue entry
-  // here; otherwise it would stay active forever and block the queue.
-  settleActiveQueue("cancelled");
-  update();
+  // Stop is immediate in the UI. The native host still receives cancellation
+  // and performs cleanup, while its late events are retired below.
+  if (job && invoke) void invoke("cancel_job", { job }).catch(() => undefined);
+  handleReset();
+  if (job) retiredJobId = job;
 }
 
 // Destination recovery grants a replacement output. On grant, walks the controller into saving;
@@ -2029,10 +2008,9 @@ function ensureDesktopAuxPanel(): void {
     }
   }
   existing?.remove();
-  const showCopy = state.status !== "idle";
   const showPartialDone = state.status === "completed" && completedPartial;
   const showCancelledNote = state.status === "cancelled";
-  if (!decision && !showCopy && !showPartialDone && !showCancelledNote) {
+  if (!decision && !showPartialDone && !showCancelledNote) {
     if (prevKey !== null) {
       restoreFocus(recoveryReturnFocus);
       recoveryReturnFocus = null;
@@ -2185,28 +2163,6 @@ function ensureDesktopAuxPanel(): void {
 
   if (state.status !== "completed" && desktopQueue.entries.length > 1) appendDesktopQueuePanel(aux, doc);
 
-  if (showCopy) {
-    const copyRow = doc.createElement("div");
-    copyRow.className = "dz-actions-row";
-    const copyBtn = doc.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.id = "dz-btn-copy-diag";
-    copyBtn.className = "dz-btn-secondary";
-    copyBtn.textContent = t("desktop.copy.diagnostics");
-    copyBtn.addEventListener("click", () => handleCopyDiagnostics(() => buildCopyDiagnostics(diagnosticsSnapshot())));
-    copyRow.appendChild(copyBtn);
-    if (state.status === "completed") {
-      const details = doc.createElement("details");
-      details.id = "dz-completed-details";
-      const summary = doc.createElement("summary");
-      summary.textContent = t("view.job.techDetails");
-      details.append(summary, copyRow);
-      aux.appendChild(details);
-    } else {
-      aux.appendChild(copyRow);
-    }
-  }
-
   card.appendChild(aux);
   if (decisionKey && decisionKey !== prevKey) {
     const primary = decisionBox?.querySelector("button.dz-btn-tactile") as HTMLElement | null;
@@ -2358,6 +2314,9 @@ function update() {
       },
       onCancel() {
         handleCancel();
+      },
+      onCopyDiagnostics(text: string) {
+        handleCopyDiagnostics(() => `${text}\n\n${buildCopyDiagnostics(diagnosticsSnapshot())}`);
       },
       onReset() {
         handleReset();

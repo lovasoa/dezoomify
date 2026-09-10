@@ -384,9 +384,9 @@ test("shipped webapp paints unreadable ordinary tiles instead of failing", () =>
 
 test("website trusts the tile plan, warns on color profiles, and compresses PNG", () => {
   const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
-  // Seam: the plan wins for placement; a mis-sized decode is logged and scaled
-  // to the planned extent so no gap appears (no Math.min clipping to the decode).
-  assert.ok(mainTs.includes("tile size mismatch"), "drawTile must log plan/decode mismatches");
+  // Seam: the plan wins for placement; a mis-sized decode is logged generically
+  // and scaled to the planned extent so no gap appears (no Math.min clipping to the decode).
+  assert.ok(mainTs.includes("A tile size differed from the plan"), "drawTile must log plan/decode mismatches without identifying a tile");
   assert.ok(!mainTs.includes("Math.min(tile.w"), "drawTile must trust the plan, not clip to the decode");
   assert.ok(
     mainTs.includes("drawImage(source, 0, 0, fullW, fullH, tile.x, tile.y, planW, planH)"),
@@ -416,5 +416,5 @@ test("website trusts the tile plan, warns on color profiles, and compresses PNG"
     path.join(REPO_ROOT, "packages", "browser-runtime", "src", "tile-draw.ts"),
     "utf8",
   );
-  assert.ok(tileDrawTs.includes("tile size mismatch"), "shared extension assembly must log plan/decode mismatches");
+  assert.ok(tileDrawTs.includes("A tile size differed from the plan"), "shared extension assembly must log plan/decode mismatches without identifying a tile");
 });

@@ -14,7 +14,7 @@ import {
 } from "../packages/shared-ui/src/history.ts";
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.ts";
-import type { ViewContext } from "../packages/shared-ui/src/view.ts";
+import type { JobActivity, ViewContext } from "../packages/shared-ui/src/view.ts";
 import { suggestedNameFor } from "../packages/shared-ui/src/saveName.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
@@ -449,6 +449,9 @@ let requestSeq = 0;
 const pendingStarts = new Map<number, { startedAt: number; label: string }>();
 let completedRequests = 0;
 let failedRequests = 0;
+let tileAttempts = 0;
+let tileRetries = 0;
+const metadataAttempts: Array<{ at: number; transport: string; target: string; outcome: string; durationMs: number; bytes?: number }> = [];
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let batchedUpdateQueued = false;
 let lastHeartbeatKey = "";
@@ -487,10 +490,18 @@ function activity(): NonNullable<ViewContext["jobActivity"]> {
   return viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
 }
 
+function activityElapsedMs(a: JobActivity, now = Date.now()): number {
+  const startedAt = a.startedAt ?? now;
+  return Math.max(0, (a.pausedAt ?? now) - startedAt - (a.pausedDurationMs ?? 0));
+}
+
 function resetActivity(url: string): void {
   pendingStarts.clear();
   completedRequests = 0;
   failedRequests = 0;
+  tileAttempts = 0;
+  tileRetries = 0;
+  metadataAttempts.length = 0;
   const now = Date.now();
   viewCtx.jobActivity = {
     url,
@@ -508,6 +519,46 @@ function resetActivity(url: string): void {
   };
 }
 
+/** Keep diagnostics bounded and useful without retaining individual tile URLs. */
+function refreshDiagnostics(): void {
+  const a = activity();
+  const lines: string[] = [];
+  if (metadataAttempts.length > 0) {
+    lines.push("Metadata requests");
+    for (const attempt of metadataAttempts) {
+      const size = attempt.bytes === undefined ? "" : ` · ${Math.max(1, Math.round(attempt.bytes / 1024))} KB`;
+      lines.push(
+        `+${(attempt.at / 1000).toFixed(1)} s  ${attempt.target}  ${attempt.transport}  ${attempt.outcome}  ${attempt.durationMs} ms${size}`,
+      );
+    }
+  }
+  if (tileAttempts > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("Tile acquisition");
+    lines.push(`${tileAttempts} attempts · ${tileRetries} retries`);
+  }
+  a.diagnostics = lines.join("\n");
+}
+
+function recordMetadataAttempt(
+  startedAt: number,
+  transport: "direct" | "metadata proxy",
+  target: string,
+  outcome: string,
+  bytes?: number,
+): void {
+  metadataAttempts.push({
+    at: Math.max(0, startedAt - (activity().startedAt ?? startedAt)),
+    transport,
+    target,
+    outcome,
+    durationMs: Math.max(0, Date.now() - startedAt),
+    ...(typeof bytes === "number" ? { bytes } : {}),
+  });
+  if (metadataAttempts.length > 20) metadataAttempts.splice(0, metadataAttempts.length - 20);
+  refreshDiagnostics();
+}
+
 function touchProgress(): void {
   activity().lastProgressAt = Date.now();
 }
@@ -523,7 +574,7 @@ function setStep(label: string, detail?: string): void {
 function pushLog(line: string): void {
   const a = activity();
   if (!a.log) a.log = [];
-  const elapsed = a.startedAt ? Math.round((Date.now() - a.startedAt) / 1000) : 0;
+  const elapsed = Math.round(activityElapsedMs(a) / 1000);
   a.log.push(`${elapsed}s: ${line}`);
   if (a.log.length > 60) a.log.splice(0, a.log.length - 60);
 }
@@ -550,8 +601,9 @@ function noteRequestEnd(id: number, ok: boolean): void {
 }
 
 function refreshLongestPending(): void {
-  const a = activity();
-  const now = Date.now();
+  const a = viewCtx.jobActivity;
+  if (!a) return;
+  const now = a.pausedAt ?? Date.now();
   a.now = now;
   let longest = 0;
   for (const { startedAt } of pendingStarts.values()) {
@@ -673,6 +725,7 @@ async function fetchDirect(
   headers?: Record<string, string>,
   signal?: AbortSignal,
   ms: number = REQUEST_TIMEOUT_MS,
+  logTimeout: boolean = true,
 ): Promise<DirectOutcome> {
   const reqId = noteRequestStart("direct");
   const combined = timeoutSignal(signal, ms);
@@ -697,7 +750,7 @@ async function fetchDirect(
     if (signal?.aborted) return { outcome: "cancelled" };
     const name = (e as { name?: string })?.name;
     if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
-      pushLog(`Direct fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
+      if (logTimeout) pushLog(`Direct metadata fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
       return { outcome: "network-error" };
     }
     return { outcome: "network-error" };
@@ -954,7 +1007,15 @@ async function fetchMetadataFor(
   // AbortController dedupe: the direct loser is aborted before the proxy
   // starts so the two transports never overlap on the same resource.
   const directCtrl = new AbortController();
+  const directStartedAt = Date.now();
   const direct = await fetchDirect(url, headers, directCtrl.signal, DIRECT_METADATA_TIMEOUT_MS);
+  recordMetadataAttempt(
+    directStartedAt,
+    "direct",
+    target,
+    direct.outcome === "http-error" ? `HTTP ${direct.status ?? 0}` : direct.outcome,
+    direct.bytes?.byteLength,
+  );
   let via = "direct";
   let bytes: ArrayBuffer | null = null;
   let contentType: string | undefined;
@@ -980,7 +1041,15 @@ async function fetchMetadataFor(
     }
     activeTransport = PROXY_LABEL;
     via = "proxy";
+    let proxyStartedAt = Date.now();
     let proxied = await fetchViaProxy(url);
+    recordMetadataAttempt(
+      proxyStartedAt,
+      "metadata proxy",
+      target,
+      proxied.ok ? `HTTP ${proxied.status}` : proxied.code ?? `HTTP ${proxied.status}`,
+      proxied.bytes?.byteLength,
+    );
     // Retry-After + backoff: one bounded retry converts a transient
     // token-bucket 429 into success. A persistent throttle, or a
     // Retry-After beyond the UX budget, still fails fast below with the
@@ -990,7 +1059,15 @@ async function fetchMetadataFor(
       if (delay !== null) {
         pushLog(`Metadata proxy rate-limited; retrying once after ${delay} ms.`);
         await sleep(delay);
+        proxyStartedAt = Date.now();
         proxied = await fetchViaProxy(url);
+        recordMetadataAttempt(
+          proxyStartedAt,
+          "metadata proxy",
+          target,
+          proxied.ok ? `HTTP ${proxied.status}` : proxied.code ?? `HTTP ${proxied.status}`,
+          proxied.bytes?.byteLength,
+        );
       }
     }
     if (!proxied.ok || !proxied.bytes) {
@@ -1055,7 +1132,10 @@ async function fetchTileFor(
   let lastStatus: number | undefined;
   for (let attempt = 0; ; attempt++) {
     await throttleTileStart(url);
-    const direct = await fetchDirect(url, headers);
+    tileAttempts += 1;
+    if (attempt > 0) tileRetries += 1;
+    refreshDiagnostics();
+    const direct = await fetchDirect(url, headers, undefined, REQUEST_TIMEOUT_MS, false);
     if (direct.outcome === "readable" && direct.bytes) {
       return { bytes: direct.bytes };
     }
@@ -1071,7 +1151,7 @@ async function fetchTileFor(
     "Part of the image could not be saved. Try again in a moment.",
     true,
     undefined,
-    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) from ${shortUrl(url)} after ${maxRetries + 1} attempts`,
+    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after ${maxRetries + 1} attempts`,
   );
 }
 
@@ -1120,7 +1200,7 @@ function loadTileImage(url: string, ms: number = REQUEST_TIMEOUT_MS): Promise<HT
     img.addEventListener("load", () => done(true, img), { once: true });
     img.addEventListener(
       "error",
-      () => done(false, new Error(`tile image failed to load: ${shortUrl(url)}`)),
+      () => done(false, new Error("tile image failed to load")),
       { once: true },
     );
     timer = setTimeout(() => {
@@ -1129,7 +1209,7 @@ function loadTileImage(url: string, ms: number = REQUEST_TIMEOUT_MS): Promise<HT
       } catch {
         // Cancelling a hung load must never throw.
       }
-      done(false, new Error(`tile image timed out after ${ms / 1000}s: ${shortUrl(url)}`));
+      done(false, new Error(`tile image timed out after ${ms / 1000}s`));
     }, ms);
     // Don't tell the tile host the request comes from dezoomify (legacy parity).
     img.referrerPolicy = "no-referrer";
@@ -1262,14 +1342,12 @@ async function drawTile(
     const fullW = source instanceof ImageBitmap ? source.width : source.naturalWidth;
     const fullH = source instanceof ImageBitmap ? source.height : source.naturalHeight;
     // Trust the plan for placement: the canvas layout must stay seamless even
-    // when a tile decodes at an unexpected size. Log the mismatch and scale
-    // the decoded bytes to the planned extent so no gap appears.
+    // when a tile decodes at an unexpected size. Scale the decoded bytes to
+    // the planned extent so no gap appears; diagnostics never retain tile data.
     const planW = tile.w ?? fullW;
     const planH = tile.h ?? fullH;
     if (planW !== fullW || planH !== fullH) {
-      pushLog(
-        `tile size mismatch at ${tile.x},${tile.y}: plan ${planW}x${planH}, decoded ${fullW}x${fullH} from ${shortUrl(tile.uri)}`,
-      );
+      pushLog("A tile size differed from the plan; it was scaled to keep the image seamless.");
     }
     if (planW > 0 && planH > 0 && fullW > 0 && fullH > 0) {
       ctx2d.drawImage(source, 0, 0, fullW, fullH, tile.x, tile.y, planW, planH);
@@ -1447,7 +1525,7 @@ async function runJob(url: string): Promise<void> {
 
     const total = plan.tiles.length;
     viewCtx.imageChoice = { width, height, tiles: total };
-    setStep("Saving image tiles…", `${total} tiles at full resolution`);
+    setStep("Fetching image tiles…", `${total} tiles at full resolution`);
     reportProgress(0, total, `Saving ${total} tiles…`);
     let done = 0;
     let failed: unknown = null;
@@ -1662,6 +1740,10 @@ let viewCtx: ViewContext = {
 function update(): void {
   if (!appContainer) return;
   const state = controller.getState();
+  if (state.status === "downloading" && viewCtx.currentProgress) {
+    const progress = viewCtx.currentProgress;
+    progress.active = Math.min(pendingStarts.size, Math.max(0, progress.total - progress.current));
+  }
   if (activeTransport && !state.transport) {
     state.transport = activeTransport;
   }
@@ -1713,7 +1795,12 @@ function update(): void {
         if (jobPaused) return;
         jobPaused = true;
         viewCtx.paused = true;
-        if (viewCtx.jobActivity) viewCtx.jobActivity.paused = true;
+        if (viewCtx.jobActivity) {
+          viewCtx.jobActivity.paused = true;
+          viewCtx.jobActivity.pausedAt = Date.now();
+          viewCtx.jobActivity.now = viewCtx.jobActivity.pausedAt;
+        }
+        stopHeartbeat();
         pushLog("Paused: no new pieces are being fetched.");
         update();
       },
@@ -1721,7 +1808,18 @@ function update(): void {
         if (!jobPaused) return;
         jobPaused = false;
         viewCtx.paused = false;
-        if (viewCtx.jobActivity) viewCtx.jobActivity.paused = false;
+        if (viewCtx.jobActivity) {
+          const now = Date.now();
+          const pausedAt = viewCtx.jobActivity.pausedAt;
+          const pausedFor = pausedAt === undefined ? 0 : Math.max(0, now - pausedAt);
+          viewCtx.jobActivity.paused = false;
+          viewCtx.jobActivity.pausedAt = undefined;
+          viewCtx.jobActivity.pausedDurationMs = (viewCtx.jobActivity.pausedDurationMs ?? 0) + pausedFor;
+          viewCtx.jobActivity.lastProgressAt = (viewCtx.jobActivity.lastProgressAt ?? now) + pausedFor;
+          viewCtx.jobActivity.now = now;
+          for (const pending of pendingStarts.values()) pending.startedAt += pausedFor;
+        }
+        startHeartbeat();
         pushLog("Resumed: fetching queued pieces again.");
         update();
       },
@@ -1731,22 +1829,28 @@ function update(): void {
         viewCtx.paused = false;
         stopHeartbeat();
         disposeClient();
-        controller.dispatch(nextEvent("cancel") as never);
-        // Queue: the active entry is cancelled, then the first waiting entry
-        // (if any) starts. Cancellation never issues new work beyond the
-        // already-queued line.
+        // Stop returns directly to the initial view. Effects from the retired
+        // token finish harmlessly without mutating the replacement job.
         if (webQueueEnabled()) {
-          const settled = finishActiveWebEntry(webQueue, "cancelled");
-          webQueue = settled.queue;
-          const next = settled.next;
-          if (next) {
-            controller.reset(sessionId);
-            currentSeq = 0;
-            pushLog(`Queue: starting next queued job (${shortUrl(next.url)})`);
-            void runJob(next.url);
-            update();
-            return;
-          }
+          webQueue = cancelAllWeb(webQueue);
+          webQueue = createWebQueue();
+        }
+        sessionId = `sess:web-${Date.now()}`;
+        controller.reset(sessionId);
+        currentSeq = 0;
+        viewCtx.currentProgress = undefined;
+        viewCtx.completedInfo = undefined;
+        viewCtx.jobActivity = undefined;
+        viewCtx.initialUrl = undefined;
+        viewCtx.imageChoice = undefined;
+        viewCtx.sourceUrl = undefined;
+        viewCtx.desktopHandoffUrl = undefined;
+        activeTransport = null;
+        setCanvasVisible(false);
+        clearHash();
+        if (resultBlobUrl) {
+          URL.revokeObjectURL(resultBlobUrl);
+          resultBlobUrl = null;
         }
         update();
       },
@@ -1803,15 +1907,18 @@ function update(): void {
         anchor.click();
         anchor.remove();
       },
-      onCopyShareLink() {
-        const href = (typeof window !== "undefined" && window.location && window.location.href) || "";
-        const btn = document.getElementById("dz-btn-share");
+      onCopyDiagnostics(text: string) {
+        const btn = document.getElementById("dz-btn-copy-diagnostics");
         const done = () => {
           if (btn) {
-            btn.textContent = "Copied!";
+            btn.setAttribute("title", "Copied");
+            btn.setAttribute("aria-label", "Copied");
             setTimeout(() => {
               try {
-                if (btn.isConnected) btn.textContent = "Copy shareable link";
+                if (btn.isConnected) {
+                  btn.setAttribute("title", "Copy technical details");
+                  btn.setAttribute("aria-label", "Copy technical details");
+                }
               } catch {
                 // Button may be gone after re-render; ignore.
               }
@@ -1820,10 +1927,10 @@ function update(): void {
         };
         try {
           if (navigator.clipboard && navigator.clipboard.writeText) {
-            (navigator.clipboard.writeText(href) as Promise<void>).then(done, done);
-          } else if (href) {
+            (navigator.clipboard.writeText(text) as Promise<void>).then(done, done);
+          } else if (text) {
             const ta = document.createElement("textarea");
-            ta.value = href;
+            ta.value = text;
             document.body.appendChild(ta);
             ta.select();
             document.execCommand("copy");

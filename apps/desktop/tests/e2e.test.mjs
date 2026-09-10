@@ -99,13 +99,8 @@ await test("desktop production entry mounts and drives rendered controls", async
     click(window, document.querySelector("#dz-btn-cancel"), "job view renders Cancel");
     await eventually(() => calls.some((call) => call.command === "cancel_job"),
       "rendered Cancel did not invoke cancel_job");
-    emit("dezoomify://job-state", { job: "job:frontend", seq: 10,
-      kind: "cancelled", detail: "Cancelled" });
-    await eventually(() => app.controller.getState().status === "cancelled",
-      "cancel acknowledgement was not applied");
-    assert.equal(document.querySelector(".dz-card")?.dataset.viewPhase, "cancelled");
-
-    click(window, document.querySelector("#dz-btn-reset"), "cancelled view renders reset");
+    await eventually(() => app.controller.getState().status === "idle",
+      "cancel did not return directly to the initial view");
     assert.equal(document.querySelector(".dz-card")?.dataset.viewPhase, "idle");
     const startsBeforeHandoff = calls.filter((call) => call.command === "start_job").length;
     emit("dezoomify://deep-link-pending", {
