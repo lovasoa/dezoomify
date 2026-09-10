@@ -39,10 +39,10 @@ guide](user/desktop-app.md#install).
 | Surface | Budget | Past the budget |
 |---|---|---|
 | Browser tab (website, extension) | Browser memory and save limits; the browser promises no fixed size | The job stops with a typed error that names the desktop app as the next step |
-| Desktop app | 8 GiB in-memory canvas: 4 bytes per pixel plus transient encode buffers, so a save needs that much free memory (about 1.5 GiB for 20000 by 20000, about 6 GiB for 40000 by 40000) | Typed `output.canvas-limit` before allocation; nothing is written; a smaller level fits the budget |
-| CLI | 1 GiB in-memory canvas budget | Same `output.canvas-limit` behavior as the desktop app |
+| Desktop app | In-memory canvas: 4 bytes per pixel, subject to the memory currently available to the process | Typed `output.canvas-limit` before allocation; nothing is written; a smaller level fits the available memory |
+| CLI | In-memory canvas subject to the memory currently available to the process | Same `output.canvas-limit` behavior as the desktop app |
 
-Encoder side caps apply on top of the canvas budget: JPEG addresses at most
+Encoder side caps apply on top of the available-memory check: JPEG addresses at most
 65535 pixels per side and WebP at most 16383 pixels per side, so larger canvases
 save as PNG, TIFF, ZIF, or an `iiif-dir` tile tree. The native baseline reports
 encoders `[png, jpeg, tiff, zif, webp]`, destination modes `[file, iiif-dir]`,

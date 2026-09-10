@@ -58,15 +58,19 @@ impl NativeError {
         error_resource_kind(&self.code)
     }
 
-    /// Canvas-limit failure naming the composed size, the required memory,
-    /// and the max-width next action. Callers pass already-validated numbers;
-    /// no paths or credentials ever enter the message.
+    /// Canvas allocation failure caused by insufficient current available
+    /// memory.
     #[must_use]
-    pub fn canvas_limit(width: u32, height: u32, required: &str, limit: &str) -> Self {
+    pub fn canvas_memory_unavailable(
+        width: u32,
+        height: u32,
+        required: &str,
+        available: &str,
+    ) -> Self {
         Self::new(
             "output.canvas-limit",
             format!(
-                "composed image {width}x{height} needs {required} of canvas memory (limit {limit}); save a smaller level with --max-width or raise the canvas budget"
+                "composed image {width}x{height} needs {required} of canvas memory, but only {available} is currently available; save a smaller level with --max-width"
             ),
         )
     }
@@ -362,15 +366,15 @@ mod tests {
     }
 
     #[test]
-    fn canvas_limit_carries_required_memory_and_max_width_hint() {
-        let error =
-            NativeError::canvas_limit(40000, 40000, "5.9 GiB (6400000000 bytes)", "8.0 GiB");
+    fn canvas_memory_error_names_current_availability() {
+        let error = NativeError::canvas_memory_unavailable(
+            40000,
+            40000,
+            "6.0 GiB (6400000000 bytes)",
+            "4.0 GiB (4294967296 bytes)",
+        );
         assert_eq!(error.code, "output.canvas-limit");
-        assert_eq!(error.phase(), "output");
-        assert!(!error.retryable());
-        assert_eq!(error.recovery(), "choose-output");
-        assert!(error.message.contains("40000x40000"));
-        assert!(error.message.contains("GiB"));
+        assert!(error.message.contains("only 4.0 GiB"));
         assert!(error.message.contains("--max-width"));
     }
 

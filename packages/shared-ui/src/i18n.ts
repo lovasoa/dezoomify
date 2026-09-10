@@ -138,7 +138,7 @@ const en = {
   "view.desktop.whyTitle": "Why use the Desktop App?",
   "view.desktop.why1Title": "Handles Larger Artworks:",
   "view.desktop.why1Body":
-    "A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory (up to its 8 GiB canvas limit, needing matching free memory) and writes the finished output to disk.",
+    "A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory subject to available memory and writes the finished output to disk.",
   "view.desktop.why2Title": "Saves the Finished Picture:",
   "view.desktop.why2Body": "Each job saves to one output file on your computer. You can queue several jobs; they save one at a time.",
   "view.desktop.why3Title": "When the Website Cannot Finish:",
@@ -266,7 +266,7 @@ const en = {
   "view.fail.fallback": "Dezoomify could not find or save the zoomable image at this address.",
   "view.fail.title": "Could not dezoomify image",
   "view.fail.deskDescLimits":
-    "For images that exceed browser memory limits, within an 8 GiB canvas cap (needing matching free memory). Processes natively on your computer.",
+    "For images that exceed browser memory limits, subject to available memory. Processes natively on your computer.",
   "view.fail.helpTitle": "Help & URL Extraction",
   "view.fail.helpDesc":
     "How to find the image address on museum & archive sites, and what to try when nothing is found.",

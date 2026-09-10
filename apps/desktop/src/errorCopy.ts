@@ -5,10 +5,9 @@
 import { t } from "@dezoomify/shared-ui";
 
 // Large-image preflight bounds (native parity, docs/native-apps.md):
-// the canvas holds 4 bytes per pixel plus transient encode buffers,
-// budgeted at 8 GiB. JPEG addresses at most 65535 px per side.
+// the canvas holds 4 bytes per pixel and is checked against current available
+// memory. JPEG addresses at most 65535 px per side.
 export const CANVAS_BYTES_PER_PIXEL = 4;
-export const CANVAS_LIMIT_BYTES = 8 * 1024 * 1024 * 1024;
 export const JPEG_MAX_SIDE = 65535;
 
 
@@ -151,13 +150,6 @@ export function trimTechnical(text: string, max = 2000): string {
 }
 
 
-export function formatGiB(bytes: number): string {
-  const gib = bytes / (1024 * 1024 * 1024);
-  if (gib >= 10) return `${Math.round(gib)} GiB`;
-  return `${(Math.round(gib * 10) / 10).toFixed(1)} GiB`;
-}
-
-
 // Layered error copy: every code has plain jargon-free wording that names
 // the step, the picture source, and the single best next action. Technical
 // vocabulary (transport names, statuses, raw engine chains) stays out of
@@ -194,10 +186,11 @@ export function plainMessageFor(code: string, engineMessage: string, host: strin
     const needMatch = engine.match(/needs\s+([0-9.]+\s*GiB[^,;]*|[0-9,]+\s*bytes[^,;]*)/i);
     const dims = dim ? t("desktop.msg.dimsPixels", { a: dim[1], b: dim[2] }) : t("desktop.msg.thisPicture");
     const need = needMatch ? t("desktop.msg.needAbout", { need: needMatch[1].trim() }) : "";
+    const availableMatch = engine.match(/only\s+([^;]+)\s+is currently available/i);
     return t("desktop.output.canvasLimit", {
       dims,
       need,
-      limit: formatGiB(CANVAS_LIMIT_BYTES),
+      limit: availableMatch ? availableMatch[1].trim() : "currently available memory",
       jpegMax: JPEG_MAX_SIDE,
       host,
     });

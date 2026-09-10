@@ -86,7 +86,7 @@ first image). Between images `--min-interval` paces the queue.
 
 ## Limits
 
-The command-line tool holds the image in memory within a 1 GiB canvas budget, while the [desktop app](./desktop-app.md) allows up to 8 GiB.
+The command-line tool holds the image in memory subject to the memory currently available to the process, as does the [desktop app](./desktop-app.md).
 A larger save stops with a typed `output.canvas-limit` error before anything is written; save a smaller level with `--max-width`.
 See [very large pictures](./troubleshooting.md#the-image-appears-blank-or-the-browser-slows-to-a-halt) when a browser tab cannot hold the image.
 

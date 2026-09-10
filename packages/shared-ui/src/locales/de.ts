@@ -33,7 +33,7 @@ export const de = {
   "view.desktop.whyTitle": "Warum die Desktop-App verwenden?",
   "view.desktop.why1Title": "Bewaltigt grossere Kunstwerke:",
   "view.desktop.why1Body":
-    "Ein Browser-Tab kann nur eine begrenzte Bildmenge halten. Die Desktop-App setzt das Bild im Speicher zusammen (bis zu ihrer Canvas-Grenze von 8 GiB, mit entsprechend freiem Speicher) und schreibt das fertige Ergebnis auf die Festplatte.",
+    "Ein Browser-Tab kann nur eine begrenzte Bildmenge halten. Die Desktop-App setzt das Bild im Speicher zusammen, soweit Speicher verfuegbar ist, und schreibt das fertige Ergebnis auf die Festplatte.",
   "view.desktop.why2Title": "Speichert das fertige Bild:",
   "view.desktop.why2Body": "Jeder Auftrag wird in genau eine Ausgabedatei auf Ihrem Rechner gespeichert. Sie konnen mehrere Auftrage einreihen; sie werden nacheinander gespeichert.",
   "view.desktop.why3Title": "Wenn die Website nicht fertig wird:",
@@ -161,7 +161,7 @@ export const de = {
   "view.fail.fallback": "Dezoomify konnte das zoombare Bild unter dieser Adresse nicht finden oder speichern.",
   "view.fail.title": "Bild konnte nicht dezoomifiziert werden",
   "view.fail.deskDescLimits":
-    "Fuer Bilder, die die Speichergrenzen des Browsers sprengen, innerhalb einer Canvas-Grenze von 8 GiB (mit entsprechend freiem Speicher). Wird nativ auf Ihrem Rechner verarbeitet.",
+    "Fuer Bilder, die die Speichergrenzen des Browsers sprengen, soweit Speicher verfuegbar ist. Wird nativ auf Ihrem Rechner verarbeitet.",
   "view.fail.helpTitle": "Hilfe und Adresssuche",
   "view.fail.helpDesc":
     "So finden Sie die Bildadresse auf Museums- und Archivseiten, und was Sie versuchen konnen, wenn nichts gefunden wird.",

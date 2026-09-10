@@ -48,15 +48,6 @@ pub const MAX_CONCURRENT: usize = 16;
 /// stays near one canvas plus one tile.
 pub const SPILL_THRESHOLD_BYTES: u64 = 512 << 20;
 
-/// CLI canvas budget: 1 GiB of composed RGBA bytes (plus one transient encode
-/// buffer, see [`required_memory_bytes`]). Jobs needing more fail with typed
-/// `output.canvas-limit` before any allocation.
-pub const CLI_MAX_CANVAS_BYTES: u64 = 1 << 30;
-
-/// Desktop canvas budget: 8 GiB of composed RGBA bytes (plus one transient
-/// encode buffer). Matches [`PipelineConfig::default`].
-pub const DESKTOP_MAX_CANVAS_BYTES: u64 = 8 << 30;
-
 /// Composed canvas bytes (RGBA, 4 bytes/pixel) for a `width` by `height`
 /// image. `None` on overflow (callers fail closed with
 /// `output.canvas-limit`).
@@ -84,12 +75,29 @@ pub fn estimated_peak_streaming_bytes(width: u32, height: u32) -> Option<u64> {
         .checked_add(64 << 10)
 }
 
-/// Required memory for the canvas gate: canvas bytes plus one transient
-/// encode buffer (twice the canvas). The driver compares this against the
-/// configured budget before any allocation (`docs/native-apps.md`).
+/// Peak model used by performance tests: canvas bytes plus one transient
+/// encode buffer (twice the canvas). The allocation gate itself checks the
+/// canvas bytes against current available memory.
 #[must_use]
 pub fn required_memory_bytes(width: u32, height: u32) -> Option<u64> {
     canvas_bytes(width, height)?.checked_mul(2)
+}
+
+/// Bytes currently available to the process according to the operating
+/// system. This is sampled immediately before the output canvas allocation;
+/// the value can change between the sample and the allocation.
+#[must_use]
+pub fn available_memory_bytes() -> u64 {
+    let mut system = sysinfo::System::new();
+    system.refresh_memory();
+    system.available_memory()
+}
+
+/// Whether an allocation of `required` bytes exceeds the sampled available
+/// memory. Kept pure so the allocation gate can be tested deterministically.
+#[must_use]
+pub fn exceeds_available_memory(required: u64, available: u64) -> bool {
+    required > available
 }
 
 /// Spill decision: true when the canvas exceeds [`SPILL_THRESHOLD_BYTES`].
@@ -276,10 +284,6 @@ pub struct PipelineConfig {
     /// `ZERO` disables the sleep (the CLI default); the reference default
     /// is 50ms. Applied as start staggering, not as a post-completion wait.
     pub min_interval: Duration,
-    /// Hard cap on composed canvas bytes (RGBA, 4 bytes/pixel, plus
-    /// transient encode buffers). Default 8 GiB: jobs needing more fail with
-    /// typed `output.canvas-limit` before any allocation.
-    pub max_canvas_bytes: u64,
     /// Output compression, 0 is less, 100 is more (reference `--compression`,
     /// default 5). JPEG quality is `100 - compression` (see
     /// [`PipelineConfig::jpeg_quality`]); PNG and TIFF deflate tiers map
@@ -354,7 +358,6 @@ impl Default for PipelineConfig {
             max_retries: 3,
             retry_delay: Duration::from_secs(2),
             min_interval: Duration::ZERO,
-            max_canvas_bytes: 8 << 30,
             compression: 5,
             cache_dir: Some(default_tile_cache_dir()),
             max_width: None,

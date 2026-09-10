@@ -881,37 +881,6 @@ fn resume_scenario_matches_the_pinned_golden() {
 }
 
 #[test]
-fn tiny_canvas_budget_fails_before_any_write() {
-    let origin = start_fixture_server();
-    let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    let out_dir = temp_dir("canvas");
-    let output = out_dir.join("huge.png");
-    let config = PipelineConfig {
-        max_canvas_bytes: 1024,
-        ..Default::default()
-    };
-    let error = pipeline::run(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_event| {},
-    )
-    .expect_err("canvas budget fails");
-    assert_eq!(error.code, "output.canvas-limit");
-    assert!(
-        error.message.contains("512x512")
-            && error.message.contains("1048576 bytes")
-            && error.message.contains("--max-width"),
-        "canvas-limit names the size, the required memory, and the next action: {}",
-        error.message
-    );
-    assert!(!output.exists(), "over-budget jobs write nothing");
-    let expected = scenario_expected("cli-canvas-limit");
-    assert_eq!(error.code, expected["code"].as_str().expect("code"));
-}
-
-#[test]
 fn cancellation_before_publish_writes_nothing() {
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");

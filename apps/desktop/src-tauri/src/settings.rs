@@ -11,7 +11,8 @@
 //
 // Wiring: `pipeline_config_for` mirrors `apps/cli/src/main.rs`
 // `pipeline_config_for` for the fixed transport (parallelism 16, timeout 30s,
-// connect 6s, max_idle 32, max_tiles 1M, max_canvas 8GiB). Validation fails
+// connect 6s, max_idle 32, max_tiles 1M, available-memory canvas preflight).
+// Validation fails
 // closed on any out-of-bounds or malformed value; logs must use
 // `describe_settings_for_log`, which never includes header values, paths
 // aside from presence, or credentials.
@@ -91,7 +92,7 @@ impl DesktopSettings {
 
 /// Build the native driver config with CLI parity: fixed transport
 /// (parallelism 16, timeout 30s, connect 6s, max_idle 32, max_tiles 1M,
-/// max_canvas 8GiB) plus the validated settings-mapped fields. No implicit
+/// available-memory canvas preflight) plus the validated settings-mapped fields. No implicit
 /// Referer is added: only explicit user headers are sent (origin-scoped by
 /// the native `UserHeaders` layer, never logged or cached).
 pub fn pipeline_config_for(settings: &DesktopSettings) -> PipelineConfig {
@@ -121,7 +122,6 @@ pub fn pipeline_config_for(settings: &DesktopSettings) -> PipelineConfig {
             ..FetchLimits::default()
         },
         max_tiles: 1 << 20,
-        max_canvas_bytes: 8 << 30,
         ..PipelineConfig::default()
     }
 }
@@ -462,7 +462,6 @@ mod tests {
         assert_eq!(config.fetch.connect_timeout, Duration::from_secs(6));
         assert_eq!(config.fetch.max_idle_per_host, 32);
         assert_eq!(config.max_tiles, 1 << 20);
-        assert_eq!(config.max_canvas_bytes, 8 << 30);
         assert_eq!(config.jpeg_quality(), 95);
     }
 

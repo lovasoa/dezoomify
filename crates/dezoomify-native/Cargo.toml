@@ -16,6 +16,7 @@ ureq.workspace = true
 rustls.workspace = true
 url.workspace = true
 sha2.workspace = true
+sysinfo.workspace = true
 image = { workspace = true, features = ["tiff", "webp"] }
 tiff = "0.11"
 

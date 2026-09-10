@@ -24,8 +24,8 @@ Choose a different app when:
   own browser with your own session, so it can.
 - **The image is enormous** (a gigapixel panorama, a whole digitized
   manuscript). A browser tab can run out of room for very large pictures.
-  The [desktop app](./desktop-app.md) runs on your computer with an 8 GiB
-  in-memory canvas limit instead of a browser tab limit, and saves one
+  The [desktop app](./desktop-app.md) runs on your computer subject to
+  available memory instead of a browser tab limit, and saves one
   job to one file or IIIF tile folder ([file formats](./desktop-app.md#choosing-the-file-format)).
 - **You want to save from scripts.** The
   [command-line tool](./command-line.md) saves one image per run.

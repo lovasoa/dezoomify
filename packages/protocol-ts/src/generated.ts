@@ -1,14 +1,13 @@
 // DO NOT EDIT: generated from crates/dezoomify-protocol/src/dto.rs
 // fingerprint: b4bad92b24615c58
-// limits-fingerprint: e820104e045e218d
+// limits-fingerprint: e23b0990912fde43
 // protocol: 1.0
 
 export const PROTOCOL_VERSION = "1.0" as const;
 export const DTO_FINGERPRINT = "b4bad92b24615c58" as const;
-export const LIMITS_FINGERPRINT = "e820104e045e218d" as const;
+export const LIMITS_FINGERPRINT = "e23b0990912fde43" as const;
 
 export const MAX_BROWSER_AREA = 268435456 as const;
-export const NATIVE_MAX_BYTES = 8589934592 as const;
 export const PROXY_MAX_BYTES = 2097152 as const;
 export const METADATA_WINDOW_MS = 1500 as const;
 

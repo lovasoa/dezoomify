@@ -53,6 +53,7 @@ html-escape = "0.2"
 ureq = "3.4"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 sha2 = "0.10"
+sysinfo = "0.30"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 axum = "0.8"

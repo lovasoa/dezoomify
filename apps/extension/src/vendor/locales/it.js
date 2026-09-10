@@ -37,7 +37,7 @@ export const it = {
   "view.desktop.whyTitle": "Perche usare l applicazione desktop?",
   "view.desktop.why1Title": "Gestisce opere molto grandi:",
   "view.desktop.why1Body":
-    "Una scheda del browser puo contenere solo una certa quantita di immagine. L applicazione desktop compone l immagine in memoria (fino al limite di 8 GiB del canvas, con pari memoria libera) e scrive il risultato sul disco.",
+    "Una scheda del browser puo contenere solo una certa quantita di immagine. L applicazione desktop compone l immagine in memoria in base alla memoria disponibile e scrive il risultato sul disco.",
   "view.desktop.why2Title": "Salva l immagine finita:",
   "view.desktop.why2Body": "Ogni attivita viene salvata in un solo file di uscita sul tuo computer. Puoi accodare piu attivita; vengono salvate una alla volta.",
   "view.desktop.why3Title": "Quando il sito non riesce a finire:",
@@ -165,7 +165,7 @@ export const it = {
   "view.fail.fallback": "Dezoomify non ha potuto trovare o salvare l immagine zoomabile a questo indirizzo.",
   "view.fail.title": "Impossibile dezoomificare l immagine",
   "view.fail.deskDescLimits":
-    "Per immagini oltre i limiti di memoria del browser, entro un limite di 8 GiB del canvas (con pari memoria libera). Elaborate in nativo sul tuo computer.",
+    "Per immagini oltre i limiti di memoria del browser, in base alla memoria disponibile. Elaborate in nativo sul tuo computer.",
   "view.fail.helpTitle": "Aiuto ed estrazione dell indirizzo",
   "view.fail.helpDesc":
     "Come trovare l indirizzo dell immagine nei siti di musei e archivi, e cosa provare quando non si trova nulla.",
