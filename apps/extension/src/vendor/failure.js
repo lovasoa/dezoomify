@@ -8,6 +8,13 @@
 // plan gates) can raise typed failures without depending on the discovery
 // client. Keep erasable-syntax-only for the browser `.js` mirrors.
 
+/** Return a stable string code from an arbitrary host-side failure. */
+export function stableErrorCode(error         , fallback = "DISCOVERY_FAILED")         {
+  if (!error || typeof error !== "object") return fallback;
+  const code = (error                      ).code;
+  return typeof code === "string" && code !== "" ? code : fallback;
+}
+
 export function failure(
   code        ,
   message        ,
