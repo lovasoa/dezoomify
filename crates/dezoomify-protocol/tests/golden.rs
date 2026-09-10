@@ -218,12 +218,10 @@ fn pause_capability_negotiation_with_n_minus_1_compat() {
 fn limits_grid_transports_single_generation() {
     // Task 6.4: one limit/grid/capability generation via protocol generate.
     // Limits mirror the website browser bound (16384 squared), the native
-    // 8 GiB canvas cap, the 2 MiB metadata proxy cap, and the 1500 ms
-    // direct-first metadata window.
+    // The browser area cap, 2 MiB metadata proxy cap, and 1500 ms direct-first
+    // metadata window.
     assert_eq!(MAX_BROWSER_AREA, 268_435_456);
     assert_eq!(MAX_BROWSER_AREA, 16_384 * 16_384);
-    assert_eq!(NATIVE_MAX_BYTES, 8_589_934_592);
-    assert_eq!(NATIVE_MAX_BYTES, 8 << 30);
     assert_eq!(PROXY_MAX_BYTES, 2_097_152);
     assert_eq!(PROXY_MAX_BYTES, 2 * 1024 * 1024);
     assert_eq!(METADATA_WINDOW_MS, 1_500);
@@ -280,7 +278,6 @@ fn limits_fingerprint_covers_generation_deterministically() {
     let ts = typescript();
     assert!(ts.contains(&format!("LIMITS_FINGERPRINT = \"{first}\"")));
     assert!(ts.contains("MAX_BROWSER_AREA = 268435456"));
-    assert!(ts.contains("NATIVE_MAX_BYTES = 8589934592"));
     assert!(ts.contains("PROXY_MAX_BYTES = 2097152"));
     assert!(ts.contains("METADATA_WINDOW_MS = 1500"));
     assert!(ts.contains("Direct from your browser"));

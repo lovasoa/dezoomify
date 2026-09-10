@@ -70,9 +70,9 @@ Acceptance:
 
 Current state: browser limits probe (`ok` / `browser-risk` /
 `native-required`), ordinary image display without readable bytes versus
-readable-bytes save, tainted-canvas display-only path, native 8 GiB
-canvas cap (CLI 1 GiB budget per user docs), and engine fail-fast on
-over-limit plans. No unified pre-run estimate panel.
+readable-bytes save, tainted-canvas display-only path, native available-memory
+preflight, and engine fail-fast on over-limit plans. No unified pre-run
+estimate panel.
 
 Capability impact: read-only. Renders from the negotiated capability
 snapshot (encoders, destination modes, practical size limits,

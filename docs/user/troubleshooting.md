@@ -40,9 +40,9 @@ website stops the job with an error and points to the
 [desktop app](./desktop-app.md). Options:
 
 - Use the desktop app, which assembles the image in memory (up to its
-  8 GiB canvas limit, needing matching free memory) and writes the
+  currently available memory) and writes the
   finished output to disk. This
-  is the fix for images that exceed browser limits but fit that cap.
+  is the fix for images that exceed browser limits but fit available memory.
 - To save a smaller copy, use the [command-line tool](./command-line.md)
   with `--max-width`.
 
@@ -51,7 +51,7 @@ website stops the job with an error and points to the
 Some browsers fail to save very large pictures even when they can display
 them. Nothing on the website can bypass that browser limit. Use the
 [desktop app](./desktop-app.md), which assembles the image in memory (up
-to its 8 GiB canvas limit, needing matching free memory) and writes the
+to its currently available memory) and writes the
 finished output to disk. The
 browser extension stays inside the same browser memory and save
 limits and never fixes this case.

@@ -160,8 +160,6 @@ impl BoundedU64 {
 
 /// Largest browser-tab canvas area in pixels (16384 x 16384, legacy parity).
 pub const MAX_BROWSER_AREA: u64 = 268_435_456;
-/// Native in-memory canvas cap in bytes (8 GiB RGBA).
-pub const NATIVE_MAX_BYTES: u64 = 8_589_934_592;
 /// Metadata proxy response cap in bytes (2 MiB, mirrors the server limit).
 pub const PROXY_MAX_BYTES: u64 = 2_097_152;
 /// Direct-first metadata head-start window in milliseconds.

@@ -10,7 +10,7 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use dezoomify_native::pipeline::{
-    encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
+    canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
     estimated_peak_streaming_bytes, required_memory_bytes, should_spill, MAX_CONCURRENT,
 };
 use dezoomify_native::pool::run_bounded;
@@ -132,13 +132,13 @@ fn bench_peak_rss_model(criterion: &mut Criterion) {
             black_box((legacy, streaming))
         });
     });
-    group.bench_function("40k-fails-canvas-limit", |bencher| {
+    group.bench_function("large-canvas-memory-model", |bencher| {
         bencher.iter(|| {
             let required =
-                required_memory_bytes(black_box(40_000), black_box(40_000)).expect("40k model");
+                required_memory_bytes(black_box(200_000), black_box(200_000)).expect("200k model");
             assert!(
-                required > 8 << 30,
-                "40k with its encode buffer must exceed the 8 GiB desktop budget"
+                required > canvas_bytes(200_000, 200_000).expect("200k canvas"),
+                "the model includes the transient encode buffer"
             );
             black_box(required)
         });

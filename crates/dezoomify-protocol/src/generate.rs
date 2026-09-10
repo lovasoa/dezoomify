@@ -5,7 +5,7 @@
 
 use crate::dto::{
     CapabilitiesDto, DIRECT_TRANSPORT_LABEL, FORMAT_GRID, MAX_BROWSER_AREA, METADATA_WINDOW_MS,
-    NATIVE_MAX_BYTES, POWER_USER_FORMATS, PROTOCOL_VERSION, PROXY_MAX_BYTES, PROXY_TRANSPORT_LABEL,
+    POWER_USER_FORMATS, PROTOCOL_VERSION, PROXY_MAX_BYTES, PROXY_TRANSPORT_LABEL,
 };
 
 pub const GENERATED_MARKER: &str =
@@ -30,13 +30,13 @@ pub fn dto_fingerprint() -> String {
 }
 
 /// Stable fingerprint of the single limits/grid/transports generation
-/// (first 16 hex of FNV-1a over the four limits plus format grid plus
+/// (first 16 hex of FNV-1a over the three limits plus format grid plus
 /// transport labels). Extends the dto fingerprint plumbing without
 /// changing the dto value, so existing capability documents keep matching.
 #[must_use]
 pub fn limits_fingerprint() -> String {
     let mut seed = format!(
-        "limits={MAX_BROWSER_AREA},{NATIVE_MAX_BYTES},{PROXY_MAX_BYTES},{METADATA_WINDOW_MS};transports={DIRECT_TRANSPORT_LABEL},{PROXY_TRANSPORT_LABEL};formats="
+        "limits={MAX_BROWSER_AREA},{PROXY_MAX_BYTES},{METADATA_WINDOW_MS};transports={DIRECT_TRANSPORT_LABEL},{PROXY_TRANSPORT_LABEL};formats="
     );
     for (id, display) in FORMAT_GRID {
         let power = if POWER_USER_FORMATS.contains(id) {
@@ -82,7 +82,6 @@ export const DTO_FINGERPRINT = "{fingerprint}" as const;
 export const LIMITS_FINGERPRINT = "{limits_fp}" as const;
 
 export const MAX_BROWSER_AREA = {MAX_BROWSER_AREA} as const;
-export const NATIVE_MAX_BYTES = {NATIVE_MAX_BYTES} as const;
 export const PROXY_MAX_BYTES = {PROXY_MAX_BYTES} as const;
 export const METADATA_WINDOW_MS = {METADATA_WINDOW_MS} as const;
 

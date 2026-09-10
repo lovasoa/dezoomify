@@ -18,7 +18,7 @@ The Rust source of truth for commands, events, capabilities, errors, and browser
 
 ### `crates/dezoomify-native`
 
-The native effect implementation: HTTP transport, local-file access, image decoding, processing execution, and the PNG output encoder. The tile-cache helpers stay unwired (storage `none`); canvas assembly is memory-bound with a 1 GiB cap. Both the CLI and Tauri desktop application use it. See [Native apps](native-apps.md).
+The native effect implementation: HTTP transport, local-file access, image decoding, processing execution, and the PNG output encoder. The tile-cache helpers stay unwired (storage `none`); canvas assembly is bounded by the memory currently available to the process. Both the CLI and Tauri desktop application use it. See [Native apps](native-apps.md).
 
 ### `crates/dezoomify-wasm`
 

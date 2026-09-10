@@ -18,7 +18,6 @@ test('generated marker and fingerprint agree', () => {
 
 test('single limit/grid/capability generation is pinned', () => {
   assert.match(generated, /MAX_BROWSER_AREA = 268435456/);
-  assert.match(generated, /NATIVE_MAX_BYTES = 8589934592/);
   assert.match(generated, /PROXY_MAX_BYTES = 2097152/);
   assert.match(generated, /METADATA_WINDOW_MS = 1500/);
   assert.equal(fingerprints.protocol, '1.0');

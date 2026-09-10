@@ -27,16 +27,6 @@ pub fn verify(a: &[String]) -> Result<(), String> {
     let r = super::repo_root();
     f(
         &r,
-        &["1 GiB", "docs/user/start-here.md"],
-        "stale 1 GiB in start-here.md (canonical is 8 GiB)",
-    )?;
-    f(
-        &r,
-        &["2 GB per tab"],
-        "stale 2 GB per tab (use 8 GiB canvas limit)",
-    )?;
-    f(
-        &r,
         &["268435456|16384", "docs/user/"],
         "raw canvas constant in docs/user/ (state limits in GiB)",
     )?;

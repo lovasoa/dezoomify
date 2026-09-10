@@ -88,10 +88,10 @@ use crate::output::{
     partial_path_for, validate_destination, write_atomic, write_iiif_dir, OutputFormat,
 };
 use crate::pipeline::{
-    blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
-    fetch_and_decode_cached, merge_headers, probe_tile_bytes, render_iiif_dir, sha256_hex,
-    PartialDecision, PartialGate, PartialPolicy, PartialRequest, PipelineConfig, PipelineEvent,
-    PipelineOutcome,
+    available_memory_bytes, blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp,
+    encode_zif_pyramid, exceeds_available_memory, fetch_and_decode_cached, merge_headers,
+    probe_tile_bytes, render_iiif_dir, sha256_hex, PartialDecision, PartialGate, PartialPolicy,
+    PartialRequest, PipelineConfig, PipelineEvent, PipelineOutcome,
 };
 
 /// Deferred-resolution bound: the initial discovery plus this many deferred
@@ -1397,28 +1397,27 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
             height = height.max(geom.destination.y.saturating_add(decoded.image.height()));
         }
     }
-    // Explicit memory check before allocating: the canvas holds 4 bytes per
-    // pixel plus transient encode buffers, so the required bytes (checked
-    // against overflow) must fit the configured budget. The default budget
-    // is 8 GiB; jobs beyond it fail with typed `output.canvas-limit` naming
-    // the required memory, never with an allocation crash.
+    // Explicit memory check before allocating: the required canvas bytes are
+    // checked against the memory currently available to the process. There is
+    // no safety margin by design, but the value can change before allocation.
+    let available = available_memory_bytes();
     let required = u64::from(width)
         .checked_mul(u64::from(height))
         .and_then(|pixels| pixels.checked_mul(4));
-    let over_budget = match required {
-        Some(bytes) => bytes > attempt.config.max_canvas_bytes,
-        None => true,
+    let Some(bytes) = required else {
+        return Err(NativeError::canvas_memory_unavailable(
+            width,
+            height,
+            "over 16 EiB",
+            &describe_bytes(available),
+        ));
     };
-    if over_budget {
-        let required_text = required
-            .map(describe_bytes)
-            .unwrap_or_else(|| "over 16 EiB".to_string());
-        return Err(NativeError::new(
-            "output.canvas-limit",
-            format!(
-                "composed image {width}x{height} needs {required_text} of canvas memory (limit {}); save a smaller level with --max-width or raise the canvas budget",
-                describe_bytes(attempt.config.max_canvas_bytes),
-            ),
+    if exceeds_available_memory(bytes, available) {
+        return Err(NativeError::canvas_memory_unavailable(
+            width,
+            height,
+            &describe_bytes(bytes),
+            &describe_bytes(available),
         ));
     }
     let partial = attempt.decoded.len() != attempt.order.len();
@@ -1441,7 +1440,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
     // concurrency, so plan order is the honest deterministic rule.
     //
     // Memory note (todo 5.5 chunked decision): the canvas stays fully
-    // assembled in memory under the 8 GiB `output.canvas-limit` fail-fast
+    // assembled in memory under the available-memory `output.canvas-limit` fail-fast
     // above, and each encoder below renders one transient in-memory buffer
     // before the atomic temp-write plus rename. True row-chunked streaming
     // would only shrink that transient buffer (the canvas itself cannot

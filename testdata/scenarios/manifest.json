@@ -1045,18 +1045,6 @@
       "source_snapshot": "local"
     },
     {
-      "content_type": "application/octet-stream",
-      "id": "native/edge-oversize-40k/payloads/fixtures.test/edge/oversize-40k/huge.dzi",
-      "license_provenance": "local test fixture (generated, no third-party material)",
-      "path": "native/edge-oversize-40k/payloads/fixtures.test/edge/oversize-40k/huge.dzi",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "994d2fc530d3b4edd94ca2653c5be1fbcb0d9ff4c0df97fec394f60c5c8a9c2f",
-      "size": 186,
-      "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
-      "source_snapshot": "local"
-    },
-    {
       "content_type": "image/png",
       "id": "native/edge-range-truncate/payloads/fixtures.test/edge/range-truncate/partial-0_1.bin",
       "license_provenance": "local test fixture (generated, no third-party material)",

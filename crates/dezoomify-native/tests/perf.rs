@@ -1,5 +1,5 @@
-//! Perf smoke for todo 3.1: fixed pool, streaming memory model, and the
-//! 20k by 20k / 40k by 40k acceptance gates. Fast and deterministic: no
+//! Perf smoke for todo 3.1: fixed pool and streaming memory model. Fast and
+//! deterministic: no
 //! gigapixel allocation, no public network. Wall-time numbers print for CI
 //! tracking; the hard gate is the deterministic memory model plus a 20
 //! percent regression bound on encoded byte sizes versus
@@ -7,8 +7,8 @@
 
 use dezoomify_native::pipeline::{
     canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
-    estimated_peak_streaming_bytes, required_memory_bytes, should_spill, PipelineConfig,
-    CLI_MAX_CANVAS_BYTES, DESKTOP_MAX_CANVAS_BYTES, MAX_CONCURRENT, SPILL_THRESHOLD_BYTES,
+    estimated_peak_streaming_bytes, exceeds_available_memory, required_memory_bytes, should_spill,
+    PipelineConfig, MAX_CONCURRENT, SPILL_THRESHOLD_BYTES,
 };
 use dezoomify_native::pool::run_bounded;
 use std::time::Instant;
@@ -65,29 +65,17 @@ fn twenty_k_streaming_halves_legacy_peak() {
 }
 
 #[test]
-fn forty_k_fails_canvas_limit_before_oom() {
-    let required = required_memory_bytes(40_000, 40_000).expect("40k model");
-    assert_eq!(required, 6_400_000_000u64 * 2);
-    assert!(
-        required > DESKTOP_MAX_CANVAS_BYTES,
-        "40k with its encode buffer must exceed the 8 GiB desktop budget"
-    );
-    assert!(
-        required > CLI_MAX_CANVAS_BYTES,
-        "40k must also exceed the 1 GiB CLI budget"
-    );
-    // The driver gate uses the same helper: a 40k publish fails typed
-    // `output.canvas-limit` before any allocation (see
-    // `tiny_canvas_budget_fails_before_any_write` for the small-budget shape).
+fn large_canvas_memory_model_is_overflow_safe() {
+    let required = required_memory_bytes(200_000, 200_000).expect("200k model");
+    assert_eq!(required, 160_000_000_000u64 * 2);
     let twenty_k = required_memory_bytes(20_000, 20_000).expect("20k model");
-    assert!(
-        twenty_k < DESKTOP_MAX_CANVAS_BYTES,
-        "20k still fits the desktop budget via streaming"
-    );
-    assert!(
-        twenty_k > CLI_MAX_CANVAS_BYTES,
-        "20k exceeds the CLI budget, so the CLI stays fail-fast there"
-    );
+    assert!(twenty_k < required, "20k requires less memory than 200k");
+}
+
+#[test]
+fn available_memory_gate_is_deterministic() {
+    assert!(!exceeds_available_memory(1024, 1024));
+    assert!(exceeds_available_memory(1025, 1024));
 }
 
 #[test]

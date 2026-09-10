@@ -277,7 +277,7 @@ export function showDesktopAppGuidance(hostDocument          , hints            
       <div class="dz-modal-section">
         <div class="dz-modal-section-title">Why use the Desktop App?</div>
         <ul class="dz-modal-list">
-          <li><strong>Handles Larger Artworks:</strong> A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory (up to its 8 GiB canvas limit, needing matching free memory) and writes the finished output to disk.</li>
+          <li><strong>Handles Larger Artworks:</strong> A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory subject to available memory and writes the finished output to disk.</li>
           <li><strong>Saves the Finished Picture:</strong> Each job saves to one output file on your computer. You can queue several jobs; they save one at a time.</li>
           <li><strong>When the Website Cannot Finish:</strong> The website stops the job with an error and points to the desktop app for the full-size image.</li>
         </ul>
@@ -1405,7 +1405,7 @@ function mountFailedSection(
             <svg class="dz-guidance-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
             <span class="dz-guidance-item-title">Desktop App Guide</span>
           </div>
-          <span class="dz-guidance-item-desc">For images that exceed browser memory limits, within an 8 GiB canvas cap (needing matching free memory). Processes natively on your computer.</span>
+          <span class="dz-guidance-item-desc">For images that exceed browser memory limits, subject to available memory. Processes natively on your computer.</span>
         </button>
         <a class="dz-guidance-item" href="./help/finding-the-image-address.html" target="_blank" rel="noopener">
           <div class="dz-guidance-item-header">
