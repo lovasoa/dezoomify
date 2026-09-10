@@ -1,7 +1,0 @@
-{
-  "_compatNote": "Chromium runs background/index.js as an MV3 service worker (no DOM; suspends when idle, so the explicit-action job state is memory-only). Firefox and Chromium use the same finite scripting.executeScript source operations on the clicked tab under the activeTab grant. No offscreen document is needed.",
-  "background": {
-    "service_worker": "background/index.js"
-  },
-  "minimum_chrome_version": "121"
-}

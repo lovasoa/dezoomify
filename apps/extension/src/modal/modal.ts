@@ -25,7 +25,7 @@
  *   loader to detach (which restores the grey action icon via the background).
  *
  * Ships verbatim as `modal/modal.js` with no bundler (see
- * `package-store.sh`), so this is plain JavaScript + JSDoc. All strings
+ * WXT bundles the shipped job flow, so this is plain JavaScript + JSDoc. All strings
  * reach the DOM via `textContent` (or the view's own escaping), never markup.
  */
 

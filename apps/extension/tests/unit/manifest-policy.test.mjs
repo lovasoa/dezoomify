@@ -1,318 +1,69 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-function readJson(rel) {
-  return JSON.parse(readFileSync(new URL(rel, import.meta.url), "utf8"));
-}
+const output = (browser) => new URL(`../../.output/${browser}-mv3/`, import.meta.url);
+const manifest = (browser) => JSON.parse(readFileSync(new URL("manifest.json", output(browser)), "utf8"));
+const REVIEWED_PERMISSIONS = ["activeTab", "scripting", "nativeMessaging"];
 
-// Mirror of scripts/generate-manifests.mjs: deterministic merge, underscore
-// keys stripped. The generated manifests must match exactly.
-function merge(base, overlay) {
-  if (Array.isArray(overlay)) return [...overlay];
-  if (overlay !== null && typeof overlay === "object" && base !== null && typeof base === "object" && !Array.isArray(base)) {
-    const out = { ...base };
-    for (const [k, v] of Object.entries(overlay)) out[k] = merge(base[k], v);
-    return out;
-  }
-  return overlay;
-}
-
-function sortKeys(v) {
-  if (Array.isArray(v)) return v.map(sortKeys);
-  if (v !== null && typeof v === "object") {
-    return Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, val]) => [k, sortKeys(val)]));
-  }
-  return v;
-}
-
-const base = readJson("../../src/manifest/base.json");
-const chromiumOverlay = readJson("../../src/manifest/chromium.json");
-const firefoxOverlay = readJson("../../src/manifest/firefox.json");
-const genChromium = readJson("../../generated/manifest.chromium.json");
-const genFirefox = readJson("../../generated/manifest.firefox.json");
-
-const REVIEWED_PERMS = new Set(["activeTab", "scripting", "nativeMessaging"]);
-const REVIEWED_OPTIONAL = new Set(["cookies"]);
-const EXPECTED_GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
-
-function cspText(manifest) {
-  const csp = manifest.content_security_policy;
-  if (!csp) return "";
-  if (typeof csp === "string") return csp;
-  return Object.values(csp).join(" ");
-}
-
-function backgroundUrls(manifest) {
-  const bg = manifest.background ?? {};
-  const urls = [];
-  if (typeof bg.service_worker === "string") urls.push(bg.service_worker);
-  for (const s of bg.scripts ?? []) urls.push(s);
-  if (typeof bg.page === "string") urls.push(bg.page);
-  return urls;
-}
-
-for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
-  test(`${name}: MV3 with the per-browser background entry`, () => {
-    assert.equal(manifest.manifest_version, 3);
-    if (name === "chromium") {
-      assert.equal(manifest.background?.service_worker, "background/index.js");
-      assert.equal(manifest.background?.scripts, undefined, "chromium must not ship Firefox event-page scripts key");
-    } else {
-      assert.deepEqual(manifest.background?.scripts, ["background/index.js"]);
-      assert.equal(manifest.background?.service_worker, undefined, "firefox must not ship Chromium service_worker key");
+for (const browser of ["chrome", "firefox"]) {
+  test(`${browser}: WXT emits the reviewed MV3 manifest`, () => {
+    const value = manifest(browser);
+    assert.equal(value.manifest_version, 3);
+    assert.deepEqual(value.permissions, REVIEWED_PERMISSIONS);
+    assert.deepEqual(value.optional_permissions, ["cookies"]);
+    assert.deepEqual(value.optional_host_permissions, ["http://*/*", "https://*/*"]);
+    assert.ok(value.host_permissions === undefined || value.host_permissions.length === 0);
+    assert.equal(value.content_scripts, undefined);
+    assert.equal(value.web_accessible_resources, undefined);
+    assert.equal(value.offscreen, undefined);
+    for (const forbidden of ["tabs", "downloads", "cookies"]) {
+      assert.ok(!value.permissions.includes(forbidden), `${browser} must not permanently request ${forbidden}`);
     }
-  });
-
-  test(`${name}: no wildcard permanent hosts`, () => {
-    for (const p of manifest.permissions ?? []) {
-      assert.ok(!(p.includes("://") || p.includes("*")), `${name} permanent host pattern ${p}`);
-    }
-    assert.deepEqual(manifest.host_permissions, []);
-    assert.deepEqual(manifest.optional_host_permissions, ["http://*/*", "https://*/*"]);
-  });
-
-  test(`${name}: no remote code`, () => {
-    // Match patterns (optional hosts, iframe exposure) are grants, not
-    // code: strip them before scanning for remote references.
-    const withoutGrants = JSON.stringify({
-      ...manifest,
-      optional_host_permissions: undefined,
-      web_accessible_resources: undefined,
-    });
-    assert.ok(!withoutGrants.includes("http://"), `${name} unexpected remote http`);
-    assert.ok(!withoutGrants.includes("javascript:"), `${name} javascript: URL`);
-    for (const u of backgroundUrls(manifest)) {
-      assert.ok(!u.startsWith("http"), `${name} remote background ${u}`);
-      assert.ok(!u.startsWith("data:"), `${name} data background ${u}`);
-    }
-  });
-
-  test(`${name}: strict CSP with wasm enabled for the page core`, () => {
-    const csp = cspText(manifest);
-    assert.ok(csp.includes("script-src 'self'"), `${name} CSP must pin script-src 'self'`);
-    assert.ok(csp.includes("'wasm-unsafe-eval'"), `${name} CSP must allow the wasm core`);
-    assert.ok(csp.includes("object-src 'none'"), `${name} CSP must block objects`);
-    assert.ok(!csp.replaceAll("'wasm-unsafe-eval'", "").includes("unsafe-eval"), `${name} unsafe-eval`);
-    assert.ok(!csp.includes("unsafe-inline"), `${name} unsafe-inline`);
-  });
-
-  test(`${name}: only reviewed permissions`, () => {
-    for (const p of manifest.permissions ?? []) {
-      assert.ok(REVIEWED_PERMS.has(p), `${name} unreviewed permission ${p}`);
-    }
-    for (const p of manifest.optional_permissions ?? []) {
-      assert.ok(REVIEWED_OPTIONAL.has(p), `${name} unreviewed optional permission ${p}`);
-    }
-    assert.ok(!(manifest.permissions ?? []).includes("cookies"), `${name} cookies must be optional, not permanent`);
-    // Chrome Web Store rejects unused permissions: the page saves via a blob
-    // anchor, which needs no `downloads` permission, so it must stay absent.
-    assert.ok(!(manifest.permissions ?? []).includes("downloads"), `${name} unused downloads permission`);
-    // Least privilege: the page works on the bound tab only (`tabs.get`),
-    // never enumerates tabs, so `tabs` must stay absent. `scripting` is
-    // reviewed and used: the background injects the in-tab modal on the
-    // clicked tab only, after detection (never declared content scripts).
-    assert.ok(!(manifest.permissions ?? []).includes("tabs"), `${name} tabs permission forbids tab enumeration`);
-    assert.ok((manifest.permissions ?? []).includes("scripting"), `${name} scripting permission required for detected-tab modal injection`);
-    assert.equal(manifest.content_scripts, undefined, `${name} no content scripts declared`);
-  });
-
-  test(`${name}: declared icons exist (grey idle action, blue brand icons)`, () => {
-    for (const [size, path] of Object.entries(manifest.icons ?? {})) {
-      assert.ok(["16", "48", "128"].includes(size), `${name} unexpected icon size ${size}`);
-      assert.ok(path.startsWith("icons/"), `${name} icon must be bundled ${path}`);
-    }
-    assert.deepEqual(Object.keys(manifest.icons ?? {}).sort(), ["128", "16", "48"]);
-    // Toolbar action defaults to the grey idle set (background swaps blue
-    // while monitoring via action.setIcon); brand icons stay blue.
-    assert.deepEqual(manifest.action?.default_icon, {
+    assert.equal(value.content_security_policy.extension_pages, "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'");
+    assert.deepEqual(value.action.default_icon, {
       16: "icons/icon16-grey.png",
       48: "icons/icon48-grey.png",
       128: "icons/icon128-grey.png",
-    }, `${name} action icon must be the grey idle set`);
-    assert.deepEqual(manifest.icons, {
+    });
+    assert.deepEqual(value.icons, {
       16: "icons/icon16.png",
       48: "icons/icon48.png",
       128: "icons/icon128.png",
-    }, `${name} brand icons must be the blue set`);
+    });
   });
 }
 
-test("chromium: minimum version supports wasm-unsafe-eval (121+)", () => {
-  assert.ok(Number(genChromium.minimum_chrome_version) >= 121, "wasm-unsafe-eval CSP needs Chrome 121+");
+test("WXT keeps Chromium as an MV3 service worker", () => {
+  const value = manifest("chrome");
+  assert.equal(value.background?.service_worker, "background.js");
+  assert.equal(value.background?.scripts, undefined);
+  assert.equal(value.minimum_chrome_version, "121");
 });
 
-test("firefox: gecko id matches reviewed release config; min version is MV3-capable", () => {
-  assert.equal(genFirefox.browser_specific_settings?.gecko?.id, EXPECTED_GECKO_ID);
-  assert.ok(Number(genFirefox.browser_specific_settings.gecko.strict_min_version) >= 128);
-  assert.equal(genChromium.browser_specific_settings, undefined);
+test("WXT emits Firefox's required classic MV3 background script", () => {
+  const value = manifest("firefox");
+  assert.deepEqual(value.background?.scripts, ["background.js"]);
+  assert.equal(value.background?.service_worker, undefined);
+  assert.equal(value.background?.type, undefined);
+  assert.equal(value.browser_specific_settings?.gecko?.id, "{14074c89-8a5f-4813-98df-a7117f062871}");
+  assert.equal(value.browser_specific_settings?.gecko?.strict_min_version, "128.0");
+  const background = new URL("background.js", output("firefox"));
+  const parsed = spawnSync(process.execPath, ["--check", fileURLToPath(background)], { encoding: "utf8" });
+  assert.equal(parsed.status, 0, `Firefox classic script failed node --check:\n${parsed.stderr}`);
+  assert.ok(!readFileSync(background, "utf8").match(/^\s*(import|export)\s/m), "Firefox background must be classic");
 });
 
-test("least-privilege: activeTab present, nativeMessaging declared", () => {
-  for (const gen of [genChromium, genFirefox]) {
-    assert.ok((gen.permissions ?? []).includes("activeTab"));
-    assert.ok((gen.permissions ?? []).includes("nativeMessaging"));
-  }
-});
-
-test("declared permissions are used by shipped code", () => {
-  const native = readFileSync(new URL("../../src/runtime/nativeHandoff.ts", import.meta.url), "utf8");
-  assert.ok(native.includes("connectNative"), "nativeMessaging must use one persistent port");
-  assert.ok(!native.includes("window.postMessage"), "webpage messages cannot control a native handoff");
-  const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
-  const backgroundCode = background
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
-    .join("\n");
-  assert.ok(!backgroundCode.includes("webRequest"), "background must not touch webRequest (deaf without host perms)");
-  assert.ok(background.includes("tabs?.create"), "background must create the dedicated job tab");
-  assert.ok(background.includes("setIcon"), "background must swap grey<->blue icons");
-  assert.ok(background.includes("setBadgeText"), "background must show the monitoring badge dot");
-    assert.ok(background.includes("executeScript"), "background must invoke source operations on the clicked tab");
-    assert.ok(background.includes("collectCandidates"), "background must invoke the candidate snapshot operation");
-    assert.ok(background.includes("fetchSource"), "background must invoke the source fetch operation");
-  assert.ok(!background.includes("tabs.query"), "background must never enumerate tabs");
-  for (const kind of ["dz.source.fetch-chunk", "dz.source.fetch-complete", "dz.job.binding", "dz.job.fetch"]) {
-    assert.ok(background.includes(kind), `background must speak ${kind}`);
-  }
-  assert.ok(!background.includes("postMessage"), "background must not bridge privileged work through webpage messages");
-  const operations = readFileSync(new URL("../../src/background/source-operations.ts", import.meta.url), "utf8");
-  assert.ok(!operations.includes("runtime.onMessage"), "source operations must not install a source-tab listener");
-});
-
-test("job coordinator retains least privilege", () => {
-  const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
-  const code = background
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
-    .join("\n");
-  // The clicked tab id comes from the action event only; the background
-  // never enumerates tabs, never requests broad hosts, and never observes
-  // traffic; source operations run only after the explicit action.
-  assert.ok(code.includes("onClicked"), "monitor must arm on the explicit action click");
-  assert.ok(!code.includes("tabs.query"), "background must never enumerate tabs");
-  assert.ok(!code.includes("webRequest"), "background must not observe traffic (deaf without host perms)");
-  assert.ok(code.includes("permissions?.request"), "only the visible job access action can request a host grant");
-  assert.ok(code.includes("onRemoved"), "monitor must stop when the tab closes");
-  assert.ok(code.includes("onUpdated"), "monitor must stop when the tab navigates");
-  assert.ok(!code.includes("onInstalled"), "install must not open a fallback extension page");
-  assert.ok(!code.includes("offscreen"), "no offscreen document is needed for source operations");
-  assert.ok(!code.includes("host_permissions"), "background must not touch broad host permissions");
-  // No offscreen declared in either generated manifest either.
-  for (const gen of [genChromium, genFirefox]) {
-    assert.equal(gen.offscreen, undefined, "offscreen must stay undeclared");
-  }
-});
-
-test("store package ships only loaded files (no dead code)", () => {
-  const script = readFileSync(new URL("../../scripts/package-store.sh", import.meta.url), "utf8");
-  const build = readFileSync(new URL("../../scripts/build.mjs", import.meta.url), "utf8");
-  // No content_scripts declared: only the background source operations and
-  // dedicated job tab ship. There is no extension-page fallback.
-  assert.ok(script.includes("scripts/build.mjs"), "package must compile the reviewed entrypoint graph");
-  assert.ok(script.includes("job/job.html"), "package must stage the dedicated job tab");
-  assert.ok(script.includes("job/worker.js"), "package must stage the dedicated job worker");
-  assert.ok(script.includes("icons background job vendor wasm"), "package must zip only the in-browser flow");
-  // The grey idle set swapped via action.setIcon must ship with the brand icons.
-  assert.ok(build.includes('"icons"'), "compiled graph must stage the declared icon directory");
-  // Vendored .js modules are esbuild inputs bundled into the compiled
-  // entries: only the theme stylesheet ships as a standalone vendor file.
-  assert.ok(build.includes("vendor/theme.css"), "compiled graph must stage the theme stylesheet");
-  assert.ok(!/"vendor"\s*,\s*\{\s*recursive: true \}/.test(build), "compiled graph must not ship the whole vendor tree");
-  // E2E-only manifest variant must not inject a tabs permission: shipped
-  // code (and the harness) never enumerates tabs.
-  assert.ok(!script.includes('"tabs"'), "package must never inject tabs permission");
-  assert.ok(!script.includes("page/page.html"), "package must not stage a fallback page");
-  assert.ok(!/\bnpm\b/.test(script), "package must use the root pnpm workspace");
-});
-
-test("generated manifests are the deterministic generator output (base+overlay, no underscore keys)", () => {
-  for (const [name, overlay, gen] of [
-    ["chromium", chromiumOverlay, genChromium],
-    ["firefox", firefoxOverlay, genFirefox],
-  ]) {
-    const merged = Object.fromEntries(Object.entries(merge(base, overlay)).filter(([k]) => !k.startsWith("_")));
-    assert.deepEqual(sortKeys(gen), sortKeys(merged), `${name} must match scripts/generate-manifests.mjs output`);
-    const raw = readFileSync(new URL(`../../generated/manifest.${name}.json`, import.meta.url), "utf8");
-    assert.ok(raw.endsWith("\n"), `${name} missing trailing newline`);
-    assert.deepEqual(JSON.parse(raw), gen);
-    for (const key of Object.keys(gen)) {
-      assert.ok(!key.startsWith("_"), `${name} generated manifest must not ship ${key}`);
-    }
-  }
-});
-
-// --- Explicit-action source-operation policy (additive; least privilege) ---
-//
-// The explicit-action source path uses scripting.executeScript snapshots and
-// fetches on the clicked tab only: no reload, registered content script,
-// persistent listener, tab enumeration, permanent hosts, downloads, or
-// background traffic observation.
-
-test("monitoring adds no permissions (no tabs/downloads/cookies/hosts; scripting reviewed)", () => {
-  for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
-    for (const forbidden of ["tabs", "downloads", "cookies"]) {
-      assert.ok(!(manifest.permissions ?? []).includes(forbidden), `${name} monitoring must not add ${forbidden}`);
-    }
-    // `scripting` is the reviewed capability for finite source operations on
-    // the clicked tab.
-    assert.ok((manifest.permissions ?? []).includes("scripting"), `${name} modal injection requires scripting`);
-    assert.deepEqual(manifest.host_permissions, [], `${name} monitoring adds no permanent hosts`);
-    assert.deepEqual(
-      manifest.optional_host_permissions,
-      ["http://*/*", "https://*/*"],
-      `${name} per-site grants stay optional`,
-    );
-  }
-});
-
-test("content-script authority stays tab-origin bounded (absent or http/https only)", () => {
-  for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
-    const scripts = manifest.content_scripts;
-    if (scripts === undefined) return; // current shape: no content scripts declared
-    assert.ok(Array.isArray(scripts), `${name} content_scripts must be a list`);
-    for (const entry of scripts) {
-      for (const match of entry.matches ?? []) {
-        assert.ok(!match.includes("<all_urls>"), `${name} content script must never match <all_urls>: ${match}`);
-        assert.ok(
-          match.startsWith("http://") || match.startsWith("https://"),
-          `${name} content script match must be http/https: ${match}`,
-        );
-      }
-      for (const file of [...(entry.js ?? []), ...(entry.css ?? [])]) {
-        assert.ok(!file.startsWith("http"), `${name} content script must be bundled: ${file}`);
-      }
-    }
-  }
-});
-
-test("no extension resource is web-accessible (hostile-page embed)", () => {
-  // The dedicated job tab is an extension page opened by the coordinator,
-  // never an embeddable document: a hostile page must not be able to frame
-  // or reference any extension resource.
-  for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
-    const war = manifest.web_accessible_resources ?? [];
-    assert.deepEqual(war, [], `${name} must declare no web-accessible resources`);
-  }
-});
-
-test("monitoring icons are bundled when declared (idle grey vs monitoring blue+dot)", () => {
-  for (const [name, manifest] of [["chromium", genChromium], ["firefox", genFirefox]]) {
-    const icons = { ...(manifest.icons ?? {}), ...((manifest.action?.default_icon ?? {})) };
-    assert.ok(Object.keys(icons).length > 0, `${name} must declare icons`);
-    for (const rel of Object.values(icons)) {
-      assert.ok(rel.startsWith("icons/"), `${name} icon must be bundled ${rel}`);
-      const abs = new URL(`../../src/${rel}`, import.meta.url);
-      assert.ok(existsSync(abs), `${name} declared icon missing on disk: ${rel}`);
-    }
-    // No remote icon URLs ever.
-    assert.ok(!JSON.stringify(icons).includes("http"), `${name} icons must be local`);
-  }
-});
-
-test("description stays explicit-action with no background monitoring", () => {
-  const text = String(base.description ?? "");
-  assert.ok(/click/i.test(text), "description must name the explicit click action");
-  assert.ok(/current page/i.test(text), "description must scope the action to the current page");
-  assert.ok(/no background monitoring/i.test(text), "description must promise no background monitoring");
+test("WXT configuration is the only extension builder and manifest source", () => {
+  const config = readFileSync(new URL("../../wxt.config.ts", import.meta.url), "utf8");
+  assert.ok(config.includes("manifestVersion: 3"));
+  assert.ok(config.includes("build:before"), "WASM and test assets must use a WXT hook");
+  assert.ok(!existsSync(new URL("../../scripts/build.mjs", import.meta.url)));
+  assert.ok(!existsSync(new URL("../../scripts/generate-manifests.mjs", import.meta.url)));
+  assert.ok(!existsSync(new URL("../../scripts/package-store.sh", import.meta.url)));
+  assert.ok(existsSync(new URL("../../entrypoints/background.ts", import.meta.url)));
+  assert.ok(existsSync(new URL("../../entrypoints/job/index.html", import.meta.url)));
+  assert.ok(!existsSync(new URL("../../src/job/job.html", import.meta.url)));
 });

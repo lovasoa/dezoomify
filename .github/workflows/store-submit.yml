@@ -106,8 +106,9 @@ jobs:
         run: |
           set -euo pipefail
           browser="${BROWSER:-chromium}"
-          version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "apps/extension/generated/manifest.$browser.json")
-          ./apps/extension/scripts/package-store.sh "$browser" "dezoomify-extension-$browser-$version.zip"
+          version=$(node -p 'require("./apps/extension/package.json").version')
+          cargo xtask build extension
+          cp "target/extension/dezoomify-$browser.zip" "dezoomify-extension-$browser-$version.zip"
           unzip -l "dezoomify-extension-$browser-$version.zip" | head -8
           sha256sum "dezoomify-extension-$browser-$version.zip"
           echo "package: ok (dezoomify-extension-$browser-$version.zip)"

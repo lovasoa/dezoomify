@@ -30,7 +30,9 @@ async function load(fake) {
   globalThis.chrome = fake.api;
   try {
     sequence += 1;
-    return await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(text)}#log-${sequence}`);
+    const mod = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(text)}#log-${sequence}`);
+    mod.startBackground();
+    return mod;
   } finally { globalThis.chrome = previous; }
 }
 

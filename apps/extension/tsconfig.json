@@ -14,5 +14,5 @@
     "noUnusedParameters": false,
     "exactOptionalPropertyTypes": false
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "entrypoints/**/*.ts", "wxt.config.ts"]
 }

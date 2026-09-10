@@ -133,13 +133,12 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
   };
 }
 
-// Build output invokes this module as a classic dedicated worker. Dynamic
-// import leaves the generated wasm glue as a build-time dependency instead of
-// hand-vendoring it into the UI entrypoint.
+// The WXT worker bundle lives below assets/. Resolve the generated glue from
+// the extension root so it stays a generated public artifact, not JS source.
 if (typeof self !== "undefined" && "postMessage" in self && typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope) {
   const host = createJobWorkerHost({
     postMessage: (message) => self.postMessage(message),
-    wasm: () => import("../wasm/dezoomify-wasm.js"),
+    wasm: () => import(/* @vite-ignore */ new URL("../wasm/dezoomify-wasm.js", self.location.href).href),
   });
   self.addEventListener("message", (event) => { void host.onMessage(event.data); });
 }

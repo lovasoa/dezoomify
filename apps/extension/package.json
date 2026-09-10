@@ -8,14 +8,14 @@
     "test": "node --test tests/unit/*.test.mjs",
     "test:unit": "node --test tests/unit/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "build": "node ./scripts/build.mjs",
-    "build:manifests": "node ./scripts/generate-manifests.mjs",
+    "build": "wxt build --browser chrome && wxt build --browser firefox",
+    "package": "wxt zip",
     "publish:store": "bash ./scripts/chrome-webstore-publish.sh"
   },
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "wxt": "0.21.4"
   }
 }
