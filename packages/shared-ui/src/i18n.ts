@@ -389,6 +389,7 @@ const en = {
   "desktop.invoke.retry": "The retry request was rejected.",
   "desktop.invoke.partial": "The partial-image choice was rejected.",
   "desktop.invoke.destination": "Could not request the save destination.",
+  "desktop.invoke.cancel": "Could not cancel the job.",
   "desktop.step.chooseWhere": "Choose where to save…",
   "desktop.step.chooseWhereDetail": "The save destination needs attention before the job can continue.",
   "desktop.step.pickOutput": "Pick the output file to continue.",

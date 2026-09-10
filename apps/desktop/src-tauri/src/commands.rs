@@ -23,43 +23,6 @@ pub const COMMANDS: &[&str] = desktop_commands!(command_names);
 /// desktop GUI encoder parity with the CLI/native output layer).
 pub const SUPPORTED_FORMATS: &[&str] = &["png", "jpeg", "tiff", "zif", "webp", "iiif-dir"];
 
-/// Explicit window-E2E flag. The real-window harness (`cargo xtask test
-/// desktop --e2e-window`) sets this to `"1"` alongside
-/// `DEZOOMIFY_E2E_FIXED_DESTINATION`; production never sets it, so the
-/// native save dialog always shows there.
-pub const E2E_WINDOW_FLAG: &str = "DEZOOMIFY_E2E_WINDOW";
-
-/// Fixed save destination for the real-window harness. Honored only together
-/// with [`E2E_WINDOW_FLAG`], so `request_destination` can grant without the
-/// native save dialog, which WebDriver cannot operate.
-pub const E2E_FIXED_DESTINATION: &str = "DEZOOMIFY_E2E_FIXED_DESTINATION";
-
-/// Window-E2E fixed destination from explicit values (pure, for testability).
-/// Returns the fixed path only when the explicit E2E flag is `"1"` and the
-/// destination is non-empty; `None` otherwise, so callers always fall back
-/// to the native save dialog unless both are set.
-pub fn e2e_fixed_destination_from(
-    flag: Option<&str>,
-    destination: Option<&str>,
-) -> Option<std::path::PathBuf> {
-    if flag != Some("1") {
-        return None;
-    }
-    let raw = destination.filter(|raw| !raw.is_empty())?;
-    Some(std::path::PathBuf::from(raw))
-}
-
-/// Window-E2E fixed destination from the process environment. Fail-closed:
-/// `None` unless both [`E2E_WINDOW_FLAG`] (`"1"`) and
-/// [`E2E_FIXED_DESTINATION`] (non-empty path) are set, so production
-/// behavior is unchanged when either is unset.
-pub fn e2e_fixed_destination() -> Option<std::path::PathBuf> {
-    e2e_fixed_destination_from(
-        std::env::var(E2E_WINDOW_FLAG).ok().as_deref(),
-        std::env::var(E2E_FIXED_DESTINATION).ok().as_deref(),
-    )
-}
-
 /// Typed command failure with a stable machine-readable code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandError {
@@ -233,7 +196,13 @@ pub fn dispatch(
                 Ok(seq) => Ok(DispatchOutcome {
                     job: id.to_string(),
                     seq,
-                    event: "cancelled".to_string(),
+                    event:
+                        if matches!(table.state_of(id), Some(crate::jobs::JobState::Cancelled)) {
+                            "cancelled"
+                        } else {
+                            "cancelling"
+                        }
+                        .to_string(),
                 }),
                 Err(kind) if kind == "unknown" => Err(CommandError::unknown_job(id)),
                 Err(kind) if kind == "stale" => Err(CommandError::stale_job(id)),
@@ -858,32 +827,5 @@ mod tests {
         let err = dispatch(&mut table, "answer_choice", Some(&id), None).unwrap_err();
         assert_eq!(err.code, "job.invalid-input");
         table.cancel_job(&id).unwrap();
-    }
-
-    /// Window-E2E fixed destination engages only with the explicit flag
-    /// plus a non-empty destination; every other combination falls back to
-    /// the native save dialog (`None`), so production never changes.
-    #[test]
-    fn e2e_fixed_destination_needs_flag_and_path() {
-        use std::path::PathBuf;
-        assert_eq!(
-            e2e_fixed_destination_from(Some("1"), Some("/tmp/dz-e2e-out.png")),
-            Some(PathBuf::from("/tmp/dz-e2e-out.png"))
-        );
-        assert_eq!(
-            e2e_fixed_destination_from(None, Some("/tmp/dz-e2e-out.png")),
-            None
-        );
-        assert_eq!(
-            e2e_fixed_destination_from(Some("0"), Some("/tmp/dz-e2e-out.png")),
-            None
-        );
-        assert_eq!(
-            e2e_fixed_destination_from(Some("yes"), Some("/tmp/dz-e2e-out.png")),
-            None
-        );
-        assert_eq!(e2e_fixed_destination_from(Some("1"), None), None);
-        assert_eq!(e2e_fixed_destination_from(Some("1"), Some("")), None);
-        assert_eq!(e2e_fixed_destination_from(None, None), None);
     }
 }

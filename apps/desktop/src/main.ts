@@ -267,6 +267,7 @@ function persistOutputFormat(format: NativeFormat): void {
 }
 let settingsError: string | null = null;
 let pendingDecision: PendingDecision | null = null;
+let cancelPending = false;
 
 // Catalog aux (todo 4.3): local-only completion geometry (WxH/K tiles) for
 // the save-name suggestion and the aux choice summary, in the
@@ -789,11 +790,16 @@ function launchNativeJob(trimmed: string, token: number): void {
       if (job) {
         currentJobId = job;
         retiredJobId = null;
+        if (cancelPending) {
+          cancelPending = false;
+          requestNativeCancellation(job, invoke);
+        }
       }
       update();
     },
     (error: unknown) => {
       if (token !== submitToken) return;
+      cancelPending = false;
       const message = error instanceof Error ? error.message : t("desktop.invoke.startFallback");
       dispatchFail(failEnv, "START_FAILED", message);
       settleActiveQueue("failed", { errorCode: "START_FAILED" });
@@ -1035,48 +1041,58 @@ function handleSelectLevel(level: number): void {
   );
 }
 
+function requestNativeCancellation(job: string, invoke: TauriInvokeFn): void {
+  void invoke("cancel_job", { job }).then(
+    () => {
+      if (isTerminalStatus(controller.getState().status)) return;
+      if (currentJobId !== job) return;
+      pushLog("Cancellation requested; waiting for cleanup…");
+      update();
+    },
+    (error: unknown) => {
+      if (isTerminalStatus(controller.getState().status)) return;
+      if (currentJobId !== job) return;
+      const message = error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+            ? error.message
+            : t("desktop.invoke.cancel");
+      dispatchFail(
+        failEnv,
+        "CANCEL_FAILED",
+        message,
+        { phase: "cleanup", retryable: true },
+      );
+      update();
+    },
+  );
+}
+
 function handleCancel(): void {
   if (isTerminalStatus(controller.getState().status)) return;
   const job = currentJobId;
   const invoke = tauriInvoke();
-  // Cancellation waits for cleanup acknowledgement before reaching
-  // cancelled: show the cleaning step now, dispatch the terminal only
-  // after the shell acknowledges (cancelled event or cancel_job success).
-  // The shell removes uncommitted output best-effort; the cancelled view
-  // notes that removal.
+  // Cancellation waits for the native worker's cleanup acknowledgement
+  // before reaching cancelled. The command only requests cancellation;
+  // the terminal state arrives through the cancelled event after any output
+  // path owned by the worker has been cleaned up.
   pushLog("Cancelling… cleaning up…");
   setStep(t("view.step.working"), t("desktop.step.cleanupDetail"));
   pendingDecision = null;
   catalogNotice = null;
-  if (job && invoke) {
-    void invoke("cancel_job", { job }).then(
-      () => {
-        if (isTerminalStatus(controller.getState().status)) return;
-        // The queue may already have settled and advanced on the cancelled
-        // event: only acknowledge a cancel for the job still current, so a
-        // late ack can never cancel a newly started queued job.
-        if (currentJobId !== job) return;
-        // Shell acknowledged cleanup: reach cancelled exactly once.
-        // The event channel usually delivers the same transition first;
-        // the controller guard makes the second a no-op.
-        controller.dispatch({ seq: nextSeq(), sessionId, kind: "cancel" });
-        pushLog("Cancelled; unfinished file removed");
-        stopHeartbeat();
-        settleActiveQueue("cancelled");
-        update();
-      },
-      () => {
-        if (isTerminalStatus(controller.getState().status)) return;
-        if (currentJobId !== job) return;
-        controller.dispatch({ seq: nextSeq(), sessionId, kind: "cancel" });
-        pushLog("Cancelled; unfinished file removed");
-        stopHeartbeat();
-        settleActiveQueue("cancelled");
-        update();
-      },
-    );
+  if (invoke) {
+    if (!job) {
+      cancelPending = true;
+      pushLog("Waiting for the native job to start before cancelling…");
+      update();
+      return;
+    }
+    requestNativeCancellation(job, invoke);
     return;
   }
+  cancelPending = false;
   controller.dispatch({ seq: nextSeq(), sessionId, kind: "cancel" });
   pushLog("Cancelled by user; unfinished file removed");
   stopHeartbeat();
@@ -1207,6 +1223,7 @@ function handlePartialChoice(keep: boolean): void {
 
 function handleReset(): void {
   outputActionError = undefined;
+  cancelPending = false;
   submitToken += 1;
   sessionId = `sess:desktop-${Date.now()}`;
   controller.reset(sessionId);

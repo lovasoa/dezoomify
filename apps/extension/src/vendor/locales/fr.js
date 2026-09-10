@@ -288,6 +288,7 @@ export const fr = {
   "desktop.invoke.retry": "La demande de nouvel essai a ete refusee.",
   "desktop.invoke.partial": "Le choix d image partielle a ete refuse.",
   "desktop.invoke.destination": "Impossible de demander la destination d enregistrement.",
+  "desktop.invoke.cancel": "Impossible d annuler la tache.",
   "desktop.step.chooseWhere": "Choisissez ou enregistrer…",
   "desktop.step.chooseWhereDetail": "La destination d enregistrement demande votre attention avant de continuer.",
   "desktop.step.pickOutput": "Choisissez le fichier de sortie pour continuer.",

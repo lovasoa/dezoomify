@@ -284,6 +284,7 @@ export const de = {
   "desktop.invoke.retry": "Die Wiederholungsanfrage wurde abgelehnt.",
   "desktop.invoke.partial": "Die Teilbildwahl wurde abgelehnt.",
   "desktop.invoke.destination": "Das Speicherziel konnte nicht angefragt werden.",
+  "desktop.invoke.cancel": "Der Auftrag konnte nicht abgebrochen werden.",
   "desktop.step.chooseWhere": "Wahlen Sie, wo gespeichert wird…",
   "desktop.step.chooseWhereDetail": "Das Speicherziel braucht Aufmerksamkeit, bevor der Auftrag fortfahren kann.",
   "desktop.step.pickOutput": "Wahlen Sie die Ausgabedatei, um fortzufahren.",

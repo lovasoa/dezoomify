@@ -143,21 +143,16 @@ note lives in the [Desktop app guide](user/desktop-app.md#install).
 
 ### Real-window E2E hook
 
-Discovery completion moves a discovering job to `AwaitingDestination` with
-one `job-state` event, which is the frontend cue to offer the save
-destination. Image and level ride the pipeline defaults (first image,
-largest fitting level); only an explicit `answer_choice` overrides them
-before the grant.
+Desktop starts automatically save the selected image using the configured
+output directory and format. The Linux-only lane is
+`cargo xtask test desktop --e2e-window` (display, tauri-driver, and
+WebKitWebDriver required). It explicitly builds the fixture server and runs
+`window.spec.mjs`, which covers automatic submit-to-save, cancellation, and
+confirmed deep-link save through the real window.
 
-The native save dialog is not WebDriver-automatable, so the window shell
-honors a fail-closed fixed destination: `request_destination` grants
-`DEZOOMIFY_E2E_FIXED_DESTINATION` without showing the dialog only when
-`DEZOOMIFY_E2E_WINDOW` is also `1`. Either variable unset restores the
-dialog, so production behavior never changes. Path validation and the typed
-grant still run, so refused destinations keep their stable codes. The Linux-only lane is `cargo xtask test desktop --e2e-window` (display,
-tauri-driver, and WebKitWebDriver required). It explicitly builds the fixture
-server and runs `window.spec.mjs`, which covers submit-to-save, cancellation,
-and confirmed deep-link save through the real window. The harness lives in
+The harness configures a fail-closed temporary output directory through the
+existing desktop settings panel; no test-only application environment
+variable is involved. The harness lives in
 `apps/desktop/tests/window-e2e/`.
 
 ## CLI

@@ -376,68 +376,53 @@ async fn request_destination(
         )
         .into());
     }
-    // Window-E2E fixed destination: bypasses the native save dialog, which
-    // WebDriver cannot operate. Engages only when the explicit E2E flag and
-    // fixed destination are both set (see `commands::e2e_fixed_destination`;
-    // production never sets them, so the dialog always shows there). Path
-    // validation and the typed grant below still run, so denied destinations
-    // stay typed denials.
-    let path: std::path::PathBuf = match commands::e2e_fixed_destination() {
-        Some(fixed) => {
-            eprintln!("dezoomify-desktop: window E2E fixed destination engaged");
-            fixed
-        }
-        None => {
-            let (filter_name, extension): (&str, &str) = match format.as_str() {
-                "png" => ("PNG image", "png"),
-                "jpeg" => ("JPEG image", "jpg"),
-                "tiff" => ("TIFF image", "tif"),
-                "zif" => ("ZIF pyramid", "zif"),
-                "webp" => ("WebP image", "webp"),
-                "iiif-dir" | "iiif" => ("IIIF tile tree", "iiif"),
-                _ => {
-                    return Err(CommandError::invalid_input(
-                        "format must be one of png, jpeg, tiff, zif, webp, iiif-dir",
-                    )
-                    .into())
-                }
-            };
-            // Settings-selected output dir seeds the dialog's initial
-            // directory; the user still picks the exact file. Read without
-            // holding the lock across the blocking dialog.
-            let output_dir = {
-                let table = state.lock().map_err(|_| CommandFailure {
-                    code: "shell.lock".into(),
-                    message: "job table poisoned".into(),
-                })?;
-                table.output_dir_for(&job)
-            };
-            // blocking dialogs must not run on the main thread; async
-            // commands run on the async runtime, so this is the sanctioned
-            // shape.
-            let mut dialog = app
-                .dialog()
-                .file()
-                .set_file_name(&suggested_name)
-                .add_filter(filter_name, &[extension]);
-            if let Some(dir) = output_dir.as_deref() {
-                dialog = dialog.set_directory(dir);
-            }
-            let chosen = dialog.blocking_save_file();
-            let Some(path) = chosen else {
-                return Ok(DestinationResult {
-                    outcome: "cancelled",
-                    destination_id: None,
-                    reason: Some("user-cancelled".into()),
-                    code: None,
-                });
-            };
-            path.into_path().map_err(|_| CommandFailure {
-                code: "command.invalid-input".into(),
-                message: "invalid destination path".into(),
-            })?
+    let (filter_name, extension): (&str, &str) = match format.as_str() {
+        "png" => ("PNG image", "png"),
+        "jpeg" => ("JPEG image", "jpg"),
+        "tiff" => ("TIFF image", "tif"),
+        "zif" => ("ZIF pyramid", "zif"),
+        "webp" => ("WebP image", "webp"),
+        "iiif-dir" | "iiif" => ("IIIF tile tree", "iiif"),
+        _ => {
+            return Err(CommandError::invalid_input(
+                "format must be one of png, jpeg, tiff, zif, webp, iiif-dir",
+            )
+            .into())
         }
     };
+    // Settings-selected output dir seeds the dialog's initial directory; the
+    // user still picks the exact file. Read without holding the lock across
+    // the blocking dialog.
+    let output_dir = {
+        let table = state.lock().map_err(|_| CommandFailure {
+            code: "shell.lock".into(),
+            message: "job table poisoned".into(),
+        })?;
+        table.output_dir_for(&job)
+    };
+    // Blocking dialogs must not run on the main thread; async commands run on
+    // the async runtime, so this is the sanctioned shape.
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_file_name(&suggested_name)
+        .add_filter(filter_name, &[extension]);
+    if let Some(dir) = output_dir.as_deref() {
+        dialog = dialog.set_directory(dir);
+    }
+    let chosen = dialog.blocking_save_file();
+    let Some(path) = chosen else {
+        return Ok(DestinationResult {
+            outcome: "cancelled",
+            destination_id: None,
+            reason: Some("user-cancelled".into()),
+            code: None,
+        });
+    };
+    let path = path.into_path().map_err(|_| CommandFailure {
+        code: "command.invalid-input".into(),
+        message: "invalid destination path".into(),
+    })?;
     if path.as_os_str().is_empty() {
         return Ok(DestinationResult {
             outcome: "cancelled",
