@@ -302,8 +302,8 @@ test("renderView mounts card and updates job section in place without DOM destru
 
   // - Targeted element text and attributes updated in place
   assert.equal(stepTextEl.textContent, "Downloading image tiles…");
-  const percentEl = card.querySelector("#dz-job-percent");
-  assert.equal(percentEl.textContent, "25%");
+  const countsEl = card.querySelector("#dz-job-counts");
+  assert.equal(countsEl.textContent, "15 done / 60");
   const barEl = card.querySelector("#dz-job-bar");
   assert.equal(barEl.style.width, "25%");
 
@@ -346,7 +346,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.ok(card.querySelector(".dz-form"), "idle form re-mounted after reset");
 });
 
-test("stalled reassurance names the website being waited on, never a generic server", () => {
+test("slow discovery replaces the phase with one waiting status", () => {
   const container = createMockElement("div");
   const callbacks = {
     onSubmitUrl: () => {},
@@ -373,14 +373,13 @@ test("stalled reassurance names the website being waited on, never a generic ser
     ctx,
   );
   const card = container.querySelector(".dz-card");
-  const reassure = card.querySelector("#dz-job-reassure");
-  assert.ok(reassure, "reassurance shown while stalled");
-  assert.notEqual(reassure.style.display, "none");
+  const step = card.querySelector("#dz-job-step-text");
+  assert.ok(step, "job status shown while stalled");
   assert.equal(
-    reassure.textContent,
-    "Still working, artsandculture.google.com is slow to answer. You can wait, or cancel and try again later.",
+    step.textContent,
+    "Waiting for artsandculture.google.com…",
   );
-  assert.doesNotMatch(reassure.textContent, /museum/i);
+  assert.doesNotMatch(step.textContent, /museum/i);
 });
 
 test("failed state updates error details in place without destroying error container", () => {
@@ -470,7 +469,7 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   assert.ok(!diag2.includes("no discovery candidate"), "stale detail must be replaced");
 });
 
-test("Change button during job is styled as a link button, and header visibility tracks phase", () => {
+test("job rail keeps integrated stop and diagnostics-copy controls, and header visibility tracks phase", () => {
   const container = createMockElement("div");
   const callbacks = {
     onSubmitUrl: () => {},
@@ -486,7 +485,7 @@ test("Change button during job is styled as a link button, and header visibility
   assert.ok(header, "header exists");
   assert.equal(header.style.display, "", "header visible in idle");
 
-  // 2. Job phase: header is hidden, Change button has dz-btn-link class
+  // 2. Job phase: header is hidden and compact job controls are mounted.
   renderView(
     container,
     { status: "downloading", seq: 2, sessionId: "s1", imageCount: 2, transport: "direct" },
@@ -497,10 +496,11 @@ test("Change button during job is styled as a link button, and header visibility
     },
   );
   assert.equal(header.style.display, "none", "header hidden in job phase");
-  const changeBtn = card.querySelector("#dz-job-change");
-  assert.ok(changeBtn, "change button exists");
-  assert.ok(changeBtn.classList.contains("dz-btn-link"), "change button has dz-btn-link class");
-  assert.ok(!changeBtn.classList.contains("dz-btn-secondary"), "change button is not a huge secondary button");
+  const stopBtn = card.querySelector("#dz-btn-cancel");
+  assert.ok(stopBtn, "stop button exists on the progress rail");
+  assert.ok(stopBtn.classList.contains("dz-progress-control"), "stop button uses compact rail-control styling");
+  const copyBtn = card.querySelector("#dz-btn-copy-diagnostics");
+  assert.ok(copyBtn, "technical details include a diagnostics copy control");
 
   // 3. Failed phase: header is hidden
   renderView(
@@ -522,9 +522,9 @@ test("CSS structural invariants prevent button clipping, container overflow, and
   assert.match(css, /\.dz-btn-secondary\s*\{[^}]*min-height:\s*38px;/);
   assert.doesNotMatch(css, /\.dz-btn-secondary\s*\{[^}]*(?<![a-z-])height:\s*38px;/);
 
-  // Progress controls and job actions must wrap and avoid squeezing elements into overlapping
-  assert.match(css, /\.dz-progress-controls\s*\{[^}]*flex-wrap:\s*wrap;/);
-  assert.match(css, /\.dz-job-actions\s*\{[^}]*flex-wrap:\s*wrap;/);
+  // The compact rail reserves a fixed, reachable control group.
+  assert.match(css, /\.dz-progress-rail\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/);
+  assert.match(css, /\.dz-progress-buttons\s*\{[^}]*display:\s*flex;/);
 
   // Link button styling for inline actions like Change button
   assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*display:\s*inline;/);
@@ -534,12 +534,9 @@ test("CSS structural invariants prevent button clipping, container overflow, and
   // Guidance items must not have broken disconnected border-top lines
   assert.doesNotMatch(css, /\.dz-guidance-item,\s*\.dz-suggestion-card\s*\{[^}]*border-top:/);
 
-  // Transport badge must be bounded and not stretch parent container
-  assert.match(css, /\.dz-transport-badge\s*\{[^}]*max-width:\s*100%;/);
-
-  // Progress percentage must never shrink or cause layout jitter
-  assert.match(css, /\.dz-progress-percent\s*\{[^}]*flex-shrink:\s*0;/);
-  assert.match(css, /\.dz-progress-percent\s*\{[^}]*tabular-nums;/);
+  // The count is stable-width enough not to cause layout jitter.
+  assert.match(css, /\.dz-progress-percent,\s*\.dz-progress-count\s*\{[^}]*flex-shrink:\s*0;/);
+  assert.match(css, /\.dz-progress-percent,\s*\.dz-progress-count\s*\{[^}]*tabular-nums;/);
 
   // Status step text must have min-width: 0 to truncate cleanly instead of overflowing
   assert.match(css, /\.dz-progress-status\s*\{[^}]*min-width:\s*0;/);

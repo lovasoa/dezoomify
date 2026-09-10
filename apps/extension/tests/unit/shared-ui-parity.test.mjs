@@ -281,13 +281,12 @@ test("extension job card carries the website geometry", () => {
   const job = card.querySelector(".dz-job-section");
   assert.ok(job, "job section mounted");
   assert.equal(card.querySelector("#dz-job-step-text").textContent, "Saving image tiles…");
-  assert.equal(card.querySelector("#dz-job-transport").textContent, "Browser session");
-  assert.equal(card.querySelector("#dz-job-percent").textContent, "25%");
+  assert.equal(card.querySelector("#dz-job-counts").textContent, "1 done / 4");
   assert.equal(card.querySelector("#dz-job-bar").style.width, "25%");
-  assert.equal(card.querySelector("#dz-job-track").getAttribute("aria-valuenow"), "25");
+  assert.equal(card.querySelector("#dz-job-track").getAttribute("aria-valuenow"), "1");
   const cancel = card.querySelector("#dz-btn-cancel");
   assert.ok(cancel, "cancel action mounted");
-  assert.ok(cancel.classList.contains("dz-btn-secondary"), "cancel uses the shared secondary geometry");
+  assert.ok(cancel.classList.contains("dz-progress-control"), "cancel is integrated with the shared progress rail");
 });
 
 test("extension completion reads saved with the file name, no second save click", () => {

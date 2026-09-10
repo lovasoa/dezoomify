@@ -100,7 +100,7 @@ test("a decoded size mismatch scales to the planned extent and logs", async () =
   await assembly.finalizeEncoder();
   assert.deepEqual(ctx2d.draws[0], { source: ctx2d.draws[0].source, sx: 0, sy: 0, sw: 10, sh: 10, dx: 0, dy: 0, dw: 16, dh: 16 });
   assert.equal(events.log.length, 1);
-  assert.match(events.log[0], /tile size mismatch at 0,0/);
+  assert.equal(events.log[0], "A tile size differed from the plan; it was scaled to keep the image seamless.");
 });
 
 test("undeclared canvas derives the output size from placements", async () => {

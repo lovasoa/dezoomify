@@ -45,6 +45,12 @@ function boundEnvelope(type: string, extra: Record<string, unknown> = {}) { retu
 
 function root() { return document.getElementById("dz-job-app"); }
 
+function copyDiagnostics(text: string) {
+  if (text === "") return;
+  const operation = navigator.clipboard?.writeText?.(text);
+  void operation?.catch(() => undefined);
+}
+
 function render(status: string, ctx: ViewContext = {}) {
   const target = root();
   if (!target) return;
@@ -53,6 +59,7 @@ function render(status: string, ctx: ViewContext = {}) {
   renderView(target, { status, seq, sessionId: binding?.jobId ?? "job:pending", transport: "browser-session", imageCount: 0, ...(ctx.failure ? { error: ctx.failure } : {}) }, {
     onSubmitUrl: () => {},
     onCancel: closeJob,
+    onCopyDiagnostics: copyDiagnostics,
     onReset: () => {},
     onRetrySameUrl: () => {},
     onSave: () => {},

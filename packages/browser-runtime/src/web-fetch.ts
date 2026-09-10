@@ -258,7 +258,7 @@ export interface WebFetchDeps {
 }
 
 export interface WebFetcher {
-  fetchDirect(url: string, headers?: Record<string, string>, signal?: AbortSignal, ms?: number): Promise<DirectOutcome>;
+  fetchDirect(url: string, headers?: Record<string, string>, signal?: AbortSignal, ms?: number, logTimeout?: boolean): Promise<DirectOutcome>;
   fetchViaProxy(targetUrl: string, signal?: AbortSignal): Promise<{
     ok: boolean;
     status: number;
@@ -427,6 +427,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     headers?: Record<string, string>,
     signal?: AbortSignal,
     ms: number = requestMs,
+    logTimeout: boolean = true,
   ): Promise<DirectOutcome> {
     if (!fetchImpl) return { outcome: "network-error" };
     const reqId = hooks.onRequestStart("direct");
@@ -459,7 +460,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (signal?.aborted) return { outcome: "cancelled" };
       const name = (e as { name?: string })?.name;
       if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
-        hooks.onLog(`Direct fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
+        if (logTimeout) hooks.onLog(`Direct metadata fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
         return { outcome: "network-error" };
       }
       return { outcome: "network-error" };
@@ -650,7 +651,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           // Throttle waits must never fail a tile.
         }
       }
-      const direct = await fetchDirect(url, headers);
+      const direct = await fetchDirect(url, headers, undefined, requestMs, false);
       if (direct.outcome === "readable" && direct.bytes) {
         return { bytes: direct.bytes };
       }

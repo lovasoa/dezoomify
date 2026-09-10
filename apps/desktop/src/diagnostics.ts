@@ -71,12 +71,26 @@ export function buildCopyDiagnostics(snapshot: DiagnosticsSnapshot): string {
 export function handleCopyDiagnostics(buildText: () => string): void {
   const text = buildText();
   const done = () => {
-    const btn = typeof document !== "undefined" ? document.getElementById("dz-btn-copy-diag") : null;
+    const btn = typeof document !== "undefined"
+      ? document.getElementById("dz-btn-copy-diagnostics") ?? document.getElementById("dz-btn-copy-diag")
+      : null;
     if (btn) {
-      btn.textContent = t("desktop.copy.copied");
+      const iconButton = btn.id === "dz-btn-copy-diagnostics";
+      if (iconButton) {
+        btn.setAttribute("title", t("desktop.copy.copied"));
+        btn.setAttribute("aria-label", t("desktop.copy.copied"));
+      } else {
+        btn.textContent = t("desktop.copy.copied");
+      }
       setTimeout(() => {
         try {
-          if (btn.isConnected) btn.textContent = t("desktop.copy.diagnostics");
+          if (!btn.isConnected) return;
+          if (iconButton) {
+            btn.setAttribute("title", t("desktop.copy.diagnostics"));
+            btn.setAttribute("aria-label", t("desktop.copy.diagnostics"));
+          } else {
+            btn.textContent = t("desktop.copy.diagnostics");
+          }
         } catch {
           // Button may be gone after re-render; ignore.
         }

@@ -146,6 +146,12 @@ function appRoot() {
   return document.getElementById("dz-modal-app");
 }
 
+function copyDiagnostics(text: string) {
+  if (text === "") return;
+  const operation = navigator.clipboard?.writeText?.(text);
+  void operation?.catch(() => undefined);
+}
+
 function throwIfCancelled() {
   if (modalState.cancelRequested) {
     throw Object.assign(new Error("cancelled by user"), { code: "cancelled" });
@@ -175,7 +181,9 @@ function render(status: string, ctx?: ModalContext) {
       onCancel: () => {
         modalState.cancelRequested = true;
         wakeCandidatesWaiter();
+        render("idle");
       },
+      onCopyDiagnostics: copyDiagnostics,
       onReset: () => {
         modalState.cancelRequested = false;
         void runDiscovery();

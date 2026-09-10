@@ -289,14 +289,13 @@ export function hostOf(url: string): string {
 export function tileFailedError(
   lastOutcome: string,
   lastStatus: number | undefined,
-  url: string,
+  _url: string,
 ): StructuredFailure {
   return failure(
     "TILE_FAILED",
     "Part of the image could not be saved. Try again in a moment.",
     true,
     undefined,
-    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) from ${shortUrl(url)} after ${TILE_MAX_RETRIES + 1} attempts`,
+    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after ${TILE_MAX_RETRIES + 1} attempts`,
   );
 }
-

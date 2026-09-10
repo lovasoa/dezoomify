@@ -914,7 +914,8 @@ abbr[title] {
   white-space: nowrap;
 }
 
-.dz-progress-percent {
+.dz-progress-percent,
+.dz-progress-count {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--dz-link-color);
@@ -930,13 +931,30 @@ abbr[title] {
   background: var(--dz-progress-track);
   border-radius: var(--dz-radius);
   overflow: hidden;
+  position: relative;
 }
 
-.dz-progress-bar {
+.dz-progress-done,
+.dz-progress-active {
+  position: absolute;
+  top: 0;
+  bottom: 0;
   height: 100%;
-  background: var(--dz-progress-bar);
   border-radius: var(--dz-radius);
+}
+
+.dz-progress-done {
+  left: 0;
+  background: var(--dz-progress-bar);
   transition: width 0.25s ease;
+}
+
+.dz-progress-active {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(146, 117, 44, 0.88) 0 4px,
+    rgba(181, 146, 57, 0.88) 4px 8px
+  );
 }
 
 .dz-progress-controls {
@@ -954,7 +972,7 @@ abbr[title] {
 .dz-job-section {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 0.7rem;
   padding: 1.25rem 0 0.5rem;
   margin-top: 0.25rem;
   width: 100%;
@@ -974,11 +992,14 @@ abbr[title] {
 @media (prefers-reduced-motion: reduce) {
   .dz-fade-in { animation: none; }
   .dz-pulse { animation: none !important; }
-  .dz-indeterminate .dz-progress-bar { animation: none !important; }
+  .dz-indeterminate .dz-progress-done { animation: none !important; }
 }
 
-.dz-source-line {
+.dz-job-source-row {
   margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
   font-size: 0.85rem;
   color: var(--dz-text-muted);
   overflow: hidden;
@@ -988,11 +1009,22 @@ abbr[title] {
   min-width: 0;
 }
 
+.dz-job-source-label {
+  flex: 0 0 auto;
+}
+
 .dz-source-url {
   font-family: var(--dz-font-mono);
   font-size: 0.82rem;
   color: var(--dz-text-secondary);
   word-break: break-all;
+}
+
+.dz-job-time {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .dz-pulse {
@@ -1012,13 +1044,59 @@ abbr[title] {
   50% { opacity: 0.25; }
 }
 
-.dz-indeterminate .dz-progress-bar {
+.dz-indeterminate .dz-progress-done {
   animation: dzSlide 1.4s ease-in-out infinite alternate;
 }
 
 @keyframes dzSlide {
   from { margin-left: 0; }
   to { margin-left: calc(100% - 35%); }
+}
+
+.dz-progress-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.dz-progress-buttons {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.dz-progress-control {
+  width: 32px;
+  min-width: 32px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-btn-secondary-bg);
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+
+.dz-progress-control:hover {
+  background: var(--dz-btn-secondary-hover-bg);
+  color: var(--dz-text-primary);
+}
+
+.dz-progress-control:focus-visible {
+  outline: none;
+  box-shadow: var(--dz-focus-ring);
+}
+
+.dz-progress-control svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.dz-stop-control svg rect {
+  rx: 1px;
 }
 
 .dz-tile-counts {
@@ -1299,6 +1377,42 @@ abbr[title] {
   background: transparent;
   margin-top: 1.25rem;
   padding-top: 0.25rem;
+  position: relative;
+}
+
+.dz-copy-diagnostics {
+  position: absolute;
+  top: 0.35rem;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dz-radius);
+  background: transparent;
+  color: var(--dz-text-muted);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+
+.dz-copy-diagnostics:hover {
+  color: var(--dz-text-primary);
+  background: var(--dz-btn-secondary-bg);
+}
+
+.dz-copy-diagnostics:focus-visible {
+  outline: none;
+  box-shadow: var(--dz-focus-ring);
+}
+
+.dz-copy-diagnostics svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
 }
 
 .dz-summary {

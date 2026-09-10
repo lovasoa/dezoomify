@@ -7,7 +7,6 @@
 // decrypt/re-encode needs readable bytes. The host image constructor and
 // timers are injected so node tests drive the fallback with fakes. Keep
 // erasable-syntax-only for the browser `.js` mirrors.
-import { shortUrl } from "./tile-policy.ts";
 import type { PlanTile } from "./session.ts";
 import type { TileBitmap } from "./tile-decode.ts";
 
@@ -73,8 +72,9 @@ export interface PlacedTileGeometry {
  * Draw one decoded tile onto an output surface at its planned placement.
  * Trusts the plan for layout: the canvas stays seamless even when a tile
  * decodes at an unexpected size; the decoded bitmap is scaled to the
- * planned extent so no gap appears. `onMismatch` receives the diagnostic
- * line when the decoded and planned sizes disagree.
+ * planned extent so no gap appears. `onMismatch` receives a generic
+ * diagnostic when the decoded and planned sizes disagree; it never identifies
+ * an individual tile.
  */
 export function drawPlacedTile(
   ctx2d: Canvas2DLike,
@@ -91,9 +91,7 @@ export function drawPlacedTile(
   const planW = geometry.w ?? fullW;
   const planH = geometry.h ?? fullH;
   if (planW !== fullW || planH !== fullH) {
-    onMismatch?.(
-      `tile size mismatch at ${geometry.x},${geometry.y}: plan ${planW}x${planH}, decoded ${fullW}x${fullH}`,
-    );
+    onMismatch?.("A tile size differed from the plan; it was scaled to keep the image seamless.");
   }
   if (planW > 0 && planH > 0 && fullW > 0 && fullH > 0) {
     ctx2d.drawImage(source, 0, 0, fullW, fullH, geometry.x, geometry.y, planW, planH);
@@ -132,7 +130,7 @@ export function loadTileImage(
         hooks.onRequestEnd(reqId, false);
         hooks.onUpdate();
       }
-      reject(new Error(`tile image unavailable without an image host: ${shortUrl(url)}`));
+      reject(new Error("tile image unavailable without an image host"));
       return;
     }
     const setTimer =
@@ -154,7 +152,7 @@ export function loadTileImage(
     img.addEventListener("load", () => done(true, img), { once: true });
     img.addEventListener(
       "error",
-      () => done(false, new Error(`tile image failed to load: ${shortUrl(url)}`)),
+      () => done(false, new Error("tile image failed to load")),
       { once: true },
     );
     timer = setTimer(() => {
@@ -163,7 +161,7 @@ export function loadTileImage(
       } catch {
         // Cancelling a hung load must never throw.
       }
-      done(false, new Error(`tile image timed out after ${ms / 1000}s: ${shortUrl(url)}`));
+      done(false, new Error(`tile image timed out after ${ms / 1000}s`));
     }, ms);
     // Don't tell the tile host the request comes from dezoomify (legacy parity).
     img.referrerPolicy = "no-referrer";
@@ -226,7 +224,7 @@ export function createTilePainter(deps: TileDrawDeps): TilePainter {
         ctx2d,
         source,
         { x: tile.x, y: tile.y, w: tile.w, h: tile.h },
-        (line) => deps.hooks.onLog(`${line} from ${shortUrl(tile.uri)}`),
+        (line) => deps.hooks.onLog(line),
       );
     };
     let readableFailure: unknown = null;
