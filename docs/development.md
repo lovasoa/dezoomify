@@ -35,8 +35,9 @@ cargo xtask build web
 cargo xtask dev web
 ```
 
-`setup` verifies the pinned Rust, Node, pnpm, WASM, and wasm-bindgen tools,
-installs the frozen pnpm workspace dependencies, and reports browser status.
+`setup` verifies the pinned Rust, pnpm, WASM, and wasm-bindgen tools plus the
+minimum Node version from `.node-version`, installs the frozen pnpm workspace
+dependencies, and reports browser status.
 It never installs browser binaries or Rust toolchains. `check` runs formatting,
 lint, type checking, dependency boundaries, generated-file checks, and manifest
 validation without rewriting source files.

@@ -94,13 +94,17 @@ fn run_step(
     summary: &mut Vec<(&'static str, bool)>,
     step: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
-    let ok = step().is_ok();
-    summary.push((name, ok));
-    if !ok {
-        print_summary(summary);
-        return Err(format!("test step '{name}' failed"));
+    match step() {
+        Ok(()) => {
+            summary.push((name, true));
+            Ok(())
+        }
+        Err(reason) => {
+            summary.push((name, false));
+            print_summary(summary);
+            Err(format!("test step '{name}' failed: {reason}"))
+        }
     }
-    Ok(())
 }
 
 fn cargo_test() -> Result<(), String> {

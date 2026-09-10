@@ -723,35 +723,148 @@ fn build_frontend() -> Result<(), String> {
     Ok(())
 }
 
-/// Build the pnpm invocation for the desktop frontend.
+/// Build the pnpm invocation for any workspace task.
 ///
-/// On Linux/macOS this is `pnpm` exactly as before. On Windows, Rust's
-/// `Command` (CreateProcess) only resolves `.exe` on PATH, not the
-/// `.cmd` shims a pnpm install leaves behind, so resolve explicitly: a
-/// real `pnpm.exe` runs directly, otherwise the resolved PATHEXT shim runs
-/// via `cmd /c` (batch files need the command interpreter). A truly absent
-/// pnpm fails closed naming the program and the fix.
+/// A `pnpm` already on PATH wins. Otherwise fall back to Corepack, which ships
+/// with Node and runs the version pinned in `package.json`'s
+/// `packageManager` field, so a fresh checkout needs no separate global pnpm
+/// install. On Windows, Rust's `Command` (CreateProcess) only resolves `.exe`
+/// on PATH, not the `.cmd` shims a pnpm/Corepack install leaves behind, so
+/// resolve explicitly: a real `.exe` runs directly, otherwise the resolved
+/// PATHEXT shim runs via `cmd /c`. When neither program exists the caller
+/// fails closed naming both.
 pub(crate) fn pnpm_command() -> Result<Command, String> {
-    if cfg!(windows) {
+    #[cfg(windows)]
+    {
         pnpm_command_windows()
-    } else {
-        Ok(Command::new("pnpm"))
+    }
+    #[cfg(not(windows))]
+    {
+        pnpm_command_unix()
     }
 }
 
+const MISSING_PNPM: &str =
+    "neither pnpm nor corepack is on PATH (Node bundles Corepack; install Node or run `corepack enable`)";
+
+/// Install Corepack's pnpm shim into a repo-local, gitignored directory and
+/// return it. Corepack ships with Node, so a fresh checkout gets the version
+/// pinned in `package.json` without any global pnpm install. The shim lives
+/// under `target/`, so `cargo clean` only makes the next call reinstall it.
+fn corepack_shims() -> Result<std::path::PathBuf, String> {
+    let dir = super::repo_root().join("target").join("corepack-shims");
+    let shim = dir.join(if cfg!(windows) { "pnpm.cmd" } else { "pnpm" });
+    if shim.is_file() {
+        return Ok(dir);
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        format!(
+            "cannot create corepack shim directory {}: {e}",
+            dir.display()
+        )
+    })?;
+    let status = Command::new("corepack")
+        .args(["enable", "--install-directory"])
+        .arg(&dir)
+        .status()
+        .map_err(|e| format!("cannot run corepack: {e}"))?;
+    if !status.success() || !shim.is_file() {
+        return Err(format!(
+            "corepack could not install pnpm shims under {}; install pnpm globally",
+            dir.display()
+        ));
+    }
+    Ok(dir)
+}
+
+/// `PATH` with `dir` first, so a spawned pnpm and the scripts it recursively
+/// runs both resolve the Corepack shim.
+fn path_with_prepended(dir: &std::path::Path) -> Result<std::ffi::OsString, String> {
+    let old = std::env::var_os("PATH").unwrap_or_default();
+    let paths = std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&old));
+    std::env::join_paths(paths).map_err(|e| format!("cannot build PATH for pnpm: {e}"))
+}
+
+/// Whether `name` is directly runnable from PATH on this host.
+fn program_available(name: &str) -> bool {
+    #[cfg(unix)]
+    {
+        program_on_path(name)
+    }
+    #[cfg(windows)]
+    {
+        let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+            .map(|path| std::env::split_paths(&path).collect())
+            .unwrap_or_default();
+        let pathext =
+            std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+        resolve_windows_program(name, &dirs, &pathext).is_some()
+    }
+}
+
+/// PATH for a child that may shell out to `pnpm` (for example the desktop dev
+/// smoke test). `None` keeps the inherited environment when a runnable pnpm
+/// already exists or Corepack is unavailable.
+fn node_path() -> Result<Option<std::ffi::OsString>, String> {
+    if program_available("pnpm") || !program_available("corepack") {
+        return Ok(None);
+    }
+    let shims = corepack_shims()?;
+    Ok(Some(path_with_prepended(&shims)?))
+}
+
+#[cfg(unix)]
+fn pnpm_command_unix() -> Result<Command, String> {
+    if program_on_path("pnpm") {
+        return Ok(Command::new("pnpm"));
+    }
+    if !program_on_path("corepack") {
+        return Err(MISSING_PNPM.to_string());
+    }
+    let shims = corepack_shims()?;
+    let mut cmd = Command::new(shims.join("pnpm"));
+    cmd.env("PATH", path_with_prepended(&shims)?);
+    Ok(cmd)
+}
+
+#[cfg(unix)]
+fn program_on_path(name: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| {
+            std::fs::metadata(dir.join(name))
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
+    })
+}
+
+#[cfg(windows)]
 fn pnpm_command_windows() -> Result<Command, String> {
     let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
         .unwrap_or_default();
     let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
-    match resolve_windows_program("pnpm", &dirs, &pathext) {
-        Some((exe, false)) => Ok(Command::new(exe)),
-        Some((shim, true)) => {
-            let mut cmd = Command::new("cmd");
-            cmd.arg("/c").arg(shim);
-            Ok(cmd)
-        }
-        None => Err("pnpm not found on PATH (install the pnpm version pinned in the packageManager field of package.json and ensure it is on PATH)".to_string()),
+    if let Some((program, needs_shell)) = resolve_windows_program("pnpm", &dirs, &pathext) {
+        return Ok(windows_launch(program, needs_shell));
+    }
+    if resolve_windows_program("corepack", &dirs, &pathext).is_some() {
+        let shims = corepack_shims()?;
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/c").arg(shims.join("pnpm.cmd"));
+        cmd.env("PATH", path_with_prepended(&shims)?);
+        return Ok(cmd);
+    }
+    Err(MISSING_PNPM.to_string())
+}
+
+#[cfg(windows)]
+fn windows_launch(program: std::path::PathBuf, needs_shell: bool) -> Command {
+    if needs_shell {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/c").arg(program);
+        cmd
+    } else {
+        Command::new(program)
     }
 }
 
@@ -762,6 +875,7 @@ fn pnpm_command_windows() -> Result<Command, String> {
 /// directory so a directly-runnable binary is never routed through a
 /// shell. Extension case follows the `pathext` entry as written; the
 /// Windows filesystem matches it case-insensitively.
+#[cfg(any(windows, test))]
 fn resolve_windows_program(
     stem: &str,
     dirs: &[std::path::PathBuf],
@@ -867,6 +981,9 @@ fn run_node_with_deadline(
         .args(args)
         .envs(env.iter().copied())
         .current_dir(super::repo_root());
+    if let Some(path) = node_path()? {
+        command.env("PATH", path);
+    }
     configure_owned_process_tree(&mut command);
     let mut child = command
         .spawn()
@@ -1003,11 +1120,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
-    fn pnpm_command_unix_is_bare_pnpm() {
-        // Linux/macOS behavior stays byte-identical: a bare `pnpm` lookup.
-        let cmd = super::pnpm_command().expect("pnpm command builds");
-        assert_eq!(cmd.get_program(), "pnpm");
+    fn path_with_prepended_puts_dir_first() {
+        let dir = std::env::temp_dir().join("dezoomify-path-prepend");
+        let joined = super::path_with_prepended(&dir).expect("join PATH");
+        assert_eq!(std::env::split_paths(&joined).next(), Some(dir));
     }
 
     #[test]
