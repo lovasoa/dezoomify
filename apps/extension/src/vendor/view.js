@@ -425,10 +425,10 @@ export function renderView(
     header = container.ownerDocument.createElement("div");
     header.className = "dz-header";
     header.innerHTML = `
-      <div class="dz-product-mark" aria-label="Dezoomify">
+      <h1 class="dz-product-mark">
         ${getDezoomifyLogoSvg(30)}
         <span>Dezoomify</span>
-      </div>
+      </h1>
     `;
     card.prepend(header);
   }
@@ -711,8 +711,6 @@ function mountInputSection(
   const desc = parent.ownerDocument.createElement("div");
   desc.className = "dz-description";
   desc.innerHTML = `
-    <p class="dz-eyebrow">${escapeHtml(t("view.input.eyebrow"))}</p>
-    <h1>${escapeHtml(t("view.input.title"))}</h1>
     <p>${escapeHtml(t("view.input.description"))}</p>
   `;
   body.appendChild(desc);

@@ -345,6 +345,7 @@ abbr[title] {
   display: inline-flex;
   align-items: center;
   gap: 0.65rem;
+  margin: 0;
   color: var(--dz-text-secondary);
   font-size: 0.92rem;
   font-weight: 700;
@@ -381,24 +382,7 @@ abbr[title] {
   margin: 0 0 1.6rem;
 }
 
-.dz-description h1 {
-  margin: 0.3rem 0 0.75rem;
-  color: var(--dz-text-primary);
-  font-size: clamp(1.85rem, 4vw, 3rem);
-  font-weight: 720;
-  letter-spacing: -0.045em;
-  line-height: 1.08;
-}
-
 .dz-description p { margin: 0; }
-
-.dz-eyebrow {
-  color: var(--dz-link-color);
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
 
 .dz-description strong {
   font-weight: 700;

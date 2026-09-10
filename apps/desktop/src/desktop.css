@@ -90,10 +90,6 @@ body {
   margin-bottom: 1.75rem;
 }
 
-#root .dz-description h1 {
-  font-size: clamp(2rem, 4.3vw, 3.65rem);
-}
-
 #root .dz-form {
   padding: 0.55rem;
   border: 1px solid var(--dz-surface-border);
