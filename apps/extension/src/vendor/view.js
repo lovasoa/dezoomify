@@ -836,14 +836,14 @@ function mountJobSection(
       <span class="dz-progress-count" id="dz-job-counts"></span>
     </div>
     <div class="dz-progress-rail">
-      <div class="dz-progress-track dz-indeterminate" id="dz-job-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-        <div class="dz-progress-done" id="dz-job-bar" style="width: 0%;"></div>
-        <div class="dz-progress-active" id="dz-job-active" style="width: 0%;"></div>
-      </div>
       <div class="dz-progress-buttons">
         <button type="button" class="dz-progress-control" id="dz-btn-pause" style="display: none;" aria-label="Pause" title="Pause"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14"></rect><rect x="14" y="5" width="4" height="14"></rect></svg></button>
         <button type="button" class="dz-progress-control" id="dz-btn-resume" style="display: none;" aria-label="Resume" title="Resume"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg></button>
         <button type="button" class="dz-progress-control dz-stop-control" id="dz-btn-cancel" aria-label="Stop and return to start" title="Stop and return to start"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12"></rect></svg></button>
+      </div>
+      <div class="dz-progress-track dz-indeterminate" id="dz-job-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div class="dz-progress-done" id="dz-job-bar" style="width: 0%;"></div>
+        <div class="dz-progress-active" id="dz-job-active" style="width: 0%;"></div>
       </div>
     </div>
     <details class="dz-details" id="dz-job-details">
@@ -903,13 +903,16 @@ function updateJobSection(
   const activePct = determinate ? (active / total) * 100 : 0;
   const retrying = Math.max(0, Math.min(ctx?.currentProgress?.retrying ?? 0, active));
   const paused = ctx?.paused === true || activity.paused === true;
+  if (paused) sec.classList.add("dz-job-paused");
+  else sec.classList.remove("dz-job-paused");
   const now = activity.now ?? Date.now();
   const startedAt = activity.startedAt ?? now;
-  const elapsedMs = Math.max(0, now - startedAt);
+  const timerNow = activity.pausedAt ?? now;
+  const elapsedMs = Math.max(0, timerNow - startedAt - (activity.pausedDurationMs ?? 0));
   const elapsed = formatElapsed(elapsedMs);
   const timeoutMs = activity.timeoutMs ?? 30000;
   const lastProgressAt = activity.lastProgressAt ?? startedAt;
-  const stalledMs = Math.max(0, now - lastProgressAt);
+  const stalledMs = Math.max(0, timerNow - lastProgressAt);
   const showStalled = stalledMs >= 10000 && state.status !== "saving";
   const step = paused
     ? "Paused"

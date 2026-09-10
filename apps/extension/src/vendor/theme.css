@@ -927,19 +927,27 @@ abbr[title] {
 
 .dz-progress-track {
   width: 100%;
-  height: 7px;
+  height: 1.5rem;
+  background: transparent;
+  position: relative;
+}
+
+.dz-progress-track::before {
+  content: "";
+  position: absolute;
+  top: calc(50% - 2px);
+  right: 0;
+  left: 0;
+  height: 4px;
   background: var(--dz-progress-track);
   border-radius: var(--dz-radius);
-  overflow: hidden;
-  position: relative;
 }
 
 .dz-progress-done,
 .dz-progress-active {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  height: 100%;
+  top: calc(50% - 2px);
+  height: 4px;
   border-radius: var(--dz-radius);
 }
 
@@ -1039,6 +1047,11 @@ abbr[title] {
   animation: dzPulse 1.6s ease-in-out infinite;
 }
 
+.dz-job-paused .dz-pulse {
+  animation: none;
+  opacity: 0.45;
+}
+
 @keyframes dzPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
@@ -1055,33 +1068,34 @@ abbr[title] {
 
 .dz-progress-rail {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-  gap: 0.45rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .dz-progress-buttons {
   display: flex;
-  gap: 0.35rem;
+  align-items: center;
+  gap: 0.2rem;
+  height: 1.5rem;
 }
 
 .dz-progress-control {
-  width: 32px;
-  min-width: 32px;
-  min-height: 0;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.5rem;
+  min-height: 1.5rem;
   padding: 0;
-  border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius);
-  background: var(--dz-btn-secondary-bg);
-  color: var(--dz-text-secondary);
+  border: 0;
+  background: transparent;
+  color: var(--dz-text-muted);
   cursor: pointer;
   display: inline-grid;
   place-items: center;
 }
 
 .dz-progress-control:hover {
-  background: var(--dz-btn-secondary-hover-bg);
-  color: var(--dz-text-primary);
+  color: var(--dz-link-color);
 }
 
 .dz-progress-control:focus-visible {
@@ -1090,8 +1104,8 @@ abbr[title] {
 }
 
 .dz-progress-control svg {
-  width: 15px;
-  height: 15px;
+  width: 0.72rem;
+  height: 0.72rem;
   fill: currentColor;
 }
 

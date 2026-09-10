@@ -14,7 +14,7 @@ import {
 } from "../packages/shared-ui/src/history.ts";
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.ts";
-import type { ViewContext } from "../packages/shared-ui/src/view.ts";
+import type { JobActivity, ViewContext } from "../packages/shared-ui/src/view.ts";
 import { suggestedNameFor } from "../packages/shared-ui/src/saveName.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
@@ -490,6 +490,11 @@ function activity(): NonNullable<ViewContext["jobActivity"]> {
   return viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
 }
 
+function activityElapsedMs(a: JobActivity, now = Date.now()): number {
+  const startedAt = a.startedAt ?? now;
+  return Math.max(0, (a.pausedAt ?? now) - startedAt - (a.pausedDurationMs ?? 0));
+}
+
 function resetActivity(url: string): void {
   pendingStarts.clear();
   completedRequests = 0;
@@ -569,7 +574,7 @@ function setStep(label: string, detail?: string): void {
 function pushLog(line: string): void {
   const a = activity();
   if (!a.log) a.log = [];
-  const elapsed = a.startedAt ? Math.round((Date.now() - a.startedAt) / 1000) : 0;
+  const elapsed = Math.round(activityElapsedMs(a) / 1000);
   a.log.push(`${elapsed}s: ${line}`);
   if (a.log.length > 60) a.log.splice(0, a.log.length - 60);
 }
@@ -596,8 +601,9 @@ function noteRequestEnd(id: number, ok: boolean): void {
 }
 
 function refreshLongestPending(): void {
-  const a = activity();
-  const now = Date.now();
+  const a = viewCtx.jobActivity;
+  if (!a) return;
+  const now = a.pausedAt ?? Date.now();
   a.now = now;
   let longest = 0;
   for (const { startedAt } of pendingStarts.values()) {
@@ -1789,7 +1795,12 @@ function update(): void {
         if (jobPaused) return;
         jobPaused = true;
         viewCtx.paused = true;
-        if (viewCtx.jobActivity) viewCtx.jobActivity.paused = true;
+        if (viewCtx.jobActivity) {
+          viewCtx.jobActivity.paused = true;
+          viewCtx.jobActivity.pausedAt = Date.now();
+          viewCtx.jobActivity.now = viewCtx.jobActivity.pausedAt;
+        }
+        stopHeartbeat();
         pushLog("Paused: no new pieces are being fetched.");
         update();
       },
@@ -1797,7 +1808,18 @@ function update(): void {
         if (!jobPaused) return;
         jobPaused = false;
         viewCtx.paused = false;
-        if (viewCtx.jobActivity) viewCtx.jobActivity.paused = false;
+        if (viewCtx.jobActivity) {
+          const now = Date.now();
+          const pausedAt = viewCtx.jobActivity.pausedAt;
+          const pausedFor = pausedAt === undefined ? 0 : Math.max(0, now - pausedAt);
+          viewCtx.jobActivity.paused = false;
+          viewCtx.jobActivity.pausedAt = undefined;
+          viewCtx.jobActivity.pausedDurationMs = (viewCtx.jobActivity.pausedDurationMs ?? 0) + pausedFor;
+          viewCtx.jobActivity.lastProgressAt = (viewCtx.jobActivity.lastProgressAt ?? now) + pausedFor;
+          viewCtx.jobActivity.now = now;
+          for (const pending of pendingStarts.values()) pending.startedAt += pausedFor;
+        }
+        startHeartbeat();
         pushLog("Resumed: fetching queued pieces again.");
         update();
       },

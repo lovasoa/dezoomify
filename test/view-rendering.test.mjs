@@ -515,6 +515,29 @@ test("job rail keeps integrated stop and diagnostics-copy controls, and header v
   assert.equal(header.style.display, "", "header reappears in idle");
 });
 
+test("paused job activity freezes the displayed elapsed time", () => {
+  const container = createMockElement("div");
+  const callbacks = {
+    onSubmitUrl: () => {},
+    onCancel: () => {},
+    onReset: () => {},
+  };
+  renderView(
+    container,
+    { status: "downloading", seq: 1, sessionId: "s1", imageCount: 1, transport: "direct" },
+    callbacks,
+    {
+      currentProgress: { current: 3, total: 10 },
+      paused: true,
+      jobActivity: { startedAt: 1_000, pausedAt: 4_000, now: 12_000, paused: true },
+    },
+  );
+
+  const card = container.querySelector(".dz-card");
+  assert.match(card.querySelector("#dz-job-time").textContent, /^3 s/);
+  assert.ok(card.querySelector(".dz-job-section").classList.contains("dz-job-paused"));
+});
+
 test("CSS structural invariants prevent button clipping, container overflow, and layout shifts", () => {
   const css = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/styles/theme.css"), "utf8");
 
@@ -522,9 +545,11 @@ test("CSS structural invariants prevent button clipping, container overflow, and
   assert.match(css, /\.dz-btn-secondary\s*\{[^}]*min-height:\s*38px;/);
   assert.doesNotMatch(css, /\.dz-btn-secondary\s*\{[^}]*(?<![a-z-])height:\s*38px;/);
 
-  // The compact rail reserves a fixed, reachable control group.
-  assert.match(css, /\.dz-progress-rail\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/);
+  // The compact rail places its bare icon controls before the progress line.
+  assert.match(css, /\.dz-progress-rail\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\);/);
   assert.match(css, /\.dz-progress-buttons\s*\{[^}]*display:\s*flex;/);
+  assert.match(css, /\.dz-progress-control\s*\{[^}]*border:\s*0;/);
+  assert.match(css, /\.dz-progress-control\s*\{[^}]*background:\s*transparent;/);
 
   // Link button styling for inline actions like Change button
   assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*display:\s*inline;/);
