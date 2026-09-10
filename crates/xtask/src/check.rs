@@ -30,11 +30,11 @@ fn run_typecheck() -> Result<(), String> {
         .args(["typecheck"])
         .current_dir(super::repo_root())
         .status()
-        .map_err(|e| format!("failed to run pnpm typecheck: {e}"))?;
+        .map_err(|e| format!("failed to launch pnpm for typecheck: {e}"))?;
     status
         .success()
         .then_some(())
-        .ok_or_else(|| "pnpm typecheck failed".to_string())
+        .ok_or_else(|| "pnpm typecheck failed (run `pnpm typecheck` for details)".to_string())
 }
 
 fn run_cargo(args: &[&str]) -> Result<(), String> {
