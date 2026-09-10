@@ -29,37 +29,21 @@ fn check_size_budget(path: &std::path::Path, budget: u64, label: &str) -> Result
 }
 
 pub fn build_extension(_args: &[String]) -> Result<(), String> {
-    for rel in [
-        "apps/extension/generated/manifest.chromium.json",
-        "apps/extension/generated/manifest.firefox.json",
-    ] {
-        let path = super::repo_root().join(rel);
-        let text =
-            std::fs::read_to_string(&path).map_err(|e| format!("missing manifest {rel}: {e}"))?;
-        let value: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| format!("bad manifest {rel}: {e}"))?;
-        if value.get("manifest_version").is_none() {
-            return Err(format!("manifest {rel} lacks manifest_version"));
-        }
-    }
     build_wasm_glue()?;
-    // Package real store-shaped ZIPs for both listings via the same script
-    // the store-submission workflow uses, so local builds cannot diverge
-    // from what is uploaded.
+    // WXT owns both the extension build and ZIP creation. Verify its output
+    // before copying the store artifacts to their stable release locations.
     let out_dir = super::repo_root().join("target/extension");
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("create target/extension: {e}"))?;
-    for browser in ["chromium", "firefox"] {
+    for (browser, wxt_browser) in [("chromium", "chrome"), ("firefox", "firefox")] {
+        let source_zip = package_wxt(wxt_browser)?;
         let zip = out_dir.join(format!("dezoomify-{browser}.zip"));
-        let status = Command::new("bash")
-            .arg("apps/extension/scripts/package-store.sh")
-            .arg(browser)
-            .arg(&zip)
-            .current_dir(super::repo_root())
-            .status()
-            .map_err(|e| format!("failed to run package-store.sh: {e}"))?;
-        if !status.success() {
-            return Err(format!("packaging {browser} extension failed"));
-        }
+        std::fs::copy(&source_zip, &zip).map_err(|e| {
+            format!(
+                "copy WXT package {} to {}: {e}",
+                source_zip.display(),
+                zip.display()
+            )
+        })?;
         let size = std::fs::metadata(&zip)
             .map_err(|e| format!("missing package {}: {e}", zip.display()))?
             .len();
@@ -78,12 +62,60 @@ pub fn build_extension(_args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn package_wxt(browser: &str) -> Result<std::path::PathBuf, String> {
+    let root = super::repo_root();
+    let status = super::desktop::pnpm_command()?
+        .args([
+            "--dir",
+            "apps/extension",
+            "exec",
+            "wxt",
+            "zip",
+            "--browser",
+            browser,
+        ])
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to run WXT for {browser}: {e}"))?;
+    if !status.success() {
+        return Err(format!("WXT packaging failed for {browser}"));
+    }
+    let output = root
+        .join("apps/extension/.output")
+        .join(format!("{browser}-mv3"));
+    let status = Command::new("node")
+        .args([
+            "apps/extension/scripts/verify-artifact.mjs",
+            &output.display().to_string(),
+            browser,
+        ])
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to verify WXT {browser} artifact: {e}"))?;
+    if !status.success() {
+        return Err(format!("WXT {browser} artifact verification failed"));
+    }
+    Ok(root
+        .join("apps/extension/.output")
+        .join(format!("dezoomify-{browser}.zip")))
+}
+
 /// The extension page runs the wasm discovery core inline, so regenerate the
 /// glue (`wasm/dezoomify-wasm.js` + `dezoomify-wasm_bg.wasm`) from the current
 /// Rust source before packaging or testing. These artifacts are gitignored:
 /// existence alone says nothing about freshness.
 pub(crate) fn build_wasm_glue() -> Result<(), String> {
     let root = super::repo_root();
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            }
+        })
+        .unwrap_or_else(|| root.join("target"));
     let glue = root.join("wasm/dezoomify-wasm.js");
     let wasm = root.join("wasm/dezoomify-wasm_bg.wasm");
     let status = Command::new("cargo")
@@ -109,7 +141,10 @@ pub(crate) fn build_wasm_glue() -> Result<(), String> {
             "wasm",
             "--out-name",
             "dezoomify-wasm",
-            "target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm",
+            &target_dir
+                .join("wasm32-unknown-unknown/release/dezoomify_wasm.wasm")
+                .display()
+                .to_string(),
         ])
         .current_dir(&root)
         .status()
@@ -129,6 +164,39 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
     // Build it first so a stale or absent local artifact cannot be mocked
     // away while the store package is broken.
     build_wasm_glue()?;
+    for browser in ["chrome", "firefox"] {
+        let status = super::desktop::pnpm_command()?
+            .args([
+                "--dir",
+                "apps/extension",
+                "exec",
+                "wxt",
+                "build",
+                "--browser",
+                browser,
+            ])
+            .current_dir(super::repo_root())
+            .status()
+            .map_err(|e| format!("failed to build WXT {browser} artifact: {e}"))?;
+        if !status.success() {
+            return Err(format!("WXT {browser} artifact build failed"));
+        }
+        let output = super::repo_root()
+            .join("apps/extension/.output")
+            .join(format!("{browser}-mv3"));
+        let status = Command::new("node")
+            .args([
+                "apps/extension/scripts/verify-artifact.mjs",
+                &output.display().to_string(),
+                browser,
+            ])
+            .current_dir(super::repo_root())
+            .status()
+            .map_err(|e| format!("failed to verify WXT {browser} artifact: {e}"))?;
+        if !status.success() {
+            return Err(format!("WXT {browser} artifact verification failed"));
+        }
+    }
     run_node_glob("apps/extension/tests/unit")?;
     test_headless_browser()?;
     // The unit glob already ran above; skip it inside the composed
@@ -146,7 +214,7 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
 /// test itself (`DEZOOMIFY_FIREFOX_BIN`, system paths, Playwright cache).
 fn test_headless_browser() -> Result<(), String> {
     // `test_extension` has just regenerated the gitignored WASM artifacts;
-    // package-store.sh stages those exact bytes for both browser runs.
+    // WXT copies those exact bytes through its build hook for both browser runs.
     let status = super::desktop::pnpm_command()?
         .args(["--filter", "dezoomify-extension-headless", "test"])
         .current_dir(super::repo_root())

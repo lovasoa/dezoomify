@@ -234,7 +234,7 @@ async function createJob(tab: BrowserTab) {
   const jobId = makeJobId();
   let jobTab;
   try {
-    jobTab = await api?.tabs?.create?.({ url: api?.runtime?.getURL?.(`job/job.html#jobId=${encodeURIComponent(jobId)}`), active: true });
+    jobTab = await api?.tabs?.create?.({ url: api?.runtime?.getURL?.(`job.html#jobId=${encodeURIComponent(jobId)}`), active: true });
   } catch (error) {
     backgroundLog("error", "job-tab-create-failed", error instanceof Error ? error.message : error);
     return;
@@ -450,8 +450,7 @@ function wire() {
     // Test-only toolbar equivalent: headless browsers cannot click browser
     // chrome, so the E2E driver asks for the same createJob path the
     // toolbar uses. Inert in store packages: the flag is set only by the
-    // test-driver block that package-store.sh appends under
-    // DEZOOMIFY_TEST_DRIVER=1, and no webpage can execute here.
+    // WXT's test-only build flag, and no webpage can execute here.
     if (message.type === "dezoomify-test-start-job") {
       if (!globals.__DEZOOMIFY_TEST__ || typeof message.tabId !== "number" || !isPublicHttpUrl(message.url)) return;
       void createJob({ id: message.tabId, url: message.url });
@@ -488,4 +487,6 @@ function wire() {
   });
 }
 
-try { if (api?.action?.onClicked) wire(); } catch (error) { backgroundLog("error", "wire-failed", error instanceof Error ? error.message : error); }
+export function startBackground() {
+  try { if (api?.action?.onClicked) wire(); } catch (error) { backgroundLog("error", "wire-failed", error instanceof Error ? error.message : error); }
+}

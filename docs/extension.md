@@ -70,18 +70,19 @@ destination origins and scope, and are not intentionally persisted.
 
 ## Packaging
 
-`scripts/generate-manifests.mjs` produces the browser manifests from
-`src/manifest/base.json` and the per-browser overlays. The store package ships
-only the background finite-operation coordinator, dedicated job tab, generated
-vendor mirrors, icons, and WASM. No source content script or fallback
-extension-page entry is packaged or tested.
+WXT generates both MV3 manifests from `apps/extension/wxt.config.ts`. Chromium
+uses the bundled `background.js` service worker. Firefox uses the same classic
+IIFE artifact through `background.scripts`; the artifact verifier parses it
+with `node --check`. The store package ships only the background finite-operation
+coordinator, dedicated job tab, generated vendor mirrors, icons, and WASM. No
+source content script or fallback extension-page entry is packaged or tested.
 
 Extension build, development, test, and release entry points regenerate the
-WASM glue from the current Rust source before staging. The extension test gate
+WASM glue from the current Rust source before WXT builds. The extension test gate
 does so before its unit suite, whose worker contract runs a real generated WASM
 session through the first discovery round trip; an absent, stale, or
 incompatible binding is a blocking failure before browser E2E starts.
-Store staging requires the root workspace dependencies installed by
+WXT packaging requires the root workspace dependencies installed by
 `cargo xtask setup` or `pnpm install --frozen-lockfile`; it never invokes a
 second package manager.
 

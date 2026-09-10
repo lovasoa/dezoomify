@@ -432,10 +432,9 @@ fn serve_dist(port: u16, label: &str) -> Result<(), String> {
         .ok_or_else(|| format!("{label}: dev server exited with {status}"))
 }
 
-/// Extension development: regenerate the canonical JS mirrors, stage an
-/// unpacked load (manifest, classic background entry, page entry, icons,
-/// wasm glue) exactly as packaged, syntax-checked, for the named engine,
-/// then launch the browser with an isolated throwaway profile.
+/// Extension development: regenerate the canonical JS mirrors, build WXT's
+/// unpacked artifact, verify its manifest/output contract, then launch the
+/// browser with an isolated throwaway profile.
 /// Unbranded Chromium only; Google Chrome rejects the command-line loading
 /// switches, and other engines fail closed when their binary is not installed.
 fn dev_extension(args: &[String]) -> Result<(), String> {
@@ -471,51 +470,34 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     // Development must load bindings generated from the current Rust tree;
     // a previous gitignored website build is not a valid extension input.
     super::extension::build_wasm_glue()?;
-    let staging = root.join("target/extension-unpacked");
-    if staging.exists() {
-        std::fs::remove_dir_all(&staging)
-            .map_err(|e| format!("clear {}: {e}", staging.display()))?;
-    }
-    std::fs::create_dir_all(&staging).map_err(|e| format!("create staging: {e}"))?;
-    let manifest = root.join("apps/extension/generated/manifest.chromium.json");
-    // Stage exactly what apps/extension/scripts/package-store.sh ships:
-    // compile the reviewed background/job entrypoint graph, then copy the
-    // manifest on top. Keeping development and store staging on the same
-    // compiler prevents removed source layouts from drifting back here.
-    let status = Command::new("node")
+    let status = super::desktop::pnpm_command()?
         .args([
-            "apps/extension/scripts/build.mjs",
-            "--out",
-            &staging.display().to_string(),
+            "--dir",
+            "apps/extension",
+            "exec",
+            "wxt",
+            "build",
+            "--browser",
+            "chrome",
         ])
         .current_dir(&root)
         .status()
-        .map_err(|e| format!("failed to build extension entrypoints: {e}"))?;
+        .map_err(|e| format!("failed to build WXT extension: {e}"))?;
     if !status.success() {
-        return Err(
-            "extension entrypoint build failed (apps/extension/scripts/build.mjs)".to_string(),
-        );
+        return Err("WXT extension build failed".to_string());
     }
-    std::fs::copy(&manifest, staging.join("manifest.json"))
-        .map_err(|e| format!("stage manifest: {e}"))?;
-    for rel in [
-        "background/index.js",
-        "job/index.js",
-        "job/worker.js",
-        "wasm/dezoomify-wasm.js",
-    ] {
-        let dest = staging.join(rel);
-        let status = Command::new("node")
-            .arg("--check")
-            .arg(&dest)
-            .status()
-            .map_err(|e| format!("failed to run node --check: {e}"))?;
-        if !status.success() {
-            return Err(format!(
-                "staged file failed syntax check: {}",
-                dest.display()
-            ));
-        }
+    let staging = root.join("apps/extension/.output/chrome-mv3");
+    let status = Command::new("node")
+        .args([
+            "apps/extension/scripts/verify-artifact.mjs",
+            &staging.display().to_string(),
+            "chrome",
+        ])
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("failed to verify WXT unpacked artifact: {e}"))?;
+    if !status.success() {
+        return Err("WXT unpacked artifact verification failed".to_string());
     }
     let profile = std::env::temp_dir().join(format!("dz-dev-extension-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);

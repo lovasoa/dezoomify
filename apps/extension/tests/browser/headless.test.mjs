@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,14 +16,15 @@ import { PNG } from "pngjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
-const PACKAGE_SCRIPT = path.join(REPO_ROOT, "apps/extension/scripts/package-store.sh");
+const EXTENSION_ROOT = path.join(REPO_ROOT, "apps/extension");
 const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 const TILE_DIR = path.join(REPO_ROOT, "testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli");
 
 function stagePackage(browser, dir, origin, testDriver = false) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
-  const staged = spawnSync("bash", [PACKAGE_SCRIPT, browser, zip], {
+  const wxtBrowser = browser === "chromium" ? "chrome" : browser;
+  const staged = spawnSync("pnpm", ["--dir", EXTENSION_ROOT, "exec", "wxt", "zip", "--browser", wxtBrowser], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     env: {
@@ -33,7 +34,8 @@ function stagePackage(browser, dir, origin, testDriver = false) {
       DEZOOMIFY_TEST_DRIVER: testDriver ? "1" : "0",
     },
   });
-  assert.equal(staged.status, 0, `package-store.sh ${browser} failed:\n${staged.stderr}`);
+  assert.equal(staged.status, 0, `WXT package ${browser} failed:\n${staged.stderr}`);
+  copyFileSync(path.join(EXTENSION_ROOT, ".output", `dezoomify-${wxtBrowser}.zip`), zip);
   return zip;
 }
 

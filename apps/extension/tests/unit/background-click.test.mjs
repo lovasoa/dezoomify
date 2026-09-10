@@ -49,7 +49,8 @@ async function load(fake) {
   globalThis.chrome = fake.api;
   try {
     sequence += 1;
-    await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(backgroundSrc)}#${sequence}`);
+    const mod = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(backgroundSrc)}#${sequence}`);
+    mod.startBackground();
   } finally {
     globalThis.browser = browser;
     globalThis.chrome = chrome;

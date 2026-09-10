@@ -219,18 +219,6 @@ fn assert_app_versions(version: &str) -> Result<(), String> {
             "apps/extension/package.json",
             json("apps/extension/package.json")?,
         ),
-        (
-            "apps/extension/src/manifest/base.json",
-            json("apps/extension/src/manifest/base.json")?,
-        ),
-        (
-            "apps/extension/generated/manifest.chromium.json",
-            json("apps/extension/generated/manifest.chromium.json")?,
-        ),
-        (
-            "apps/extension/generated/manifest.firefox.json",
-            json("apps/extension/generated/manifest.firefox.json")?,
-        ),
     ];
     let mismatched: Vec<&str> = sources
         .iter()

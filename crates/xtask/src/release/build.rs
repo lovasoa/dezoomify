@@ -115,20 +115,17 @@ fn build_cli_artifact(target_os: &str, out: &Path) -> Result<(), String> {
 }
 
 fn build_extension_artifact(browser: &str, out: &Path) -> Result<(), String> {
-    // Release matrix jobs start from a fresh checkout and package-store.sh is
-    // deliberately only a stager. Generate the current Rust binding here so
-    // release builds cannot consume missing or locally stale WASM artifacts.
-    crate::extension::build_wasm_glue()?;
-    let script = crate::repo_root()
-        .join("apps/extension/scripts/package-store.sh")
-        .canonicalize()
-        .map_err(|e| format!("missing package-store.sh: {e}"))?;
-    let out = out.canonicalize().unwrap_or_else(|_| out.to_path_buf());
-    run_cmd(&[
-        script.to_string_lossy().as_ref(),
-        browser,
-        out.to_string_lossy().as_ref(),
-    ])?;
+    crate::extension::build_extension(&[])?;
+    let source = crate::repo_root()
+        .join("target/extension")
+        .join(format!("dezoomify-{browser}.zip"));
+    std::fs::copy(&source, out).map_err(|e| {
+        format!(
+            "copy WXT extension package {} to {}: {e}",
+            source.display(),
+            out.display()
+        )
+    })?;
     Ok(())
 }
 
