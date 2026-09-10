@@ -165,7 +165,8 @@ export function isLocalFileUrl(urlString: string): boolean {
 }
 
 /** Stable error classification derived from the code, never from text. */
-export function categoryFor(code: string): string {
+export function categoryFor(code: unknown): string {
+  if (typeof code !== "string") return "transport";
   if (code === "NO_IMAGE_FOUND") return "discovery";
   if (code === "INVALID_URL") return "validation";
   if (code.startsWith("OUTPUT_")) return "output";
@@ -173,7 +174,8 @@ export function categoryFor(code: string): string {
   return "transport";
 }
 
-export function phaseFor(code: string): string {
+export function phaseFor(code: unknown): string {
+  if (typeof code !== "string") return "acquisition";
   if (code === "NO_IMAGE_FOUND") return "discovery";
   if (code.startsWith("OUTPUT_")) return "output";
   return "acquisition";

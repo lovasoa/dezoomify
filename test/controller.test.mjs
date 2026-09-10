@@ -54,6 +54,20 @@ test("controller display-only branch + failed stores structured error", () => {
   assert.deepEqual(d.getState().error, err);
 });
 
+test("controller can fall back from saving to display-only", () => {
+  const c = createController("s11");
+  let seq = 0;
+  const next = (kind, extra = {}) => ({ seq: ++seq, sessionId: "s11", kind, ...extra });
+  c.dispatch(next("start-discovery"));
+  c.dispatch(next("images-found"));
+  c.dispatch(next("image-chosen"));
+  c.dispatch(next("level-chosen"));
+  c.dispatch(next("preflight-ok"));
+  c.dispatch(next("save-start"));
+  assert.ok(c.dispatch(next("preflight-display-only")));
+  assert.equal(c.getState().status, "display-only");
+});
+
 test("stale seq and foreign session ignored; illegal transition rejected", () => {
   const c = createController("s1");
   assert.ok(c.dispatch({ seq: 1, sessionId: "s1", kind: "start-discovery" }));

@@ -28,11 +28,11 @@ import { errorTransportFor, isOrdinaryImageTile, isProxyEligible } from "./webIn
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 import {
   createDiscoveryClient,
-  failure,
   type DiscoveryClient,
   type PlanTile,
   type WebCatalog,
 } from "../packages/browser-runtime/src/session.ts";
+import { failure, stableErrorCode } from "../packages/browser-runtime/src/failure.ts";
 import {
   BROWSER_LIMITS,
   BROWSER_MAX_CANVAS_AREA,
@@ -42,8 +42,10 @@ import {
 import {
   assertDeclaredSizeFitsBrowser,
   assertPlanFitsBrowser,
+  categoryFor,
   desktopHandoffLink,
   mapWorkerLimitExceeded,
+  phaseFor,
 } from "../packages/browser-runtime/src/plan-gates.ts";
 import { pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
@@ -1166,19 +1168,11 @@ function setCanvasVisible(visible: boolean): void {
   }
 }
 
-/** Stable error classification derived from the code, never from text. */
-function categoryFor(code: string): string {
-  if (code === "NO_IMAGE_FOUND") return "discovery";
-  if (code === "INVALID_URL") return "validation";
-  if (code.startsWith("OUTPUT_")) return "output";
-  if (code === "WORKER_FAILED" || code === "PLAN_INVALID") return "internal";
-  return "transport";
-}
-
-function phaseFor(code: string): string {
-  if (code === "NO_IMAGE_FOUND") return "discovery";
-  if (code.startsWith("OUTPUT_")) return "output";
-  return "acquisition";
+/** A browser canvas reports taint as a SecurityError when serialization is attempted. */
+function isCanvasTaintError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === "SecurityError" || candidate.code === 18;
 }
 
 function disposeClient(): void {
@@ -1452,6 +1446,19 @@ async function runJob(url: string): Promise<void> {
     let done = 0;
     let failed: unknown = null;
     let tainted = false;
+    const finishDisplayOnly = (): void => {
+      viewCtx.originClean = false;
+      viewCtx.sourceUrl = url;
+      viewCtx.desktopHandoffUrl = desktopHandoffLink(url);
+      setStep("Displaying the image…", "This site shows its pieces without letting the browser keep a copy.");
+      reportProgress(total, total, `Displaying ${total} tiles…`);
+      pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
+      setCanvasVisible(true);
+      preview.resetTransform(document);
+      controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
+      recordWebHistory(url, width, height, "display");
+      update();
+    };
     const queue = [...plan.tiles];
     const tileWorker = async (): Promise<void> => {
       while (queue.length && !failed) {
@@ -1491,35 +1498,36 @@ async function runJob(url: string): Promise<void> {
       // supports it, or uses the extension/desktop app for a clean save.
       // Tiles never use the metadata proxy; the handoff below is plain
       // navigation to a `dezoomify://` link, not a proxied fetch.
-      viewCtx.originClean = false;
-      viewCtx.sourceUrl = url;
-      viewCtx.desktopHandoffUrl = desktopHandoffLink(url);
-      setStep("Displaying the image…", "This site shows its pieces without letting the browser keep a copy.");
-      reportProgress(total, total, `Displaying ${total} tiles…`);
-      pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
-      setCanvasVisible(true);
-      preview.resetTransform(document);
-      controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
-      recordWebHistory(url, width, height, "display");
-      update();
+      finishDisplayOnly();
       return;
     }
 
     controller.dispatch(nextEvent("save-start") as never);
     setStep("Assembling the final picture…", "Encoding PNG in your browser");
     reportProgress(total, total, "Encoding PNG…");
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(failure(
-          "OUTPUT_ENCODE_FAILED",
-          "The final picture could not be created from the saved pieces.",
-          false,
-          undefined,
-          "canvas.toBlob returned null while encoding the PNG",
-        ))),
-        "image/png",
-      );
-    });
+    let blob: Blob;
+    try {
+      blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(failure(
+            "OUTPUT_ENCODE_FAILED",
+            "The final picture could not be created from the saved pieces.",
+            false,
+            undefined,
+            "canvas.toBlob returned null while encoding the PNG",
+          ))),
+          "image/png",
+        );
+      });
+    } catch (error) {
+      // A browser may defer origin-clean enforcement until toBlob. Keep the
+      // assembled canvas visible and never retry serialization in that case.
+      if (isCanvasTaintError(error)) {
+        finishDisplayOnly();
+        return;
+      }
+      throw error;
+    }
     if (resultBlobUrl) URL.revokeObjectURL(resultBlobUrl);
     resultBlobUrl = URL.createObjectURL(blob);
     viewCtx.completedInfo = {
@@ -1541,13 +1549,13 @@ async function runJob(url: string): Promise<void> {
     if (token !== jobToken) return;
     queueOutcome = "failed";
     const structured = error as {
-      code?: string;
+      code?: unknown;
       message?: string;
       detail?: string;
       technical?: string;
       retryable?: boolean;
     };
-    const code = structured?.code || "DISCOVERY_FAILED";
+    const code = stableErrorCode(error);
     const message = structured?.message || "Could not save this zoomable image.";
     const detail = structured?.detail ?? structured?.technical;
     // The activity log is technical: prefer the dense chain over UI copy.

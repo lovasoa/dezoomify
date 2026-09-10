@@ -17,6 +17,13 @@ export interface StructuredFailure extends Error {
   technical?: string;
 }
 
+/** Return a stable string code from an arbitrary host-side failure. */
+export function stableErrorCode(error: unknown, fallback = "DISCOVERY_FAILED"): string {
+  if (!error || typeof error !== "object") return fallback;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && code !== "" ? code : fallback;
+}
+
 export function failure(
   code: string,
   message: string,

@@ -86,7 +86,12 @@ const TRANSITIONS: Record<UiStatus, Partial<Record<ControllerEventKind, UiStatus
     cancel: "cancelled",
   },
   "display-only": { cancel: "cancelled", fail: "failed", reset: "idle" },
-  saving: { "save-done": "completed", fail: "failed", cancel: "cancelled" },
+  saving: {
+    "save-done": "completed",
+    "preflight-display-only": "display-only",
+    fail: "failed",
+    cancel: "cancelled",
+  },
   completed: { reset: "idle" },
   cancelled: { reset: "idle" },
   failed: { reset: "idle", "start-discovery": "discovering" },

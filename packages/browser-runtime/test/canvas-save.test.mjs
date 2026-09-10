@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BROWSER_SAVE_COLOR_WARNING, canvasToPngBlob, saveBlobViaAnchor } from "../src/canvas-save.ts";
+import { stableErrorCode } from "../src/failure.ts";
 
 test("canvasToPngBlob resolves the encoded blob", async () => {
   const blob = await canvasToPngBlob({ toBlob: (cb) => cb({ kind: "png" }), });
@@ -16,6 +17,12 @@ test("canvasToPngBlob maps null and throws to OUTPUT_ENCODE_FAILED", async () =>
     assert.equal(e.code, "OUTPUT_ENCODE_FAILED");
     return true;
   });
+});
+
+test("stableErrorCode ignores browser exception numeric codes", () => {
+  assert.equal(stableErrorCode({ code: 18, name: "SecurityError" }), "DISCOVERY_FAILED");
+  assert.equal(stableErrorCode({ code: "TILE_FAILED" }), "TILE_FAILED");
+  assert.equal(stableErrorCode(null), "DISCOVERY_FAILED");
 });
 
 test("saveBlobViaAnchor downloads the suggested WxH name", () => {

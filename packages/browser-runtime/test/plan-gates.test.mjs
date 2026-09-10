@@ -73,7 +73,10 @@ test("error classification derives from codes, never text", () => {
   assert.equal(categoryFor("OUTPUT_ENCODE_FAILED"), "output");
   assert.equal(categoryFor("PLAN_INVALID"), "internal");
   assert.equal(categoryFor("TILE_FAILED"), "transport");
+  assert.equal(categoryFor({ code: "OUTPUT_ENCODE_FAILED" }), "transport");
+  assert.equal(categoryFor(null), "transport");
   assert.equal(phaseFor("NO_IMAGE_FOUND"), "discovery");
   assert.equal(phaseFor("OUTPUT_DENIED"), "output");
   assert.equal(phaseFor("TILE_FAILED"), "acquisition");
+  assert.equal(phaseFor({ code: "OUTPUT_DENIED" }), "acquisition");
 });
