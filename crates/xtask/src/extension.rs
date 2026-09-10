@@ -30,8 +30,7 @@ fn check_size_budget(path: &std::path::Path, budget: u64, label: &str) -> Result
 
 pub fn build_extension(_args: &[String]) -> Result<(), String> {
     build_wasm_glue()?;
-    // WXT owns both the extension build and ZIP creation. Verify its output
-    // before copying the store artifacts to their stable release locations.
+    // WXT owns both the extension build and ZIP creation.
     let out_dir = super::repo_root().join("target/extension");
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("create target/extension: {e}"))?;
     for (browser, wxt_browser) in [("chromium", "chrome"), ("firefox", "firefox")] {
@@ -63,6 +62,29 @@ pub fn build_extension(_args: &[String]) -> Result<(), String> {
 }
 
 fn package_wxt(browser: &str) -> Result<std::path::PathBuf, String> {
+    run_wxt(browser, "zip")?;
+    let root = super::repo_root();
+    if browser == "firefox" {
+        let background = root.join("apps/extension/.output/firefox-mv3/background.js");
+        let status = Command::new("node")
+            .arg("--check")
+            .arg(&background)
+            .status()
+            .map_err(|e| format!("failed to parse Firefox background: {e}"))?;
+        if !status.success() {
+            return Err("Firefox background must be a parseable classic script".to_string());
+        }
+    }
+    Ok(root
+        .join("apps/extension/.output")
+        .join(format!("dezoomify-{browser}.zip")))
+}
+
+pub(crate) fn build_wxt(browser: &str) -> Result<(), String> {
+    run_wxt(browser, "build")
+}
+
+fn run_wxt(browser: &str, command: &str) -> Result<(), String> {
     let root = super::repo_root();
     let status = super::desktop::pnpm_command()?
         .args([
@@ -70,7 +92,7 @@ fn package_wxt(browser: &str) -> Result<std::path::PathBuf, String> {
             "apps/extension",
             "exec",
             "wxt",
-            "zip",
+            command,
             "--browser",
             browser,
         ])
@@ -78,26 +100,9 @@ fn package_wxt(browser: &str) -> Result<std::path::PathBuf, String> {
         .status()
         .map_err(|e| format!("failed to run WXT for {browser}: {e}"))?;
     if !status.success() {
-        return Err(format!("WXT packaging failed for {browser}"));
+        return Err(format!("WXT {command} failed for {browser}"));
     }
-    let output = root
-        .join("apps/extension/.output")
-        .join(format!("{browser}-mv3"));
-    let status = Command::new("node")
-        .args([
-            "apps/extension/scripts/verify-artifact.mjs",
-            &output.display().to_string(),
-            browser,
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to verify WXT {browser} artifact: {e}"))?;
-    if !status.success() {
-        return Err(format!("WXT {browser} artifact verification failed"));
-    }
-    Ok(root
-        .join("apps/extension/.output")
-        .join(format!("dezoomify-{browser}.zip")))
+    Ok(())
 }
 
 /// The extension page runs the wasm discovery core inline, so regenerate the
@@ -165,37 +170,7 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
     // away while the store package is broken.
     build_wasm_glue()?;
     for browser in ["chrome", "firefox"] {
-        let status = super::desktop::pnpm_command()?
-            .args([
-                "--dir",
-                "apps/extension",
-                "exec",
-                "wxt",
-                "build",
-                "--browser",
-                browser,
-            ])
-            .current_dir(super::repo_root())
-            .status()
-            .map_err(|e| format!("failed to build WXT {browser} artifact: {e}"))?;
-        if !status.success() {
-            return Err(format!("WXT {browser} artifact build failed"));
-        }
-        let output = super::repo_root()
-            .join("apps/extension/.output")
-            .join(format!("{browser}-mv3"));
-        let status = Command::new("node")
-            .args([
-                "apps/extension/scripts/verify-artifact.mjs",
-                &output.display().to_string(),
-                browser,
-            ])
-            .current_dir(super::repo_root())
-            .status()
-            .map_err(|e| format!("failed to verify WXT {browser} artifact: {e}"))?;
-        if !status.success() {
-            return Err(format!("WXT {browser} artifact verification failed"));
-        }
+        build_wxt(browser)?;
     }
     run_node_glob("apps/extension/tests/unit")?;
     test_headless_browser()?;

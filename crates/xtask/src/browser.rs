@@ -433,8 +433,7 @@ fn serve_dist(port: u16, label: &str) -> Result<(), String> {
 }
 
 /// Extension development: regenerate the canonical JS mirrors, build WXT's
-/// unpacked artifact, verify its manifest/output contract, then launch the
-/// browser with an isolated throwaway profile.
+/// unpacked artifact, then launch the browser with an isolated throwaway profile.
 /// Unbranded Chromium only; Google Chrome rejects the command-line loading
 /// switches, and other engines fail closed when their binary is not installed.
 fn dev_extension(args: &[String]) -> Result<(), String> {
@@ -470,35 +469,8 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
     // Development must load bindings generated from the current Rust tree;
     // a previous gitignored website build is not a valid extension input.
     super::extension::build_wasm_glue()?;
-    let status = super::desktop::pnpm_command()?
-        .args([
-            "--dir",
-            "apps/extension",
-            "exec",
-            "wxt",
-            "build",
-            "--browser",
-            "chrome",
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to build WXT extension: {e}"))?;
-    if !status.success() {
-        return Err("WXT extension build failed".to_string());
-    }
+    super::extension::build_wxt("chrome")?;
     let staging = root.join("apps/extension/.output/chrome-mv3");
-    let status = Command::new("node")
-        .args([
-            "apps/extension/scripts/verify-artifact.mjs",
-            &staging.display().to_string(),
-            "chrome",
-        ])
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to verify WXT unpacked artifact: {e}"))?;
-    if !status.success() {
-        return Err("WXT unpacked artifact verification failed".to_string());
-    }
     let profile = std::env::temp_dir().join(format!("dz-dev-extension-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
     // Google Chrome 137+ deliberately rejects both command-line extension

@@ -72,8 +72,8 @@ destination origins and scope, and are not intentionally persisted.
 
 WXT generates both MV3 manifests from `apps/extension/wxt.config.ts`. Chromium
 uses the bundled `background.js` service worker. Firefox uses the same classic
-IIFE artifact through `background.scripts`; the artifact verifier parses it
-with `node --check`. The store package ships only the background finite-operation
+IIFE artifact through `background.scripts`; packaging parses it with `node --check`.
+The store package ships only the background finite-operation
 coordinator, dedicated job tab, generated vendor mirrors, icons, and WASM. No
 source content script or fallback extension-page entry is packaged or tested.
 
