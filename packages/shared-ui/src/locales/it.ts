@@ -284,6 +284,7 @@ export const it = {
   "desktop.invoke.retry": "La richiesta di nuovo tentativo e stata rifiutata.",
   "desktop.invoke.partial": "La scelta di immagine parziale e stata rifiutata.",
   "desktop.invoke.destination": "Impossibile richiedere la destinazione di salvataggio.",
+  "desktop.invoke.cancel": "Impossibile annullare l attivita.",
   "desktop.step.chooseWhere": "Scegli dove salvare…",
   "desktop.step.chooseWhereDetail": "La destinazione di salvataggio richiede attenzione prima di continuare.",
   "desktop.step.pickOutput": "Scegli il file di uscita per continuare.",

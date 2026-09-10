@@ -150,10 +150,10 @@ WebKitWebDriver required). It explicitly builds the fixture server and runs
 `window.spec.mjs`, which covers automatic submit-to-save, cancellation, and
 confirmed deep-link save through the real window.
 
-The harness supplies a fail-closed temporary output directory through
-`DEZOOMIFY_E2E_OUTPUT_DIRECTORY`, honored only when
-`DEZOOMIFY_E2E_WINDOW=1`; production behavior never changes. The harness
-lives in `apps/desktop/tests/window-e2e/`.
+The harness configures a fail-closed temporary output directory through the
+existing desktop settings panel; no test-only application environment
+variable is involved. The harness lives in
+`apps/desktop/tests/window-e2e/`.
 
 ## CLI
 

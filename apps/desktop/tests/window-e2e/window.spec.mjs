@@ -53,6 +53,8 @@ async function snapshot(driver) {
       deepLink: !!document.querySelector(${JSON.stringify(SEL.deepLinkConfirm)}),
       deepLinkButtons: buttons(${JSON.stringify(`${SEL.deepLinkConfirm} button`)}),
       error: !!document.querySelector(${JSON.stringify(SEL.error)}),
+      errorMessage: text("#dz-error-message"),
+      errorDiagnostics: text("#dz-error-diagnostics"),
       jobSection: !!document.querySelector(${JSON.stringify(SEL.jobSection)}),
       step: text(${JSON.stringify(SEL.step)}),
     };
@@ -91,6 +93,25 @@ async function clickButton(driver, selector, text) {
   }, selector, text);
 }
 
+test("real window: cancel leaves no output", { timeout: 180000 }, async () => {
+  await runWindowFlow({
+    nativeDriverBin: shared.nativeDriverBin,
+    body: async ({ driver, base, outputDir }) => {
+      await submitUrl(driver, gatewayInput(base, GATEWAY_DZI));
+      await waitFor(driver, (state) => state.jobSection, 60000, "job section");
+      await driver.findElement({ css: SEL.cancel }).click();
+      const settled = await waitFor(
+        driver,
+        (state) => !state.jobSection && !state.completed && !state.error,
+        60000,
+        "cancelled job",
+      );
+      assert.equal(settled.error, false);
+      assert.equal(outputFiles(outputDir).length, 0, "cancelled jobs do not publish output");
+    },
+  });
+});
+
 test("real window: automatic submit and save produce the expected PNG", { timeout: 180000 }, async () => {
   const hash = expectedHash();
   await runWindowFlow({
@@ -109,25 +130,6 @@ test("real window: automatic submit and save produce the expected PNG", { timeou
       const outputs = outputFiles(outputDir);
       assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
       assertSavedPyramid(readFileSync(outputs[0]), hash);
-    },
-  });
-});
-
-test("real window: cancel leaves no output", { timeout: 180000 }, async () => {
-  await runWindowFlow({
-    nativeDriverBin: shared.nativeDriverBin,
-    body: async ({ driver, base, outputDir }) => {
-      await submitUrl(driver, gatewayInput(base, GATEWAY_DZI));
-      await waitFor(driver, (state) => state.jobSection, 60000, "job section");
-      await driver.findElement({ css: SEL.cancel }).click();
-      const settled = await waitFor(
-        driver,
-        (state) => !state.jobSection && !state.completed && !state.error,
-        60000,
-        "cancelled job",
-      );
-      assert.equal(settled.error, false);
-      assert.equal(outputFiles(outputDir).length, 0, "cancelled jobs do not publish output");
     },
   });
 });

@@ -11,9 +11,9 @@
 // - Never contacts public websites: every submit URL is a loopback gateway
 //   (`/fetch?url=<scenario dumping ground>`) served from `testdata/scenarios`.
 // - Automatic desktop saves derive a filename from the selected catalog title;
-//   the app honors `DEZOOMIFY_E2E_OUTPUT_DIRECTORY` only together with the
-//   explicit `DEZOOMIFY_E2E_WINDOW=1` flag, keeping generated files inside the
-//   flow's temporary directory.
+//   the harness configures the existing output-directory setting through the
+//   rendered settings panel, keeping generated files inside the flow's
+//   temporary directory.
 // - The debug window shell loads its embedded devUrl (`http://localhost:1420`,
 //   baked into the disowned `tauri.conf.json`), so the harness serves the
 //   freshly built `apps/desktop/dist` there over loopback. Port 1420 is
@@ -22,7 +22,7 @@
 // - Reports carry origins, hashes, and stable codes only: never credentials,
 //   full URLs, or absolute paths.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import { tmpdir } from "node:os";
@@ -389,16 +389,15 @@ function waitForProcExit(proc, timeoutMs) {
 }
 
 // Isolated app environment for one flow: temp HOME plus XDG dirs (no
-// shared caches) plus the explicit E2E flag pair. Mesa shader-cache writes
-// are disabled so teardown never races a late cache flush (the observed
-// Ubuntu `mesa_shader_cache` cleanup race); the directory override stays
-// as belt-and-braces for drivers that ignore the disable flag. On Windows
+// shared caches). Mesa shader-cache writes are disabled so teardown never
+// races a late cache flush (the observed Ubuntu `mesa_shader_cache` cleanup
+// race). On Windows
 // the POSIX HOME/XDG pair is irrelevant to Edge/WebView2, so the Windows
 // profile roots move under the temp home too (fresh writable profile per
 // flow: a shared or locked profile surfaces as `DevToolsActivePort file
 // doesn't exist` / `Chrome instance exited` session failures), including
 // the explicit WebView2 user-data override.
-function laneAppEnv(home, fixedDest, outputDir = null) {
+function laneAppEnv(home) {
   const env = {
     ...process.env,
     HOME: home,
@@ -407,10 +406,7 @@ function laneAppEnv(home, fixedDest, outputDir = null) {
     XDG_CACHE_HOME: path.join(home, ".cache"),
     MESA_SHADER_CACHE_DISABLE: "1",
     MESA_SHADER_CACHE_DIR: path.join(home, ".cache", "mesa_shader_cache"),
-    DEZOOMIFY_E2E_WINDOW: "1",
-    DEZOOMIFY_E2E_FIXED_DESTINATION: fixedDest,
   };
-  if (outputDir) env.DEZOOMIFY_E2E_OUTPUT_DIRECTORY = outputDir;
   if (process.platform === "win32") {
     const localAppData = path.join(home, "AppData", "Local");
     const roamingAppData = path.join(home, "AppData", "Roaming");
@@ -510,41 +506,18 @@ export async function startTauriDriver(tauriPort, nativePort, nativeDriverBin, e
   );
 }
 
-// Fail-closed window-shell check: the lean shell and the window shell share
-// one binary path, so a concurrent or stale `cargo build` can leave the lean
-// shell on disk. The lean shell prints its version and exits, which wedges
-// session creation forever; the marker below only exists in the window shell
-// (`tauri_shell.rs` is compiled solely behind the `tauri` feature).
-const WINDOW_SHELL_MARKER = "window E2E fixed destination engaged";
-
 export function ensureWindowShell() {
   if (!existsSync(APP_BIN)) {
     throw new Error(
       `window E2E: ${APP_BIN} is missing; run \`cargo xtask test desktop --e2e-window\` (it builds the window shell first)`,
     );
   }
-  // Cross-platform marker probe (no `grep` dependency for Windows): the
-  // marker only exists in the window shell (`tauri_shell.rs` behind the
-  // `tauri` feature). Read the binary and search the bytes directly.
-  let hasMarker = false;
-  try {
-    const bytes = readFileSync(APP_BIN);
-    hasMarker = bytes.includes(Buffer.from(WINDOW_SHELL_MARKER, "utf8"));
-  } catch {
-    hasMarker = false;
-  }
-  if (!hasMarker) {
-    throw new Error(
-      `window E2E: ${APP_BIN} is not the window shell (lean shell on disk); ` +
-        `rebuild with \`cargo xtask build desktop --unsigned-test\` and rerun`,
-    );
-  }
 }
 
 // One app launch under the running tauri-driver. `appArgs` carries an
-// optional deep-link argv entry; `appEnv` carries the isolated HOME plus the
-// explicit E2E flag pair. Resolves once the idle form or the deep-link
-// confirm gate is visible.
+// optional deep-link argv entry; `appEnv` carries the isolated HOME and
+// profile roots. Resolves once the idle form or the deep-link confirm gate is
+// visible.
 //
 // Session establishment retries at the harness level only (never inside
 // specs): a late-run `no WebDriver session` flake gets two more attempts
@@ -649,11 +622,36 @@ export function outputFiles(outputDir, extension = ".png") {
     .map((entry) => path.join(outputDir, entry.name));
 }
 
+// Configure the existing desktop output-directory setting through the
+// rendered settings panel. This uses the same persisted settings payload as
+// the user-facing folder picker and keeps the real window test portable
+// across Linux, macOS, and Windows without adding a test-only application
+// environment variable.
+async function configureOutputDirectory(driver, outputDir) {
+  await driver.wait(
+    () => driver.executeScript((directory) => {
+      const input = document.querySelector("#dz-settings-output-dir");
+      const panel = document.querySelector("#dz-desktop-settings");
+      if (!input || !panel) return false;
+      input.value = directory;
+      const visibleSelect = Array.from(panel.querySelectorAll("select"))
+        .find((select) => !select.hidden);
+      if (!visibleSelect) return false;
+      // The visible quick-format control already invokes the panel's
+      // validated persistence callback when it receives a change event.
+      visibleSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      return input.value === directory;
+    }, outputDir),
+    60000,
+    "desktop output-directory setting",
+  );
+}
+
 // Full lifecycle for one flow: isolated profile, fixture server,
 // tauri-driver plus app launch, then `body`. Everything is cleaned up
 // (driver quit, child kills with exit wait, temp profile removal with
 // retries) even on failure.
-export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName = "saved.png", preCreateDest = null, body }) {
+export async function runWindowFlow({ nativeDriverBin, appArgs = [], body }) {
   ensureDisplay();
   // Rechecked per flow: the window and lean shells share one binary path.
   ensureWindowShell();
@@ -663,8 +661,6 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
   const outputDir = path.join(work, "outputs");
   mkdirSync(home, { recursive: true });
   mkdirSync(outputDir, { recursive: true });
-  const fixedDest = path.join(work, fixedName);
-  if (preCreateDest !== null) writeFileSync(fixedDest, preCreateDest);
   let fixture = null;
   let driverProc = null;
   let driver = null;
@@ -672,12 +668,12 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
     fixture = await startFixtureServer(work);
     const tauriPort = await freePort();
     const nativePort = await freePort();
-    const appEnv = laneAppEnv(home, fixedDest, outputDir);
+    const appEnv = laneAppEnv(home);
     driverProc = await startTauriDriver(tauriPort, nativePort, nativeDriverBin, appEnv);
     // Deep-link flows build their argv from the allocated loopback base,
     // which only exists after the fixture server starts.
     const resolvedArgs = typeof appArgs === "function"
-      ? appArgs({ base: fixture.base, fixedDest, work })
+      ? appArgs({ base: fixture.base, work })
       : appArgs;
     try {
       driver = await launchApp({ tauriPort, appArgs: resolvedArgs });
@@ -690,7 +686,8 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
       throw new Error(`${err.message}\napp log tail:\n${tail || "(empty)"}`);
     }
     try {
-      return await body({ driver, work, home, fixedDest, outputDir, base: fixture.base, appEnv });
+      await configureOutputDirectory(driver, outputDir);
+      return await body({ driver, work, home, outputDir, base: fixture.base, appEnv });
     } catch (err) {
       // The app inherits tauri-driver's stderr, so the tail below carries
       // the shell's own diagnostics (E2E hook engagement, deep-link
@@ -728,14 +725,15 @@ export async function runWindowFlow({ nativeDriverBin, appArgs = [], fixedName =
 // reset. Everything is cleaned up even on failure. Use for a data-driven
 // formats matrix where every case has the same automatic-save shape;
 // one-off flows keep the isolated runWindowFlow above.
-export async function runSharedWindowSession({ nativeDriverBin, fixedName = "shared.png", body }) {
+export async function runSharedWindowSession({ nativeDriverBin, body }) {
   ensureDisplay();
   ensureWindowShell();
   await reapLaneOrphans();
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-window-e2e-shared-"));
   const home = path.join(work, "home");
+  const outputDir = path.join(work, "outputs");
   mkdirSync(home, { recursive: true });
-  const fixedDest = path.join(work, fixedName);
+  mkdirSync(outputDir, { recursive: true });
   let fixture = null;
   let driverProc = null;
   let driver = null;
@@ -743,7 +741,7 @@ export async function runSharedWindowSession({ nativeDriverBin, fixedName = "sha
     fixture = await startFixtureServer(work);
     const tauriPort = await freePort();
     const nativePort = await freePort();
-    const appEnv = laneAppEnv(home, fixedDest);
+    const appEnv = laneAppEnv(home);
     driverProc = await startTauriDriver(tauriPort, nativePort, nativeDriverBin, appEnv);
     try {
       driver = await launchApp({ tauriPort });
@@ -752,7 +750,8 @@ export async function runSharedWindowSession({ nativeDriverBin, fixedName = "sha
       throw new Error(`${err.message}\napp log tail:\n${tail || "(empty)"}`);
     }
     try {
-      return await body({ driver, work, home, fixedDest, base: fixture.base, appEnv });
+      await configureOutputDirectory(driver, outputDir);
+      return await body({ driver, work, home, outputDir, base: fixture.base, appEnv });
     } catch (err) {
       const tail = String(driverProc.logged()).trim().split("\n").slice(-15).join("\n");
       const note = tail ? `\napp log tail:\n${tail}` : "\napp log tail: (empty)";

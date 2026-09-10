@@ -12,9 +12,9 @@
 // validates, mints `job:n`, records `Discovering` seq 1, and spawns a
 // background driver task without blocking. The discovery worker proves real
 // engine wiring (`Job::new` + `start`, no I/O) and exits; the real
-// `pipeline::run` worker starts after `request_destination` grants a
-// destination. Synchronous lifecycle methods stay the source of truth so the
-// lean offline build passes with no network.
+// `pipeline::run` worker starts after an automatic settings destination or a
+// `request_destination` grant. Synchronous lifecycle methods stay the source
+// of truth so the lean offline build passes with no network.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -247,6 +247,10 @@ pub struct JobRecord {
     /// Shared cancellation flag; cloned into `pipeline_config` so the
     /// background `pipeline::run` observes `cancel_job` promptly.
     pub cancel_flag: std::sync::Arc<AtomicBool>,
+    /// Cancellation has been requested but the background worker has not yet
+    /// completed cleanup. The cancelled terminal is emitted only after the
+    /// worker exits, so a late publish cannot survive cancellation.
+    pub cancel_requested: bool,
     /// Driver configuration (selection, retry, fetch bounds, `cancel_flag`).
     pub pipeline_config: PipelineConfig,
     /// Granted save destination: the real dialog-chosen path, stored per job
@@ -324,6 +328,7 @@ impl std::fmt::Debug for JobRecord {
             .field("input_url", &self.input_url)
             .field("origin", &self.origin)
             .field("user_header_names", &header_names)
+            .field("cancel_requested", &self.cancel_requested)
             .field("destination_format", &self.destination_format)
             .field("destination_overwrite", &self.destination_overwrite)
             .field("output_dir", &self.output_dir)
@@ -790,6 +795,67 @@ impl JobTable {
         (channel, payload)
     }
 
+    /// Finish a cancellation after the worker has stopped. A successful
+    /// worker result is treated as uncommitted when cancellation was already
+    /// requested, and its actual output path is removed before the cancelled
+    /// terminal is emitted. Automatic outputs are included even though they
+    /// do not have a dialog-granted `destination` in the record.
+    fn finish_cancellation(&mut self, job: &str, published: Option<PathBuf>) {
+        let Some((destination, overwrite)) = self.jobs.get(job).and_then(|record| {
+            record
+                .cancel_requested
+                .then(|| (record.destination.clone(), record.destination_overwrite))
+        }) else {
+            return;
+        };
+
+        let mut cleanup = Vec::new();
+        if let Some(path) = published {
+            let is_granted = destination.as_ref().is_some_and(|dest| dest == &path);
+            cleanup.push((path, is_granted && overwrite));
+        }
+        if let Some(path) = destination {
+            cleanup.push((path, overwrite));
+        }
+        for (path, overwrite) in cleanup {
+            remove_uncommitted_output(&path, overwrite);
+        }
+
+        if let Some(record) = self.jobs.get_mut(job) {
+            record.cancel_requested = false;
+            record.output_hash = None;
+            record.output_width = None;
+            record.output_height = None;
+            record.output_tile_count = None;
+            record.output_source_format = None;
+            record.pending_partial = None;
+            record.output_missing.clear();
+            record.output_sibling = None;
+            record.saved_path = None;
+            record.state = JobState::Cancelled;
+        }
+        self.push_event(job, "cancelled", "Cancelled");
+    }
+
+    /// Finalize cancellations whose worker has already exited. This is
+    /// separate from `cancel_job` because the driver poller owns the eventual
+    /// worker completion and must process its result before cleanup.
+    fn finalize_ready_cancellations(&mut self) {
+        let ready: Vec<String> = self
+            .jobs
+            .iter()
+            .filter(|(job, record)| {
+                record.cancel_requested
+                    && matches!(record.state, JobState::CleaningUp)
+                    && !self.driver_handles.contains_key(*job)
+            })
+            .map(|(job, _)| job.clone())
+            .collect();
+        for job in ready {
+            self.finish_cancellation(&job, None);
+        }
+    }
+
     /// Drain finished workers and fold their messages into the transcript.
     /// Non-blocking; terminal-once is enforced (late outcomes after a sync
     /// terminal transition are ignored).
@@ -951,6 +1017,7 @@ impl JobTable {
                 input_url: input_url.to_string(),
                 origin,
                 cancel_flag,
+                cancel_requested: false,
                 pipeline_config,
                 destination: None,
                 saved_path: None,
@@ -997,7 +1064,9 @@ impl JobTable {
     fn require_live(&self, job: &str) -> Result<JobState, String> {
         match self.jobs.get(job) {
             None => Err("unknown".to_string()),
-            Some(record) if record.state.is_terminal() => Err("stale".to_string()),
+            Some(record) if record.state.is_terminal() || record.cancel_requested => {
+                Err("stale".to_string())
+            }
             Some(record) => Ok(record.state.clone()),
         }
     }
@@ -1009,9 +1078,20 @@ impl JobTable {
     /// Terminal jobs report stale; missing jobs report unknown.
     pub fn cancel_job(&mut self, job: &str) -> Result<u64, String> {
         self.pump_drivers();
+        let immediate = matches!(
+            self.jobs.get(job).map(|record| &record.state),
+            Some(
+                JobState::Discovering
+                    | JobState::AwaitingImageSelection
+                    | JobState::AwaitingLevelSelection
+                    | JobState::AwaitingDestination
+                    | JobState::AwaitingChoice
+            )
+        );
         self.require_live(job)?;
-        if let Some(record) = self.jobs.get(job) {
+        if let Some(record) = self.jobs.get_mut(job) {
             record.cancel_flag.store(true, Ordering::SeqCst);
+            record.cancel_requested = true;
         }
         // Real engine policy parity (offline, no I/O): drive a transient job
         // through `Cancel` so `cancel-work`/`release-bytes` ordering is
@@ -1021,31 +1101,21 @@ impl JobTable {
         if let Some(record) = self.jobs.get_mut(job) {
             record.state = JobState::Cancelling;
         }
-        self.push_event(job, "job-state", "Cancelling");
+        let cancelling = self.push_event(job, "job-state", "Cancelling");
         if let Some(record) = self.jobs.get_mut(job) {
             record.state = JobState::CleaningUp;
         }
-        self.push_event(job, "job-state", "CleaningUp");
-        // `release-bytes`: drop staged digests and remove uncommitted output
-        // best-effort (temp sibling plus, when overwrite was refused, the
-        // destination itself). No output is ever reported on the cancel path.
-        // Paths never enter events or logs here.
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.output_hash = None;
-            record.output_width = None;
-            record.output_height = None;
-            record.output_tile_count = None;
-            record.output_source_format = None;
-            record.pending_partial = None;
-            record.output_missing.clear();
-            record.output_sibling = None;
-            if let Some(dest) = record.destination.clone() {
-                let overwrite = record.destination_overwrite;
-                remove_uncommitted_output(&dest, overwrite);
-            }
-            record.state = JobState::Cancelled;
+        let cleanup = self.push_event(job, "job-state", "CleaningUp");
+        // No pipeline can have published output in the discovery/choice
+        // states, so those cancellations can finish immediately. Once a
+        // pipeline worker exists, it owns the automatic output path and final
+        // cleanup waits for its result.
+        if immediate {
+            self.finish_cancellation(job, None);
+        } else {
+            self.finalize_ready_cancellations();
         }
-        Ok(self.push_event(job, "cancelled", "Cancelled"))
+        Ok(self.last_seq(job).unwrap_or(cleanup.max(cancelling)))
     }
 
     /// Answer an image/level choice for a live job. Maps the opaque choice
@@ -1705,6 +1775,11 @@ impl JobTable {
                     if !live {
                         continue;
                     }
+                    if self.jobs.get(&job).is_some_and(|r| {
+                        matches!(r.state, JobState::Cancelling | JobState::CleaningUp)
+                    }) {
+                        continue;
+                    }
                     // Only a still-discovering job moves: an early grant or
                     // choice already advanced the state, and replaying the
                     // transition would clobber it with a spurious event.
@@ -1802,6 +1877,18 @@ impl JobTable {
                 DriverMessage::Finished { job, result } => {
                     let live = self.jobs.get(&job).is_some_and(|r| !r.state.is_terminal());
                     if !live {
+                        continue;
+                    }
+                    if self
+                        .jobs
+                        .get(&job)
+                        .is_some_and(|record| record.cancel_requested)
+                    {
+                        let published = match result {
+                            Ok(success) => Some(success.saved_path),
+                            Err(_) => None,
+                        };
+                        self.finish_cancellation(&job, published);
                         continue;
                     }
                     match result {
@@ -1925,6 +2012,7 @@ impl JobTable {
                 }
             }
         }
+        self.finalize_ready_cancellations();
     }
 }
 
@@ -2811,6 +2899,32 @@ mod tests {
         );
         assert_eq!(table.state_of(&id), Some(JobState::Cancelled));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancellation_removes_auto_output_reported_by_worker() {
+        let path = scratch_path("cancel-auto", "saved.png");
+        let _ = std::fs::remove_file(&path);
+        std::fs::write(&path, b"published-after-cancel").unwrap();
+
+        let mut table = JobTable::new();
+        let id = table.start_job("https://example.com/item").unwrap();
+        if let Some(record) = table.jobs.get_mut(&id) {
+            record.cancel_requested = true;
+            record.state = JobState::CleaningUp;
+        }
+        table.finish_cancellation(&id, Some(path.clone()));
+
+        assert!(!path.exists(), "automatic output is removed on cancel");
+        assert_eq!(table.state_of(&id), Some(JobState::Cancelled));
+        assert_eq!(
+            table
+                .events_for(&id)
+                .iter()
+                .filter(|event| event.kind == "cancelled")
+                .count(),
+            1
+        );
     }
 
     /// Task 6.1: unknown job ids are rejected before any work.

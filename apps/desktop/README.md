@@ -59,10 +59,10 @@ window shell, launches the app under tauri-driver with a fresh profile and
 ephemeral ports, and drives three flows with selenium-webdriver: automatic
 submit/save to an isolated output directory versus the `native/cli-dzi`
 golden, cancel with output cleanup, and the deep-link confirm gate (pending
-links perform no effect). The run sets a fail-closed E2E output-directory
-override (`DEZOOMIFY_E2E_WINDOW=1` plus `DEZOOMIFY_E2E_OUTPUT_DIRECTORY`) so
-generated filenames remain isolated and discoverable; production never sets
-either. Reports stay redacted and seeds fixed as in the hermetic gate.
+links perform no effect). The harness configures the existing output-directory
+setting to an isolated temporary folder through the rendered settings panel,
+so generated filenames remain discoverable on every supported host. Reports
+stay redacted and seeds fixed as in the hermetic gate.
 
 The lane needs a display (`xvfb-run -a` when headless), tauri-driver 2.x
 (`cargo install tauri-driver --version "=2.0.6"`, or `TAURI_DRIVER_BIN`),
