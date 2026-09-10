@@ -10,38 +10,18 @@
 // erasable-syntax-only for the browser `.js` mirrors.
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
 import type { BrowserLimits } from "./types.ts";
-
-/** Wire shape of one engine catalog level (see `LevelDto`). */
-export interface EngineLevelOption {
-  id: string;
-  width?: number;
-  height?: number;
-}
-
-/** Wire shape of one engine catalog image (see `ImageDto`). */
-export interface EngineImageOption {
-  id: string;
-  label?: string;
-  readiness?: string;
-  levels: EngineLevelOption[];
-}
-
-export interface EngineCatalogLike {
-  images: EngineImageOption[];
-}
+import type { CatalogDto, ImageDto, LevelDto } from "../../protocol-ts/src/generated.ts";
 
 export interface EngineSelection {
   image: string;
   level: string;
 }
 
-function levelArea(level: EngineLevelOption): number | null {
-  if (typeof level?.width !== "number" || typeof level?.height !== "number") return null;
+function levelArea(level: LevelDto): number | null {
   return safeArea(level.width, level.height);
 }
 
-function levelFits(level: EngineLevelOption, limits: BrowserLimits): boolean {
-  if (typeof level?.width !== "number" || typeof level?.height !== "number") return true;
+function levelFits(level: LevelDto, limits: BrowserLimits): boolean {
   return probeLimits({ width: level.width, height: level.height }, limits).verdict === "ok";
 }
 
@@ -51,11 +31,11 @@ function levelFits(level: EngineLevelOption, limits: BrowserLimits): boolean {
  * failure; the engine never guesses silently).
  */
 export function pickEngineSelection(
-  catalog: EngineCatalogLike,
+  catalog: CatalogDto | undefined,
   limits: BrowserLimits = BROWSER_LIMITS,
 ): EngineSelection | null {
   const images = Array.isArray(catalog?.images) ? catalog.images : [];
-  let bestImage: EngineImageOption | null = null;
+  let bestImage: ImageDto | null = null;
   let bestImageArea = -1;
   for (const image of images) {
     if (image?.readiness && image.readiness !== "ready") continue;
@@ -66,28 +46,30 @@ export function pickEngineSelection(
       const area = levelArea(level) ?? -1;
       if (area >= imageArea) imageArea = area;
     }
-    if (imageArea < 0) continue;
-    if (imageArea >= bestImageArea) {
+    // Probe-driven and adversarial dimensions may not have a safe area yet.
+    // They remain selectable; declared geometry is evaluated below.
+    if (!bestImage || imageArea >= bestImageArea) {
       bestImage = image;
       bestImageArea = imageArea;
     }
   }
   if (!bestImage) return null;
   const levels = Array.isArray(bestImage.levels) ? bestImage.levels : [];
-  let best: EngineLevelOption | null = null;
+  let best: LevelDto | null = null;
   let bestArea = -1;
-  let smallest: EngineLevelOption | null = null;
+  let smallest: LevelDto | null = null;
   let smallestArea = Number.POSITIVE_INFINITY;
   for (const level of levels) {
     const area = levelArea(level);
-    if (area === null) continue;
-    if (levelFits(level, limits) && area >= bestArea) {
+    const declared = level.width > 0 && level.height > 0;
+    const orderingArea = area ?? Number.POSITIVE_INFINITY;
+    if (declared && levelFits(level, limits) && area !== null && area >= bestArea) {
       best = level;
       bestArea = area;
     }
-    if (area < smallestArea) {
+    if (declared && (smallest === null || orderingArea < smallestArea)) {
       smallest = level;
-      smallestArea = area;
+      smallestArea = orderingArea;
     }
   }
   const chosen = best ?? smallest;

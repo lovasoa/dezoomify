@@ -113,7 +113,7 @@ test("plan drives probe rounds until the plan resolves", async () => {
     fetchTile: async () => ({ bytes: new ArrayBuffer(8) }),
     probeSize: async () => ({ ok: true, width: 256, height: 256 }),
   });
-  const plan = await client.plan(0, 0);
+  const plan = await client.plan("img:0", "lvl:0");
   assert.equal(probes, 2);
   assert.equal(plan.canvas.x, 512);
   assert.equal(plan.tiles.length, 1);
@@ -196,7 +196,7 @@ test("a second operation is rejected while one is pending", async () => {
   });
   const first = client.start("https://site.test/slow");
   await assert.rejects(
-    () => client.plan(0, 0),
+    () => client.plan("img:0", "lvl:0"),
     (error) => error.code === "CLIENT_BUSY",
   );
   client.dispose();
@@ -242,7 +242,7 @@ test("a stray catalog during a pending plan does not cancel the plan", async () 
     fetchTile: async () => ({ bytes: new ArrayBuffer(1) }),
     probeSize: async () => ({ ok: false, width: 0, height: 0 }),
   });
-  const plan = await client.plan(0, 0);
+  const plan = await client.plan("img:0", "lvl:0");
   assert.equal(plan.canvas.x, 256);
   client.dispose();
 });

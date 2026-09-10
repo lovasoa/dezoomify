@@ -14,17 +14,11 @@
 // erasable-syntax-only for the browser `.js` mirrors.
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.js";
 
-/** Wire shape of one engine catalog level (see `LevelDto`). */
-
-/** Wire shape of one engine catalog image (see `ImageDto`). */
-
-function levelArea(level                   )                {
-  if (typeof level?.width !== "number" || typeof level?.height !== "number") return null;
+function levelArea(level          )                {
   return safeArea(level.width, level.height);
 }
 
-function levelFits(level                   , limits               )          {
-  if (typeof level?.width !== "number" || typeof level?.height !== "number") return true;
+function levelFits(level          , limits               )          {
   return probeLimits({ width: level.width, height: level.height }, limits).verdict === "ok";
 }
 
@@ -34,11 +28,11 @@ function levelFits(level                   , limits               )          {
  * failure; the engine never guesses silently).
  */
 export function pickEngineSelection(
-  catalog                   ,
+  catalog                        ,
   limits                = BROWSER_LIMITS,
 )                         {
   const images = Array.isArray(catalog?.images) ? catalog.images : [];
-  let bestImage                           = null;
+  let bestImage                  = null;
   let bestImageArea = -1;
   for (const image of images) {
     if (image?.readiness && image.readiness !== "ready") continue;
@@ -49,28 +43,30 @@ export function pickEngineSelection(
       const area = levelArea(level) ?? -1;
       if (area >= imageArea) imageArea = area;
     }
-    if (imageArea < 0) continue;
-    if (imageArea >= bestImageArea) {
+    // Probe-driven and adversarial dimensions may not have a safe area yet.
+    // They remain selectable; declared geometry is evaluated below.
+    if (!bestImage || imageArea >= bestImageArea) {
       bestImage = image;
       bestImageArea = imageArea;
     }
   }
   if (!bestImage) return null;
   const levels = Array.isArray(bestImage.levels) ? bestImage.levels : [];
-  let best                           = null;
+  let best                  = null;
   let bestArea = -1;
-  let smallest                           = null;
+  let smallest                  = null;
   let smallestArea = Number.POSITIVE_INFINITY;
   for (const level of levels) {
     const area = levelArea(level);
-    if (area === null) continue;
-    if (levelFits(level, limits) && area >= bestArea) {
+    const declared = level.width > 0 && level.height > 0;
+    const orderingArea = area ?? Number.POSITIVE_INFINITY;
+    if (declared && levelFits(level, limits) && area !== null && area >= bestArea) {
       best = level;
       bestArea = area;
     }
-    if (area < smallestArea) {
+    if (declared && (smallest === null || orderingArea < smallestArea)) {
       smallest = level;
-      smallestArea = area;
+      smallestArea = orderingArea;
     }
   }
   const chosen = best ?? smallest;

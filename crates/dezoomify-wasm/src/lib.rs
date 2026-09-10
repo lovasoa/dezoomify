@@ -286,6 +286,18 @@ pub mod wasm_api {
                 .map_err(js_error)
         }
 
+        /// Project the tile plan of a stable protocol image and level id.
+        #[wasm_bindgen(js_name = "levelTilesById")]
+        pub fn level_tiles_by_id(
+            &mut self,
+            image_id: String,
+            level_id: String,
+        ) -> Result<String, JsValue> {
+            self.inner
+                .level_tiles_by_id(&image_id, &level_id)
+                .map_err(js_error)
+        }
+
         /// Submit one probe observation; returns the next step or the plan.
         #[wasm_bindgen(js_name = "probeSubmit")]
         pub fn probe_submit(
@@ -298,6 +310,21 @@ pub mod wasm_api {
         ) -> Result<String, JsValue> {
             self.inner
                 .probe_submit(image as usize, level as usize, ok, width, height)
+                .map_err(js_error)
+        }
+
+        /// Continue probing a stable protocol image and level id.
+        #[wasm_bindgen(js_name = "probeSubmitById")]
+        pub fn probe_submit_by_id(
+            &mut self,
+            image_id: String,
+            level_id: String,
+            ok: bool,
+            width: u32,
+            height: u32,
+        ) -> Result<String, JsValue> {
+            self.inner
+                .probe_submit_by_id(&image_id, &level_id, ok, width, height)
                 .map_err(js_error)
         }
 

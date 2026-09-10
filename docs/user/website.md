@@ -17,7 +17,7 @@ reading is part of it).
 5. When the picture appears, use the **Save** button (or right-click the
    image and choose *Save image as…*). The file is saved as a PNG.
 
-If a page offers several images, the website saves the first one it finds.
+If a page offers several images, the website saves the largest one it finds.
 It uses the highest resolution that fits in a browser tab.
 There is no list to pick from in the website.
 To choose a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).

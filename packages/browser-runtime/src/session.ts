@@ -19,6 +19,7 @@
 
 import { failure } from "./failure.ts";
 import type { StructuredFailure } from "./failure.ts";
+import type { CatalogDto } from "../../protocol-ts/src/generated.ts";
 
 export { failure };
 export type { StructuredFailure };
@@ -31,23 +32,7 @@ export interface WorkerLike {
   onerror?: ((ev: ErrorEvent) => void) | null;
 }
 
-export interface CatalogLevel {
-  index: number;
-  title?: string;
-  scale?: number;
-  imageSize?: { x: number; y: number };
-}
-
-export interface CatalogImage {
-  id: number;
-  title?: string;
-  format: string;
-  levels: CatalogLevel[];
-}
-
-export interface WebCatalog {
-  images: CatalogImage[];
-}
+export type WebCatalog = CatalogDto;
 
 export interface PlanTile {
   uri: string;
@@ -82,7 +67,7 @@ export interface DiscoveryClientDeps {
 
 export interface DiscoveryClient {
   start(url: string): Promise<WebCatalog>;
-  plan(image: number, level: number): Promise<TilePlan>;
+  plan(image: string, level: string): Promise<TilePlan>;
   process(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer>;
   dispose(): void;
 }
@@ -96,8 +81,8 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
   const { worker } = deps;
   let pending: Pending | null = null;
   let pendingKind: "start" | "plan" | "process" | null = null;
-  let currentImage = 0;
-  let currentLevel = 0;
+  let currentImage = "";
+  let currentLevel = "";
   let disposed = false;
 
   // A worker that never starts (script load failure, corrupted content) would
@@ -250,11 +235,11 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
 
   return {
     start(url: string): Promise<WebCatalog> {
-      currentImage = 0;
-      currentLevel = 0;
+      currentImage = "";
+      currentLevel = "";
       return send({ type: "start", url }, "start") as Promise<WebCatalog>;
     },
-    plan(image: number, level: number): Promise<TilePlan> {
+    plan(image: string, level: string): Promise<TilePlan> {
       currentImage = image;
       currentLevel = level;
       return send({ type: "plan", image, level }, "plan") as Promise<TilePlan>;

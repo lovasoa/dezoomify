@@ -289,6 +289,7 @@ pub enum Readiness {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LevelDto {
     pub id: LevelId,
     pub width: u64,
@@ -298,6 +299,7 @@ pub struct LevelDto {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImageDto {
     pub id: ImageId,
     pub label: String,
@@ -1088,5 +1090,37 @@ impl ControlEnvelope {
             protocol: PROTOCOL_VERSION.to_string(),
             body,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_json_matches_the_generated_typescript_field_names() {
+        let catalog = CatalogDto {
+            images: vec![ImageDto {
+                id: "img:test".parse().expect("image id"),
+                label: "Test".into(),
+                format: "test".into(),
+                width: 512,
+                height: 512,
+                readiness: Readiness::Ready,
+                source_kind: "grid".into(),
+                levels: vec![LevelDto {
+                    id: "lvl:test".parse().expect("level id"),
+                    width: 512,
+                    height: 512,
+                    tile_width: 256,
+                    tile_height: 256,
+                }],
+            }],
+        };
+        let value = serde_json::to_value(catalog).expect("catalog serializes");
+        assert_eq!(value["images"][0]["sourceKind"], "grid");
+        assert_eq!(value["images"][0]["levels"][0]["tileWidth"], 256);
+        assert!(value["images"][0].get("source_kind").is_none());
+        assert!(value["images"][0]["levels"][0].get("tile_width").is_none());
     }
 }

@@ -65,10 +65,10 @@ test("estimateTileCount parity plus 100k guard semantics", () => {
   assert.ok(ext.estimateTileCount(16384, 16384) <= ext.BROWSER_MAX_PLAN_TILES);
 });
 
-test("modal uses the vendored limits module, no forked area math", () => {
+test("modal uses the shared browser policy, no forked area math", () => {
   const modal = readFileSync(new URL("../../src/modal/modal.ts", import.meta.url), "utf8");
   assert.ok(modal.includes('from "../vendor/limits.js"'), "modal must import the vendored limits module");
-  assert.ok(modal.includes("pickLevel"), "modal must use shared pickLevel");
+  assert.ok(modal.includes('from "../vendor/engine-selection.js"'), "modal must use shared selection");
   assert.ok(modal.includes("BROWSER_MAX_PLAN_TILES"), "modal must enforce the 100k tile cap");
   assert.ok(!modal.includes("MAX_CANVAS_AREA = 16384"), "modal must not keep the forked float area check");
 });
