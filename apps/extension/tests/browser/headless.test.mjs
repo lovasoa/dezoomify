@@ -35,7 +35,7 @@ function stagePackage(browser, dir, origin, testDriver = false) {
     },
   });
   assert.equal(staged.status, 0, `WXT package ${browser} failed:\n${staged.stderr}`);
-  copyFileSync(path.join(EXTENSION_ROOT, ".output", `dezoomify-${wxtBrowser}.zip`), zip);
+  copyFileSync(path.join(EXTENSION_ROOT, ".output-test", `dezoomify-${wxtBrowser}.zip`), zip);
   return zip;
 }
 

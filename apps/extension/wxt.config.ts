@@ -20,6 +20,7 @@ function testHostPermissions(): string[] {
 export default defineConfig({
   targetBrowsers: ["chrome", "firefox"],
   manifestVersion: 3,
+  outDir: isTestPackage ? ".output-test" : ".output",
   imports: false,
   dev: { reloadCommand: false },
   zip: {
