@@ -216,10 +216,8 @@ export const de = {
   "view.history.open": "Erneut offnen",
   "view.history.clear": "Verlauf loschen",
   "view.history.dims": "{w} mal {h} Pixel",
-  "view.input.eyebrow": "Zoombare Bilder speichern",
-  "view.input.title": "Dezoomify",
   "view.input.description":
-    "Dezoomify speichert zoombare Bilder. Fuegen Sie unten die URL eines Bildbetrachters, Manifests oder einer Kachel-Adresse ein. Dezoomify findet das Bild und speichert die hoechste Aufloesung, die in Ihren Browser passt. Wenn es fertig ist, speichern Sie das Bild mit der Schaltflaeche auf Ihrem Computer.",
+    "Dezoomify laedt zoombare Kachelbilder aus Bibliotheken, Museen, Galerien und anderen Websites herunter. Fuegen Sie unten die Adresse eines Bildes ein, um es herunterzuladen.",
   "view.input.placeholder": "Adresse eines Bildbetrachters oder Manifests einfuegen",
   "view.input.aria": "Adresse der Webseite mit dem zoombaren Bild",
   "view.input.start": "Bild finden",

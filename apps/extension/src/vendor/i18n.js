@@ -321,10 +321,8 @@ const en = {
   "view.history.open": "Open again",
   "view.history.clear": "Clear history",
   "view.history.dims": "{w} by {h} pixels",
-  "view.input.eyebrow": "New image",
-  "view.input.title": "Save the full-resolution image",
   "view.input.description":
-    "Paste a viewer page, manifest, or tile address. Dezoomify finds the image and selects the best available resolution.",
+    "Dezoomify downloads zoomable tiled images from libraries, museums, galleries, and other websites. Paste the URL of an image below to download it.",
   "view.input.placeholder": "Paste an image viewer or manifest URL",
   "view.input.aria": "Address of the webpage containing your zoomable image",
   "view.input.start": "Find image",

@@ -216,10 +216,8 @@ export const it = {
   "view.history.open": "Riapri",
   "view.history.clear": "Cancella la cronologia",
   "view.history.dims": "{w} per {h} pixel",
-  "view.input.eyebrow": "Salvataggio di immagini zoomabili",
-  "view.input.title": "Dezoomify",
   "view.input.description":
-    "Dezoomify permette di salvare immagini zoomabili. Incolla qui sotto l URL di un visualizzatore, manifesto o indirizzo di tasselli. Dezoomify trova l immagine e salva la risoluzione piu alta adatta al browser. Quando e pronta, usa il pulsante Salva immagine per salvarla sul tuo computer.",
+    "Dezoomify scarica immagini zoomabili a tasselli da biblioteche, musei, gallerie e altri siti web. Incolla qui sotto l indirizzo di un immagine per scaricarla.",
   "view.input.placeholder": "Incolla l indirizzo di un visualizzatore o manifesto",
   "view.input.aria": "Indirizzo della pagina con l immagine ingrandibile",
   "view.input.start": "Trova immagine",
