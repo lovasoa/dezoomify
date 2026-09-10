@@ -32,15 +32,16 @@
 import { createSessionFetcher, originOf } from "../runtime/fetch.js";
 import { validateCandidateUrl, redactUrlForLabel } from "../runtime/candidates.js";
 import { requestNativeHandoff, NATIVE_HOST_NAME } from "../runtime/nativeHandoff.js";
-import { pickLevel, BROWSER_MAX_PLAN_TILES } from "../vendor/limits.js";
+import { BROWSER_MAX_PLAN_TILES } from "../vendor/limits.js";
+import { pickEngineSelection } from "../vendor/engine-selection.js";
 import { renderView } from "../vendor/view.js";
 import init, * as wasm from "../wasm/dezoomify-wasm.js";
 
 type JsonObject = Record<string, unknown>;
 type ModalContext = JsonObject & { imageCount?: number; failure?: unknown };
 type JobContextExtra = { url?: string; progress?: { current: number; total: number }; rest?: JsonObject };
-type ImageLevel = { index: number; width?: number; height?: number };
-type CatalogImage = { id: string; levels: ImageLevel[] };
+type ImageLevel = { id: string; width: number; height: number; tileWidth: number; tileHeight: number };
+type CatalogImage = { id: string; readiness: "ready" | "deferred"; levels: ImageLevel[] };
 type Catalog = { images: CatalogImage[] };
 type Tile = { uri: string; x: number; y: number; w?: number; h?: number; processing?: string | null };
 type TilePlan = { kind?: string; uri?: string; canvas: { x: number; y: number }; tiles: Tile[] };
@@ -271,10 +272,11 @@ async function discover(sourceUrl: string, tabOrigin: string): Promise<{ session
 }
 
 async function planLevel(session: wasm.DiscoverySession, image: CatalogImage, tabOrigin: string): Promise<TilePlan> {
-  // Canonical level picking (vendored limits.js, no forked area math).
-  const picked = pickLevel({ levels: image.levels });
-  const level = image.levels.find((candidate) => candidate.index === picked.index) ?? image.levels[0];
-  let plan = JSON.parse(session.levelTiles(image.id, level.index)) as TilePlan;
+  const selection = pickEngineSelection({ images: [image] });
+  if (!selection) throw new Error("catalog has no selectable level");
+  const level = image.levels.find((candidate) => candidate.id === selection.level);
+  if (!level) throw new Error("selected level is absent from catalog");
+  let plan = JSON.parse(session.levelTilesById(selection.image, selection.level)) as TilePlan;
   const fetcher = makeTabFetcher(tabOrigin);
   let guard = 0;
   while (plan.kind === "probe" && guard++ < 5) {
@@ -282,7 +284,7 @@ async function planLevel(session: wasm.DiscoverySession, image: CatalogImage, ta
     if (!plan.uri) throw new Error("probe plan has no URI");
     const out = await fetcher.fetchResource(plan.uri, { userIntent: true });
     const bmp = await createImageBitmap(new Blob([new Uint8Array(out.bytes).slice().buffer]));
-    plan = JSON.parse(session.probeSubmit(image.id, level.index, bmp.width > 0, bmp.width, bmp.height)) as TilePlan;
+    plan = JSON.parse(session.probeSubmitById(selection.image, selection.level, bmp.width > 0, bmp.width, bmp.height)) as TilePlan;
   }
   if (plan.tiles && plan.tiles.length > BROWSER_MAX_PLAN_TILES) {
     throw Object.assign(

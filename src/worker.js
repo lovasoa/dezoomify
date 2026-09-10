@@ -93,7 +93,7 @@ function pumpNeeds() {
 }
 
 function dispatchPlan(image, level) {
-  const result = JSON.parse(session.levelTiles(image, level));
+  const result = JSON.parse(session.levelTilesById(image, level));
   if (result.kind === "probe") {
     post({ type: "probe", uri: result.uri, headers: result.headers ?? {} });
     return;
@@ -169,7 +169,7 @@ async function handle(msg) {
     case "probe-submit": {
       if (!session) throw Object.assign(new Error("no discovery session"), { code: "WORKER_FAILED" });
       const result = JSON.parse(
-        session.probeSubmit(msg.image, msg.level, msg.ok, msg.width, msg.height),
+        session.probeSubmitById(msg.image, msg.level, msg.ok, msg.width, msg.height),
       );
       if (result.kind === "probe") {
         post({ type: "probe", uri: result.uri, headers: result.headers ?? {} });

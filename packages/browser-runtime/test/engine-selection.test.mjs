@@ -41,6 +41,22 @@ test("levels beyond the browser canvas fall back to the smallest declared level"
   assert.deepEqual(pickEngineSelection(catalog), { image: "img:0", level: "lvl:small" });
 });
 
+test("krpano Eiffel pyramid selects the largest browser-safe level", () => {
+  const catalog = {
+    images: [image("img:krpano", [
+      level("lvl:0", 512, 512),
+      level("lvl:1", 844, 1152),
+      level("lvl:2", 1898, 2176),
+      level("lvl:3", 3586, 4352),
+      level("lvl:4", 7172, 8832),
+      level("lvl:5", 14554, 8832),
+      level("lvl:6", 29110, 17664),
+      level("lvl:7", 58220, 35328),
+    ])],
+  };
+  assert.deepEqual(pickEngineSelection(catalog), { image: "img:krpano", level: "lvl:5" });
+});
+
 test("ties keep the later image and later level", () => {
   const catalog = {
     images: [

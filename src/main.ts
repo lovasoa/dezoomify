@@ -33,8 +33,19 @@ import {
   type PlanTile,
   type WebCatalog,
 } from "../packages/browser-runtime/src/session.ts";
-import { probeLimits, safeArea } from "../packages/browser-runtime/src/limits.ts";
-import type { BrowserLimits } from "../packages/browser-runtime/src/types.ts";
+import {
+  BROWSER_LIMITS,
+  BROWSER_MAX_CANVAS_AREA,
+  BROWSER_MAX_CANVAS_SIDE,
+  BROWSER_MAX_PLAN_TILES,
+} from "../packages/browser-runtime/src/limits.ts";
+import {
+  assertDeclaredSizeFitsBrowser,
+  assertPlanFitsBrowser,
+  desktopHandoffLink,
+  mapWorkerLimitExceeded,
+} from "../packages/browser-runtime/src/plan-gates.ts";
+import { pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
   cancelAllWeb,
   createWebQueue,
@@ -57,6 +68,10 @@ import {
 // existing website test imports (`test/pick-level.test.mjs` and
 // `test/preview.test.mjs` import from `src/main.ts`).
 export {
+  BROWSER_MAX_CANVAS_AREA,
+  BROWSER_MAX_CANVAS_SIDE,
+  BROWSER_MAX_PLAN_TILES,
+  desktopHandoffLink,
   PREVIEW_MAX_SCALE,
   PREVIEW_MIN_SCALE,
   PREVIEW_ZOOM_STEP,
@@ -151,55 +166,6 @@ function webQueueEnabled(): boolean {
 /** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
 
-/**
- * Largest canvas a browser tab can hold (16384 x 16384, legacy
- * MAX_CANVAS_AREA parity). Level picking never plans above this: gigapixel
- * services (e.g. the 2-gigapixel deepest WMTS matrix of global imagery)
- * would otherwise exhaust worker memory while serializing trillions of
- * tiles and trap the engine. The pre-plan declared-size check below fails
- * fast without calling `client.plan`; the post-plan canvas check enforces
- * the same bound (via `probeLimits`) for levels without declared sizes.
- */
-export const BROWSER_MAX_CANVAS_AREA = 268435456;
-
-/**
- * Browser canvas limits (todo 5.3, overflow-safe). `probeLimits` is the
- * single canvas check: pickLevel, the pre-plan declared-size gate, and the
- * post-plan canvas gate all call it instead of duplicating `width * height`
- * arithmetic (which overflows past MAX_SAFE_INTEGER for gigapixel sizes).
- * No policy widening: 16384 px per side with the legacy area bound.
- */
-export const BROWSER_MAX_CANVAS_SIDE = 16384;
-export const BROWSER_LIMITS: BrowserLimits = {
-  maxWidth: BROWSER_MAX_CANVAS_SIDE,
-  maxHeight: BROWSER_MAX_CANVAS_SIDE,
-  maxArea: BROWSER_MAX_CANVAS_AREA,
-  maxBytes: BROWSER_MAX_CANVAS_AREA * 4,
-};
-
-/**
- * Upper bound on tiles materialized into one website plan (todo 5.3).
- * Mirrors the wasm `MAX_PLAN_TILES` allocation guard: the worker rejects
- * larger plans with `limit-exceeded` before serializing them, and the
- * website's pre-plan estimate plus post-plan cap fail with the same
- * desktop-app guidance. Allocation protection only, not a canvas policy.
- */
-export const BROWSER_MAX_PLAN_TILES = 100_000;
-
-/** Desktop handoff link for images beyond the browser tab (`dezoomify://`).
- * Returns "" for non-http(s) sources (for example local `file:` URLs): the
- * desktop deep link only carries bounded http(s) input, so local files show
- * the local-only note instead of a broken link. */
-export function desktopHandoffLink(sourceUrl: string): string {
-  try {
-    const u = new URL(String(sourceUrl ?? "").trim());
-    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
-  } catch {
-    return "";
-  }
-  return `dezoomify://open?v=2&src=${encodeURIComponent(sourceUrl)}`;
-}
-
 /** True for `file:` URLs pasted into the website input. Local files stay on
  * this computer, so the failed view shows the local-only note (nothing is
  * sent) instead of a deep link. */
@@ -209,38 +175,6 @@ function isLocalFileUrl(urlString: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Tile-count estimate for a declared size assuming 256 px tiles (todo 5.3).
- * 256 px is the smallest common tile, so the estimate is a conservative
- * upper bound: when it already exceeds `BROWSER_MAX_PLAN_TILES`, any real
- * tile size would still need the desktop app. Overflow-safe: returns null
- * for invalid sizes or when the multiply would exceed MAX_SAFE_INTEGER,
- * which callers treat as over-limit (fail fast, never plan).
- */
-export function estimateTileCount(width: number, height: number, tileSide: number = 256): number | null {
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return null;
-  if (!Number.isInteger(tileSide) || tileSide <= 0) return null;
-  const cols = Math.floor((width + tileSide - 1) / tileSide);
-  const rows = Math.floor((height + tileSide - 1) / tileSide);
-  if (!Number.isSafeInteger(cols) || !Number.isSafeInteger(rows) || cols <= 0 || rows <= 0) return null;
-  if (cols > Number.MAX_SAFE_INTEGER / rows) return null;
-  return cols * rows;
-}
-
-function canvasTooLargeFailure(width: number, height: number, sourceUrl: string, extra?: string) {
-  const handoff = desktopHandoffLink(sourceUrl);
-  const technical = extra
-    ? `canvas ${width}x${height} exceeds the browser limit (${extra}); desktop handoff ${handoff}`
-    : `canvas ${width}x${height} exceeds the browser limit; desktop handoff ${handoff}`;
-  return failure(
-    "PLAN_INVALID",
-    "This image is too large for this browser tab. Use the desktop app for the full-size image.",
-    false,
-    `Open in the desktop app: ${handoff}`,
-    technical,
-  );
 }
 
 /**
@@ -1293,50 +1227,6 @@ function makeClient(): DiscoveryClient {
   });
 }
 
-interface PickedLevel {
-  index: number;
-}
-
-/**
- * Largest declared level that fits the browser canvas wins (overflow-safe
- * via `probeLimits`; same 16384-px / area bound, no policy widening).
- * Levels without a declared size keep the old behavior (last wins): their
- * size is only known after probing, so the pre-plan estimate cannot run
- * and the post-plan `probeLimits` + tile-count cap enforces the bound.
- * When declared levels exist but none fits, the smallest declared level is
- * returned so the pre-plan gate fails fast with desktop-app guidance
- * instead of planning a gigapixel level that exhausts worker memory.
- */
-export function pickLevel(image: { levels: Array<{ index: number; imageSize?: { x: number; y: number } }> }): PickedLevel {
-  let best: PickedLevel | null = null;
-  let bestArea = -1;
-  let smallest: PickedLevel | null = null;
-  let smallestArea = Number.POSITIVE_INFINITY;
-  let sawDeclared = false;
-  let lastUndeclared: PickedLevel | null = null;
-  for (const level of image.levels) {
-    const size = level.imageSize;
-    if (!size) {
-      lastUndeclared = { index: level.index };
-      continue;
-    }
-    sawDeclared = true;
-    const fits = probeLimits({ width: size.x, height: size.y }, BROWSER_LIMITS).verdict === "ok";
-    const area = safeArea(size.x, size.y) ?? Number.POSITIVE_INFINITY;
-    if (fits && area >= bestArea) {
-      best = { index: level.index };
-      bestArea = area;
-    }
-    if (area < smallestArea) {
-      smallest = { index: level.index };
-      smallestArea = area;
-    }
-  }
-  if (best) return best;
-  if (sawDeclared) return smallest ?? { index: 0 };
-  return lastUndeclared ?? { index: 0 };
-}
-
 // Encrypted-tile processing (e.g. Google Arts & Culture XOR-free AES
 // container) goes through the single-pending worker client. Tile fetches
 // run concurrently, so processing calls are serialized here: fetching stays
@@ -1490,7 +1380,6 @@ async function runJob(url: string): Promise<void> {
       );
     }
     pushLog(`Found ${catalog.images.length} image${catalog.images.length === 1 ? "" : "s"}`);
-    const image = catalog.images[0];
     controller.dispatch(
       nextEvent("images-found", { imageCount: catalog.images.length, transport: via }) as never,
     );
@@ -1500,30 +1389,17 @@ async function runJob(url: string): Promise<void> {
       "The website saves the first image automatically; use the desktop app to choose another.",
     );
     controller.dispatch(nextEvent("image-chosen") as never);
-    const level = pickLevel(image);
-    // Pre-plan gate (todo 5.3): declared sizes fail fast with a desktop
-    // handoff link without calling `client.plan`, so the worker never
-    // serializes a trillion-tile plan. Undeclared sizes skip this gate
-    // (probe-driven; size is known only after probing) and rely on the
-    // worker `limit-exceeded` guard plus the post-plan `probeLimits` and
-    // tile-count caps below.
-    const pickedSize = image.levels.find((entry) => entry.index === level.index)?.imageSize;
-    if (pickedSize) {
-      if (probeLimits({ width: pickedSize.x, height: pickedSize.y }, BROWSER_LIMITS).verdict !== "ok") {
-        throw canvasTooLargeFailure(pickedSize.x, pickedSize.y, url);
-      }
-      const estimate = estimateTileCount(pickedSize.x, pickedSize.y);
-      if (estimate === null || estimate > BROWSER_MAX_PLAN_TILES) {
-        throw canvasTooLargeFailure(
-          pickedSize.x,
-          pickedSize.y,
-          url,
-          estimate === null
-            ? "tile-count estimate overflow"
-            : `estimated ${estimate} tiles exceeds the ${BROWSER_MAX_PLAN_TILES}-tile browser plan limit`,
-        );
-      }
+    const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
+    if (!selection) {
+      throw failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false);
     }
+    const image = catalog.images.find((entry) => entry.id === selection.image);
+    const level = image?.levels.find((entry) => entry.id === selection.level);
+    const declared = level && level.width > 0 && level.height > 0
+      ? { x: level.width, y: level.height }
+      : undefined;
+    const declaredFailure = assertDeclaredSizeFitsBrowser(declared, url);
+    if (declaredFailure) throw declaredFailure;
     setStep("Choosing the highest resolution…");
     controller.dispatch(nextEvent("level-chosen") as never);
     setStep("Checking the image size…");
@@ -1532,17 +1408,10 @@ async function runJob(url: string): Promise<void> {
 
     let plan;
     try {
-      plan = await client.plan(image.id, level.index);
+      plan = await client.plan(selection.image, selection.level);
     } catch (error) {
-      // Worker allocation guard (wasm MAX_PLAN_TILES) surfaces as the stable
-      // `limit-exceeded` code inside the detail string; map that stable code
-      // (never UI copy) to the same desktop handoff so probe-driven huge
-      // levels fail as PLAN_INVALID instead of generic WORKER_FAILED.
-      const structured = error as { code?: string; detail?: string; technical?: string };
-      const hay = `${structured?.code ?? ""} ${structured?.detail ?? ""} ${structured?.technical ?? ""}`;
-      if (hay.includes("limit-exceeded")) {
-        throw canvasTooLargeFailure(pickedSize?.x ?? 0, pickedSize?.y ?? 0, url, "tile plan exceeds the browser plan limit");
-      }
+      const mapped = mapWorkerLimitExceeded(error, declared?.x ?? 0, declared?.y ?? 0, url);
+      if (mapped) throw mapped;
       throw error;
     }
     if (token !== jobToken) return;
@@ -1559,26 +1428,8 @@ async function runJob(url: string): Promise<void> {
     }
     const width = plan.canvas ? plan.canvas.x : 0;
     const height = plan.canvas ? plan.canvas.y : 0;
-    if (!(width > 0 && height > 0)) {
-      throw failure(
-        "PLAN_INVALID",
-        "The image size could not be determined.",
-        false,
-        undefined,
-        `invalid tile plan: canvas ${width}x${height}`,
-      );
-    }
-    if (probeLimits({ width, height }, BROWSER_LIMITS).verdict !== "ok") {
-      throw canvasTooLargeFailure(width, height, url);
-    }
-    if (plan.tiles.length > BROWSER_MAX_PLAN_TILES) {
-      throw canvasTooLargeFailure(
-        width,
-        height,
-        url,
-        `${plan.tiles.length} tiles exceeds the ${BROWSER_MAX_PLAN_TILES}-tile browser plan limit`,
-      );
-    }
+    const planFailure = assertPlanFitsBrowser(width, height, plan.tiles.length, url);
+    if (planFailure) throw planFailure;
     canvas.width = width;
     canvas.height = height;
     try {

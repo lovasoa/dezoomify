@@ -41,6 +41,15 @@ deterministic catalog selection for engine hosts lives in
 `engine-selection.ts` (largest ready image, largest level that fits the
 browser canvas, smallest declared level as the fail-fast fallback).
 
+## Catalog boundary
+
+Browser hosts consume the protocol `CatalogDto` with stable `img:` and `lvl:`
+identifiers. The WASM discovery session projects its core catalog through the
+same `dezoomify-job` projection as the job engine, and planning accepts those
+stable identifiers. Browser selection, declared-size preflight, and plan gates
+therefore use one generated wire shape; hosts do not define their own catalog
+or level DTOs.
+
 ## Ordinary image display
 
 For ordinary website tiles with `ProcessingRecipe::None`, the runtime may load through `<img>` and draw into a canvas even when the source taints it. The canvas remains visible, and the user can use the browser's right-click or other user-agent save support where available.

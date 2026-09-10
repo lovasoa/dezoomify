@@ -20,6 +20,8 @@ export class DiscoverySession {
   provideFailure(id: number | string, message: string): void;
   finish(): string;
   levelTiles(image: string | number, level: number): string;
+  levelTilesById(imageId: string, levelId: string): string;
   probeSubmit(image: string | number, level: number, valid: boolean, width: number, height: number): string;
+  probeSubmitById(imageId: string, levelId: string, valid: boolean, width: number, height: number): string;
   applyProcessing(recipe: string, bytes: Uint8Array): Uint8Array;
 }

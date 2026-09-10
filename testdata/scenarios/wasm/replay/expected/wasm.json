@@ -31,76 +31,76 @@
             {
               "height": 1,
               "id": "lvl:dzi:0:9",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 1
             },
             {
               "height": 2,
               "id": "lvl:dzi:0:8",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 2
             },
             {
               "height": 4,
               "id": "lvl:dzi:0:7",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 4
             },
             {
               "height": 8,
               "id": "lvl:dzi:0:6",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 8
             },
             {
               "height": 16,
               "id": "lvl:dzi:0:5",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 16
             },
             {
               "height": 32,
               "id": "lvl:dzi:0:4",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 32
             },
             {
               "height": 64,
               "id": "lvl:dzi:0:3",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 64
             },
             {
               "height": 128,
               "id": "lvl:dzi:0:2",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 128
             },
             {
               "height": 256,
               "id": "lvl:dzi:0:1",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 256
             },
             {
               "height": 512,
               "id": "lvl:dzi:0:0",
-              "tile_height": 256,
-              "tile_width": 256,
+              "tileHeight": 256,
+              "tileWidth": 256,
               "width": 512
             }
           ],
           "readiness": "ready",
-          "source_kind": "grid",
+          "sourceKind": "grid",
           "width": 512
         }
       ]

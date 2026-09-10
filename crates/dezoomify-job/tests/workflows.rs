@@ -85,12 +85,12 @@ fn discover_success_minimal() {
     assert_eq!(image["readiness"], "ready");
     assert_eq!(image["width"], 512);
     assert_eq!(image["height"], 512);
-    assert_eq!(image["source_kind"], "grid");
+    assert_eq!(image["sourceKind"], "grid");
     let level = &image["levels"][0];
     // Core normalizes levels to ascending size: the first entry is the
     // smallest level (highest ordinal), the last is the largest.
     assert_eq!(level["id"], "lvl:dzi:0:9");
-    assert_eq!(level["tile_width"], 256);
+    assert_eq!(level["tileWidth"], 256);
 
     // The discovery fetch effect targets the input URL with metadata purpose.
     assert!(host.effects.iter().any(|effect| {

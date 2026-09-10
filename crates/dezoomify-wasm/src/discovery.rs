@@ -10,6 +10,7 @@ use dezoomify_core::core::discovery::{DiscoveryOperation, ResourceFailure, Resou
 use dezoomify_core::core::model::{CatalogEntry, ProcessingRecipe, Request, TileRole};
 use dezoomify_core::core::registry::default_registry;
 use dezoomify_core::core::tile_plan::{Grid, TileSource, TileSourceError};
+use dezoomify_job::projection::project_catalog;
 use serde::Serialize;
 
 use crate::error::{redact, AdapterError, AdapterErrorCode};
@@ -181,10 +182,7 @@ impl DiscoverySession {
         Ok(())
     }
 
-    /// Complete discovery and project the catalog to JSON:
-    /// `{"images":[{"id","title","format","warnings","levels":[...]}]}`
-    /// where each level carries `index`, `title`, `scale`, `warnings`, and
-    /// `imageSize` when the source declares one up front.
+    /// Complete discovery and project the versioned protocol catalog to JSON.
     ///
     /// # Errors
     ///
@@ -201,65 +199,47 @@ impl DiscoverySession {
             .take()
             .ok_or_else(|| AdapterError::new(AdapterErrorCode::WrongState, "no operation"))?;
         let catalog = operation.finish().map_err(discovery_error)?;
-        #[derive(Serialize)]
-        struct LevelDto {
-            index: usize,
-            title: Option<String>,
-            scale: Option<u32>,
-            warnings: Vec<String>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            image_size: Option<PointDto>,
-        }
-        #[derive(Serialize)]
-        struct ImageDto {
-            id: usize,
-            title: Option<String>,
-            format: String,
-            warnings: Vec<String>,
-            levels: Vec<LevelDto>,
-        }
-        #[derive(Serialize)]
-        struct CatalogDto {
-            images: Vec<ImageDto>,
-        }
-        let mut images = Vec::new();
-        for (index, entry) in catalog.entries().iter().enumerate() {
-            match entry {
-                CatalogEntry::Ready(image) => {
-                    let levels = image
-                        .levels
-                        .iter()
-                        .enumerate()
-                        .map(|(level_index, level)| LevelDto {
-                            index: level_index,
-                            title: level.title.clone(),
-                            scale: level.scale_factor,
-                            warnings: level.warnings.clone(),
-                            image_size: level.source.image_size().map(|size| PointDto {
-                                x: size.x,
-                                y: size.y,
-                            }),
-                        })
-                        .collect();
-                    images.push(ImageDto {
-                        id: index,
-                        title: image.title.clone(),
-                        format: image.format.as_str().to_string(),
-                        warnings: image.warnings.clone(),
-                        levels,
-                    });
-                }
-                CatalogEntry::Deferred(_) => {
-                    return Err(AdapterError::new(
-                        AdapterErrorCode::Malformed,
-                        "catalog contains an image whose metadata was not fetched",
-                    ));
-                }
-            }
-        }
+        let projected = project_catalog(&catalog)
+            .map_err(|error| malformed(format!("catalog projection failed: {error}")))?;
         self.catalog = Some(catalog);
-        serde_json::to_string(&CatalogDto { images })
+        serde_json::to_string(&projected)
             .map_err(|e| malformed(format!("catalog projection failed: {e}")))
+    }
+
+    fn indexes_for_ids(
+        &self,
+        image_id: &str,
+        level_id: &str,
+    ) -> Result<(usize, usize), AdapterError> {
+        let catalog = self.catalog.as_ref().ok_or_else(|| {
+            AdapterError::new(AdapterErrorCode::WrongState, "discovery not finished")
+        })?;
+        let projected = project_catalog(catalog)
+            .map_err(|error| malformed(format!("catalog projection failed: {error}")))?;
+        for (image_index, image) in projected.images.iter().enumerate() {
+            if image.id.as_str() != image_id {
+                continue;
+            }
+            if let Some(level_index) = image
+                .levels
+                .iter()
+                .position(|level| level.id.as_str() == level_id)
+            {
+                return Ok((image_index, level_index));
+            }
+            return Err(malformed("level id is not in the selected image"));
+        }
+        Err(malformed("image id is not in the catalog"))
+    }
+
+    /// Project the tile plan of a stable protocol image and level id.
+    pub fn level_tiles_by_id(
+        &mut self,
+        image_id: &str,
+        level_id: &str,
+    ) -> Result<String, AdapterError> {
+        let (image, level) = self.indexes_for_ids(image_id, level_id)?;
+        self.level_tiles(image, level)
     }
 
     /// Project the tile plan of one level. For grid/positioned sources this
@@ -349,6 +329,19 @@ impl DiscoverySession {
         };
         let next = step.submit(observation).map_err(tile_error)?;
         self.advance_probe(image, level, next)
+    }
+
+    /// Continue probing a stable protocol image and level id.
+    pub fn probe_submit_by_id(
+        &mut self,
+        image_id: &str,
+        level_id: &str,
+        ok: bool,
+        width: u32,
+        height: u32,
+    ) -> Result<String, AdapterError> {
+        let (image, level) = self.indexes_for_ids(image_id, level_id)?;
+        self.probe_submit(image, level, ok, width, height)
     }
 
     fn advance_probe(
@@ -530,6 +523,24 @@ mod tests {
         let catalog: serde_json::Value = serde_json::from_str(&catalog).expect("catalog parses");
         assert_eq!(catalog["images"].as_array().expect("images").len(), 1);
         assert_eq!(catalog["images"][0]["format"], "zoomify");
+        assert_eq!(catalog["images"][0]["id"], "img:zoomify:image");
+        assert_eq!(catalog["images"][0]["levels"][0]["tileWidth"], 256);
+
+        let image_id = catalog["images"][0]["id"].as_str().expect("image id");
+        let level_id = catalog["images"][0]["levels"]
+            .as_array()
+            .expect("levels")
+            .iter()
+            .find(|level| level["width"] == 512)
+            .and_then(|level| level["id"].as_str())
+            .expect("512-wide level id");
+        let plan_by_id: serde_json::Value = serde_json::from_str(
+            &session
+                .level_tiles_by_id(image_id, level_id)
+                .expect("stable-id plan"),
+        )
+        .expect("stable-id plan parses");
+        assert_eq!(plan_by_id["canvas"]["x"], 512);
 
         // Largest level: 512x512, 2x2 tiles. Find it by canvas size.
         let mut plan = None;
@@ -546,6 +557,28 @@ mod tests {
         assert_eq!(plan["kind"], "resolved");
         assert_eq!(plan["tiles"].as_array().expect("tiles").len(), 4);
         assert_eq!(plan["tiles"][0]["processing"], "none");
+    }
+
+    #[test]
+    fn krpano_catalog_exposes_declared_geometry_with_protocol_names() {
+        let xml = br#"<krpano><image><flat url="tiles/l%l/%00v/l%l_%00v_%00h.jpg" multires="512,512x844,1152x1898,2176x3586,4352x7172,8832x14554,17664x29110,35328x58220"/></image></krpano>"#;
+        let mut session = DiscoverySession::new("https://example.com/eiffel.xml").expect("session");
+        let need: serde_json::Value =
+            serde_json::from_str(&session.next_need().expect("need")).expect("need parses");
+        session
+            .provide(
+                need["id"].as_u64().expect("id") as usize,
+                xml.to_vec(),
+                None,
+            )
+            .expect("provide");
+        let catalog: serde_json::Value =
+            serde_json::from_str(&session.finish().expect("catalog")).expect("catalog parses");
+        let levels = catalog["images"][0]["levels"].as_array().expect("levels");
+        assert!(levels
+            .iter()
+            .any(|level| level["width"] == 8832 && level["height"] == 14554));
+        assert!(levels.iter().all(|level| level.get("image_size").is_none()));
     }
 
     #[test]
@@ -663,10 +696,7 @@ mod tests {
         let levels = catalog["images"][0]["levels"].as_array().expect("levels");
         assert_eq!(levels.len(), 2);
         // Levels normalize ascending by area: small (512x512) first.
-        assert_eq!(
-            levels[0]["image_size"],
-            serde_json::json!({"x": 512, "y": 512})
-        );
+        assert_eq!(levels[0]["width"], serde_json::json!(512));
 
         let small: serde_json::Value =
             serde_json::from_str(&session.level_tiles(0, 0).expect("small plan"))
