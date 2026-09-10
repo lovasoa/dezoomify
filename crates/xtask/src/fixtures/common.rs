@@ -33,9 +33,19 @@ pub(crate) struct RoutesFile {
     pub(crate) routes: Vec<Route>,
 }
 
+fn default_method() -> String {
+    "GET".to_string()
+}
+
+fn default_status() -> u16 {
+    200
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct Route {
+    #[serde(default)]
     pub(crate) route_id: String,
+    #[serde(default = "default_method")]
     pub(crate) method: String,
     #[allow(dead_code)]
     pub(crate) host: Option<String>,
@@ -45,11 +55,30 @@ pub(crate) struct Route {
     pub(crate) path_regex: Option<String>,
     #[allow(dead_code)]
     pub(crate) query: Option<String>,
+    #[serde(default = "default_status")]
     pub(crate) status: u16,
     #[allow(dead_code)]
     pub(crate) headers: Option<std::collections::HashMap<String, String>>,
     pub(crate) payload: Option<String>,
     pub(crate) generator: Option<serde_json::Value>,
+}
+
+impl Route {
+    /// A stable id for a route that omitted `route_id`; mirrors the server's
+    /// derivation so duplicate detection stays meaningful.
+    pub(crate) fn effective_id(&self) -> String {
+        if !self.route_id.is_empty() {
+            return self.route_id.clone();
+        }
+        let host = self.host.as_deref().unwrap_or("any");
+        let target = self
+            .path
+            .as_deref()
+            .or(self.path_prefix.as_deref())
+            .or(self.path_regex.as_deref())
+            .unwrap_or("route");
+        format!("{host}-{target}")
+    }
 }
 
 pub(crate) fn check_schemas(dir: &Path) -> Result<(), String> {

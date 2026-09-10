@@ -523,8 +523,8 @@
       "path": "native/cli-dzi/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "87cc6cc8a41df26b7b76d7782d522551250da2887a44bbfeb52a59976c48c696",
-      "size": 1770,
+      "sha256": "6cb88dc137cb849400f79438e8d9ba2235f94619dabdc82b2f1221d1e6d7e5da",
+      "size": 1201,
       "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
       "source_snapshot": "local"
     },
@@ -751,8 +751,8 @@
       "path": "native/cli-resume-cache/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "809baa850d0bc51a1b6938a13b0239ed690c71886fe4c832806aab22a4a39c7a",
-      "size": 1524,
+      "sha256": "03fe042aa5c38bf58ac364842f1e48454915df98254af4cf92e71fe1d2945483",
+      "size": 1293,
       "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
       "source_snapshot": "local"
     },
@@ -823,8 +823,8 @@
       "path": "native/cli-tile-failure/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "0520a1a96c2cb440ea7fbef232a6eb528825506813fa53cc00c28b7380cfbeb7",
-      "size": 874,
+      "sha256": "e635d1cef3aaeac16d8e7f112949116e7b5774b5e15319d749a63a18999456a8",
+      "size": 627,
       "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
       "source_snapshot": "local"
     },
@@ -3146,18 +3146,6 @@
     },
     {
       "content_type": "application/json",
-      "id": "web/auto-cycle/routes.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/auto-cycle/routes.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "5467e54eb174b4e3722046fb99eb88c2b1eddda33dc8cabea0d43d563be8c9cf",
-      "size": 1303,
-      "source_path": "tests/dezoomers.spec.js cycle",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
       "id": "web/auto-cycle/scenario.json",
       "license_provenance": "GPL-2.0-or-later (web fixture)",
       "path": "web/auto-cycle/scenario.json",
@@ -3189,18 +3177,6 @@
       "served_urls": [],
       "sha256": "fee41012c3cf948fa0445c19e96af90bad9a95d86475c96dc9c07475ede887d7",
       "size": 104,
-      "source_path": "tests/dezoomers.spec.js precedence",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/auto-precedence/routes.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/auto-precedence/routes.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "671c5c6507d7a24f66385d713332adacd1a4afa7fab5e51a2b25a0c433179e3a",
-      "size": 346,
       "source_path": "tests/dezoomers.spec.js precedence",
       "source_snapshot": "f7caa07"
     },
@@ -3583,8 +3559,8 @@
       "path": "web/core-discovery/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "d0557450807ca08ed281db3c22729df4ff78a7a51a89ad362de088c1ea607755",
-      "size": 9978,
+      "sha256": "e668e67e77a3f8acefc13fd613bad43492430200dc6fd4ac178a567647e3cb1f",
+      "size": 1946,
       "source_path": "tests/dezoomers.spec.js coreCases",
       "source_snapshot": "f7caa07"
     },
@@ -3967,8 +3943,8 @@
       "path": "web/iiif-discovery/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "dc9b415a73cda467f40953300db78c6cef0c9becdc1b271d8fa72623f36f3374",
-      "size": 8975,
+      "sha256": "007457bbf81e8d5428865d67fa7775a78cf2275063709ae0df5bb17ec7f9e10d",
+      "size": 1753,
       "source_path": "tests/dezoomers.spec.js iiifCases",
       "source_snapshot": "f7caa07"
     },
@@ -4173,18 +4149,6 @@
       "served_urls": [],
       "sha256": "afb4bc37b175eeee5aeba80222d82ba208ee08d075819bfe2b173a6cc7a3a150",
       "size": 246,
-      "source_path": "tests/dezoomers.spec.js query params",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/query-params/routes.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/query-params/routes.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "75057a2f0a199d13b8abf1128824b5cccfa5e15a7d8bfcb6998a7fc5129e6a58",
-      "size": 1903,
       "source_path": "tests/dezoomers.spec.js query params",
       "source_snapshot": "f7caa07"
     },
@@ -4435,8 +4399,8 @@
       "path": "web/seadragon-pages/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "790c33f391c3eda519bb8389543bc7b5612365b73841c620cbfa685dd883002f",
-      "size": 5642,
+      "sha256": "62e53e8b7e356790969543e08a6f1c6437f1c3082ab7333678a8ff7df6adad73",
+      "size": 951,
       "source_path": "tests/dezoomers.spec.js seadragonCases",
       "source_snapshot": "f7caa07"
     },
@@ -4639,8 +4603,8 @@
       "path": "web/site-adapters/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "a99c6e3cf52029ce12d33991cb86b46e0c1243bcd25fe95114b7ceb78492e728",
-      "size": 4668,
+      "sha256": "0fad782ce90c59e48fdac9161ca640f5030c74a72694eca11178c08837c96ad4",
+      "size": 386,
       "source_path": "tests/dezoomers.spec.js remaining adapters",
       "source_snapshot": "f7caa07"
     },
@@ -4737,18 +4701,6 @@
       "served_urls": [],
       "sha256": "7e04ddff8ceb8c117b6527ce71bac57a4628635c250fe55138fbca9e1d870c54",
       "size": 292,
-      "source_path": "tests/dezoomers.spec.js topviewer",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/topviewer/routes.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/topviewer/routes.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "53b1b9bb5efc434cc53851376cb62994508d5e34c488d324a34052bf99d3f88b",
-      "size": 1713,
       "source_path": "tests/dezoomers.spec.js topviewer",
       "source_snapshot": "f7caa07"
     },
@@ -5013,18 +4965,6 @@
       "served_urls": [],
       "sha256": "8db06c7abea88605d4be80fc16b8cb4bf71caca948fedcf378968b4a5af795d4",
       "size": 88,
-      "source_path": "tests/dezoomers.spec.js zoomifyCases",
-      "source_snapshot": "f7caa07"
-    },
-    {
-      "content_type": "application/json",
-      "id": "web/zoomify-pages/routes.json",
-      "license_provenance": "GPL-2.0-or-later (web fixture)",
-      "path": "web/zoomify-pages/routes.json",
-      "sensitive": false,
-      "served_urls": [],
-      "sha256": "a87eed32e7c178d745a113e3170882a6e7bc5e08bde802e34830d64d5904095b",
-      "size": 6650,
       "source_path": "tests/dezoomers.spec.js zoomifyCases",
       "source_snapshot": "f7caa07"
     },

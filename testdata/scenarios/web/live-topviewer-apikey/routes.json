@@ -1,17 +1,6 @@
 {
   "routes": [
     {
-      "route_id": "fixtures-test-live-topviewer-mediabank-html",
-      "method": "GET",
-      "host": "fixtures.test",
-      "path": "/live/topviewer/mediabank.html",
-      "status": 200,
-      "headers": {
-        "Content-Type": "text/html"
-      },
-      "payload": "payloads/fixtures.test/live/topviewer/mediabank.html"
-    },
-    {
       "route_id": "fixtures-test-live-topviewer-media",
       "method": "GET",
       "host": "fixtures.test",
@@ -21,17 +10,6 @@
         "Content-Type": "application/json"
       },
       "payload": "payloads/fixtures.test/live/topviewer/media.json"
-    },
-    {
-      "route_id": "fixtures-test-live-topviewer-data",
-      "method": "GET",
-      "host": "fixtures.test",
-      "path": "/live/topviewer/data.json",
-      "status": 200,
-      "headers": {
-        "Content-Type": "application/json"
-      },
-      "payload": "payloads/fixtures.test/live/topviewer/data.json"
     }
   ]
 }

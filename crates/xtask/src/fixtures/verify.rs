@@ -26,6 +26,7 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     let mut seen_files = BTreeSet::new();
     let mut served: BTreeMap<(String, String, String), Vec<(String, String)>> = BTreeMap::new();
     let mut scenario_ids = BTreeSet::new();
+    let mut claimed_payloads: BTreeSet<(String, String)> = BTreeSet::new();
     for entry in &manifest.scenarios {
         if !scenario_ids.insert(entry.id.clone()) {
             return Err(format!("duplicate scenario id '{}'", entry.id));
@@ -116,19 +117,19 @@ pub fn verify(args: &[String]) -> Result<(), String> {
                 .map_err(|e| format!("bad {}: {e}", routes_path.display()))?;
             let mut route_ids = BTreeSet::new();
             for r in &file.routes {
-                if !route_ids.insert(r.route_id.clone()) {
-                    return Err(format!("duplicate route_id '{}' in {scenario}", r.route_id));
+                let route_id = r.effective_id();
+                if !route_ids.insert(route_id.clone()) {
+                    return Err(format!("duplicate route_id '{route_id}' in {scenario}"));
                 }
                 if r.method != "GET" && r.method != "HEAD" {
-                    return Err(format!("bad method in {scenario}/{}", r.route_id));
+                    return Err(format!("bad method in {scenario}/{route_id}"));
                 }
                 if !(100..600).contains(&r.status) {
-                    return Err(format!("bad status in {scenario}/{}", r.route_id));
+                    return Err(format!("bad status in {scenario}/{route_id}"));
                 }
                 if r.path.is_none() && r.path_prefix.is_none() && r.path_regex.is_none() {
                     return Err(format!(
-                        "route {}/{} needs path, path_prefix, or path_regex",
-                        scenario, r.route_id
+                        "route {scenario}/{route_id} needs path, path_prefix, or path_regex"
                     ));
                 }
                 if let Some(p) = &r.payload {
@@ -137,11 +138,11 @@ pub fn verify(args: &[String]) -> Result<(), String> {
                     if !seen_files.contains(&rel) {
                         return Err(format!("payload {rel} referenced but not in manifest"));
                     }
+                    claimed_payloads.insert((scenario.clone(), p.clone()));
                 }
                 if r.payload.is_none() && r.generator.is_none() {
                     return Err(format!(
-                        "route {}/{} needs payload or generator",
-                        scenario, r.route_id
+                        "route {scenario}/{route_id} needs payload or generator"
                     ));
                 }
                 if let (Some(host), Some(path)) = (&r.host, &r.path) {
@@ -154,6 +155,33 @@ pub fn verify(args: &[String]) -> Result<(), String> {
                 }
             }
         }
+    }
+    // Directory-mirror convention: a payload laid out as
+    // `{scenario}/payloads/{host}/{url-path}` serves at `{host}{url-path}`
+    // unless an explicit route claims it. Fold mirrors into `served` so the
+    // incompatible-duplicate check covers the whole served surface.
+    for entry in &manifest.scenarios {
+        let Some((scenario, rest)) = entry.path.split_once("/payloads/") else {
+            continue;
+        };
+        let payload = format!("payloads/{rest}");
+        if claimed_payloads.contains(&(scenario.to_string(), payload.clone())) {
+            continue;
+        }
+        let Some((host, tail)) = rest.split_once('/') else {
+            continue;
+        };
+        if host.is_empty() || tail.is_empty() || host.contains("..") || tail.contains("..") {
+            continue;
+        }
+        let path = format!("/{tail}");
+        if served.contains_key(&(host.to_string(), path.clone(), "GET".to_string())) {
+            continue;
+        }
+        served
+            .entry((host.to_string(), path, "GET".to_string()))
+            .or_default()
+            .push((scenario.to_string(), format!("200|{}", entry.sha256)));
     }
     // Incompatible duplicate served URLs fail; identical duplicates are allowed
     // (scenarios stay self-contained with distinct scenario/payload IDs).
