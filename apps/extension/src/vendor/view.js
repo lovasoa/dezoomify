@@ -5,8 +5,6 @@
 // Modern accessible Shared UI view renderer.
 // Binds host-neutral DOM components to the shared controller and app integration.
 
-import { renderAppChoice } from "./controller.js";
-
 import { t } from "./i18n.js";
 import {
   renderSaveGuidance,
@@ -1086,48 +1084,16 @@ function mountDisplayOnlySection(
     </div>
   `;
 
-  if (ctx?.capabilities) {
-    const appChoice = renderAppChoice(ctx.capabilities);
-    const guidanceBox = parent.ownerDocument.createElement("p");
-    guidanceBox.className = "dz-notice-guidance";
-    guidanceBox.textContent = appChoice;
-    section.appendChild(guidanceBox);
-  }
-
   // Display-only handoff (todo 6.2, one-click in 5.5): the assembled canvas
   // stays visible below without a programmatic save (cross-origin canvas,
   // right-click where supported). Offer the readable routes explicitly
   // instead of failing late with TILE_FAILED: extension guidance plus the
-  // desktop `dezoomify://` handoff when the host supplied one. The summary
-  // names origin/scope/recipient/job memory-only (extension consent pattern);
-  // the desktop app confirms again before any effect.
+  // desktop `dezoomify://` handoff when the host supplied one. The desktop
+  // app confirms again before any effect.
   const handoffUrl = typeof ctx?.desktopHandoffUrl === "string" ? ctx.desktopHandoffUrl : "";
   const handoffSource = typeof ctx?.sourceUrl === "string" ? ctx.sourceUrl : "";
   const handoffOrigin = handoffOriginFor(handoffUrl, handoffSource);
   const handoffLabel = handoffOrigin !== "" ? `Send to desktop app (${handoffOrigin})` : "Send to desktop app";
-  const shownNote = parent.ownerDocument.createElement("p");
-  shownNote.className = "dz-notice-message";
-  if (handoffUrl !== "") {
-    shownNote.innerHTML = `Shown below without saving. <a id="dz-display-handoff-inline" href="${escapeHtml(handoffUrl)}">Open in desktop app</a>`;
-    shownNote.querySelector("#dz-display-handoff-inline")?.addEventListener("click", () => {
-      try {
-        callbacks.onOpenExternalLink?.(handoffUrl);
-      } catch {
-        // Handoff navigation must never break display.
-      }
-    });
-  } else {
-    shownNote.textContent = "Shown below without saving.";
-  }
-  section.appendChild(shownNote);
-
-  if (handoffUrl !== "" && handoffOrigin !== "") {
-    const consent = parent.ownerDocument.createElement("p");
-    consent.className = "dz-notice-message";
-    consent.id = "dz-handoff-consent";
-    consent.textContent = `Sends ${handoffOrigin} to the desktop app. No sign-in details travel; one job only, kept in memory.`;
-    section.appendChild(consent);
-  }
 
   const guide = parent.ownerDocument.createElement("div");
   guide.className = "dz-guidance-section";
