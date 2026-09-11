@@ -1,15 +1,25 @@
-// Hermetic fixture plumbing for the real-window desktop E2E.
+// Hermetic fixture plumbing and app lifecycle for the real-window desktop E2E.
 //
-// The official @wdio/tauri-service (embedded WebDriver provider) owns the
-// WebDriver layer, the app launch, and teardown. This module owns only the
-// hermetic environment around it: an ephemeral loopback fixture server, a
-// loopback static server for the built frontend (the debug window shell loads
-// its embedded devUrl `http://localhost:1420`), an isolated per-run profile,
-// deep-link delivery, and output helpers. Inputs are fixed, there is no public
-// network, and reports carry origins, hashes, and stable codes only.
+// The app embeds a W3C WebDriver server (tauri-plugin-wdio-webdriver, built via
+// the `testing-webdriver` cargo feature) and a `selenium-webdriver` client drives
+// it. This module owns the hermetic environment and the app lifecycle: an
+// ephemeral loopback fixture server, a loopback static server for the built
+// frontend (the debug window shell loads its embedded devUrl
+// `http://localhost:1420`), an isolated per-run profile, WebDriver port
+// allocation, app launch/readiness/teardown, deep-link delivery, and output
+// helpers. Inputs are fixed, there is no public network, and reports carry
+// origins, hashes, and stable codes only.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,8 +72,8 @@ const MIME = {
 };
 
 // Linux needs a display; macOS and Windows runners provide a GUI session.
-// WebdriverIO can auto-detect Xvfb (9.19.1+), but the xtask lane wraps the run
-// in `xvfb-run` so this stays an explicit, fail-closed precondition.
+// The xtask lane wraps the run in `xvfb-run` so this stays an explicit,
+// fail-closed precondition.
 export function assertDisplay() {
   if (process.platform !== "linux") return;
   if (process.env.DISPLAY) return;
@@ -78,6 +88,120 @@ export function ensureWindowShell() {
     throw new Error(
       `window E2E: ${APP_BIN} is missing; run \`cargo xtask test desktop --e2e-window\` (it builds the window shell first)`,
     );
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Set by `startWindowApp` before the app is launched; live binding so the spec
+// can read it after startup. Never a fixed shared port: the embedded server
+// gets an ephemeral loopback port the kernel hands out.
+export let WEBDRIVER_URL = null;
+
+// Allocate a free loopback port by binding port 0 and closing the probe. The
+// app then binds that port; the tiny close-to-bind race is covered by the
+// readiness poll below.
+async function allocateWebDriverPort() {
+  return await new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.unref();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const port = typeof address === "object" && address ? address.port : null;
+      probe.close((err) => {
+        if (err) reject(err);
+        else if (!port) reject(new Error("could not allocate a WebDriver port"));
+        else resolve(port);
+      });
+    });
+  });
+}
+
+// Launch the window shell with the embedded WebDriver server on an ephemeral
+// port. Output is teed to the run directory and captured for fail-closed
+// errors. Readiness is the plugin's `GET /status` contract
+// (`{value:{ready:true}}`); a premature exit or missed deadline fails with the
+// captured log as evidence.
+export async function startWindowApp(home) {
+  assertDisplay();
+  ensureWindowShell();
+  const port = await allocateWebDriverPort();
+  const logPath = path.join(path.dirname(home), "app.log");
+  const chunks = [];
+  const capture = (chunk) => {
+    chunks.push(chunk.toString());
+    if (chunks.length > 500) chunks.shift();
+    appendFileSync(logPath, chunk);
+  };
+  const env = {
+    ...process.env,
+    ...laneAppEnv(home),
+    TAURI_WEBDRIVER_PORT: String(port),
+  };
+  const proc = spawn(APP_BIN, [], { env, stdio: ["ignore", "pipe", "pipe"] });
+  proc.stdout.on("data", capture);
+  proc.stderr.on("data", capture);
+  WEBDRIVER_URL = `http://127.0.0.1:${port}`;
+  const url = WEBDRIVER_URL;
+  const app = { proc, port, logPath, logs: () => chunks.join("") };
+
+  let exited = null;
+  proc.once("exit", (code, signal) => {
+    exited = { code, signal };
+  });
+  const deadline = Date.now() + 180000;
+  for (;;) {
+    if (exited) {
+      throw new Error(
+        `window E2E: app exited before the WebDriver server became ready ` +
+          `(${JSON.stringify(exited)}):\n${app.logs()}`,
+      );
+    }
+    try {
+      const response = await fetch(`${url}/status`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (response.ok) {
+        const body = await response.json();
+        if (body?.value?.ready === true) return app;
+      }
+    } catch {
+      // Not listening yet.
+    }
+    if (Date.now() >= deadline) {
+      await stopWindowApp(app);
+      throw new Error(
+        `window E2E: WebDriver server at ${url} was not ready within 180 s:\n${app.logs()}`,
+      );
+    }
+    await sleep(250);
+  }
+}
+
+// Stop the app and wait for it to exit. `run_node_with_deadline` owns the
+// process tree, so a leaked app is still killed on a lane deadline; this makes
+// normal teardown deterministic instead of relying on that backstop.
+export async function stopWindowApp(app) {
+  if (!app || !app.proc) return;
+  const { proc } = app;
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
+  const exited = new Promise((resolve) => proc.once("exit", resolve));
+  try {
+    proc.kill("SIGTERM");
+  } catch {
+    // Already gone.
+  }
+  const timeout = new Promise((resolve) => setTimeout(() => resolve("timeout"), 5000));
+  if ((await Promise.race([exited, timeout])) === "timeout") {
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      // Already gone.
+    }
+    await exited;
   }
 }
 

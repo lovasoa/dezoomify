@@ -1,16 +1,29 @@
 // Real-window desktop E2E: user-visible journeys through the shipped window
-// shell, driven by WebdriverIO through the official @wdio/tauri-service
-// embedded WebDriver provider against hermetic loopback fixtures. One app
-// session per run; each test resets to idle through the product control.
+// shell, driven by selenium-webdriver against the embedded W3C WebDriver server
+// (tauri-plugin-wdio-webdriver, built via the `testing-webdriver` cargo feature)
+// and hermetic loopback fixtures. One app session per run; each test resets to
+// idle through the product control.
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
+import { after, afterEach, before, describe, it } from "node:test";
+import { Builder, By } from "selenium-webdriver";
 import {
   SCENARIOS_DIR,
+  WEBDRIVER_URL,
+  closeFrontendServer,
+  createRunDirs,
   deepLinkArgv,
   deliverDeepLink,
+  ensureFixtureServerBuilt,
   gatewayInput,
+  laneAppEnv,
   outputFiles,
   runOutputDir,
+  startFixtureServer,
+  startFrontendServer,
+  startWindowApp,
+  stopFixtureServer,
+  stopWindowApp,
 } from "../harness.mjs";
 import { assertSavedPyramid, goldenOutputHash } from "../png-assert.mjs";
 
@@ -24,8 +37,12 @@ function expectedHash() {
   return goldenOutputHash(SCENARIOS_DIR);
 }
 
-async function snapshot() {
-  return browser.execute(() => {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function snapshot(driver) {
+  return driver.executeScript(() => {
     const q = (selector) => document.querySelector(selector);
     const text = (selector) => q(selector)?.textContent?.trim() ?? null;
     return {
@@ -39,23 +56,27 @@ async function snapshot() {
   });
 }
 
-async function waitFor(predicate, timeout, label) {
-  try {
-    await browser.waitUntil(predicate, {
-      timeout,
-      timeoutMsg: `timed out waiting for ${label}`,
-    });
-  } catch (error) {
-    const state = await snapshot().catch(() => null);
-    throw new Error(`${error.message}: ${JSON.stringify(state)}`);
+async function waitFor(driver, predicate, timeout, label) {
+  const deadline = Date.now() + timeout;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      if (await predicate()) return;
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(200);
   }
+  const state = await snapshot(driver).catch(() => null);
+  const detail = lastError ? ` (last error: ${lastError.message})` : "";
+  throw new Error(`timed out waiting for ${label}${detail}: ${JSON.stringify(state)}`);
 }
 
-async function configureOutputDirectory() {
+async function configureOutputDirectory(driver) {
   const directory = runOutputDir();
   let last = null;
   for (let attempt = 0; attempt < 120; attempt += 1) {
-    last = await browser.execute((dir) => {
+    last = await driver.executeScript((dir) => {
       const input = document.querySelector("#dz-settings-output-dir");
       const panel = document.querySelector("#dz-desktop-settings");
       if (!input || !panel) {
@@ -73,22 +94,22 @@ async function configureOutputDirectory() {
       return { ok: input.value === dir, reason: "done", value: input.value };
     }, directory);
     if (last.ok) return;
-    await browser.pause(500);
+    await sleep(500);
   }
   throw new Error(`desktop output-directory setting: ${JSON.stringify(last)}`);
 }
 
-async function submitUrl(url) {
-  await browser.execute((value) => {
+async function submitUrl(driver, url) {
+  await driver.executeScript((value) => {
     const input = document.querySelector("#dz-url-input");
     input.value = value;
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }, url);
-  await (await browser.$(".dz-button-row .dz-btn-tactile")).click();
+  await (await driver.findElement(By.css(".dz-button-row .dz-btn-tactile"))).click();
 }
 
-async function resetToIdle() {
-  await browser.execute(() => {
+async function resetToIdle(driver) {
+  await driver.executeScript(() => {
     const byId = (id) => document.getElementById(id);
     const button =
       byId("dz-btn-another") ??
@@ -97,7 +118,7 @@ async function resetToIdle() {
       byId("dz-btn-try-again");
     button?.click();
   });
-  await waitFor(async () => (await snapshot()).idle, 60000, "idle after reset");
+  await waitFor(driver, async () => (await snapshot(driver)).idle, 60000, "idle after reset");
 }
 
 function clearOutput() {
@@ -107,23 +128,85 @@ function clearOutput() {
 }
 
 describe("Dezoomify desktop window", () => {
+  let driver = null;
+  let app = null;
+  let fixture = null;
+  let frontend = null;
+  let runDirs = null;
+
+  async function teardown() {
+    if (driver) {
+      try {
+        await driver.quit();
+      } catch {
+        // The session may already be gone.
+      }
+      driver = null;
+    }
+    await stopWindowApp(app);
+    app = null;
+    await closeFrontendServer(frontend);
+    frontend = null;
+    stopFixtureServer(fixture);
+    fixture = null;
+    if (runDirs) {
+      try {
+        rmSync(runDirs.root, { recursive: true, force: true });
+      } catch {
+        // Best-effort: temp dirs are reaped by the OS eventually.
+      }
+      runDirs = null;
+    }
+  }
+
   before(async () => {
-    await configureOutputDirectory();
+    try {
+      runDirs = createRunDirs();
+      process.env.DEZOOMIFY_WINDOW_E2E_ROOT = runDirs.root;
+      process.env.DEZOOMIFY_WINDOW_E2E_HOME = runDirs.home;
+      process.env.DEZOOMIFY_WINDOW_E2E_OUTPUT = runDirs.output;
+      // The deep-link forwarder inherits the isolated profile too.
+      Object.assign(process.env, laneAppEnv(runDirs.home));
+      ensureFixtureServerBuilt();
+      fixture = await startFixtureServer(runDirs.root);
+      process.env.DEZOOMIFY_WINDOW_E2E_BASE = fixture.base;
+      // The debug shell loads its embedded devUrl, so the frontend server must
+      // be listening before the app starts.
+      frontend = await startFrontendServer();
+      app = await startWindowApp(runDirs.home);
+      driver = await new Builder()
+        .usingServer(WEBDRIVER_URL)
+        .withCapabilities({ browserName: "wry" }) // accepted/ignored by the embedded server
+        .build();
+      await configureOutputDirectory(driver);
+    } catch (error) {
+      await teardown();
+      throw error;
+    }
+  });
+
+  after(async () => {
+    await teardown();
   });
 
   afterEach(async () => {
-    await resetToIdle();
+    await resetToIdle(driver);
   });
 
   it("saves the expected PNG automatically", async () => {
     clearOutput();
-    await submitUrl(gatewayInput(GATEWAY_DZI));
-    await waitFor(async () => {
-      const state = await snapshot();
-      return state.completed || state.error;
-    }, 180000, "automatic save terminal");
+    await submitUrl(driver, gatewayInput(GATEWAY_DZI));
+    await waitFor(
+      driver,
+      async () => {
+        const state = await snapshot(driver);
+        return state.completed || state.error;
+      },
+      180000,
+      "automatic save terminal",
+    );
 
-    const terminal = await snapshot();
+    const terminal = await snapshot(driver);
     assert.equal(terminal.error, false, "the save completes without a UI error");
     assert.equal(terminal.completed, true, "the completion view is shown");
     const outputs = outputFiles(runOutputDir());
@@ -134,20 +217,21 @@ describe("Dezoomify desktop window", () => {
 
   it("cancelling a job leaves no output", async () => {
     clearOutput();
-    await submitUrl(gatewayInput(SLOW_DZI));
-    await waitFor(async () => (await snapshot()).job, 60000, "job view");
+    await submitUrl(driver, gatewayInput(SLOW_DZI));
+    await waitFor(driver, async () => (await snapshot(driver)).job, 60000, "job view");
     // The throttled job keeps running through retry backoff, so the cancel
     // control is present and reaches the runtime before the job can complete.
-    await (await browser.$("#dz-btn-cancel")).click();
-    await waitFor(async () => {
-      const state = await snapshot();
-      return !state.job && !state.completed && !state.error && !state.deepLink;
-    }, 60000, "cancelled view");
-    assert.equal(
-      outputFiles(runOutputDir()).length,
-      0,
-      "cancelled jobs publish no output",
+    await (await driver.findElement(By.css("#dz-btn-cancel"))).click();
+    await waitFor(
+      driver,
+      async () => {
+        const state = await snapshot(driver);
+        return !state.job && !state.completed && !state.error && !state.deepLink;
+      },
+      60000,
+      "cancelled view",
     );
+    assert.equal(outputFiles(runOutputDir()).length, 0, "cancelled jobs publish no output");
   });
 
   it("a confirmed deep link saves the expected PNG", async () => {
@@ -156,27 +240,37 @@ describe("Dezoomify desktop window", () => {
       env: process.env,
       link: deepLinkArgv(gatewayInput(GATEWAY_DZI)),
     });
-    await waitFor(async () => (await snapshot()).deepLink, 60000, "deep-link confirmation");
+    await waitFor(
+      driver,
+      async () => (await snapshot(driver)).deepLink,
+      60000,
+      "deep-link confirmation",
+    );
 
-    const pending = await snapshot();
+    const pending = await snapshot(driver);
     assert.equal(pending.job, false, "the link does not start before confirmation");
     assert.equal(outputFiles(runOutputDir()).length, 0, "the link does not save before confirmation");
 
-    const confirmed = await browser.execute(() => {
-      const button = Array.from(
-        document.querySelectorAll("#dz-deep-link-confirm button"),
-      ).find((candidate) => candidate.textContent.includes("Open image"));
+    const confirmed = await driver.executeScript(() => {
+      const button = Array.from(document.querySelectorAll("#dz-deep-link-confirm button")).find(
+        (candidate) => candidate.textContent.includes("Open image"),
+      );
       if (!button) return false;
       button.click();
       return true;
     });
     assert.equal(confirmed, true, "the confirmation dialog offers Open image");
 
-    await waitFor(async () => {
-      const state = await snapshot();
-      return state.completed || state.error;
-    }, 180000, "deep-link save terminal");
-    const terminal = await snapshot();
+    await waitFor(
+      driver,
+      async () => {
+        const state = await snapshot(driver);
+        return state.completed || state.error;
+      },
+      180000,
+      "deep-link save terminal",
+    );
+    const terminal = await snapshot(driver);
     assert.equal(terminal.error, false, "the confirmed deep link completes");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "the deep link writes exactly one PNG");
@@ -185,13 +279,18 @@ describe("Dezoomify desktop window", () => {
 
   it("keeps a partial download as a .partial sibling", async () => {
     clearOutput();
-    await submitUrl(gatewayInput(PARTIAL_DZI));
-    await waitFor(async () => {
-      const state = await snapshot();
-      return state.completed || state.error;
-    }, 180000, "partial terminal");
+    await submitUrl(driver, gatewayInput(PARTIAL_DZI));
+    await waitFor(
+      driver,
+      async () => {
+        const state = await snapshot(driver);
+        return state.completed || state.error;
+      },
+      180000,
+      "partial terminal",
+    );
 
-    const terminal = await snapshot();
+    const terminal = await snapshot(driver);
     assert.equal(terminal.error, false, "a kept partial is not a hard error");
     assert.ok(terminal.partialNote, "the completion view reports missing tiles");
     const outputs = outputFiles(runOutputDir());

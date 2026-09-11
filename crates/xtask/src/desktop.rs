@@ -116,17 +116,17 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Real-window E2E: WebdriverIO drives the shipped window shell through the
-/// official `@wdio/tauri-service` embedded WebDriver provider against
-/// hermetic loopback fixtures, then verifies byte-exact saved output.
+/// Real-window E2E: selenium-webdriver drives the shipped window shell through
+/// the embedded W3C WebDriver server against hermetic loopback fixtures, then
+/// verifies byte-exact saved output.
 ///
-/// The embedded provider runs a W3C WebDriver server inside the app
-/// (`tauri-plugin-wdio-webdriver`, compiled behind the test-only `wdio`
-/// cargo feature), so the lane needs no external tauri-driver or platform
-/// driver and runs on Linux, macOS, and Windows. `wdio.conf.mjs` owns the
-/// full lifecycle: fixture server, frontend server, isolated profile, app
-/// launch, and teardown. Opt-in only: bare `test desktop` (plus `test`,
-/// `test all`, and `ci`) stays lean and display-free.
+/// The embedded server runs inside the app (`tauri-plugin-wdio-webdriver`,
+/// compiled behind the test-only `testing-webdriver` cargo feature), so the
+/// lane needs no external tauri-driver or platform driver and runs on Linux,
+/// macOS, and Windows. `specs/desktop.e2e.mjs` owns the full lifecycle:
+/// fixture server, frontend server, isolated profile, app launch, and teardown.
+/// Opt-in only: bare `test desktop` (plus `test`, `test all`, and `ci`) stays
+/// lean and display-free.
 fn test_desktop_e2e_window() -> Result<(), String> {
     // Display: Linux needs Xvfb (the lane fails closed without DISPLAY);
     // macOS and Windows CI runners provide a GUI session, so no DISPLAY
@@ -140,7 +140,8 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     ensure_window_e2e_deps()?;
     // The harness launches this exact binary, so build it first: frontend,
     // fixture server, and window shell with the embedded WebDriver server.
-    // Skip the lean `build_desktop` path: the spec binary needs `wdio`.
+    // Skip the lean `build_desktop` path: the spec binary needs
+    // `testing-webdriver`.
     if !tauri_system_ready() {
         return Err(format!(
             "test desktop --e2e-window needs the webview system packages ({WEBKIT_SYSTEM_PACKAGES})"
@@ -165,7 +166,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         "-p",
         DESKTOP_PKG,
         "--features",
-        "tauri,wdio",
+        "tauri,testing-webdriver",
         "--bin",
         "dezoomify-desktop",
     ])?;
@@ -192,9 +193,8 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     run_node_with_deadline(
         std::time::Duration::from_secs(20 * 60),
         &[
-            "apps/desktop/tests/window-e2e/node_modules/@wdio/cli/bin/wdio.js",
-            "run",
-            "apps/desktop/tests/window-e2e/wdio.conf.mjs",
+            "--test",
+            "apps/desktop/tests/window-e2e/specs/desktop.e2e.mjs",
         ],
         &[
             (
@@ -206,7 +206,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
                 dist_copy.to_str().unwrap_or(""),
             ),
         ],
-        "wdio.conf.mjs",
+        "desktop.e2e.mjs",
     )?;
     println!("test desktop --e2e-window: ok (real window, hermetic loopback)");
     Ok(())
@@ -280,12 +280,12 @@ fn copy_e2e_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), Str
     Ok(())
 }
 
-/// WebdriverIO + Tauri service for the window harness, installed by the root
-/// pnpm workspace during `cargo xtask setup`.
+/// selenium-webdriver for the window harness, installed by the root pnpm
+/// workspace during `cargo xtask setup`.
 fn ensure_window_e2e_deps() -> Result<(), String> {
     let root = super::repo_root();
     let marker =
-        root.join("apps/desktop/tests/window-e2e/node_modules/@wdio/tauri-service/package.json");
+        root.join("apps/desktop/tests/window-e2e/node_modules/selenium-webdriver/package.json");
     if marker.is_file() {
         return Ok(());
     }

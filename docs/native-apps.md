@@ -147,12 +147,13 @@ Desktop starts automatically save the selected image using the configured
 output directory and format. The lane is
 `cargo xtask test desktop --e2e-window` (a display is required on headless
 Linux; macOS and Windows runners provide one). It builds the fixture server
-and the window shell with the test-only `wdio` cargo feature, then WebdriverIO
-drives the real window through the official `@wdio/tauri-service` embedded
-WebDriver provider. `specs/desktop.e2e.mjs` covers automatic submit-to-save,
-cancellation, confirmed deep-link save, and a kept partial published to a
-`.partial` sibling. No external tauri-driver or platform WebDriver is needed,
-so the same lane runs on Linux, macOS, and Windows.
+and the window shell with the test-only `testing-webdriver` cargo feature, then
+`selenium-webdriver` drives the real window against the embedded W3C WebDriver
+server (`tauri-plugin-wdio-webdriver`, which declares no IPC commands and so
+needs no capability entry). `specs/desktop.e2e.mjs` covers automatic
+submit-to-save, cancellation, confirmed deep-link save, and a kept partial
+published to a `.partial` sibling. No external tauri-driver or platform
+WebDriver is needed, so the same lane runs on Linux, macOS, and Windows.
 
 The harness configures a fail-closed temporary output directory through the
 existing desktop settings panel; no test-only application environment

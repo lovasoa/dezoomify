@@ -2,19 +2,13 @@
   "name": "dezoomify-desktop-window-e2e",
   "version": "1.0.0",
   "private": true,
-  "description": "Real-window end-to-end gate for the Tauri desktop app: WebdriverIO drives the shipped window shell through the official @wdio/tauri-service embedded WebDriver provider against hermetic loopback fixtures, and verifies saved bytes against scenario goldens.",
+  "description": "Real-window end-to-end gate for the Tauri desktop app: selenium-webdriver drives the shipped window shell through the embedded W3C WebDriver server against hermetic loopback fixtures, and verifies saved bytes against scenario goldens.",
   "type": "module",
   "scripts": {
-    "test": "wdio run wdio.conf.mjs"
+    "test": "node --test specs/desktop.e2e.mjs"
   },
   "devDependencies": {
-    "@wdio/cli": "9.30.1",
-    "@wdio/globals": "9.29.1",
-    "@wdio/local-runner": "9.30.1",
-    "@wdio/mocha-framework": "9.30.1",
-    "@wdio/spec-reporter": "9.30.1",
-    "@wdio/tauri-service": "1.4.0",
-    "webdriverio": "9.30.1"
+    "selenium-webdriver": "^4.48.0"
   },
   "license": "GPL-3.0-or-later"
 }

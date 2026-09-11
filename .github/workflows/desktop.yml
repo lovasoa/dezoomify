@@ -30,10 +30,10 @@ concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  # Real-window E2E on all three desktop platforms. The embedded WebDriver
-  # provider runs the W3C server inside the app, so no external tauri-driver or
-  # platform driver is installed; Linux needs a display (Xvfb), macOS and
-  # Windows runners provide a GUI session.
+  # Real-window E2E on all three desktop platforms. The embedded W3C WebDriver
+  # server runs inside the app, so no external tauri-driver or platform driver
+  # is installed; Linux needs a display (Xvfb), macOS and Windows runners
+  # provide a GUI session.
   window-e2e:
     name: Window E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

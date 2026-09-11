@@ -26,19 +26,21 @@ bridge. Tests: `cargo xtask test desktop`.
 
 ## End-to-end
 
-The real-window E2E is the app-level gate: WebdriverIO drives the shipped
-window shell through the official `@wdio/tauri-service` embedded WebDriver
-provider (`tauri-plugin-wdio-webdriver`, compiled behind the test-only `wdio`
-cargo feature) against hermetic loopback fixtures. Because the provider embeds
-the W3C WebDriver server in the app, the same suite runs on Linux, macOS, and
-Windows with no external tauri-driver or platform driver.
+The real-window E2E is the app-level gate: `selenium-webdriver` drives the
+shipped window shell against the embedded W3C WebDriver server
+(`tauri-plugin-wdio-webdriver`, compiled behind the test-only
+`testing-webdriver` cargo feature) over hermetic loopback fixtures. Because the
+server is embedded in the app, the same suite runs on Linux, macOS, and Windows
+with no external tauri-driver or platform driver. The plugin declares no IPC
+commands, so it needs no capability entry.
 
 ```sh
 cargo xtask test desktop --e2e-window
 ```
 
 The lane builds the frontend, fixture server, and window shell (features
-`tauri,wdio`), stages lane-private copies, then runs `wdio.conf.mjs`. The spec
+`tauri,testing-webdriver`), stages lane-private copies, then runs
+`node --test specs/desktop.e2e.mjs`. The spec
 covers the user-visible journeys: automatic submit/save to an isolated output
 directory versus the `native/cli-dzi` golden, cancellation with no output, the
 deep-link confirm gate (pending links perform no effect), and a kept partial
@@ -55,7 +57,7 @@ behavior is verified through the real window.
 
 CI (`.github/workflows/desktop.yml`, path-gated to desktop-relevant changes)
 runs `window-e2e` on ubuntu/macos/windows (`fail-fast: false`, the embedded
-provider needs no external driver; Linux runs under Xvfb with one hard
+server needs no external driver; Linux runs under Xvfb with one hard
 deadline). The `bundle-smoke` job keeps actual per-platform bundle, install,
 and launch coverage:
 Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under
