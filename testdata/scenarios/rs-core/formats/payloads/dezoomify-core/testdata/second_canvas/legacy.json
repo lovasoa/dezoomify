@@ -1,0 +1,13 @@
+{
+  "title": "Legacy multi-layer artwork",
+  "gigapixel": {
+    "url": "https://sc.example.test/gigapixel/legacy/",
+    "pattern": "legacy_",
+    "level": 3,
+    "size": { "w": 1300, "h": 900 },
+    "tile": 512,
+    "ir": { "pattern": "legacy_IR_", "level": "2" },
+    "rx": { "pattern": "legacy_RX_", "level": 3 },
+    "uv": { "pattern": "legacy_UV_", "level": "1" }
+  }
+}

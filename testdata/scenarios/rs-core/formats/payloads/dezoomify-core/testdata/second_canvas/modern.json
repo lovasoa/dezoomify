@@ -1,0 +1,14 @@
+{
+  "title": "Modern multi-layer artwork",
+  "version": 2,
+  "gigapixel": {
+    "url": "https://sc.example.test/gigapixel/modern/",
+    "types": [
+      { "name": "Normal", "type": "normal", "pattern": "normal_", "level": "3" },
+      { "name": "Infrared", "type": "ir", "pattern": "normal_IR_", "level": 2 }
+    ],
+    "size": { "w": 1300, "h": 900 },
+    "mask": { "w": 162.5, "h": 112.5 },
+    "tile": 512
+  }
+}

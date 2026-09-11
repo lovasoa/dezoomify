@@ -17,6 +17,7 @@ for how to find that file.
 |---|---|---|
 | Zoomify | Many museums and libraries | The viewer page, `ImageProperties.xml`, or any tile address |
 | Deep Zoom (Seadragon) | Microsoft-style viewers, many digital libraries | The viewer page or the `.dzi` file |
+| Second Canvas | Madpixel museum viewers | The viewer's `web/..._<language>.json` configuration file |
 | IIIF | Widely used by national and university libraries | A viewer page, an `info.json` file, or a presentation manifest for whole books |
 | Arts & Culture | Google Arts & Culture | The artwork page |
 | IIPImage | Image servers recognizable by `FIF=` in addresses | Any address containing `FIF=` |

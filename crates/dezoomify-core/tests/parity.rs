@@ -101,6 +101,14 @@ fn automatic_discovery_selects_every_ready_format() {
             "krpano",
         ),
         (
+            "https://fixtures.test/second-canvas/modern.json",
+            &[ (
+                "https://fixtures.test/second-canvas/modern.json",
+                include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json"),
+            ) ],
+            "second_canvas",
+        ),
+        (
             "https://fixtures.test/iip?FIF=/image.tif",
             &[ (
                 "https://fixtures.test/iip?FIF=/image.tif&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number",

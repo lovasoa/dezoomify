@@ -2065,6 +2065,42 @@
       "source_snapshot": "a304e43"
     },
     {
+      "content_type": "application/json",
+      "id": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/legacy-string-level.json",
+      "license_provenance": "local test fixture (synthetic Second Canvas metadata)",
+      "path": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/legacy-string-level.json",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "51492a25845b963cf4b73fca183b673ef013045d4c69f1a9001b5b89b314c002",
+      "size": 330,
+      "source_path": "Second Canvas legacy schema documented in issue #808",
+      "source_snapshot": "2026-09-11"
+    },
+    {
+      "content_type": "application/json",
+      "id": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/legacy.json",
+      "license_provenance": "local test fixture (synthetic Second Canvas metadata)",
+      "path": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/legacy.json",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "ef51de815a72e836e23b0761266e166fc20943b7b4ba1c7f2d96c946bf79c941",
+      "size": 374,
+      "source_path": "Second Canvas legacy schema documented in issue #808",
+      "source_snapshot": "2026-09-11"
+    },
+    {
+      "content_type": "application/json",
+      "id": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json",
+      "license_provenance": "local test fixture (synthetic Second Canvas metadata)",
+      "path": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "c6b0ed78f24b0c70988f63b67602135b1ade88e7d950796ab081acd36c70474f",
+      "size": 415,
+      "source_path": "Second Canvas modern schema documented in issue #808",
+      "source_snapshot": "2026-09-11"
+    },
+    {
       "content_type": "image/png",
       "id": "rs-core/formats/payloads/root-testdata/deepzoom/expected_result.png",
       "license_provenance": "GPL-3.0-only (Rust source)",

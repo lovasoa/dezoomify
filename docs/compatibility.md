@@ -71,6 +71,7 @@ formats](user/supported-formats.md) for what to paste per format.
 |---|---|---|---|---|
 | Zoomify | Yes | Yes | Yes | Yes |
 | Deep Zoom (Seadragon) | Yes | Yes | Yes | Yes |
+| Second Canvas | Yes | Yes | Yes | Yes |
 | IIIF | Yes | Yes | Yes | Yes |
 | Arts and Culture | Yes | Yes | Yes | Yes |
 | IIPImage | Yes | Yes | Yes | Yes |
