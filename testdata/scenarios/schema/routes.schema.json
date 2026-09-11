@@ -8,7 +8,6 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["route_id", "method", "status"],
         "properties": {
           "route_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
           "method": { "type": "string", "enum": ["GET", "HEAD"] },

@@ -1,17 +1,6 @@
 {
   "routes": [
     {
-      "route_id": "edge-range-truncate-metadata",
-      "method": "GET",
-      "host": "fixtures.test",
-      "path": "/edge/range-truncate/pyramid.dzi",
-      "status": 200,
-      "headers": {
-        "Content-Type": "application/xml"
-      },
-      "payload": "payloads/fixtures.test/edge/range-truncate/pyramid.dzi"
-    },
-    {
       "route_id": "edge-range-truncate-tile-0-0",
       "method": "GET",
       "host": "fixtures.test",

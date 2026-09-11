@@ -1,7 +1,10 @@
 //! Deterministic loopback fixture server.
 //!
 //! Loads every `testdata/scenarios/*/routes.json` plus referenced payloads and
-//! serves them by exact method/host/path match. No public network access is
+//! serves them by exact method/host/path match. The directory mirror is the
+//! default route table: a payload at `payloads/{host}{url-path}` serves at
+//! `{host}{url-path}` with a type inferred from its extension, so `routes.json`
+//! only spells out exceptions. No public network access is
 //! possible by construction: unknown resources get a stable fixture-missing
 //! response and there is no passthrough mode.
 

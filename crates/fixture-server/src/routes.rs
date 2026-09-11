@@ -2,12 +2,25 @@
 
 use axum::http::{HeaderMap, HeaderValue};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+
+fn default_method() -> String {
+    "GET".to_string()
+}
+
+fn default_status() -> u16 {
+    200
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScenarioRoute {
+    /// Optional: derived from the host/path when omitted. Routes are almost
+    /// always `GET`, a `200`, and a file served at `payloads/{host}{path}`;
+    /// only the interesting exceptions spell these out.
+    #[serde(default)]
     pub route_id: String,
+    #[serde(default = "default_method")]
     pub method: String,
     #[serde(default)]
     pub host: Option<String>,
@@ -19,6 +32,7 @@ pub struct ScenarioRoute {
     pub path_regex: Option<String>,
     #[serde(default)]
     pub query: Option<String>,
+    #[serde(default = "default_status")]
     pub status: u16,
     #[serde(default)]
     pub headers: HashMap<String, String>,
@@ -67,6 +81,140 @@ pub struct RenderedRoute {
     pub bytes: Vec<u8>,
 }
 
+/// Route id for a route that omitted one: stable, human-readable, derived
+/// from the match shape. Used only in logs and error messages.
+fn derive_route_id(route: &ScenarioRoute) -> String {
+    fn slug(s: &str) -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    }
+    let host = route.host.as_deref().unwrap_or("any");
+    let target = route
+        .path
+        .as_deref()
+        .or(route.path_prefix.as_deref())
+        .or(route.path_regex.as_deref())
+        .unwrap_or("route");
+    format!("{}-{}", slug(host), slug(target))
+}
+
+/// Directory-mirror convention: any payload laid out as
+/// `{scenario}/payloads/{host}/{url-path}` is served at `{host}{url-path}`
+/// unless an explicit route already claims it. A fixture that follows the
+/// layout needs no `routes.json` entry at all.
+fn mirror_routes(
+    scenarios_dir: &Path,
+    claimed: &HashSet<(String, String)>,
+    served: &HashSet<(String, String, String)>,
+) -> Result<Vec<(String, ScenarioRoute, Option<regex::Regex>)>, String> {
+    let mut payloads = Vec::new();
+    collect_payloads(scenarios_dir, scenarios_dir, &mut payloads)?;
+    payloads.sort();
+    let mut routes = Vec::new();
+    let mut mirrored: HashSet<(String, String)> = HashSet::new();
+    for (scenario, payload) in payloads {
+        if claimed.contains(&(scenario.clone(), payload.clone())) {
+            continue;
+        }
+        let Some(rest) = payload.strip_prefix("payloads/") else {
+            continue;
+        };
+        let Some((host, tail)) = rest.split_once('/') else {
+            continue;
+        };
+        if host.is_empty() || tail.is_empty() || rest.contains("..") {
+            continue;
+        }
+        let url_path = format!("/{tail}");
+        if served.contains(&(host.to_string(), url_path.clone(), "GET".to_string()))
+            || !mirrored.insert((host.to_string(), url_path.clone()))
+        {
+            continue;
+        }
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Content-Type".to_string(),
+            route_content_type(&url_path).to_string(),
+        );
+        routes.push((
+            scenario,
+            ScenarioRoute {
+                route_id: format!("mirror-{host}-{tail}"),
+                method: "GET".to_string(),
+                host: Some(host.to_string()),
+                path: Some(url_path),
+                path_prefix: None,
+                path_regex: None,
+                query: None,
+                status: 200,
+                headers,
+                payload: Some(payload),
+                generator: None,
+            },
+            None,
+        ));
+    }
+    Ok(routes)
+}
+
+fn collect_payloads(
+    base: &Path,
+    dir: &Path,
+    out: &mut Vec<(String, String)>,
+) -> Result<(), String> {
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| format!("cannot list {}: {e}", dir.display()))?;
+    let mut entries: Vec<_> = entries
+        .map(|e| e.map_err(|e| format!("dir entry: {e}")))
+        .collect::<Result<_, _>>()?;
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_payloads(base, &path, out)?;
+        } else {
+            let rel = path
+                .strip_prefix(base)
+                .map_err(|e| format!("strip prefix: {e}"))?
+                .to_str()
+                .ok_or("non-utf8 payload path")?;
+            if let Some(idx) = rel.find("/payloads/") {
+                out.push((rel[..idx].to_string(), rel[idx + 1..].to_string()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Content type for a mirrored payload by URL extension. Matches the
+/// `application/xml` convention fixtures use for `.xml`/`.dzi`.
+fn route_content_type(path: &str) -> &'static str {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let ext = file.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    match ext.to_ascii_lowercase().as_str() {
+        "html" => "text/html",
+        "js" | "mjs" => "application/javascript",
+        "css" => "text/css",
+        "json" => "application/json",
+        "xml" | "dzi" => "application/xml",
+        "txt" => "text/plain",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "wasm" => "application/wasm",
+        "ico" => "image/x-icon",
+        "yaml" | "yml" => "application/yaml",
+        _ => "application/octet-stream",
+    }
+}
+
 impl RouteTable {
     /// Number of loaded route entries, for startup diagnostics.
     pub fn entry_count(&self) -> usize {
@@ -111,6 +259,10 @@ impl RouteTable {
         }
         dirs.sort();
         let mut entries = Vec::new();
+        // Explicit routes win over the directory-mirror convention, so track
+        // which payloads and served URLs they claim before mirroring.
+        let mut claimed: HashSet<(String, String)> = HashSet::new();
+        let mut served: HashSet<(String, String, String)> = HashSet::new();
         for (id, dir) in &dirs {
             let path = dir.join("routes.json");
             let text = std::fs::read_to_string(&path)
@@ -124,7 +276,10 @@ impl RouteTable {
                     file.routes.len()
                 ));
             }
-            for route in file.routes {
+            for mut route in file.routes {
+                if route.route_id.is_empty() {
+                    route.route_id = derive_route_id(&route);
+                }
                 if let Some(payload) = &route.payload {
                     if payload.contains("..") || payload.starts_with('/') {
                         return Err(format!(
@@ -132,6 +287,10 @@ impl RouteTable {
                             route.route_id
                         ));
                     }
+                    claimed.insert((id.clone(), payload.clone()));
+                }
+                if let (Some(host), Some(path)) = (&route.host, &route.path) {
+                    served.insert((host.clone(), path.clone(), route.method.clone()));
                 }
                 let compiled = match &route.path_regex {
                     Some(re) => {
@@ -148,6 +307,7 @@ impl RouteTable {
                 entries.push((id.clone(), route, compiled));
             }
         }
+        entries.extend(mirror_routes(scenarios_dir, &claimed, &served)?);
         Ok(RouteTable { entries })
     }
 
@@ -170,8 +330,25 @@ impl RouteTable {
     }
 
     fn lookup_exact(&self, host: &str, path: &str, query: Option<&str>) -> Option<RouteHit<'_>> {
+        // Exact path matches beat prefix/regex wildcards, regardless of load
+        // order: directory-mirror routes are appended last, and a concrete
+        // payload must not be shadowed by an earlier wildcard fallback.
+        self.match_entries(host, path, query, true)
+            .or_else(|| self.match_entries(host, path, query, false))
+    }
+
+    fn match_entries(
+        &self,
+        host: &str,
+        path: &str,
+        query: Option<&str>,
+        exact_path: bool,
+    ) -> Option<RouteHit<'_>> {
         self.entries.iter().find_map(|(scenario, route, compiled)| {
             if !route.method.eq_ignore_ascii_case("GET") {
+                return None;
+            }
+            if route.path.is_some() != exact_path {
                 return None;
             }
             if let Some(h) = &route.host {

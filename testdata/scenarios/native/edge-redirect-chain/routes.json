@@ -56,17 +56,6 @@
       "payload": "payloads/fixtures.test/edge/redirect-chain/empty.txt"
     },
     {
-      "route_id": "edge-redirect-chain-final",
-      "method": "GET",
-      "host": "fixtures.test",
-      "path": "/edge/redirect-chain/final.dzi",
-      "status": 200,
-      "headers": {
-        "Content-Type": "application/xml"
-      },
-      "payload": "payloads/fixtures.test/edge/redirect-chain/final.dzi"
-    },
-    {
       "route_id": "edge-redirect-chain-tile-0-0",
       "method": "GET",
       "host": "fixtures.test",

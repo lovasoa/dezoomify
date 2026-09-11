@@ -17,7 +17,12 @@ ordering, explicit seeds, controlled time, and canonical snapshots.
 ## Harness maintenance
 
 The deterministic harness is `crates/fixture-server` (loopback route server)
-driven by `testdata/scenarios`. Add scenarios per `testdata/scenarios/README.md`;
+driven by `testdata/scenarios`. The directory mirror is the default route
+table: a payload at `payloads/{host}{url-path}` serves at `{host}{url-path}`
+with a type inferred from its extension, so `routes.json` lists only the
+exceptions (non-`200` statuses, extra headers, redirects, query/wildcard
+matches, generators, non-mirrored payload names). Add scenarios per
+`testdata/scenarios/README.md`;
 review route/payload/hash changes with `cargo xtask fixtures verify`; serve
 locally with `cargo xtask fixtures serve --port 0`; keep tests isolated with
 ephemeral ports and allocated addresses (never fixed shared ports); update
