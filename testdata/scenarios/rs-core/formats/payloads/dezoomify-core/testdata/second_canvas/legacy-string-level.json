@@ -1,0 +1,12 @@
+{
+  "title": "Legacy string-level artwork",
+  "version": 1,
+  "gigapixel": {
+    "url": "https://sc.example.test/gigapixel/legacy-string/",
+    "pattern": "legacy_string_",
+    "level": "2",
+    "size": { "w": 1024, "h": 768 },
+    "tile": 512,
+    "ir": { "name": "Infrared", "pattern": "legacy_string_IR_", "level": "2" }
+  }
+}

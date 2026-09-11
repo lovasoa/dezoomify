@@ -101,6 +101,14 @@ fn automatic_discovery_selects_every_ready_format() {
             "krpano",
         ),
         (
+            "https://fixtures.test/second-canvas/modern.json",
+            &[ (
+                "https://fixtures.test/second-canvas/modern.json",
+                include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json"),
+            ) ],
+            "second_canvas",
+        ),
+        (
             "https://fixtures.test/iip?FIF=/image.tif",
             &[ (
                 "https://fixtures.test/iip?FIF=/image.tif&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number",
@@ -155,6 +163,57 @@ fn automatic_discovery_selects_every_ready_format() {
         panic!("bulk text must produce a deferred entry");
     };
     assert_eq!(image.id.as_str(), "bulk:0");
+}
+
+#[test]
+fn second_canvas_viewer_page_follows_its_js_configuration() {
+    let viewer = "https://fixtures.test/second-canvas/web/index.html?js=metadata%2Fmodern.json";
+    let metadata = "https://fixtures.test/second-canvas/web/metadata/modern.json";
+    let image = ready_image(
+        discover(
+            viewer,
+            &[
+                (
+                    viewer,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/viewer.html"),
+                ),
+                (
+                    metadata,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json"),
+                ),
+            ],
+        )
+        .unwrap(),
+    );
+    assert_eq!(image.format.as_str(), "second_canvas");
+}
+
+#[test]
+fn second_canvas_museum_page_follows_its_embedded_viewer_configuration() {
+    let page = "https://museum.example.test/collection/metropolis";
+    let viewer = "https://sc.example.test.s3.amazonaws.com/web/gallery/metropolis_es.html";
+    let metadata = "https://sc.example.test.s3.amazonaws.com/web/gallery/metropolis_es.json";
+    let image = ready_image(
+        discover(
+            page,
+            &[
+                (
+                    page,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/museum-page.html"),
+                ),
+                (
+                    viewer,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/embedded-viewer.html"),
+                ),
+                (
+                    metadata,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json"),
+                ),
+            ],
+        )
+        .unwrap(),
+    );
+    assert_eq!(image.format.as_str(), "second_canvas");
 }
 
 fn grid(level: &LevelDescriptor) -> &Grid {

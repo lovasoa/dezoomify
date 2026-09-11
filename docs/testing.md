@@ -54,8 +54,8 @@ stays listed in the `docs/compatibility.md` dashboard, never tolerated as a
 silent failure. Removal from `crates/xtask/src/live.rs` happens only when the
 site is gone for good or the format is redesigned, with the reason in the
 commit message. `cargo xtask test live --dry-run --fixtures` validates the
-34-target list plus quarantine with no network; `cargo xtask test live
---public --quarantine --report-only` is the nightly advisory full-34 run that
+36-target list plus quarantine with no network; `cargo xtask test live
+--public --quarantine --report-only` is the nightly advisory full-36 run that
 never blocks pull requests.
 
 Focused targets are:

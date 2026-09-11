@@ -30,6 +30,7 @@ pub mod iipimage;
 pub mod krpano;
 pub mod lizardtech;
 pub mod pnav;
+pub mod second_canvas;
 pub mod topviewer;
 pub mod vec2d;
 pub mod vls;
