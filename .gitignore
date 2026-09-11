@@ -39,6 +39,14 @@ client_secret_*.json
 /apps/extension/.wxt/
 /node_modules
 
+# Extension build outputs: esbuild staging (dist/), legacy WXT artifacts
+# (.wxt/, .output/, .output-test/, public/), and store zips.
+/apps/extension/dist/
+/apps/extension/.wxt/
+/apps/extension/.output/
+/apps/extension/.output-test/
+/apps/extension/public/
+
 # wrangler local state (wrangler pages dev)
 /.wrangler/
 
