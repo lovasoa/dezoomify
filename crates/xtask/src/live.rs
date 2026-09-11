@@ -65,6 +65,15 @@ const TARGETS: &[LiveTarget] = &[
         headers: &[],
         accept_invalid_certs: false,
     },
+    // Nationalmuseum links to this immutable public configuration from its
+    // Second Canvas collection page. It exercises the version-2 `types`
+    // schema without relying on a viewer page or an institution session.
+    LiveTarget {
+        name: "second_canvas_nationalmuseum",
+        url: "https://sc52c295l2e0u257236675112f3025a8b.s3.amazonaws.com/web/52w981s7g6u181258638003c0d64ad1/a52w35039o216d250100915f780a519_en.json",
+        headers: &[],
+        accept_invalid_certs: false,
+    },
     LiveTarget {
         name: "iiif",
         url: "https://i.micr.io/fhXoU/info.json",
