@@ -1,17 +1,6 @@
 {
   "routes": [
     {
-      "route_id": "basic-zif-metadata",
-      "method": "GET",
-      "host": "fixtures.test",
-      "path": "/desktop/basic-zif/pyramid.dzi",
-      "status": 200,
-      "headers": {
-        "Content-Type": "application/xml"
-      },
-      "payload": "payloads/fixtures.test/desktop/basic-zif/pyramid.dzi"
-    },
-    {
       "route_id": "basic-zif-tile-0-0",
       "method": "GET",
       "host": "fixtures.test",

@@ -2,17 +2,6 @@
   "routes": [
     {
       "headers": {
-        "Content-Type": "application/xml"
-      },
-      "host": "fixtures.test",
-      "method": "GET",
-      "path": "/desktop/tile-failure-keep/corrupt.dzi",
-      "payload": "payloads/fixtures.test/desktop/tile-failure-keep/corrupt.dzi",
-      "route_id": "desktop-keep-metadata",
-      "status": 200
-    },
-    {
-      "headers": {
         "Content-Type": "image/png"
       },
       "host": "fixtures.test",

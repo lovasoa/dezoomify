@@ -1359,28 +1359,35 @@ fn part_three_malformed_metadata_is_rejected() {
 mod scenario_parity {
     use dezoomify_core::core::discovery::{DiscoveryError, ResourceResponse};
     use dezoomify_core::core::{CatalogEntry, ImageCatalog, TileSource, default_registry};
-    use std::collections::HashMap;
-    use std::path::PathBuf;
+    use std::collections::{HashMap, HashSet};
+    use std::path::{Path, PathBuf};
 
     fn scenarios_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios")
     }
 
-    /// Map of servable URL -> payload bytes for scenarios, from routes.json.
-    /// Keys cover http/https and query-stripped variants.
+    /// Map of servable URL -> payload bytes for scenarios, from the explicit
+    /// routes plus the directory-mirror convention. Keys cover http/https and
+    /// query-stripped variants.
     fn route_map(scenarios: &[&str]) -> HashMap<String, Vec<u8>> {
         let mut map = HashMap::new();
         for scenario in scenarios {
             let dir = scenarios_dir().join(scenario);
-            let routes: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(dir.join("routes.json")).expect("routes.json"),
-            )
-            .expect("parse routes");
-            for route in routes["routes"].as_array().expect("routes array") {
+            let mut claimed: HashSet<String> = HashSet::new();
+            let explicit: serde_json::Value = if dir.join("routes.json").is_file() {
+                serde_json::from_str(
+                    &std::fs::read_to_string(dir.join("routes.json")).expect("read routes"),
+                )
+                .expect("parse routes")
+            } else {
+                serde_json::json!({ "routes": [] })
+            };
+            for route in explicit["routes"].as_array().expect("routes array") {
                 let payload = match route.get("payload").and_then(|p| p.as_str()) {
                     Some(p) => p,
                     None => continue,
                 };
+                claimed.insert(payload.to_string());
                 let mut bytes = std::fs::read(dir.join(payload)).expect("payload bytes");
                 let host = route.get("host").and_then(|h| h.as_str()).unwrap_or("");
                 if let Some(path) = route.get("path").and_then(|p| p.as_str()) {
@@ -1407,8 +1414,76 @@ mod scenario_parity {
                     }
                 }
             }
+            mirror_entries(&dir, &claimed, &mut map);
         }
         map
+    }
+
+    /// Fold in unclaimed `payloads/{host}{path}` mirrors, mirroring the server's
+    /// directory-mirror convention (content type inferred by extension).
+    fn mirror_entries(dir: &Path, claimed: &HashSet<String>, map: &mut HashMap<String, Vec<u8>>) {
+        let root = dir.join("payloads");
+        let mut files = Vec::new();
+        collect_payload_files(&root, &root, &mut files);
+        files.sort();
+        for rel in files {
+            if claimed.contains(&format!("payloads/{rel}")) {
+                continue;
+            }
+            let Some((host, tail)) = rel.split_once('/') else {
+                continue;
+            };
+            if host.is_empty() || tail.is_empty() || rel.contains("..") {
+                continue;
+            }
+            let mut bytes = std::fs::read(root.join(&rel)).expect("mirror payload");
+            if is_text_path(tail) {
+                let text = String::from_utf8_lossy(&bytes)
+                    .replace("{{origin}}", "http://127.0.0.1:PORT")
+                    .replace("{{host}}", host);
+                bytes = text.into_bytes();
+            }
+            let path = format!("/{tail}");
+            for scheme in ["http", "https"] {
+                map.insert(format!("{scheme}://{host}{path}"), bytes.clone());
+            }
+        }
+    }
+
+    fn collect_payload_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_payload_files(root, &path, out);
+            } else if let Ok(rel) = path.strip_prefix(root) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+
+    fn is_text_path(path: &str) -> bool {
+        let ext = path
+            .rsplit_once('.')
+            .map(|(_, e)| e.to_ascii_lowercase())
+            .unwrap_or_default();
+        matches!(
+            ext.as_str(),
+            "html"
+                | "htm"
+                | "js"
+                | "mjs"
+                | "json"
+                | "xml"
+                | "dzi"
+                | "txt"
+                | "svg"
+                | "css"
+                | "yaml"
+                | "yml"
+        )
     }
 
     fn drive(input: &str, map: &HashMap<String, Vec<u8>>) -> Result<ImageCatalog, DiscoveryError> {

@@ -1,17 +1,6 @@
 {
   "routes": [
     {
-      "route_id": "edge-throttle-429-metadata",
-      "method": "GET",
-      "host": "fixtures.test",
-      "path": "/edge/throttle-429/pyramid.dzi",
-      "status": 200,
-      "headers": {
-        "Content-Type": "application/xml"
-      },
-      "payload": "payloads/fixtures.test/edge/throttle-429/pyramid.dzi"
-    },
-    {
       "route_id": "edge-throttle-429-tile-0-0",
       "method": "GET",
       "host": "fixtures.test",

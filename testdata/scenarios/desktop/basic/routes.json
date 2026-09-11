@@ -2,17 +2,6 @@
   "routes": [
     {
       "headers": {
-        "Content-Type": "application/xml"
-      },
-      "host": "fixtures.test",
-      "method": "GET",
-      "path": "/desktop/basic/pyramid.dzi",
-      "payload": "payloads/fixtures.test/desktop/basic/pyramid.dzi",
-      "route_id": "desktop-basic-metadata",
-      "status": 200
-    },
-    {
-      "headers": {
         "Content-Type": "image/png"
       },
       "host": "fixtures.test",

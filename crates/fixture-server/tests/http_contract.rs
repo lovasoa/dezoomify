@@ -9,6 +9,59 @@ mod common;
 use common::TestServer;
 
 #[tokio::test]
+async fn directory_mirror_serves_payloads_without_routes() {
+    // The mirror convention has no routes.json entry: any payload laid out as
+    // `payloads/{host}{path}` serves at `{host}{path}` with an inferred type.
+    // `native/cli-dzi` relies on this for its DZI metadata route.
+    let srv = TestServer::start().await;
+    let url = format!(
+        "{}/fetch?url=https://fixtures.test/cli/pyramid.dzi",
+        srv.base
+    );
+    let res = reqwest::get(&url).await.expect("get");
+    assert_eq!(res.status(), 200);
+    assert_eq!(
+        res.headers().get("content-type").unwrap(),
+        "application/xml",
+        "mirror infers the fixture xml convention"
+    );
+    let expected = std::fs::read(TestServer::scenarios_path(
+        "native/cli-dzi/payloads/fixtures.test/cli/pyramid.dzi",
+    ))
+    .expect("payload");
+    assert_eq!(
+        res.bytes().await.expect("body").as_ref(),
+        expected.as_slice()
+    );
+}
+
+#[tokio::test]
+async fn exact_payload_beats_prefix_wildcard() {
+    // `web/iiif-discovery` serves a jpeg stub for any
+    // `/fixtures/iiif-private-id/` prefix; the concrete `info.json` mirror
+    // route must win regardless of load order.
+    let srv = TestServer::start().await;
+    let url = format!(
+        "{}/fetch?url=http://127.0.0.1/fixtures/iiif-private-id/info.json",
+        srv.base
+    );
+    let res = reqwest::get(&url).await.expect("get");
+    assert_eq!(res.status(), 200);
+    assert_eq!(
+        res.headers().get("content-type").unwrap(),
+        "application/json"
+    );
+    let expected = std::fs::read(TestServer::scenarios_path(
+        "web/iiif-discovery/payloads/127.0.0.1/fixtures/iiif-private-id/info.json",
+    ))
+    .expect("payload");
+    assert_eq!(
+        res.bytes().await.expect("body").as_ref(),
+        expected.as_slice()
+    );
+}
+
+#[tokio::test]
 async fn static_payload_exact_bytes_and_headers() {
     let srv = TestServer::start().await;
     let url = format!(
