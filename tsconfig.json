@@ -8,8 +8,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

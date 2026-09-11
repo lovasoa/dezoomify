@@ -59,7 +59,7 @@ failures before a commit.
 | Target | Output |
 |---|---|
 | `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
-| `web` | full site build via `scripts/build-site.mjs`: wasm adapter plus browser glue under `wasm/`, regenerated browser JS mirrors and help pages, and the deployable `dist/` tree (requires `wasm-bindgen-cli` matching the version in `Cargo.lock`; see below) |
+| `web` | full site build via `scripts/build-site.mjs`: wasm adapter plus browser glue under `wasm/`, the Vite production bundle, help pages, and the deployable `dist/` tree (requires `wasm-bindgen-cli` matching the version in `Cargo.lock`; see below) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
 | `desktop` | the lean shell always compiles; the Tauri window shell (feature `tauri`) additionally compiles when the platform webview system packages are present; without `--unsigned-test` and with the bundler prerequisites installed, a real bundle for the matching host is produced (Linux `deb`, Windows `msi`/`nsis`, macOS `dmg`; see [Native apps](native-apps.md#desktop-bundles)) |
 | `extension` | real store-shaped ZIPs for chromium and firefox under `target/extension/`, packaged by the same script the store-submission workflow uses |
@@ -77,23 +77,22 @@ artifacts are built by `build web`, `build desktop`, and `build extension`; ther
 are no separate `build browser`, `build ui`, `build native`, or `build all`
 aliases.
 
-The website ships static ES modules with no bundler, so browsers need plain
-`.js`. The TypeScript sources (`src/*.ts`, the shared-UI and browser-runtime
-sources they import) are the single source of truth: type-checked and
-unit-tested. `node scripts/sync-web-js.mjs` regenerates the served `.js`
-mirrors from them; never hand-edit a generated mirror. The mirrors, the wasm
-glue under `wasm/`, and the pages under `help/` are generated artifacts and
-are never committed: the `website-deploy` workflow builds them on every push
-to `master` (see the deployment contract below), `cargo xtask build web` builds
-them locally, and the web test lanes regenerate what they read.
+The website ships a Vite production bundle. The TypeScript/TSX sources
+(`src/*.ts`, the shared-UI and browser-runtime sources they import) are the
+single source of truth: type-checked, unit-tested, and bundled by Vite with
+`vite.config.ts` (`base: "/beta/"`). The wasm glue under `wasm/`, the Vite
+build output under `dist/`, and the pages under `help/` are generated
+artifacts and are never committed: the `website-deploy` workflow builds them
+on every push to `master` (see the deployment contract below), and
+`cargo xtask build web` builds them locally.
 
 ## Website deployment contract
 
 One Cloudflare Pages project (the original `dezoomify`) receives builds from
 GitHub Actions through `.github/workflows/website-deploy.yml`:
 
-1. `scripts/build-site.mjs` regenerates every derived artifact (mirrors, help,
-   wasm glue) and assembles `dist/`: the legacy site (vendored under `legacy/`,
+1. `scripts/build-site.mjs` builds the Vite+React app, help pages, and wasm
+   glue, then assembles `dist/`: the legacy site (vendored under `legacy/`,
    from `master` before the merge, kept verbatim) serves `/`, the new app
    serves `/beta`, and `_routes.json` limits Function invocation to
    `/api/proxy` (new app) and `/proxy` (legacy, re-exported from

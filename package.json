@@ -3,12 +3,19 @@
   "private": true,
   "packageManager": "pnpm@9.12.0",
   "dependencies": {
-    "markdown-it": "15.0.1"
+    "markdown-it": "15.0.1",
+    "react": "^19",
+    "react-dom": "^19"
   },
   "devDependencies": {
     "@types/node": "26.5.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.1",
     "esbuild": "0.28.2",
+    "linkedom": "^0.18.13",
     "typescript": "7.0.2",
+    "vite": "^8.2.2",
     "wrangler": "4.130.0"
   },
   "pnpm": {
@@ -19,6 +26,7 @@
   "scripts": {
     "lint": "pnpm -r lint",
     "typecheck": "tsc --noEmit && pnpm -r typecheck",
-    "test": "node scripts/sync-web-js.mjs && node scripts/build-help.mjs && node --test test/*.test.mjs"
+    "build": "vite build",
+    "test": "node scripts/build-help.mjs && node --import ./test/tsx-loader.mjs --test test/*.test.mjs"
   }
 }

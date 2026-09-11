@@ -22,16 +22,12 @@
 //   never rewrite them.
 // - Interpolation is `{name}` substitution only (no plurals engine, no
 //   markup). Callers escape with `escapeHtml` when composing `innerHTML`.
-// - The extension modal ships with no bundler and cannot import this module
-//   by relative path: it renders through its vendored `vendor/i18n.js`
-//   codegen mirror (see `scripts/sync-web-js.mjs`), which carries these same
-//   tables behind the same `t(key, vars)` shape. `test/ui-i18n.test.mjs`
-//   fails when a renderer uses a key outside this table, when a locale
-//   drops a key, or when placeholders diverge per locale.
+// - Hosts bundle the shared UI directly; there is no `.js` codegen mirror.
+//   `test/ui-i18n.test.mjs` fails when a renderer uses a key outside this
+//   table, when a locale drops a key, or when placeholders diverge per locale.
 //
 // This module is erasable-syntax-only TypeScript (type aliases, plain
-// functions) so `scripts/sync-web-js.mjs` can mirror it to `i18n.js` for
-// browsers exactly like the other shared-ui modules.
+// functions) so node can type-strip it directly in tests.
 
 import { fr } from "./locales/fr.ts";
 import { de } from "./locales/de.ts";
@@ -518,12 +514,10 @@ const en = {
   "desktop.advanced.change": "Change…",
   "desktop.advanced.headers": "Request headers",
   "desktop.advanced.headersDesc": "For protected viewers. Sent only to the image origin and never logged.",
-  // Extension modal user copy. The modal imports this table through its
-  // vendored `vendor/i18n.js` codegen
-  // mirror (see `scripts/sync-web-js.mjs`) and renders through the same
-  // `t(key, vars)` shape; log and diagnostics lines stay literal English and
-  // never use these keys. `test/ui-i18n.test.mjs` fails when the page renders
-  // a key outside this table.
+  // Extension job-tab user copy, rendered through the same `t(key, vars)`
+  // shape; log and diagnostics lines stay literal English and never use these
+  // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside
+  // this table.
   "page.step.scanning": "Scanning page…",
   "page.step.finding": "Finding the zoomable image ({done}/{total})…",
   "page.step.choosing": "Choosing the highest resolution…",

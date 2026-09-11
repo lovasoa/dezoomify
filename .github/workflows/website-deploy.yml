@@ -1,7 +1,7 @@
 name: website-deploy
 # GitHub Actions builds the entire website into dist/ via scripts/
-# build-site.mjs: the legacy site (vendored under legacy/) at / and the new
-# app at /beta. It uploads dist/ to the existing Cloudflare Pages project
+# build-site.mjs: the legacy site (vendored under legacy/) at / and the
+# Vite+React app at /beta. It uploads dist/ to the existing Cloudflare Pages project
 # (dezoomify) with wrangler; the project's automatic git deployments are
 # disabled, so this workflow is the only publisher (see docs/development.md).
 # Pushes to master are production deployments; same-repository pull requests
@@ -48,7 +48,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - id: bindgen
         uses: ./.github/actions/setup-wasm-bindgen
-      - name: Build the site (mirrors, help, wasm glue, dist/)
+      - name: Build the site (Vite app, help, wasm glue, dist/)
         run: node scripts/build-site.mjs
       - name: Check deploy credentials
         id: creds
@@ -110,8 +110,10 @@ jobs:
             # /beta/ is the new app: honest gate on HTTP 200 plus real app
             # markers (input, entry), not just the word Dezoomify.
             beta=$(curl -sS -o /tmp/beta.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/" || true)
-            main_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/src/main.js" || true)
-            discovery_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/src/discovery.js" || true)
+            # Vite emits a hashed entry bundle; read its path from the built
+            # HTML and probe that exact asset.
+            main_asset=$(grep -oE '/beta/assets/index-[A-Za-z0-9_-]+\.js' dist/beta/index.html | head -1)
+            main_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}${main_asset}" || true)
             # Wasm glue must be served as real JS/wasm. A 200 text/html response
             # masks a missing asset: Firefox then fails the worker with
             # NS_ERROR_CORRUPTED_CONTENT and the site spins in "Finding the
@@ -150,18 +152,18 @@ jobs:
               && [ "$beta" = "200" ] \
               && [ "$served_beta_hash" = "$expected_beta_hash" ] \
               && grep -q "dz-url-input\|id=\"app\"" /tmp/beta.html \
-              && grep -q "src/main.js" /tmp/beta.html \
-              && [ "$main_js" = "200" ] && [ "$discovery_js" = "200" ] \
+              && grep -q "$main_asset" /tmp/beta.html \
+              && [ "$main_js" = "200" ] \
               && [ "$proxy" = "403" ] && [ "$legacy_proxy" = "400" ] \
                && case "$wasm_js" in "200 application/javascript"*|"200 text/javascript"*) ;; *) false;; esac \
                && case "$wasm_bin" in "200 application/wasm"*) ;; *) false;; esac \
               && [ "$help" = "200" ] && grep -q "dz-help-topics" /tmp/help.html \
               && [ "$repo_files_served" = "0" ] \
               && ! grep -q "14 of 28" /tmp/beta.html; then
-              echo "deployment live: legacy=$legacy beta=$beta main.js=$main_js discovery.js=$discovery_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served beta_hash=$served_beta_hash"
+              echo "deployment live: legacy=$legacy beta=$beta main_asset=$main_asset main_js=$main_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served beta_hash=$served_beta_hash"
               exit 0
             fi
-            echo "attempt $i: legacy=$legacy beta=$beta main.js=$main_js discovery.js=$discovery_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served beta_hash=${served_beta_hash:-none} (want $expected_beta_hash); retrying in ${delay}s"
+            echo "attempt $i: legacy=$legacy beta=$beta main_asset=$main_asset main_js=$main_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served beta_hash=${served_beta_hash:-none} (want $expected_beta_hash); retrying in ${delay}s"
             sleep "$delay"
             delay=$(( delay * 2 > 60 ? 60 : delay * 2 ))
           done

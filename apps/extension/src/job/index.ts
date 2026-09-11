@@ -1,10 +1,14 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
+import { renderView } from "@dezoomify/shared-ui";
+import type { UiStatus, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
+import {
+  canvasToPngBlob,
+  createCanvasAssembly,
+  createTileDecoder,
+  pickEngineSelection,
+  saveBlobViaAnchor,
+} from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.js";
-import { renderView } from "../vendor/view.js";
-import { createTileDecoder } from "../vendor/tile-decode.js";
-import { canvasToPngBlob, saveBlobViaAnchor } from "../vendor/canvas-save.js";
-import { createCanvasAssembly } from "../vendor/assembly.js";
-import { pickEngineSelection } from "../vendor/engine-selection.js";
 import { createJobController } from "./controller.js";
 import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
 import type { JobBinding } from "./transport.js";
@@ -14,7 +18,7 @@ type ExtensionApi = {
   permissions?: { contains?(request: { origins: string[] }): Promise<boolean> };
 };
 type Failure = { code: string; category: string; retryable: boolean; message: string };
-type ViewContext = Record<string, unknown> & { failure?: Failure };
+type ViewContext = SharedViewContext & { failure?: Failure };
 type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: Failure; catalog?: { images?: unknown[] } };
 type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[] };
 
@@ -51,7 +55,7 @@ function copyDiagnostics(text: string) {
   void operation?.catch(() => undefined);
 }
 
-function render(status: string, ctx: ViewContext = {}) {
+function render(status: UiStatus, ctx: ViewContext = {}) {
   const target = root();
   if (!target) return;
   target.className = "";
@@ -198,7 +202,8 @@ function createAssembly(sourceUrl: string) {
       // both on one surface object.
       return { width, height, ctx2d, toBlob: (cb: BlobCallback, mime?: string) => element.toBlob(cb, mime) };
     },
-    encode: (canvas: { toBlob(cb: (blob: unknown | null) => void, mime?: string): void }) => canvasToPngBlob(canvas),
+    encode: (canvas) =>
+      canvasToPngBlob(canvas as unknown as { toBlob(cb: BlobCallback, mime?: string): void }),
     save: (blob: unknown, width: number, height: number) => {
       if (!(blob instanceof Blob)) throw new TypeError("encoded output is not a Blob");
       const url = URL.createObjectURL(blob);
@@ -226,13 +231,15 @@ function handleEvent(event: JobEvent) {
   else if (event.type === "completed" || event.type === "partial-completed") render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } });
   else if (event.type === "catalog" && !selected) {
     selected = true;
-    const selection = pickEngineSelection(event.catalog ?? {});
+    const selection = pickEngineSelection(
+      (event.catalog ?? {}) as Parameters<typeof pickEngineSelection>[0],
+    );
     if (!selection) {
       onHostFailure(Object.assign(new Error("No downloadable image was found on this page."), { code: "NO_IMAGE_FOUND", retryable: false }));
       controller?.cancel();
       return;
     }
-    render("downloading", { imageCount: event.catalog?.images?.length ?? 0, jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
+    render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
     controller?.selectImage(selection.image);
     controller?.selectLevel(selection.level);
   }

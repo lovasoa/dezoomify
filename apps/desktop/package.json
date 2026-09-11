@@ -8,15 +8,20 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --import ../../test/tsx-loader.mjs --test tests/*.test.mjs"
   },
   "dependencies": {
     "@dezoomify/browser-runtime": "workspace:*",
     "@dezoomify/shared-ui": "workspace:*",
     "@tauri-apps/api": "2.11.1",
-    "@tauri-apps/plugin-opener": "2.5.5"
+    "@tauri-apps/plugin-opener": "2.5.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "linkedom": "^0.18.13",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"

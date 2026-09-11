@@ -855,7 +855,15 @@ fn run_node(args: &[&str]) -> Result<(), String> {
     // cold Cargo work in the deep-link test, while failing a leaked Node or
     // Vite descendant with the owning spec named instead of letting CI hang.
     let label = args.join(" ");
-    run_node_with_deadline(std::time::Duration::from_secs(6 * 60), args, &[], &label)
+    // React `.tsx` sources import directly under the test hook.
+    let mut with_loader: Vec<&str> = vec!["--import", "./test/tsx-loader.mjs"];
+    with_loader.extend_from_slice(args);
+    run_node_with_deadline(
+        std::time::Duration::from_secs(6 * 60),
+        &with_loader,
+        &[],
+        &label,
+    )
 }
 
 /// Run node under a hard deadline: when the child outlives it, the process

@@ -37,7 +37,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "-i",
             "dezoomer|readable tile bytes|tainted|blob allocation|multi[ -]?core",
             "docs/user/",
-            "packages/shared-ui/src/view.ts",
+            "packages/shared-ui/src/view.tsx",
             "packages/shared-ui/src/components.ts",
         ],
     )?;
@@ -55,7 +55,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             "-N",
             "250 ?ms",
             "docs/user/",
-            "packages/shared-ui/src/view.ts",
+            "packages/shared-ui/src/view.tsx",
             "packages/shared-ui/src/components.ts",
         ],
     )?

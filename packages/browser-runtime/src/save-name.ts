@@ -4,12 +4,11 @@
 // suffix when dimensions are known positive integers, extension from format
 // (png default, jpeg/jpg -> jpg, tiff/tif -> tif, zif -> zif, webp -> webp,
 // iiif/iiif-dir -> iiif). Pure, erasable-syntax-only, no I/O or DOM, so
-// browsers (via scripts/sync-web-js.mjs), node type-stripping, and native
-// shells share it. `packages/shared-ui` re-exports these helpers for
-// rendering; it never owns them, so browser-runtime save code imports
-// downward only. The extension modal renders through its vendored
-// `vendor/` codegen mirror (see scripts/sync-web-js.mjs), never a local
-// replica; the CLI mirrors the `dezoomify` base in Rust (titles and collision
+// Vite/WXT bundles, node type-stripping, and native shells share it.
+// `packages/shared-ui` re-exports these helpers for rendering; it never owns
+// them, so browser-runtime save code imports downward only. The extension
+// job tab imports the workspace package directly; the CLI mirrors the
+// `dezoomify` base in Rust (titles and collision
 // suffixes stay Rust-side). Todo 5.1: desktop GUI parity exposes ZIF, WebP,
 // and `iiif-dir` (`.iiif`) alongside PNG/JPEG/TIFF.
 export type SaveNameFormat =

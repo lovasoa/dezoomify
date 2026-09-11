@@ -11,8 +11,7 @@
 // parity: it tries ranked candidates directly).
 //
 // Keep this file erasable-syntax-only so node type-stripping can import it
-// directly in tests. The browser `./discovery.js` mirror is generated from
-// this file by `scripts/sync-web-js.mjs`; never edit the `.js` by hand.
+// directly in tests; Vite/WXT bundle it for browsers.
 
 export interface DiscoveryStructuredError {
   code: string;

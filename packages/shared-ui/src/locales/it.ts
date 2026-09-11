@@ -6,8 +6,8 @@
 // Brand and product names ("Dezoomify", "Chrome Web Store", "GitHub Releases",
 // "GPL", "PNG", "JPEG", "URL", "CLI", "FAQ") stay literal.
 //
-// Erasable-syntax-only TypeScript (plain object, no enums) so
-// `scripts/sync-web-js.mjs` can mirror it to `locales/it.js` for browsers.
+// Erasable-syntax-only TypeScript (plain object, no enums) so node can
+// type-strip it directly in tests.
 
 export const it = {
   "desktop.done.title": "Immagine salvata",
@@ -413,12 +413,10 @@ export const it = {
   "desktop.advanced.change": "Modifica…",
   "desktop.advanced.headers": "Intestazioni della richiesta",
   "desktop.advanced.headersDesc": "Per i visori protetti. Inviate solo all origine dell immagine e mai registrate.",
-  // Extension modal user copy. The modal
-  // imports this table through its vendored `vendor/i18n.js` codegen
-  // mirror (see `scripts/sync-web-js.mjs`) and renders through the same
-  // `t(key, vars)` shape; log and diagnostics lines stay literal English and
-  // never use these keys. `test/ui-i18n.test.mjs` fails when the page renders
-  // a key outside this table.
+  // Extension job-tab user copy, rendered through the same `t(key, vars)`
+  // shape; log and diagnostics lines stay literal English and never use these
+  // keys. `test/ui-i18n.test.mjs` fails when the page renders a key outside
+  // this table.
   "page.step.scanning": "Scansione della pagina…",
   "page.step.finding": "Ricerca dell immagine zoomabile ({done}/{total})…",
   "page.step.choosing": "Scelta della risoluzione piu alta…",

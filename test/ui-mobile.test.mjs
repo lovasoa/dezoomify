@@ -10,12 +10,10 @@ function read(rel) {
   return fs.readFileSync(path.join(rootDir, rel), "utf8");
 }
 
-// The extension modal links the vendored canonical theme
-// (`vendor/theme.css`, generated at build time by
-// scripts/sync-web-js.mjs from packages/shared-ui/src/styles/theme.css) and
-// ships no inline theme subset. These gates read the canonical theme (the
-// single source of truth, byte-identical to the vendor copy per the
-// extension shared-ui parity suite) plus the page shell.
+// The extension job page imports the canonical theme
+// (`packages/shared-ui/src/styles/theme.css`) through its bundler and ships
+// no inline theme subset. These gates read that single source of truth plus
+// the page shell.
 
 /** Normalize one CSS declaration for cross-file comparison. */
 function normDecl(decl) {
@@ -44,9 +42,10 @@ test("mobile: website theme keeps the 768/560/380px breakpoint stack", () => {
   }
 });
 
-test("mobile: extension modal links the canonical theme with no inline fork", () => {
-  const html = read("apps/extension/src/modal/modal.html");
-  assert.match(html, /<link rel="stylesheet" href="\.\.\/vendor\/theme\.css" \/>/, "modal links the vendored canonical theme");
+test("mobile: extension job page links the canonical theme with no inline fork", () => {
+  const html = read("apps/extension/entrypoints/job/index.html");
+  const entry = read("apps/extension/entrypoints/job/job.ts");
+  assert.match(entry, /styles\/theme\.css/, "job page links the canonical theme");
   const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join("\n");
   assert.ok(!styles.includes(".dz-"), "page ships no inline theme subset (theme owns all dz-* geometry)");
   assert.ok(!styles.includes("@media"), "page ships no breakpoint fork (theme owns every breakpoint)");
@@ -56,7 +55,7 @@ test("mobile CSS contract: 360px rules avoid known reachability blockers", () =>
   // The themed job card comes from the vendored renderView mount, styled by
   // the canonical theme; the static shell only adds the scan tab list.
   const css = read("packages/shared-ui/src/styles/theme.css");
-  const html = read("apps/extension/src/modal/modal.html");
+  const html = read("apps/extension/entrypoints/job/index.html");
   assert.match(html, /name="viewport"[^>]*width=device-width[^>]*initial-scale=1/, "viewport stays device-width");
 
   // No fixed-width layout container wider than a 360px phone.
@@ -91,7 +90,7 @@ test("mobile CSS contract: 360px rules avoid known reachability blockers", () =>
   // column stays within the viewport at every breakpoint.
   assert.match(css, /\.dz-card\s*\{[^}]*overflow:\s*hidden;/, "card never scrolls sideways");
   assert.match(css, /\.dz-main\s*\{[^}]*width:\s*min\(9[24]%,\s*960px\);/, "main column stays fluid");
-  // Page-owned chrome stays limited to the close control; interactive job
-  // actions are rendered by the shared UI and covered by the rules above.
-  assert.match(html, /id="dz-modal-dismiss"/, "close control stays mounted");
+  // The job shell only hosts the shared-UI mount; interactive job actions
+  // are rendered by the shared UI and covered by the rules above.
+  assert.match(html, /id="dz-job-app"/, "shared-UI mount stays present");
 });

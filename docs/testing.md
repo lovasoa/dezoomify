@@ -71,7 +71,7 @@ Focused targets are:
 | `web` | website direct-first transport, metadata CORS proxy fallback, and cross-browser end-to-end behavior |
 | `native` | native runtime, CLI, encoders, cache, and scenario parity |
 | `desktop` | Tauri integration, canonical command registration, and disabled-updater fixtures; `--e2e-window` drives the real webview with selenium-webdriver against the embedded W3C WebDriver server |
-| `extension` | fresh generated-WASM worker contract, manifests, scanning, browser-session fetch, permissions, shared-UI vendoring with web-vs-extension job-card parity, store size gate, and browser E2E |
+| `extension` | fresh generated-WASM worker contract, manifests, scanning, browser-session fetch, permissions, the React shared-UI job tab, store size gate, and browser E2E |
 | `native-messaging` | framing, handoff consent, cookie scope, registration, and cleanup |
 | `scenario` | scenario-corpus gates: native pipeline scenarios over loopback plus CLI snapshots |
 | `perf [--smoke]` | native pool plus streaming plus backpressure benches (criterion `native_pipeline`: tile throughput, encode time, peak RSS on the 20k model) with CI tracking that fails beyond 20 percent regression |
@@ -89,16 +89,17 @@ flags instead of silently widening or skipping coverage.
 `node:test` files (`test/*.test.mjs`). It runs via
 `node --test test/*.test.mjs` and the `web` and `build web` gates. The `ui`
 gate runs the shared-UI subset plus its gates: `test/controller.test.mjs`,
-`test/view-rendering.test.mjs`, `test/ui-a11y.test.mjs` (static
-accessibility-contract checks over a minimal DOM, theme CSS, the extension page shell,
-and the shared confirm dialog), `test/ui-i18n.test.mjs` (four-locale
-dictionary coverage with per-key English fallback; the extension renders
-through its vendored dictionary mirror with
-no local replica), and `test/ui-mobile.test.mjs` (560/380px parity over the
-canonical theme the extension page links, and static 360px CSS reachability invariants). It is
-tracked and always present. The UI target regenerates the ignored browser
-mirrors before these suites so their source and vendor parity checks always
-have their required artifacts.
+`test/view-rendering.test.mjs`, `test/ui-a11y.test.mjs` (React DOM checks
+over a real `linkedom` document via `test/react-dom.mjs`, plus static
+accessibility-contract checks over theme CSS and the shared confirm dialog),
+`test/ui-i18n.test.mjs` (four-locale dictionary coverage with per-key English
+fallback; the extension job tab resolves through the same table with no local
+replica), and `test/ui-mobile.test.mjs` (560/380px parity over the
+canonical theme the extension page links, and static 360px CSS reachability
+invariants). It is tracked and always present. The root suite loads
+`test/tsx-loader.mjs` (esbuild) so React `.tsx` sources import directly under
+`node --test`; the UI target regenerates the ignored help pages before these
+suites.
 
 `e2e-artifacts/` (repository root) is not a suite and never runs in any
 `cargo xtask test` or `cargo xtask ci` lane. It holds only untracked

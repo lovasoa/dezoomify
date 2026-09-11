@@ -1,2 +1,2 @@
-import "../../src/vendor/theme.css";
-import "../../src/job/index.js";
+import "../../../../packages/shared-ui/src/styles/theme.css";
+import "../../src/job/index.ts";

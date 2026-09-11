@@ -1,6 +1,7 @@
 import { access, cp, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "wxt";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -84,6 +85,7 @@ export default defineConfig({
     },
   },
   vite: () => ({
+    plugins: [react()],
     define: {
       __DEZOOMIFY_TEST_DRIVER__: JSON.stringify(isTestPackage),
     },
