@@ -37,7 +37,7 @@ test("website preview wires wheel, drag, and buttons without pixel reads", () =>
   assert.ok(block.includes("pointerdown"), "drag pan wired");
   assert.ok(block.includes("preview-zoom-in"), "zoom-in button wired");
   assert.ok(block.includes("preview-zoom-out"), "zoom-out button wired");
-  assert.ok(block.includes("preview-zoom-reset"), "reset button wired");
+  assert.ok(block.includes("preview-zoom-fit"), "fit button wired");
   assert.ok(block.includes("preview-zoom-100"), "100% button wired");
   assert.ok(block.includes("style.transform"), "transform scale/translate applied");
   assert.ok(!block.includes("getImageData("), "preview never reads pixels (tainted-safe)");
@@ -47,9 +47,10 @@ test("website preview wires wheel, drag, and buttons without pixel reads", () =>
 
 test("preview controls exist in the page and theme", () => {
   const html = fs.readFileSync(path.join(rootDir, "index.html"), "utf8");
-  for (const id of ["preview-controls", "preview-zoom-in", "preview-zoom-out", "preview-zoom-100", "preview-zoom-reset", "preview-zoom-label"]) {
+  for (const id of ["preview-controls", "preview-zoom-in", "preview-zoom-out", "preview-zoom-100", "preview-zoom-fit", "preview-zoom-label"]) {
     assert.ok(html.includes(`id="${id}"`), `index.html missing #${id}`);
   }
+  assert.ok(html.includes(">Fit</button>"), "preview fit control is labelled Fit");
   const css = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/styles/theme.css"), "utf8");
   assert.ok(css.includes(".dz-preview-controls"), "theme styles the preview toolbar");
   assert.ok(css.includes("overflow: hidden"), "preview frame does not natively scroll with zoom");

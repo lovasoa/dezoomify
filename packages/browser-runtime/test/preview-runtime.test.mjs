@@ -27,7 +27,7 @@ function doc() {
     "rendering-canvas": element({ width: 1600, height: 1200 }),
     "preview-zoom-in": element(),
     "preview-zoom-out": element(),
-    "preview-zoom-reset": element(),
+    "preview-zoom-fit": element(),
     "preview-zoom-100": element(),
     "preview-zoom-label": element(),
     "preview-controls": element(),
@@ -46,7 +46,7 @@ test("preview scale clamps to the tainted-safe transform range", () => {
   assert.equal(clampPreviewScale("bad"), 1);
 });
 
-test("zoom and reset apply transform-only styles", () => {
+test("zoom and fit apply transform-only styles", () => {
   const d = doc();
   const preview = createPreviewControls();
   preview.initControls(d);
@@ -57,6 +57,17 @@ test("zoom and reset apply transform-only styles", () => {
   preview.resetTransform(d);
   assert.deepEqual(preview.getTransform(), { scale: 0.5, tx: 0, ty: 0 });
   assert.match(canvas.style.transform, /scale\(0.5\)/);
+});
+
+test("fit keeps tall images inside the frame below the manual zoom limit", () => {
+  const d = doc();
+  d.ids["rendering-canvas"].width = 2000;
+  d.ids["rendering-canvas"].height = 20000;
+  const preview = createPreviewControls();
+  preview.initControls(d);
+  d.ids["preview-zoom-fit"].fire("click");
+  assert.deepEqual(preview.getTransform(), { scale: 0.03, tx: 0, ty: 0 });
+  assert.equal(d.ids["preview-zoom-label"].textContent, "3%");
 });
 
 test("controls wire buttons, wheel, and bounded drag without pixel reads", () => {
@@ -78,7 +89,7 @@ test("controls wire buttons, wheel, and bounded drag without pixel reads", () =>
   assert.equal(preview.getTransform().tx, 0);
   assert.equal(preview.getTransform().ty, 0);
   assert.equal(stopped, true);
-  d.ids["preview-zoom-reset"].fire("click");
+  d.ids["preview-zoom-fit"].fire("click");
   d.ids["preview-zoom-100"].fire("click");
   canvas.fire("pointerdown", { clientX: 10, clientY: 20, pointerId: 1 });
   canvas.fire("pointermove", { clientX: 1010, clientY: 1020 });
@@ -86,7 +97,7 @@ test("controls wire buttons, wheel, and bounded drag without pixel reads", () =>
   const moved = preview.getTransform();
   assert.equal(moved.tx, 400);
   assert.equal(moved.ty, 300);
-  d.ids["preview-zoom-reset"].fire("click");
+  d.ids["preview-zoom-fit"].fire("click");
   assert.deepEqual(preview.getTransform(), { scale: 0.5, tx: 0, ty: 0 });
   d.ids["preview-zoom-100"].fire("click");
   assert.equal(preview.getTransform().scale, 1);
