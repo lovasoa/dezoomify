@@ -50,6 +50,7 @@ async function snapshot(driver) {
       job: !!q(".dz-job-section"),
       completed: !!q(".dz-completed-section"),
       error: !!q(".dz-error-section"),
+      errorText: text("#dz-error-message"),
       deepLink: !!q("#dz-deep-link-confirm"),
       partialNote: text(".dz-partial-note"),
     };
@@ -144,6 +145,10 @@ describe("Dezoomify desktop window", () => {
       driver = null;
     }
     await stopWindowApp(app);
+    if (app) {
+      const logs = app.logs().trim();
+      if (logs) process.stderr.write(`window E2E app log:\n${logs.slice(-4000)}\n`);
+    }
     app = null;
     await closeFrontendServer(frontend);
     frontend = null;
@@ -207,7 +212,7 @@ describe("Dezoomify desktop window", () => {
     );
 
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, "the save completes without a UI error");
+    assert.equal(terminal.error, false, `the save completes without a UI error: ${terminal.errorText}`);
     assert.equal(terminal.completed, true, "the completion view is shown");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
@@ -271,7 +276,7 @@ describe("Dezoomify desktop window", () => {
       "deep-link save terminal",
     );
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, "the confirmed deep link completes");
+    assert.equal(terminal.error, false, `the confirmed deep link completes: ${terminal.errorText}`);
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "the deep link writes exactly one PNG");
     assertSavedPyramid(readFileSync(outputs[0]), expectedHash());
@@ -291,7 +296,7 @@ describe("Dezoomify desktop window", () => {
     );
 
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, "a kept partial is not a hard error");
+    assert.equal(terminal.error, false, `a kept partial is not a hard error: ${terminal.errorText}`);
     assert.ok(terminal.partialNote, "the completion view reports missing tiles");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "exactly one partial output is published");
