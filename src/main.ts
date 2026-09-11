@@ -60,24 +60,16 @@ import {
   createPreviewControls,
 } from "../packages/browser-runtime/src/preview.ts";
 import {
-  PREVIEW_MAX_SCALE,
-  PREVIEW_MIN_SCALE,
   PREVIEW_ZOOM_STEP,
-  clampPreviewScale,
 } from "../packages/browser-runtime/src/preview.ts";
 
-// Re-export the shared browser limits plus the preview transform helpers for
-// existing website test imports (`test/pick-level.test.mjs` and
-// `test/preview.test.mjs` import from `src/main.ts`).
+// Re-export the shared browser limits for existing website test imports.
 export {
   BROWSER_MAX_CANVAS_AREA,
   BROWSER_MAX_CANVAS_SIDE,
   BROWSER_MAX_PLAN_TILES,
   desktopHandoffLink,
-  PREVIEW_MAX_SCALE,
-  PREVIEW_MIN_SCALE,
   PREVIEW_ZOOM_STEP,
-  clampPreviewScale,
 };
 
 const preview = createPreviewControls();

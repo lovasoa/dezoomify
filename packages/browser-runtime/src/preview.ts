@@ -7,8 +7,6 @@
 // display-only path stays display-only; preview never promises a clean save.
 // The host document is injected so node tests drive the transform math
 // without a DOM. Keep erasable-syntax-only for the browser `.js` mirrors.
-export const PREVIEW_MIN_SCALE = 0.1;
-export const PREVIEW_MAX_SCALE = 8;
 export const PREVIEW_ZOOM_STEP = 1.25;
 const PREVIEW_WHEEL_STEP_PIXELS = 100;
 
@@ -46,12 +44,6 @@ export interface PreviewControls {
   zoomBy(factor: unknown, doc?: PreviewDocumentLike | null): PreviewTransform;
   setScale(scale: unknown, doc?: PreviewDocumentLike | null): PreviewTransform;
   initControls(doc: PreviewDocumentLike): void;
-}
-
-export function clampPreviewScale(scale: unknown): number {
-  const value = typeof scale === "number" ? scale : Number(scale);
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, value));
 }
 
 export function createPreviewControls(): PreviewControls {
@@ -112,7 +104,7 @@ export function createPreviewControls(): PreviewControls {
   function fitScale(doc?: PreviewDocumentLike | null): number {
     const size = geometry(doc);
     if (!size) return 1;
-    return clampPreviewScale(Math.min(1, size.viewportWidth / size.width, size.viewportHeight / size.height));
+    return Math.min(1, size.viewportWidth / size.width, size.viewportHeight / size.height);
   }
 
   function resetTransform(doc?: PreviewDocumentLike | null): PreviewTransform {
@@ -123,7 +115,7 @@ export function createPreviewControls(): PreviewControls {
 
   function zoomBy(factor: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
     const value = typeof factor === "number" ? factor : Number(factor);
-    const next = clampPreviewScale(transform.scale * (Number.isFinite(value) ? value : 1));
+    const next = Math.max(fitScale(doc), Math.min(1, transform.scale * (Number.isFinite(value) ? value : 1)));
     transform = { ...transform, scale: next };
     clampTranslation(doc);
     applyTransform(doc);
@@ -131,7 +123,9 @@ export function createPreviewControls(): PreviewControls {
   }
 
   function setScale(scale: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
-    transform = { ...transform, scale: clampPreviewScale(scale) };
+    const value = typeof scale === "number" ? scale : Number(scale);
+    const next = Number.isFinite(value) ? Math.max(fitScale(doc), Math.min(1, value)) : 1;
+    transform = { ...transform, scale: next };
     clampTranslation(doc);
     applyTransform(doc);
     return getTransform();
@@ -155,7 +149,7 @@ export function createPreviewControls(): PreviewControls {
 
       doc.getElementById("preview-zoom-in")?.addEventListener("click", () => zoomBy(PREVIEW_ZOOM_STEP, doc));
       doc.getElementById("preview-zoom-out")?.addEventListener("click", () => zoomBy(1 / PREVIEW_ZOOM_STEP, doc));
-      doc.getElementById("preview-zoom-reset")?.addEventListener("click", () => resetTransform(doc));
+      doc.getElementById("preview-zoom-fit")?.addEventListener("click", () => resetTransform(doc));
       doc.getElementById("preview-zoom-100")?.addEventListener("click", () => setScale(1, doc));
 
       // Wheel zoom (ctrl/pinch friendly): scale around the viewport center via
