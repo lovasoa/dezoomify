@@ -70,7 +70,7 @@ Focused targets are:
 | `ui` | shared UI controller, view rendering, static accessibility contracts, four-locale message dictionary, and mobile CSS contracts |
 | `web` | website direct-first transport, metadata CORS proxy fallback, and cross-browser end-to-end behavior |
 | `native` | native runtime, CLI, encoders, cache, and scenario parity |
-| `desktop` | Tauri integration, canonical command registration, disabled-updater fixtures, and a mounted production-frontend integration smoke; `--e2e-window` drives the real webview |
+| `desktop` | Tauri integration, canonical command registration, and disabled-updater fixtures; `--e2e-window` drives the real webview with selenium-webdriver against the embedded W3C WebDriver server |
 | `extension` | fresh generated-WASM worker contract, manifests, scanning, browser-session fetch, permissions, shared-UI vendoring with web-vs-extension job-card parity, store size gate, and browser E2E |
 | `native-messaging` | framing, handoff consent, cookie scope, registration, and cleanup |
 | `scenario` | scenario-corpus gates: native pipeline scenarios over loopback plus CLI snapshots |
@@ -274,26 +274,33 @@ Tauri-driver stub cannot observe.
 cargo xtask test desktop --e2e-window
 ```
 
-The real-window lane drives the shipped window shell with tauri-driver against
-hermetic loopback fixtures. It keeps only the user journeys that need a real
-window: submit to a granted destination and byte-exact PNG output, cancellation
-without an output, and a deep link that cannot start or save until confirmed.
-The native pipeline and format matrix are covered by the Rust scenario and CLI
-suites; duplicating them through the window adds time without covering a
-distinct UI boundary.
+The real-window lane drives the shipped window shell with
+`selenium-webdriver` against the embedded W3C WebDriver server
+(`tauri-plugin-wdio-webdriver`, compiled behind the test-only
+`testing-webdriver` cargo feature) over hermetic loopback fixtures. Because the
+server runs inside the app, the lane needs no external tauri-driver or platform
+WebDriver and runs on Linux, macOS, and Windows. The embedded plugin declares no
+IPC commands, so it needs no capability entry. It keeps only the user journeys
+that need a real window: automatic submit-to-save with byte-exact PNG output,
+cancellation without an output, a deep link that cannot start or save until
+confirmed, and a kept partial published to a `.partial` sibling. App-level
+suites that only asserted internal Rust state or mocked the IPC boundary were
+removed; the native pipeline and format matrix stay covered by the Rust
+scenario and CLI suites.
 
-The lane is Linux-only because it requires WebKitWebDriver. `cargo xtask test
-desktop --e2e-window` explicitly asks Cargo to build both the window shell and
-the fixture server, so it always uses current sources rather than an existing
-executable. It runs one spec under a ten-minute ownership deadline. Bare `test
-desktop` stays lean and display-free.
+A display is required on headless Linux (`xvfb-run -a`); macOS and Windows
+runners provide a GUI session. `cargo xtask test desktop --e2e-window`
+explicitly asks Cargo to build the frontend, fixture server, and window shell
+(features `tauri,testing-webdriver`) so it always uses current sources rather
+than an existing executable. It runs one `node --test` spec under a
+twenty-minute ownership deadline. Bare `test desktop` stays lean and
+display-free.
 
-Desktop CI is path-gated. The Ubuntu `window-e2e` job installs WebKitWebDriver
-and runs the real lane under Xvfb. The separate `bundle-smoke` matrix still
-performs actual release build, install when the host provides the installer
-tools, and launch smoke on Ubuntu, macOS, and Windows. Those platform smokes
-are not presented as window E2E coverage and do not install browser drivers or
-pass expected driver failures.
+Desktop CI is path-gated. The `window-e2e` job matrixes ubuntu, macOS, and
+Windows and runs the real lane under Xvfb on Linux. The separate
+`bundle-smoke` matrix still performs actual release build, install when the
+host provides the installer tools, and launch smoke on Ubuntu, macOS, and
+Windows. Those platform smokes are not presented as window E2E coverage.
 
 ## Cross-runtime guarantees
 

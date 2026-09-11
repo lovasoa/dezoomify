@@ -26,56 +26,40 @@ bridge. Tests: `cargo xtask test desktop`.
 
 ## End-to-end
 
-The hermetic frontend integration test always runs with no public network and
-no webview. It mounts the production `src/main.ts` entry in a lightweight DOM
-and drives its rendered submit, recovery, cancellation, and deep-link controls
-through a recording Tauri IPC and event boundary. It therefore fails when the
-shipped frontend wiring drifts; it does not duplicate URL parsing or job
-sequencing in the test. Native pipeline behavior is covered by the Rust desktop E2E and scenario
-lanes, while rendered-window behavior is covered by the real-window lane.
-
-```sh
-cargo xtask test desktop    # lean shell tests plus the hermetic integration smoke
-cargo xtask test scenario   # native pipeline scenario gates
-```
-
-The hermetic pieces are `apps/desktop/src-tauri/tests/desktop_e2e.rs`
-(real job table over an in-process loopback server) and
-`apps/desktop/tests/e2e.test.mjs` (mounted production frontend entry through a
-recording IPC and event boundary). The Rust test owns native output verification; the
-frontend test owns the shipped UI-to-command and event-to-controller graph.
-
-The real-window E2E runs the window shell under tauri-driver on Linux
-instead of by hand:
+The real-window E2E is the app-level gate: `selenium-webdriver` drives the
+shipped window shell against the embedded W3C WebDriver server
+(`tauri-plugin-wdio-webdriver`, compiled behind the test-only
+`testing-webdriver` cargo feature) over hermetic loopback fixtures. Because the
+server is embedded in the app, the same suite runs on Linux, macOS, and Windows
+with no external tauri-driver or platform driver. The plugin declares no IPC
+commands, so it needs no capability entry.
 
 ```sh
 cargo xtask test desktop --e2e-window
 ```
 
-The lane builds the window shell (`--unsigned-test`: lean shell, frontend,
-window shell, no bundle), serves fixtures hermetically on an ephemeral
-loopback port, serves the built frontend over loopback for the debug
-window shell, launches the app under tauri-driver with a fresh profile and
-ephemeral ports, and drives three flows with selenium-webdriver: automatic
-submit/save to an isolated output directory versus the `native/cli-dzi`
-golden, cancel with output cleanup, and the deep-link confirm gate (pending
-links perform no effect). The harness configures the existing output-directory
-setting to an isolated temporary folder through the rendered settings panel,
-so generated filenames remain discoverable on every supported host. Reports
-stay redacted and seeds fixed as in the hermetic gate.
+The lane builds the frontend, fixture server, and window shell (features
+`tauri,testing-webdriver`), stages lane-private copies, then runs
+`node --test specs/desktop.e2e.mjs`. The spec
+covers the user-visible journeys: automatic submit/save to an isolated output
+directory versus the `native/cli-dzi` golden, cancellation with no output, the
+deep-link confirm gate (pending links perform no effect), and a kept partial
+published to a `.partial` sibling. The harness configures the existing
+output-directory setting to an isolated temporary folder through the rendered
+settings panel, so generated filenames remain discoverable on every supported
+host. Reports stay redacted and inputs fixed.
 
-The lane needs a display (`xvfb-run -a` when headless), tauri-driver 2.x
-(`cargo install tauri-driver --version "=2.0.6"`, or `TAURI_DRIVER_BIN`),
-WebKitWebDriver (`WEBKIT_DRIVER_BIN` override), and the webview system
-packages above; each missing piece fails closed naming it. The lane and
-harness run on Linux; macOS/Windows lane support (native-driver discovery
-plus lane preflight) is a later wave.
+The lane needs a display on headless Linux (`xvfb-run -a`); macOS and Windows
+CI runners provide a GUI session. It needs the webview system packages above;
+a missing piece fails closed naming it. The earlier app-level suites that only
+asserted internal Rust state or mocked the IPC boundary were removed: app
+behavior is verified through the real window.
 
 CI (`.github/workflows/desktop.yml`, path-gated to desktop-relevant changes)
-uses a Linux `window-e2e` job for this real lane under Xvfb (apt
-`webkit2gtk-driver`, pinned tauri-driver, one hard deadline). The `bundle-smoke` job matrixes
-ubuntu/macos/windows (`fail-fast: false`) and keeps actual per-platform
-bundle, install, and launch coverage:
+runs `window-e2e` on ubuntu/macos/windows (`fail-fast: false`, the embedded
+server needs no external driver; Linux runs under Xvfb with one hard
+deadline). The `bundle-smoke` job keeps actual per-platform bundle, install,
+and launch coverage:
 Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under
 Xvfb (a 20 s stay-alive proves install + launch + webview init; the window
 shell has no `--version` flag), macOS mounts the `dmg` and execs the binary

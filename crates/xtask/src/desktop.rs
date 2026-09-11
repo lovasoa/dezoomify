@@ -110,26 +110,23 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     run_node(&["apps/desktop/tests/dev-smoke.test.mjs"])?;
     // Versioned icon generator (scripts/gen-desktop-icons.py, stdlib-only,
     // deterministic): re-runs the script and asserts byte-identical PNG/ICO/
-    // ICNS output plus container magic. Runs before the hermetic E2E so a
-    // nondeterministic generator fails fast.
+    // ICNS output plus container magic.
     run_node(&["apps/desktop/tests/icons.test.mjs"])?;
-    // Hermetic production-frontend integration: imports the shipped main.ts
-    // entry and drives its rendered controls through recording DOM and Tauri
-    // event/IPC boundaries.
-    // Rendered-window behavior remains in `--e2e-window` below.
-    run_node(&["apps/desktop/tests/e2e.test.mjs"])?;
     println!("test desktop: ok");
     Ok(())
 }
 
-/// Real-window E2E: the window shell under tauri-driver, Linux
-/// WebKitWebDriver, hermetic loopback fixtures, and byte-exact save
-/// verification.
-/// Owns the full lifecycle through the node harness (preflight,
-/// window-shell build, fixture server, frontend server, tauri-driver, app
-/// launches, isolated profiles with cleanup). Opt-in only: bare
-/// `test desktop` (plus `test`, `test all`, and `ci`) stays lean and
-/// display-free.
+/// Real-window E2E: selenium-webdriver drives the shipped window shell through
+/// the embedded W3C WebDriver server against hermetic loopback fixtures, then
+/// verifies byte-exact saved output.
+///
+/// The embedded server runs inside the app (`tauri-plugin-wdio-webdriver`,
+/// compiled behind the test-only `testing-webdriver` cargo feature), so the
+/// lane needs no external tauri-driver or platform driver and runs on Linux,
+/// macOS, and Windows. `specs/desktop.e2e.mjs` owns the full lifecycle:
+/// fixture server, frontend server, isolated profile, app launch, and teardown.
+/// Opt-in only: bare `test desktop` (plus `test`, `test all`, and `ci`) stays
+/// lean and display-free.
 fn test_desktop_e2e_window() -> Result<(), String> {
     // Display: Linux needs Xvfb (the lane fails closed without DISPLAY);
     // macOS and Windows CI runners provide a GUI session, so no DISPLAY
@@ -140,19 +137,11 @@ fn test_desktop_e2e_window() -> Result<(), String> {
                 .to_string(),
         );
     }
-    // Fail-closed driver discovery, mirroring the harness rules.
-    if resolve_tauri_driver().is_none() {
-        return Err(
-            "test desktop --e2e-window needs tauri-driver 2.x (or TAURI_DRIVER_BIN=...); install with `cargo install tauri-driver --version \"=2.0.6\"`"
-                .to_string(),
-        );
-    }
-    check_native_driver()?;
     ensure_window_e2e_deps()?;
-    // The harness launches this exact binary, so build it first: lean
-    // shell, frontend, and window shell with no bundle. `build_desktop`
-    // skips the window shell silently without the webview system packages,
-    // so fail closed up front instead.
+    // The harness launches this exact binary, so build it first: frontend,
+    // fixture server, and window shell with the embedded WebDriver server.
+    // Skip the lean `build_desktop` path: the spec binary needs
+    // `testing-webdriver`.
     if !tauri_system_ready() {
         return Err(format!(
             "test desktop --e2e-window needs the webview system packages ({WEBKIT_SYSTEM_PACKAGES})"
@@ -171,7 +160,16 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // ask Cargo to build it so source changes are rebuilt and no lane relies
     // on a binary left by an unrelated command.
     run_cargo(&["build", "-p", "dezoomify-fixture-server"])?;
-    build_desktop(&["--unsigned-test".to_string()])?;
+    build_frontend()?;
+    run_cargo(&[
+        "build",
+        "-p",
+        DESKTOP_PKG,
+        "--features",
+        "tauri,testing-webdriver",
+        "--bin",
+        "dezoomify-desktop",
+    ])?;
     // Lane-private copies: the window and lean shells share one binary
     // path (and the frontend one dist directory), so snapshot both before
     // the spec runs. A concurrent lean or frontend rebuild in the same
@@ -191,10 +189,13 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         &e2e_dir.join("dist"),
     )?;
     // One compact spec owns the fixed frontend port. Its deadline bounds a
-    // leaked app, driver, or frontend server without inflating normal runs.
+    // leaked app or frontend server without inflating normal runs.
     run_node_with_deadline(
-        std::time::Duration::from_secs(10 * 60),
-        &["--test", "apps/desktop/tests/window-e2e/window.spec.mjs"],
+        std::time::Duration::from_secs(20 * 60),
+        &[
+            "--test",
+            "apps/desktop/tests/window-e2e/specs/desktop.e2e.mjs",
+        ],
         &[
             (
                 "DEZOOMIFY_WINDOW_E2E_APP_BIN",
@@ -205,7 +206,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
                 dist_copy.to_str().unwrap_or(""),
             ),
         ],
-        "window.spec.mjs",
+        "desktop.e2e.mjs",
     )?;
     println!("test desktop --e2e-window: ok (real window, hermetic loopback)");
     Ok(())
@@ -279,7 +280,7 @@ fn copy_e2e_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), Str
     Ok(())
 }
 
-/// Selenium client for the window harness, installed by the root pnpm
+/// selenium-webdriver for the window harness, installed by the root pnpm
 /// workspace during `cargo xtask setup`.
 fn ensure_window_e2e_deps() -> Result<(), String> {
     let root = super::repo_root();
@@ -289,114 +290,6 @@ fn ensure_window_e2e_deps() -> Result<(), String> {
         return Ok(());
     }
     Err("window E2E workspace dependencies missing; run `cargo xtask setup` first".to_string())
-}
-
-fn path_on_path(name: &str) -> Option<std::path::PathBuf> {
-    for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
-        let candidate = dir.join(name);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-        // Windows: CreateProcess resolves `.exe` but a bare stem lookup
-        // does not, so probe the suffixed binary too (mirrors the harness
-        // resolveOnPath behavior on win32).
-        if cfg!(windows) {
-            let exe = dir.join(format!("{name}.exe"));
-            if exe.exists() {
-                return Some(exe);
-            }
-        }
-    }
-    None
-}
-
-/// tauri-driver discovery shared by all OSes: TAURI_DRIVER_BIN override,
-/// else `tauri-driver` (or `tauri-driver.exe` on Windows) on PATH.
-fn resolve_tauri_driver() -> Option<String> {
-    std::env::var("TAURI_DRIVER_BIN")
-        .ok()
-        .filter(|p| std::path::Path::new(p).exists())
-        .or_else(|| path_on_path("tauri-driver").map(|p| p.to_string_lossy().into_owned()))
-}
-
-/// Platform native-driver gate, mirroring the harness
-/// `resolveNativeDriver` slots. Linux keeps its exact prior message;
-/// macOS expects safaridriver (enabled via `sudo safaridriver --enable`);
-/// Windows expects msedgedriver exact-matched to the runner Edge version
-/// (the workflow installs it fail-closed naming both versions).
-fn check_native_driver() -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    {
-        if std::env::var("WEBKIT_DRIVER_BIN")
-            .ok()
-            .filter(|p| std::path::Path::new(p).exists())
-            .or_else(|| path_on_path("WebKitWebDriver").map(|p| p.to_string_lossy().into_owned()))
-            .is_none()
-        {
-            return Err(
-                "test desktop --e2e-window needs WebKitWebDriver on PATH (or WEBKIT_DRIVER_BIN=...)"
-                    .to_string(),
-            );
-        }
-        Ok(())
-    }
-    #[cfg(target_os = "macos")]
-    {
-        // SAFARI_DRIVER_BIN is the canonical override; WEBKIT_DRIVER_BIN
-        // stays accepted so a shared CI env keeps working. Note: this gate
-        // only checks the native driver is provisioned; tauri-driver 2.0.6
-        // itself ships no darwin server (its main.rs gates the server on
-        // `any(target_os = "linux", windows)`), so the harness surfaces the
-        // driver's own `not supported on this platform` there until
-        // upstream ships macOS support.
-        let found = std::env::var("SAFARI_DRIVER_BIN")
-            .ok()
-            .filter(|p| std::path::Path::new(p).exists())
-            .or_else(|| {
-                std::env::var("WEBKIT_DRIVER_BIN")
-                    .ok()
-                    .filter(|p| std::path::Path::new(p).exists())
-            })
-            .or_else(|| {
-                let builtin = std::path::PathBuf::from("/usr/bin/safaridriver");
-                builtin
-                    .exists()
-                    .then(|| builtin.to_string_lossy().into_owned())
-            })
-            .or_else(|| path_on_path("safaridriver").map(|p| p.to_string_lossy().into_owned()));
-        if found.is_none() {
-            return Err(
-                "test desktop --e2e-window needs safaridriver (or SAFARI_DRIVER_BIN=...); enable with `sudo safaridriver --enable`"
-                    .to_string(),
-            );
-        }
-        Ok(())
-    }
-    #[cfg(target_os = "windows")]
-    {
-        // EDGE_DRIVER_BIN is the canonical override; WEBKIT_DRIVER_BIN
-        // stays accepted so a shared CI env keeps working.
-        let found = std::env::var("EDGE_DRIVER_BIN")
-            .ok()
-            .filter(|p| std::path::Path::new(p).exists())
-            .or_else(|| {
-                std::env::var("WEBKIT_DRIVER_BIN")
-                    .ok()
-                    .filter(|p| std::path::Path::new(p).exists())
-            })
-            .or_else(|| path_on_path("msedgedriver").map(|p| p.to_string_lossy().into_owned()));
-        if found.is_none() {
-            return Err(
-                "test desktop --e2e-window needs msedgedriver on PATH (or EDGE_DRIVER_BIN=...) exact-matched to the runner Edge version (install from https://msedgedriver.microsoft.com/<edge-version>/edgedriver_win64.zip)"
-                    .to_string(),
-            );
-        }
-        Ok(())
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    {
-        Err("test desktop --e2e-window runs on Linux, macOS, or Windows only".to_string())
-    }
 }
 
 /// Desktop development: run the real Tauri development application together

@@ -58,6 +58,15 @@ async fn main() {
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    eprintln!(
+        "fixture server loaded {} route entries from {}",
+        routes.entry_count(),
+        scenarios_dir.display()
+    );
+    eprintln!(
+        "fixture server scenarios: {}",
+        routes.scenario_ids().join(",")
+    );
     let state = AppState {
         routes: Arc::new(routes),
         scenarios_dir,

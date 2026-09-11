@@ -595,6 +595,11 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init());
+    // Test-only embedded WebDriver server for the real-window E2E. The plugin
+    // starts its server unconditionally, so it is compiled in only for the
+    // non-default `testing-webdriver` feature and never reaches a release bundle.
+    #[cfg(feature = "testing-webdriver")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     // Updater (todo 5.8 decision): automatic updates are disabled.
     // No update host or key is deployed; users check GitHub Releases
     // manually. The capability document sets `updater.enabled: false`
