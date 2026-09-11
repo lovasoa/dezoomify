@@ -2101,6 +2101,18 @@
       "source_snapshot": "2026-09-11"
     },
     {
+      "content_type": "text/html",
+      "id": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/viewer.html",
+      "license_provenance": "local test fixture (synthetic Second Canvas viewer)",
+      "path": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/viewer.html",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "fc0f8bfb038a92f87ae74ba11588451b76332d9b43c7fda7224fa2aeae25ae2f",
+      "size": 135,
+      "source_path": "Second Canvas legacy viewer schema documented in issue #808",
+      "source_snapshot": "2026-09-11"
+    },
+    {
       "content_type": "image/png",
       "id": "rs-core/formats/payloads/root-testdata/deepzoom/expected_result.png",
       "license_provenance": "GPL-3.0-only (Rust source)",

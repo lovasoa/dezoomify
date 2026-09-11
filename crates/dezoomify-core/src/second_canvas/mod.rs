@@ -3,15 +3,19 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, de::IntoDeserializer};
+use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, DiscoveryRoute, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId,
+    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
+    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
+    LevelDescriptor, Request, StableId,
 };
 
-const ROUTES: &[DiscoveryRoute] =
-    &[DiscoveryMatch::ContentPredicate(contains_gigapixel).extract(catalog)];
+const ROUTES: &[DiscoveryRoute] = &[
+    DiscoveryMatch::ContentPredicate(contains_gigapixel).extract(catalog),
+    DiscoveryMatch::ContentPredicate(contains_viewer_script).then(follow_viewer_config),
+];
 
 pub const SPEC: DezoomerSpec =
     DezoomerSpec::new("second_canvas", ROUTES).with_display_name("Second Canvas");
@@ -21,6 +25,41 @@ fn contains_gigapixel(bytes: &[u8]) -> bool {
         .ok()
         .and_then(|document| document.get("gigapixel").cloned())
         .is_some_and(|gigapixel| gigapixel.is_object())
+}
+
+fn contains_viewer_script(bytes: &[u8]) -> bool {
+    let page = String::from_utf8_lossy(bytes).to_ascii_lowercase();
+    page.contains("scw.min.js") || page.contains("scv.min.js")
+}
+
+fn follow_viewer_config(
+    _: &DiscoveryContext<'_>,
+    resource: DiscoveryResource<'_>,
+) -> Result<DiscoveryStep, DiscoveryError> {
+    Ok(DiscoveryStep::Follow(Request::new(viewer_config_uri(
+        resource.final_uri(),
+    )?)))
+}
+
+fn viewer_config_uri(viewer_uri: &str) -> Result<String, DiscoveryError> {
+    let viewer = Url::parse(viewer_uri).map_err(|error| {
+        DiscoveryError::Session(format!("invalid Second Canvas viewer URL: {error}"))
+    })?;
+    let config = viewer
+        .query_pairs()
+        .find_map(|(name, value)| (name == "js").then(|| value.into_owned()))
+        .ok_or_else(|| {
+            DiscoveryError::Session("Second Canvas viewer URL has no js configuration".into())
+        })?;
+    let config = viewer.join(&config).map_err(|error| {
+        DiscoveryError::Session(format!("invalid Second Canvas configuration URL: {error}"))
+    })?;
+    if !config.path().to_ascii_lowercase().ends_with(".json") {
+        return Err(DiscoveryError::Session(
+            "Second Canvas viewer js configuration is not JSON".into(),
+        ));
+    }
+    Ok(config.into())
 }
 
 fn catalog(_: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
@@ -294,6 +333,17 @@ mod tests {
         assert_eq!(
             urls.last().unwrap(),
             "https://sc.example.test/gigapixel/modern/normal_3_2_1.jpg"
+        );
+    }
+
+    #[test]
+    fn viewer_js_parameter_resolves_against_the_viewer_page() {
+        assert_eq!(
+            viewer_config_uri(
+                "https://fixtures.test/web/index.html?js=metadata%2Fmodern.json&ua=test"
+            )
+            .unwrap(),
+            "https://fixtures.test/web/metadata/modern.json"
         );
     }
 }

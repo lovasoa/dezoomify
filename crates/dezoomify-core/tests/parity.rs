@@ -165,6 +165,29 @@ fn automatic_discovery_selects_every_ready_format() {
     assert_eq!(image.id.as_str(), "bulk:0");
 }
 
+#[test]
+fn second_canvas_viewer_page_follows_its_js_configuration() {
+    let viewer = "https://fixtures.test/second-canvas/web/index.html?js=metadata%2Fmodern.json";
+    let metadata = "https://fixtures.test/second-canvas/web/metadata/modern.json";
+    let image = ready_image(
+        discover(
+            viewer,
+            &[
+                (
+                    viewer,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/viewer.html"),
+                ),
+                (
+                    metadata,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json"),
+                ),
+            ],
+        )
+        .unwrap(),
+    );
+    assert_eq!(image.format.as_str(), "second_canvas");
+}
+
 fn grid(level: &LevelDescriptor) -> &Grid {
     match &level.source {
         TileSource::Grid(grid) => grid,
