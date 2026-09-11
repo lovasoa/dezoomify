@@ -144,11 +144,15 @@ note lives in the [Desktop app guide](user/desktop-app.md#install).
 ### Real-window E2E hook
 
 Desktop starts automatically save the selected image using the configured
-output directory and format. The Linux-only lane is
-`cargo xtask test desktop --e2e-window` (display, tauri-driver, and
-WebKitWebDriver required). It explicitly builds the fixture server and runs
-`window.spec.mjs`, which covers automatic submit-to-save, cancellation, and
-confirmed deep-link save through the real window.
+output directory and format. The lane is
+`cargo xtask test desktop --e2e-window` (a display is required on headless
+Linux; macOS and Windows runners provide one). It builds the fixture server
+and the window shell with the test-only `wdio` cargo feature, then WebdriverIO
+drives the real window through the official `@wdio/tauri-service` embedded
+WebDriver provider. `specs/desktop.e2e.mjs` covers automatic submit-to-save,
+cancellation, confirmed deep-link save, and a kept partial published to a
+`.partial` sibling. No external tauri-driver or platform WebDriver is needed,
+so the same lane runs on Linux, macOS, and Windows.
 
 The harness configures a fail-closed temporary output directory through the
 existing desktop settings panel; no test-only application environment

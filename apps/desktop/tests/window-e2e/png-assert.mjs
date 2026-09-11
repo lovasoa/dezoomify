@@ -1,9 +1,8 @@
 // PNG golden helpers for the real-window desktop E2E.
 //
-// Copied from the hermetic gate (`apps/desktop/tests/e2e.test.mjs`) so this
-// directory stays self-contained: same 512x512 pyramid quadrants, same
-// sha256 pin against `testdata/scenarios/native/cli-dzi/expected/result.json`.
-// No public network, no shared state; inputs are fixed with a fixed seed.
+// The saved window output is verified against the same 512x512 pyramid
+// quadrants and sha256 pin as `testdata/scenarios/native/cli-dzi/expected/result.json`.
+// No public network, no shared state; inputs are fixed.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
