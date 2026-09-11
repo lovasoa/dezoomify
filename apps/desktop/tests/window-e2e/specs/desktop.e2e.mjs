@@ -82,23 +82,29 @@ async function configureOutputDirectory(driver) {
   const directory = runOutputDir();
   let last = null;
   for (let attempt = 0; attempt < 120; attempt += 1) {
-    last = await driver.executeScript((dir) => {
-      const input = document.querySelector("#dz-settings-output-dir");
-      const panel = document.querySelector("#dz-desktop-settings");
-      if (!input || !panel) {
-        return { ok: false, reason: "panel-missing", hasInput: !!input, hasPanel: !!panel };
-      }
-      input.value = dir;
-      // A change on any advanced control routes through the panel's validated
-      // persist callback (which reads the hidden inputs, including the output
-      // directory). #dz-settings-retries is a stable id present on every panel.
-      const retries = panel.querySelector("#dz-settings-retries");
-      if (!retries) {
-        return { ok: false, reason: "no-persist-control" };
-      }
-      retries.dispatchEvent(new Event("change", { bubbles: true }));
-      return { ok: input.value === dir, reason: "done", value: input.value };
-    }, directory);
+    try {
+      last = await driver.executeScript((dir) => {
+        const input = document.querySelector("#dz-settings-output-dir");
+        const panel = document.querySelector("#dz-desktop-settings");
+        if (!input || !panel) {
+          return { ok: false, reason: "panel-missing", hasInput: !!input, hasPanel: !!panel };
+        }
+        input.value = dir;
+        // A change on any advanced control routes through the panel's validated
+        // persist callback (which reads the hidden inputs, including the output
+        // directory). #dz-settings-retries is a stable id present on every panel.
+        const retries = panel.querySelector("#dz-settings-retries");
+        if (!retries) {
+          return { ok: false, reason: "no-persist-control" };
+        }
+        retries.dispatchEvent(new Event("change", { bubbles: true }));
+        return { ok: input.value === dir, reason: "done", value: input.value };
+      }, directory);
+    } catch (error) {
+      // The webview can still be settling right after session creation on a
+      // loaded CI runner; a transient script timeout must not fail the run.
+      last = { ok: false, reason: `script-error: ${error.message}` };
+    }
     if (last.ok) return;
     await sleep(500);
   }
@@ -195,6 +201,9 @@ describe("Dezoomify desktop window", () => {
         .usingServer(WEBDRIVER_URL)
         .withCapabilities({ browserName: "wry" }) // accepted/ignored by the embedded server
         .build();
+      // Generous script/page timeouts: the webview may still be settling on a
+      // loaded CI runner, and the product's own startup can block the loop.
+      await driver.manage().setTimeouts({ script: 120000, pageLoad: 180000, implicit: 0 });
       await configureOutputDirectory(driver);
     } catch (error) {
       await teardown();

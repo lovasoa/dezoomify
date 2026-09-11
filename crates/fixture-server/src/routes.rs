@@ -180,11 +180,14 @@ fn collect_payloads(
         if path.is_dir() {
             collect_payloads(base, &path, out)?;
         } else {
+            // Normalize to `/` so the `{scenario}/payloads/{host}/{path}`
+            // convention matches on Windows, where `strip_prefix` yields `\`.
             let rel = path
                 .strip_prefix(base)
                 .map_err(|e| format!("strip prefix: {e}"))?
                 .to_str()
-                .ok_or("non-utf8 payload path")?;
+                .ok_or("non-utf8 payload path")?
+                .replace('\\', "/");
             if let Some(idx) = rel.find("/payloads/") {
                 out.push((rel[..idx].to_string(), rel[idx + 1..].to_string()));
             }
