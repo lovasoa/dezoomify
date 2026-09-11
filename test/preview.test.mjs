@@ -3,25 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  PREVIEW_MIN_SCALE,
-  PREVIEW_MAX_SCALE,
-  PREVIEW_ZOOM_STEP,
-  clampPreviewScale,
-} from "../src/main.ts";
 
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-
-test("preview scale clamps to the tainted-safe transform range", () => {
-  assert.equal(PREVIEW_MIN_SCALE, 0.1);
-  assert.equal(PREVIEW_MAX_SCALE, 8);
-  assert.equal(PREVIEW_ZOOM_STEP, 1.25);
-  assert.equal(clampPreviewScale(1), 1);
-  assert.equal(clampPreviewScale(0), PREVIEW_MIN_SCALE);
-  assert.equal(clampPreviewScale(100), PREVIEW_MAX_SCALE);
-  assert.equal(clampPreviewScale(NaN), 1);
-  assert.equal(clampPreviewScale("bad"), 1);
-});
 
 test("website preview wires wheel, drag, and buttons without pixel reads", () => {
   // Todo 2.2: the preview lives in packages/browser-runtime/src/preview.ts;

@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  PREVIEW_MAX_SCALE,
-  PREVIEW_MIN_SCALE,
   PREVIEW_ZOOM_STEP,
-  clampPreviewScale,
   createPreviewControls,
   setCanvasVisible,
 } from "../src/preview.ts";
@@ -35,15 +32,8 @@ function doc() {
   return { ids, getElementById: (id) => ids[id] ?? null };
 }
 
-test("preview scale clamps to the tainted-safe transform range", () => {
-  assert.equal(PREVIEW_MIN_SCALE, 0.1);
-  assert.equal(PREVIEW_MAX_SCALE, 8);
+test("preview zoom uses the configured step", () => {
   assert.equal(PREVIEW_ZOOM_STEP, 1.25);
-  assert.equal(clampPreviewScale(1), 1);
-  assert.equal(clampPreviewScale(0), PREVIEW_MIN_SCALE);
-  assert.equal(clampPreviewScale(100), PREVIEW_MAX_SCALE);
-  assert.equal(clampPreviewScale(NaN), 1);
-  assert.equal(clampPreviewScale("bad"), 1);
 });
 
 test("zoom and fit apply transform-only styles", () => {
@@ -59,15 +49,18 @@ test("zoom and fit apply transform-only styles", () => {
   assert.match(canvas.style.transform, /scale\(0.5\)/);
 });
 
-test("fit keeps tall images inside the frame below the manual zoom limit", () => {
+test("zoom stays between fit and the image's natural scale", () => {
   const d = doc();
   d.ids["rendering-canvas"].width = 2000;
   d.ids["rendering-canvas"].height = 20000;
   const preview = createPreviewControls();
   preview.initControls(d);
-  d.ids["preview-zoom-fit"].fire("click");
   assert.deepEqual(preview.getTransform(), { scale: 0.03, tx: 0, ty: 0 });
   assert.equal(d.ids["preview-zoom-label"].textContent, "3%");
+  preview.zoomBy(100, d);
+  assert.equal(preview.getTransform().scale, 1);
+  preview.zoomBy(0.01, d);
+  assert.equal(preview.getTransform().scale, 0.03);
 });
 
 test("controls wire buttons, wheel, and bounded drag without pixel reads", () => {

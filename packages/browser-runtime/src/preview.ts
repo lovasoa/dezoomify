@@ -7,8 +7,6 @@
 // display-only path stays display-only; preview never promises a clean save.
 // The host document is injected so node tests drive the transform math
 // without a DOM. Keep erasable-syntax-only for the browser `.js` mirrors.
-export const PREVIEW_MIN_SCALE = 0.1;
-export const PREVIEW_MAX_SCALE = 8;
 export const PREVIEW_ZOOM_STEP = 1.25;
 const PREVIEW_WHEEL_STEP_PIXELS = 100;
 
@@ -48,19 +46,8 @@ export interface PreviewControls {
   initControls(doc: PreviewDocumentLike): void;
 }
 
-function clampScale(scale: unknown, minimum: number): number {
-  const value = typeof scale === "number" ? scale : Number(scale);
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(PREVIEW_MAX_SCALE, Math.max(minimum, value));
-}
-
-export function clampPreviewScale(scale: unknown): number {
-  return clampScale(scale, PREVIEW_MIN_SCALE);
-}
-
 export function createPreviewControls(): PreviewControls {
   let transform: PreviewTransform = { scale: 1, tx: 0, ty: 0 };
-  let minimumScale = PREVIEW_MIN_SCALE;
   let wired = false;
 
   function getTransform(): PreviewTransform {
@@ -117,21 +104,18 @@ export function createPreviewControls(): PreviewControls {
   function fitScale(doc?: PreviewDocumentLike | null): number {
     const size = geometry(doc);
     if (!size) return 1;
-    // Fit may need to go below the normal zoom-out limit for tall images.
     return Math.min(1, size.viewportWidth / size.width, size.viewportHeight / size.height);
   }
 
   function resetTransform(doc?: PreviewDocumentLike | null): PreviewTransform {
-    const scale = fitScale(doc);
-    minimumScale = Math.min(PREVIEW_MIN_SCALE, scale);
-    transform = { scale, tx: 0, ty: 0 };
+    transform = { scale: fitScale(doc), tx: 0, ty: 0 };
     applyTransform(doc);
     return getTransform();
   }
 
   function zoomBy(factor: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
     const value = typeof factor === "number" ? factor : Number(factor);
-    const next = clampScale(transform.scale * (Number.isFinite(value) ? value : 1), minimumScale);
+    const next = Math.max(fitScale(doc), Math.min(1, transform.scale * (Number.isFinite(value) ? value : 1)));
     transform = { ...transform, scale: next };
     clampTranslation(doc);
     applyTransform(doc);
@@ -139,8 +123,9 @@ export function createPreviewControls(): PreviewControls {
   }
 
   function setScale(scale: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
-    minimumScale = PREVIEW_MIN_SCALE;
-    transform = { ...transform, scale: clampPreviewScale(scale) };
+    const value = typeof scale === "number" ? scale : Number(scale);
+    const next = Number.isFinite(value) ? Math.max(fitScale(doc), Math.min(1, value)) : 1;
+    transform = { ...transform, scale: next };
     clampTranslation(doc);
     applyTransform(doc);
     return getTransform();
