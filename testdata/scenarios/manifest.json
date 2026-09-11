@@ -2065,6 +2065,18 @@
       "source_snapshot": "a304e43"
     },
     {
+      "content_type": "text/html",
+      "id": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/embedded-viewer.html",
+      "license_provenance": "local test fixture (synthetic Second Canvas viewer)",
+      "path": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/embedded-viewer.html",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "887f46c5743c9fb0929cd3798738a9fc8d76c2e6a5696c3ade8d7e474396a911",
+      "size": 171,
+      "source_path": "Second Canvas embedded viewer schema documented in issue #808",
+      "source_snapshot": "2026-09-11"
+    },
+    {
       "content_type": "application/json",
       "id": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/legacy-string-level.json",
       "license_provenance": "local test fixture (synthetic Second Canvas metadata)",
@@ -2086,6 +2098,18 @@
       "sha256": "ef51de815a72e836e23b0761266e166fc20943b7b4ba1c7f2d96c946bf79c941",
       "size": 374,
       "source_path": "Second Canvas legacy schema documented in issue #808",
+      "source_snapshot": "2026-09-11"
+    },
+    {
+      "content_type": "text/html",
+      "id": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/museum-page.html",
+      "license_provenance": "local test fixture (synthetic Second Canvas embed page)",
+      "path": "rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/museum-page.html",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "dcf67a68ea807916332af8cbc84afbf1a0739785e7e0f2f309c64a8f2789eead",
+      "size": 138,
+      "source_path": "Second Canvas museum iframe flow reported on PR #1031",
       "source_snapshot": "2026-09-11"
     },
     {

@@ -188,6 +188,34 @@ fn second_canvas_viewer_page_follows_its_js_configuration() {
     assert_eq!(image.format.as_str(), "second_canvas");
 }
 
+#[test]
+fn second_canvas_museum_page_follows_its_embedded_viewer_configuration() {
+    let page = "https://museum.example.test/collection/metropolis";
+    let viewer = "https://sc.example.test.s3.amazonaws.com/web/gallery/metropolis_es.html";
+    let metadata = "https://sc.example.test.s3.amazonaws.com/web/gallery/metropolis_es.json";
+    let image = ready_image(
+        discover(
+            page,
+            &[
+                (
+                    page,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/museum-page.html"),
+                ),
+                (
+                    viewer,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/embedded-viewer.html"),
+                ),
+                (
+                    metadata,
+                    include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/dezoomify-core/testdata/second_canvas/modern.json"),
+                ),
+            ],
+        )
+        .unwrap(),
+    );
+    assert_eq!(image.format.as_str(), "second_canvas");
+}
+
 fn grid(level: &LevelDescriptor) -> &Grid {
     match &level.source {
         TileSource::Grid(grid) => grid,

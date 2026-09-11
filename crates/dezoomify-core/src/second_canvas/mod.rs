@@ -1,7 +1,8 @@
 //! Pure discovery for Second Canvas (Madpixel) `gigapixel` JSON metadata.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
+use regex::bytes::Regex as BytesRegex;
 use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
@@ -9,12 +10,14 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId,
+    LevelDescriptor, Positioned, PositionedTile, ProcessingRecipe, Request, StableId,
+    TileSourceError, resolve_relative,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(contains_gigapixel).extract(catalog),
     DiscoveryMatch::ContentPredicate(contains_viewer_script).then(follow_viewer_config),
+    DiscoveryMatch::ContentPredicate(contains_second_canvas_iframe).then(follow_iframe),
 ];
 
 pub const SPEC: DezoomerSpec =
@@ -32,24 +35,64 @@ fn contains_viewer_script(bytes: &[u8]) -> bool {
     page.contains("scw.min.js") || page.contains("scv.min.js")
 }
 
+static SECOND_CANVAS_IFRAME_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(
+        r#"(?is)<iframe\b[^>]*\bsrc\s*=\s*[\"'](?P<src>https?://[^\"']+\.s3\.amazonaws\.com/web/[^\"']+\.html(?:[?#][^\"']*)?)[\"']"#,
+    )
+    .expect("constant Second Canvas iframe pattern")
+});
+
+static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(
+        r#"(?is)\bsc[wv]\s*\.\s*load\s*\(\s*\{\s*[\"']hash[\"']\s*:\s*[\"'](?P<config>[^\"']+\.json)[\"']"#,
+    )
+    .expect("constant Second Canvas embedded configuration pattern")
+});
+
+fn contains_second_canvas_iframe(bytes: &[u8]) -> bool {
+    SECOND_CANVAS_IFRAME_RE.is_match(bytes)
+}
+
 fn follow_viewer_config(
     _: &DiscoveryContext<'_>,
     resource: DiscoveryResource<'_>,
 ) -> Result<DiscoveryStep, DiscoveryError> {
     Ok(DiscoveryStep::Follow(Request::new(viewer_config_uri(
         resource.final_uri(),
+        resource.bytes(),
     )?)))
 }
 
-fn viewer_config_uri(viewer_uri: &str) -> Result<String, DiscoveryError> {
+fn follow_iframe(
+    _: &DiscoveryContext<'_>,
+    resource: DiscoveryResource<'_>,
+) -> Result<DiscoveryStep, DiscoveryError> {
+    let src = SECOND_CANVAS_IFRAME_RE
+        .captures(resource.bytes())
+        .and_then(|captures| captures.name("src"))
+        .map(|src| String::from_utf8_lossy(src.as_bytes()).replace("&amp;", "&"))
+        .ok_or_else(|| DiscoveryError::Session("Second Canvas iframe has no source".into()))?;
+    Ok(DiscoveryStep::Follow(Request::new(resolve_relative(
+        resource.final_uri(),
+        &src,
+    ))))
+}
+
+fn viewer_config_uri(viewer_uri: &str, viewer_bytes: &[u8]) -> Result<String, DiscoveryError> {
     let viewer = Url::parse(viewer_uri).map_err(|error| {
         DiscoveryError::Session(format!("invalid Second Canvas viewer URL: {error}"))
     })?;
     let config = viewer
         .query_pairs()
         .find_map(|(name, value)| (name == "js").then(|| value.into_owned()))
+        .or_else(|| {
+            EMBEDDED_CONFIG_RE
+                .captures(viewer_bytes)
+                .and_then(|captures| captures.name("config"))
+                .map(|config| String::from_utf8_lossy(config.as_bytes()).into_owned())
+        })
         .ok_or_else(|| {
-            DiscoveryError::Session("Second Canvas viewer URL has no js configuration".into())
+            DiscoveryError::Session("Second Canvas viewer has no JSON configuration".into())
         })?;
     let config = viewer.join(&config).map_err(|error| {
         DiscoveryError::Session(format!("invalid Second Canvas configuration URL: {error}"))
@@ -141,16 +184,16 @@ fn build_levels(
                 x: image_size.x.div_ceil(downscale),
                 y: image_size.y.div_ceil(downscale),
             };
-            let origin = Arc::clone(&origin);
-            let pattern = Arc::clone(&pattern);
-            let source = Grid::with_requests(
+            let validation_origin = Arc::clone(&origin);
+            let validation_pattern = Arc::clone(&pattern);
+            let validation = Grid::with_requests(
                 StableId::new(format!("second-canvas:{}:{level}", layer.id(0))),
                 level_size,
                 Vec2d::square(gigapixel.tile),
                 Vec2d::default(),
                 move |tile| {
                     Request::new(format!(
-                        "{origin}{pattern}{level}_{}_{}.jpg",
+                        "{validation_origin}{validation_pattern}{level}_{}_{}.jpg",
                         tile.coord.column, tile.coord.row
                     ))
                 },
@@ -158,11 +201,65 @@ fn build_levels(
             .map_err(|error| {
                 DiscoveryError::Session(format!("invalid Second Canvas grid: {error}"))
             })?;
+            // Second Canvas serves full-sized padded JPEGs for edge cells.
+            // Keep their decoded size and let the declared canvas crop padding
+            // instead of scaling edge pixels down in browser runtimes.
+            let source = Positioned::from_generator(
+                StableId::new(format!("second-canvas:{}:{level}", layer.id(0))),
+                Some(level_size),
+                SecondCanvasTiles {
+                    origin: Arc::clone(&origin),
+                    pattern: Arc::clone(&pattern),
+                    level,
+                    tile_size: gigapixel.tile,
+                    shape: validation.shape(),
+                    count: validation.count(),
+                },
+            );
             Ok(LevelDescriptor::new(source)
                 .with_scale_factor(Some(downscale))
                 .with_title(Some(format!("Second Canvas level {level}"))))
         })
         .collect()
+}
+
+#[derive(Clone, Debug)]
+struct SecondCanvasTiles {
+    origin: Arc<str>,
+    pattern: Arc<str>,
+    level: u32,
+    tile_size: u32,
+    shape: Vec2d,
+    count: u64,
+}
+
+impl crate::core::tile_plan::PositionedGenerator for SecondCanvasTiles {
+    fn count(&self) -> u64 {
+        self.count
+    }
+
+    fn tile(&self, ordinal: u64) -> Result<PositionedTile, TileSourceError> {
+        let column = u32::try_from(ordinal % u64::from(self.shape.x))
+            .map_err(|_| TileSourceError::ArithmeticOverflow)?;
+        let row = u32::try_from(ordinal / u64::from(self.shape.x))
+            .map_err(|_| TileSourceError::ArithmeticOverflow)?;
+        let destination = Vec2d {
+            x: column
+                .checked_mul(self.tile_size)
+                .ok_or(TileSourceError::ArithmeticOverflow)?,
+            y: row
+                .checked_mul(self.tile_size)
+                .ok_or(TileSourceError::ArithmeticOverflow)?,
+        };
+        Ok(PositionedTile {
+            request: Request::new(format!(
+                "{}{}{}_{}_{}.jpg",
+                self.origin, self.pattern, self.level, column, row
+            )),
+            destination,
+            processing: ProcessingRecipe::None,
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -319,11 +416,11 @@ mod tests {
         let CatalogEntry::Ready(image) = &catalog.entries()[0] else {
             panic!("expected ready image");
         };
-        let TileSource::Grid(grid) = &image.levels.last().unwrap().source else {
-            panic!("expected grid");
+        let TileSource::Positioned(tiles) = &image.levels.last().unwrap().source else {
+            panic!("expected positioned tiles");
         };
-        let urls: Vec<_> = grid
-            .tiles_row_major()
+        let urls: Vec<_> = tiles
+            .tiles()
             .map(|tile| tile.unwrap().request.uri)
             .collect();
         assert_eq!(
@@ -334,16 +431,33 @@ mod tests {
             urls.last().unwrap(),
             "https://sc.example.test/gigapixel/modern/normal_3_2_1.jpg"
         );
+        assert_eq!(tiles.image_size(), Some(Vec2d { x: 1300, y: 900 }));
+        let last = tiles.tiles().last().unwrap().unwrap();
+        assert_eq!(last.destination, Vec2d { x: 1024, y: 512 });
+        assert_eq!(last.expected_size, None, "padded edge tiles are clipped");
     }
 
     #[test]
     fn viewer_js_parameter_resolves_against_the_viewer_page() {
         assert_eq!(
             viewer_config_uri(
-                "https://fixtures.test/web/index.html?js=metadata%2Fmodern.json&ua=test"
+                "https://fixtures.test/web/index.html?js=metadata%2Fmodern.json&ua=test",
+                b"<script src=\"scw.min.js\"></script>",
             )
             .unwrap(),
             "https://fixtures.test/web/metadata/modern.json"
+        );
+    }
+
+    #[test]
+    fn embedded_viewer_hash_resolves_against_the_viewer_page() {
+        assert_eq!(
+            viewer_config_uri(
+                "https://fixtures.test/web/gallery/metropolis_es.html",
+                br#"<script src="scv.min.js"></script><script>scv.load({ "hash":"metropolis_es.json" });</script>"#,
+            )
+            .unwrap(),
+            "https://fixtures.test/web/gallery/metropolis_es.json"
         );
     }
 }
