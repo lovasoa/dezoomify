@@ -255,11 +255,14 @@ export async function startFixtureServer(workDir) {
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) {
-      throw new Error(`fixture gateway returned ${response.status}`);
+      throw new Error(`fixture gateway returned ${response.status}: ${await response.text()}`);
     }
   } catch (error) {
     stopFixtureServer(fixture);
-    throw new Error(`window E2E: fixture gateway unreachable at ${base}: ${error.message}\n${fixture.logs()}`);
+    const log = existsSync(requestLog) ? readFileSync(requestLog, "utf8") : "";
+    throw new Error(
+      `window E2E: fixture gateway unreachable at ${base}: ${error.message}\n${fixture.logs()}\n${log}`,
+    );
   }
   return fixture;
 }

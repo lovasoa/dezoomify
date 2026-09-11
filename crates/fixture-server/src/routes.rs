@@ -68,6 +68,11 @@ pub struct RenderedRoute {
 }
 
 impl RouteTable {
+    /// Number of loaded route entries, for startup diagnostics.
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
     pub fn load(scenarios_dir: &Path) -> Result<Self, String> {
         // Discover scenario dirs by walking for routes.json files; the manifest
         // is a verification artifact, not the load list.
