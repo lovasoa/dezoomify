@@ -73,6 +73,14 @@ impl RouteTable {
         self.entries.len()
     }
 
+    /// Unique scenario ids backing the loaded routes, for startup diagnostics.
+    pub fn scenario_ids(&self) -> Vec<&str> {
+        let mut ids: Vec<&str> = self.entries.iter().map(|(id, _, _)| id.as_str()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
     pub fn load(scenarios_dir: &Path) -> Result<Self, String> {
         // Discover scenario dirs by walking for routes.json files; the manifest
         // is a verification artifact, not the load list.

@@ -63,6 +63,10 @@ async fn main() {
         routes.entry_count(),
         scenarios_dir.display()
     );
+    eprintln!(
+        "fixture server scenarios: {}",
+        routes.scenario_ids().join(",")
+    );
     let state = AppState {
         routes: Arc::new(routes),
         scenarios_dir,

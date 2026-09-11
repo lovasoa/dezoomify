@@ -95,6 +95,26 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Independent Node-side view of the scenario tree, for diagnosing a fixture
+// server that loads a different route count than the checkout provides.
+function countScenarioRoutes(dir) {
+  let files = 0;
+  let routes = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.name === "routes.json") {
+        files += 1;
+        routes += JSON.parse(readFileSync(full, "utf8")).routes.length;
+      }
+    }
+  }
+  return { files, routes };
+}
+
 // Set by `startWindowApp` before the app is launched; live binding so the spec
 // can read it after startup. Never a fixed shared port: the embedded server
 // gets an ephemeral loopback port the kernel hands out.
@@ -260,8 +280,15 @@ export async function startFixtureServer(workDir) {
   } catch (error) {
     stopFixtureServer(fixture);
     const log = existsSync(requestLog) ? readFileSync(requestLog, "utf8") : "";
+    let tree = "unavailable";
+    try {
+      tree = JSON.stringify(countScenarioRoutes(SCENARIOS_DIR));
+    } catch (treeError) {
+      tree = `error: ${treeError.message}`;
+    }
     throw new Error(
-      `window E2E: fixture gateway unreachable at ${base}: ${error.message}\n${fixture.logs()}\n${log}`,
+      `window E2E: fixture gateway unreachable at ${base}: ${error.message}\n` +
+        `node scenario tree: ${tree}\n${fixture.logs()}\n${log}`,
     );
   }
   return fixture;
