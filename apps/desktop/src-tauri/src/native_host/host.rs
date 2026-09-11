@@ -30,7 +30,7 @@ use crate::native_host::session::{
 /// Native host identity (matches manifests and capabilities).
 pub const HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 /// Host application version.
-pub const HOST_VERSION: &str = "3.0.2";
+pub const HOST_VERSION: &str = "3.0.3";
 /// Dezoomify protocol version spoken on this channel.
 pub const HOST_PROTOCOL: &str = "1.0";
 

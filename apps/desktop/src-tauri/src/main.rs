@@ -54,7 +54,7 @@ fn best_effort_register() {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        println!("dezoomify-desktop 3.0.2");
+        println!("dezoomify-desktop 3.0.3");
         return;
     }
     match args.first().map(String::as_str) {
