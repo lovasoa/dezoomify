@@ -4,7 +4,7 @@
 // and hermetic loopback fixtures. One app session per run; each test resets to
 // idle through the product control.
 import assert from "node:assert/strict";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { after, afterEach, before, describe, it } from "node:test";
 import { Builder, By } from "selenium-webdriver";
 import {
@@ -41,6 +41,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function errorDetail(state) {
+  return `${state.errorText}\n${state.errorDiagnostics ?? ""}`;
+}
+
 async function snapshot(driver) {
   return driver.executeScript(() => {
     const q = (selector) => document.querySelector(selector);
@@ -51,6 +55,7 @@ async function snapshot(driver) {
       completed: !!q(".dz-completed-section"),
       error: !!q(".dz-error-section"),
       errorText: text("#dz-error-message"),
+      errorDiagnostics: text("#dz-error-diagnostics"),
       deepLink: !!q("#dz-deep-link-confirm"),
       partialNote: text(".dz-partial-note"),
     };
@@ -152,6 +157,13 @@ describe("Dezoomify desktop window", () => {
     app = null;
     await closeFrontendServer(frontend);
     frontend = null;
+    if (fixture) {
+      const requestLog = existsSync(fixture.requestLog)
+        ? readFileSync(fixture.requestLog, "utf8")
+        : "";
+      const logs = `${fixture.logs()}\n${requestLog}`.trim();
+      if (logs) process.stderr.write(`window E2E fixture log:\n${logs.slice(-4000)}\n`);
+    }
     stopFixtureServer(fixture);
     fixture = null;
     if (runDirs) {
@@ -212,7 +224,7 @@ describe("Dezoomify desktop window", () => {
     );
 
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, `the save completes without a UI error: ${terminal.errorText}`);
+    assert.equal(terminal.error, false, `the save completes without a UI error: ${errorDetail(terminal)}`);
     assert.equal(terminal.completed, true, "the completion view is shown");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
@@ -276,7 +288,7 @@ describe("Dezoomify desktop window", () => {
       "deep-link save terminal",
     );
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, `the confirmed deep link completes: ${terminal.errorText}`);
+    assert.equal(terminal.error, false, `the confirmed deep link completes: ${errorDetail(terminal)}`);
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "the deep link writes exactly one PNG");
     assertSavedPyramid(readFileSync(outputs[0]), expectedHash());
@@ -296,7 +308,7 @@ describe("Dezoomify desktop window", () => {
     );
 
     const terminal = await snapshot(driver);
-    assert.equal(terminal.error, false, `a kept partial is not a hard error: ${terminal.errorText}`);
+    assert.equal(terminal.error, false, `a kept partial is not a hard error: ${errorDetail(terminal)}`);
     assert.ok(terminal.partialNote, "the completion view reports missing tiles");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "exactly one partial output is published");

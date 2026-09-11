@@ -230,6 +230,9 @@ export async function startFixtureServer(workDir) {
     "--request-log",
     requestLog,
   ]);
+  const chunks = [];
+  proc.stdout.on("data", (chunk) => chunks.push(chunk.toString()));
+  proc.stderr.on("data", (chunk) => chunks.push(chunk.toString()));
   let base = null;
   for (let i = 0; i < 100 && !base; i += 1) {
     const bound = existsSync(addrFile) ? readFileSync(addrFile, "utf8").trim() : null;
@@ -244,7 +247,21 @@ export async function startFixtureServer(workDir) {
     proc.kill();
     throw new Error("fixture server address is not loopback");
   }
-  return { proc, base, requestLog };
+  const fixture = { proc, base, requestLog, logs: () => chunks.join("") };
+  // Fail closed before the app launches if the harness itself cannot read the
+  // gateway; otherwise an app-side discovery failure is hard to attribute.
+  try {
+    const response = await fetch(`${base}/fetch?url=${encodeURIComponent("https://fixtures.test/cli/pyramid.dzi")}`, {
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) {
+      throw new Error(`fixture gateway returned ${response.status}`);
+    }
+  } catch (error) {
+    stopFixtureServer(fixture);
+    throw new Error(`window E2E: fixture gateway unreachable at ${base}: ${error.message}\n${fixture.logs()}`);
+  }
+  return fixture;
 }
 
 export function stopFixtureServer(fixture) {
