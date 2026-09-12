@@ -504,6 +504,11 @@ abbr[title] {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+  padding: 0.55rem;
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius-large);
+  background: var(--dz-surface-gradient);
+  box-shadow: var(--dz-surface-shadow);
 }
 
 @media (min-width: 561px) {
@@ -537,8 +542,8 @@ abbr[title] {
   font-family: inherit;
   font-size: 1.05rem;
   color: var(--dz-text-primary);
-  background: #ffffff;
-  border: 1.5px solid var(--dz-surface-border);
+  background: transparent;
+  border: 1.5px solid transparent;
   border-radius: var(--dz-radius);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -546,15 +551,15 @@ abbr[title] {
 
 @media (prefers-color-scheme: dark) {
   .dz-input {
-    background: #1c1a18;
-    border-color: var(--dz-surface-border);
+    background: transparent;
+    border-color: transparent;
   }
 }
 
 .dz-input:focus {
   outline: none;
-  border-color: var(--dz-accent-blue);
-  box-shadow: var(--dz-focus-ring);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .dz-input::placeholder {

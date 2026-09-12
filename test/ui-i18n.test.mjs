@@ -218,7 +218,7 @@ test("i18n: no orphan locale keys; the dictionary stays ready for the view/page 
   // dictionary as the single source for their migration (see the module
   // header and `packages/shared-ui/AGENTS.md`). Every English key therefore
   // ships in all four locales now, so the migration needs no retranslation.
-  const viewRefs = tRefs(read("packages/shared-ui/src/view.ts"));
+  const viewRefs = tRefs(read("packages/shared-ui/src/view.tsx"));
   for (const key of viewRefs) {
     for (const [label, table] of Object.entries(LOCALES)) {
       assert.ok(Object.hasOwn(table, key), `${label} covers future view/page key: ${key}`);
@@ -239,31 +239,18 @@ test("i18n: no orphan locale keys; the dictionary stays ready for the view/page 
   }
 });
 
-test("i18n: extension modal carries no replica table; its mirror stays generated", () => {
-  const modal = read("apps/extension/src/modal/modal.ts");
-  assert.ok(!modal.includes("PAGE_EN"), "modal must not carry an i18n replica table");
-  assert.ok(!modal.includes("pageT("), "modal must not carry a replica lookup");
+test("i18n: the extension job tab resolves copy through the shared dictionary", () => {
+  // The extension bundles the shared UI directly; there is no vendored
+  // dictionary mirror left to drift. Any `t()` key the job tab renders must
+  // exist in all four locales.
+  const job = read("apps/extension/src/job/index.ts");
+  assert.ok(!job.includes("PAGE_EN"), "job tab must not carry an i18n replica table");
   for (const replica of ["const fr =", "const de =", "const it =", "FR_DE_IT"]) {
-    assert.ok(!modal.includes(replica), `modal must not vendor a locale table inline (${replica})`);
+    assert.ok(!job.includes(replica), `job tab must not vendor a locale table inline (${replica})`);
   }
-  // Whatever the modal resolves through `t()` today must exist in all four
-  // locales; the modal still renders English literals while its migration is
-  // staged, so zero refs is accepted and resolves vacuously.
-  const refs = tRefs(modal);
-  for (const key of refs) {
+  for (const key of tRefs(job)) {
     for (const [label, table] of Object.entries(LOCALES)) {
       assert.ok(Object.hasOwn(table, key), `${label} covers extension key: ${key}`);
     }
-  }
-  // The served browser mirror carries the same four tables via codegen.
-  const mirror = read("packages/shared-ui/src/i18n.js");
-  for (const mod of ['./locales/fr.js', './locales/de.js', './locales/it.js']) {
-    assert.ok(mirror.includes(mod), `browser mirror imports ${mod} (run node scripts/sync-web-js.mjs)`);
-  }
-  for (const name of ["fr.js", "de.js", "it.js"]) {
-    assert.ok(
-      fs.existsSync(path.join(rootDir, "packages/shared-ui/src/locales", name)),
-      `browser locale mirror ships: locales/${name}`,
-    );
   }
 });

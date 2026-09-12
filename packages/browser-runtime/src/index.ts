@@ -10,3 +10,7 @@ export * from "./queue.ts";
 export * from "./session.ts";
 export * from "./save-name.ts";
 export * from "./web-integration.ts";
+export * from "./tile-decode.ts";
+export * from "./canvas-save.ts";
+export * from "./assembly.ts";
+export * from "./engine-selection.ts";

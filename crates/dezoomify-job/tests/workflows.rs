@@ -186,6 +186,56 @@ fn destination_grant_flow_completes() {
 }
 
 #[test]
+fn keeping_a_partial_result_decodes_only_acquired_tiles() {
+    let mut config = test_config();
+    config.max_retries = 0;
+    let mut host = ScriptedHost::new(&job_id(20), INPUT_URL, config).unwrap();
+    let _level_id = discover_and_select(&mut host, 20);
+    host.apply(JobResponse::DestinationGranted {
+        job: job_id(20),
+        destination: "dst:0".to_string(),
+    })
+    .unwrap();
+    let planned: Vec<String> = host
+        .tile_effects()
+        .into_iter()
+        .map(|(tile, _, _)| tile)
+        .collect();
+
+    host.apply(JobResponse::TileOutcome {
+        job: job_id(20),
+        tile: planned[0].clone(),
+        ok: true,
+    })
+    .unwrap();
+    host.apply(JobResponse::TileOutcome {
+        job: job_id(20),
+        tile: planned[1].clone(),
+        ok: false,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AwaitingPartialDecision");
+
+    host.apply(JobResponse::PartialKeep {
+        job: job_id(20),
+        keep: true,
+    })
+    .unwrap();
+
+    let decoded: Vec<&str> = host
+        .effects
+        .iter()
+        .filter(|effect| {
+            effect.get("kind").and_then(serde_json::Value::as_str) == Some("decode-pixels")
+        })
+        .filter_map(|effect| effect.get("tile").and_then(serde_json::Value::as_str))
+        .collect();
+    assert_eq!(decoded, vec![planned[0].as_str()]);
+    assert_eq!(host.state(), "PartiallyCompleted");
+    assert_eq!(host.job().terminal_kind(), Some("partial-completed"));
+}
+
+#[test]
 fn cancel_in_acquiring_tiles_ignores_late_response() {
     let mut host = ScriptedHost::new(&job_id(3), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 3);

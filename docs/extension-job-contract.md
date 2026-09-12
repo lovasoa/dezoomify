@@ -56,7 +56,7 @@ are not retrospectively accepted as validated.
 
 The job tab is a full browser host of the Rust job engine: its dedicated
 worker owns one WASM `Session`, and the shared browser-runtime assembly
-executor (vendored from `packages/browser-runtime`) executes the engine's
+executor (imported from `packages/browser-runtime`) executes the engine's
 effects. The controller never grows a second state machine:
 
 - Catalog selection is deterministic (`engine-selection.ts`): largest ready

@@ -5,6 +5,7 @@
 // idle through the product control.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { Builder, By } from "selenium-webdriver";
 import {
@@ -78,27 +79,18 @@ async function waitFor(driver, predicate, timeout, label) {
   throw new Error(`timed out waiting for ${label}${detail}: ${JSON.stringify(state)}`);
 }
 
-async function configureOutputDirectory(driver) {
-  const directory = runOutputDir();
+async function waitForDefaultOutputDirectory(driver) {
+  const directory = path.basename(runOutputDir());
   let last = null;
   for (let attempt = 0; attempt < 120; attempt += 1) {
     try {
-      last = await driver.executeScript((dir) => {
-        const input = document.querySelector("#dz-settings-output-dir");
+      last = await driver.executeScript((expectedFolder) => {
         const panel = document.querySelector("#dz-desktop-settings");
-        if (!input || !panel) {
-          return { ok: false, reason: "panel-missing", hasInput: !!input, hasPanel: !!panel };
+        const folder = panel?.querySelector(".dz-quick-button");
+        if (!panel || !folder) {
+          return { ok: false, reason: "settings-not-mounted", hasPanel: !!panel, hasFolder: !!folder };
         }
-        input.value = dir;
-        // A change on any advanced control routes through the panel's validated
-        // persist callback (which reads the hidden inputs, including the output
-        // directory). #dz-settings-retries is a stable id present on every panel.
-        const retries = panel.querySelector("#dz-settings-retries");
-        if (!retries) {
-          return { ok: false, reason: "no-persist-control" };
-        }
-        retries.dispatchEvent(new Event("change", { bubbles: true }));
-        return { ok: input.value === dir, reason: "done", value: input.value };
+        return { ok: folder.textContent.trim() === expectedFolder, reason: "done", value: folder.textContent.trim() };
       }, directory);
     } catch (error) {
       // The webview can still be settling right after session creation on a
@@ -108,7 +100,7 @@ async function configureOutputDirectory(driver) {
     if (last.ok) return;
     await sleep(500);
   }
-  throw new Error(`desktop output-directory setting: ${JSON.stringify(last)}`);
+  throw new Error(`desktop default output-directory setting: ${JSON.stringify(last)}`);
 }
 
 async function submitUrl(driver, url) {
@@ -204,7 +196,7 @@ describe("Dezoomify desktop window", () => {
       // Generous script/page timeouts: the webview may still be settling on a
       // loaded CI runner, and the product's own startup can block the loop.
       await driver.manage().setTimeouts({ script: 120000, pageLoad: 180000, implicit: 0 });
-      await configureOutputDirectory(driver);
+      await waitForDefaultOutputDirectory(driver);
     } catch (error) {
       await teardown();
       throw error;

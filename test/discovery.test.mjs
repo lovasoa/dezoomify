@@ -14,7 +14,7 @@ import {
   textToBytes,
   noImageFoundError,
 } from "../src/discovery.ts";
-import * as discoveryJs from "../src/discovery.js";
+import * as discoveryJs from "../src/discovery.ts";
 
 const ANTHROPIC_LIKE_HTML = `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><title>Formalizing Fermat's Last Theorem</title>
@@ -268,27 +268,22 @@ test("browser mirror stays in sync with the tested TS classifier", () => {
 test("entries never fabricate tile progress; negatives carry a structured error", () => {
   const thisFile = fileURLToPath(import.meta.url);
   const srcDir = path.dirname(path.dirname(thisFile));
-  const mainJs = fs.readFileSync(path.join(srcDir, "src", "main.js"), "utf8");
   const mainTs = fs.readFileSync(path.join(srcDir, "src", "main.ts"), "utf8");
-  // The reported bug was a hardcoded fake count shown for any URL.
-  assert.ok(!mainJs.includes("14 of 28"), "main.js must not hardcode fake tile counts");
-  assert.ok(!mainJs.includes("14, total: 28"), "main.js must not hardcode fake totals");
   // Positive-path fabrications stay banned: no hardcoded dimensions or fake
   // save success. A real save lifecycle is allowed, but only when backed by
   // actual canvas encoding (toBlob) of assembled pixels.
-  for (const [name, text] of [["main.js", mainJs], ["main.ts", mainTs]]) {
-    assert.ok(!text.includes("4096"), `${name} must not hardcode fake dimensions`);
-    assert.ok(!text.includes("3072"), `${name} must not hardcode fake dimensions`);
-    assert.ok(!text.includes("Image ready to save"), `${name} must not fake save success`);
-    assert.ok(!text.includes("Reading image tiles"), `${name} must not imply tile fetch`);
-    if (text.includes("save-done")) {
-      assert.ok(text.includes("toBlob"), `${name} must encode real pixels before save-done`);
-    }
+  assert.ok(!mainTs.includes("14 of 28"), "main.ts must not hardcode fake tile counts");
+  assert.ok(!mainTs.includes("14, total: 28"), "main.ts must not hardcode fake totals");
+  assert.ok(!mainTs.includes("4096"), "main.ts must not hardcode fake dimensions");
+  assert.ok(!mainTs.includes("3072"), "main.ts must not hardcode fake dimensions");
+  assert.ok(!mainTs.includes("Image ready to save"), "main.ts must not fake save success");
+  assert.ok(!mainTs.includes("Reading image tiles"), "main.ts must not imply tile fetch");
+  if (mainTs.includes("save-done")) {
+    assert.ok(mainTs.includes("toBlob"), "main.ts must encode real pixels before save-done");
   }
   // The WASM core is authoritative: the website forwards every readable
   // payload and lets the engine decide. The substring classifier stays as a
   // UI hint only and must never gate (throw) on a negative hint.
-  assert.ok(mainJs.includes("classifyReadableBytes"), "main.js keeps classifier as hint");
   assert.ok(mainTs.includes("classifyReadableBytes"), "main.ts keeps classifier as hint");
   assert.ok(
     mainTs.includes("running full discovery"),
@@ -298,13 +293,11 @@ test("entries never fabricate tile progress; negatives carry a structured error"
     !mainTs.includes("content classifier: no zoomable-image content"),
     "main.ts must not fail the job when the first head lacks a zoomable literal",
   );
-  for (const text of [mainTs, mainJs]) {
-    assert.ok(
-      !text.includes('throw failure(\n      "NO_IMAGE_FOUND"') &&
-        !text.includes('throw failure("NO_IMAGE_FOUND"'),
-      "website fetch must not throw NO_IMAGE_FOUND before the engine runs",
-    );
-  }
+  assert.ok(
+    !mainTs.includes('throw failure(\n      "NO_IMAGE_FOUND"') &&
+      !mainTs.includes('throw failure("NO_IMAGE_FOUND"'),
+    "website fetch must not throw NO_IMAGE_FOUND before the engine runs",
+  );
   // NO_IMAGE_FOUND still exists as the engine's terminal discovery code
   // (worker maps "no discovery candidate accepted" to it).
   const workerJs = fs.readFileSync(path.join(srcDir, "src", "worker.js"), "utf8");
@@ -354,15 +347,14 @@ test("regression: heads without zoomable literals still reach WASM discovery (GA
     mainTs.includes("running full discovery"),
     "website forwards literal-free heads to WASM discovery",
   );
-  // Extension parity: ranked candidates are each tried via core discovery,
-  // never dropped on a head-text pre-filter.
-  const pageTs = fs.readFileSync(
-    path.join(srcDir, "apps", "extension", "src", "modal", "modal.ts"),
+  // The extension ranks candidates through the same core and never drops one
+  // on a head-text pre-filter.
+  const jobIndex = fs.readFileSync(
+    path.join(srcDir, "apps", "extension", "src", "job", "index.ts"),
     "utf8",
   );
   assert.ok(
-    pageTs.includes("for (let i = 0; i < ranked.length; i++)") &&
-      pageTs.includes("await discover(candidate.url"),
-    "extension tries every ranked candidate directly",
+    jobIndex.includes('postMessage({ type: "engine.rank"'),
+    "extension ranks candidates through the engine, no head-text pre-filter",
   );
 });

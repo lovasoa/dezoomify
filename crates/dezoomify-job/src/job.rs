@@ -1073,7 +1073,17 @@ impl Job {
     fn complete_remaining(&mut self, partial: bool) -> Result<(), JobError> {
         self.paused = false;
         self.set_state(State::ProcessingTiles)?;
-        for tile in self.planned_tiles.clone() {
+        // A partial result deliberately has holes: only successfully acquired
+        // tiles can be decoded. Emitting decode work for failed or still
+        // in-flight tiles makes every host treat an accepted partial result as
+        // an output-state failure before it can encode the retained pieces.
+        let tiles_to_decode: Vec<_> = self
+            .planned_tiles
+            .clone()
+            .into_iter()
+            .filter(|tile| !partial || self.acquired_tiles.contains(tile))
+            .collect();
+        for tile in tiles_to_decode {
             let effect = self.alloc_effect_id()?;
             self.push_effect("decode-pixels", json!({"effect": effect, "tile": tile}))?;
         }

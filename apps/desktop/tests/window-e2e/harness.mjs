@@ -17,6 +17,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  writeFileSync,
 } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -375,9 +376,20 @@ export async function closeFrontendServer(server) {
 export function createRunDirs() {
   const root = mkdtempSync(path.join(tmpdir(), "dezoomify-window-e2e-"));
   const home = path.join(root, "home");
-  const output = path.join(root, "outputs");
+  // First-run Tauri settings select the platform Downloads folder. Point the
+  // isolated profile at an empty one so the E2E takes the exact user path,
+  // without rewriting the shipped page or preloading localStorage.
+  const output = path.join(home, "Downloads");
   mkdirSync(home, { recursive: true });
   mkdirSync(output, { recursive: true });
+  // Tauri's Linux `downloadDir()` resolves the XDG user-dirs setting rather
+  // than assuming `~/Downloads`. Seed the isolated *OS profile* so every
+  // platform has a real first-run default without touching app persistence.
+  if (process.platform === "linux") {
+    const config = path.join(home, ".config");
+    mkdirSync(config, { recursive: true });
+    writeFileSync(path.join(config, "user-dirs.dirs"), 'XDG_DOWNLOAD_DIR="$HOME/Downloads"\n');
+  }
   return { root, home, output };
 }
 

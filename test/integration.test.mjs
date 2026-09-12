@@ -271,14 +271,11 @@ test("shipped webapp uses the shared proxy policy (no inline duplicate)", () => 
   assert.ok(mainTs.includes('from "./webIntegration.ts"'), "main.ts must import the shared eligibility policy");
   assert.ok(mainTs.includes('from "./proxyTransport.ts"'), "main.ts must import the shared proxy transport");
   assert.ok(mainTs.includes("isProxyEligible({"), "main.ts must call the shared policy with a request object");
-  const mainJs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.js"), "utf8");
-  assert.ok(mainJs.includes("./webIntegration.js"), "generated main.js must import the shared policy mirror");
-  assert.ok(mainJs.includes("./proxyTransport.js"), "generated main.js must import the shared transport mirror");
 });
 
 test("proxy fallback is unconditional; no opt-out UI remains; 1500 ms direct head start", () => {
   const viewTs = fs.readFileSync(
-    path.join(REPO_ROOT, "packages", "shared-ui", "src", "view.ts"),
+    path.join(REPO_ROOT, "packages", "shared-ui", "src", "view.tsx"),
     "utf8",
   );
   assert.ok(!viewTs.includes("dz-proxy-optin"), "idle view must not render the proxy toggle");
@@ -302,43 +299,6 @@ test("proxy fallback is unconditional; no opt-out UI remains; 1500 ms direct hea
     mainTs.includes("proxyRateLimitDelayMs") && mainTs.includes("retryAfterMs"),
     "PROXY_RATE_LIMITED honors Retry-After with backoff and a single bounded retry",
   );
-});
-
-test("served browser import graph resolves to generated files", () => {
-  // The mirrors are generated (scripts/sync-web-js.mjs, run by the test
-  // lanes and at deploy time); they must resolve exactly like the deployed
-  // /beta/ tree does.
-  const roots = ["src/main.js", "src/worker.js"];
-  const seen = new Set();
-  const queue = [...roots];
-  while (queue.length > 0) {
-    const rel = queue.pop();
-    if (seen.has(rel)) continue;
-    seen.add(rel);
-    // wasm/ holds ignored build artifacts (verified by `cargo xtask build web`).
-    if (rel.startsWith("wasm/")) continue;
-    const text = fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
-    const specifiers = [
-      ...text.matchAll(/(?:import|export)[^'"]*?from\s*["'](\.[^"']+)["']/g),
-      ...text.matchAll(/import\(\s*["'](\.[^"']+)["']\s*\)/g),
-    ].map((m) => m[1]);
-    for (const spec of specifiers) {
-      assert.ok(
-        spec.endsWith(".js"),
-        `${rel} imports non-JS specifier ${spec} (browsers need generated .js mirrors)`,
-      );
-      queue.push(path.normalize(path.join(path.dirname(rel), spec)));
-    }
-  }
-  for (const expected of [
-    "src/webIntegration.js",
-    "packages/browser-runtime/src/web-integration.js",
-    "src/proxyTransport.js",
-    "packages/browser-runtime/src/transport-labels.js",
-    "packages/browser-runtime/src/session.js",
-  ]) {
-    assert.ok(seen.has(expected), `browser graph must include ${expected}`);
-  }
 });
 
 test("ordinary display fallback only for unprocessed tiles", () => {

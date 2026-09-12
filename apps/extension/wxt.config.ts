@@ -1,6 +1,7 @@
 import { access, cp, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "wxt";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -8,12 +9,17 @@ const repository = path.resolve(root, "../..");
 const publicDir = path.join(root, "public");
 const isTestPackage = process.env.DEZOOMIFY_TEST_DRIVER === "1";
 const testOrigin = process.env.DEZOOMIFY_TEST_ORIGIN ?? "";
+const testScenario = process.env.DEZOOMIFY_TEST_SCENARIO ?? "";
 
 function testHostPermissions(): string[] {
   if (process.env.DEZOOMIFY_TEST_HOST_PERMISSIONS !== "1") return [];
   if (!/^https?:\/\/[^/]+$/.test(testOrigin)) {
     throw new Error("DEZOOMIFY_TEST_ORIGIN must be an http(s) origin for the E2E package");
   }
+  // The permission E2E declares its loopback tile origin so Chromium may
+  // transport fixture bytes. The test package's job view still treats it as
+  // ungranted until its native-permission boundary mock is clicked.
+  if (process.env.DEZOOMIFY_TEST_SOURCE_HOST_ONLY === "1") return [`${testOrigin}/*`, "http://localhost/*"];
   return ["http://127.0.0.1/*", "http://localhost/*", `${testOrigin}/*`];
 }
 
@@ -79,13 +85,19 @@ export default defineConfig({
 
       if (isTestPackage) {
         await cp(path.join(root, "src/test"), path.join(publicDir, "test"), { recursive: true });
-        await writeFile(path.join(publicDir, "test/config.js"), `globalThis.__DEZOOMIFY_TEST_ORIGIN__ = ${JSON.stringify(testOrigin)};\n`);
+        await writeFile(
+          path.join(publicDir, "test/config.js"),
+          `globalThis.__DEZOOMIFY_TEST_ORIGIN__ = ${JSON.stringify(testOrigin)};\n` +
+          `globalThis.__DEZOOMIFY_TEST_SCENARIO__ = ${JSON.stringify(testScenario)};\n`,
+        );
       }
     },
   },
   vite: () => ({
+    plugins: [react()],
     define: {
       __DEZOOMIFY_TEST_DRIVER__: JSON.stringify(isTestPackage),
+      __DEZOOMIFY_TEST_PERMISSION_MOCK__: JSON.stringify(isTestPackage && testScenario === "permission"),
     },
   }),
 });

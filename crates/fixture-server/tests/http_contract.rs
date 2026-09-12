@@ -97,6 +97,43 @@ async fn templating_substitutes_origin() {
         .expect("text");
     assert!(!body.contains("{{origin}}"), "template left unsubstituted");
     assert!(body.contains(&srv.base), "origin not injected");
+    assert!(
+        !body.contains("{{localhost_origin}}"),
+        "localhost origin template left unsubstituted"
+    );
+}
+
+#[tokio::test]
+async fn templating_substitutes_loopback_alias() {
+    let srv = TestServer::start().await;
+    let url = format!(
+        "{}/fetch?url=https://fixtures.test/cli/permission-tiles.yaml",
+        srv.base
+    );
+    let body = reqwest::get(&url)
+        .await
+        .expect("get")
+        .text()
+        .await
+        .expect("text");
+    let localhost = srv.base.replacen("127.0.0.1", "localhost", 1);
+    assert!(
+        !body.contains("{{localhost_origin}}"),
+        "template left unsubstituted"
+    );
+    assert!(body.contains(&localhost), "localhost origin not injected");
+}
+
+#[tokio::test]
+async fn fetch_path_preserves_the_fixture_url_shape() {
+    let srv = TestServer::start().await;
+    let url = format!(
+        "{}/fetch/https://fixtures.test/cli/permission-tiles.yaml",
+        srv.base
+    );
+    let res = reqwest::get(&url).await.expect("get");
+    assert_eq!(res.status(), 200);
+    assert!(res.text().await.expect("text").contains("url_template"));
 }
 
 #[tokio::test]

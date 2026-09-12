@@ -1,20 +1,29 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
+import { renderView } from "@dezoomify/shared-ui";
+import { createElement } from "react";
+import type { UiStatus, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
+import {
+  canvasToPngBlob,
+  createCanvasAssembly,
+  createTileDecoder,
+  pickEngineSelection,
+  saveBlobViaAnchor,
+} from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.js";
-import { renderView } from "../vendor/view.js";
-import { createTileDecoder } from "../vendor/tile-decode.js";
-import { canvasToPngBlob, saveBlobViaAnchor } from "../vendor/canvas-save.js";
-import { createCanvasAssembly } from "../vendor/assembly.js";
-import { pickEngineSelection } from "../vendor/engine-selection.js";
 import { createJobController } from "./controller.js";
+import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
 import type { JobBinding } from "./transport.js";
 
+declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
+declare const __DEZOOMIFY_TEST_PERMISSION_MOCK__: boolean;
+
 type ExtensionApi = {
   runtime?: { sendMessage?(message: unknown): Promise<unknown>; onMessage?: { addListener(listener: (message: Record<string, unknown>) => void): void } };
-  permissions?: { contains?(request: { origins: string[] }): Promise<boolean> };
+  permissions?: { contains?(request: { origins: string[] }): Promise<boolean>; request?(request: { origins: string[] }): Promise<boolean> };
 };
 type Failure = { code: string; category: string; retryable: boolean; message: string };
-type ViewContext = Record<string, unknown> & { failure?: Failure };
+type ViewContext = SharedViewContext & { failure?: Failure };
 type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: Failure; catalog?: { images?: unknown[] } };
 type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[] };
 
@@ -38,6 +47,9 @@ let lastSource = "";
 // effects. Keep it while a permission view temporarily replaces the job view
 // so approval resumes the same determinate progress display immediately.
 let lastTileProgress: { current: number; total: number } | null = null;
+let accessRequest: { hosts: string[]; requesting: boolean } | null = null;
+let partialDecision: string | null = null;
+const testGrantedOrigins = new Set<string>();
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 
 function requestId(prefix: string) { return `${prefix}-${crypto.randomUUID?.() ?? Date.now().toString(36)}`; }
@@ -51,10 +63,9 @@ function copyDiagnostics(text: string) {
   void operation?.catch(() => undefined);
 }
 
-function render(status: string, ctx: ViewContext = {}) {
+function render(status: UiStatus, ctx: ViewContext = {}) {
   const target = root();
   if (!target) return;
-  target.className = "";
   seq += 1;
   renderView(target, { status, seq, sessionId: binding?.jobId ?? "job:pending", transport: "browser-session", imageCount: 0, ...(ctx.failure ? { error: ctx.failure } : {}) }, {
     onSubmitUrl: () => {},
@@ -63,7 +74,47 @@ function render(status: string, ctx: ViewContext = {}) {
     onReset: () => {},
     onRetrySameUrl: () => {},
     onSave: () => {},
-  }, ctx);
+  }, {
+    ...ctx,
+  }, {
+    ...(accessRequest ? { replace: createElement(AccessRequestView, {
+      origin: accessRequest.hosts.length === 1 ? accessRequest.hosts[0] : "the required image host",
+      requesting: accessRequest.requesting,
+      onRequest: () => {
+      if (!accessRequest || accessRequest.requesting) return;
+      accessRequest.requesting = true;
+      render(status, ctx);
+      const hosts = accessRequest.hosts;
+      const origins = hosts.map((origin) => `${origin}/*`);
+      // Optional-host consent must be requested synchronously from this
+      // click handler. A message hop to the service worker loses Chrome's
+      // required user activation and leaves the UI stuck requesting access.
+      // Chromium's native optional-permission prompt cannot be automated by
+      // the headless extension driver. Its test package mocks only that
+      // browser boundary; the click, coordinator validation, retry, and
+      // completed output still run end to end.
+      const request = __DEZOOMIFY_TEST_PERMISSION_MOCK__ ? Promise.resolve(true) : Promise.resolve(api?.permissions?.request?.({ origins }));
+      void request.then((granted) => {
+        if (!granted) throw new Error("permission denied");
+        return send(boundEnvelope("dz.job.permission-required", {
+          origins: hosts,
+          ...(__DEZOOMIFY_TEST_PERMISSION_MOCK__ ? { testGrant: true } : {}),
+        }));
+      }).catch(() => {
+        if (!accessRequest) return;
+        accessRequest.requesting = false;
+        render(status, ctx);
+      });
+      },
+    }) } : {}),
+    ...(partialDecision ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
+      const recovery = partialDecision;
+      if (!recovery) return;
+      partialDecision = null;
+      controller?.choosePartial(recovery, keep);
+      render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Finishing the image" } });
+    } }) } : {}),
+  });
 }
 
 function send(message: unknown): Promise<unknown> {
@@ -79,51 +130,16 @@ function closeJob() {
 
 function showAccessRequired(detail: { hosts: string[] }) {
   const hosts = Array.isArray(detail.hosts) ? detail.hosts : [];
-  const target = root();
-  if (!target) return;
-  const origin = hosts.length === 1 ? hosts[0] : "the required image host";
-  target.replaceChildren();
-  target.className = "dz-permission-request";
-  const icon = document.createElement("div");
-  icon.className = "dz-permission-icon";
-  icon.setAttribute("aria-hidden", "true");
-  const lock = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  lock.setAttribute("viewBox", "0 0 24 24");
-  lock.setAttribute("fill", "none");
-  lock.setAttribute("stroke", "currentColor");
-  lock.setAttribute("stroke-width", "1.8");
-  const shackle = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  shackle.setAttribute("d", "M8 10V7a4 4 0 0 1 8 0v3");
-  const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  body.setAttribute("x", "5"); body.setAttribute("y", "10"); body.setAttribute("width", "14"); body.setAttribute("height", "10"); body.setAttribute("rx", "1");
-  lock.append(shackle, body);
-  icon.append(lock);
-  const title = document.createElement("h1");
-  title.textContent = "Allow access to continue";
-  const explanation = document.createElement("p");
-  explanation.textContent = `This image uses files from ${origin}.`;
-  const reason = document.createElement("p");
-  reason.textContent = "Dezoomify needs access to read those files and assemble your image in this browser.";
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "dz-btn-tactile dz-permission-button";
-  button.dataset.dzAllowAccess = "true";
-  button.textContent = "Allow access and continue";
-  button.addEventListener("click", () => {
-    // This click is the only path that may cause the coordinator to call the
-    // browser permission API. The worker/fetch transport never does so.
-    button.disabled = true;
-    button.textContent = "Requesting access…";
-    void send(boundEnvelope("dz.job.permission-required", { origins: hosts })).catch(() => {
-      button.disabled = false;
-      button.textContent = "Allow access and continue";
-    });
-  });
-  target.append(icon, title, explanation, reason, button);
+  accessRequest = { hosts, requesting: false };
+  render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for access" } });
 }
 
 function resolvePermission(message: Record<string, unknown>) {
   if (!binding || message.jobId !== binding.jobId || typeof message.granted !== "boolean") return;
+  accessRequest = null;
+  if (__DEZOOMIFY_TEST_PERMISSION_MOCK__ && message.granted && Array.isArray(message.origins)) {
+    for (const origin of message.origins) if (typeof origin === "string") testGrantedOrigins.add(origin);
+  }
   if (message.granted) {
     const progress = lastTileProgress;
     render("downloading", {
@@ -141,22 +157,8 @@ function resolvePermission(message: Record<string, unknown>) {
  */
 function showPartialDecision(recovery: string) {
   if (typeof recovery !== "string" || !recovery.startsWith("rec:")) return;
+  partialDecision = recovery;
   render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Some tiles are missing" } });
-  const target = root();
-  if (!target || target.querySelector("[data-dz-partial-choice]")) return;
-  const keep = document.createElement("button");
-  keep.type = "button";
-  keep.className = "dz-btn-tactile";
-  keep.dataset.dzPartialChoice = "keep";
-  keep.textContent = "Keep the partial image";
-  keep.addEventListener("click", () => controller?.choosePartial(recovery, true));
-  const discard = document.createElement("button");
-  discard.type = "button";
-  discard.className = "dz-btn-tactile";
-  discard.dataset.dzPartialChoice = "discard";
-  discard.textContent = "Discard the partial image";
-  discard.addEventListener("click", () => controller?.choosePartial(recovery, false));
-  target.append(keep, discard);
 }
 
 /** Host-side effect execution failed terminally: render it and stop. */
@@ -198,7 +200,8 @@ function createAssembly(sourceUrl: string) {
       // both on one surface object.
       return { width, height, ctx2d, toBlob: (cb: BlobCallback, mime?: string) => element.toBlob(cb, mime) };
     },
-    encode: (canvas: { toBlob(cb: (blob: unknown | null) => void, mime?: string): void }) => canvasToPngBlob(canvas),
+    encode: (canvas) =>
+      canvasToPngBlob(canvas as unknown as { toBlob(cb: BlobCallback, mime?: string): void }),
     save: (blob: unknown, width: number, height: number) => {
       if (!(blob instanceof Blob)) throw new TypeError("encoded output is not a Blob");
       const url = URL.createObjectURL(blob);
@@ -221,18 +224,20 @@ function handleEvent(event: JobEvent) {
     lastTileProgress = { current: event.acquired, total: event.total };
     render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
   }
-  else if (event.type === "failed") render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
-  else if (event.type === "cancelled") render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } });
-  else if (event.type === "completed" || event.type === "partial-completed") render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } });
+  else if (event.type === "failed") { partialDecision = null; render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } }); }
+  else if (event.type === "cancelled") { partialDecision = null; render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } }); }
+  else if (event.type === "completed" || event.type === "partial-completed") { partialDecision = null; render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } }); }
   else if (event.type === "catalog" && !selected) {
     selected = true;
-    const selection = pickEngineSelection(event.catalog ?? {});
+    const selection = pickEngineSelection(
+      (event.catalog ?? {}) as Parameters<typeof pickEngineSelection>[0],
+    );
     if (!selection) {
       onHostFailure(Object.assign(new Error("No downloadable image was found on this page."), { code: "NO_IMAGE_FOUND", retryable: false }));
       controller?.cancel();
       return;
     }
-    render("downloading", { imageCount: event.catalog?.images?.length ?? 0, jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
+    render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
     controller?.selectImage(selection.image);
     controller?.selectLevel(selection.level);
   }
@@ -254,7 +259,8 @@ function setup(bound: unknown) {
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   jobWorker = worker;
   const extensionTransport = createExtensionFetcher({
-    hasPermission: async (origin) => !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] })),
+    hasPermission: async (origin) => testGrantedOrigins.has(origin) ||
+      (!__DEZOOMIFY_TEST_PERMISSION_MOCK__ && !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] }))),
   });
   sourceTransport = createCoordinatorSourceTransport({ sendMessage: send });
   controller = createJobController({

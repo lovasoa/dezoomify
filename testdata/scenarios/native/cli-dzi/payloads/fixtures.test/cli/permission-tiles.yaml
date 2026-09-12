@@ -1,0 +1,11 @@
+# Metadata stays readable in the source tab. The tile origin differs only by
+# the loopback hostname, which lets extension E2E exercise optional access.
+url_template: "{{localhost_origin}}/fetch?url=https%3A%2F%2Ffixtures.test%2Fcli%2Fpyramid_files%2F9%2F{{x}}_{{y}}.png"
+x_template: "x * tile_size"
+y_template: "y * tile_size"
+variables:
+  - { name: x, from: 0, to: 1 }
+  - { name: y, from: 0, to: 1 }
+  - { name: tile_size, value: 256 }
+width: 512
+height: 512

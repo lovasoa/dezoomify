@@ -158,22 +158,20 @@ fn ensure_help_deps() -> Result<(), String> {
     Ok(())
 }
 
-/// Regenerate the untracked web artifacts (browser JS mirrors, help pages)
-/// the node test suites read. The generated files are never committed:
-/// deployments build them via `scripts/build-site.mjs`.
+/// Regenerate the untracked web artifacts (help pages) the node test suites
+/// read. The generated files are never committed: deployments build them via
+/// `scripts/build-site.mjs`.
 fn generate_web_artifacts() -> Result<(), String> {
     ensure_help_deps()?;
-    let root = super::repo_root();
-    for script in ["scripts/sync-web-js.mjs", "scripts/build-help.mjs"] {
-        let status = Command::new("node")
-            .env("NODE_NO_WARNINGS", "1")
-            .arg(script)
-            .current_dir(&root)
-            .status()
-            .map_err(|e| format!("failed to run node {script}: {e}"))?;
-        if !status.success() {
-            return Err(format!("{script} failed"));
-        }
+    let script = "scripts/build-help.mjs";
+    let status = Command::new("node")
+        .env("NODE_NO_WARNINGS", "1")
+        .arg(script)
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|e| format!("failed to run node {script}: {e}"))?;
+    if !status.success() {
+        return Err(format!("{script} failed"));
     }
     Ok(())
 }
@@ -219,7 +217,7 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
     check_dist_budget()?;
     run_node(&["--test", "test/*.test.mjs"])?;
     println!(
-        "build web: ok (mirrors, help, wasm glue, and dist/ assembled by scripts/build-site.mjs)"
+        "build web: ok (help, wasm glue, Vite app, and dist/ assembled by scripts/build-site.mjs)"
     );
     Ok(())
 }
@@ -349,7 +347,7 @@ fn dist_fresh() -> bool {
     };
     for rel in [
         "scripts/build-site.mjs",
-        "scripts/sync-web-js.mjs",
+        "vite.config.ts",
         "scripts/build-help.mjs",
         "index.html",
         "privacy.html",
@@ -455,17 +453,6 @@ fn dev_extension(args: &[String]) -> Result<(), String> {
         ));
     }
     let root = super::repo_root();
-    // Regenerate the canonical browser JS mirrors with the single
-    // generator (type-strip plus `.ts` -> `.js` import rewrite) before the
-    // extension entrypoint graph is compiled.
-    let status = Command::new("node")
-        .arg("scripts/sync-web-js.mjs")
-        .current_dir(&root)
-        .status()
-        .map_err(|e| format!("failed to run node scripts/sync-web-js.mjs: {e}"))?;
-    if !status.success() {
-        return Err("sync-web-js failed (scripts/sync-web-js.mjs)".to_string());
-    }
     // Development must load bindings generated from the current Rust tree;
     // a previous gitignored website build is not a valid extension input.
     super::extension::build_wasm_glue()?;
@@ -559,8 +546,10 @@ fn run_node(args: &[&str]) -> Result<(), String> {
             expanded.push(arg.to_string());
         }
     }
-    // First arg is the node flag when present.
+    // Every suite loads the TSX hook so React `.tsx` sources import directly.
     let status = Command::new("node")
+        .arg("--import")
+        .arg("./test/tsx-loader.mjs")
         .args(&expanded)
         .current_dir(super::repo_root())
         .status()

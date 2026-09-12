@@ -118,8 +118,7 @@ test("app pages link the in-app docs instead of legacy doc sites", () => {
     );
   }
   for (const source of [
-    path.join(webDir, "packages", "shared-ui", "src", "view.ts"),
-    path.join(webDir, "packages", "shared-ui", "src", "view.js"),
+    path.join(webDir, "packages", "shared-ui", "src", "view.tsx"),
   ]) {
     const code = readFileSync(source, "utf8");
     assert.ok(

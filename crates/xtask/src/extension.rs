@@ -164,7 +164,6 @@ pub(crate) fn build_wasm_glue() -> Result<(), String> {
 
 pub fn test_extension(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("test extension", args)?;
-    generate_vendor_mirrors()?;
     // The unit suite imports and executes this exact generated boundary.
     // Build it first so a stale or absent local artifact cannot be mocked
     // away while the store package is broken.
@@ -329,22 +328,6 @@ fn test_install_round_trip() -> Result<(), String> {
         written.len()
     );
     Ok(())
-}
-
-/// Regenerate the canonical browser JS mirrors plus the no-bundler
-/// extension vendor copies before the unit glob, so the parity gates read
-/// fresh output. Same generator the `web` lane runs; generated trees are
-/// never committed.
-fn generate_vendor_mirrors() -> Result<(), String> {
-    let status = Command::new("node")
-        .arg("scripts/sync-web-js.mjs")
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run node scripts/sync-web-js.mjs: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "sync-web-js failed (scripts/sync-web-js.mjs)".to_string())
 }
 
 fn run_node_glob(dir: &str) -> Result<(), String> {

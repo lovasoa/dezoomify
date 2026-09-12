@@ -27,6 +27,7 @@ import {
   loadHistory as loadHistoryStore,
   pushHistory,
   renderView,
+  openConfirmModal,
   saveHistory as saveHistoryStore,
   t,
   toHistoryEntry,
@@ -69,12 +70,12 @@ import {
   handleCopyDiagnostics,
 } from "./diagnostics.ts";
 import {
-  ensureDesktopSettingsPanel,
   getEffectiveSettings,
-  persistSettingsFromPanel,
   resetDesktopSettings,
 } from "./settingsPanel.ts";
 import type { SettingsPanelEnv } from "./settingsPanel.ts";
+import { DesktopSettingsView } from "./settingsView.tsx";
+import { createElement } from "react";
 import {
   createDesktopIntegration,
   DESKTOP_COMMANDS,
@@ -281,7 +282,6 @@ let catalogNotice: CatalogNotice | null = null;
 // Accessibility (Task 5.2): dialog focus state. Each modal stores the element
 // focused before it opened so focus returns on close. Recovery tracks its key
 // so a new decision moves focus once without stealing it on every tick.
-let deepLinkReturnFocus: HTMLElement | null = null;
 let recoveryReturnFocus: HTMLElement | null = null;
 let lastRecoveryKey: string | null = null;
 
@@ -563,7 +563,6 @@ function setCompletedSibling(name: string | null): void {
 }
 
 const settingsEnv: SettingsPanelEnv = {
-  root,
   getSettings: () => desktopSettings,
   setSettings: (settings: DesktopSettings) => {
     desktopSettings = settings;
@@ -577,7 +576,10 @@ const settingsEnv: SettingsPanelEnv = {
 };
 
 function runPersistSettingsFromPanel(): void {
-  persistSettingsFromPanel(settingsEnv);
+  const errors = saveSettings(desktopSettings);
+  settingsError = errors.length ? errors.join("; ") : null;
+  if (!settingsError) pushLog(`Settings saved: ${describeSettingsForLog(desktopSettings)}`);
+  update();
 }
 
 function runResetDesktopSettings(): void {
@@ -738,7 +740,7 @@ function launchNativeJob(trimmed: string, token: number): void {
   // Minimal settings are validated fail-closed here: invalid settings fail
   // the submit before any start_job effect. The redacted summary never
   // includes header values.
-  const effective = getEffectiveSettings(root, desktopSettings);
+  const effective = getEffectiveSettings(null, desktopSettings);
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;
@@ -1216,7 +1218,6 @@ function handleReset(): void {
   activeQueueId = null;
   clearJobViewState();
   dismissDeepLinkConfirm(false);
-  deepLinkReturnFocus = null;
   recoveryReturnFocus = null;
   lastRecoveryKey = null;
   // Idle prefill survives reset: a launch URL stays available for the next
@@ -1249,12 +1250,8 @@ function grantedMime(): string {
 
 
 function dismissDeepLinkConfirm(restore = true): void {
-  if (typeof document === "undefined") return;
-  document.getElementById("dz-deep-link-confirm")?.remove();
-  if (restore) {
-    restoreFocus(deepLinkReturnFocus);
-    deepLinkReturnFocus = null;
-  }
+  // Shared UI owns modal lifetime. Opening another modal supersedes this one.
+  void restore;
 }
 
 // Confirm UI for deep links: shows the validated source plus provenance
@@ -1269,91 +1266,21 @@ function dismissDeepLinkConfirm(restore = true): void {
 // the crisp 2px architectural focus ring (never a neon halo).
 function showDeepLinkConfirm(info: ValidatedDeepLink): void {
   if (typeof document === "undefined") return;
-  dismissDeepLinkConfirm(false);
-  const doc = document;
-  deepLinkReturnFocus = activeElementOf(doc);
-  const overlay = doc.createElement("div");
-  overlay.id = "dz-deep-link-confirm";
-  overlay.className = "dz-modal-backdrop";
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-labelledby", "dz-deep-link-title");
-  overlay.setAttribute("aria-describedby", "dz-deep-link-desc");
-  const card = doc.createElement("div");
-  card.className = "dz-modal-card";
-  const title = doc.createElement("h2");
-  title.className = "dz-modal-title";
-  title.id = "dz-deep-link-title";
-  title.tabIndex = -1;
-  title.textContent = t("desktop.link.title");
-  const source = doc.createElement("p");
-  source.className = "dz-modal-subtitle";
-  source.id = "dz-deep-link-desc";
-  source.textContent = t("desktop.link.source", { url: info.sourceUrl });
-  const provenance = doc.createElement("p");
-  provenance.className = "dz-notice-message";
-  provenance.textContent = info.hint
-    ? t("desktop.link.provHint", { version: info.version, hint: info.hint })
-    : t("desktop.link.prov", { version: info.version });
-  const note = doc.createElement("p");
-  note.className = "dz-notice-message";
-  note.textContent = t("desktop.link.note");
-  const row = doc.createElement("div");
-  row.className = "dz-modal-actions";
-  const declineButton = doc.createElement("button");
-  declineButton.type = "button";
-  declineButton.className = "dz-btn-secondary";
-  declineButton.textContent = t("desktop.link.dismiss");
-  const close = (): void => {
-    doc.removeEventListener("keydown", onKeyDown, true);
-    dismissDeepLinkConfirm(true);
-  };
-  const onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-      return;
-    }
-    if (e.key !== "Tab") return;
-    const focusables = focusableIn(overlay);
-    if (focusables.length === 0) {
-      e.preventDefault();
-      return;
-    }
-    const first = focusables[0] as HTMLElement;
-    const last = focusables[focusables.length - 1] as HTMLElement;
-    const active = doc.activeElement as HTMLElement | null;
-    if (e.shiftKey) {
-      if (active === first || !overlay.contains(active)) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else if (active === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
-  declineButton.addEventListener("click", close);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
+  void openConfirmModal(document, {
+    id: "dz-deep-link-confirm",
+    title: t("desktop.link.title"),
+    subtitle: t("desktop.link.source", { url: info.sourceUrl }),
+    bodyLines: [
+      info.hint
+        ? t("desktop.link.provHint", { version: info.version, hint: info.hint })
+        : t("desktop.link.prov", { version: info.version }),
+      t("desktop.link.note"),
+    ],
+    confirmLabel: t("desktop.link.open"),
+    declineLabel: t("desktop.link.dismiss"),
+  }).then((confirmed) => {
+    if (confirmed) handleSubmitUrl(info.sourceUrl);
   });
-  doc.addEventListener("keydown", onKeyDown, true);
-  const confirmButton = doc.createElement("button");
-  confirmButton.type = "button";
-  confirmButton.className = "dz-btn-tactile";
-  confirmButton.textContent = t("desktop.link.open");
-  confirmButton.addEventListener("click", () => {
-    doc.removeEventListener("keydown", onKeyDown, true);
-    dismissDeepLinkConfirm(true);
-    handleSubmitUrl(info.sourceUrl);
-  });
-  row.append(declineButton, confirmButton);
-  card.append(title, source, provenance, note, row);
-  overlay.appendChild(card);
-  doc.body.appendChild(overlay);
-  if (typeof confirmButton.focus === "function") {
-    confirmButton.focus();
-  }
 }
 
 function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
@@ -2362,16 +2289,20 @@ function update() {
       ...(auxChoice ? { imageChoice: auxChoice } : {}),
       history: [...desktopHistory],
     },
+    state.status === "idle" ? {
+      after: createElement(DesktopSettingsView, {
+        settings: desktopSettings,
+        error: settingsError,
+        onChange: (settings: DesktopSettings) => {
+          desktopSettings = settings;
+          grantedFormat = normalizeNativeFormat(settings.outputFormat);
+          runPersistSettingsFromPanel();
+        },
+        onReset: runResetDesktopSettings,
+      }),
+    } : undefined,
   );
   ensureDesktopAuxPanel();
-  if (state.status === "idle") ensureDesktopSettingsPanel({
-    root,
-    settings: desktopSettings,
-    error: settingsError,
-    onPersist: () => runPersistSettingsFromPanel(),
-    onReset: () => runResetDesktopSettings(),
-  });
-  else root.ownerDocument.getElementById("dz-desktop-settings")?.remove();
   ensureDesktopExternalNav();
   ensureDesktopFooter();
 }

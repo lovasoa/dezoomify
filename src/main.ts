@@ -1,5 +1,5 @@
-// Web application entry point (single source of truth; `./main.js` is
-// generated from this file by `scripts/sync-web-js.mjs`, never hand-edited).
+// Web application entry point (single source of truth; Vite bundles this
+// file directly, there is no hand-maintained `.js` mirror).
 // Real pipeline: worker-hosted wasm core discovery -> direct-first transport
 // with automatic eligible metadata-proxy fallback -> tile acquisition -> canvas
 // assembly -> real PNG save. Nothing here fabricates progress or completion.
@@ -13,8 +13,8 @@ import {
   toHistoryEntry,
 } from "../packages/shared-ui/src/history.ts";
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
-import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.ts";
-import type { JobActivity, ViewContext } from "../packages/shared-ui/src/view.ts";
+import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
+import type { JobActivity, ViewContext } from "../packages/shared-ui/src/view.tsx";
 import { suggestedNameFor } from "../packages/shared-ui/src/saveName.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,

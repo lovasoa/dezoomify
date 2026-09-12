@@ -6,9 +6,8 @@
 // its origin for display. History never leaves the device; clearing removes
 // every entry.
 //
-// This module is erasable-syntax-only TypeScript so
-// `scripts/sync-web-js.mjs` can mirror it to `history.js` exactly like the
-// other shared-ui modules. Keep it framework-free: shared UI stays vanilla.
+// This module is erasable-syntax-only TypeScript so node can type-strip it
+// directly in tests. Keep it framework-free: presentation lives in `view.tsx`.
 
 export const HISTORY_MAX = 20;
 

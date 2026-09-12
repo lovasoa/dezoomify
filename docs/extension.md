@@ -74,8 +74,10 @@ WXT generates both MV3 manifests from `apps/extension/wxt.config.ts`. Chromium
 uses the bundled `background.js` service worker. Firefox uses the same classic
 IIFE artifact through `background.scripts`; packaging parses it with `node --check`.
 The store package ships only the background finite-operation
-coordinator, dedicated job tab, generated vendor mirrors, icons, and WASM. No
-source content script or fallback extension-page entry is packaged or tested.
+coordinator, the React dedicated job tab (bundling the workspace
+`@dezoomify/shared-ui` and `@dezoomify/browser-runtime` packages), icons, and
+WASM. No source content script or fallback extension-page entry is packaged
+or tested.
 
 Extension build, development, test, and release entry points regenerate the
 WASM glue from the current Rust source before WXT builds. The extension test gate

@@ -8,6 +8,7 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
+    "jsx": "react-jsx",
     "types": []
   },
   "include": ["src"]

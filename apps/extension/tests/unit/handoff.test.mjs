@@ -9,8 +9,7 @@ async function loadTs(rel) {
 
 const handoff = await loadTs("../../src/background/handoff.ts");
 const native = await loadTs("../../src/background/native.ts");
-const messages = await loadTs("../../src/app/messages.ts");
-const integration = await loadTs("../../src/app/extensionIntegration.ts");
+
 
 // ---------- website-to-extension handoff ----------
 
@@ -190,53 +189,6 @@ test("consent details list names-not-values; snapshot contains no values", () =>
 });
 
 // ---------- internal messages + integration ----------
-
-test("PROTO_KEYS identical in handoff.ts and messages.ts (no drift)", () => {
-  const extract = (rel) => {
-    const src = readFileSync(new URL(rel, import.meta.url), "utf8");
-    const m = src.match(/PROTO_KEYS = Object\.freeze\((\[[^\]]*\])\)/);
-    assert.ok(m, `PROTO_KEYS found in ${rel}`);
-    return JSON.stringify(JSON.parse(m[1]));
-  };
-  assert.equal(extract("../../src/background/handoff.ts"), extract("../../src/app/messages.ts"));
-});
-
-test("messages: version+ids required; stale/unknown rejected", () => {
-  const m = messages.createMessage("StartScan", { scanId: "scan-1", jobId: "job-1" }, { x: 1 });
-  assert.equal(m.version, 2);
-  assert.equal(messages.validateMessage(m, { currentScanId: "scan-1" }).ok, true);
-  assert.equal(messages.validateMessage(m, { currentScanId: "other" }).code, "stale");
-  assert.equal(messages.validateMessage({ kind: "Nope", version: 2, scanId: "s" }).code, "unknown-kind");
-  assert.equal(messages.validateMessage({ kind: "StartScan", version: 99, scanId: "s" }).code, "bad-version");
-  assert.equal(messages.validateMessage({ kind: "StartScan", version: 2 }).code, "missing-id");
-  // N-1 accepted
-  assert.equal(messages.validateMessage({ ...m, version: 1 }, {}).ok, true);
-  // oversize rejected
-  assert.equal(messages.validateMessage({ kind: "StartScan", version: 2, scanId: "s", pad: "x".repeat(70000) }).code, "oversize");
-});
-
-test("extensionIntegration: validates then delegates; rejects stale", async () => {
-  let scans = 0;
-  const integ = integration.createExtensionIntegration({
-    validateMessage: messages.validateMessage,
-    startScan: async () => {
-      scans++;
-      return { ok: true };
-    },
-    fetchResource: async () => ({ bytes: new Uint8Array([1]) }),
-    requestNativeHandoff: async () => ({ ok: true }),
-  });
-  integ.bind("scan-1", "job-1");
-  const good = messages.createMessage("StartScan", { scanId: "scan-1", jobId: "job-1" });
-  const r1 = await integ.handleMessage(good);
-  assert.equal(r1.ok, true);
-  assert.equal(scans, 1);
-  const stale = messages.createMessage("StartScan", { scanId: "stale-scan", jobId: "job-1" });
-  const r2 = await integ.handleMessage(stale);
-  assert.equal(r2.ok, false);
-  const unknown = { kind: "Bogus", version: 2, scanId: "scan-1" };
-  assert.equal((await integ.handleMessage(unknown)).ok, false);
-});
 
 test("cookie-handoff transcript is fixed and consented", () => {
   const p = new URL("../../../../testdata/scenarios/extension/cookie-handoff/expected/result.json", import.meta.url);

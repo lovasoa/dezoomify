@@ -2,7 +2,7 @@
 // the worker never fetches anything; the main thread performs every network
 // request through the classified transport and feeds bytes back here.
 import init, { DiscoverySession } from "../wasm/dezoomify-wasm.js";
-import { discoveryFailedError, noImageFoundError } from "./discovery.js";
+import { discoveryFailedError, noImageFoundError } from "./discovery.ts";
 
 let ready = null;
 let session = null;

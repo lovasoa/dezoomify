@@ -3,216 +3,26 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderView, getPhaseForStatus } from "../packages/shared-ui/src/view.ts";
+import { act } from "./react-dom.mjs";
+import { renderView, getPhaseForStatus } from "../packages/shared-ui/src/view.tsx";
 
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
-function createMockElement(tagName) {
-  const attrs = new Map();
-  const listeners = new Map();
-  const children = [];
-  const classes = new Set();
-  const dataset = {};
-  const style = {};
-
-  const el = {
-    tagName: tagName.toUpperCase(),
-    ownerDocument: globalThis.document,
-    style,
-    dataset,
-    open: false,
-    _value: "",
-    get value() {
-      return el._value;
-    },
-    set value(v) {
-      el._value = String(v);
-    },
-    parentNode: null,
-    children,
-    get firstElementChild() {
-      return children[0] ?? null;
-    },
-    get classList() {
-      return {
-        add(...cls) {
-          cls.forEach((c) => classes.add(c));
-        },
-        remove(...cls) {
-          cls.forEach((c) => classes.delete(c));
-        },
-        contains(c) {
-          return classes.has(c);
-        },
-      };
-    },
-    get className() {
-      return Array.from(classes).join(" ");
-    },
-    set className(val) {
-      classes.clear();
-      String(val || "")
-        .split(/\s+/)
-        .filter(Boolean)
-        .forEach((c) => classes.add(c));
-    },
-    _id: "",
-    get id() {
-      return el._id;
-    },
-    set id(val) {
-      el._id = String(val || "");
-    },
-    _textContent: "",
-    get textContent() {
-      if (children.length === 0) return el._textContent;
-      return children.map((c) => c.textContent).join("");
-    },
-    set textContent(val) {
-      children.length = 0;
-      el._textContent = String(val ?? "");
-    },
-    _innerHTML: "",
-    get innerHTML() {
-      return el._innerHTML;
-    },
-    set innerHTML(html) {
-      el._innerHTML = String(html ?? "");
-      children.length = 0;
-      el._textContent = "";
-      parseSimpleHtml(el, el._innerHTML);
-    },
-    setAttribute(name, value) {
-      attrs.set(name.toLowerCase(), String(value));
-      if (name.toLowerCase() === "id") el.id = String(value);
-      if (name.toLowerCase() === "class") el.className = String(value);
-    },
-    getAttribute(name) {
-      return attrs.get(name.toLowerCase()) ?? null;
-    },
-    hasAttribute(name) {
-      return attrs.has(name.toLowerCase());
-    },
-    removeAttribute(name) {
-      attrs.delete(name.toLowerCase());
-    },
-    appendChild(child) {
-      if (child.parentNode) child.parentNode.removeChild(child);
-      child.parentNode = el;
-      children.push(child);
-      return child;
-    },
-    prepend(child) {
-      if (child.parentNode) child.parentNode.removeChild(child);
-      child.parentNode = el;
-      children.unshift(child);
-      return child;
-    },
-    removeChild(child) {
-      const idx = children.indexOf(child);
-      if (idx !== -1) {
-        children.splice(idx, 1);
-        child.parentNode = null;
-      }
-      return child;
-    },
-    remove() {
-      if (el.parentNode) {
-        el.parentNode.removeChild(el);
-      }
-    },
-    addEventListener(type, fn) {
-      if (!listeners.has(type)) listeners.set(type, new Set());
-      listeners.get(type).add(fn);
-    },
-    removeEventListener(type, fn) {
-      listeners.get(type)?.delete(fn);
-    },
-    querySelector(selector) {
-      const all = el.querySelectorAll(selector);
-      return all[0] ?? null;
-    },
-    querySelectorAll(selector) {
-      const matches = [];
-      const isClass = selector.startsWith(".");
-      const isId = selector.startsWith("#");
-      const target = selector.slice(1);
-
-      function search(node) {
-        for (const c of node.children) {
-          if (isClass && c.classList.contains(target)) {
-            matches.push(c);
-          } else if (isId && c.id === target) {
-            matches.push(c);
-          } else if (!isClass && !isId && c.tagName === selector.toUpperCase()) {
-            matches.push(c);
-          }
-          search(c);
-        }
-      }
-      search(el);
-      return matches;
-    },
-  };
-
+function container() {
+  const el = globalThis.document.createElement("div");
+  globalThis.document.body.appendChild(el);
   return el;
 }
 
-function parseSimpleHtml(parent, html) {
-  // Stack-based tag parser handling nesting
-  const tokenRegex = /<(\/?[a-zA-Z0-9-]+)([^>]*)>|([^<]+)/g;
-  let match;
-  const stack = [parent];
-  const voidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr", "line", "polyline", "circle", "rect", "path"]);
-
-  while ((match = tokenRegex.exec(html)) !== null) {
-    const [full, rawTag, rawAttrs, text] = match;
-    const current = stack[stack.length - 1];
-
-    if (text) {
-      const clean = text.trim();
-      if (clean) {
-        current._textContent = (current._textContent ? current._textContent + " " : "") + clean;
-      }
-      continue;
-    }
-
-    if (rawTag.startsWith("/")) {
-      // Closing tag
-      if (stack.length > 1) {
-        stack.pop();
-      }
-    } else {
-      // Opening tag
-      const tagName = rawTag;
-      const child = createMockElement(tagName);
-
-      const idMatch = rawAttrs.match(/\bid=["']([^"']+)["']/i);
-      if (idMatch) child.id = idMatch[1];
-      const classMatch = rawAttrs.match(/\bclass=["']([^"']+)["']/i);
-      if (classMatch) child.className = classMatch[1];
-      const styleMatch = rawAttrs.match(/\bstyle=["']([^"']+)["']/i);
-      if (styleMatch) {
-        styleMatch[1].split(";").forEach((pair) => {
-          const [k, v] = pair.split(":").map((s) => s?.trim());
-          if (k && v) child.style[k] = v;
-        });
-      }
-
-      current.appendChild(child);
-
-      const isSelfClosing = rawAttrs.endsWith("/") || voidTags.has(tagName.toLowerCase());
-      if (!isSelfClosing) {
-        stack.push(child);
-      }
-    }
-  }
+function render(el, state, callbacks, ctx) {
+  act(() => renderView(el, state, callbacks, ctx));
 }
 
-globalThis.document = {
-  createElement(tag) {
-    return createMockElement(tag);
-  },
+const callbacks = {
+  onSubmitUrl: () => {},
+  onCancel: () => {},
+  onReset: () => {},
+  onSave: () => {},
 };
 
 test("getPhaseForStatus maps active job statuses to 'job'", () => {
@@ -230,21 +40,14 @@ test("getPhaseForStatus maps active job statuses to 'job'", () => {
 });
 
 test("renderView mounts card and updates job section in place without DOM destruction", () => {
-  const container = createMockElement("div");
-  const callbacks = {
-    onSubmitUrl: () => {},
-    onCancel: () => {},
-    onReset: () => {},
-    onSave: () => {},
-  };
+  const el = container();
 
   // 1. Initial idle render
-  renderView(container, { status: "idle", seq: 0, sessionId: "s1", imageCount: 0, transport: null }, callbacks);
-  const card = container.querySelector(".dz-card");
+  render(el, { status: "idle", seq: 0, sessionId: "s1", imageCount: 0, transport: null }, callbacks);
+  const card = el.querySelector(".dz-card");
   assert.ok(card, "status card mounted");
   assert.equal(card.dataset.viewPhase, "idle");
-  const form = card.querySelector(".dz-form");
-  assert.ok(form, "form mounted in idle view");
+  assert.ok(card.querySelector(".dz-form"), "form mounted in idle view");
 
   // 2. Transition to discovering (active job phase)
   const jobState = {
@@ -263,7 +66,7 @@ test("renderView mounts card and updates job section in place without DOM destru
     },
   };
 
-  renderView(container, jobState, callbacks, ctx);
+  render(el, jobState, callbacks, ctx);
   assert.equal(card.dataset.viewPhase, "job");
   const jobSec = card.querySelector(".dz-job-section");
   assert.ok(jobSec, "job section mounted");
@@ -277,11 +80,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   details.open = true;
 
   // 3. Heartbeat update / progress ticks during job
-  const nextJobState = {
-    ...jobState,
-    status: "downloading",
-    seq: 2,
-  };
+  const nextJobState = { ...jobState, status: "downloading", seq: 2 };
   const nextCtx = {
     ...ctx,
     currentProgress: { current: 15, total: 60, message: "Downloading image tiles…" },
@@ -293,45 +92,38 @@ test("renderView mounts card and updates job section in place without DOM destru
     },
   };
 
-  renderView(container, nextJobState, callbacks, nextCtx);
+  render(el, nextJobState, callbacks, nextCtx);
 
-  // Critical architectural invariants:
-  // - Card and job section MUST be the exact same DOM node references (NO recreation)
-  assert.equal(container.querySelector(".dz-card"), card, "card node preserved across job updates");
+  // Card and job section MUST be the exact same DOM node references.
+  assert.equal(el.querySelector(".dz-card"), card, "card node preserved across job updates");
   assert.equal(card.querySelector(".dz-job-section"), jobSec, "job section node preserved across job updates");
 
-  // - Targeted element text and attributes updated in place
   assert.equal(stepTextEl.textContent, "Downloading image tiles…");
   const countsEl = card.querySelector("#dz-job-counts");
   assert.equal(countsEl.textContent, "15 done / 60");
   const barEl = card.querySelector("#dz-job-bar");
   assert.equal(barEl.style.width, "25%");
 
-  // - Details open state preserved natively
+  // Uncontrolled details open state is preserved natively.
   assert.equal(details.open, true, "open details preserved across in-place updates");
 
-  // 4. Simulate 10 rapid heartbeat / progress ticks (every 500ms timer simulation)
+  // 4. Rapid heartbeat / progress ticks
   for (let tick = 1; tick <= 10; tick++) {
-    renderView(
-      container,
-      nextJobState,
-      callbacks,
-      {
-        ...nextCtx,
-        jobActivity: {
-          ...nextCtx.jobActivity,
-          pendingRequests: tick % 3,
-          completedRequests: 15 + tick,
-        },
+    render(el, nextJobState, callbacks, {
+      ...nextCtx,
+      jobActivity: {
+        ...nextCtx.jobActivity,
+        pendingRequests: tick % 3,
+        completedRequests: 15 + tick,
       },
-    );
+    });
     assert.equal(card.querySelector(".dz-job-section"), jobSec, `tick ${tick}: DOM reference must stay identical`);
     assert.equal(details.open, true, `tick ${tick}: open details must never close`);
   }
 
   // 5. Transition to completed
-  renderView(
-    container,
+  render(
+    el,
     { status: "completed", seq: 3, sessionId: "s1", imageCount: 1, transport: "direct" },
     callbacks,
     { completedInfo: { width: 4000, height: 3000, mime: "image/png" } },
@@ -341,20 +133,13 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.ok(card.querySelector(".dz-completed-section"), "completed section mounted");
 
   // 6. Reset back to idle
-  renderView(container, { status: "idle", seq: 4, sessionId: "s1", imageCount: 0, transport: null }, callbacks);
+  render(el, { status: "idle", seq: 4, sessionId: "s1", imageCount: 0, transport: null }, callbacks);
   assert.equal(card.dataset.viewPhase, "idle");
   assert.ok(card.querySelector(".dz-form"), "idle form re-mounted after reset");
 });
 
 test("slow discovery replaces the phase with one waiting status", () => {
-  const container = createMockElement("div");
-  const callbacks = {
-    onSubmitUrl: () => {},
-    onCancel: () => {},
-    onReset: () => {},
-    onSave: () => {},
-  };
-
+  const el = container();
   const now = Date.now();
   const ctx = {
     jobActivity: {
@@ -365,32 +150,16 @@ test("slow discovery replaces the phase with one waiting status", () => {
       stepLabel: "Finding the zoomable image…",
     },
   };
-
-  renderView(
-    container,
-    { status: "discovering", seq: 1, sessionId: "s1", imageCount: 0, transport: "direct" },
-    callbacks,
-    ctx,
-  );
-  const card = container.querySelector(".dz-card");
+  render(el, { status: "discovering", seq: 1, sessionId: "s1", imageCount: 0, transport: "direct" }, callbacks, ctx);
+  const card = el.querySelector(".dz-card");
   const step = card.querySelector("#dz-job-step-text");
   assert.ok(step, "job status shown while stalled");
-  assert.equal(
-    step.textContent,
-    "Waiting for artsandculture.google.com…",
-  );
+  assert.equal(step.textContent, "Waiting for artsandculture.google.com…");
   assert.doesNotMatch(step.textContent, /museum/i);
 });
 
 test("failed state updates error details in place without destroying error container", () => {
-  const container = createMockElement("div");
-  const callbacks = {
-    onSubmitUrl: () => {},
-    onCancel: () => {},
-    onReset: () => {},
-    onSave: () => {},
-  };
-
+  const el = container();
   const errState1 = {
     status: "failed",
     seq: 1,
@@ -404,31 +173,21 @@ test("failed state updates error details in place without destroying error conta
       message: "No zoomable image could be found.",
     },
   };
-
-  renderView(container, errState1, callbacks);
-  const card = container.querySelector(".dz-card");
+  render(el, errState1, callbacks);
+  const card = el.querySelector(".dz-card");
   assert.equal(card.dataset.viewPhase, "failed");
   const errSec = card.querySelector(".dz-error-section");
   assert.ok(errSec, "error section mounted");
   assert.equal(card.querySelector("#dz-error-message").textContent, "No zoomable image could be found.");
 
-  // Subsequent update with refined error message in same failed phase
-  const errState2 = {
-    ...errState1,
-    error: {
-      ...errState1.error,
-      message: "Network timeout contacting server.",
-    },
-  };
-
-  renderView(container, errState2, callbacks);
+  const errState2 = { ...errState1, error: { ...errState1.error, message: "Network timeout contacting server." } };
+  render(el, errState2, callbacks);
   assert.equal(card.querySelector(".dz-error-section"), errSec, "error section node preserved");
   assert.equal(card.querySelector("#dz-error-message").textContent, "Network timeout contacting server.");
 });
 
 test("error layering: plain message prominent, engine diagnostics only in technical details", () => {
-  const container = createMockElement("div");
-  const callbacks = { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} };
+  const el = container();
   const aggregate =
     "no discovery candidate accepted the input\n" +
     " - custom: not a tiles.yaml file\n" +
@@ -450,50 +209,35 @@ test("error layering: plain message prominent, engine diagnostics only in techni
       phase: "discovery",
     },
   };
-  renderView(container, state, callbacks);
-  const card = container.querySelector(".dz-card");
-  // The prominent slot carries the plain sentence only, never the aggregate.
+  render(el, state, callbacks);
+  const card = el.querySelector(".dz-card");
   const prominent = card.querySelector("#dz-error-message").textContent;
   assert.ok(!prominent.includes("discovery candidate"), "aggregate must not be prominent");
   assert.ok(!prominent.includes("custom:"), "per-format diagnostics must not be prominent");
-  // The collapsible technical section carries the code fields and the detail.
   const diagnostics = card.querySelector("#dz-error-diagnostics").textContent;
   assert.match(diagnostics, /Code: UPSTREAM_RATE_LIMITED/);
   assert.match(diagnostics, /no discovery candidate accepted the input/);
   assert.match(diagnostics, / - custom: not a tiles\.yaml file/);
-  // Errors without detail keep the previous diagnostics shape.
   const state2 = { ...state, seq: 2, error: { ...state.error, detail: undefined } };
-  renderView(container, state2, callbacks);
+  render(el, state2, callbacks);
   const diag2 = card.querySelector("#dz-error-diagnostics").textContent;
   assert.match(diag2, /Message: The website hosting this image/);
   assert.ok(!diag2.includes("no discovery candidate"), "stale detail must be replaced");
 });
 
 test("job rail keeps integrated stop and diagnostics-copy controls, and header visibility tracks phase", () => {
-  const container = createMockElement("div");
-  const callbacks = {
-    onSubmitUrl: () => {},
-    onCancel: () => {},
-    onReset: () => {},
-    onSave: () => {},
-  };
-
-  // 1. Idle phase: header is visible
-  renderView(container, { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 }, callbacks);
-  const card = container.querySelector(".dz-card");
+  const el = container();
+  render(el, { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 }, callbacks);
+  const card = el.querySelector(".dz-card");
   const header = card.querySelector(".dz-header");
   assert.ok(header, "header exists");
   assert.equal(header.style.display, "", "header visible in idle");
 
-  // 2. Job phase: header is hidden and compact job controls are mounted.
-  renderView(
-    container,
+  render(
+    el,
     { status: "downloading", seq: 2, sessionId: "s1", imageCount: 2, transport: "direct" },
     callbacks,
-    {
-      currentProgress: { current: 10, total: 50 },
-      imageChoice: { width: 4000, height: 3000, tiles: 50 },
-    },
+    { currentProgress: { current: 10, total: 50 }, imageChoice: { width: 4000, height: 3000, tiles: 50 } },
   );
   assert.equal(header.style.display, "none", "header hidden in job phase");
   const stopBtn = card.querySelector("#dz-btn-cancel");
@@ -502,38 +246,30 @@ test("job rail keeps integrated stop and diagnostics-copy controls, and header v
   const copyBtn = card.querySelector("#dz-btn-copy-diagnostics");
   assert.ok(copyBtn, "technical details include a diagnostics copy control");
 
-  // 3. Failed phase: header is hidden
-  renderView(
-    container,
+  render(
+    el,
     { status: "failed", seq: 3, sessionId: "s1", imageCount: 0, error: { code: "FAILED", category: "transport", retryable: true, message: "Error" } },
     callbacks,
   );
   assert.equal(header.style.display, "none", "header hidden in failed phase");
 
-  // 4. Return to idle: header reappears
-  renderView(container, { status: "idle", seq: 4, sessionId: "s1", imageCount: 0 }, callbacks);
+  render(el, { status: "idle", seq: 4, sessionId: "s1", imageCount: 0 }, callbacks);
   assert.equal(header.style.display, "", "header reappears in idle");
 });
 
 test("paused job activity freezes the displayed elapsed time", () => {
-  const container = createMockElement("div");
-  const callbacks = {
-    onSubmitUrl: () => {},
-    onCancel: () => {},
-    onReset: () => {},
-  };
-  renderView(
-    container,
+  const el = container();
+  render(
+    el,
     { status: "downloading", seq: 1, sessionId: "s1", imageCount: 1, transport: "direct" },
-    callbacks,
+    { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {} },
     {
       currentProgress: { current: 3, total: 10 },
       paused: true,
       jobActivity: { startedAt: 1_000, pausedAt: 4_000, now: 12_000, paused: true },
     },
   );
-
-  const card = container.querySelector(".dz-card");
+  const card = el.querySelector(".dz-card");
   assert.match(card.querySelector("#dz-job-time").textContent, /^3 s/);
   assert.ok(card.querySelector(".dz-job-section").classList.contains("dz-job-paused"));
 });
@@ -541,32 +277,19 @@ test("paused job activity freezes the displayed elapsed time", () => {
 test("CSS structural invariants prevent button clipping, container overflow, and layout shifts", () => {
   const css = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/styles/theme.css"), "utf8");
 
-  // Secondary buttons must not have rigid height: 38px (must use min-height to avoid text bleed)
   assert.match(css, /\.dz-btn-secondary\s*\{[^}]*min-height:\s*38px;/);
   assert.doesNotMatch(css, /\.dz-btn-secondary\s*\{[^}]*(?<![a-z-])height:\s*38px;/);
-
-  // The compact rail places its bare icon controls before the progress line.
   assert.match(css, /\.dz-progress-rail\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\);/);
   assert.match(css, /\.dz-progress-buttons\s*\{[^}]*display:\s*flex;/);
   assert.match(css, /\.dz-progress-control\s*\{[^}]*border:\s*0;/);
   assert.match(css, /\.dz-progress-control\s*\{[^}]*background:\s*transparent;/);
-
-  // Link button styling for inline actions like Change button
   assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*display:\s*inline;/);
   assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*background:\s*transparent;/);
   assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*text-decoration:\s*underline;/);
-
-  // Guidance items must not have broken disconnected border-top lines
   assert.doesNotMatch(css, /\.dz-guidance-item,\s*\.dz-suggestion-card\s*\{[^}]*border-top:/);
-
-  // The count is stable-width enough not to cause layout jitter.
   assert.match(css, /\.dz-progress-percent,\s*\.dz-progress-count\s*\{[^}]*flex-shrink:\s*0;/);
   assert.match(css, /\.dz-progress-percent,\s*\.dz-progress-count\s*\{[^}]*tabular-nums;/);
-
-  // Status step text must have min-width: 0 to truncate cleanly instead of overflowing
   assert.match(css, /\.dz-progress-status\s*\{[^}]*min-width:\s*0;/);
-
-  // Mobile layout adaptations for portrait phones
   assert.ok(css.includes("max-width: 560px") && css.includes("flex-direction: column"));
   assert.ok(css.includes("max-width: 380px"));
 });
