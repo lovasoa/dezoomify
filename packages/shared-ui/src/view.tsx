@@ -11,7 +11,7 @@
 // product contract (theme CSS, E2E selectors); keep them stable.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { FormEvent, ReactElement, ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -43,6 +43,7 @@ import {
   formatElapsed,
   getDezoomifyLogoSvg,
 } from "./components.ts";
+import { UrlInput } from "./url-input.tsx";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (host-neutral, no DOM).
@@ -247,74 +248,12 @@ function HistorySection({
 }
 
 function IdleView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewContext }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [hasValue, setHasValue] = useState<boolean>(Boolean(ctx?.initialUrl));
-
-  useEffect(() => {
-    const el = inputRef.current;
-    if (el && !el.value && ctx?.initialUrl) {
-      el.value = ctx.initialUrl;
-      setHasValue(true);
-    }
-  }, [ctx?.initialUrl]);
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    const url = inputRef.current?.value.trim() ?? "";
-    if (!url) {
-      inputRef.current?.focus();
-      return;
-    }
-    callbacks.onSubmitUrl(url);
-  }
-
   return (
     <div className="dz-view-body dz-fade-in">
       <div className="dz-description">
         <p>{t("view.input.description")}</p>
       </div>
-      <form className="dz-form" onSubmit={submit}>
-        <div className="dz-input-wrapper">
-          <input
-            ref={inputRef}
-            type="url"
-            id="dz-url-input"
-            className="dz-input"
-            placeholder={t("view.input.placeholder")}
-            required
-            autoFocus
-            defaultValue={ctx?.initialUrl ?? ""}
-            aria-label={t("view.input.aria")}
-            onChange={(e) => setHasValue(e.currentTarget.value.length > 0)}
-          />
-          <button
-            type="button"
-            className="dz-input-clear"
-            id="dz-btn-clear"
-            title={t("view.idle.clearTitle")}
-            aria-label={t("view.idle.clearTitle")}
-            style={{ display: hasValue ? "flex" : "none" }}
-            onClick={() => {
-              const el = inputRef.current;
-              if (el) {
-                el.value = "";
-                setHasValue(false);
-                el.focus();
-              }
-            }}
-          >
-            ×
-          </button>
-        </div>
-        <div className="dz-button-row">
-          <button type="submit" className="dz-btn-tactile">
-            <span>{t("view.input.start")}</span>
-            <span className="dz-button-key" aria-hidden="true">
-              ↵
-            </span>
-          </button>
-        </div>
-      </form>
+      <UrlInput initialUrl={ctx?.initialUrl} onSubmit={callbacks.onSubmitUrl} />
       <HistorySection callbacks={callbacks} ctx={ctx} />
     </div>
   );

@@ -90,25 +90,6 @@ body {
   margin-bottom: 1.75rem;
 }
 
-#root .dz-form {
-  padding: 0.55rem;
-  border: 1px solid var(--dz-surface-border);
-  border-radius: var(--dz-radius-large);
-  background: var(--dz-surface-gradient);
-  box-shadow: var(--dz-surface-shadow);
-}
-
-#root .dz-form .dz-input {
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-}
-
-#root .dz-form .dz-input:focus {
-  border-color: transparent;
-  box-shadow: none;
-}
-
 /* Pinned bottom footer: a deliberately thin, always-visible link bar. */
 .dz-site-footer {
   display: flex;
