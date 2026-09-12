@@ -94,6 +94,11 @@ function assertPng(bytes) {
   }
 }
 
+function assertPngShape(bytes) {
+  const output = PNG.sync.read(bytes);
+  assert.deepEqual([output.width, output.height], [512, 512], "saved image dimensions");
+}
+
 async function readCompletedPng(output, deadline) {
   let lastError = "file was never created";
   while (Date.now() <= deadline) {
@@ -241,7 +246,7 @@ test("chromium: partial-output actions disappear after the terminal event", { ti
   let server = null;
   try {
     server = await startFixtureServer(work);
-    assertPng(await runChromiumJob(server.base, work, {
+    assertPngShape(await runChromiumJob(server.base, work, {
       source: "https://fixtures.test/cli/corrupt.dzi",
       async beforeCompletion(jobPage) {
         const keep = jobPage.locator("[data-dz-partial-choice=keep]");

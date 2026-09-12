@@ -227,16 +227,18 @@ hermetic headless browser E2E in both engines. Chromium runs under
 Playwright; Firefox under Selenium/geckodriver (binary via
 `DEZOOMIFY_FIREFOX_BIN`, a system install, or the Playwright cache; JavaScript
 dependencies come from the root pnpm workspace). Browser binaries are
-installed separately by the E2E setup. Full user-facing UI flows remain manual
-or CI-runner work.
+installed separately by the E2E setup. The permission and partial-output
+recovery flows below are also browser E2E coverage, not manual-only checks.
 
 Browser chrome cannot be clicked headlessly, so the toolbar lifecycle is
 covered by unit harnesses driving the real background module with
 production-faithful fakes through job readiness, finite snapshot/fetch
 dispatch, stale-generation rejection, error-badge presentation, and every
 disarm rule. The headless E2E runs the actual in-browser job flow in both
-engines over the loopback fixture-server with an E2E-only exact-origin host
-grant: the background snapshots the tab's retained performance timeline, the
+engines over the loopback fixture-server. Its baseline uses an E2E-only
+exact-origin host grant; Chromium also drives the real optional-host prompt
+and verifies that partial-output controls are gone after the terminal event.
+The background snapshots the tab's retained performance timeline, the
 job tab performs WASM discovery,
 fetches tiles, assembles, and saves, with the saved PNG verified against the
 fixture pyramid. A CORS-blocked fixture asserts tainted display-only with no
