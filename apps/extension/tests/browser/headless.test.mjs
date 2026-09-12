@@ -21,7 +21,7 @@ const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 const TILE_DIR = path.join(REPO_ROOT, "testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli");
 
-function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermissions = true, source } = {}) {
+function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermissions = true, scenario } = {}) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
   const wxtBrowser = browser === "chromium" ? "chrome" : browser;
   const staged = spawnSync("pnpm", ["--dir", EXTENSION_ROOT, "exec", "wxt", "zip", "--browser", wxtBrowser], {
@@ -32,7 +32,7 @@ function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermi
       DEZOOMIFY_TEST_HOST_PERMISSIONS: grantHostPermissions ? "1" : "0",
       DEZOOMIFY_TEST_ORIGIN: origin,
       DEZOOMIFY_TEST_DRIVER: testDriver ? "1" : "0",
-      ...(source ? { DEZOOMIFY_TEST_SOURCE: source } : {}),
+      ...(scenario ? { DEZOOMIFY_TEST_SCENARIO: scenario } : {}),
     },
   });
   assert.equal(staged.status, 0, `WXT package ${browser} failed:\n${staged.stderr}`);
@@ -244,6 +244,7 @@ test("chromium: optional host grant keeps the React job view mounted", { timeout
     server = await startFixtureServer(work);
     assertPng(await runChromiumJob(server.base, work, {
       grantHostPermissions: false,
+      scenario: "permission",
       async beforeCompletion(jobPage) {
         const grant = jobPage.locator("[data-dz-allow-access=true]");
         await grant.waitFor({ state: "visible", timeout: 30000 });
@@ -263,7 +264,7 @@ test("chromium: partial-output actions disappear after the terminal event", { ti
   try {
     server = await startFixtureServer(work);
     assertPngShape(await runChromiumJob(server.base, work, {
-      source: "https://fixtures.test/cli/corrupt.dzi",
+      scenario: "corrupt",
       async beforeCompletion(jobPage) {
         const keep = jobPage.locator("[data-dz-partial-choice=keep]");
         await keep.waitFor({ state: "visible", timeout: 30000 });
