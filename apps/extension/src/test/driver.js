@@ -9,7 +9,11 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
     throw new Error("extension E2E driver is not configured");
   }
 
-  const targetUrl = `${origin}/target.html?source=${encodeURIComponent(source)}`;
+  // Do not attach the default source as a query parameter: its `.dzi` suffix
+  // would make the fixture document itself a higher-ranked discovery
+  // candidate than the simulated viewer request. Only the corrupt-tile test
+  // needs to override target.html's built-in source.
+  const targetUrl = source === "" ? `${origin}/target.html` : `${origin}/target.html?source=${encodeURIComponent(source)}`;
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 

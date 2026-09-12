@@ -9,7 +9,7 @@ const repository = path.resolve(root, "../..");
 const publicDir = path.join(root, "public");
 const isTestPackage = process.env.DEZOOMIFY_TEST_DRIVER === "1";
 const testOrigin = process.env.DEZOOMIFY_TEST_ORIGIN ?? "";
-const testSource = process.env.DEZOOMIFY_TEST_SOURCE ?? "https://fixtures.test/cli/pyramid.dzi";
+const testSource = process.env.DEZOOMIFY_TEST_SOURCE ?? "";
 
 function testHostPermissions(): string[] {
   if (process.env.DEZOOMIFY_TEST_HOST_PERMISSIONS !== "1") return [];
