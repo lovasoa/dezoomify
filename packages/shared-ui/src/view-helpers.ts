@@ -26,7 +26,8 @@ export function handoffOriginFor(handoffUrl?: string, sourceUrl?: string): strin
   } catch { /* malformed handoff links have no origin summary */ }
   for (const candidate of candidates) {
     try {
-      if (!candidate || candidate.trim().toLowerCase().startsWith("file:")) return "";
+      if (!candidate) continue;
+      if (candidate.trim().toLowerCase().startsWith("file:")) return "";
       const url = new URL(candidate.trim());
       if (url.protocol === "http:" || url.protocol === "https:") return `${url.protocol}//${url.host}/`;
     } catch { /* try the next candidate */ }
