@@ -79,26 +79,17 @@ async function waitFor(driver, predicate, timeout, label) {
 }
 
 async function configureOutputDirectory(driver) {
-  const directory = runOutputDir();
+  const directory = path.basename(runOutputDir());
   let last = null;
   for (let attempt = 0; attempt < 120; attempt += 1) {
     try {
-      last = await driver.executeScript((dir) => {
-        const input = document.querySelector("#dz-settings-output-dir");
+      last = await driver.executeScript((expectedFolder) => {
         const panel = document.querySelector("#dz-desktop-settings");
-        if (!input || !panel) {
-          return { ok: false, reason: "panel-missing", hasInput: !!input, hasPanel: !!panel };
+        const folder = panel?.querySelector(".dz-quick-button");
+        if (!panel || !folder) {
+          return { ok: false, reason: "settings-not-mounted", hasPanel: !!panel, hasFolder: !!folder };
         }
-        input.value = dir;
-        // A change on any advanced control routes through the panel's validated
-        // persist callback (which reads the hidden inputs, including the output
-        // directory). #dz-settings-retries is a stable id present on every panel.
-        const retries = panel.querySelector("#dz-settings-retries");
-        if (!retries) {
-          return { ok: false, reason: "no-persist-control" };
-        }
-        retries.dispatchEvent(new Event("change", { bubbles: true }));
-        return { ok: input.value === dir, reason: "done", value: input.value };
+        return { ok: folder.textContent.trim() === expectedFolder, reason: "done", value: folder.textContent.trim() };
       }, directory);
     } catch (error) {
       // The webview can still be settling right after session creation on a

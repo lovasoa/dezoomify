@@ -338,10 +338,28 @@ export async function startFrontendServer() {
       res.end("not found");
       return;
     }
+    let body = readFileSync(file);
+    // Configure the isolated test profile before the desktop entry module
+    // reads localStorage. This is setup, not a second settings control: the
+    // window still exposes its normal Folder picker to users. Native file
+    // pickers cannot be driven consistently by W3C WebDriver on all three
+    // desktop platforms, while the saved settings are the product's own
+    // supported persistence boundary.
+    if (name === "/index.html") {
+      const outputDir = process.env.DEZOOMIFY_WINDOW_E2E_OUTPUT;
+      if (!outputDir) throw new Error("window E2E output directory is unset");
+      const settings = JSON.stringify({ outputDir });
+      body = Buffer.from(
+        body.toString("utf8").replace(
+          "</head>",
+          `<script>localStorage.setItem("dezoomify.desktop.settings.v1", ${JSON.stringify(settings)});</script></head>`,
+        ),
+      );
+    }
     res.writeHead(200, {
       "Content-Type": MIME[path.extname(file)] ?? "application/octet-stream",
     });
-    res.end(readFileSync(file));
+    res.end(body);
   });
   await new Promise((resolve, reject) => {
     server.once("error", (err) => {

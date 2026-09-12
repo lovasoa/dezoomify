@@ -16,10 +16,13 @@
       const scenario = new URLSearchParams(location.search).get("scenario");
       const source = scenario === "corrupt"
         ? "https://fixtures.test/cli/corrupt.dzi"
-        : scenario === "permission"
-          ? location.protocol + "//localhost:" + location.port + "/fetch/https://fixtures.test/cli/pyramid.dzi?url=" + encodeURIComponent("https://fixtures.test/cli/pyramid.dzi")
-          : "https://fixtures.test/cli/pyramid.dzi";
-      fetch(scenario === "permission" ? source : location.origin + "/fetch/" + source + "?url=" + encodeURIComponent(source))
+        : "https://fixtures.test/cli/pyramid.dzi";
+      // Metadata is fetched from the source document's own origin. The
+      // permission scenario differs only in the extension package: it starts
+      // with no optional host grant, so the first tile request reaches the
+      // visible permission boundary. Switching 127.0.0.1 to localhost here
+      // made the fixture request cross-origin and failed before that boundary.
+      fetch(location.origin + "/fetch/" + source + "?url=" + encodeURIComponent(source))
         .then((r) => {
           if (!r.ok) throw new Error("status " + r.status);
           window.__sourceFetched = true;

@@ -269,7 +269,7 @@ test("chromium: partial-output actions disappear after the terminal event", { ti
         const keep = jobPage.locator("[data-dz-partial-choice=keep]");
         await keep.waitFor({ state: "visible", timeout: 30000 });
         await keep.click();
-        await jobPage.locator("h2").filter({ hasText: "Showing preview" }).waitFor({ state: "visible", timeout: 30000 });
+        await jobPage.locator(".dz-completed-section").waitFor({ state: "visible", timeout: 30000 });
         assert.equal(await jobPage.locator("[data-dz-partial-choice]").count(), 0);
       },
     }));
