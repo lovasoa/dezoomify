@@ -10,7 +10,7 @@
 // The rendered class names, ids, roles, and visible text are part of the
 // product contract (theme CSS, E2E selectors); keep them stable.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
