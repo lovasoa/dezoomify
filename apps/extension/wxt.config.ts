@@ -16,6 +16,10 @@ function testHostPermissions(): string[] {
   if (!/^https?:\/\/[^/]+$/.test(testOrigin)) {
     throw new Error("DEZOOMIFY_TEST_ORIGIN must be an http(s) origin for the E2E package");
   }
+  // The permission E2E starts with access only to its source document. Its
+  // viewer metadata comes from the same loopback server through `localhost`,
+  // so derived tile reads must cross the optional-permission boundary.
+  if (process.env.DEZOOMIFY_TEST_SOURCE_HOST_ONLY === "1") return [`${testOrigin}/*`];
   return ["http://127.0.0.1/*", "http://localhost/*", `${testOrigin}/*`];
 }
 

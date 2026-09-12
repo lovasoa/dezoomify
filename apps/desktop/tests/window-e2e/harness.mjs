@@ -332,6 +332,17 @@ export async function startFrontendServer() {
       return;
     }
     if (name === "/") name = "/index.html";
+    // The document CSP only permits same-origin scripts. Serve the ephemeral
+    // test setting as one instead of injecting an inline script, which WebKit
+    // correctly rejects and would silently leave the app on Downloads.
+    if (name === "/e2e-settings.js") {
+      const outputDir = process.env.DEZOOMIFY_WINDOW_E2E_OUTPUT;
+      if (!outputDir) throw new Error("window E2E output directory is unset");
+      const settings = JSON.stringify({ outputDir });
+      res.writeHead(200, { "Content-Type": "text/javascript" });
+      res.end(`localStorage.setItem("dezoomify.desktop.settings.v1", ${JSON.stringify(settings)});`);
+      return;
+    }
     const file = path.join(FRONTEND_DIST, name);
     if (!file.startsWith(FRONTEND_DIST) || !existsSync(file)) {
       res.writeHead(404);
@@ -348,11 +359,10 @@ export async function startFrontendServer() {
     if (name === "/index.html") {
       const outputDir = process.env.DEZOOMIFY_WINDOW_E2E_OUTPUT;
       if (!outputDir) throw new Error("window E2E output directory is unset");
-      const settings = JSON.stringify({ outputDir });
       body = Buffer.from(
         body.toString("utf8").replace(
           "</head>",
-          `<script>localStorage.setItem("dezoomify.desktop.settings.v1", ${JSON.stringify(settings)});</script></head>`,
+          '<script src="/e2e-settings.js"></script></head>',
         ),
       );
     }

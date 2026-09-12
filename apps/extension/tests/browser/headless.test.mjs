@@ -21,7 +21,7 @@ const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 const TILE_DIR = path.join(REPO_ROOT, "testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli");
 
-function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermissions = true, scenario } = {}) {
+function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermissions = true, sourceHostOnly = false, scenario } = {}) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
   const wxtBrowser = browser === "chromium" ? "chrome" : browser;
   const staged = spawnSync("pnpm", ["--dir", EXTENSION_ROOT, "exec", "wxt", "zip", "--browser", wxtBrowser], {
@@ -30,6 +30,7 @@ function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermi
     env: {
       ...process.env,
       DEZOOMIFY_TEST_HOST_PERMISSIONS: grantHostPermissions ? "1" : "0",
+      ...(sourceHostOnly ? { DEZOOMIFY_TEST_SOURCE_HOST_ONLY: "1" } : {}),
       DEZOOMIFY_TEST_ORIGIN: origin,
       DEZOOMIFY_TEST_DRIVER: testDriver ? "1" : "0",
       ...(scenario ? { DEZOOMIFY_TEST_SCENARIO: scenario } : {}),
@@ -252,7 +253,7 @@ test("chromium: optional host grant keeps the React job view mounted", { timeout
   try {
     server = await startFixtureServer(work);
     assertPng(await runChromiumJob(server.base, work, {
-      grantHostPermissions: false,
+      sourceHostOnly: true,
       scenario: "permission",
       async beforeCompletion(jobPage) {
         const grant = jobPage.locator("[data-dz-allow-access=true]");
