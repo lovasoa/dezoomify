@@ -4,11 +4,12 @@
 globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   const api = globalThis.browser ?? globalThis.chrome;
   const origin = globalThis.__DEZOOMIFY_TEST_ORIGIN__;
-  if (!api?.tabs?.create || typeof origin !== "string") {
+  const source = globalThis.__DEZOOMIFY_TEST_SOURCE__;
+  if (!api?.tabs?.create || typeof origin !== "string" || typeof source !== "string") {
     throw new Error("extension E2E driver is not configured");
   }
 
-  const targetUrl = `${origin}/target.html`;
+  const targetUrl = `${origin}/target.html?source=${encodeURIComponent(source)}`;
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 

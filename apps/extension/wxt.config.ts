@@ -9,6 +9,7 @@ const repository = path.resolve(root, "../..");
 const publicDir = path.join(root, "public");
 const isTestPackage = process.env.DEZOOMIFY_TEST_DRIVER === "1";
 const testOrigin = process.env.DEZOOMIFY_TEST_ORIGIN ?? "";
+const testSource = process.env.DEZOOMIFY_TEST_SOURCE ?? "https://fixtures.test/cli/pyramid.dzi";
 
 function testHostPermissions(): string[] {
   if (process.env.DEZOOMIFY_TEST_HOST_PERMISSIONS !== "1") return [];
@@ -80,7 +81,11 @@ export default defineConfig({
 
       if (isTestPackage) {
         await cp(path.join(root, "src/test"), path.join(publicDir, "test"), { recursive: true });
-        await writeFile(path.join(publicDir, "test/config.js"), `globalThis.__DEZOOMIFY_TEST_ORIGIN__ = ${JSON.stringify(testOrigin)};\n`);
+        await writeFile(
+          path.join(publicDir, "test/config.js"),
+          `globalThis.__DEZOOMIFY_TEST_ORIGIN__ = ${JSON.stringify(testOrigin)};\n` +
+          `globalThis.__DEZOOMIFY_TEST_SOURCE__ = ${JSON.stringify(testSource)};\n`,
+        );
       }
     },
   },

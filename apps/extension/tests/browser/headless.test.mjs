@@ -21,7 +21,7 @@ const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 const TILE_DIR = path.join(REPO_ROOT, "testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli");
 
-function stagePackage(browser, dir, origin, testDriver = false) {
+function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermissions = true, source } = {}) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
   const wxtBrowser = browser === "chromium" ? "chrome" : browser;
   const staged = spawnSync("pnpm", ["--dir", EXTENSION_ROOT, "exec", "wxt", "zip", "--browser", wxtBrowser], {
@@ -29,9 +29,10 @@ function stagePackage(browser, dir, origin, testDriver = false) {
     encoding: "utf8",
     env: {
       ...process.env,
-      DEZOOMIFY_TEST_HOST_PERMISSIONS: "1",
+      DEZOOMIFY_TEST_HOST_PERMISSIONS: grantHostPermissions ? "1" : "0",
       DEZOOMIFY_TEST_ORIGIN: origin,
       DEZOOMIFY_TEST_DRIVER: testDriver ? "1" : "0",
+      ...(source ? { DEZOOMIFY_TEST_SOURCE: source } : {}),
     },
   });
   assert.equal(staged.status, 0, `WXT package ${browser} failed:\n${staged.stderr}`);
@@ -113,8 +114,18 @@ async function readCompletedPng(output, deadline) {
   throw new Error(`Firefox saved an incomplete PNG: ${lastError}`);
 }
 
-async function runChromiumJob(base, work) {
-  const zip = stagePackage("chromium", work, base, true);
+async function waitForJobPage(context) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const page = context.pages().find((candidate) => candidate.url().includes("/job.html#jobId="));
+    if (page) return page;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("the extension did not open its job tab");
+}
+
+async function runChromiumJob(base, work, options = {}) {
+  const zip = stagePackage("chromium", work, base, { testDriver: true, ...options });
   const pkgDir = path.join(work, "pkg");
   spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
   const context = await chromium.launchPersistentContext(path.join(work, "profile"), {
@@ -139,6 +150,8 @@ async function runChromiumJob(base, work) {
     const driverResult = await driverPage.evaluate(() => globalThis.__DEZOOMIFY_TEST_RUN__
       .then(() => ({ ok: true }), (error) => ({ ok: false, error: String(error?.message ?? error) })));
     assert.deepEqual(driverResult, { ok: true }, `Chromium test driver failed: ${JSON.stringify(driverResult)}`);
+    const jobPage = await waitForJobPage(context);
+    if (options.beforeCompletion) await options.beforeCompletion(jobPage);
     const deadline = Date.now() + 90000;
     while (downloads.length === 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -162,7 +175,7 @@ function findFirefoxBinary() {
 }
 
 async function runFirefoxJob(base, work) {
-  const zip = stagePackage("firefox", work, base, true);
+  const zip = stagePackage("firefox", work, base, { testDriver: true });
   const binary = findFirefoxBinary();
   assert.ok(binary, "no Firefox binary found; set DEZOOMIFY_FIREFOX_BIN");
   const downloadsDir = path.join(work, "downloads");
@@ -197,6 +210,47 @@ test("chromium: packaged extension runs the job-tab engine flow", { timeout: 180
   try {
     server = await startFixtureServer(work);
     assertPng(await runChromiumJob(server.base, work));
+  } finally {
+    if (server) server.proc.kill();
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("chromium: optional host grant keeps the React job view mounted", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-permission-"));
+  let server = null;
+  try {
+    server = await startFixtureServer(work);
+    assertPng(await runChromiumJob(server.base, work, {
+      grantHostPermissions: false,
+      async beforeCompletion(jobPage) {
+        const grant = jobPage.locator("[data-dz-allow-access=true]");
+        await grant.waitFor({ state: "visible", timeout: 30000 });
+        await grant.click();
+        await jobPage.locator(".dz-card").waitFor({ state: "visible", timeout: 30000 });
+      },
+    }));
+  } finally {
+    if (server) server.proc.kill();
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("chromium: partial-output actions disappear after the terminal event", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-partial-"));
+  let server = null;
+  try {
+    server = await startFixtureServer(work);
+    assertPng(await runChromiumJob(server.base, work, {
+      source: "https://fixtures.test/cli/corrupt.dzi",
+      async beforeCompletion(jobPage) {
+        const keep = jobPage.locator("[data-dz-partial-choice=keep]");
+        await keep.waitFor({ state: "visible", timeout: 30000 });
+        await keep.click();
+        await jobPage.locator("h2").filter({ hasText: "Showing preview" }).waitFor({ state: "visible", timeout: 30000 });
+        assert.equal(await jobPage.locator("[data-dz-partial-choice]").count(), 0);
+      },
+    }));
   } finally {
     if (server) server.proc.kill();
     rmSync(work, { recursive: true, force: true });

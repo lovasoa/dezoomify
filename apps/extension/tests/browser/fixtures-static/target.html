@@ -13,7 +13,7 @@
       // The query-preserving `/fetch/<original-path>` form keeps the `.dzi`
       // suffix visible to URL-shape discovery (the bare `/fetch` outer path
       // is opaque to it).
-      const source = "https://fixtures.test/cli/pyramid.dzi";
+      const source = new URLSearchParams(location.search).get("source") || "https://fixtures.test/cli/pyramid.dzi";
       fetch(
         location.origin + "/fetch/" + source + "?url=" + encodeURIComponent(source),
       )
