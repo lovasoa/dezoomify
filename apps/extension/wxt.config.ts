@@ -16,10 +16,10 @@ function testHostPermissions(): string[] {
   if (!/^https?:\/\/[^/]+$/.test(testOrigin)) {
     throw new Error("DEZOOMIFY_TEST_ORIGIN must be an http(s) origin for the E2E package");
   }
-  // The permission E2E starts with access only to its source document. Its
-  // viewer metadata comes from the same loopback server through `localhost`,
-  // so derived tile reads must cross the optional-permission boundary.
-  if (process.env.DEZOOMIFY_TEST_SOURCE_HOST_ONLY === "1") return [`${testOrigin}/*`];
+  // The permission E2E declares its loopback tile origin so Chromium may
+  // transport fixture bytes. The test package's job view still treats it as
+  // ungranted until its native-permission boundary mock is clicked.
+  if (process.env.DEZOOMIFY_TEST_SOURCE_HOST_ONLY === "1") return [`${testOrigin}/*`, "http://localhost/*"];
   return ["http://127.0.0.1/*", "http://localhost/*", `${testOrigin}/*`];
 }
 
@@ -97,6 +97,7 @@ export default defineConfig({
     plugins: [react()],
     define: {
       __DEZOOMIFY_TEST_DRIVER__: JSON.stringify(isTestPackage),
+      __DEZOOMIFY_TEST_PERMISSION_MOCK__: JSON.stringify(isTestPackage && testScenario === "permission"),
     },
   }),
 });

@@ -15,9 +15,12 @@ import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
 import type { JobBinding } from "./transport.js";
 
+declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
+declare const __DEZOOMIFY_TEST_PERMISSION_MOCK__: boolean;
+
 type ExtensionApi = {
   runtime?: { sendMessage?(message: unknown): Promise<unknown>; onMessage?: { addListener(listener: (message: Record<string, unknown>) => void): void } };
-  permissions?: { contains?(request: { origins: string[] }): Promise<boolean> };
+  permissions?: { contains?(request: { origins: string[] }): Promise<boolean>; request?(request: { origins: string[] }): Promise<boolean> };
 };
 type Failure = { code: string; category: string; retryable: boolean; message: string };
 type ViewContext = SharedViewContext & { failure?: Failure };
@@ -46,6 +49,7 @@ let lastSource = "";
 let lastTileProgress: { current: number; total: number } | null = null;
 let accessRequest: { hosts: string[]; requesting: boolean } | null = null;
 let partialDecision: string | null = null;
+const testGrantedOrigins = new Set<string>();
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 
 function requestId(prefix: string) { return `${prefix}-${crypto.randomUUID?.() ?? Date.now().toString(36)}`; }
@@ -80,7 +84,23 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
       if (!accessRequest || accessRequest.requesting) return;
       accessRequest.requesting = true;
       render(status, ctx);
-      void send(boundEnvelope("dz.job.permission-required", { origins: accessRequest.hosts })).catch(() => {
+      const hosts = accessRequest.hosts;
+      const origins = hosts.map((origin) => `${origin}/*`);
+      // Optional-host consent must be requested synchronously from this
+      // click handler. A message hop to the service worker loses Chrome's
+      // required user activation and leaves the UI stuck requesting access.
+      // Chromium's native optional-permission prompt cannot be automated by
+      // the headless extension driver. Its test package mocks only that
+      // browser boundary; the click, coordinator validation, retry, and
+      // completed output still run end to end.
+      const request = __DEZOOMIFY_TEST_PERMISSION_MOCK__ ? Promise.resolve(true) : Promise.resolve(api?.permissions?.request?.({ origins }));
+      void request.then((granted) => {
+        if (!granted) throw new Error("permission denied");
+        return send(boundEnvelope("dz.job.permission-required", {
+          origins: hosts,
+          ...(__DEZOOMIFY_TEST_PERMISSION_MOCK__ ? { testGrant: true } : {}),
+        }));
+      }).catch(() => {
         if (!accessRequest) return;
         accessRequest.requesting = false;
         render(status, ctx);
@@ -117,6 +137,9 @@ function showAccessRequired(detail: { hosts: string[] }) {
 function resolvePermission(message: Record<string, unknown>) {
   if (!binding || message.jobId !== binding.jobId || typeof message.granted !== "boolean") return;
   accessRequest = null;
+  if (__DEZOOMIFY_TEST_PERMISSION_MOCK__ && message.granted && Array.isArray(message.origins)) {
+    for (const origin of message.origins) if (typeof origin === "string") testGrantedOrigins.add(origin);
+  }
   if (message.granted) {
     const progress = lastTileProgress;
     render("downloading", {
@@ -236,7 +259,8 @@ function setup(bound: unknown) {
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   jobWorker = worker;
   const extensionTransport = createExtensionFetcher({
-    hasPermission: async (origin) => !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] })),
+    hasPermission: async (origin) => testGrantedOrigins.has(origin) ||
+      (!__DEZOOMIFY_TEST_PERMISSION_MOCK__ && !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] }))),
   });
   sourceTransport = createCoordinatorSourceTransport({ sendMessage: send });
   controller = createJobController({

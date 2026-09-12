@@ -425,8 +425,10 @@ impl ScenarioRoute {
                 std::fs::read(&full).map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
             if is_text(&headers) {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
+                let localhost_origin = state.origin.replacen("127.0.0.1", "localhost", 1);
                 let replaced = text
                     .replace("{{origin}}", &state.origin)
+                    .replace("{{localhost_origin}}", &localhost_origin)
                     .replace("{{host}}", &original.host);
                 bytes = replaced.into_bytes();
             }
@@ -446,6 +448,7 @@ fn is_text(headers: &HeaderMap) -> bool {
             ct.starts_with("text/")
                 || ct.contains("json")
                 || ct.contains("xml")
+                || ct.contains("yaml")
                 || ct.contains("javascript")
                 || ct.contains("svg")
         })

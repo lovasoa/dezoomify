@@ -16,7 +16,14 @@ mod variable;
 
 pub const SPEC: DezoomerSpec = DezoomerSpec::new("custom", &[DiscoveryMatch::Any.extract(catalog)])
     .with_display_name("Custom tiles")
-    .recognizing(|uri| uri.ends_with("tiles.yaml"), "not a tiles.yaml file");
+    .recognizing(is_tiles_yaml, "not a tiles.yaml file")
+    .preferring(is_tiles_yaml);
+
+fn is_tiles_yaml(uri: &str) -> bool {
+    uri.split(['?', '#'])
+        .next()
+        .is_some_and(|path| path.ends_with("tiles.yaml"))
+}
 
 fn catalog(_: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     catalog_from_yaml(bytes)
@@ -116,6 +123,13 @@ mod tests {
         let yaml: CustomYamlTiles =
             serde_yaml::from_str("url_template: test.com\nvariables: []").unwrap();
         assert!(yaml.headers.contains_key("User-Agent"));
+    }
+
+    #[test]
+    fn recognizes_tiles_yaml_with_a_query_or_fragment() {
+        assert!(is_tiles_yaml("https://example.test/tiles.yaml?version=2"));
+        assert!(is_tiles_yaml("https://example.test/tiles.yaml#preview"));
+        assert!(!is_tiles_yaml("https://example.test/tiles.yml"));
     }
 
     #[test]

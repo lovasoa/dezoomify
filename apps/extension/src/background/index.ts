@@ -19,7 +19,7 @@ type BrowserApi = {
   action?: { setIcon?: (details: unknown) => Promise<void>; setBadgeText?: (details: unknown) => Promise<void>; onClicked?: { addListener?: (listener: (tab: BrowserTab) => void) => void } };
   tabs?: { sendMessage?: (tabId: number, message: unknown, options?: { frameId: number }) => Promise<unknown>; update?: (tabId: number, details: unknown) => Promise<unknown>; create?: (details: unknown) => Promise<BrowserTab>; onRemoved?: { addListener?: (listener: (tabId: number) => void) => void }; onUpdated?: { addListener?: (listener: (tabId: number, changeInfo: { url?: string }) => void) => void } };
   storage?: { session?: { set?: (value: unknown) => Promise<void>; get?: (key: string) => Promise<Record<string, unknown>> } };
-  permissions?: { request?: (details: { origins: string[] }) => Promise<boolean>; onRemoved?: { addListener?: (listener: (removed: { origins?: string[] }) => void) => void } };
+  permissions?: { contains?: (details: { origins: string[] }) => Promise<boolean>; onRemoved?: { addListener?: (listener: (removed: { origins?: string[] }) => void) => void } };
   scripting?: { executeScript?: (details: { target: { tabId: number; frameIds: number[] }; func: (...args: never[]) => unknown; args: unknown[] }) => Promise<Array<{ frameId: number; result: unknown }>> };
   runtime?: { getURL?: (path: string) => string; onMessage?: { addListener?: (listener: (message: Message, sender: BrowserSender, sendResponse: (response: unknown) => void) => boolean | void) => void } };
 };
@@ -319,7 +319,11 @@ async function handlePermission(entry: Entry, message: Message) {
     : [];
   if (!origins.length) return sendToJob(entry, "dz.job.permission-required", message.requestId, { granted: false, code: "invalid-origins" });
   let granted = false;
-  try { granted = Boolean(await api?.permissions?.request?.({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
+  // The job page owns `permissions.request()` because it retains the user
+  // activation from its Allow button. The coordinator verifies that grant
+  // before resuming a paused acquisition.
+  if (globals.__DEZOOMIFY_TEST__ && message.testGrant === true) granted = true;
+  else try { granted = Boolean(await api?.permissions?.contains?.({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
   if (granted) for (const origin of origins) entry.grantedOrigins.add(origin);
   await persistBindings();
   sendToJob(entry, "dz.job.permission-required", message.requestId, { granted, origins });

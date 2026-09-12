@@ -244,6 +244,10 @@ mod tests {
         assert_eq!(classify_url("x/info.json"), Some("iiif"));
         assert_eq!(classify_url("server?fif=image.tif"), Some("iipimage"));
         assert_eq!(classify_url("x/TileGroup0/0-0-0.jpg"), Some("zoomify"));
+        assert_eq!(
+            classify_url("https://example.test/tiles.yaml?version=2"),
+            Some("custom")
+        );
         assert_eq!(classify_url("https://example.test/unknown"), None);
     }
 

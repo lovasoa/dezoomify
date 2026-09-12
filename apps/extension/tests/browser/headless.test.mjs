@@ -259,7 +259,7 @@ test("chromium: optional host grant keeps the React job view mounted", { timeout
         const grant = jobPage.locator("[data-dz-allow-access=true]");
         await waitForVisible(jobPage, "[data-dz-allow-access=true]", "permission action");
         await grant.click();
-        await jobPage.locator(".dz-card").waitFor({ state: "visible", timeout: 30000 });
+        await waitForVisible(jobPage, ".dz-completed-section", "completed job after permission grant");
       },
     }));
   } finally {

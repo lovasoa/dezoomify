@@ -181,6 +181,18 @@
       "source_snapshot": "local"
     },
     {
+      "content_type": "application/yaml",
+      "id": "native/cli-dzi/payloads/fixtures.test/cli/permission-tiles.yaml",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "native/cli-dzi/payloads/fixtures.test/cli/permission-tiles.yaml",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "ea27514058ced52a6023d40b9fadfbba944268a4dfe976d32edac7bcbf73ef71",
+      "size": 462,
+      "source_path": "apps/extension/tests/browser/headless.test.mjs",
+      "source_snapshot": "local"
+    },
+    {
       "content_type": "application/octet-stream",
       "id": "desktop/basic/payloads/fixtures.test/desktop/basic/pyramid.dzi",
       "license_provenance": "local test fixture (generated, no third-party material)",
@@ -523,9 +535,9 @@
       "path": "native/cli-dzi/routes.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "6cb88dc137cb849400f79438e8d9ba2235f94619dabdc82b2f1221d1e6d7e5da",
-      "size": 1201,
-      "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
+      "sha256": "5cdda155c0eda2acd17ed7cc99f3f4c29cc802bc9cfc421c16ca27feae89c696",
+      "size": 1514,
+      "source_path": "apps/extension/tests/browser/headless.test.mjs",
       "source_snapshot": "local"
     },
     {

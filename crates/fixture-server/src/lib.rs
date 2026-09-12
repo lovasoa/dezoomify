@@ -16,7 +16,7 @@ mod svg;
 pub use routes::{RouteTable, ScenarioRoute};
 
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
@@ -43,13 +43,10 @@ struct FetchParams {
 pub fn router(state: AppState) -> axum::Router {
     axum::Router::new()
         .route("/fetch", any(handle_fetch))
-        // Test-only query-preserving discovery path: the outer path after
-        // `/fetch/` is ignored for serving (the inner `url` query param
-        // selects the fixture), but it stays visible to URL-shape discovery
-        // gates (`UrlSuffix`/`UrlPredicate`) that cannot see through the
-        // bare `/fetch` outer path. Deterministic, loopback-only,
-        // fail-closed (missing `url` still 400s like bare `/fetch`).
-        .route("/fetch/{*path}", any(handle_fetch))
+        // Test-only discovery path: the outer path can carry the original
+        // fixture URL, so URL-shape discovery sees its real suffix. A `url`
+        // query remains supported and takes precedence for existing tests.
+        .route("/fetch/{*path}", any(handle_fetch_path))
         .route("/proxy", any(handle_proxy))
         .route("/", any(handle_static_root))
         .route("/{*path}", any(handle_static))
@@ -156,6 +153,19 @@ async fn handle_fetch(
     Query(params): Query<FetchParams>,
 ) -> Response {
     serve_original_url(&state, &method, &params.url, "fetch").await
+}
+
+async fn handle_fetch_path(
+    State(state): State<AppState>,
+    method: Method,
+    Path(path): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let original = params
+        .get("url")
+        .map(String::as_str)
+        .unwrap_or(path.as_str());
+    serve_original_url(&state, &method, original, "fetch").await
 }
 
 async fn handle_proxy(

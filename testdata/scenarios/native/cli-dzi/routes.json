@@ -1,6 +1,17 @@
 {
   "routes": [
     {
+      "route_id": "cli-permission-tiles",
+      "method": "GET",
+      "host": "fixtures.test",
+      "path": "/cli/permission-tiles.yaml",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/yaml"
+      },
+      "payload": "payloads/fixtures.test/cli/permission-tiles.yaml"
+    },
+    {
       "route_id": "cli-dzi-tile-0-0",
       "method": "GET",
       "host": "fixtures.test",
