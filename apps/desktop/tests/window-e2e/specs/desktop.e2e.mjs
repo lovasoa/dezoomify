@@ -5,6 +5,7 @@
 // idle through the product control.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { Builder, By } from "selenium-webdriver";
 import {

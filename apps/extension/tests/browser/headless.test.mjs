@@ -129,6 +129,15 @@ async function waitForJobPage(context) {
   throw new Error("the extension did not open its job tab");
 }
 
+async function waitForVisible(page, selector, label) {
+  try {
+    await page.locator(selector).waitFor({ state: "visible", timeout: 30000 });
+  } catch (error) {
+    const body = await page.locator("body").innerText().catch(() => "<unavailable>");
+    throw new Error(`${label} did not become visible\njob page: ${body}`, { cause: error });
+  }
+}
+
 async function runChromiumJob(base, work, options = {}) {
   const zip = stagePackage("chromium", work, base, { testDriver: true, ...options });
   const pkgDir = path.join(work, "pkg");
@@ -247,7 +256,7 @@ test("chromium: optional host grant keeps the React job view mounted", { timeout
       scenario: "permission",
       async beforeCompletion(jobPage) {
         const grant = jobPage.locator("[data-dz-allow-access=true]");
-        await grant.waitFor({ state: "visible", timeout: 30000 });
+        await waitForVisible(jobPage, "[data-dz-allow-access=true]", "permission action");
         await grant.click();
         await jobPage.locator(".dz-card").waitFor({ state: "visible", timeout: 30000 });
       },
@@ -267,9 +276,9 @@ test("chromium: partial-output actions disappear after the terminal event", { ti
       scenario: "corrupt",
       async beforeCompletion(jobPage) {
         const keep = jobPage.locator("[data-dz-partial-choice=keep]");
-        await keep.waitFor({ state: "visible", timeout: 30000 });
+        await waitForVisible(jobPage, "[data-dz-partial-choice=keep]", "partial-output action");
         await keep.click();
-        await jobPage.locator(".dz-completed-section").waitFor({ state: "visible", timeout: 30000 });
+        await waitForVisible(jobPage, ".dz-completed-section", "partial completion");
         assert.equal(await jobPage.locator("[data-dz-partial-choice]").count(), 0);
       },
     }));
