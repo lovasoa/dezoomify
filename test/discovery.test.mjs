@@ -14,7 +14,7 @@ import {
   textToBytes,
   noImageFoundError,
 } from "../src/discovery.ts";
-import * as discoveryJs from "../src/discovery.js";
+import * as discoveryJs from "../src/discovery.ts";
 
 const ANTHROPIC_LIKE_HTML = `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><title>Formalizing Fermat's Last Theorem</title>
