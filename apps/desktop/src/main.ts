@@ -70,12 +70,12 @@ import {
   handleCopyDiagnostics,
 } from "./diagnostics.ts";
 import {
-  ensureDesktopSettingsPanel,
   getEffectiveSettings,
-  persistSettingsFromPanel,
   resetDesktopSettings,
 } from "./settingsPanel.ts";
 import type { SettingsPanelEnv } from "./settingsPanel.ts";
+import { DesktopSettingsView } from "./settingsView.tsx";
+import { createElement } from "react";
 import {
   createDesktopIntegration,
   DESKTOP_COMMANDS,
@@ -563,7 +563,6 @@ function setCompletedSibling(name: string | null): void {
 }
 
 const settingsEnv: SettingsPanelEnv = {
-  root,
   getSettings: () => desktopSettings,
   setSettings: (settings: DesktopSettings) => {
     desktopSettings = settings;
@@ -577,7 +576,10 @@ const settingsEnv: SettingsPanelEnv = {
 };
 
 function runPersistSettingsFromPanel(): void {
-  persistSettingsFromPanel(settingsEnv);
+  const errors = saveSettings(desktopSettings);
+  settingsError = errors.length ? errors.join("; ") : null;
+  if (!settingsError) pushLog(`Settings saved: ${describeSettingsForLog(desktopSettings)}`);
+  update();
 }
 
 function runResetDesktopSettings(): void {
@@ -738,7 +740,7 @@ function launchNativeJob(trimmed: string, token: number): void {
   // Minimal settings are validated fail-closed here: invalid settings fail
   // the submit before any start_job effect. The redacted summary never
   // includes header values.
-  const effective = getEffectiveSettings(root, desktopSettings);
+  const effective = getEffectiveSettings(null, desktopSettings);
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;
@@ -2287,16 +2289,20 @@ function update() {
       ...(auxChoice ? { imageChoice: auxChoice } : {}),
       history: [...desktopHistory],
     },
+    state.status === "idle" ? {
+      after: createElement(DesktopSettingsView, {
+        settings: desktopSettings,
+        error: settingsError,
+        onChange: (settings: DesktopSettings) => {
+          desktopSettings = settings;
+          grantedFormat = normalizeNativeFormat(settings.outputFormat);
+          runPersistSettingsFromPanel();
+        },
+        onReset: runResetDesktopSettings,
+      }),
+    } : undefined,
   );
   ensureDesktopAuxPanel();
-  if (state.status === "idle") ensureDesktopSettingsPanel({
-    root,
-    settings: desktopSettings,
-    error: settingsError,
-    onPersist: () => runPersistSettingsFromPanel(),
-    onReset: () => runResetDesktopSettings(),
-  });
-  else root.ownerDocument.getElementById("dz-desktop-settings")?.remove();
   ensureDesktopExternalNav();
   ensureDesktopFooter();
 }
