@@ -1,5 +1,6 @@
 import type { AppCapabilities, ControllerState } from "./controller.ts";
 import type { HistoryEntry } from "./history.ts";
+import type { ReactElement, ReactNode } from "react";
 
 /** Effects supplied by the graphical product that hosts the shared UI. */
 export interface ViewCallbacks {
@@ -18,8 +19,6 @@ export interface ViewCallbacks {
   onClearHistory?(): void;
   onPause?(): void;
   onResume?(): void;
-  onRequestExtensionAccess?(): void;
-  onChoosePartialOutput?(keep: boolean): void;
 }
 
 export interface JobActivity {
@@ -39,8 +38,12 @@ export interface ViewContext {
   originClean?: boolean; jobActivity?: JobActivity; initialUrl?: string;
   imageChoice?: { width?: number; height?: number; tiles?: number };
   sourceUrl?: string; desktopHandoffUrl?: string; history?: HistoryEntry[]; paused?: boolean;
-  extensionAccess?: { origin: string; requesting?: boolean };
-  partialOutputDecision?: boolean;
+}
+
+/** Host-owned React content rendered inside or instead of the generic card. */
+export interface ViewRenderOptions {
+  after?: ReactNode;
+  replace?: ReactElement;
 }
 
 export type ViewPhase = "idle" | "job" | "display-only" | "completed" | "failed" | "cancelled" | "generic";

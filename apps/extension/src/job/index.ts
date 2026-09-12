@@ -1,5 +1,6 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
 import { renderView } from "@dezoomify/shared-ui";
+import { createElement } from "react";
 import type { UiStatus, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
 import {
   canvasToPngBlob,
@@ -10,6 +11,7 @@ import {
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.js";
 import { createJobController } from "./controller.js";
+import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
 import type { JobBinding } from "./transport.js";
 
@@ -68,7 +70,13 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
     onReset: () => {},
     onRetrySameUrl: () => {},
     onSave: () => {},
-    onRequestExtensionAccess: () => {
+  }, {
+    ...ctx,
+  }, {
+    ...(accessRequest ? { replace: createElement(AccessRequestView, {
+      origin: accessRequest.hosts.length === 1 ? accessRequest.hosts[0] : "the required image host",
+      requesting: accessRequest.requesting,
+      onRequest: () => {
       if (!accessRequest || accessRequest.requesting) return;
       accessRequest.requesting = true;
       render(status, ctx);
@@ -77,21 +85,15 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
         accessRequest.requesting = false;
         render(status, ctx);
       });
-    },
-    onChoosePartialOutput: (keep) => {
+      },
+    }) } : {}),
+    ...(partialDecision ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
       const recovery = partialDecision;
       if (!recovery) return;
       partialDecision = null;
       controller?.choosePartial(recovery, keep);
       render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Finishing the image" } });
-    },
-  }, {
-    ...ctx,
-    ...(accessRequest ? { extensionAccess: {
-      origin: accessRequest.hosts.length === 1 ? accessRequest.hosts[0] : "the required image host",
-      requesting: accessRequest.requesting,
-    } } : {}),
-    ...(partialDecision ? { partialOutputDecision: true } : {}),
+    } }) } : {}),
   });
 }
 

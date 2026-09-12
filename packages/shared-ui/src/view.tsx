@@ -15,18 +15,18 @@ import type { FormEvent, ReactElement, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
-import type { ControllerState, StructuredError, AppCapabilities } from "./controller.ts";
+import type { ControllerState, StructuredError } from "./controller.ts";
 import type { HistoryEntry } from "./history.ts";
 import {
   getPhaseForStatus,
 } from "./view-types.ts";
 import type {
   ConfirmModalArgs, ImagePickerArgs, LevelPickerArgs, PlatformHints,
-  ViewCallbacks, ViewContext,
+  ViewCallbacks, ViewContext, ViewRenderOptions,
 } from "./view-types.ts";
 import {
   defaultStepFor, displaySourceUrl, errorDiagnosticsText, handoffOriginFor,
-  hostFromUrl, isFileHandoffSource, truncateMiddle,
+  hostFromUrl, isFileHandoffSource,
 } from "./view-helpers.ts";
 
 export { getPhaseForStatus } from "./view-types.ts";
@@ -34,7 +34,7 @@ export { handoffOriginFor, isFileHandoffSource } from "./view-helpers.ts";
 export type {
   ConfirmModalArgs, ImagePickerArgs, ImagePickerOption, JobActivity,
   LevelPickerArgs, LevelPickerOption, PlatformHints, ViewCallbacks,
-  ViewContext, ViewPhase,
+  ViewContext, ViewPhase, ViewRenderOptions,
 } from "./view-types.ts";
 import { t } from "./i18n.ts";
 import {
@@ -871,60 +871,6 @@ function CancelledView({ callbacks }: { callbacks: ViewCallbacks }) {
   );
 }
 
-function ExtensionAccessView({
-  access,
-  callbacks,
-}: {
-  access: NonNullable<ViewContext["extensionAccess"]>;
-  callbacks: ViewCallbacks;
-}) {
-  return (
-    <div className="dz-permission-request">
-      <div className="dz-permission-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-          <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-          <rect x="5" y="10" width="14" height="10" rx="1" />
-        </svg>
-      </div>
-      <h1>Allow access to continue</h1>
-      <p>This image uses files from {access.origin}.</p>
-      <p>Dezoomify needs access to read those files and assemble your image in this browser.</p>
-      <button
-        type="button"
-        className="dz-btn-tactile dz-permission-button"
-        data-dz-allow-access="true"
-        disabled={access.requesting}
-        onClick={() => callbacks.onRequestExtensionAccess?.()}
-      >
-        {access.requesting ? "Requesting access…" : "Allow access and continue"}
-      </button>
-    </div>
-  );
-}
-
-function PartialOutputDecision({ callbacks }: { callbacks: ViewCallbacks }) {
-  return (
-    <div className="dz-actions-row" data-dz-partial-decision="true">
-      <button
-        type="button"
-        className="dz-btn-tactile"
-        data-dz-partial-choice="keep"
-        onClick={() => callbacks.onChoosePartialOutput?.(true)}
-      >
-        Keep the partial image
-      </button>
-      <button
-        type="button"
-        className="dz-btn-tactile"
-        data-dz-partial-choice="discard"
-        onClick={() => callbacks.onChoosePartialOutput?.(false)}
-      >
-        Discard the partial image
-      </button>
-    </div>
-  );
-}
-
 function GenericView({ state, callbacks }: { state: ControllerState; callbacks: ViewCallbacks }) {
   return (
     <div className="dz-view-body dz-fade-in" style={{ padding: "1rem 0" }}>
@@ -946,15 +892,15 @@ function SharedView({
   state,
   callbacks,
   ctx,
+  options,
 }: {
   state: ControllerState;
   callbacks: ViewCallbacks;
   ctx?: ViewContext;
+  options?: ViewRenderOptions;
 }) {
   const phase = getPhaseForStatus(state.status);
-  if (ctx?.extensionAccess) {
-    return <ExtensionAccessView access={ctx.extensionAccess} callbacks={callbacks} />;
-  }
+  if (options?.replace) return options.replace;
   return (
     <div className="dz-card" data-view-phase={phase}>
       <div className="dz-header" style={{ display: phase === "idle" ? "" : "none" }}>
@@ -967,7 +913,7 @@ function SharedView({
       {phase === "failed" ? <FailedView state={state} callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
       {phase === "generic" ? <GenericView state={state} callbacks={callbacks} /> : null}
-      {ctx?.partialOutputDecision ? <PartialOutputDecision callbacks={callbacks} /> : null}
+      {options?.after}
     </div>
   );
 }
@@ -988,8 +934,9 @@ export function renderView(
   state: ControllerState,
   callbacks: ViewCallbacks,
   ctx?: ViewContext,
+  options?: ViewRenderOptions,
 ): void {
-  renderInto(container, <SharedView state={state} callbacks={callbacks} ctx={ctx} />);
+  renderInto(container, <SharedView state={state} callbacks={callbacks} ctx={ctx} options={options} />);
 }
 
 // ---------------------------------------------------------------------------
