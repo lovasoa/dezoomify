@@ -141,8 +141,21 @@ async function runChromiumJob(base, work, options = {}) {
   // Downloads are tracked from context level: the job tab saves via a blob
   // anchor, which can fire before a page-level listener attaches.
   const downloads = [];
-  for (const page of context.pages()) page.on("download", (download) => downloads.push(download));
-  context.on("page", (page) => page.on("download", (download) => downloads.push(download)));
+  const diagnostics = [];
+  const observe = (page) => {
+    page.on("console", (message) => {
+      if (message.type() === "error") diagnostics.push(`console: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => diagnostics.push(`pageerror: ${String(error?.stack ?? error)}`));
+  };
+  for (const page of context.pages()) {
+    page.on("download", (download) => downloads.push(download));
+    observe(page);
+  }
+  context.on("page", (page) => {
+    page.on("download", (download) => downloads.push(download));
+    observe(page);
+  });
   try {
     const serviceWorker = context.serviceWorkers()[0] ?? await context.waitForEvent("serviceworker", { timeout: 15000 });
     assert.ok(serviceWorker, "background service worker did not start");
@@ -162,7 +175,10 @@ async function runChromiumJob(base, work, options = {}) {
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     const download = downloads[0];
-    assert.ok(download, "the job tab did not save the assembled image in time");
+    if (!download) {
+      const jobText = await jobPage.locator("body").innerText().catch(() => "<unavailable>");
+      assert.fail(`the job tab did not save the assembled image in time\njob page: ${jobText}\nbrowser diagnostics: ${diagnostics.join("\n") || "<none>"}`);
+    }
     const output = path.join(work, "saved-chromium.png");
     await download.saveAs(output);
     return readFileSync(output);
