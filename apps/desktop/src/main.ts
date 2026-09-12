@@ -1265,6 +1265,7 @@ function dismissDeepLinkConfirm(restore = true): void {
 function showDeepLinkConfirm(info: ValidatedDeepLink): void {
   if (typeof document === "undefined") return;
   void openConfirmModal(document, {
+    id: "dz-deep-link-confirm",
     title: t("desktop.link.title"),
     subtitle: t("desktop.link.source", { url: info.sourceUrl }),
     bodyLines: [

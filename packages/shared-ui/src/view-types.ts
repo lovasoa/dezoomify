@@ -59,5 +59,5 @@ export interface ImagePickerOption { index: number; title?: string; width?: numb
 export interface ImagePickerArgs { options: ImagePickerOption[]; onPick(index: number): void; }
 export interface LevelPickerOption { index: number; width: number; height: number; tiles: number; fits: boolean; }
 export interface LevelPickerArgs { options: LevelPickerOption[]; onPick(index: number): void; }
-export interface ConfirmModalArgs { title: string; subtitle: string; bodyLines: string[]; confirmLabel: string; declineLabel: string; }
+export interface ConfirmModalArgs { id?: string; title: string; subtitle: string; bodyLines: string[]; confirmLabel: string; declineLabel: string; }
 export interface PlatformHints { userAgent?: string; platform?: string; }

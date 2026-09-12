@@ -944,6 +944,7 @@ export function renderView(
 // ---------------------------------------------------------------------------
 
 function ModalCard({
+  id,
   title,
   subtitle,
   body,
@@ -951,6 +952,7 @@ function ModalCard({
   showClose = true,
   onClose,
 }: {
+  id?: string;
   title: string;
   subtitle?: string;
   body: ReactNode;
@@ -967,6 +969,7 @@ function ModalCard({
   }, [onClose]);
   return (
     <div
+      id={id}
       className="dz-modal-backdrop"
       role="dialog"
       aria-modal="true"
@@ -1140,6 +1143,7 @@ function ConfirmDialog({
   };
   return (
     <ModalCard
+      id={args.id}
       title={args.title}
       subtitle={args.subtitle}
       showClose={false}
