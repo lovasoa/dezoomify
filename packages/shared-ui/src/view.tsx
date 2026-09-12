@@ -17,6 +17,25 @@ import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import type { ControllerState, StructuredError, AppCapabilities } from "./controller.ts";
 import type { HistoryEntry } from "./history.ts";
+import {
+  getPhaseForStatus,
+} from "./view-types.ts";
+import type {
+  ConfirmModalArgs, ImagePickerArgs, LevelPickerArgs, PlatformHints,
+  ViewCallbacks, ViewContext,
+} from "./view-types.ts";
+import {
+  defaultStepFor, displaySourceUrl, errorDiagnosticsText, handoffOriginFor,
+  hostFromUrl, isFileHandoffSource, truncateMiddle,
+} from "./view-helpers.ts";
+
+export { getPhaseForStatus } from "./view-types.ts";
+export { handoffOriginFor, isFileHandoffSource } from "./view-helpers.ts";
+export type {
+  ConfirmModalArgs, ImagePickerArgs, ImagePickerOption, JobActivity,
+  LevelPickerArgs, LevelPickerOption, PlatformHints, ViewCallbacks,
+  ViewContext, ViewPhase,
+} from "./view-types.ts";
 import { t } from "./i18n.ts";
 import {
   renderSaveGuidance,
@@ -25,182 +44,9 @@ import {
   getDezoomifyLogoSvg,
 } from "./components.ts";
 
-export interface ViewCallbacks {
-  onSubmitUrl(url: string): void;
-  onCancel(): void;
-  onReset(): void;
-  onRetrySameUrl?(): void;
-  onSave?(): void;
-  onOpenOutput?(): void;
-  onRevealOutput?(): void;
-  onHistorySelect?(entry: HistoryEntry): void;
-  onSelectImage?(index: number): void;
-  onSelectLevel?(level: number): void;
-  onOpenExternalLink?(url: string): void;
-  onCopyDiagnostics?(text: string): void;
-  onClearHistory?(): void;
-  onPause?(): void;
-  onResume?(): void;
-  onRequestExtensionAccess?(): void;
-  onChoosePartialOutput?(keep: boolean): void;
-}
-
-export interface JobActivity {
-  url?: string;
-  startedAt?: number;
-  now?: number;
-  stepLabel?: string;
-  detail?: string;
-  pendingRequests?: number;
-  completedRequests?: number;
-  failedRequests?: number;
-  longestPendingMs?: number;
-  timeoutMs?: number;
-  lastProgressAt?: number;
-  log?: string[];
-  diagnostics?: string;
-  paused?: boolean;
-  pausedAt?: number;
-  pausedDurationMs?: number;
-}
-
-export interface ViewContext {
-  capabilities?: AppCapabilities;
-  currentProgress?: {
-    current: number;
-    total: number;
-    active?: number;
-    retrying?: number;
-    estimatedTotalMs?: number;
-    message?: string;
-  };
-  completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
-  nativeSaved?: { partial: boolean };
-  savedOutput?: {
-    name: string;
-    width: number;
-    height: number;
-    doneTiles: number;
-    totalTiles: number;
-    failedTiles: number;
-  };
-  originClean?: boolean;
-  jobActivity?: JobActivity;
-  initialUrl?: string;
-  imageChoice?: { width?: number; height?: number; tiles?: number };
-  sourceUrl?: string;
-  desktopHandoffUrl?: string;
-  history?: Array<HistoryEntry>;
-  paused?: boolean;
-  extensionAccess?: { origin: string; requesting?: boolean };
-  partialOutputDecision?: boolean;
-}
-
-export interface ModalHost {
-  document: Document;
-}
-
-export type ViewPhase =
-  | "idle"
-  | "job"
-  | "display-only"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "generic";
-
-export function getPhaseForStatus(status: ControllerState["status"]): ViewPhase {
-  switch (status) {
-    case "idle":
-      return "idle";
-    case "discovering":
-    case "choosing-image":
-    case "choosing-level":
-    case "preflighting":
-    case "downloading":
-    case "saving":
-      return "job";
-    case "display-only":
-      return "display-only";
-    case "completed":
-      return "completed";
-    case "failed":
-      return "failed";
-    case "cancelled":
-      return "cancelled";
-    default:
-      return "generic";
-  }
-}
-
-export interface ImagePickerOption {
-  index: number;
-  title?: string;
-  width?: number;
-  height?: number;
-  tiles?: number;
-}
-
-export interface ImagePickerArgs {
-  options: ImagePickerOption[];
-  onPick(index: number): void;
-}
-
-export interface LevelPickerOption {
-  index: number;
-  width: number;
-  height: number;
-  tiles: number;
-  fits: boolean;
-}
-
-export interface LevelPickerArgs {
-  options: LevelPickerOption[];
-  onPick(index: number): void;
-}
-
-export interface ConfirmModalArgs {
-  title: string;
-  subtitle: string;
-  bodyLines: string[];
-  confirmLabel: string;
-  declineLabel: string;
-}
-
-export interface PlatformHints {
-  userAgent?: string;
-  platform?: string;
-}
-
 // ---------------------------------------------------------------------------
 // Pure helpers (host-neutral, no DOM).
 // ---------------------------------------------------------------------------
-
-function truncateMiddle(value: string, max = 90): string {
-  const s = String(value ?? "");
-  if (s.length <= max) return s;
-  const half = Math.floor((max - 1) / 2);
-  return `${s.slice(0, half)}…${s.slice(s.length - half)}`;
-}
-
-/** Display source context without query, fragment, or credentials. */
-function displaySourceUrl(value: string): string {
-  try {
-    const url = new URL(value);
-    return truncateMiddle(`${url.host}${url.pathname}`, 90);
-  } catch {
-    return "source unavailable";
-  }
-}
-
-/** The website a request is waiting on, for plain-language messages. */
-function hostFromUrl(url: string | undefined): string {
-  try {
-    return new URL(url ?? "").host;
-  } catch {
-    return "the server";
-  }
-}
 
 /**
  * Redacted origin (`scheme://host[:port]/`) for the one-click desktop handoff
@@ -208,50 +54,6 @@ function hostFromUrl(url: string | undefined): string {
  * inside the `dezoomify://` link. Returns "" for local files or unparseable
  * input. Never includes userinfo, path, query, or fragment.
  */
-export function handoffOriginFor(handoffUrl?: string, sourceUrl?: string): string {
-  const candidates: Array<string> = [];
-  if (typeof sourceUrl === "string" && sourceUrl !== "") candidates.push(sourceUrl);
-  if (typeof handoffUrl === "string" && handoffUrl !== "") {
-    try {
-      const query = handoffUrl.split("?")[1]?.split("#")[0] ?? "";
-      for (const pair of query.split("&")) {
-        if (pair.startsWith("src=")) {
-          try {
-            candidates.push(decodeURIComponent(pair.slice(4).replace(/\+/g, " ")));
-          } catch {
-            // A malformed src never blocks the summary.
-          }
-          break;
-        }
-      }
-    } catch {
-      // A malformed handoff link never blocks the summary.
-    }
-  }
-  for (const candidate of candidates) {
-    try {
-      const trimmed = String(candidate).trim();
-      if (trimmed.toLowerCase().startsWith("file:")) return "";
-      const u = new URL(trimmed);
-      if (u.protocol !== "http:" && u.protocol !== "https:") continue;
-      if (!u.hostname) continue;
-      return `${u.protocol}//${u.host}/`;
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  return "";
-}
-
-/** True for local-file sources: handoff carries no link, only the local note. */
-export function isFileHandoffSource(sourceUrl?: string): boolean {
-  try {
-    return new URL(String(sourceUrl ?? "").trim()).protocol === "file:";
-  } catch {
-    return false;
-  }
-}
-
 function historyDimsLabel(entry: HistoryEntry): string {
   if (
     typeof entry.width === "number" &&
@@ -271,25 +73,6 @@ function historyDateLabel(at: number): string {
     return date.toLocaleDateString();
   } catch {
     return "";
-  }
-}
-
-function defaultStepFor(status: ControllerState["status"]): string {
-  switch (status) {
-    case "discovering":
-      return t("view.step.discovering");
-    case "choosing-image":
-      return t("view.step.choosingImage");
-    case "choosing-level":
-      return t("view.step.choosingLevel");
-    case "preflighting":
-      return t("view.step.preflighting");
-    case "downloading":
-      return t("view.step.downloading");
-    case "saving":
-      return t("view.step.saving");
-    default:
-      return t("view.step.working");
   }
 }
 
@@ -313,17 +96,6 @@ function diagnosticsText(
   if (p?.retrying !== undefined) lines.push(`Tiles retrying: ${p.retrying}`);
   if (a.url) lines.push(`Source: ${displaySourceUrl(a.url)}`);
   return lines.join("\n");
-}
-
-function errorDiagnosticsText(error: StructuredError): string {
-  const base =
-    `Code: ${error.code}\n` +
-    `Category: ${error.category}\n` +
-    `Retryable: ${error.retryable}\n` +
-    `Transport: ${error.transport ?? "direct"}\n` +
-    `Phase: ${error.phase ?? "discovery"}\n` +
-    `Message: ${error.message}`;
-  return error.detail ? `${base}\n\n${error.detail}` : base;
 }
 
 // ---------------------------------------------------------------------------
