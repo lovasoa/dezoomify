@@ -79,7 +79,7 @@ async function waitFor(driver, predicate, timeout, label) {
   throw new Error(`timed out waiting for ${label}${detail}: ${JSON.stringify(state)}`);
 }
 
-async function configureOutputDirectory(driver) {
+async function waitForDefaultOutputDirectory(driver) {
   const directory = path.basename(runOutputDir());
   let last = null;
   for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -100,7 +100,7 @@ async function configureOutputDirectory(driver) {
     if (last.ok) return;
     await sleep(500);
   }
-  throw new Error(`desktop output-directory setting: ${JSON.stringify(last)}`);
+  throw new Error(`desktop default output-directory setting: ${JSON.stringify(last)}`);
 }
 
 async function submitUrl(driver, url) {
@@ -196,7 +196,7 @@ describe("Dezoomify desktop window", () => {
       // Generous script/page timeouts: the webview may still be settling on a
       // loaded CI runner, and the product's own startup can block the loop.
       await driver.manage().setTimeouts({ script: 120000, pageLoad: 180000, implicit: 0 });
-      await configureOutputDirectory(driver);
+      await waitForDefaultOutputDirectory(driver);
     } catch (error) {
       await teardown();
       throw error;

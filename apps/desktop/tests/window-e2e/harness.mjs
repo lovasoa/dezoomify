@@ -332,44 +332,16 @@ export async function startFrontendServer() {
       return;
     }
     if (name === "/") name = "/index.html";
-    // The document CSP only permits same-origin scripts. Serve the ephemeral
-    // test setting as one instead of injecting an inline script, which WebKit
-    // correctly rejects and would silently leave the app on Downloads.
-    if (name === "/e2e-settings.js") {
-      const outputDir = process.env.DEZOOMIFY_WINDOW_E2E_OUTPUT;
-      if (!outputDir) throw new Error("window E2E output directory is unset");
-      const settings = JSON.stringify({ outputDir });
-      res.writeHead(200, { "Content-Type": "text/javascript" });
-      res.end(`localStorage.setItem("dezoomify.desktop.settings.v1", ${JSON.stringify(settings)});`);
-      return;
-    }
     const file = path.join(FRONTEND_DIST, name);
     if (!file.startsWith(FRONTEND_DIST) || !existsSync(file)) {
       res.writeHead(404);
       res.end("not found");
       return;
     }
-    let body = readFileSync(file);
-    // Configure the isolated test profile before the desktop entry module
-    // reads localStorage. This is setup, not a second settings control: the
-    // window still exposes its normal Folder picker to users. Native file
-    // pickers cannot be driven consistently by W3C WebDriver on all three
-    // desktop platforms, while the saved settings are the product's own
-    // supported persistence boundary.
-    if (name === "/index.html") {
-      const outputDir = process.env.DEZOOMIFY_WINDOW_E2E_OUTPUT;
-      if (!outputDir) throw new Error("window E2E output directory is unset");
-      body = Buffer.from(
-        body.toString("utf8").replace(
-          "</head>",
-          '<script src="/e2e-settings.js"></script></head>',
-        ),
-      );
-    }
     res.writeHead(200, {
       "Content-Type": MIME[path.extname(file)] ?? "application/octet-stream",
     });
-    res.end(body);
+    res.end(readFileSync(file));
   });
   await new Promise((resolve, reject) => {
     server.once("error", (err) => {
@@ -403,7 +375,10 @@ export async function closeFrontendServer(server) {
 export function createRunDirs() {
   const root = mkdtempSync(path.join(tmpdir(), "dezoomify-window-e2e-"));
   const home = path.join(root, "home");
-  const output = path.join(root, "outputs");
+  // First-run Tauri settings select the platform Downloads folder. Point the
+  // isolated profile at an empty one so the E2E takes the exact user path,
+  // without rewriting the shipped page or preloading localStorage.
+  const output = path.join(home, "Downloads");
   mkdirSync(home, { recursive: true });
   mkdirSync(output, { recursive: true });
   return { root, home, output };
