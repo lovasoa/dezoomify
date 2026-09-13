@@ -59,6 +59,9 @@ pub(crate) struct Route {
     pub(crate) status: u16,
     #[allow(dead_code)]
     pub(crate) headers: Option<std::collections::HashMap<String, String>>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub(crate) required_cookies: std::collections::HashMap<String, String>,
     pub(crate) payload: Option<String>,
     pub(crate) generator: Option<serde_json::Value>,
 }

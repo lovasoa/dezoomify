@@ -1,0 +1,13 @@
+{
+  "id": "extension/cookie-session",
+  "description": "An authenticated viewer serves metadata and every tile only in the current browser session.",
+  "input": {
+    "mode": "explicit",
+    "url": "http://127.0.0.1/target.html?scenario=cookie-session"
+  },
+  "operation": "extension-browser-session-fetch",
+  "source_evidence": {
+    "path": "apps/extension/tests/browser/headless.test.mjs",
+    "snapshot": "local deterministic fixture"
+  }
+}

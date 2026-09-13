@@ -68,6 +68,7 @@ async function startFixtureServer(workDir) {
     "--write-address", addrFile,
     "--scenarios-dir", path.join(REPO_ROOT, "testdata/scenarios"),
     "--static-dir", STATIC_DIR,
+    "--request-log", path.join(workDir, "fixture-requests.jsonl"),
   ]);
   let base = null;
   for (let i = 0; i < 100 && !base; i += 1) {
@@ -187,7 +188,10 @@ async function runChromiumJob(base, work, options = {}) {
     const download = downloads[0];
     if (!download) {
       const jobText = await jobPage.locator("body").innerText().catch(() => "<unavailable>");
-      assert.fail(`the job tab did not save the assembled image in time\njob page: ${jobText}\nbrowser diagnostics: ${diagnostics.join("\n") || "<none>"}`);
+      const fixtureLog = existsSync(path.join(work, "fixture-requests.jsonl"))
+        ? readFileSync(path.join(work, "fixture-requests.jsonl"), "utf8").trim()
+        : "<unavailable>";
+      assert.fail(`the job tab did not save the assembled image in time\njob page: ${jobText}\nbrowser diagnostics: ${diagnostics.join("\n") || "<none>"}\nfixture requests: ${fixtureLog || "<none>"}`);
     }
     const output = path.join(work, "saved-chromium.png");
     await download.saveAs(output);
@@ -283,6 +287,21 @@ test("chromium: partial-output actions disappear after the terminal event", { ti
         assert.equal(await jobPage.locator("[data-dz-partial-choice]").count(), 0);
       },
     }));
+  } finally {
+    if (server) server.proc.kill();
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("chromium: packaged extension retains the browser session for protected metadata and tiles", { timeout: 180000 }, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-cookie-session-"));
+  let server = null;
+  try {
+    server = await startFixtureServer(work);
+    // The fixture page creates an HttpOnly session cookie. Its metadata and
+    // every tile return 403 unless the browser attaches that cookie, while
+    // this test observes only the successful image, not request headers.
+    assertPng(await runChromiumJob(server.base, work, { scenario: "cookie-session" }));
   } finally {
     if (server) server.proc.kill();
     rmSync(work, { recursive: true, force: true });

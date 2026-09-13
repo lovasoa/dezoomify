@@ -150,14 +150,16 @@ fn record(state: &AppState, entry: serde_json::Value) {
 async fn handle_fetch(
     State(state): State<AppState>,
     method: Method,
+    headers: HeaderMap,
     Query(params): Query<FetchParams>,
 ) -> Response {
-    serve_original_url(&state, &method, &params.url, "fetch").await
+    serve_original_url(&state, &method, &headers, &params.url, "fetch").await
 }
 
 async fn handle_fetch_path(
     State(state): State<AppState>,
     method: Method,
+    headers: HeaderMap,
     Path(path): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
@@ -165,23 +167,25 @@ async fn handle_fetch_path(
         .get("url")
         .map(String::as_str)
         .unwrap_or(path.as_str());
-    serve_original_url(&state, &method, original, "fetch").await
+    serve_original_url(&state, &method, &headers, original, "fetch").await
 }
 
 async fn handle_proxy(
     State(state): State<AppState>,
     method: Method,
+    headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let Some(target) = params.get("url") else {
         return text_response(StatusCode::BAD_REQUEST, "missing url", false);
     };
-    serve_original_url(&state, &method, target, "proxy").await
+    serve_original_url(&state, &method, &headers, target, "proxy").await
 }
 
 async fn serve_original_url(
     state: &AppState,
     method: &Method,
+    headers: &HeaderMap,
     original: &str,
     via: &str,
 ) -> Response {
@@ -236,6 +240,25 @@ async fn serve_original_url(
         .lookup(&parsed.method_host(), &parsed.path, parsed.query.as_deref())
     {
         Some(hit) => {
+            if let Some(cookie) = hit.route.missing_required_cookie(headers) {
+                record(
+                    state,
+                    serde_json::json!({
+                        "via": via,
+                        "url": redact_url_for_log(original),
+                        "status": 403,
+                        "route": hit.route.route_id,
+                        "scenario": hit.scenario,
+                        "auth": "missing-required-cookie",
+                        "cookie_name": cookie,
+                    }),
+                );
+                return text_response(
+                    StatusCode::FORBIDDEN,
+                    &format!("fixture auth required: missing cookie {cookie}"),
+                    head_only,
+                );
+            }
             let body = match hit.route.render(state, hit.scenario, &parsed) {
                 Ok(b) => b,
                 Err(status) => {
@@ -423,6 +446,27 @@ async fn serve_static(
                 path: full_path.clone(),
                 query: query.clone(),
             };
+            if let Some(cookie) = hit.route.missing_required_cookie(headers) {
+                record(
+                    state,
+                    serde_json::json!({
+                        "via": "direct",
+                        "host": host,
+                        "path": full_path,
+                        "query": query,
+                        "status": 403,
+                        "route": hit.route.route_id,
+                        "scenario": hit.scenario,
+                        "auth": "missing-required-cookie",
+                        "cookie_name": cookie,
+                    }),
+                );
+                return text_response(
+                    StatusCode::FORBIDDEN,
+                    &format!("fixture auth required: missing cookie {cookie}"),
+                    head_only,
+                );
+            }
             let body = match hit.route.render(state, hit.scenario, &parts) {
                 Ok(b) => b,
                 Err(status) => {

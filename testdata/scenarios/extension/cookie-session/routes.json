@@ -1,0 +1,67 @@
+{
+  "routes": [
+    {
+      "route_id": "cookie-session-viewer",
+      "method": "GET",
+      "host": "127.0.0.1",
+      "path": "/target.html",
+      "query": "scenario=cookie-session",
+      "status": 200,
+      "headers": {
+        "Content-Type": "text/html",
+        "Set-Cookie": "fixture_session=extension-e2e; Path=/; HttpOnly; SameSite=Lax"
+      },
+      "payload": "payloads/127.0.0.1/target.html"
+    },
+    {
+      "route_id": "cookie-session-metadata",
+      "method": "GET",
+      "host": "127.0.0.1",
+      "path": "/protected/artwork.dzi",
+      "status": 200,
+      "headers": { "Content-Type": "application/xml" },
+      "required_cookies": { "fixture_session": "extension-e2e" },
+      "payload": "payloads/127.0.0.1/protected/artwork.dzi"
+    },
+    {
+      "route_id": "cookie-session-tile-0-0",
+      "method": "GET",
+      "host": "127.0.0.1",
+      "path": "/protected/artwork_files/9/0_0.png",
+      "status": 200,
+      "headers": { "Content-Type": "image/png" },
+      "required_cookies": { "fixture_session": "extension-e2e" },
+      "payload": "payloads/127.0.0.1/protected/tile-0_0.png"
+    },
+    {
+      "route_id": "cookie-session-tile-1-0",
+      "method": "GET",
+      "host": "127.0.0.1",
+      "path": "/protected/artwork_files/9/1_0.png",
+      "status": 200,
+      "headers": { "Content-Type": "image/png" },
+      "required_cookies": { "fixture_session": "extension-e2e" },
+      "payload": "payloads/127.0.0.1/protected/tile-1_0.png"
+    },
+    {
+      "route_id": "cookie-session-tile-0-1",
+      "method": "GET",
+      "host": "127.0.0.1",
+      "path": "/protected/artwork_files/9/0_1.png",
+      "status": 200,
+      "headers": { "Content-Type": "image/png" },
+      "required_cookies": { "fixture_session": "extension-e2e" },
+      "payload": "payloads/127.0.0.1/protected/tile-0_1.png"
+    },
+    {
+      "route_id": "cookie-session-tile-1-1",
+      "method": "GET",
+      "host": "127.0.0.1",
+      "path": "/protected/artwork_files/9/1_1.png",
+      "status": 200,
+      "headers": { "Content-Type": "image/png" },
+      "required_cookies": { "fixture_session": "extension-e2e" },
+      "payload": "payloads/127.0.0.1/protected/tile-1_1.png"
+    }
+  ]
+}
