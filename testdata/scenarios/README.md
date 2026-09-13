@@ -32,6 +32,10 @@ is the default route table:
   matching, wildcards, generators, or a payload whose file name does not
   mirror its URL (e.g. `tile-0_0.png` served at
   `pyramid_files/9/0_0.png`).
+- `required_cookies` is a name/value map that makes a route return a stable
+  `403` unless the browser sends each pair. The server records only missing
+  cookie names, never cookie values, so session tests assert product outcomes
+  rather than request headers.
 
 ## Harness maintenance
 

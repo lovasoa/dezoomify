@@ -83,6 +83,54 @@ async fn static_payload_exact_bytes_and_headers() {
 }
 
 #[tokio::test]
+async fn protected_routes_require_a_session_without_logging_its_value() {
+    let srv = TestServer::start().await;
+    let viewer = reqwest::get(format!("{}/target.html?scenario=cookie-session", srv.base))
+        .await
+        .expect("viewer");
+    assert_eq!(viewer.status(), 200);
+    assert_eq!(
+        viewer.headers().get("set-cookie").unwrap(),
+        "fixture_session=extension-e2e; Path=/; HttpOnly; SameSite=Lax"
+    );
+
+    let metadata = format!("{}/protected/artwork.dzi", srv.base);
+    let denied = reqwest::get(&metadata)
+        .await
+        .expect("unauthenticated metadata");
+    assert_eq!(denied.status(), 403);
+    assert_eq!(
+        denied.text().await.expect("denial body"),
+        "fixture auth required: missing cookie fixture_session"
+    );
+    let allowed = reqwest::Client::new()
+        .get(&metadata)
+        .header("cookie", "fixture_session=extension-e2e")
+        .send()
+        .await
+        .expect("authenticated metadata");
+    assert_eq!(allowed.status(), 200);
+
+    let tile = format!("{}/protected/artwork_files/9/0_0.png", srv.base);
+    let denied = reqwest::get(&tile).await.expect("unauthenticated tile");
+    assert_eq!(denied.status(), 403);
+    let allowed = reqwest::Client::new()
+        .get(tile)
+        .header("cookie", "fixture_session=extension-e2e")
+        .send()
+        .await
+        .expect("authenticated tile");
+    assert_eq!(allowed.status(), 200);
+
+    let log = srv.log_text();
+    assert!(log.contains("missing-required-cookie"));
+    assert!(
+        !log.contains("extension-e2e"),
+        "cookie values stay out of fixture logs"
+    );
+}
+
+#[tokio::test]
 async fn templating_substitutes_origin() {
     let srv = TestServer::start().await;
     let url = format!(

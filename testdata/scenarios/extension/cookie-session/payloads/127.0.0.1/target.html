@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Authenticated artwork</title></head>
+  <body>
+    <h1>Authenticated zoomable fixture</h1>
+    <script>
+      fetch("{{origin}}/protected/artwork.dzi")
+        .then((response) => {
+          if (!response.ok) throw new Error("protected artwork metadata returned " + response.status);
+          window.__sourceFetched = true;
+        })
+        .catch(() => { window.__sourceFetched = false; });
+    </script>
+  </body>
+</html>

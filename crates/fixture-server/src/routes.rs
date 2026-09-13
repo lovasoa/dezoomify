@@ -36,6 +36,11 @@ pub struct ScenarioRoute {
     pub status: u16,
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    /// Cookie name/value pairs required before this route serves its payload.
+    /// The fixture server evaluates this condition without logging request
+    /// cookie values, so browser-session tests can assert outcomes only.
+    #[serde(default)]
+    pub required_cookies: HashMap<String, String>,
     #[serde(default)]
     pub payload: Option<String>,
     #[serde(default)]
@@ -155,6 +160,7 @@ fn mirror_routes(
                 query: None,
                 status: 200,
                 headers,
+                required_cookies: HashMap::new(),
                 payload: Some(payload),
                 generator: None,
             },
@@ -385,6 +391,23 @@ impl RouteTable {
 }
 
 impl ScenarioRoute {
+    /// Return the first missing cookie name without exposing its expected or
+    /// received value. Routes use this to produce useful, secret-free auth
+    /// diagnostics.
+    pub fn missing_required_cookie<'a>(&'a self, headers: &HeaderMap) -> Option<&'a str> {
+        let raw = headers
+            .get("cookie")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        let present: HashMap<&str, &str> = raw
+            .split(';')
+            .filter_map(|pair| pair.trim().split_once('='))
+            .collect();
+        self.required_cookies.iter().find_map(|(name, expected)| {
+            (present.get(name.as_str()) != Some(&expected.as_str())).then_some(name.as_str())
+        })
+    }
+
     pub fn render(
         &self,
         state: &super::AppState,
