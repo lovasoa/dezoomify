@@ -300,7 +300,7 @@ test("chromium: packaged extension retains the browser session for protected met
     server = await startFixtureServer(work);
     // The fixture page creates an HttpOnly session cookie. Its metadata and
     // every tile return 403 unless the browser attaches that cookie, while
-    // this test observes only the successful image—not request headers.
+    // this test observes only the successful image, not request headers.
     assertPng(await runChromiumJob(server.base, work, { scenario: "cookie-session" }));
   } finally {
     if (server) server.proc.kill();
