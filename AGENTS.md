@@ -21,6 +21,9 @@ cargo xtask release plan|build|sign|verify|publish
                            # release orchestration (sign/publish need keys)
 ```
 
+Routine development builds omit debug symbols but retain incremental
+compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
+
 - `cargo xtask test live --public` is the only command that contacts real
   websites; it is opt-in and advisory.
 - Iterate with `check` plus bare `test`, run the narrowest focused lane after

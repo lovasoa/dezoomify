@@ -7,6 +7,17 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/lovasoa/dezoomify"
 
+# Full DWARF information makes local test and build artifacts substantially
+# larger. Keep the normal edit/build loop lean; debug assertions and
+# incremental compilation retain their Cargo defaults. Use `--profile
+# dev-debug` only when investigating a problem that needs symbolic debugging.
+[profile.dev]
+debug = 0
+
+[profile.dev-debug]
+inherits = "dev"
+debug = 2
+
 # Shared lint policy (todo 6.1): `[workspace.lints]` is the authored default
 # (`missing_docs`/`pedantic` warn so legacy debt stays visible; `nursery`
 # stays allowed until audited). NOTE (cargo 1.98): `[lints] workspace = true`
