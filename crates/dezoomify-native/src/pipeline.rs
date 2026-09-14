@@ -14,8 +14,8 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use dezoomify_core::core::adaptive::ObservationResult;
 use dezoomify_core::core::model::{ProcessingRecipe, Request};
+use dezoomify_core::core::{adaptive::ObservationResult, redact_uri};
 use dezoomify_core::Vec2d;
 
 use crate::error::NativeError;
@@ -592,27 +592,14 @@ pub(crate) fn fetch_and_decode_cached(
     })
 }
 
-/// Provide actionable tile HTTP diagnostics while bounding response bodies
-/// passed to the host UI.
+/// Provide actionable, redacted HTTP diagnostics for host logs.
 pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
-    let mut requested = outcome.final_uri.clone();
+    let mut requested = redact_uri(&outcome.final_uri);
     if requested.len() > 2_048 {
         requested.truncate(2_048);
         requested.push_str("...");
     }
-    let response = std::str::from_utf8(&outcome.body)
-        .ok()
-        .filter(|text| text.len() <= 1_024)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .filter(|text| !text.chars().any(char::is_control));
-    match response {
-        Some(response) => format!(
-            "request to {requested} returned HTTP {}: {response}",
-            outcome.status
-        ),
-        None => format!("request to {requested} returned HTTP {}", outcome.status),
-    }
+    format!("request to {requested} returned HTTP {}", outcome.status)
 }
 
 pub(crate) struct ProbeRead {
@@ -1049,7 +1036,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn http_failure_keeps_the_requested_url_and_short_text_response() {
+    fn http_failure_redacts_credentials_and_response_body() {
         let outcome = crate::http::FetchOutcome {
             status: 403,
             final_uri: "https://user:password@example.test/tile?token=secret".to_string(),
@@ -1057,7 +1044,7 @@ mod tests {
         };
         assert_eq!(
             describe_http_failure(&outcome),
-            "request to https://user:password@example.test/tile?token=secret returned HTTP 403: Access denied"
+            "request to https://REDACTED:REDACTED@example.test/tile?token=REDACTED returned HTTP 403"
         );
     }
 

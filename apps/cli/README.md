@@ -54,8 +54,8 @@ sibling (`out.png` becomes `out.partial.png`); `--no-partial` discards
 instead with `tile.download-failed` and no output.
 
 On a terminal, human progress uses plain-language stages and a live tile bar.
-Failed HTTP metadata and tile requests show their URL, status, and any short
-textual response body so the server failure can be investigated.
+Failed HTTP metadata and tile requests show their redacted address and HTTP
+status so the server failure can be investigated without leaking credentials.
 
 Bulk mode saves one output per list entry and never stops early:
 
@@ -69,9 +69,8 @@ ignored. A IIIF collection manifest URL is accepted best-effort (its
 its first image). Failures continue with a per-image summary; the exit is 1
 when any entry fails.
 
-HTTP metadata and tile failures include the requested URL, HTTP status, and a
-short textual response body when available. Tests: `cargo xtask test native`
-and `cargo xtask test scenario`.
+HTTP metadata and tile failures include the requested redacted address and HTTP
+status. Tests: `cargo xtask test native` and `cargo xtask test scenario`.
 
 Contributing: argument parsing and presentation live here; format parsing,
 downloading, and codecs belong to `dezoomify-native`/`dezoomify-core`.

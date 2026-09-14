@@ -987,8 +987,10 @@ fn execute_effects(
                             BTreeMap::from([(
                                 "error".to_string(),
                                 format!(
-                                    "request to {uri} failed: {} ({})",
-                                    error.message, error.code
+                                    "request to {} failed: {} ({})",
+                                    dezoomify_core::core::redact_uri(&uri),
+                                    error.message,
+                                    error.code
                                 ),
                             )]),
                         );
