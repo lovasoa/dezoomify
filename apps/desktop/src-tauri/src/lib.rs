@@ -12,6 +12,12 @@
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/desktop_commands.rs"));
 
+/// Version shared by every app built from this revision.
+pub const APP_VERSION: &str = match option_env!("DEZOOMIFY_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 pub mod commands;
 pub mod deep_link;
 pub mod install_integration;

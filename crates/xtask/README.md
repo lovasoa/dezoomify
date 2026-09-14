@@ -14,9 +14,12 @@ cargo xtask test [core|protocol|job|wasm|browser|ui|web|native|scenario|desktop|
 cargo xtask build <wasm|web|cli|desktop|extension> [options]
 cargo xtask dev <ui|web|desktop|extension> [options]
 cargo xtask ci <check|rust|wasm|browser|web|native|desktop|extension|protocol|security|local|digest> [--check <hex>]
-cargo xtask release plan <version> <channel>
-cargo xtask release build --plan <path>
-cargo xtask release verify --plan <path> [--artifacts <path>]
+cargo xtask release version
+cargo xtask release plan [--numbered]
+cargo xtask release build --plan <path> --target <target>
+cargo xtask release sign
+cargo xtask release verify --plan <path> --artifacts <path>
+cargo xtask release publish --plan <path> --artifacts <path>
 cargo xtask protocol <generate|check> [options]
 cargo xtask fixtures <verify|serve|capture> [options]
 ```
@@ -31,8 +34,7 @@ gates.
 are read-only. `protocol generate` is the explicit generated-source update;
 golden candidates require its explicit maintenance option. Builds write only to
 declared generated paths, `target/`, `dist/`, or `artifacts/` as appropriate.
-Release build does not sign or publish, and release verification uses public
-keys only.
+Release verification uses public keys only.
 
 ## Examples
 

@@ -14,7 +14,6 @@ use std::process::Command;
 pub(crate) fn publish_cmd(args: &[String]) -> Result<(), String> {
     let mut plan: Option<PathBuf> = None;
     let mut artifacts: Option<PathBuf> = None;
-    let mut draft = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -30,25 +29,23 @@ pub(crate) fn publish_cmd(args: &[String]) -> Result<(), String> {
                     args.get(i).ok_or("missing --artifacts <path>")?.clone(),
                 ));
             }
-            "--draft" => draft = true,
             other => return Err(format!("unknown release publish arg '{other}'")),
         }
         i += 1;
     }
     let (Some(plan), Some(artifacts)) = (plan, artifacts) else {
         return Err(
-            "usage: cargo xtask release publish --plan <path> --artifacts <path> [--draft]"
-                .to_string(),
+            "usage: cargo xtask release publish --plan <path> --artifacts <path>".to_string(),
         );
     };
     let p = read_plan(&plan)?;
     release_verify(&p, &artifacts, false)?;
-    release_publish(&p, &artifacts, draft)?;
+    release_publish(&p, &artifacts)?;
     println!("release publish: {}", p.tag);
     Ok(())
 }
 
-fn release_publish(plan: &Plan, artifacts: &std::path::Path, draft: bool) -> Result<(), String> {
+fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), String> {
     if Command::new("gh")
         .args(["auth", "status"])
         .output()
@@ -56,14 +53,27 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path, draft: bool) -> Res
     {
         return Err("gh is not available or authenticated; cannot publish".to_string());
     }
-    // The tag must exist and point at the planned revision; the release is
-    // never published for a revision other than the one it is tagged with.
-    let tag_commit = tag_commit(&plan.tag)?;
-    if tag_commit != plan.commit {
+    let master = remote_master_commit()?;
+    if master != plan.commit {
         return Err(format!(
-            "tag {} points at {tag_commit}, but the plan pins {}; regenerate the plan from the tagged revision",
-            plan.tag, plan.commit
+            "plan pins {}, but origin/master is {master}; refusing to publish an outdated commit",
+            plan.commit
         ));
+    }
+    match remote_tag_commit(&plan.tag)? {
+        Some(commit) if commit != plan.commit => {
+            return Err(format!(
+                "tag {} points at {commit}, not the planned commit {}",
+                plan.tag, plan.commit
+            ));
+        }
+        None if plan.channel == "stable" => {
+            return Err(format!(
+                "tag {} does not exist on origin; push it before publishing",
+                plan.tag
+            ));
+        }
+        _ => {}
     }
     let tag = plan.tag.clone();
     let exists = Command::new("gh")
@@ -77,28 +87,28 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path, draft: bool) -> Res
             "GitHub release {tag} already exists; refusing to republish"
         ));
     }
-    // Record the reviewed inventory before publishing.
-    let inventory = crate::repo_root()
-        .join("release/checksums")
-        .join(&plan.version);
-    std::fs::create_dir_all(&inventory)
-        .map_err(|e| format!("create {}: {e}", inventory.display()))?;
-    std::fs::copy(artifacts.join("SHA256SUMS"), inventory.join("SHA256SUMS"))
-        .map_err(|e| format!("copy SHA256SUMS: {e}"))?;
+    if plan.channel == "stable" {
+        let inventory = crate::repo_root()
+            .join("release/checksums")
+            .join(&plan.version);
+        std::fs::create_dir_all(&inventory)
+            .map_err(|e| format!("create {}: {e}", inventory.display()))?;
+        std::fs::copy(artifacts.join("SHA256SUMS"), inventory.join("SHA256SUMS"))
+            .map_err(|e| format!("copy SHA256SUMS: {e}"))?;
+    }
     let mut cmd = Command::new("gh");
     cmd.args(["release", "create", &tag, "--target", &plan.commit])
         .arg("--title")
         .arg(format!("dezoomify {}", plan.tag))
         .arg("--notes-file")
         .arg(artifacts.join("notes.md"))
-        .arg(artifacts.join("SHA256SUMS"));
+        .arg(artifacts.join("SHA256SUMS"))
+        .arg(artifacts.join("SHA256SUMS.sig"));
     for name in parse_sums(&artifacts.join("SHA256SUMS"))? {
         cmd.arg(artifacts.join(&name));
         cmd.arg(artifacts.join(format!("{name}.sig")));
     }
-    if draft {
-        cmd.arg("--draft");
-    }
+    cmd.arg("--latest");
     let status = cmd.status().map_err(|e| format!("failed to run gh: {e}"))?;
     if !status.success() {
         return Err(format!("gh release create {tag} failed"));
@@ -106,40 +116,44 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path, draft: bool) -> Res
     Ok(())
 }
 
-/// Resolves the tag to the commit it points at, fetching it from the origin
-/// when the shallow/CI checkout lacks it. Fails closed when the tag does
-/// not exist.
-fn tag_commit(tag: &str) -> Result<String, String> {
-    let resolve = |label: &str| -> Option<String> {
-        let out = Command::new("git")
-            .args(["rev-parse", &format!("{label}^{{commit}}")])
-            .current_dir(crate::repo_root())
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let s = String::from_utf8(out.stdout).ok()?;
-        let commit = s.trim().to_string();
-        (commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit())).then_some(commit)
-    };
-    if let Some(commit) = resolve(tag) {
-        return Ok(commit);
-    }
-    let fetched = Command::new("git")
-        .args([
-            "fetch",
-            "--no-tags",
-            "origin",
-            &format!("refs/tags/{tag}:refs/tags/{tag}"),
-        ])
+fn remote_master_commit() -> Result<String, String> {
+    let out = Command::new("git")
+        .args(["ls-remote", "origin", "refs/heads/master"])
         .current_dir(crate::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !fetched.success() {
-        return Err(format!(
-            "tag {tag} does not exist; create and push it before publishing"
-        ));
+        .output()
+        .map_err(|e| format!("failed to inspect origin/master: {e}"))?;
+    let text = String::from_utf8(out.stdout).map_err(|e| format!("git output: {e}"))?;
+    let commit = text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| "origin/master did not resolve".to_string())?;
+    Ok(commit.to_string())
+}
+
+fn remote_tag_commit(tag: &str) -> Result<Option<String>, String> {
+    let reference = format!("refs/tags/{tag}");
+    let peeled = format!("{reference}^{{}}");
+    let out = Command::new("git")
+        .args(["ls-remote", "origin", &reference, &peeled])
+        .current_dir(crate::repo_root())
+        .output()
+        .map_err(|e| format!("failed to inspect origin tag {tag}: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("failed to inspect origin tag {tag}"));
     }
-    resolve(tag).ok_or_else(|| format!("tag {tag} exists but does not resolve to a commit"))
+    let text = String::from_utf8(out.stdout).map_err(|e| format!("git output: {e}"))?;
+    let resolve = |name: &str| {
+        text.lines().find_map(|line| {
+            let (commit, found) = line.split_once(char::is_whitespace)?;
+            (found.trim() == name).then_some(commit)
+        })
+    };
+    let commit = resolve(&peeled).or_else(|| resolve(&reference));
+    match commit {
+        None => Ok(None),
+        Some(value) if value.len() == 40 && value.chars().all(|c| c.is_ascii_hexdigit()) => {
+            Ok(Some(value.to_string()))
+        }
+        Some(_) => Err(format!("origin tag {tag} returned a malformed commit")),
+    }
 }

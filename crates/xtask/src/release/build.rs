@@ -57,6 +57,12 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
             "release plan was generated from a different commit; regenerate the plan".to_string(),
         );
     }
+    if std::env::var("DEZOOMIFY_VERSION").ok().as_deref() != Some(plan.version.as_str()) {
+        return Err(format!(
+            "set DEZOOMIFY_VERSION={} before building this plan",
+            plan.version
+        ));
+    }
     let artifact = expected_artifact_name(target, &plan.version)
         .ok_or_else(|| format!("target '{target}' has no artifact name rule"))?;
     let dir = plan_dir(&plan.version).join(target);

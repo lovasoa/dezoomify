@@ -1,6 +1,5 @@
 {
   "name": "@dezoomify/desktop",
-  "version": "3.0.3",
   "private": true,
   "type": "module",
   "main": "./src/main.ts",

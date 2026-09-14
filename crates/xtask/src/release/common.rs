@@ -20,14 +20,7 @@ pub(crate) const ARTIFACTS_ROOT: &str = "target/release-dist";
 
 #[derive(Deserialize)]
 pub(crate) struct Config {
-    pub(crate) release: ConfigRelease,
     pub(crate) protocol: ConfigProtocol,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct ConfigRelease {
-    pub(crate) version: String,
-    pub(crate) channel: String,
 }
 
 #[derive(Deserialize)]
@@ -144,21 +137,90 @@ pub(crate) struct PlanTarget {
     pub(crate) available: bool,
 }
 
-pub(crate) fn git_commit() -> Result<String, String> {
+fn git_output(args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
-        .args(["rev-parse", "HEAD"])
+        .args(args)
         .current_dir(crate::repo_root())
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
     if !out.status.success() {
-        return Err("git rev-parse HEAD failed".to_string());
+        return Err(format!("git {} failed", args.join(" ")));
     }
-    let s = String::from_utf8(out.stdout).map_err(|e| format!("git output: {e}"))?;
-    let commit = s.trim().to_string();
+    String::from_utf8(out.stdout)
+        .map(|value| value.trim().to_string())
+        .map_err(|e| format!("git output: {e}"))
+}
+
+pub(crate) fn git_commit() -> Result<String, String> {
+    let commit = git_output(&["rev-parse", "HEAD"])?;
     if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("git rev-parse HEAD returned a non-commit value".to_string());
     }
     Ok(commit)
+}
+
+/// The nearest numbered tag is the baseline; each first-parent commit after
+/// it consumes one patch number. The boolean is true on the tagged commit.
+pub(crate) fn app_version() -> Result<(String, bool), String> {
+    let current = app_version_at("HEAD", 0)?;
+    if current.1 {
+        let rolling = app_version_at("HEAD^", 1)?.0;
+        let numbers = |version: &str| {
+            version
+                .split('.')
+                .map(|part| part.parse::<u64>().expect("validated app version"))
+                .collect::<Vec<_>>()
+        };
+        if numbers(&current.0) <= numbers(&rolling) {
+            return Err(format!(
+                "numbered version {} must be newer than rolling version {rolling}",
+                current.0
+            ));
+        }
+    }
+    Ok(current)
+}
+
+fn app_version_at(revision: &str, extra_distance: u64) -> Result<(String, bool), String> {
+    let description = git_output(&[
+        "describe",
+        "--first-parent",
+        "--tags",
+        "--match",
+        "v[0-9]*.[0-9]*.[0-9]*",
+        "--long",
+        revision,
+    ])
+    .map_err(|_| "cannot derive app version; fetch the numbered tags".to_string())?;
+    let (tag_distance, _) = description
+        .rsplit_once("-g")
+        .ok_or_else(|| "unexpected git describe output".to_string())?;
+    let (tag, distance) = tag_distance
+        .rsplit_once('-')
+        .ok_or_else(|| "unexpected git describe output".to_string())?;
+    let base = tag
+        .strip_prefix('v')
+        .ok_or_else(|| "numbered tags must use vX.Y.Z".to_string())?;
+    validate_version(base)?;
+    let mut parts: Vec<u64> = base
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .map_err(|_| "bad numbered tag".to_string())?;
+    let distance: u64 = distance
+        .parse()
+        .map_err(|_| "bad git distance".to_string())?;
+    let exact = distance == 0;
+    let distance = distance
+        .checked_add(extra_distance)
+        .ok_or_else(|| "derived version overflow".to_string())?;
+    parts[2] = parts[2]
+        .checked_add(distance)
+        .ok_or_else(|| "derived version overflow".to_string())?;
+    if parts.iter().any(|part| *part > u64::from(u16::MAX)) {
+        return Err("derived version exceeds browser-store limits".to_string());
+    }
+    Ok((format!("{}.{}.{}", parts[0], parts[1], parts[2]), exact))
 }
 
 pub(crate) fn plan_dir(version: &str) -> PathBuf {
@@ -262,10 +324,11 @@ pub(crate) fn plan_from_repo() -> Plan {
     let targets = load_targets().unwrap();
     let compat = load_compatibility().unwrap();
     let caps = load_capabilities().unwrap();
+    let version = app_version().unwrap().0;
     Plan {
-        version: config.release.version.clone(),
-        tag: format!("v{}", config.release.version),
-        channel: config.release.channel.clone(),
+        tag: format!("rolling-v{version}"),
+        version,
+        channel: "rolling".to_string(),
         commit: "0".repeat(40),
         protocol: PlanProtocol {
             range: config.protocol.range.clone(),

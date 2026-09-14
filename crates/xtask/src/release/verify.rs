@@ -8,8 +8,8 @@
 //! the `sign` stage.
 
 use super::common::{
-    expected_artifact_name, load_capabilities, load_compatibility, load_config, read_plan,
-    schema_fingerprint, sha256_file, validate_version, Plan,
+    expected_artifact_name, load_capabilities, load_compatibility, load_config, load_targets,
+    read_plan, schema_fingerprint, sha256_file, validate_version, Plan,
 };
 use super::sign;
 use std::collections::BTreeMap;
@@ -60,25 +60,42 @@ pub(crate) fn verify_cmd(args: &[String]) -> Result<(), String> {
 /// repository inventory, and (unless `--unsigned`) GPG signature validity.
 pub(crate) fn release_verify(plan: &Plan, artifacts: &Path, unsigned: bool) -> Result<(), String> {
     validate_version(&plan.version)?;
-    if plan.tag != format!("v{}", plan.version) {
+    let expected_tag = match plan.channel.as_str() {
+        "rolling" => format!("rolling-v{}", plan.version),
+        "stable" => format!("v{}", plan.version),
+        _ => return Err(format!("unknown release channel {}", plan.channel)),
+    };
+    if plan.tag != expected_tag {
         return Err(format!(
             "plan tag {} does not match version {}",
             plan.tag, plan.version
         ));
     }
     let config = load_config()?;
-    if plan.version != config.release.version || plan.channel != config.release.channel {
-        return Err("plan disagrees with release/config.toml".to_string());
+    if plan.version != super::common::app_version()?.0 {
+        return Err("plan version disagrees with the checked-out revision".to_string());
     }
     let compat = load_compatibility()?;
     let caps = load_capabilities()?;
+    let targets = load_targets()?;
     let fingerprint = schema_fingerprint()?;
     if plan.protocol.range != config.protocol.range
+        || plan.protocol.min_peer != config.protocol.min_peer
         || plan.protocol.compatibility_current != compat.compatibility.current
         || plan.protocol.compatibility_n_minus_1 != compat.compatibility.n_minus_1
         || caps.protocol != plan.protocol.range
         || caps.capabilities != plan.capabilities
         || plan.schema_fingerprint != fingerprint
+        || plan.targets.len() != targets.list.len()
+        || plan
+            .targets
+            .iter()
+            .zip(&targets.list)
+            .any(|(planned, target)| {
+                planned.name != target.name
+                    || planned.os != target.os
+                    || planned.available != target.available
+            })
     {
         return Err(
             "plan disagrees with the repository release inventory; regenerate the plan".to_string(),
@@ -185,7 +202,7 @@ mod tests {
 
     #[test]
     fn verify_rejects_tampered_digests() {
-        let plan = plan_from_repo();
+        let mut plan = plan_from_repo();
         let dir = temp_root("verify");
         let mut names: Vec<(String, PathBuf)> = Vec::new();
         for target in plan.targets.iter().filter(|t| t.available) {
@@ -211,6 +228,11 @@ mod tests {
         if let Err(e) = release_verify(&plan, &dir, true) {
             panic!("unsigned verify should pass: {e}");
         }
+        plan.targets[0].available = false;
+        assert!(release_verify(&plan, &dir, true)
+            .unwrap_err()
+            .contains("release inventory"));
+        plan.targets[0].available = true;
         // An unexpected extra artifact is rejected.
         std::fs::write(
             dir.join("SHA256SUMS"),

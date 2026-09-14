@@ -6,6 +6,9 @@ import react from "@vitejs/plugin-react";
 // source maps unless release policy explicitly permits sanitized maps.
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __DEZOOMIFY_VERSION__: JSON.stringify(process.env.DEZOOMIFY_VERSION ?? "0.0.0"),
+  },
   clearScreen: false,
   server: {
     port: 1420,

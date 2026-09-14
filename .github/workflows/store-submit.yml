@@ -5,10 +5,9 @@ name: store-submit
 # Default is dry-run: package the store payload, validate it, and upload it
 # as a workflow artifact. Pass upload=true to push to the existing listing
 # (Chromium: draft upload; Firefox/AMO: listed-channel version upload, which
-# auto-submits for review), and publish=true to publish the Chromium draft.
-# Chromium publish can be retried without another upload when a draft already
-# exists. Draft upload and publish fail closed with a clear message when any
-# required secret is missing.
+# auto-submits for review), and publish=true to publish that Chromium upload.
+# Draft upload and publish fail closed with a clear message when any required
+# secret is missing.
 # Chromium secrets (OAuth only, no IDs): CHROME_WS_CLIENT_ID,
 # CHROME_WS_CLIENT_SECRET, CHROME_WS_REFRESH_TOKEN (one-time owner authorize).
 # Uploads use the /upload/ media endpoint; publish uses the items endpoint.
@@ -45,11 +44,12 @@ on:
         type: boolean
         default: false
       publish:
-        description: "Publish the existing Chromium draft (needs secrets; upload may be false for retry)"
+        description: "Publish the Chromium package uploaded by this run (requires upload=true)"
         required: false
         type: boolean
         default: false
 permissions:
+  actions: read
   contents: read
 concurrency:
   group: store-submit-${{ inputs.browser || 'chromium' }}-${{ github.ref }}
@@ -64,6 +64,8 @@ jobs:
       BROWSER: ${{ inputs.browser || 'chromium' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
@@ -104,10 +106,12 @@ jobs:
         run: |
           set -euo pipefail
           browser="${BROWSER:-chromium}"
-          version=$(node -p 'require("./apps/extension/package.json").version')
+          version="$(cargo xtask release version)"
+          export DEZOOMIFY_VERSION="$version"
+          echo "DEZOOMIFY_VERSION=$version" >> "$GITHUB_ENV"
           cargo xtask build extension
           cp "target/extension/dezoomify-$browser.zip" "dezoomify-extension-$browser-$version.zip"
-          unzip -l "dezoomify-extension-$browser-$version.zip" | head -8
+          unzip -l "dezoomify-extension-$browser-$version.zip"
           sha256sum "dezoomify-extension-$browser-$version.zip"
           echo "package: ok (dezoomify-extension-$browser-$version.zip)"
       - name: Upload artifact (dry-run record)
@@ -116,6 +120,35 @@ jobs:
           name: dezoomify-extension
           path: dezoomify-extension-*.zip
           retention-days: 30
+      - name: Use released package for store mutation
+        if: inputs.upload == true || inputs.publish == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${{ inputs.publish }}" != "true" || test "${{ inputs.upload }}" = "true"
+          sha="$(git rev-parse HEAD)"
+          test "$sha" = "$(git ls-remote origin refs/heads/master | cut -f1)"
+          test -n "$(gh run list --workflow ci.yml --branch master --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          release_tag="rolling-v$DEZOOMIFY_VERSION"
+          git rev-parse "v$DEZOOMIFY_VERSION^{commit}" >/dev/null 2>&1 && release_tag="v$DEZOOMIFY_VERSION"
+          test "$(git rev-parse "$release_tag^{commit}")" = "$sha"
+          asset="dezoomify-$BROWSER-v$DEZOOMIFY_VERSION.zip"
+          package="dezoomify-extension-$BROWSER-$DEZOOMIFY_VERSION.zip"
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$verify_dir"' EXIT
+          gh release download "$release_tag" --dir "$verify_dir" --pattern "$asset" --pattern "$asset.sig" --pattern SHA256SUMS --pattern SHA256SUMS.sig
+          released_package="$verify_dir/$asset"
+          unzip -t "$released_package"
+          export GNUPGHOME="$verify_dir/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --import release/gpg-public-key.asc
+          gpg --batch --verify "$verify_dir/SHA256SUMS.sig" "$verify_dir/SHA256SUMS"
+          gpg --batch --verify "$verify_dir/$asset.sig" "$released_package"
+          digest="$(sha256sum "$released_package" | cut -d' ' -f1)"
+          grep -Fqx "$digest  extension-$BROWSER/$asset" "$verify_dir/SHA256SUMS"
+          cp "$released_package" "$package"
+          echo "store package: signed release $release_tag/$asset"
       - name: Draft upload to Chrome Web Store
         if: inputs.browser == 'chromium' && inputs.upload == true
         env:
@@ -124,6 +157,7 @@ jobs:
           CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/master | cut -f1)"
           for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
             [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
           done
@@ -166,6 +200,7 @@ jobs:
           CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/master | cut -f1)"
           for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
             [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
           done
@@ -220,6 +255,7 @@ jobs:
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/master | cut -f1)"
           for v in AMO_JWT_ISSUER AMO_JWT_SECRET; do
             [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
           done
