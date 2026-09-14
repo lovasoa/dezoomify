@@ -576,7 +576,7 @@ pub(crate) fn fetch_and_decode_cached(
     if !outcome.ok() {
         return Err(NativeError::new(
             "tile.http-error",
-            format!("tile request returned http status {}", outcome.status),
+            describe_http_failure(&outcome),
         ));
     }
     let bytes = processing.apply(outcome.body).map_err(NativeError::from)?;
@@ -590,6 +590,29 @@ pub(crate) fn fetch_and_decode_cached(
         icc_profile: loaded.icc_profile,
         exif_metadata: loaded.exif_metadata,
     })
+}
+
+/// Provide actionable tile HTTP diagnostics while bounding response bodies
+/// passed to the host UI.
+fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
+    let mut requested = outcome.final_uri.clone();
+    if requested.len() > 2_048 {
+        requested.truncate(2_048);
+        requested.push_str("...");
+    }
+    let response = std::str::from_utf8(&outcome.body)
+        .ok()
+        .filter(|text| text.len() <= 1_024)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .filter(|text| !text.chars().any(char::is_control));
+    match response {
+        Some(response) => format!(
+            "request to {requested} returned HTTP {}: {response}",
+            outcome.status
+        ),
+        None => format!("request to {requested} returned HTTP {}", outcome.status),
+    }
 }
 
 pub(crate) struct ProbeRead {
@@ -1024,6 +1047,19 @@ pub(crate) fn retry_wait(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn http_failure_keeps_the_requested_url_and_short_text_response() {
+        let outcome = crate::http::FetchOutcome {
+            status: 403,
+            final_uri: "https://user:password@example.test/tile?token=secret".to_string(),
+            body: b"Access denied".to_vec(),
+        };
+        assert_eq!(
+            describe_http_failure(&outcome),
+            "request to https://user:password@example.test/tile?token=secret returned HTTP 403: Access denied"
+        );
+    }
 
     #[test]
     fn first_attempt_never_waits() {

@@ -7,7 +7,7 @@
 mod arguments;
 mod report;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -349,11 +349,11 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         eprintln!("error: job started without an event (native.internal)");
         return false;
     };
-    print_event(parsed.json, started, level);
+    let mut reporter = Reporter::new(parsed.json, level);
+    reporter.event(started);
 
     let config = pipeline_config_for(parsed);
     let json = parsed.json;
-    let level_owned = level.to_string();
     let result = pipeline::run(
         input,
         &output_str,
@@ -362,12 +362,13 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         &mut |event: PipelineEvent| {
             handle.emit_detail(&event.kind, event.detail.clone());
             if let Some(last) = handle.events().last() {
-                print_event(json, last, &level_owned);
+                reporter.event(last);
             }
         },
     );
     match result {
         Ok(outcome) => {
+            reporter.finish_progress();
             let result = handle.finish(outcome.output_hash.clone());
             if json {
                 println!(
@@ -408,6 +409,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             true
         }
         Err(error) => {
+            reporter.finish_progress();
             eprintln!("error: {} ({})", error.message, error.code);
             false
         }
@@ -572,34 +574,37 @@ fn run_one_bulk_image(
     // bulk-item lines on stdout, so event details never pollute JSON.
     if !parsed.json {
         if let Some(last) = handle.events().last() {
-            print_event(false, last, &parsed.logging);
+            Reporter::new(false, &parsed.logging).event(last);
         }
     }
     let config = pipeline_config_for(parsed);
-    let mut events: Vec<PipelineEvent> = Vec::new();
     let logging = parsed.logging.clone();
+    let mut reporter = Reporter::new(false, &logging);
     let result = pipeline::run(
         url,
         output,
         parsed.overwrite,
         &config,
         &mut |event: PipelineEvent| {
-            events.push(event.clone());
             handle.emit_detail(&event.kind, event.detail.clone());
             if !parsed.json {
                 if let Some(last) = handle.events().last() {
-                    print_event(false, last, &logging);
+                    reporter.event(last);
                 }
             }
         },
     );
     match result {
         Ok(outcome) => {
+            reporter.finish_progress();
             let _ = handle.finish(outcome.output_hash.clone());
             let actual = outcome.output_path.to_string_lossy().into_owned();
             Ok((outcome.output_hash, outcome.tile_count, actual))
         }
-        Err(error) => Err((error.code, error.message)),
+        Err(error) => {
+            reporter.finish_progress();
+            Err((error.code, error.message))
+        }
     }
 }
 
@@ -801,31 +806,119 @@ mod url {
     }
 }
 
-fn print_event(json: bool, event: &JobEvent, logging: &str) {
-    if json {
-        println!(
-            "{}",
-            report::machine_event_detail(&event.job, event.seq, event.kind.as_str(), &event.detail)
-        );
-        return;
+struct Reporter {
+    json: bool,
+    logging: String,
+    tty: bool,
+    progress_visible: bool,
+    reported_failures: BTreeSet<String>,
+}
+
+impl Reporter {
+    fn new(json: bool, logging: &str) -> Self {
+        use std::io::IsTerminal as _;
+        Self {
+            json,
+            logging: logging.to_string(),
+            tty: std::io::stderr().is_terminal(),
+            progress_visible: false,
+            reported_failures: BTreeSet::new(),
+        }
     }
-    if !report::show_progress(logging) {
-        return;
+
+    fn event(&mut self, event: &JobEvent) {
+        if self.json {
+            println!(
+                "{}",
+                report::machine_event_detail(
+                    &event.job,
+                    event.seq,
+                    event.kind.as_str(),
+                    &event.detail
+                )
+            );
+            return;
+        }
+        if !report::show_progress(&self.logging) {
+            return;
+        }
+        match event.kind.as_str() {
+            "started" => self.line("Starting image download..."),
+            "discovery" => self.line("Finding image information..."),
+            "downloading" => self.progress(&event.detail),
+            "encoding" => self.line("Building the image..."),
+            "tile-failed" => {
+                self.finish_progress();
+                let tile = event
+                    .detail
+                    .get("tile")
+                    .map(String::as_str)
+                    .unwrap_or("unknown");
+                let error = event
+                    .detail
+                    .get("error")
+                    .map(String::as_str)
+                    .unwrap_or("unknown error");
+                if self.reported_failures.insert(tile.to_string()) {
+                    eprintln!("Could not retrieve tile {tile}: {error}");
+                }
+            }
+            "recovery-requested" => {
+                self.line("Some tiles could not be retrieved. Preparing a partial image...");
+            }
+            "missing-work" => {
+                let failed = event
+                    .detail
+                    .get("failed")
+                    .map(String::as_str)
+                    .unwrap_or("some");
+                self.line(&format!("{failed} tiles could not be retrieved."));
+            }
+            _ => {}
+        }
+        if report::is_trace(&self.logging) {
+            if let Ok(payload) = serde_json::to_string(&event.detail) {
+                self.finish_progress();
+                eprintln!("trace {} {} {payload}", event.kind, event.job);
+            }
+        }
     }
-    let detail = event
-        .detail
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if detail.is_empty() {
-        eprintln!("{} {}", event.kind, event.job);
-    } else {
-        eprintln!("{} {} {}", event.kind, event.job, detail);
+
+    fn progress(&mut self, detail: &BTreeMap<String, String>) {
+        let acquired = detail
+            .get("acquired")
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(0);
+        let total = detail
+            .get("total")
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(0);
+        if self.tty {
+            let filled = acquired.saturating_mul(30).checked_div(total).unwrap_or(0);
+            let bar = format!(
+                "{}{}",
+                "#".repeat(filled.min(30)),
+                "-".repeat(30usize.saturating_sub(filled))
+            );
+            let percent = acquired.saturating_mul(100).checked_div(total).unwrap_or(0);
+            eprint!("\rDownloading [{bar}] {percent:>3}% ({acquired}/{total} tiles)");
+            use std::io::Write as _;
+            let _ = std::io::stderr().flush();
+            self.progress_visible = true;
+        } else if acquired == 0 || acquired == total {
+            self.line(&format!("Downloading: {acquired}/{total} tiles"));
+        }
     }
-    if report::is_trace(logging) {
-        if let Ok(payload) = serde_json::to_string(&event.detail) {
-            eprintln!("trace {} {} {payload}", event.kind, event.job);
+
+    fn line(&mut self, message: &str) {
+        self.finish_progress();
+        eprintln!("{message}");
+    }
+
+    fn finish_progress(&mut self) {
+        if self.progress_visible {
+            eprintln!();
+            self.progress_visible = false;
         }
     }
 }

@@ -88,6 +88,18 @@ fn cli_fails_honestly_on_missing_tiles() {
         stderr.contains("tile.download-failed"),
         "honest code: {stderr}"
     );
+    assert!(
+        stderr.contains("Could not retrieve tile"),
+        "tile failure: {stderr}"
+    );
+    assert!(
+        stderr.contains("returned HTTP 404"),
+        "http status: {stderr}"
+    );
+    assert!(
+        stderr.contains("/fetch?url=https://fixtures.test/cli/broken_files/9/"),
+        "requested url: {stderr}"
+    );
 }
 
 #[test]

@@ -1291,8 +1291,12 @@ fn acquire_tiles(
             backoff,
         });
     }
-    let mut outcomes: Vec<(String, bool, Option<crate::pipeline::DecodedTile>)> =
-        Vec::with_capacity(tiles.len());
+    let mut outcomes: Vec<(
+        String,
+        bool,
+        Option<crate::pipeline::DecodedTile>,
+        Option<String>,
+    )> = Vec::with_capacity(tiles.len());
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(tiles.len());
         for (need, plan) in tiles.iter().zip(planned) {
@@ -1327,12 +1331,20 @@ fn acquire_tiles(
         }
         for (tile, handle) in handles {
             match handle.join() {
-                Ok(Ok(image)) => outcomes.push((tile, true, Some(image))),
-                Ok(Err(_)) | Err(_) => outcomes.push((tile, false, None)),
+                Ok(Ok(image)) => outcomes.push((tile, true, Some(image), None)),
+                Ok(Err(error)) => outcomes.push((
+                    tile,
+                    false,
+                    None,
+                    Some(format!("{} ({})", error.message, error.code)),
+                )),
+                Err(_) => {
+                    outcomes.push((tile, false, None, Some("tile worker failed".to_string())))
+                }
             }
         }
     });
-    for (tile, ok, image) in outcomes {
+    for (tile, ok, image, failure) in outcomes {
         if job.state() != JobState::AcquiringTiles {
             // An earlier outcome in this batch already moved the job on
             // (retry-exhausted tile → partial decision): later outcomes are
@@ -1347,6 +1359,15 @@ fn acquire_tiles(
             attempt
                 .tile_failures
                 .insert(tile.clone(), failures.saturating_add(1));
+            if let Some(error) = failure {
+                attempt.emit(
+                    "tile-failed",
+                    BTreeMap::from([
+                        ("tile".to_string(), tile.clone()),
+                        ("error".to_string(), error),
+                    ]),
+                );
+            }
         }
         if let Some(image) = image {
             attempt.decoded.insert(tile.clone(), image);
