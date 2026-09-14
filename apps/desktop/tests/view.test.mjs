@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { act, click, makeContainer } from "../../../test/react-dom.mjs";
+import { act, click, document, makeContainer } from "../../../test/react-dom.mjs";
 import { DesktopJobView } from "../src/desktopView.tsx";
 import { DesktopSettingsView } from "../src/settingsView.tsx";
 import { defaultSettings } from "../src/settings.ts";
@@ -71,6 +71,30 @@ test("desktop partial completion and output errors are declarative", () => {
   const { container } = mount(initial);
   assert.match(container.querySelector(".dz-partial-note").textContent, /image\.partial\.png/);
   assert.match(container.querySelector("#dz-open-error").textContent, /output\.launch-failed/);
+});
+
+test("desktop recovery keeps its keyboard cycle and Escape route", () => {
+  const cancel = document.createElement("button");
+  cancel.id = "dz-btn-cancel";
+  document.body.append(cancel);
+  const { container } = mount(props({
+    decision: { kind: "partial-recovery", reason: "partial", missingTiles: ["3,4"] },
+  }));
+  const actions = container.querySelectorAll(".dz-recovery-dialog button");
+  act(() => {
+    actions[2].focus();
+    const event = new window.Event("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperties(event, { key: { value: "Tab" }, shiftKey: { value: false } });
+    actions[2].dispatchEvent(event);
+  });
+  assert.equal(document.activeElement, actions[0], "Tab wraps to the first recovery action");
+  act(() => {
+    const event = new window.Event("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "key", { value: "Escape" });
+    actions[0].dispatchEvent(event);
+  });
+  assert.equal(document.activeElement, cancel, "Escape moves focus to the shared Cancel action");
+  cancel.remove();
 });
 
 test("desktop settings keep size in the quick strip and open an advanced dialog", () => {

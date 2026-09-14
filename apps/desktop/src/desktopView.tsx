@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-import type { ReactElement } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
 import { t } from "@dezoomify/shared-ui";
 import type { ControllerState, ViewRenderOptions } from "@dezoomify/shared-ui";
 import { NATIVE_FORMATS } from "./desktopIntegration.ts";
@@ -170,7 +170,7 @@ function useRecoveryFocus() {
   return {
     dialogRef,
     primaryActionRef,
-    onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    onKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
       if (event.key === "Escape") {
         event.preventDefault();
         document.getElementById("dz-btn-cancel")?.focus();
@@ -182,7 +182,7 @@ function useRecoveryFocus() {
       );
       if (actions.length === 0) return;
       const first = actions[0];
-      const last = actions.at(-1)!;
+      const last = actions[actions.length - 1]!;
       if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();
