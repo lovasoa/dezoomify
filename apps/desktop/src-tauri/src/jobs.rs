@@ -1598,6 +1598,12 @@ impl JobTable {
                         });
                         return;
                     }
+                    // Tile request diagnostics are intended for the CLI. The
+                    // desktop only exposes typed recovery and must not treat
+                    // an informational event as a terminal engine failure.
+                    if lower == "tile-failed" || lower == "resource-failed" {
+                        return;
+                    }
                     let _ = tx_progress.send(DriverMessage::Progress {
                         job: job_for_events.clone(),
                         kind: event.kind,

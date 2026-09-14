@@ -88,10 +88,10 @@ use crate::output::{
     partial_path_for, validate_destination, write_atomic, write_iiif_dir, OutputFormat,
 };
 use crate::pipeline::{
-    available_memory_bytes, blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp,
-    encode_zif_pyramid, exceeds_available_memory, fetch_and_decode_cached, merge_headers,
-    probe_tile_bytes, render_iiif_dir, sha256_hex, PartialDecision, PartialGate, PartialPolicy,
-    PartialRequest, PipelineConfig, PipelineEvent, PipelineOutcome,
+    available_memory_bytes, blit_onto, describe_http_failure, encode_jpeg, encode_png, encode_tiff,
+    encode_webp, encode_zif_pyramid, exceeds_available_memory, fetch_and_decode_cached,
+    merge_headers, probe_tile_bytes, render_iiif_dir, sha256_hex, PartialDecision, PartialGate,
+    PartialPolicy, PartialRequest, PipelineConfig, PipelineEvent, PipelineOutcome,
 };
 
 /// Deferred-resolution bound: the initial discovery plus this many deferred
@@ -965,7 +965,14 @@ fn execute_effects(
                             },
                         )?;
                     }
-                    Ok(_) => {
+                    Ok(outcome) => {
+                        attempt.emit(
+                            "resource-failed",
+                            BTreeMap::from([(
+                                "error".to_string(),
+                                describe_http_failure(&outcome),
+                            )]),
+                        );
                         reply(
                             job,
                             JobResponse::FetchFailure {
@@ -974,7 +981,17 @@ fn execute_effects(
                             },
                         )?;
                     }
-                    Err(_) => {
+                    Err(error) => {
+                        attempt.emit(
+                            "resource-failed",
+                            BTreeMap::from([(
+                                "error".to_string(),
+                                format!(
+                                    "request to {uri} failed: {} ({})",
+                                    error.message, error.code
+                                ),
+                            )]),
+                        );
                         reply(
                             job,
                             JobResponse::FetchFailure {

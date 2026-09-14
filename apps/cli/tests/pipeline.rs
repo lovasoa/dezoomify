@@ -103,6 +103,32 @@ fn cli_fails_honestly_on_missing_tiles() {
 }
 
 #[test]
+fn cli_reports_failed_image_information_requests() {
+    let origin = start_fixture_server();
+    let input = format!("{origin}/fetch?url=https://fixtures.test/no-such-image.dzi");
+    let output = temp_dir("e2e-discovery-failure").join("missing.png");
+    let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("run cli");
+    assert!(!run.status.success(), "missing metadata must fail");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("Could not retrieve image information"),
+        "resource failure: {stderr}"
+    );
+    assert!(
+        stderr.contains("returned HTTP 404"),
+        "http status: {stderr}"
+    );
+    assert!(
+        stderr.contains("/fetch?url=https://fixtures.test/no-such-image.dzi"),
+        "requested url: {stderr}"
+    );
+}
+
+#[test]
 fn cli_max_width_flag_caps_output() {
     // `--max-width 300` on the 512px pyramid must download the largest
     // fitting level (256px, 1 tile) and hash to the cli-max-width golden.

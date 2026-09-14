@@ -594,7 +594,7 @@ pub(crate) fn fetch_and_decode_cached(
 
 /// Provide actionable tile HTTP diagnostics while bounding response bodies
 /// passed to the host UI.
-fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
+pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
     let mut requested = outcome.final_uri.clone();
     if requested.len() > 2_048 {
         requested.truncate(2_048);
