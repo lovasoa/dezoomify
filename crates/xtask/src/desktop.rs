@@ -104,6 +104,7 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
     run_node(&["apps/desktop/tests/queue.test.mjs"])?;
     run_node(&["apps/desktop/tests/diagnostics.test.mjs"])?;
+    run_node(&["apps/desktop/tests/view.test.mjs"])?;
     // Development-surface smoke: starts the real Vite entrypoint on the
     // Tauri dev URL and verifies the shared theme resolves through Vite's
     // module graph. No webview or display is needed.

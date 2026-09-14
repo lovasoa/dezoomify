@@ -3,7 +3,7 @@
  *
  * Tokens (parchment light, walnut dark, sapphire/sage links, beveled
  * buttons, 2px focus rings) live in packages/shared-ui/src/styles/theme.css.
- * This sheet only wires desktop-only DOM (footer sibling, aux panel,
+ * This sheet styles desktop-only UI (footer, job panel,
  * settings panel, deep-link confirm) to those tokens. No pills, no nested
  * boxes, no neon. All body copy stays left-aligned; the footer stays pinned.
  *
@@ -125,9 +125,9 @@ body {
   border-left: 0;
 }
 
-/* Desktop aux panel: plain flow inside the single status card.
+/* Desktop job panel: plain flow inside the single status card.
  * Transparent, no nested bordered box, only a top separator rhythm. */
-#dz-desktop-aux {
+#dz-desktop-job-panel {
   background: transparent;
   border: none;
   border-top: 1px solid var(--dz-surface-border);
@@ -141,25 +141,41 @@ body {
   text-align: left;
 }
 
-#dz-desktop-aux .dz-notice-title {
+#dz-desktop-job-panel .dz-notice-title {
   color: var(--dz-text-primary);
   text-align: left;
 }
 
-#dz-desktop-aux .dz-notice-message {
+#dz-desktop-job-panel .dz-notice-message {
   text-align: left;
 }
 
-#dz-desktop-aux .dz-actions-row {
+#dz-desktop-job-panel .dz-actions-row {
   margin-top: 0.5rem;
 }
 
 /* Missing-tile and partial/cancel notes: plain left-aligned flow, no box. */
-#dz-desktop-aux .dz-missing-list,
+#dz-desktop-job-panel .dz-missing-list,
 #dz-cancel-cleanup-note {
   text-align: left;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+.dz-output-format {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.dz-output-format-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 /* Loading view: tabular counts and a smooth architectural track.
@@ -220,12 +236,12 @@ body {
 }
 
 /* Tabular counts stay tabular in desktop panels. */
-#dz-desktop-aux .dz-tile-counts,
-#dz-desktop-aux .dz-progress-percent {
+#dz-desktop-job-panel .dz-tile-counts,
+#dz-desktop-job-panel .dz-progress-percent {
   font-variant-numeric: tabular-nums;
 }
 
-/* Desktop settings panel: same flat flow as the aux panel. Transparent, no
+/* Desktop settings panel: flat flow inside the shared card. Transparent, no
  * nested bordered box, only a top separator. Labels stack above their
  * controls; every control is a native input/textarea/button reachable by
  * Tab with a labelled name. */
@@ -241,6 +257,10 @@ body {
   flex-direction: column;
   gap: 0;
   text-align: left;
+}
+
+#dz-desktop-settings + .dz-history-section {
+  margin-top: 2.5rem;
 }
 
 #dz-desktop-settings .dz-settings-disclosure {
@@ -485,7 +505,7 @@ body {
 #dz-desktop-settings .dz-settings-dialog {
   width: min(700px, calc(100vw - 2rem));
   max-width: none;
-  height: auto;
+  height: fit-content;
   max-height: min(720px, calc(100vh - 3rem));
   margin: auto;
   padding: 0;
@@ -503,6 +523,7 @@ body {
 }
 
 #dz-desktop-settings .dz-settings-sheet {
+  height: fit-content;
   max-height: min(720px, calc(100vh - 3rem));
   overflow-y: auto;
   padding: 0 1.5rem 1.25rem;
@@ -671,10 +692,9 @@ body {
   #dz-desktop-settings .dz-settings-summary-value { display: none; }
 }
 
-/* Recovery dialog wrapper: flat flow, never a nested bordered box. The
- * role="dialog" semantics live in main.tsx; visuals stay inline. */
-#dz-desktop-aux .dz-recovery-dialog,
-#dz-desktop-aux .dz-partial-note {
+/* Recovery and partial-result sections stay flat within the job panel. */
+#dz-desktop-job-panel .dz-recovery-dialog,
+#dz-desktop-job-panel .dz-partial-note {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -689,13 +709,13 @@ body {
 /* Crisp 2px architectural focus for every desktop-only action: submit, save,
  * cancel, reset, recovery choices, settings inputs, browse, help/about, and
  * confirm. Shared actions (Dezoomify/Cancel/Save buttons, URL input) already
- * use the same token in theme.css; these rules cover the desktop aux,
- * settings, help, and deep-link DOM. One token only, no blur, no neon halo. */
-#dz-desktop-aux button:focus-visible,
-#dz-desktop-aux input:focus-visible,
-#dz-desktop-aux textarea:focus-visible,
-#dz-desktop-aux a:focus-visible,
-#dz-desktop-aux summary:focus-visible,
+ * use the same token in theme.css; these rules cover the desktop job panel,
+ * settings, help, and deep-link overlay. One token only, no blur, no neon halo. */
+#dz-desktop-job-panel button:focus-visible,
+#dz-desktop-job-panel input:focus-visible,
+#dz-desktop-job-panel textarea:focus-visible,
+#dz-desktop-job-panel a:focus-visible,
+#dz-desktop-job-panel summary:focus-visible,
 #dz-desktop-settings button:focus-visible,
 #dz-desktop-settings input:focus-visible,
 #dz-desktop-settings textarea:focus-visible,
@@ -706,26 +726,6 @@ body {
 #dz-deep-link-confirm [tabindex]:focus-visible,
 .dz-site-footer a:focus-visible {
   outline: none;
-  box-shadow: var(--dz-focus-ring);
-}
-
-.dz-history-main[type="button"] {
-  background: none;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  padding: 0.5rem 0;
-  width: 100%;
-  overflow-wrap: anywhere;
-}
-
-.dz-history-main[type="button"]:hover {
-  text-decoration: underline;
-}
-
-.dz-history-main[type="button"]:focus-visible {
   box-shadow: var(--dz-focus-ring);
 }
 

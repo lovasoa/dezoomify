@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
 import { act, click, document, makeContainer } from "./react-dom.mjs";
 import {
   renderView,
@@ -17,8 +18,8 @@ const callbacks = {
   onSave: () => {},
 };
 
-function render(el, state, cb, ctx) {
-  act(() => renderView(el, state, cb ?? callbacks, ctx));
+function render(el, state, cb, ctx, options) {
+  act(() => renderView(el, state, cb ?? callbacks, ctx, options));
 }
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */
@@ -105,20 +106,68 @@ test("native completion opens saved output without browser save guidance", () =>
 
 test("history rows select a source without submitting it", () => {
   const el = makeContainer();
-  const entry = { url: "https://museum.example/image", origin: "https://museum.example", at: 1 };
+  const entry = {
+    url: "https://museum.example/image",
+    origin: "https://museum.example",
+    width: 1200,
+    height: 800,
+    format: "PNG",
+    at: 1,
+  };
   let selected;
   let submitted = false;
+  let cleared = false;
   render(
     el,
     { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 },
-    { ...callbacks, onSubmitUrl() { submitted = true; }, onHistorySelect(value) { selected = value; } },
+    {
+      ...callbacks,
+      onSubmitUrl() { submitted = true; },
+      onHistorySelect(value) { selected = value; },
+      onClearHistory() { cleared = true; },
+    },
     { history: [entry] },
   );
+  assert.ok(el.querySelector(".dz-history-table"), "history uses the shared compact table");
+  assert.equal(el.querySelectorAll(".dz-history-table tbody td").length, 4);
+  assert.equal(el.querySelector(".dz-history-dimensions").textContent, "1200x800");
+  assert.equal(el.querySelector(".dz-history-note"), null);
   const button = el.querySelector(".dz-history-main");
   assert.equal(button.tagName, "BUTTON");
   click(button);
   assert.equal(selected, entry);
   assert.equal(submitted, false);
+  const clear = el.querySelector("#dz-history-clear");
+  assert.equal(clear.textContent.trim(), "", "clear action is icon-only");
+  assert.equal(clear.getAttribute("aria-label"), "Clear history");
+  click(clear);
+  assert.equal(cleared, true);
+});
+
+test("URL input exposes a typed host handle for recalling history", () => {
+  const el = makeContainer();
+  let handle;
+  render(
+    el,
+    { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 },
+    { ...callbacks, onUrlInputReady(value) { handle = value; } },
+  );
+  assert.ok(handle, "URL input handle is ready after render");
+  act(() => handle.setValue("https://museum.example/recalled"));
+  const input = el.querySelector("#dz-url-input");
+  assert.equal(input.value, "https://museum.example/recalled");
+});
+
+test("idle product content is rendered before recent pictures", () => {
+  const el = makeContainer();
+  render(
+    el,
+    { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 },
+    callbacks,
+    { history: [{ url: "https://museum.example/image", origin: "https://museum.example", at: 1 }] },
+    { idleBeforeHistory: createElement("section", { id: "product-settings" }) },
+  );
+  assert.equal(el.querySelector("#product-settings").nextElementSibling.id, "dz-history");
 });
 
 test("completion treats saved filenames as text", () => {

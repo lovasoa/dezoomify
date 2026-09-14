@@ -215,6 +215,11 @@ export const fr = {
   "view.history.localOnly": "Conserve uniquement sur cet appareil.",
   "view.history.open": "Rouvrir",
   "view.history.clear": "Effacer l historique",
+  "view.history.url": "Adresse de l image",
+  "view.history.width": "Largeur",
+  "view.history.height": "Hauteur",
+  "view.history.format": "Format",
+  "view.history.date": "Date",
   "view.history.dims": "{w} par {h} pixels",
   "view.input.description":
     "Dezoomify télécharge des images zoomables en tuiles depuis des bibliothèques, des musées, des galeries et d’autres sites web. Collez ci-dessous l’adresse d’une image pour la télécharger.",

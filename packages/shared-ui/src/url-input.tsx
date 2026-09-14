@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import { t } from "./i18n.ts";
+import type { UrlInputHandle } from "./view-types.ts";
 
 /** The canonical URL entry and submit control used by graphical products. */
-export function UrlInput({ initialUrl, onSubmit }: { initialUrl?: string; onSubmit(url: string): void }): ReactElement {
+export function UrlInput({ initialUrl, onSubmit, onReady }: { initialUrl?: string; onSubmit(url: string): void; onReady?(handle: UrlInputHandle | null): void }): ReactElement {
   const inputRef = useRef<HTMLInputElement>(null);
   const [hasValue, setHasValue] = useState(Boolean(initialUrl));
 
@@ -14,6 +15,21 @@ export function UrlInput({ initialUrl, onSubmit }: { initialUrl?: string; onSubm
       setHasValue(true);
     }
   }, [initialUrl]);
+
+  useLayoutEffect(() => {
+    if (!onReady) return;
+    const handle: UrlInputHandle = {
+      setValue(value, options) {
+        const input = inputRef.current;
+        if (!input) return;
+        input.value = value;
+        setHasValue(value.length > 0);
+        if (options?.focus) input.focus();
+      },
+    };
+    onReady(handle);
+    return () => onReady(null);
+  }, [onReady]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();

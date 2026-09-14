@@ -32,7 +32,7 @@ import {
   t,
   toHistoryEntry,
 } from "@dezoomify/shared-ui";
-import type { HistoryEntry, ViewContext } from "@dezoomify/shared-ui";
+import type { HistoryEntry, UrlInputHandle, ViewContext } from "@dezoomify/shared-ui";
 import { suggestedNameFor } from "@dezoomify/browser-runtime";
 import {
   asPayload,
@@ -74,8 +74,7 @@ import {
   resetDesktopSettings,
 } from "./settingsPanel.ts";
 import type { SettingsPanelEnv } from "./settingsPanel.ts";
-import { DesktopSettingsView } from "./settingsView.tsx";
-import { createElement } from "react";
+import { createDesktopViewOptions } from "./desktopView.tsx";
 import {
   createDesktopIntegration,
   DESKTOP_COMMANDS,
@@ -270,60 +269,17 @@ let settingsError: string | null = null;
 let pendingDecision: PendingDecision | null = null;
 let cancelPending = false;
 
-// Catalog aux (todo 4.3): local-only completion geometry (WxH/K tiles) for
-// the save-name suggestion and the aux choice summary, in the
-// pendingDecision aux pattern, never a new protocol event. The native
+// Local-only completion geometry (WxH/K tiles) supports the save-name
+// suggestion and desktop job details without introducing a protocol event. The native
 // pipeline auto-saves images[0] at the largest fitting level and emits no
 // imageCount, so no multi-image notice is rendered here; the shared job
 // view's choiceCount notice stays for other apps. `docs/user/desktop-app.md`
 // documents single-output saves only.
 let catalogNotice: CatalogNotice | null = null;
 
-// Accessibility (Task 5.2): dialog focus state. Each modal stores the element
-// focused before it opened so focus returns on close. Recovery tracks its key
-// so a new decision moves focus once without stealing it on every tick.
-let recoveryReturnFocus: HTMLElement | null = null;
-let lastRecoveryKey: string | null = null;
-
-// Focusable selectors for trap cycles. All desktop actions are native
-// buttons, inputs, textareas, links, or summaries, so Tab reaches submit,
-// save, cancel, reset, choices, settings, browse, and confirm without
-// positive tabindex or div click handlers.
-const FOCUSABLE_SELECTOR =
-  "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), " +
-  "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
-
-function focusableIn(container: HTMLElement): Array<HTMLElement> {
-  const nodes = container.querySelectorAll(FOCUSABLE_SELECTOR);
-  const out: Array<HTMLElement> = [];
-  for (const node of Array.from(nodes)) {
-    const el = node as HTMLElement;
-    if (el.tabIndex < 0 && el.getAttribute("tabindex") === "-1") continue;
-    out.push(el);
-  }
-  return out;
-}
-
-function activeElementOf(doc: Document): HTMLElement | null {
-  const active = doc.activeElement;
-  if (active && active instanceof HTMLElement) return active;
-  return null;
-}
-
-function restoreFocus(target: HTMLElement | null): void {
-  if (!target) return;
-  try {
-    if (target.isConnected && typeof target.focus === "function") target.focus();
-  } catch {
-    // Focus restore is best effort; a detached node stays ignored.
-  }
-}
-
-function recoveryKeyFor(decision: PendingDecision | null): string | null {
-  if (!decision) return null;
-  const missing = (decision.missingTiles ?? []).join(",");
-  return `${decision.kind}:${decision.reason}:${missing}:${decision.failedCount ?? ""}:${decision.totalCount ?? ""}`;
-}
+// Typed shared-input handle used to recall a history URL without reaching
+// into React-owned DOM. The handle owns both value synchronization and focus.
+let urlInputHandle: UrlInputHandle | null = null;
 
 // Marked partial completion: a kept partial output stays distinguishable
 // from a complete save. Set only on a partial-completed event; cleared on
@@ -906,97 +862,6 @@ function handleQueueRetry(id: string): void {
   update();
 }
 
-function desktopQueueStatusLabel(status: string): string {
-  if (status === "active") return t("desktop.queue.statusActive");
-  if (status === "done") return t("desktop.queue.statusDone");
-  if (status === "failed") return t("desktop.queue.statusFailed");
-  if (status === "cancelled") return t("desktop.queue.statusCancelled");
-  return t("desktop.queue.statusQueued");
-}
-
-// Multi-job queue panel (todo 5.3): one row per queued job with its redacted
-// origin, status, and progress, plus cancel-one, cancel-all, and retry
-// actions. Rendered only when the negotiated capabilities offer the queue and
-// at least one entry exists. All actions are native buttons in the existing
-// architectural style; only counts, hashes, codes, and redacted origins ever
-// reach this panel, never full URLs, paths, or secrets.
-function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
-  if (!desktopQueueEnabled()) return;
-  if (desktopQueue.entries.length === 0) return;
-  const box = doc.createElement("div");
-  box.className = "dz-queue-panel";
-  box.setAttribute("role", "region");
-  box.setAttribute("aria-label", t("desktop.queue.title"));
-  const title = doc.createElement("h2");
-  title.className = "dz-notice-title";
-  title.textContent = t("desktop.queue.title");
-  box.appendChild(title);
-  const summary = summarizeDesktopQueue(desktopQueue);
-  const summaryLine = doc.createElement("p");
-  summaryLine.className = "dz-notice-message";
-  summaryLine.setAttribute("role", "status");
-  summaryLine.setAttribute("aria-live", "polite");
-  summaryLine.textContent = t("desktop.queue.summary", {
-    succeeded: summary.succeeded,
-    failed: summary.failed,
-    total: summary.total,
-  });
-  box.appendChild(summaryLine);
-  const list = doc.createElement("ul");
-  list.className = "dz-queue-list";
-  for (const entry of desktopQueue.entries) {
-    const item = doc.createElement("li");
-    item.className = "dz-queue-item";
-    const label = doc.createElement("span");
-    label.className = "dz-queue-label";
-    let text = `${entry.origin || t("desktop.queue.unknownOrigin")} - ${desktopQueueStatusLabel(entry.status)}`;
-    if (entry.status === "active" && entry.progress.total > 0) {
-      text += ` - ${t("desktop.queue.progress", {
-        current: entry.progress.acquired,
-        total: entry.progress.total,
-      })}`;
-    }
-    if (entry.status === "failed" && entry.errorCode) {
-      text += ` - ${entry.errorCode}`;
-    }
-    label.textContent = text;
-    item.appendChild(label);
-    const row = doc.createElement("div");
-    row.className = "dz-actions-row";
-    const addBtn = (btnLabel: string, primary: boolean, onClick: () => void): void => {
-      const btn = doc.createElement("button");
-      btn.type = "button";
-      btn.className = primary ? "dz-btn-tactile" : "dz-btn-secondary";
-      btn.textContent = btnLabel;
-      btn.addEventListener("click", onClick);
-      row.appendChild(btn);
-    };
-    if (entry.status === "queued" || entry.status === "active") {
-      const id = entry.id;
-      addBtn(t("desktop.queue.cancel"), false, () => handleQueueCancelOne(id));
-    }
-    if (entry.status === "failed" || entry.status === "cancelled") {
-      const id = entry.id;
-      addBtn(t("desktop.queue.retry"), true, () => handleQueueRetry(id));
-    }
-    if (row.childElementCount > 0) item.appendChild(row);
-    list.appendChild(item);
-  }
-  box.appendChild(list);
-  if (summary.pending > 0) {
-    const allRow = doc.createElement("div");
-    allRow.className = "dz-actions-row";
-    const allBtn = doc.createElement("button");
-    allBtn.type = "button";
-    allBtn.className = "dz-btn-secondary";
-    allBtn.textContent = t("desktop.queue.cancelAll");
-    allBtn.addEventListener("click", () => handleQueueCancelAll());
-    allRow.appendChild(allBtn);
-    box.appendChild(allRow);
-  }
-  aux.appendChild(box);
-}
-
 function answerChoice(choice: string, onGranted: () => void, failureLabel: string): void {
   const job = currentJobId;
   const invoke = tauriInvoke();
@@ -1141,7 +1006,7 @@ async function handleOpenOutput(reveal: boolean): Promise<void> {
   const job = currentJobId;
   if (!invoke || !job) return;
   outputActionError = undefined;
-  root?.querySelector("#dz-open-error")?.remove();
+  update();
   try {
     await invoke("open_saved_output", { job, reveal });
   } catch (error) {
@@ -1151,13 +1016,7 @@ async function handleOpenOutput(reveal: boolean): Promise<void> {
       ? rawCode : "output.invoke-failed";
     outputActionError = { action: reveal ? "folder" : "open", code };
     pushLog(`File action ${outputActionError.action} failed (${code})`);
-    const section = root?.querySelector(".dz-completed-section");
-    if (!section) return;
-    const note = section.ownerDocument.createElement("p");
-    note.id = "dz-open-error";
-    note.setAttribute("role", "alert");
-    note.textContent = `${t(code === "output.not-found" ? "desktop.done.missingError" : reveal ? "desktop.done.folderError" : "desktop.done.openError")} (${code})`;
-    section.appendChild(note);
+    update();
   }
 }
 
@@ -1218,8 +1077,6 @@ function handleReset(): void {
   activeQueueId = null;
   clearJobViewState();
   dismissDeepLinkConfirm(false);
-  recoveryReturnFocus = null;
-  lastRecoveryKey = null;
   // Idle prefill survives reset: a launch URL stays available for the next
   // empty form without ever starting a job on its own.
   const prefilled = readInitialUrl();
@@ -1526,7 +1383,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
   // Completion: output digest plus optional geometry. Only positive geometry
   // becomes completedInfo (the view renders "W by H" verbatim); the mime
   // falls back to the granted encoder. A partial-completed terminal stays
-  // distinguishable: the aux panel marks the partial output and its missing
+  // distinguishable: the desktop completion view marks the partial output and its missing
   // tiles instead of claiming a complete save.
   if (
     channel === "dezoomify://job-output" ||
@@ -1834,299 +1691,6 @@ function syncInitialUrlFromLocation(): void {
   }
 }
 
-// Output format selector (todo 4.4, todo 5.1): native format radios bound to
-// grantedFormat. Flat flow
-// inside the aux panel, native inputs so Tab and screen readers work; the
-// crisp 2px focus ring comes from desktop.css. Changing a radio updates
-// grantedFormat and persists it via persistOutputFormat (settings.ts
-// outputFormat) so the choice survives reloads; requestOutputAndResume
-// reads grantedFormat when building { format, suggestedName } for
-// requestSaveDestination.
-function appendOutputFormatRadios(parent: HTMLElement, doc: Document): void {
-  const group = doc.createElement("fieldset");
-  group.id = "dz-output-format-group";
-  group.className = "dz-actions-row";
-  group.style.border = "none";
-  group.style.padding = "0";
-  group.style.margin = "0";
-  const legend = doc.createElement("legend");
-  legend.className = "dz-notice-message";
-  legend.textContent = t("desktop.panel.outputFormat");
-  group.appendChild(legend);
-  for (const value of NATIVE_FORMATS) {
-    const label = doc.createElement("label");
-    label.style.display = "inline-flex";
-    label.style.alignItems = "center";
-    label.style.gap = "0.35rem";
-    label.style.marginRight = "1rem";
-    const input = doc.createElement("input");
-    input.type = "radio";
-    input.name = "dz-output-format";
-    input.value = value;
-    if (normalizeNativeFormat(grantedFormat) === value) input.checked = true;
-    input.addEventListener("change", () => {
-      if (input.checked) {
-        grantedFormat = normalizeNativeFormat(input.value);
-        persistOutputFormat(grantedFormat);
-      }
-    });
-    const text = doc.createElement("span");
-    if (value === "png") text.textContent = "PNG";
-    else if (value === "jpeg") text.textContent = "JPEG";
-    else if (value === "tiff") text.textContent = "TIFF";
-    else if (value === "zif") text.textContent = "ZIF";
-    else if (value === "webp") text.textContent = "WebP";
-    else text.textContent = "IIIF folder";
-    label.append(input, text);
-    group.appendChild(label);
-  }
-  parent.appendChild(group);
-}
-
-// Desktop auxiliary panel: typed recovery choices, partial and cancelled
-// notices, plus a copy-diagnostics button. The shared view owns the card
-// layout; this panel is re-applied after every render (idempotent by stable
-// id) so phase remounts cannot lose a pending decision, and in-place job
-// updates keep it without flicker.
-// Visuals stay flat inside the single status card: transparent flow with a
-// top separator, left-aligned copy, theme buttons. Never a nested box.
-//
-// Accessibility (Task 5.2): the pending decision renders as an inline
-// role="dialog" with aria-modal="false" (inline, not a modal overlay),
-// labelledby/describedby, and an assertive description so screen readers
-// announce recovery without a separate alert. A new decision moves focus to
-// its primary button once; later ticks preserve the focused button instead
-// of dropping focus. Resolving the decision returns focus to the opener.
-// Tab cycles inside the decision buttons; Escape moves focus out to the job
-// Cancel action (when present) without clearing the decision, since recovery
-// must keep waiting for an explicit choice. Partial and cancelled notes use
-// role="status" with aria-live polite; the shared job view owns the single
-// role="progressbar" with aria-valuenow/min/max, so no second progressbar
-// lives here. All buttons are native and keyboard reachable.
-function ensureDesktopAuxPanel(): void {
-  if (typeof document === "undefined" || !root) return;
-  const state = controller.getState();
-  const doc = root.ownerDocument;
-  const decision = pendingDecision;
-  const decisionKey = recoveryKeyFor(decision);
-  const prevKey = lastRecoveryKey;
-  const existing = doc.getElementById("dz-desktop-aux");
-  const focusedInside = existing && existing.contains(doc.activeElement)
-    ? (doc.activeElement as HTMLElement)
-    : null;
-  const focusedLabel = focusedInside && focusedInside instanceof HTMLButtonElement
-    ? focusedInside.textContent
-    : null;
-  const focusedFormat =
-    focusedInside &&
-    focusedInside instanceof HTMLInputElement &&
-    focusedInside.type === "radio" &&
-    focusedInside.name === "dz-output-format"
-      ? focusedInside.value
-      : null;
-  if (decisionKey && decisionKey !== prevKey && !recoveryReturnFocus) {
-    const opener = activeElementOf(doc);
-    recoveryReturnFocus = opener && existing?.contains(opener) ? null : opener;
-    if (recoveryReturnFocus === null && opener && !existing?.contains(opener)) {
-      recoveryReturnFocus = opener;
-    }
-    if (existing && existing.contains(opener as Node) && prevKey === null) {
-      recoveryReturnFocus = null;
-    }
-  }
-  existing?.remove();
-  const showPartialDone = state.status === "completed" && completedPartial;
-  const showCancelledNote = state.status === "cancelled";
-  if (!decision && !showPartialDone && !showCancelledNote) {
-    if (prevKey !== null) {
-      restoreFocus(recoveryReturnFocus);
-      recoveryReturnFocus = null;
-    }
-    lastRecoveryKey = decisionKey;
-    return;
-  }
-  const card = root.querySelector(".dz-card");
-  if (!card) {
-    lastRecoveryKey = decisionKey;
-    return;
-  }
-
-  const aux = doc.createElement("div");
-  aux.id = "dz-desktop-aux";
-  aux.className = "dz-view-body dz-desktop-aux";
-  aux.setAttribute("role", "region");
-  aux.setAttribute("aria-label", t("desktop.panel.jobActions"));
-  if (decision && decision.kind !== "partial-recovery") appendOutputFormatRadios(aux, doc);
-
-  let decisionBox: HTMLElement | null = null;
-
-  if (decision) {
-    decisionBox = doc.createElement("div");
-    decisionBox.className = "dz-recovery-dialog";
-    decisionBox.setAttribute("role", "dialog");
-    decisionBox.setAttribute("aria-modal", "false");
-    decisionBox.setAttribute("aria-labelledby", "dz-recovery-title");
-    decisionBox.setAttribute("aria-describedby", "dz-recovery-desc");
-    const title = doc.createElement("h2");
-    title.className = "dz-notice-title";
-    title.id = "dz-recovery-title";
-    title.tabIndex = -1;
-    const desc = doc.createElement("p");
-    desc.className = "dz-notice-message";
-    desc.id = "dz-recovery-desc";
-    desc.setAttribute("aria-live", "assertive");
-    const row = doc.createElement("div");
-    row.className = "dz-actions-row";
-
-    function addButton(label: string, primary: boolean, onClick: () => void): void {
-      const btn = doc.createElement("button");
-      btn.type = "button";
-      btn.className = primary ? "dz-btn-tactile" : "dz-btn-secondary";
-      btn.textContent = label;
-      btn.addEventListener("click", onClick);
-      row.appendChild(btn);
-    }
-
-    if (decision.kind === "partial-recovery") {
-      title.textContent = t("desktop.rec.partialTitle");
-      const missing = decision.missingTiles ?? [];
-      const summary = formatMissingSummary(missing, decision.failedCount);
-      desc.textContent = t("desktop.rec.partialDesc", { summary });
-      decisionBox.append(title, desc);
-      if (missing.length > 0) {
-        const list = doc.createElement("p");
-        list.className = "dz-notice-message dz-missing-list";
-        const shown = missing.slice(0, 20).join(", ");
-        const rest = missing.length > 20 ? t("desktop.rec.more", { n: missing.length - 20 }) : "";
-        list.textContent = t("desktop.rec.missing", { shown, rest });
-        decisionBox.appendChild(list);
-      }
-      decisionBox.appendChild(row);
-      addButton(t("desktop.rec.keep"), true, () => handlePartialChoice(true));
-      addButton(t("desktop.rec.discard"), false, () => handlePartialChoice(false));
-      addButton(t("desktop.rec.retryTiles"), false, () => handleRecoveryRetry());
-    } else if (decision.kind === "destination-recovery") {
-      title.textContent = t("desktop.rec.destTitle");
-      desc.textContent = t("desktop.rec.destDesc");
-      decisionBox.append(title, desc, row);
-      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
-      addButton(t("desktop.rec.tryAgain"), false, () => handleRecoveryRetry());
-    } else {
-      title.textContent = t("desktop.rec.chooseTitle");
-      desc.textContent = t("desktop.rec.chooseDesc");
-      decisionBox.append(title, desc, row);
-      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
-    }
-    decisionBox.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        const cancelBtn = doc.getElementById("dz-btn-cancel") as HTMLElement | null;
-        if (cancelBtn && typeof cancelBtn.focus === "function") cancelBtn.focus();
-        else {
-          const firstOutside = focusableIn(aux).filter((el) => !decisionBox?.contains(el))[0];
-          if (firstOutside) firstOutside.focus();
-        }
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const box = decisionBox as HTMLElement;
-      const focusables = focusableIn(box);
-      if (focusables.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusables[0] as HTMLElement;
-      const last = focusables[focusables.length - 1] as HTMLElement;
-      const active = doc.activeElement as HTMLElement | null;
-      if (e.shiftKey) {
-        if (active === first || !box.contains(active)) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    });
-    aux.appendChild(decisionBox);
-  }
-
-  if (showPartialDone) {
-    const doneBox = doc.createElement("div");
-    doneBox.className = "dz-partial-note";
-    doneBox.setAttribute("role", "status");
-    doneBox.setAttribute("aria-live", "polite");
-    const title = doc.createElement("h2");
-    title.className = "dz-notice-title";
-    title.textContent = t("desktop.done.partialTitle");
-    const desc = doc.createElement("p");
-    desc.className = "dz-notice-message";
-    const summary = formatMissingSummary(completedMissing, completedMissing.length);
-    // Honest sibling basename (never the granted path) rides the existing
-    // translated sentence as a literal: no new copy, no shared-ui change.
-    const summaryWithFile = completedSibling ? `${summary} File: ${completedSibling}.` : summary;
-    desc.textContent = t("desktop.done.partialDesc", { summary: summaryWithFile });
-    doneBox.append(title, desc);
-    if (completedMissing.length > 0) {
-      const list = doc.createElement("p");
-      list.className = "dz-notice-message dz-missing-list";
-      const shown = completedMissing.slice(0, 20).join(", ");
-      const rest = completedMissing.length > 20 ? t("desktop.rec.more", { n: completedMissing.length - 20 }) : "";
-      list.textContent = t("desktop.rec.missing", { shown, rest });
-      doneBox.appendChild(list);
-    }
-    aux.appendChild(doneBox);
-  }
-
-  if (showCancelledNote) {
-    const note = doc.createElement("p");
-    note.className = "dz-notice-message";
-    note.id = "dz-cancel-cleanup-note";
-    note.setAttribute("role", "status");
-    note.setAttribute("aria-live", "polite");
-    note.textContent = t("desktop.cancel.note");
-    aux.appendChild(note);
-  }
-
-  if (state.status !== "completed" && desktopQueue.entries.length > 1) appendDesktopQueuePanel(aux, doc);
-
-  card.appendChild(aux);
-  if (decisionKey && decisionKey !== prevKey) {
-    const primary = decisionBox?.querySelector("button.dz-btn-tactile") as HTMLElement | null;
-    if (primary && typeof primary.focus === "function") primary.focus();
-    else {
-      const firstBtn = decisionBox ? focusableIn(decisionBox)[0] : undefined;
-      if (firstBtn) firstBtn.focus();
-    }
-  } else if (focusedFormat) {
-    const radio = aux.querySelector(
-      `input[name="dz-output-format"][value="${focusedFormat}"]`,
-    ) as HTMLElement | null;
-    if (radio && typeof radio.focus === "function") radio.focus();
-  } else if (focusedLabel && decisionBox) {
-    const candidates = focusableIn(decisionBox);
-    for (const candidate of candidates) {
-      if (candidate.textContent === focusedLabel && typeof candidate.focus === "function") {
-        candidate.focus();
-        break;
-      }
-    }
-  } else if (focusedLabel) {
-    const candidates = focusableIn(aux);
-    for (const candidate of candidates) {
-      if (candidate.textContent === focusedLabel && typeof candidate.focus === "function") {
-        candidate.focus();
-        break;
-      }
-    }
-  }
-  if (!decisionKey && prevKey !== null) {
-    restoreFocus(recoveryReturnFocus);
-    recoveryReturnFocus = null;
-  }
-  lastRecoveryKey = decisionKey;
-}
-
 // Resolve any anchor href seen in the privileged window to a canonical
 // https external URL (docs/user/ rendered pages, legal pages, repo links).
 // Returns null for in-page fragments and non-navigating hrefs. Relative
@@ -2203,32 +1767,20 @@ function ensureDesktopExternalNav(): void {
   );
 }
 
-// Pinned bottom footer: the static markup in index.html carries exactly the
-// five legal/repo links. Navigation itself is handled by the delegated
-// ensureDesktopExternalNav interceptor above, so this only verifies the
-// footer exists. Idempotent.
-function ensureDesktopFooter(): void {
-  if (typeof document === "undefined") return;
-  const footer = document.querySelector(".dz-site-footer");
-  if (!footer) return;
-  if (footer.getAttribute("data-dz-wired") === "true") return;
-  footer.setAttribute("data-dz-wired", "true");
-}
-
 function update() {
   if (!root) return;
   const state = controller.getState();
   const caps = integration.getCapabilities();
   if (viewCtx.jobActivity && !isTerminalStatus(state.status)) refreshLongestPending();
-  const auxTiles = catalogNotice?.tiles ?? viewCtx.imageChoice?.tiles ?? viewCtx.currentProgress?.total;
-  const auxWidth = catalogNotice?.width ?? viewCtx.imageChoice?.width ?? viewCtx.completedInfo?.width;
-  const auxHeight = catalogNotice?.height ?? viewCtx.imageChoice?.height ?? viewCtx.completedInfo?.height;
-  const auxChoice =
-    catalogNotice || viewCtx.imageChoice || auxTiles !== undefined || auxWidth !== undefined
+  const selectedTiles = catalogNotice?.tiles ?? viewCtx.imageChoice?.tiles ?? viewCtx.currentProgress?.total;
+  const selectedWidth = catalogNotice?.width ?? viewCtx.imageChoice?.width ?? viewCtx.completedInfo?.width;
+  const selectedHeight = catalogNotice?.height ?? viewCtx.imageChoice?.height ?? viewCtx.completedInfo?.height;
+  const selectedImage =
+    catalogNotice || viewCtx.imageChoice || selectedTiles !== undefined || selectedWidth !== undefined
       ? {
-          ...(typeof auxWidth === "number" ? { width: auxWidth } : {}),
-          ...(typeof auxHeight === "number" ? { height: auxHeight } : {}),
-          ...(typeof auxTiles === "number" ? { tiles: auxTiles } : {}),
+          ...(typeof selectedWidth === "number" ? { width: selectedWidth } : {}),
+          ...(typeof selectedHeight === "number" ? { height: selectedHeight } : {}),
+          ...(typeof selectedTiles === "number" ? { tiles: selectedTiles } : {}),
         }
       : undefined;
 
@@ -2248,16 +1800,17 @@ function update() {
       onReset() {
         handleReset();
       },
+      onUrlInputReady(handle: UrlInputHandle | null) {
+        urlInputHandle = handle;
+      },
       ...(state.status === "completed" ? {
         onOpenOutput: () => { void handleOpenOutput(false); },
         onRevealOutput: () => { void handleOpenOutput(true); },
       } : {}),
       onHistorySelect(entry: HistoryEntry) {
         viewCtx.initialUrl = entry.url;
-        const input = root.querySelector<HTMLInputElement>("#dz-url-input");
-        if (input) input.value = entry.url;
         update();
-        root.querySelector<HTMLInputElement>("#dz-url-input")?.focus();
+        urlInputHandle?.setValue(entry.url, { focus: true });
       },
       onSelectImage(index: number) {
         handleSelectImage(index);
@@ -2286,25 +1839,44 @@ function update() {
       ...(state.status === "completed" ? { nativeSaved: { partial: completedPartial } } : {}),
       ...(viewCtx.jobActivity ? { jobActivity: viewCtx.jobActivity } : {}),
       ...(viewCtx.initialUrl ? { initialUrl: viewCtx.initialUrl } : {}),
-      ...(auxChoice ? { imageChoice: auxChoice } : {}),
+      ...(selectedImage ? { imageChoice: selectedImage } : {}),
       history: [...desktopHistory],
     },
-    state.status === "idle" ? {
-      after: createElement(DesktopSettingsView, {
-        settings: desktopSettings,
-        error: settingsError,
-        onChange: (settings: DesktopSettings) => {
+    createDesktopViewOptions({
+      status: state.status,
+      settings: desktopSettings,
+      settingsError,
+      onSettingsChange: (settings: DesktopSettings) => {
           desktopSettings = settings;
           grantedFormat = normalizeNativeFormat(settings.outputFormat);
           runPersistSettingsFromPanel();
+      },
+      onSettingsReset: runResetDesktopSettings,
+      job: {
+        status: state.status,
+        decision: pendingDecision,
+        format: normalizeNativeFormat(grantedFormat),
+        queue: desktopQueue,
+        queueEnabled: desktopQueueEnabled(),
+        completedPartial,
+        completedMissing,
+        completedSibling,
+        ...(outputActionError ? { outputActionError } : {}),
+        onFormatChange(format: NativeFormat) {
+          grantedFormat = format;
+          persistOutputFormat(format);
+          update();
         },
-        onReset: runResetDesktopSettings,
-      }),
-    } : undefined,
+        onChooseOutput: requestOutputAndResume,
+        onRecoveryRetry: handleRecoveryRetry,
+        onPartialChoice: handlePartialChoice,
+        onQueueCancel: handleQueueCancelOne,
+        onQueueRetry: handleQueueRetry,
+        onQueueCancelAll: handleQueueCancelAll,
+      },
+    }),
   );
-  ensureDesktopAuxPanel();
   ensureDesktopExternalNav();
-  ensureDesktopFooter();
 }
 
 initInitialUrl();

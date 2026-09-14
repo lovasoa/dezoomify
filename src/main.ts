@@ -14,7 +14,7 @@ import {
 } from "../packages/shared-ui/src/history.ts";
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
-import type { JobActivity, ViewContext } from "../packages/shared-ui/src/view.tsx";
+import type { JobActivity, UrlInputHandle, ViewContext } from "../packages/shared-ui/src/view.tsx";
 import { suggestedNameFor } from "../packages/shared-ui/src/saveName.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
@@ -1725,6 +1725,7 @@ function submitQueuedUrl(url: string): void {
 }
 
 const appContainer = typeof document !== "undefined" ? document.getElementById("app") : null;
+let urlInputHandle: UrlInputHandle | null = null;
 
 let viewCtx: ViewContext = {
   capabilities: {
@@ -1883,6 +1884,14 @@ function update(): void {
           resultBlobUrl = null;
         }
         update();
+      },
+      onUrlInputReady(handle: UrlInputHandle | null) {
+        urlInputHandle = handle;
+      },
+      onHistorySelect(entry: HistoryEntry) {
+        viewCtx.initialUrl = entry.url;
+        update();
+        urlInputHandle?.setValue(entry.url, { focus: true });
       },
       onRetrySameUrl() {
         const lastUrl = viewCtx.jobActivity?.url ?? viewCtx.initialUrl;

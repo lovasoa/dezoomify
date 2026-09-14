@@ -316,6 +316,11 @@ const en = {
   "view.history.localOnly": "Kept only on this device.",
   "view.history.open": "Open again",
   "view.history.clear": "Clear history",
+  "view.history.url": "Picture address",
+  "view.history.width": "Width",
+  "view.history.height": "Height",
+  "view.history.format": "Format",
+  "view.history.date": "Date",
   "view.history.dims": "{w} by {h} pixels",
   "view.input.description":
     "Dezoomify downloads zoomable tiled images from libraries, museums, galleries, and other websites. Paste the URL of an image below to download it.",

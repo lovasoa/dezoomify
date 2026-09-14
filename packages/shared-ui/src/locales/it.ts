@@ -215,6 +215,11 @@ export const it = {
   "view.history.localOnly": "Conservate solo su questo dispositivo.",
   "view.history.open": "Riapri",
   "view.history.clear": "Cancella la cronologia",
+  "view.history.url": "Indirizzo immagine",
+  "view.history.width": "Larghezza",
+  "view.history.height": "Altezza",
+  "view.history.format": "Formato",
+  "view.history.date": "Data",
   "view.history.dims": "{w} per {h} pixel",
   "view.input.description":
     "Dezoomify scarica immagini zoomabili a tasselli da biblioteche, musei, gallerie e altri siti web. Incolla qui sotto l indirizzo di un immagine per scaricarla.",

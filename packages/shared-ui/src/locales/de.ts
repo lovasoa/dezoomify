@@ -215,6 +215,11 @@ export const de = {
   "view.history.localOnly": "Nur auf diesem Gerat behalten.",
   "view.history.open": "Erneut offnen",
   "view.history.clear": "Verlauf loschen",
+  "view.history.url": "Bildadresse",
+  "view.history.width": "Breite",
+  "view.history.height": "Hohe",
+  "view.history.format": "Format",
+  "view.history.date": "Datum",
   "view.history.dims": "{w} mal {h} Pixel",
   "view.input.description":
     "Dezoomify laedt zoombare Kachelbilder aus Bibliotheken, Museen, Galerien und anderen Websites herunter. Fuegen Sie unten die Adresse eines Bildes ein, um es herunterzuladen.",

@@ -19,6 +19,12 @@ export interface ViewCallbacks {
   onClearHistory?(): void;
   onPause?(): void;
   onResume?(): void;
+  onUrlInputReady?(handle: UrlInputHandle | null): void;
+}
+
+/** Typed imperative boundary for hosts that need to recall a URL into the shared input. */
+export interface UrlInputHandle {
+  setValue(value: string, options?: { focus?: boolean }): void;
 }
 
 export interface JobActivity {
@@ -42,6 +48,7 @@ export interface ViewContext {
 
 /** Host-owned React content rendered inside or instead of the generic card. */
 export interface ViewRenderOptions {
+  idleBeforeHistory?: ReactNode;
   after?: ReactNode;
   replace?: ReactElement;
 }

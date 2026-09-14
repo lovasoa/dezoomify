@@ -16,7 +16,6 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import type { ControllerState, StructuredError } from "./controller.ts";
-import type { HistoryEntry } from "./history.ts";
 import {
   getPhaseForStatus,
 } from "./view-types.ts";
@@ -34,7 +33,7 @@ export { handoffOriginFor, isFileHandoffSource } from "./view-helpers.ts";
 export type {
   ConfirmModalArgs, ImagePickerArgs, ImagePickerOption, JobActivity,
   LevelPickerArgs, LevelPickerOption, PlatformHints, ViewCallbacks,
-  ViewContext, ViewPhase, ViewRenderOptions,
+  UrlInputHandle, ViewContext, ViewPhase, ViewRenderOptions,
 } from "./view-types.ts";
 import { t } from "./i18n.ts";
 import {
@@ -55,18 +54,6 @@ import { UrlInput } from "./url-input.tsx";
  * inside the `dezoomify://` link. Returns "" for local files or unparseable
  * input. Never includes userinfo, path, query, or fragment.
  */
-function historyDimsLabel(entry: HistoryEntry): string {
-  if (
-    typeof entry.width === "number" &&
-    typeof entry.height === "number" &&
-    entry.width > 0 &&
-    entry.height > 0
-  ) {
-    return t("view.history.dims", { w: entry.width, h: entry.height });
-  }
-  return "";
-}
-
 function historyDateLabel(at: number): string {
   try {
     const date = new Date(at);
@@ -193,57 +180,85 @@ function HistorySection({
   ctx?: ViewContext;
 }) {
   const entries = ctx?.history;
-  if (!Array.isArray(entries)) return <div className="dz-history-section" id="dz-history" />;
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return <div className="dz-history-section" id="dz-history" />;
+  }
+  const recentEntries = entries.slice(0, 20);
   return (
-    <div className="dz-history-section" id="dz-history">
-      <h2 className="dz-history-title">{t("view.history.title")}</h2>
-      <p className="dz-history-note">{t("view.history.localOnly")}</p>
-      {entries.length === 0 ? (
-        <p className="dz-history-empty">{t("view.history.empty")}</p>
-      ) : (
-        <ul className="dz-history-list">
-          {entries.slice(0, 20).map((entry, i) => {
-            const parts = [entry.url || entry.origin];
-            const dims = historyDimsLabel(entry);
-            const date = historyDateLabel(entry.at);
-            if (dims !== "") parts.push(dims);
-            if (typeof entry.format === "string" && entry.format !== "") parts.push(entry.format);
-            if (date !== "") parts.push(date);
+    <section className="dz-history-section" id="dz-history">
+      <table className="dz-history-table">
+        <caption>
+          <span className="dz-history-bar">
+            <span className="dz-history-title">{t("view.history.title")}</span>
+            {typeof callbacks.onClearHistory === "function" ? (
+              <button
+                type="button"
+                className="dz-history-clear"
+                id="dz-history-clear"
+                title={t("view.history.clear")}
+                aria-label={t("view.history.clear")}
+                onClick={() => {
+                  try {
+                    callbacks.onClearHistory?.();
+                  } catch {
+                    // Clearing must never break the view.
+                  }
+                }}
+              >
+                <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                  <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 10v6M14 10v6" />
+                </svg>
+              </button>
+            ) : null}
+          </span>
+        </caption>
+        <colgroup>
+          <col className="dz-history-col-url" />
+          <col className="dz-history-col-dimensions" />
+          <col className="dz-history-col-format" />
+          <col className="dz-history-col-date" />
+        </colgroup>
+        <thead className="dz-visually-hidden">
+          <tr>
+            <th scope="col">{t("view.history.url")}</th>
+            <th scope="col">{t("view.history.width")} x {t("view.history.height")}</th>
+            <th scope="col">{t("view.history.format")}</th>
+            <th scope="col">{t("view.history.date")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {recentEntries.map((entry, i) => {
+            const source = entry.url || entry.origin;
+            const selectEntry = () => callbacks.onHistorySelect?.(entry);
             return (
-              <li className="dz-history-item" key={`${entry.url}-${i}`}>
-                {callbacks.onHistorySelect ? (
-                  <button
-                    type="button"
-                    className="dz-history-main"
-                    onClick={() => callbacks.onHistorySelect?.(entry)}
-                  >
-                    {parts.join(" ")}
-                  </button>
-                ) : (
-                  <span className="dz-history-main">{parts.join(" ")}</span>
-                )}
-              </li>
+              <tr className="dz-history-row" key={`${entry.url}-${i}`}>
+                <td className="dz-history-url" title={source}>
+                  {callbacks.onHistorySelect ? (
+                    <button
+                      type="button"
+                      className="dz-history-main"
+                      aria-label={`${t("view.history.open")}: ${source}`}
+                      onClick={selectEntry}
+                    >
+                      {source}
+                    </button>
+                  ) : source}
+                </td>
+                <td>
+                  <span className="dz-history-dimensions">
+                    <span>{entry.width ?? ""}</span>
+                    <span>x</span>
+                    <span>{entry.height ?? ""}</span>
+                  </span>
+                </td>
+                <td className="dz-history-format">{entry.format ?? ""}</td>
+                <td className="dz-history-date">{historyDateLabel(entry.at)}</td>
+              </tr>
             );
           })}
-        </ul>
-      )}
-      {typeof callbacks.onClearHistory === "function" && entries.length > 0 ? (
-        <button
-          type="button"
-          className="dz-btn-secondary"
-          id="dz-history-clear"
-          onClick={() => {
-            try {
-              callbacks.onClearHistory?.();
-            } catch {
-              // Clearing must never break the view.
-            }
-          }}
-        >
-          {t("view.history.clear")}
-        </button>
-      ) : null}
-    </div>
+        </tbody>
+      </table>
+    </section>
   );
 }
 
@@ -253,8 +268,7 @@ function IdleView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewCont
       <div className="dz-description">
         <p>{t("view.input.description")}</p>
       </div>
-      <UrlInput initialUrl={ctx?.initialUrl} onSubmit={callbacks.onSubmitUrl} />
-      <HistorySection callbacks={callbacks} ctx={ctx} />
+      <UrlInput initialUrl={ctx?.initialUrl} onSubmit={callbacks.onSubmitUrl} onReady={callbacks.onUrlInputReady} />
     </div>
   );
 }
@@ -846,6 +860,8 @@ function SharedView({
         <Logo />
       </div>
       {phase === "idle" ? <IdleView callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "idle" ? options?.idleBeforeHistory : null}
+      {phase === "idle" ? <HistorySection callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "job" ? <JobView state={state} callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "display-only" ? <DisplayOnlyView callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "completed" ? <CompletedView callbacks={callbacks} ctx={ctx} /> : null}
