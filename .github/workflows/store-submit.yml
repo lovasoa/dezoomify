@@ -80,8 +80,6 @@ jobs:
           cargo build -p dezoomify-wasm --release --target wasm32-unknown-unknown
           wasm-bindgen --target web --out-dir wasm --out-name dezoomify-wasm target/wasm32-unknown-unknown/release/dezoomify_wasm.wasm
           test -f wasm/dezoomify-wasm.js && test -f wasm/dezoomify-wasm_bg.wasm
-      - name: Generate extension vendor mirrors (generated, never committed)
-        run: node scripts/sync-web-js.mjs
       - name: Resolve extension ID from release config
         env:
           CHROME_WS_EXTENSION_ID_OVERRIDE: ${{ secrets.CHROME_WS_EXTENSION_ID }}
