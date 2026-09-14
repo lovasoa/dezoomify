@@ -1604,10 +1604,7 @@ impl JobTable {
                     // Tile request diagnostics are intended for the CLI. The
                     // desktop only exposes typed recovery and must not treat
                     // an informational event as a terminal engine failure.
-                    if matches!(
-                        kind,
-                        JobEventKind::TileFailed | JobEventKind::ResourceFailed
-                    ) {
+                    if matches!(kind, JobEventKind::TileFailed) {
                         return;
                     }
                     let _ = tx_progress.send(DriverMessage::Progress {

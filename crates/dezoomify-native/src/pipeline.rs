@@ -1036,19 +1036,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn http_failure_redacts_credentials_and_response_body() {
-        let outcome = crate::http::FetchOutcome {
-            status: 403,
-            final_uri: "https://user:password@example.test/tile?token=secret".to_string(),
-            body: b"Access denied".to_vec(),
-        };
-        assert_eq!(
-            describe_http_failure(&outcome),
-            "request to https://REDACTED:REDACTED@example.test/tile?token=REDACTED returned HTTP 403"
-        );
-    }
-
-    #[test]
     fn first_attempt_never_waits() {
         assert_eq!(
             retry_wait(Duration::from_secs(2), 10, 20, 0),

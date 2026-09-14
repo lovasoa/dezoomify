@@ -6,7 +6,6 @@
 
 mod arguments;
 mod report;
-mod reporter;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,8 +14,7 @@ use std::time::{Duration, Instant};
 use arguments::Args;
 use dezoomify_native::http::{FetchLimits, TlsPolicy};
 use dezoomify_native::pipeline::{PipelineConfig, PipelineEvent};
-use dezoomify_native::{pipeline, JobRequest, NativeRuntime};
-use reporter::Reporter;
+use dezoomify_native::{pipeline, JobEvent, JobRequest, NativeRuntime};
 
 /// Minimum-interval pacing between bulk images. Ports the reference
 /// `Throttler` idea synchronously: per-tile throttling still needs native
@@ -351,8 +349,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         eprintln!("error: job started without an event (native.internal)");
         return false;
     };
-    let mut reporter = Reporter::new(parsed.json, level);
-    reporter.event(started);
+    print_event(parsed.json, started, level);
 
     let config = pipeline_config_for(parsed);
     let json = parsed.json;
@@ -364,13 +361,12 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         &mut |event: PipelineEvent| {
             handle.emit_detail(&event.kind, event.detail.clone());
             if let Some(last) = handle.events().last() {
-                reporter.event(last);
+                print_event(json, last, level);
             }
         },
     );
     match result {
         Ok(outcome) => {
-            reporter.finish_progress();
             let result = handle.finish(outcome.output_hash.clone());
             if json {
                 println!(
@@ -411,7 +407,6 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
             true
         }
         Err(error) => {
-            reporter.finish_progress();
             eprintln!("error: {} ({})", error.message, error.code);
             false
         }
@@ -576,12 +571,11 @@ fn run_one_bulk_image(
     // bulk-item lines on stdout, so event details never pollute JSON.
     if !parsed.json {
         if let Some(last) = handle.events().last() {
-            Reporter::new(false, &parsed.logging).event(last);
+            print_event(false, last, &parsed.logging);
         }
     }
     let config = pipeline_config_for(parsed);
     let logging = parsed.logging.clone();
-    let mut reporter = Reporter::new(false, &logging);
     let result = pipeline::run(
         url,
         output,
@@ -591,21 +585,46 @@ fn run_one_bulk_image(
             handle.emit_detail(&event.kind, event.detail.clone());
             if !parsed.json {
                 if let Some(last) = handle.events().last() {
-                    reporter.event(last);
+                    print_event(false, last, &logging);
                 }
             }
         },
     );
     match result {
         Ok(outcome) => {
-            reporter.finish_progress();
             let _ = handle.finish(outcome.output_hash.clone());
             let actual = outcome.output_path.to_string_lossy().into_owned();
             Ok((outcome.output_hash, outcome.tile_count, actual))
         }
-        Err(error) => {
-            reporter.finish_progress();
-            Err((error.code, error.message))
+        Err(error) => Err((error.code, error.message)),
+    }
+}
+
+fn print_event(json: bool, event: &JobEvent, logging: &str) {
+    if json {
+        println!(
+            "{}",
+            report::machine_event_detail(&event.job, event.seq, event.kind.as_str(), &event.detail)
+        );
+        return;
+    }
+    if !report::show_progress(logging) {
+        return;
+    }
+    let detail = event
+        .detail
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if detail.is_empty() {
+        eprintln!("{} {}", event.kind, event.job);
+    } else {
+        eprintln!("{} {} {detail}", event.kind, event.job);
+    }
+    if report::is_trace(logging) {
+        if let Ok(payload) = serde_json::to_string(&event.detail) {
+            eprintln!("trace {} {} {payload}", event.kind, event.job);
         }
     }
 }

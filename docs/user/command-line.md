@@ -30,10 +30,6 @@ largest level that fits `--max-width`/`--max-height` when given, else the
 largest level (`--largest`, implied in bulk mode without level caps,
 ignores caps).
 
-When stderr is a terminal, the tool shows plain-language stages and a live
-tile progress bar. A failed metadata or tile request names its redacted
-address and HTTP status. Use `--json` for machine-readable events instead.
-
 ## Useful options
 
 | You want to… | Option |
