@@ -97,17 +97,16 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
     super::live::test_live(args)
 }
 
-/// Deterministic inputs digest for the release attestation gate.
+/// Deterministic release-inputs checksum (standalone diagnostic).
 ///
 /// `cargo xtask ci digest` prints the sha256 over the exact files the
 /// release plan and verification read (Rust lockfile, release inventory,
 /// generated capabilities, fixture manifest), each framed by its relative
-/// path so renames change the digest. The sharded CI `attest` job uploads
-/// this digest; `release` re-computes it on the tagged revision and
-/// compares with `--check`: a match proves the tag commit passed the full
-/// sharded suite on identical inputs, so the serial `ci local` rerun is
-/// skipped in favor of the fast release gate. A mismatch (or no attested
-/// run) falls back to the full `ci local` rerun, never to a silent pass.
+/// path so renames change the digest. CI and `release` do not consume it:
+/// the release workflow gates on a successful CI run for the exact source
+/// sha instead (`.github/workflows/release.yml`), which already pins these
+/// committed inputs. The command stays useful for manually comparing
+/// release inputs across checkouts; `--check` verifies a recorded value.
 const DIGEST_FILES: &[&str] = &[
     "Cargo.lock",
     "release/config.toml",

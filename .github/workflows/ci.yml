@@ -116,26 +116,3 @@ jobs:
       - name: CI lane (security)
         if: matrix.lane-group == 'protocol+security'
         run: cargo xtask ci security
-  attest:
-    # Release attestation gate (todo 6.2): after every sharded lane is green,
-    # publish the deterministic release-inputs digest. `release`
-    # re-computes it on the tagged revision with
-    # `cargo xtask ci digest --check`; a match skips the serial `ci local`
-    # rerun, anything else falls back to it. Never a silent pass.
-    name: attest release inputs digest
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [deterministic]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Compute release-inputs digest
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo xtask ci digest > ci.digest
-          cat ci.digest
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ci-inputs-digest
-          path: ci.digest
-          retention-days: 30
