@@ -618,14 +618,11 @@ fn build_frontend() -> Result<(), String> {
 
 /// Build the pnpm invocation for any workspace task.
 ///
-/// A `pnpm` already on PATH wins. Otherwise fall back to Corepack, which ships
-/// with Node and runs the version pinned in `package.json`'s
-/// `packageManager` field, so a fresh checkout needs no separate global pnpm
-/// install. On Windows, Rust's `Command` (CreateProcess) only resolves `.exe`
-/// on PATH, not the `.cmd` shims a pnpm/Corepack install leaves behind, so
-/// resolve explicitly: a real `.exe` runs directly, otherwise the resolved
-/// PATHEXT shim runs via `cmd /c`. When neither program exists the caller
-/// fails closed naming both.
+/// A `pnpm` already on PATH wins. Otherwise use a repo-local install or
+/// Corepack. On Windows, Rust's `Command` (CreateProcess) only
+/// resolves `.exe` on PATH, not the `.cmd` shims a pnpm/Corepack install leaves
+/// behind, so resolve explicitly: a real `.exe` runs directly, otherwise the
+/// resolved PATHEXT shim runs via `cmd /c`.
 pub(crate) fn pnpm_command() -> Result<Command, String> {
     #[cfg(windows)]
     {
@@ -637,13 +634,52 @@ pub(crate) fn pnpm_command() -> Result<Command, String> {
     }
 }
 
-const MISSING_PNPM: &str =
-    "neither pnpm nor corepack is on PATH (Node bundles Corepack; install Node or run `corepack enable`)";
+const MISSING_PNPM: &str = "pnpm is unavailable; install Node and run `cargo xtask setup`";
+
+fn local_pnpm_dir() -> std::path::PathBuf {
+    let prefix = super::repo_root().join("target/pnpm");
+    if cfg!(windows) {
+        prefix
+    } else {
+        prefix.join("bin")
+    }
+}
+
+fn local_pnpm_path() -> std::path::PathBuf {
+    local_pnpm_dir().join(if cfg!(windows) { "pnpm.cmd" } else { "pnpm" })
+}
+
+pub(crate) fn bootstrap_pnpm(expected: &str) -> Result<(), String> {
+    if pnpm_command().is_ok() {
+        return Ok(());
+    }
+    let prefix = super::repo_root().join("target/pnpm");
+    let mut npm = if cfg!(windows) {
+        let mut command = Command::new("cmd");
+        command.args(["/c", "npm"]);
+        command
+    } else {
+        Command::new("npm")
+    };
+    let status = npm
+        .args(["install", "--global", "--prefix"])
+        .arg(&prefix)
+        .arg("--ignore-scripts")
+        .arg(format!("pnpm@{expected}"))
+        .status()
+        .map_err(|e| format!("cannot bootstrap pnpm with npm: {e}"))?;
+    if !status.success() || !local_pnpm_path().is_file() {
+        return Err(format!(
+            "npm could not install pnpm@{expected} under {}; install pnpm manually",
+            prefix.display()
+        ));
+    }
+    Ok(())
+}
 
 /// Install Corepack's pnpm shim into a repo-local, gitignored directory and
-/// return it. Corepack ships with Node, so a fresh checkout gets the version
-/// pinned in `package.json` without any global pnpm install. The shim lives
-/// under `target/`, so `cargo clean` only makes the next call reinstall it.
+/// return it. The shim lives under `target/`, so `cargo clean` only makes the
+/// next call reinstall it.
 fn corepack_shims() -> Result<std::path::PathBuf, String> {
     let dir = super::repo_root().join("target").join("corepack-shims");
     let shim = dir.join(if cfg!(windows) { "pnpm.cmd" } else { "pnpm" });
@@ -697,19 +733,32 @@ fn program_available(name: &str) -> bool {
 
 /// PATH for a child that may shell out to `pnpm` (for example the desktop dev
 /// smoke test). `None` keeps the inherited environment when a runnable pnpm
-/// already exists or Corepack is unavailable.
+/// already exists and no repo-local shim needs exposing.
 fn node_path() -> Result<Option<std::ffi::OsString>, String> {
-    if program_available("pnpm") || !program_available("corepack") {
+    if program_available("pnpm") {
         return Ok(None);
     }
-    let shims = corepack_shims()?;
-    Ok(Some(path_with_prepended(&shims)?))
+    let dir = local_pnpm_dir();
+    if local_pnpm_path().is_file() {
+        return Ok(Some(path_with_prepended(&dir)?));
+    }
+    if program_available("corepack") {
+        let shims = corepack_shims()?;
+        return Ok(Some(path_with_prepended(&shims)?));
+    }
+    Ok(None)
 }
 
 #[cfg(unix)]
 fn pnpm_command_unix() -> Result<Command, String> {
     if program_on_path("pnpm") {
         return Ok(Command::new("pnpm"));
+    }
+    let shim = local_pnpm_path();
+    if shim.is_file() {
+        let mut cmd = Command::new(shim);
+        cmd.env("PATH", path_with_prepended(&local_pnpm_dir())?);
+        return Ok(cmd);
     }
     if !program_on_path("corepack") {
         return Err(MISSING_PNPM.to_string());
@@ -739,6 +788,10 @@ fn pnpm_command_windows() -> Result<Command, String> {
     let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
     if let Some((program, needs_shell)) = resolve_windows_program("pnpm", &dirs, &pathext) {
         return Ok(windows_launch(program, needs_shell));
+    }
+    let shim = local_pnpm_path();
+    if shim.is_file() {
+        return Ok(windows_launch(shim, true));
     }
     if resolve_windows_program("corepack", &dirs, &pathext).is_some() {
         let shims = corepack_shims()?;
