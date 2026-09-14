@@ -1130,7 +1130,7 @@ function detectPlatform(hints?: PlatformHints): { name: string; hasInstaller: bo
   return { name: "All Platforms", hasInstaller: false };
 }
 
-const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases";
+const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
 
 export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformHints): void {
   const p = detectPlatform(hints);

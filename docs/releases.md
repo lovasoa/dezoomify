@@ -4,7 +4,12 @@ The monorepo produces coordinated core libraries, protocol bindings, the website
 
 ## Versioning
 
-The release version identifies a tested source revision across all apps. The protocol has an independent version because installed extensions and native applications do not update at the same time. Schema fingerprints identify exact generated contracts; they supplement rather than replace protocol versions.
+The release version identifies a tested source revision across all apps.
+`cargo xtask release version` derives it from Git: `vX.Y.Z` is `X.Y.Z`, and
+each following first-parent commit increments `Z`. App manifests do not author
+release versions; builds receive the derived value as `DEZOOMIFY_VERSION`.
+The protocol has an independent version because installed products do not
+update at the same time.
 
 Backward-compatible protocol additions keep the current major version. Removed fields, changed meanings, or incompatible command and event behavior require a new protocol major version. Error codes remain stable within a supported protocol major.
 
@@ -34,7 +39,7 @@ A release candidate passes:
 orchestration; every stage validates the previous stage's digests and fails
 closed on missing inputs, tools, or secrets. The plan stage freezes a
 deterministic contract (version, tag, commit, protocol range, schema
-fingerprint, capabilities, targets) from `release/config.toml`,
+fingerprint, capabilities, targets) from Git, `release/config.toml`,
 `release/targets.toml`, `release/compatibility.toml`, and
 `generated/release-capabilities.json`. The build stage produces one target's
 artifact plus a per-target digest fragment on the matching host; unavailable
@@ -44,23 +49,16 @@ it runs only with the release signing key (the `release-signing`
 environment secret) and the public key lives at
 `release/gpg-public-key.asc`. The verify stage recomputes every digest,
 checks artifact names against the plan, and validates every signature. The
-publish stage verifies again, resolves the release tag to its commit and
-refuses to publish unless it is exactly the planned revision, then creates
-the GitHub release from the tagged revision with artifacts, checksums,
-signatures, and notes, and records the inventory at
-`release/checksums/<version>/SHA256SUMS`. Working
+publish stage verifies again and refuses unless `origin/master` is the planned
+revision. Rolling releases use `rolling-v<version>` and become GitHub's latest
+release. Important numbered releases use `vX.Y.Z`; their inventory is recorded
+at `release/checksums/<version>/SHA256SUMS`. Working
 release trees live under `target/release-dist/<version>/` and are never
 committed; `target/` is used so website builds cannot clobber them.
 
-The `release-build`, `release-sign`, and `release-publish` workflows chain
-these stages by run id: the build workflow gates the tagged revision on the
-deterministic suite before planning, and no artifact exists that has not
-passed it. When the sharded `ci` workflow vouches for the exact tag commit
-(its `attest` job uploads `cargo xtask ci digest`, recomputed and compared
-with `--check` on the tag), the serial `ci local` rerun is skipped in favor
-of the fast release gate (`fixtures verify` plus `protocol check`); any
-missing attestation or digest mismatch falls back to the full `ci local`
-rerun, never to a silent pass. Local `cargo xtask build desktop` produces
+The `release` workflow runs after successful `master` CI and can be dispatched
+with a numbered tag for an important release. Every job uses the same planned
+revision. Local `cargo xtask build desktop` produces
 a real unsigned `.deb` (no paid signing) from the Tauri window shell behind
 the optional `tauri` feature, so `desktop-linux-x86_64` is available;
 `desktop-windows-x86_64` (needs a Windows host with WebView2, WiX, NSIS, and
@@ -69,11 +67,14 @@ Line Tools and `icon.icns`) stay unavailable, and a release never claims an
 artifact it did not build. The operator
 sequence for cutting a release is the runbook in [Operations](operations.md).
 
-Artifacts are built from a tagged revision, signed with free mechanisms only (GPG-detached SHA256SUMS plus store submission to the existing Chromium and Firefox (AMO) listings), and published with checksums, schema fingerprint, supported protocol range, capabilities, and user-visible changes. Desktop installers ship unsigned: paid Apple/Azure signing is out of plan for a free project. Only the Linux `.deb` (`desktop-linux-x86_64`) is buildable; Windows and macOS targets stay unavailable until a matching host builds them, and a release never claims an artifact it did not build. The user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install). Web release notes identify the automatic metadata CORS proxy fallback and active-transport indicator; they do not describe proxy use as per-attempt consent. The compatibility matrix remains available so peers can determine whether to update, use another runtime, or continue safely.
+Artifacts are signed with GPG-detached checksums and signatures. Store
+submission remains separate because store review may lag rolling releases.
+Desktop installers remain unsigned; the published inventory currently has the
+Linux `.deb` only. See the [Desktop app guide](user/desktop-app.md#install).
 
 ## Desktop updater
 
-Automatic in-app updates are disabled (todo 5.8 decision): no update host is deployed and no updater key exists. Users check [GitHub Releases](https://github.com/lovasoa/dezoomify/releases) manually for new versions. The shipped desktop capability sets `updater.enabled: false` with an empty allowlist, `tauri.conf.json` ships empty `plugins.updater.endpoints`, `release/config.toml` sets `[updater] enabled = false` with empty endpoints and no key file, and `UPDATER_PUBKEY` stays empty so the plugin never validates (fail closed).
+Automatic in-app updates are disabled (todo 5.8 decision): no update host is deployed and no updater key exists. Users install the [latest release](https://github.com/lovasoa/dezoomify/releases/latest) manually. The shipped desktop capability sets `updater.enabled: false` with an empty allowlist, `tauri.conf.json` ships empty `plugins.updater.endpoints`, `release/config.toml` sets `[updater] enabled = false` with empty endpoints and no key file, and `UPDATER_PUBKEY` stays empty so the plugin never validates (fail closed).
 
 The retained `apps/desktop/src-tauri/src/updater.rs` validator documents the policy a future self-hosted updater would enforce (strict ed25519 over the canonical `dezoomify-updater-v1` message, HTTPS allowlist, 7-day stale bound, +300s future skew, anti-rollback, explicit user confirmation, never auto-stage) and stays unit-tested via `validate_candidate`; the production `validate_update` entry rejects every candidate with `updater.disabled` and the installed app keeps working. The capability document grants only `updater:allow-check` so download and install stay denied. Activation requires a key ceremony that has not happened: a real public key in place of the empty `UPDATER_PUBKEY` (which also registers the plugin via the `tauri_shell.rs` gate), deployed endpoints, and `enabled = true`; until then no host or key is invented and every candidate fails closed.
 

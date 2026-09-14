@@ -825,6 +825,12 @@ fn bundle() -> Result<(), String> {
     }
     let mut args = vec!["tauri", "build", "--features", "tauri", "--bundles"];
     args.extend(targets.iter().copied());
+    let version_config = std::env::var("DEZOOMIFY_VERSION")
+        .ok()
+        .map(|version| format!(r#"{{"version":"{version}"}}"#));
+    if let Some(config) = version_config.as_deref() {
+        args.extend(["--config", config]);
+    }
     let status = Command::new("cargo")
         .args(&args)
         .current_dir(super::repo_root())

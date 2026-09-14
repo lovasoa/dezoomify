@@ -1,7 +1,3 @@
-[release]
-version = "3.0.3"
-channel = "stable"
-
 [protocol]
 range = "1.0"
 min_peer = "1.0"

@@ -175,9 +175,10 @@ Release tasks consume an immutable plan. Building does not sign or publish, and
 verification uses public keys only.
 
 ```sh
-cargo xtask release plan 1.8.0 beta
-cargo xtask release build --plan artifacts/release/1.8.0-beta.json
-cargo xtask release verify --plan artifacts/release/1.8.0-beta.json --artifacts dist/
+export DEZOOMIFY_VERSION="$(cargo xtask release version)"
+cargo xtask release plan [--numbered]
+cargo xtask release build --plan target/release-dist/<version>/plan.json --target <target>
+cargo xtask release verify --plan target/release-dist/<version>/plan.json --artifacts target/release-dist/<version>
 ```
 
 Signing, notarization, deployment, store submission, and publication run as

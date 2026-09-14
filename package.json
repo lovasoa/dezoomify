@@ -24,6 +24,7 @@
     }
   },
   "scripts": {
+    "release:version": "cargo xtask release version",
     "lint": "pnpm -r lint",
     "typecheck": "tsc --noEmit && pnpm -r typecheck",
     "build": "vite build",

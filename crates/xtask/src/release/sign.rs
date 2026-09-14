@@ -8,7 +8,7 @@
 //! artifact. The private key comes only from the `RELEASE_GPG_KEY`
 //! environment secret; without it signing fails closed, never silently.
 
-use super::common::{load_config, parse_sums, plan_dir, read_plan, Plan};
+use super::common::{parse_sums, plan_dir, read_plan, Plan};
 use crate::reject_unknown_args;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,9 +18,9 @@ const GPG_PASSPHRASE_ENV: &str = "RELEASE_GPG_PASSPHRASE";
 
 pub(crate) fn sign_cmd(args: &[String]) -> Result<(), String> {
     reject_unknown_args("release sign", args)?;
-    let config = load_config()?;
-    let plan_path = plan_dir(&config.release.version).join("plan.json");
-    let artifacts = plan_dir(&config.release.version);
+    let version = super::common::app_version()?.0;
+    let plan_path = plan_dir(&version).join("plan.json");
+    let artifacts = plan_dir(&version);
     release_sign(&read_plan(&plan_path)?, &artifacts)?;
     println!("release sign: {}", artifacts.join("SHA256SUMS").display());
     Ok(())

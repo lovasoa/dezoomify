@@ -20,14 +20,7 @@ pub(crate) const ARTIFACTS_ROOT: &str = "target/release-dist";
 
 #[derive(Deserialize)]
 pub(crate) struct Config {
-    pub(crate) release: ConfigRelease,
     pub(crate) protocol: ConfigProtocol,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct ConfigRelease {
-    pub(crate) version: String,
-    pub(crate) channel: String,
 }
 
 #[derive(Deserialize)]
@@ -161,6 +154,95 @@ pub(crate) fn git_commit() -> Result<String, String> {
     Ok(commit)
 }
 
+/// The nearest numbered tag is the baseline; each first-parent commit after
+/// it consumes one patch number. The boolean is true on the tagged commit.
+pub(crate) fn app_version() -> Result<(String, bool), String> {
+    let current = app_version_at("HEAD")?;
+    if current.1 {
+        let rolling = increment_patch(&app_version_at("HEAD^")?.0)?;
+        if !version_is_newer(&current.0, &rolling) {
+            return Err(format!(
+                "numbered version {} must be newer than rolling version {rolling}",
+                current.0
+            ));
+        }
+    }
+    Ok(current)
+}
+
+pub(crate) fn app_version_at(revision: &str) -> Result<(String, bool), String> {
+    let out = Command::new("git")
+        .args([
+            "describe",
+            "--first-parent",
+            "--tags",
+            "--match",
+            "v[0-9]*.[0-9]*.[0-9]*",
+            "--long",
+            revision,
+        ])
+        .current_dir(crate::repo_root())
+        .output()
+        .map_err(|e| format!("failed to run git describe: {e}"))?;
+    if !out.status.success() {
+        return Err("cannot derive app version; fetch the numbered tags".to_string());
+    }
+    let description = String::from_utf8(out.stdout).map_err(|e| format!("git output: {e}"))?;
+    let (tag_distance, _) = description
+        .trim()
+        .rsplit_once("-g")
+        .ok_or_else(|| "unexpected git describe output".to_string())?;
+    let (tag, distance) = tag_distance
+        .rsplit_once('-')
+        .ok_or_else(|| "unexpected git describe output".to_string())?;
+    let base = tag
+        .strip_prefix('v')
+        .ok_or_else(|| "numbered tags must use vX.Y.Z".to_string())?;
+    validate_version(base)?;
+    let mut parts: Vec<u64> = base
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .map_err(|_| "bad numbered tag".to_string())?;
+    let distance: u64 = distance
+        .parse()
+        .map_err(|_| "bad git distance".to_string())?;
+    parts[2] = parts[2]
+        .checked_add(distance)
+        .ok_or_else(|| "derived version overflow".to_string())?;
+    if parts.iter().any(|part| *part > u64::from(u16::MAX)) {
+        return Err("derived version exceeds browser-store limits".to_string());
+    }
+    Ok((
+        format!("{}.{}.{}", parts[0], parts[1], parts[2]),
+        distance == 0,
+    ))
+}
+
+pub(crate) fn version_is_newer(candidate: &str, previous: &str) -> bool {
+    let parse = |version: &str| {
+        version
+            .split('.')
+            .map(str::parse::<u64>)
+            .collect::<Result<Vec<_>, _>>()
+    };
+    matches!((parse(candidate), parse(previous)), (Ok(a), Ok(b)) if a > b)
+}
+
+fn increment_patch(version: &str) -> Result<String, String> {
+    validate_version(version)?;
+    let mut parts = version
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "bad app version".to_string())?;
+    parts[2] = parts[2]
+        .checked_add(1)
+        .filter(|part| *part <= u64::from(u16::MAX))
+        .ok_or_else(|| "derived version exceeds browser-store limits".to_string())?;
+    Ok(format!("{}.{}.{}", parts[0], parts[1], parts[2]))
+}
+
 pub(crate) fn plan_dir(version: &str) -> PathBuf {
     crate::repo_root().join(ARTIFACTS_ROOT).join(version)
 }
@@ -262,10 +344,11 @@ pub(crate) fn plan_from_repo() -> Plan {
     let targets = load_targets().unwrap();
     let compat = load_compatibility().unwrap();
     let caps = load_capabilities().unwrap();
+    let version = app_version().unwrap().0;
     Plan {
-        version: config.release.version.clone(),
-        tag: format!("v{}", config.release.version),
-        channel: config.release.channel.clone(),
+        tag: format!("rolling-v{version}"),
+        version,
+        channel: "rolling".to_string(),
         commit: "0".repeat(40),
         protocol: PlanProtocol {
             range: config.protocol.range.clone(),
@@ -284,5 +367,19 @@ pub(crate) fn plan_from_repo() -> Plan {
                 available: t.available,
             })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::{increment_patch, version_is_newer};
+
+    #[test]
+    fn numbered_versions_must_advance_the_rolling_version() {
+        assert!(version_is_newer("3.1.0", "3.0.9"));
+        assert!(version_is_newer("4.0.0", "3.9.42"));
+        assert!(!version_is_newer("3.0.4", "3.0.9"));
+        assert!(!version_is_newer("3.0.9", "3.0.9"));
+        assert_eq!(increment_patch("3.0.8").unwrap(), "3.0.9");
     }
 }

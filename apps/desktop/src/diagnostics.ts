@@ -9,10 +9,11 @@ import {
   PROTOCOL_VERSION,
 } from "./desktopIntegration.ts";
 
-// Desktop app version mirrors apps/desktop/package.json. Kept as a literal
-// so the TS layer stays host-neutral (no JSON import, no I/O); bump both
-// together. Used only for copy-diagnostics provenance, never for logic.
-export const DESKTOP_APP_VERSION = "3.0.3";
+declare const __DEZOOMIFY_VERSION__: string;
+
+export const DESKTOP_APP_VERSION = typeof __DEZOOMIFY_VERSION__ === "string"
+  ? __DEZOOMIFY_VERSION__
+  : "0.0.0";
 
 
 // Copy-diagnostics provenance: typed error context, job and attempt ids, app

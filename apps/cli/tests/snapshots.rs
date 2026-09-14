@@ -26,7 +26,10 @@ fn version_snapshot() {
     let stdout = String::from_utf8(version.stdout).unwrap();
     // Shape contract only: `<name> <version>`. The exact number comes from
     // the package and must not be pinned here (it changes every release).
-    let expected = format!("dezoomify-cli {}\n", env!("CARGO_PKG_VERSION"));
+    let expected = format!(
+        "dezoomify-cli {}\n",
+        option_env!("DEZOOMIFY_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    );
     assert_eq!(
         stdout, expected,
         "--version must be `dezoomify-cli <pkg version>`"

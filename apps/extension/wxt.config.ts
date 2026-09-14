@@ -35,6 +35,7 @@ export default defineConfig({
     zipSources: false,
   },
   manifest: ({ browser }) => ({
+    version: process.env.DEZOOMIFY_VERSION ?? "0.0.1",
     action: {
       default_title: "Dezoomify",
       default_icon: {

@@ -13,7 +13,7 @@
 
 use std::process::Command;
 
-/// Pinned `cargo-deny` release. The `security`, `ci`, and `release-build`
+/// Pinned `cargo-deny` release. The `security` and `ci`
 /// workflows install exactly this version; the missing-binary error below
 /// repeats it, and the `deny_pin_matches_workflows` test enforces the sync.
 pub const CARGO_DENY_VERSION: &str = "0.20.2";
@@ -172,11 +172,7 @@ mod tests {
     fn deny_pin_matches_workflows() {
         // The workflows must install the same cargo-deny release xtask
         // gates on; a drift would let CI pass what local runs deny.
-        for workflow in [
-            ".github/workflows/security.yml",
-            ".github/workflows/ci.yml",
-            ".github/workflows/release-build.yml",
-        ] {
+        for workflow in [".github/workflows/security.yml", ".github/workflows/ci.yml"] {
             let text = std::fs::read_to_string(super::super::repo_root().join(workflow))
                 .unwrap_or_else(|_| panic!("read {workflow}"));
             assert!(

@@ -5,6 +5,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+const APP_VERSION: &str = match option_env!("DEZOOMIFY_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
     pub input: Option<String>,
@@ -309,7 +314,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--help" | "-?" => return Err(help()),
             "--version" | "-V" => {
-                return Err(format!("dezoomify-cli {}", env!("CARGO_PKG_VERSION")));
+                return Err(format!("dezoomify-cli {APP_VERSION}"));
             }
             "-H" | "--header" => {
                 let raw = take_value(args, &mut i, inline_value, flag)?;

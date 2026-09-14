@@ -1109,7 +1109,7 @@ dependencies = [
 
 [[package]]
 name = "dezoomify-cli"
-version = "3.0.3"
+version = "0.0.0"
 dependencies = [
  "axum",
  "dezoomify-core",
@@ -1149,7 +1149,7 @@ dependencies = [
 
 [[package]]
 name = "dezoomify-desktop"
-version = "3.0.3"
+version = "0.0.0"
 dependencies = [
  "dezoomify-core",
  "dezoomify-job",

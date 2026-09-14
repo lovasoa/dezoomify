@@ -28,12 +28,19 @@ mod verify;
 
 pub fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
+        Some("version") => {
+            crate::reject_unknown_args("release version", &args[1..])?;
+            println!("{}", common::app_version()?.0);
+            Ok(())
+        }
         Some("plan") => plan::plan_cmd(&args[1..]),
         Some("build") => build::build_cmd(&args[1..]),
         Some("sign") => sign::sign_cmd(&args[1..]),
         Some("verify") => verify::verify_cmd(&args[1..]),
         Some("publish") => publish::publish_cmd(&args[1..]),
         Some(other) => Err(format!("unknown release subcommand '{other}'")),
-        None => Err("usage: cargo xtask release <plan|build|sign|verify|publish>".to_string()),
+        None => {
+            Err("usage: cargo xtask release <version|plan|build|sign|verify|publish>".to_string())
+        }
     }
 }

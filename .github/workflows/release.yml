@@ -1,0 +1,178 @@
+name: release
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Numbered vX.Y.Z tag
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_run' && 'rolling' || inputs.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
+
+env:
+  SOURCE_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.ref }}
+
+jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      commit: ${{ steps.commit.outputs.value }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 0
+      - id: commit
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0
+      - name: Require green CI for a numbered release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          test -n "$(gh run list --workflow ci.yml --branch master --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+      - id: version
+        run: echo "value=$(cargo xtask release version)" >> "$GITHUB_OUTPUT"
+      - name: Freeze plan
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            cargo xtask release plan --numbered
+          else
+            cargo xtask release plan
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-plan
+          path: target/release-dist
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [cli-linux-x86_64, desktop-linux-x86_64, extension-chromium, extension-firefox]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          install: true
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0
+          targets: wasm32-unknown-unknown
+      - uses: ./.github/actions/setup-wasm-bindgen
+      - name: Install desktop tools
+        if: matrix.target == 'desktop-linux-x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential dpkg-dev xvfb xauth
+          cargo install tauri-cli --version '=2.11.4' --locked
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Download plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "${{ github.run_id }}" -n release-plan -D target/release-dist
+      - name: Linux desktop release gate
+        if: matrix.target == 'desktop-linux-x86_64'
+        env:
+          DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
+        run: xvfb-run -a cargo xtask test desktop --e2e-window
+      - name: Build artifact
+        env:
+          DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          v="$DEZOOMIFY_VERSION"
+          cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
+          rm "target/release-dist/$v/plan.json" "target/release-dist/$v/notes.md"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.target }}
+          path: target/release-dist
+
+  sign:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    environment: release-signing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0
+      - name: Reassemble artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p target
+          for name in release-plan release-cli-linux-x86_64 release-desktop-linux-x86_64 release-extension-chromium release-extension-firefox; do
+            gh run download "${{ github.run_id }}" -n "$name" -D dist
+          done
+          mv dist target/release-dist
+      - name: Sign
+        env:
+          RELEASE_GPG_KEY: ${{ secrets.RELEASE_GPG_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: cargo xtask release sign
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-signed
+          path: target/release-dist
+
+  publish:
+    needs: [prepare, sign]
+    runs-on: ubuntu-latest
+    environment: release-publish
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        with:
+          toolchain: 1.98.0
+      - name: Download signed artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p target/release-dist
+          gh run download "${{ github.run_id }}" -n release-signed -D target/release-dist
+      - name: Verify and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ needs.prepare.outputs.version }}"
+          cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
+          cargo xtask release publish --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
+      - name: Record numbered checksum inventory
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          v="${{ needs.prepare.outputs.version }}"
+          git config user.name "dezoomify release bot"
+          git config user.email "noreply@dezoomify.ophir.dev"
+          git add "release/checksums/$v/SHA256SUMS"
+          git commit -m "release: record v$v checksum inventory"
+          git push origin HEAD:master

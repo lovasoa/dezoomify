@@ -32,6 +32,8 @@ jobs:
           - protocol+security
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         if: matrix.lane-group != 'native+scenario'
         with:
@@ -116,7 +118,7 @@ jobs:
         run: cargo xtask ci security
   attest:
     # Release attestation gate (todo 6.2): after every sharded lane is green,
-    # publish the deterministic release-inputs digest. `release-build`
+    # publish the deterministic release-inputs digest. `release`
     # re-computes it on the tagged revision with
     # `cargo xtask ci digest --check`; a match skips the serial `ci local`
     # rerun, anything else falls back to it. Never a silent pass.

@@ -12,6 +12,8 @@ for (const browser of ["chrome", "firefox"]) {
   test(`${browser}: WXT emits the reviewed MV3 manifest`, () => {
     const value = manifest(browser);
     assert.equal(value.manifest_version, 3);
+    assert.match(value.version, /^\d+\.\d+\.\d+$/);
+    assert.notEqual(value.version, "0.0.0");
     assert.deepEqual(value.permissions, REVIEWED_PERMISSIONS);
     assert.deepEqual(value.optional_permissions, ["cookies"]);
     assert.deepEqual(value.optional_host_permissions, ["http://*/*", "https://*/*"]);

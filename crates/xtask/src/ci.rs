@@ -103,7 +103,7 @@ pub fn test_live(args: &[String]) -> Result<(), String> {
 /// release plan and verification read (Rust lockfile, release inventory,
 /// generated capabilities, fixture manifest), each framed by its relative
 /// path so renames change the digest. The sharded CI `attest` job uploads
-/// this digest; `release-build` re-computes it on the tagged revision and
+/// this digest; `release` re-computes it on the tagged revision and
 /// compares with `--check`: a match proves the tag commit passed the full
 /// sharded suite on identical inputs, so the serial `ci local` rerun is
 /// skipped in favor of the fast release gate. A mismatch (or no attested
