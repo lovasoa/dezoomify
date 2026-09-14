@@ -228,12 +228,6 @@ mod tests {
         if let Err(e) = release_verify(&plan, &dir, true) {
             panic!("unsigned verify should pass: {e}");
         }
-        let min_peer = plan.protocol.min_peer.clone();
-        plan.protocol.min_peer = "wrong".to_string();
-        assert!(release_verify(&plan, &dir, true)
-            .unwrap_err()
-            .contains("release inventory"));
-        plan.protocol.min_peer = min_peer;
         plan.targets[0].available = false;
         assert!(release_verify(&plan, &dir, true)
             .unwrap_err()

@@ -130,31 +130,24 @@ jobs:
           sha="$(git rev-parse HEAD)"
           test "$sha" = "$(git ls-remote origin refs/heads/master | cut -f1)"
           test -n "$(gh run list --workflow ci.yml --branch master --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          release_tag=""
-          for tag in "v$DEZOOMIFY_VERSION" "rolling-v$DEZOOMIFY_VERSION"; do
-            if gh release view "$tag" >/dev/null 2>&1 && test "$(git rev-parse "$tag^{commit}")" = "$sha"; then
-              release_tag="$tag"
-              break
-            fi
-          done
-          test -n "$release_tag"
+          release_tag="rolling-v$DEZOOMIFY_VERSION"
+          git rev-parse "v$DEZOOMIFY_VERSION^{commit}" >/dev/null 2>&1 && release_tag="v$DEZOOMIFY_VERSION"
+          test "$(git rev-parse "$release_tag^{commit}")" = "$sha"
           asset="dezoomify-$BROWSER-v$DEZOOMIFY_VERSION.zip"
           package="dezoomify-extension-$BROWSER-$DEZOOMIFY_VERSION.zip"
-          rm "$package"
-          gh release download "$release_tag" --pattern "$asset" --output "$package"
-          unzip -t "$package"
           verify_dir="$(mktemp -d)"
           trap 'rm -rf "$verify_dir"' EXIT
-          gh release download "$release_tag" --pattern "$asset.sig" --output "$verify_dir/$asset.sig"
-          gh release download "$release_tag" --pattern SHA256SUMS --output "$verify_dir/SHA256SUMS"
-          gh release download "$release_tag" --pattern SHA256SUMS.sig --output "$verify_dir/SHA256SUMS.sig"
+          gh release download "$release_tag" --dir "$verify_dir" --pattern "$asset" --pattern "$asset.sig" --pattern SHA256SUMS --pattern SHA256SUMS.sig
+          released_package="$verify_dir/$asset"
+          unzip -t "$released_package"
           export GNUPGHOME="$verify_dir/gnupg"
           mkdir -m 700 "$GNUPGHOME"
           gpg --batch --import release/gpg-public-key.asc
           gpg --batch --verify "$verify_dir/SHA256SUMS.sig" "$verify_dir/SHA256SUMS"
-          gpg --batch --verify "$verify_dir/$asset.sig" "$package"
-          digest="$(sha256sum "$package" | cut -d' ' -f1)"
+          gpg --batch --verify "$verify_dir/$asset.sig" "$released_package"
+          digest="$(sha256sum "$released_package" | cut -d' ' -f1)"
           grep -Fqx "$digest  extension-$BROWSER/$asset" "$verify_dir/SHA256SUMS"
+          cp "$released_package" "$package"
           echo "store package: signed release $release_tag/$asset"
       - name: Draft upload to Chrome Web Store
         if: inputs.browser == 'chromium' && inputs.upload == true

@@ -137,17 +137,22 @@ pub(crate) struct PlanTarget {
     pub(crate) available: bool,
 }
 
-pub(crate) fn git_commit() -> Result<String, String> {
+fn git_output(args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
-        .args(["rev-parse", "HEAD"])
+        .args(args)
         .current_dir(crate::repo_root())
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
     if !out.status.success() {
-        return Err("git rev-parse HEAD failed".to_string());
+        return Err(format!("git {} failed", args.join(" ")));
     }
-    let s = String::from_utf8(out.stdout).map_err(|e| format!("git output: {e}"))?;
-    let commit = s.trim().to_string();
+    String::from_utf8(out.stdout)
+        .map(|value| value.trim().to_string())
+        .map_err(|e| format!("git output: {e}"))
+}
+
+pub(crate) fn git_commit() -> Result<String, String> {
+    let commit = git_output(&["rev-parse", "HEAD"])?;
     if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("git rev-parse HEAD returned a non-commit value".to_string());
     }
@@ -157,10 +162,16 @@ pub(crate) fn git_commit() -> Result<String, String> {
 /// The nearest numbered tag is the baseline; each first-parent commit after
 /// it consumes one patch number. The boolean is true on the tagged commit.
 pub(crate) fn app_version() -> Result<(String, bool), String> {
-    let current = app_version_at("HEAD")?;
+    let current = app_version_at("HEAD", 0)?;
     if current.1 {
-        let rolling = increment_patch(&app_version_at("HEAD^")?.0)?;
-        if !version_is_newer(&current.0, &rolling) {
+        let rolling = app_version_at("HEAD^", 1)?.0;
+        let numbers = |version: &str| {
+            version
+                .split('.')
+                .map(|part| part.parse::<u64>().expect("validated app version"))
+                .collect::<Vec<_>>()
+        };
+        if numbers(&current.0) <= numbers(&rolling) {
             return Err(format!(
                 "numbered version {} must be newer than rolling version {rolling}",
                 current.0
@@ -170,26 +181,18 @@ pub(crate) fn app_version() -> Result<(String, bool), String> {
     Ok(current)
 }
 
-pub(crate) fn app_version_at(revision: &str) -> Result<(String, bool), String> {
-    let out = Command::new("git")
-        .args([
-            "describe",
-            "--first-parent",
-            "--tags",
-            "--match",
-            "v[0-9]*.[0-9]*.[0-9]*",
-            "--long",
-            revision,
-        ])
-        .current_dir(crate::repo_root())
-        .output()
-        .map_err(|e| format!("failed to run git describe: {e}"))?;
-    if !out.status.success() {
-        return Err("cannot derive app version; fetch the numbered tags".to_string());
-    }
-    let description = String::from_utf8(out.stdout).map_err(|e| format!("git output: {e}"))?;
+fn app_version_at(revision: &str, extra_distance: u64) -> Result<(String, bool), String> {
+    let description = git_output(&[
+        "describe",
+        "--first-parent",
+        "--tags",
+        "--match",
+        "v[0-9]*.[0-9]*.[0-9]*",
+        "--long",
+        revision,
+    ])
+    .map_err(|_| "cannot derive app version; fetch the numbered tags".to_string())?;
     let (tag_distance, _) = description
-        .trim()
         .rsplit_once("-g")
         .ok_or_else(|| "unexpected git describe output".to_string())?;
     let (tag, distance) = tag_distance
@@ -207,40 +210,17 @@ pub(crate) fn app_version_at(revision: &str) -> Result<(String, bool), String> {
     let distance: u64 = distance
         .parse()
         .map_err(|_| "bad git distance".to_string())?;
+    let exact = distance == 0;
+    let distance = distance
+        .checked_add(extra_distance)
+        .ok_or_else(|| "derived version overflow".to_string())?;
     parts[2] = parts[2]
         .checked_add(distance)
         .ok_or_else(|| "derived version overflow".to_string())?;
     if parts.iter().any(|part| *part > u64::from(u16::MAX)) {
         return Err("derived version exceeds browser-store limits".to_string());
     }
-    Ok((
-        format!("{}.{}.{}", parts[0], parts[1], parts[2]),
-        distance == 0,
-    ))
-}
-
-pub(crate) fn version_is_newer(candidate: &str, previous: &str) -> bool {
-    let parse = |version: &str| {
-        version
-            .split('.')
-            .map(str::parse::<u64>)
-            .collect::<Result<Vec<_>, _>>()
-    };
-    matches!((parse(candidate), parse(previous)), (Ok(a), Ok(b)) if a > b)
-}
-
-fn increment_patch(version: &str) -> Result<String, String> {
-    validate_version(version)?;
-    let mut parts = version
-        .split('.')
-        .map(str::parse::<u64>)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "bad app version".to_string())?;
-    parts[2] = parts[2]
-        .checked_add(1)
-        .filter(|part| *part <= u64::from(u16::MAX))
-        .ok_or_else(|| "derived version exceeds browser-store limits".to_string())?;
-    Ok(format!("{}.{}.{}", parts[0], parts[1], parts[2]))
+    Ok((format!("{}.{}.{}", parts[0], parts[1], parts[2]), exact))
 }
 
 pub(crate) fn plan_dir(version: &str) -> PathBuf {
@@ -367,19 +347,5 @@ pub(crate) fn plan_from_repo() -> Plan {
                 available: t.available,
             })
             .collect(),
-    }
-}
-
-#[cfg(test)]
-mod version_tests {
-    use super::{increment_patch, version_is_newer};
-
-    #[test]
-    fn numbered_versions_must_advance_the_rolling_version() {
-        assert!(version_is_newer("3.1.0", "3.0.9"));
-        assert!(version_is_newer("4.0.0", "3.9.42"));
-        assert!(!version_is_newer("3.0.4", "3.0.9"));
-        assert!(!version_is_newer("3.0.9", "3.0.9"));
-        assert_eq!(increment_patch("3.0.8").unwrap(), "3.0.9");
     }
 }

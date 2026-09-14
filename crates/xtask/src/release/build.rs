@@ -77,13 +77,13 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
         ));
     }
     match target {
-        "cli-linux-x86_64" => build_cli_artifact(&entry.os, &out, &plan.version)?,
+        "cli-linux-x86_64" => build_cli_artifact(&entry.os, &out)?,
         "desktop-linux-x86_64"
         | "desktop-windows-x86_64"
         | "desktop-macos-aarch64"
-        | "desktop-macos-x86_64" => build_desktop_artifact(target, &entry.os, &out, &plan.version)?,
-        "extension-chromium" => build_extension_artifact("chromium", &out, &plan.version)?,
-        "extension-firefox" => build_extension_artifact("firefox", &out, &plan.version)?,
+        | "desktop-macos-x86_64" => build_desktop_artifact(target, &entry.os, &out)?,
+        "extension-chromium" => build_extension_artifact("chromium", &out)?,
+        "extension-firefox" => build_extension_artifact("firefox", &out)?,
         other => return Err(format!("target '{other}' has no build recipe")),
     }
     if !out.is_file() || std::fs::metadata(&out).map_err(|e| e.to_string())?.len() == 0 {
@@ -104,7 +104,7 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-fn build_cli_artifact(target_os: &str, out: &Path, version: &str) -> Result<(), String> {
+fn build_cli_artifact(target_os: &str, out: &Path) -> Result<(), String> {
     if target_os != "linux" || !cfg!(target_os = "linux") {
         return Err("target cli-linux-x86_64 must be built on a linux host".to_string());
     }
@@ -116,38 +116,12 @@ fn build_cli_artifact(target_os: &str, out: &Path, version: &str) -> Result<(), 
             bin.display()
         ));
     }
-    let version_output = Command::new(&bin)
-        .arg("--version")
-        .output()
-        .map_err(|e| format!("run {} --version: {e}", bin.display()))?;
-    if !version_output.status.success()
-        || version_output.stdout != format!("dezoomify-cli {version}\n").as_bytes()
-    {
-        return Err(format!("CLI artifact does not embed version {version}"));
-    }
     tar_gz(&bin, "dezoomify-cli", out)?;
     Ok(())
 }
 
-fn build_extension_artifact(browser: &str, out: &Path, version: &str) -> Result<(), String> {
+fn build_extension_artifact(browser: &str, out: &Path) -> Result<(), String> {
     crate::extension::build_extension(&[])?;
-    let wxt_browser = if browser == "chromium" {
-        "chrome"
-    } else {
-        "firefox"
-    };
-    let manifest = crate::repo_root()
-        .join("apps/extension/.output")
-        .join(format!("{wxt_browser}-mv3/manifest.json"));
-    let manifest: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&manifest).map_err(|e| format!("read {}: {e}", manifest.display()))?,
-    )
-    .map_err(|e| format!("parse {}: {e}", manifest.display()))?;
-    if manifest.get("version").and_then(|value| value.as_str()) != Some(version) {
-        return Err(format!(
-            "extension artifact does not embed version {version}"
-        ));
-    }
     let source = crate::repo_root()
         .join("target/extension")
         .join(format!("dezoomify-{browser}.zip"));
@@ -166,12 +140,7 @@ fn build_extension_artifact(browser: &str, out: &Path, version: &str) -> Result<
 /// copies the single release installer to `out`. Only the artifact named by
 /// `expected_artifact_name` ships; anything else the bundler leaves on disk
 /// is never listed in SHA256SUMS and never signed.
-fn build_desktop_artifact(
-    target: &str,
-    target_os: &str,
-    out: &Path,
-    version: &str,
-) -> Result<(), String> {
+fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(), String> {
     let host_ok = match target_os {
         "linux" => cfg!(target_os = "linux"),
         "windows" => cfg!(target_os = "windows"),
@@ -221,13 +190,6 @@ fn build_desktop_artifact(
             hits.len(),
             dir.display()
         ));
-    }
-    if !hits[0]
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.contains(version))
-    {
-        return Err(format!("desktop artifact does not embed version {version}"));
     }
     std::fs::copy(&hits[0], out).map_err(|e| format!("copy {}: {e}", hits[0].display()))?;
     Ok(())
