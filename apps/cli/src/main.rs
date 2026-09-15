@@ -353,7 +353,6 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
 
     let config = pipeline_config_for(parsed);
     let json = parsed.json;
-    let level_owned = level.to_string();
     let result = pipeline::run(
         input,
         &output_str,
@@ -362,7 +361,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         &mut |event: PipelineEvent| {
             handle.emit_detail(&event.kind, event.detail.clone());
             if let Some(last) = handle.events().last() {
-                print_event(json, last, &level_owned);
+                print_event(json, last, level);
             }
         },
     );
@@ -576,7 +575,6 @@ fn run_one_bulk_image(
         }
     }
     let config = pipeline_config_for(parsed);
-    let mut events: Vec<PipelineEvent> = Vec::new();
     let logging = parsed.logging.clone();
     let result = pipeline::run(
         url,
@@ -584,7 +582,6 @@ fn run_one_bulk_image(
         parsed.overwrite,
         &config,
         &mut |event: PipelineEvent| {
-            events.push(event.clone());
             handle.emit_detail(&event.kind, event.detail.clone());
             if !parsed.json {
                 if let Some(last) = handle.events().last() {
@@ -600,6 +597,35 @@ fn run_one_bulk_image(
             Ok((outcome.output_hash, outcome.tile_count, actual))
         }
         Err(error) => Err((error.code, error.message)),
+    }
+}
+
+fn print_event(json: bool, event: &JobEvent, logging: &str) {
+    if json {
+        println!(
+            "{}",
+            report::machine_event_detail(&event.job, event.seq, event.kind.as_str(), &event.detail)
+        );
+        return;
+    }
+    if !report::show_progress(logging) {
+        return;
+    }
+    let detail = event
+        .detail
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if detail.is_empty() {
+        eprintln!("{} {}", event.kind, event.job);
+    } else {
+        eprintln!("{} {} {detail}", event.kind, event.job);
+    }
+    if report::is_trace(logging) {
+        if let Ok(payload) = serde_json::to_string(&event.detail) {
+            eprintln!("trace {} {} {payload}", event.kind, event.job);
+        }
     }
 }
 
@@ -797,35 +823,6 @@ mod url {
             None
         } else {
             Some(host.to_string())
-        }
-    }
-}
-
-fn print_event(json: bool, event: &JobEvent, logging: &str) {
-    if json {
-        println!(
-            "{}",
-            report::machine_event_detail(&event.job, event.seq, event.kind.as_str(), &event.detail)
-        );
-        return;
-    }
-    if !report::show_progress(logging) {
-        return;
-    }
-    let detail = event
-        .detail
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if detail.is_empty() {
-        eprintln!("{} {}", event.kind, event.job);
-    } else {
-        eprintln!("{} {} {}", event.kind, event.job, detail);
-    }
-    if report::is_trace(logging) {
-        if let Ok(payload) = serde_json::to_string(&event.detail) {
-            eprintln!("trace {} {} {payload}", event.kind, event.job);
         }
     }
 }

@@ -14,8 +14,8 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use dezoomify_core::core::adaptive::ObservationResult;
 use dezoomify_core::core::model::{ProcessingRecipe, Request};
+use dezoomify_core::core::{adaptive::ObservationResult, redact_uri};
 use dezoomify_core::Vec2d;
 
 use crate::error::NativeError;
@@ -576,7 +576,7 @@ pub(crate) fn fetch_and_decode_cached(
     if !outcome.ok() {
         return Err(NativeError::new(
             "tile.http-error",
-            format!("tile request returned http status {}", outcome.status),
+            describe_http_failure(&outcome),
         ));
     }
     let bytes = processing.apply(outcome.body).map_err(NativeError::from)?;
@@ -590,6 +590,16 @@ pub(crate) fn fetch_and_decode_cached(
         icc_profile: loaded.icc_profile,
         exif_metadata: loaded.exif_metadata,
     })
+}
+
+/// Provide actionable, redacted HTTP diagnostics for host logs.
+pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
+    let mut requested = redact_uri(&outcome.final_uri);
+    if requested.len() > 2_048 {
+        requested.truncate(2_048);
+        requested.push_str("...");
+    }
+    format!("request to {requested} returned HTTP {}", outcome.status)
 }
 
 pub(crate) struct ProbeRead {

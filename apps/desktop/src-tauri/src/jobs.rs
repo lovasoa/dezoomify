@@ -29,7 +29,7 @@ use dezoomify_native::pipeline::{
     partial_decision_from_choice, PartialDecision, PartialGate, PartialPolicy, PipelineConfig,
     PipelineEvent,
 };
-use dezoomify_native::{JobRequest, NativeRuntime};
+use dezoomify_native::{JobEventKind, JobRequest, NativeRuntime};
 
 use crate::settings::{pipeline_config_for, DesktopSettings};
 
@@ -1585,8 +1585,11 @@ impl JobTable {
                 let tx_progress = tx.clone();
                 let job_for_events = job_id.clone();
                 let mut on_event = |event: PipelineEvent| {
-                    let lower = event.kind.to_ascii_lowercase();
-                    if lower == "recovery-requested" || lower == "missing-work" {
+                    let kind = JobEventKind::from(event.kind.as_str());
+                    if matches!(
+                        kind,
+                        JobEventKind::RecoveryRequested | JobEventKind::MissingWork
+                    ) {
                         let (missing, failed, total, recovery) =
                             parse_partial_detail(&event.detail);
                         let _ = tx_progress.send(DriverMessage::RecoveryRequested {
@@ -1596,6 +1599,12 @@ impl JobTable {
                             total,
                             recovery,
                         });
+                        return;
+                    }
+                    // Tile request diagnostics are intended for the CLI. The
+                    // desktop only exposes typed recovery and must not treat
+                    // an informational event as a terminal engine failure.
+                    if matches!(kind, JobEventKind::TileFailed) {
                         return;
                     }
                     let _ = tx_progress.send(DriverMessage::Progress {
