@@ -26,7 +26,79 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     check_runtime(&root.join("packages/browser-runtime/src"))?;
     check_browser_single_sources(&root)?;
     check_website_runtime_usage(&root)?;
+    check_protocol_boundaries(&root)?;
     println!("architecture: ok");
+    Ok(())
+}
+
+fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
+    let dto_path = root.join("crates/dezoomify-protocol/src/dto.rs");
+    let dto = std::fs::read_to_string(&dto_path)
+        .map_err(|e| format!("read {}: {e}", dto_path.display()))?;
+    for removed in [
+        "SessionId",
+        "ScanId",
+        "CandidateId",
+        "OperationId",
+        "HandoffId",
+        "StartScan",
+        "ScanSnapshot",
+        "CandidateChunkDto",
+        "ByteChunkDto",
+        "CapabilitiesDto",
+        "HandoffDto",
+        "DestinationDto",
+        "OutputDto",
+    ] {
+        if dto.contains(removed) {
+            return Err(format!(
+                "speculative protocol contract `{removed}` has no production producer and consumer"
+            ));
+        }
+    }
+    for (contract, producer, produced, consumer, consumed) in [
+        (
+            "JobCommand",
+            "apps/extension/src/job/worker.ts",
+            "kind: \"command\"",
+            "crates/dezoomify-wasm/src/session.rs",
+            "JobCommand",
+        ),
+        (
+            "HostEffect",
+            "crates/dezoomify-wasm/src/session.rs",
+            "HostEffect",
+            "apps/extension/src/job/controller.ts",
+            "message.type",
+        ),
+        (
+            "JobEvent",
+            "crates/dezoomify-wasm/src/session.rs",
+            "JobEvent",
+            "apps/extension/src/job/index.ts",
+            "handleEvent",
+        ),
+        (
+            "NativeHostRequest",
+            "apps/extension/src/runtime/nativeHandoff.ts",
+            "kind: \"handshake\"",
+            "apps/desktop/src-tauri/src/native_host/envelope.rs",
+            "NativeHostRequest",
+        ),
+    ] {
+        for (role, path, needle) in [
+            ("producer", producer, produced),
+            ("consumer", consumer, consumed),
+        ] {
+            let text = std::fs::read_to_string(root.join(path))
+                .map_err(|e| format!("read {path}: {e}"))?;
+            if !text.contains(needle) {
+                return Err(format!(
+                    "protocol contract `{contract}` lacks its production {role} marker `{needle}` in {path}"
+                ));
+            }
+        }
+    }
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 [protocol]
-range = "1.0"
-min_peer = "1.0"
+range = "2.0"
+min_peer = "2.0"
 
 # Extension store identity (plan 13 step 2: exact IDs from reviewed config,
 # never secrets). Updates go to the EXISTING listings below; never create a

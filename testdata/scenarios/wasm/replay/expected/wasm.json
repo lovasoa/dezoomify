@@ -2,7 +2,7 @@
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "Discovering",
     "type": "job-state"
   },
@@ -10,7 +10,7 @@
     "effect": "fx:0",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "request": {
       "headers": [],
       "id": "req:0",
@@ -107,20 +107,20 @@
     },
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "type": "catalog"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "AwaitingImageSelection",
     "type": "job-state"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "AwaitingLevelSelection",
     "type": "job-state"
   },
@@ -129,20 +129,20 @@
     "format": "png",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "type": "request-destination"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "AwaitingDestination",
     "type": "job-state"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "Planning",
     "type": "job-state"
   },
@@ -150,14 +150,14 @@
     "acquired": 0,
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "total": 4,
     "type": "progress"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "AcquiringTiles",
     "type": "job-state"
   },
@@ -180,7 +180,7 @@
       },
       "processing": "none"
     },
-    "protocol": "1.0",
+    "protocol": "2.0",
     "request": {
       "headers": [
         {
@@ -214,7 +214,7 @@
       },
       "processing": "none"
     },
-    "protocol": "1.0",
+    "protocol": "2.0",
     "request": {
       "headers": [
         {
@@ -248,7 +248,7 @@
       },
       "processing": "none"
     },
-    "protocol": "1.0",
+    "protocol": "2.0",
     "request": {
       "headers": [
         {
@@ -282,7 +282,7 @@
       },
       "processing": "none"
     },
-    "protocol": "1.0",
+    "protocol": "2.0",
     "request": {
       "headers": [
         {
@@ -301,7 +301,7 @@
     "acquired": 1,
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "total": 4,
     "type": "progress"
   },
@@ -309,7 +309,7 @@
     "acquired": 2,
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "total": 4,
     "type": "progress"
   },
@@ -317,7 +317,7 @@
     "acquired": 3,
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "total": 4,
     "type": "progress"
   },
@@ -325,7 +325,7 @@
     "acquired": 4,
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "total": 4,
     "type": "progress"
   },
@@ -333,7 +333,7 @@
     "effect": "fx:6",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "tile": "tile:0",
     "type": "decode-pixels"
   },
@@ -341,7 +341,7 @@
     "effect": "fx:7",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "tile": "tile:1",
     "type": "decode-pixels"
   },
@@ -349,7 +349,7 @@
     "effect": "fx:8",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "tile": "tile:2",
     "type": "decode-pixels"
   },
@@ -357,14 +357,14 @@
     "effect": "fx:9",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "tile": "tile:3",
     "type": "decode-pixels"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "ProcessingTiles",
     "type": "job-state"
   },
@@ -377,13 +377,13 @@
     "format": "png",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "type": "open-encoder"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "Encoding",
     "type": "job-state"
   },
@@ -391,13 +391,13 @@
     "effect": "fx:11",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "type": "finalize-encoder"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "Finalizing",
     "type": "job-state"
   },
@@ -406,13 +406,13 @@
     "job": "job:wasm-basic-1",
     "kind": "effect",
     "output": "out:0",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "type": "publish-output"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "Publishing",
     "type": "job-state"
   },
@@ -420,20 +420,20 @@
     "effect": "fx:13",
     "job": "job:wasm-basic-1",
     "kind": "effect",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "type": "release-bytes"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "CleaningUp",
     "type": "job-state"
   },
   {
     "job": "job:wasm-basic-1",
     "kind": "event",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "state": "Completed",
     "type": "job-state"
   },
@@ -441,7 +441,7 @@
     "job": "job:wasm-basic-1",
     "kind": "event",
     "output": "out:0",
-    "protocol": "1.0",
+    "protocol": "2.0",
     "type": "completed"
   }
 ]

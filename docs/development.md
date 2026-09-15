@@ -168,9 +168,9 @@ cargo xtask fixtures verify
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
 
-`protocol generate` refreshes checked-in TypeScript, schema, and capability
-artifacts. Its `--check` form compares against a temporary generation, while
-`protocol check` runs cross-language goldens, fingerprints, portability, and
+`protocol generate` refreshes the checked-in TypeScript bindings. Its `--check`
+form compares against a temporary generation, while `protocol check` runs
+cross-language goldens, portability, and
 generated-marker checks. Golden candidates change only through the explicit
 maintenance option reported by `protocol generate --help`. `fixtures verify`
 validates manifests, provenance, licenses, routes, and hashes.

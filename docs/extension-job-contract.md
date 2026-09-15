@@ -6,9 +6,9 @@ the bindings between them. Webpage `postMessage` is not a job-control channel.
 
 ## Binding and ordering
 
-Every source-originated or job-originated request carries a `SourceBindingDto`:
-`job`, browser-verified `tab_id`, browser-verified `frame_id`, and
-`document_generation`. It also carries one `RequestId`. The coordinator checks
+Every source-originated or job-originated request carries a host-local binding:
+`job`, browser-verified tab and frame IDs, and a document generation. It also
+carries one request sequence. The coordinator checks
 the message sender's tab and frame against the stored binding before routing
 it. A navigation increments `document_generation`; messages and responses for
 an earlier generation are discarded. A source-tab navigation invalidates only
@@ -29,10 +29,9 @@ bounded, and deduplicated by the coordinator; there is no persistent observer
 or source-tab runtime listener. Overflow is returned as diagnostics, not
 silently discarded.
 
-Candidates use `CandidateChunkDto` and never include response bytes. Source
-requests use `SourceFetchRequestDto`; responses use `ByteChunkDto` and
-`ChunkAcknowledgementDto` with bounded out-of-band buffers. Cancellation aborts
-the source fetch before more chunks are retained.
+Candidates and source fetch messages use extension-local envelopes and never
+claim to be a cross-version protocol. Cancellation aborts the source fetch
+before more chunks are retained.
 
 ## Internal extension envelopes
 
@@ -45,7 +44,7 @@ protocol bindings are consumed by the entrypoints: `dz.source.fetch-chunk`,
 
 ## Transport outcomes
 
-`ExtensionTransportOutcome` categorizes source-document loss, access required,
+Extension-local outcomes categorize source-document loss, access required,
 redirect-policy limitations, cancellation, network and throttling failures,
 malformed responses, streaming limits, and native/channel disconnection.
 `access-required` pauses the job with host names and rationale; only a visible

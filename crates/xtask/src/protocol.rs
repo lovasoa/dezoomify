@@ -72,7 +72,7 @@ fn generate_check() -> Result<(), String> {
 }
 
 fn check(_args: &[String]) -> Result<(), String> {
-    // Markers/fingerprints, golden vectors (Rust), TS goldens, portability.
+    // Generated marker, golden vectors (Rust/TypeScript), and portability.
     generate_check()?;
     super::command::cargo_test(&["-p", "dezoomify-protocol", "--test", "golden"])?;
     run_node_test()?;

@@ -55,18 +55,12 @@ fn main() {
         let _ = std::fs::remove_dir_all(&tmp);
         write_all(&tmp);
         let mut drift = Vec::new();
-        for rel in [
-            "src/generated.ts",
-            "schema/protocol-v1.schema.json",
-            "schema/capabilities-v1.schema.json",
-            "fingerprints.json",
-        ] {
-            let expected = std::fs::read_to_string(tmp.join(rel))
-                .unwrap_or_else(|e| fail(format!("read tmp artifact {rel}: {e}")));
-            let current = std::fs::read_to_string(out.join(rel)).unwrap_or_default();
-            if expected != current {
-                drift.push(rel.to_string());
-            }
+        let rel = "src/generated.ts";
+        let expected = std::fs::read_to_string(tmp.join(rel))
+            .unwrap_or_else(|e| fail(format!("read tmp artifact {rel}: {e}")));
+        let current = std::fs::read_to_string(out.join(rel)).unwrap_or_default();
+        if expected != current {
+            drift.push(rel.to_string());
         }
         let _ = std::fs::remove_dir_all(&tmp);
         if !drift.is_empty() {

@@ -190,7 +190,7 @@ for (const id of ["queue-basic", "queue-retry"]) {
     const transcript = readJson(`${id}/expected/transcript.json`);
     assert.equal(doc.scenario, `desktop/${id}`);
     assert.equal(doc.capabilities.bulkSupported, true, "queue scenarios need bulkSupported");
-    assert.equal(doc.protocol, "1.0");
+    assert.equal(doc.protocol, "2.0");
     assert.equal(doc.redacted, true);
     assert.ok(!JSON.stringify(doc).includes("CANARY"), "no secrets in the scenario");
     const { queue: q, events, byIndex } = runQueueScript(doc);

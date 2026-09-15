@@ -56,7 +56,7 @@
       "total": 2
     }
   },
-  "protocol": "1.0",
+  "protocol": "2.0",
   "provenance": "fixture",
   "redacted": true,
   "scenario": "desktop/queue-retry",

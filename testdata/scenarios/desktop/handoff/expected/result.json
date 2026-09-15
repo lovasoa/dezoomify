@@ -129,7 +129,7 @@
     "tileCount": 4,
     "width": 512
   },
-  "protocol": "1.0",
+  "protocol": "2.0",
   "provenance": "fixture",
   "readableBytes": true,
   "redacted": true,

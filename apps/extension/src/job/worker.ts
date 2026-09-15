@@ -33,7 +33,7 @@ function engineError(error: unknown) {
 
 /** @param {Record<string, unknown>} command */
 function commandBytes(command: Record<string, unknown>): Uint8Array {
-  return encoder.encode(`${JSON.stringify({ protocol: "1.0", kind: "command", ...command })}\n`);
+  return encoder.encode(`${JSON.stringify({ protocol: "2.0", kind: "command", ...command })}\n`);
 }
 
 /** @param {{ postMessage: (message: unknown) => void, wasm: () => Promise<any> }} deps */
@@ -70,7 +70,7 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
     const wasm = await deps.wasm();
     if (disposed) return;
     await wasm.default?.();
-    session = new wasm.Session("1.0", JSON.stringify(message.quotas ?? {}));
+    session = new wasm.Session("2.0", JSON.stringify(message.quotas ?? {}));
     dispatch({ type: "start", job: message.jobId, input_url: message.inputUrl });
   }
 

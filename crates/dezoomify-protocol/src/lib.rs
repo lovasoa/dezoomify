@@ -1,4 +1,4 @@
-//! Canonical protocol version 1: the single authored source for commands,
+//! Canonical protocol version 2: the single authored source for commands,
 //! effects, responses, events, capabilities, handoff, output, recovery, and
 //! errors. `packages/protocol-ts` is generated from [`dto`]; never duplicate
 //! these shapes by hand.

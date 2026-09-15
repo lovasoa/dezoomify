@@ -45,14 +45,13 @@
       "dezoomify://job-error",
       "dezoomify://deep-link-pending"
     ],
-    "fingerprint": "b4bad92b24615c58",
     "nativeHost": {
       "name": "dev.ophir.dezoomify.native_host"
     },
     "protocol": {
-      "max": "1.0",
-      "min": "1.0",
-      "version": "1.0"
+      "max": "2.0",
+      "min": "2.0",
+      "version": "2.0"
     },
     "updater": {
       "allowlist": [],

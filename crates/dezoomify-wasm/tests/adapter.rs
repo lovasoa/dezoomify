@@ -36,7 +36,7 @@ const GOLDEN_PATH: &str = concat!(
 );
 
 fn new_session() -> Session {
-    Session::new("1.0", "{}").expect("default session constructs")
+    Session::new("2.0", "{}").expect("default session constructs")
 }
 
 fn envelope_bytes(body: ControlBody) -> Vec<u8> {
@@ -108,18 +108,18 @@ fn decode_all(messages: &[Vec<u8>]) -> Vec<ControlEnvelope> {
 
 #[test]
 fn version_export_and_constructor_gates() {
-    assert_eq!(protocol_version(), "1.0");
-    assert!(Session::new("1", "{}").is_ok());
+    assert_eq!(protocol_version(), "2.0");
+    assert!(Session::new("2.0", "{}").is_ok());
     assert_eq!(
-        Session::new("2.0", "{}").unwrap_err().code(),
+        Session::new("1.0", "{}").unwrap_err().code(),
         AdapterErrorCode::VersionUnsupported
     );
     assert_eq!(
-        Session::new("1.0", "{oops}").unwrap_err().code(),
+        Session::new("2.0", "{oops}").unwrap_err().code(),
         AdapterErrorCode::Malformed
     );
     assert_eq!(
-        Session::new("1.0", r#"{"max_buffer_bytes": 99999999999}"#)
+        Session::new("2.0", r#"{"max_buffer_bytes": 99999999999}"#)
             .unwrap_err()
             .code(),
         AdapterErrorCode::LimitExceeded
@@ -209,7 +209,7 @@ fn buffer_limits_use_checked_arithmetic() {
         "double commit is wrong-state"
     );
     // Session-total quota is enforced before allocation.
-    let mut tight = Session::new("1.0", r#"{"max_total_bytes": 16}"#).expect("tight quotas");
+    let mut tight = Session::new("2.0", r#"{"max_total_bytes": 16}"#).expect("tight quotas");
     tight.allocate_buffer(16).expect("fills quota");
     assert_eq!(
         tight.allocate_buffer(1).unwrap_err().code(),
@@ -241,7 +241,7 @@ fn dispatch_rejects_malformed_and_wrong_versions_atomically() {
         job: "job:x".parse().unwrap(),
     });
     let mut envelope = ControlEnvelope::new(body).unwrap();
-    envelope.protocol = "2.0".to_string();
+    envelope.protocol = "1.0".to_string();
     let bytes = codec::encode(&envelope).unwrap();
     assert_eq!(
         session.dispatch(&bytes).unwrap_err().code(),

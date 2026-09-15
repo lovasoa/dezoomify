@@ -2,20 +2,14 @@
 
 ## Protocol versions
 
-Current protocol is 1.0; N-1 is 1.0 (single-version rollout; see `release/compatibility.toml`).
+Current and minimum protocol are 2.0 (single-version rollout; see `release/compatibility.toml`).
 
 Every connection starts with the [version handshake](protocol.md#version-handshake):
-application version, protocol version range, schema fingerprint, runtime kind,
-and capabilities. Peers select a mutually supported protocol version before
-exchanging job data. Handoff data carries app version, protocol version, schema
-fingerprint, required capabilities, and expiration; receivers treat every field
-as untrusted input, validate it, and require user confirmation before effects.
-No version overlap stops safely with `protocol.incompatible` and an update
-recovery action. N-2 and future versions fail with guided update or manual
-flows. Store and updater lag never activates unsupported features; website
-offers follow published capabilities. Release automation verifies generated
-bindings, schema fingerprints, compatibility fixtures, and this matrix (see
-[Releases](releases.md)).
+application version and protocol version. Protocol 1.x and future versions stop
+safely with `protocol.incompatible` and an update recovery action; there is no
+translation layer. Handoff application input remains untrusted and requires
+confirmation before effects. Release automation verifies generated bindings,
+compatibility fixtures, and this matrix (see [Releases](releases.md)).
 
 ## Browsers and operating systems
 

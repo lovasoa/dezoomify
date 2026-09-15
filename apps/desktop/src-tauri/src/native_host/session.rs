@@ -19,7 +19,7 @@ use std::collections::HashSet;
 /// Current and minimum (N-1) native protocol versions.
 pub const CURRENT_NATIVE_PROTOCOL: u32 = 2;
 /// Minimum supported (N-1).
-pub const MIN_NATIVE_PROTOCOL: u32 = 1;
+pub const MIN_NATIVE_PROTOCOL: u32 = 2;
 /// One-use session lifetime (ms).
 pub const HANDOFF_TTL_MS: u64 = 5 * 60 * 1000;
 /// Maximum origins per handoff consent.
@@ -284,9 +284,12 @@ mod tests {
     }
 
     #[test]
-    fn version_negotiation_current_and_n_minus_1() {
+    fn version_negotiation_accepts_only_current() {
         assert!(begin_session(true, 2, "j", "e", "c", "n", 0).is_ok());
-        assert!(begin_session(true, 1, "j", "e", "c", "n", 0).is_ok());
+        assert_eq!(
+            begin_session(true, 1, "j", "e", "c", "n", 0),
+            Err(SessionError::IncompatibleVersion { got: 1 })
+        );
         assert_eq!(
             begin_session(true, 0, "j", "e", "c", "n", 0),
             Err(SessionError::IncompatibleVersion { got: 0 })

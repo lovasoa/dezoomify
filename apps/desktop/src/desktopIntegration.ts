@@ -8,9 +8,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 // Keep erasable syntax only so node type-stripping can read this file.
 
-export const PROTOCOL_MIN = "1.0" as const;
-export const PROTOCOL_MAX = "1.0" as const;
-export const PROTOCOL_VERSION = "1.0" as const;
+export const PROTOCOL_MIN = "2.0" as const;
+export const PROTOCOL_MAX = "2.0" as const;
+export const PROTOCOL_VERSION = "2.0" as const;
 export const NATIVE_HOST_NAME = "dev.ophir.dezoomify.native_host" as const;
 export const APP_IDENTIFIER = "dev.ophir.dezoomify" as const;
 

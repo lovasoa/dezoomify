@@ -70,8 +70,8 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             .map_err(|e| format!("read product.md: {e}"))?,
         std::fs::read_to_string(r.join("docs/protocol.md"))
             .map_err(|e| format!("read protocol.md: {e}"))?,
-        std::fs::read_to_string(r.join("crates/dezoomify-protocol/src/dto.rs"))
-            .map_err(|e| format!("read dto.rs: {e}"))?,
+        std::fs::read_to_string(r.join("generated/desktop-capabilities.json"))
+            .map_err(|e| format!("read desktop-capabilities.json: {e}"))?,
     );
     let b = |t: &str| {
         t.find("encoders `[")
@@ -83,7 +83,7 @@ pub fn verify(a: &[String]) -> Result<(), String> {
             .all(|e| d.contains(&format!("\"{e}\"")))
     {
         return Err(format!(
-            "encoder-list drift: product.md {:?} vs protocol.md {:?} vs dto.rs [png, jpeg, tiff]",
+            "encoder-list drift: product.md {:?} vs protocol.md {:?} vs desktop capabilities [png, jpeg, tiff]",
             b(&p),
             b(&q)
         ));

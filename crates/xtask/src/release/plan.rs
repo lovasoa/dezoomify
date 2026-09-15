@@ -1,14 +1,14 @@
 //! `cargo xtask release plan`: freeze the deterministic release contract.
 //!
-//! The plan pins the version, tag, commit, protocol range, schema
-//! fingerprint, capabilities, and per-target availability from
+//! The plan pins the version, tag, commit, protocol range, capabilities,
+//! and per-target availability from
 //! `release/*.toml` + `generated/*.json`, and refuses to silently replace
 //! an existing plan for the same version (byte-identical rewrites are the
 //! only idempotent case).
 
 use super::common::{
     app_version, git_commit, git_output, load_capabilities, load_compatibility, load_config,
-    load_targets, schema_fingerprint, validate_version, ARTIFACTS_ROOT,
+    load_targets, validate_version, ARTIFACTS_ROOT,
 };
 use super::common::{Plan, PlanProtocol, PlanTarget};
 use std::path::{Path, PathBuf};
@@ -52,7 +52,6 @@ fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
         ));
     }
     let commit = git_commit()?;
-    let fingerprint = schema_fingerprint()?;
     let plan = Plan {
         tag: if numbered {
             format!("v{version}")
@@ -68,7 +67,6 @@ fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
             compatibility_current: compat.compatibility.current.clone(),
             compatibility_n_minus_1: compat.compatibility.n_minus_1.clone(),
         },
-        schema_fingerprint: fingerprint.clone(),
         capabilities: caps.capabilities.clone(),
         targets: targets
             .list

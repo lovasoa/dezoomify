@@ -6,7 +6,7 @@ types here generate `packages/protocol-ts`, so both sides stay in lockstep
 (checked by golden round-trip tests).
 
 ```sh
-cargo xtask protocol generate   # regenerate TypeScript + schemas
-cargo xtask protocol check      # goldens, fingerprints, WASM portability
+cargo xtask protocol generate   # regenerate TypeScript bindings
+cargo xtask protocol check      # goldens, generated bindings, WASM portability
 cargo xtask test protocol
 ```
