@@ -26,7 +26,6 @@
           "format": "deepzoom",
           "height": 512,
           "id": "img:dzi:0",
-          "label": "image",
           "levels": [
             {
               "height": 1,
@@ -101,6 +100,7 @@
           ],
           "readiness": "ready",
           "sourceKind": "grid",
+          "title": "image",
           "width": 512
         }
       ]

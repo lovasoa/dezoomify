@@ -98,7 +98,7 @@ export type ExtensionTransportOutcome = "source-document-lost" | "access-require
 
 export interface RequestDto {{ id: string; uri: string; headers: {{ name: string; value: string }}[]; purpose: RequestPurpose }}
 export interface BufferHandle {{ id: string; generation: number; length: number; checksum?: string }}
-export interface ImageDto {{ id: string; label: string; format: string; width: number; height: number; readiness: Readiness; sourceKind: string; levels: LevelDto[] }}
+export interface ImageDto {{ id: string; title?: string; format: string; width: number; height: number; readiness: Readiness; sourceKind: string; levels: LevelDto[] }}
 export interface LevelDto {{ id: string; width: number; height: number; tileWidth: number; tileHeight: number }}
 export interface CatalogDto {{ images: ImageDto[] }}
 export interface CandidateDto {{ id: string; url: string; formatHint: string; confidence: number; reason: string; dedupKey: string; sourceFrame: string }}

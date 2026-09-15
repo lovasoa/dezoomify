@@ -300,7 +300,8 @@ pub struct LevelDto {
 #[serde(rename_all = "camelCase")]
 pub struct ImageDto {
     pub id: ImageId,
-    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub format: String,
     pub width: u64,
     pub height: u64,
@@ -1100,7 +1101,7 @@ mod tests {
         let catalog = CatalogDto {
             images: vec![ImageDto {
                 id: "img:test".parse().expect("image id"),
-                label: "Test".into(),
+                title: Some("Test".into()),
                 format: "test".into(),
                 width: 512,
                 height: 512,
@@ -1116,6 +1117,7 @@ mod tests {
             }],
         };
         let value = serde_json::to_value(catalog).expect("catalog serializes");
+        assert_eq!(value["images"][0]["title"], "Test");
         assert_eq!(value["images"][0]["sourceKind"], "grid");
         assert_eq!(value["images"][0]["levels"][0]["tileWidth"], 256);
         assert!(value["images"][0].get("source_kind").is_none());

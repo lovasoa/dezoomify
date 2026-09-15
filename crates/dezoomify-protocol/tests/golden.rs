@@ -450,7 +450,7 @@ fn all_events(job: &JobId) -> Vec<JobEvent> {
     let catalog = CatalogDto {
         images: vec![ImageDto {
             id: "img:1".parse().unwrap(),
-            label: "One".into(),
+            title: Some("One".into()),
             format: "Zoomify".into(),
             width: 256,
             height: 256,

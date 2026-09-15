@@ -14,6 +14,8 @@ import type { CatalogDto, ImageDto, LevelDto } from "../../protocol-ts/src/gener
 export interface EngineSelection {
   image: string;
   level: string;
+  /** Optional core-extracted title, never a UI fallback. */
+  title?: string;
 }
 
 function levelArea(level: LevelDto): number | null {
@@ -73,5 +75,9 @@ export function pickEngineSelection(
   }
   const chosen = best ?? smallest;
   if (!chosen) return null;
-  return { image: bestImage.id, level: chosen.id };
+  return {
+    image: bestImage.id,
+    level: chosen.id,
+    ...(typeof bestImage.title === "string" ? { title: bestImage.title } : {}),
+  };
 }
