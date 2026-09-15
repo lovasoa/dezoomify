@@ -78,6 +78,8 @@ test("deterministic 2x2 save produces a real decodable PNG", async () => {
   assert.equal(res.width, 2);
   assert.equal(res.height, 2);
   assert.ok(res.filename.includes("2x2"));
+  const titled = await saveReadable(surface2x2(pixels), "png", { title: "Core title" });
+  assert.equal(titled.filename, "Core title.png");
   // Deterministic: same input -> same bytes.
   const again = await saveReadable(surface2x2(pixels), "png");
   assert.deepEqual([...res.bytes], [...again.bytes]);

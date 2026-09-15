@@ -98,6 +98,7 @@ let currentSeq = 0;
 let client: DiscoveryClient | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
+let resultTitle: string | undefined;
 // Pause v1 (todo 5.7, suspend-acquisition): the website stops scheduling new
 // tiles while paused, finishes in-flight work, retains the canvas, and
 // re-drives on resume. Integration-layer only; the engine pause lives in
@@ -352,6 +353,7 @@ async function runJob(url: string): Promise<void> {
   viewCtx.completedInfo = undefined;
   viewCtx.sourceUrl = undefined;
   viewCtx.desktopHandoffUrl = undefined;
+  resultTitle = undefined;
   // Hash owns the active job only: queued URLs never touch the hash until
   // they become active and reach this point.
   writeHash(url);
@@ -389,6 +391,7 @@ async function runJob(url: string): Promise<void> {
       throw failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false);
     }
     const image = catalog.images.find((entry) => entry.id === selection.image);
+    resultTitle = image?.title;
     const level = image?.levels.find((entry) => entry.id === selection.level);
     const declared = level && level.width > 0 && level.height > 0
       ? { x: level.width, y: level.height }
@@ -827,6 +830,7 @@ function update(): void {
           resultBlobUrl,
           viewCtx.completedInfo?.width,
           viewCtx.completedInfo?.height,
+          resultTitle,
         );
       },
       onCopyDiagnostics(text: string) {

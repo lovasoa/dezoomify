@@ -180,39 +180,18 @@ fn extension_for(format: OutputFormat) -> &'static str {
     }
 }
 
-fn safe_output_stem(title: Option<&str>) -> String {
-    let mut stem = String::new();
-    let mut previous_separator = false;
-    for character in title.unwrap_or("dezoomify").chars() {
-        if character.is_alphanumeric() {
-            stem.push(character);
-            previous_separator = false;
-        } else if !previous_separator {
-            stem.push('-');
-            previous_separator = true;
-        }
-        if stem.len() >= 120 {
-            break;
-        }
-    }
-    let stem = stem.trim_matches('-');
-    let lower = stem.to_ascii_lowercase();
-    let reserved_windows_name = matches!(lower.as_str(), "con" | "prn" | "aux" | "nul")
-        || (lower.len() == 4
-            && (lower.starts_with("com") || lower.starts_with("lpt"))
-            && lower
-                .as_bytes()
-                .last()
-                .is_some_and(|byte| matches!(byte, b'1'..=b'9')));
-    if stem.is_empty() || reserved_windows_name {
-        "dezoomify".to_string()
-    } else {
-        stem.to_string()
-    }
-}
-
-fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat) -> PathBuf {
-    let stem = safe_output_stem(title);
+fn auto_output_path(
+    output_dir: &Path,
+    title: Option<&str>,
+    canvas: Option<Vec2d>,
+    format: OutputFormat,
+) -> PathBuf {
+    let stem = title
+        .and_then(crate::output::safe_title_stem)
+        .unwrap_or_else(|| match canvas {
+            Some(size) if size.x > 0 && size.y > 0 => format!("dezoomify-{}x{}", size.x, size.y),
+            _ => "dezoomify".to_string(),
+        });
     let extension = extension_for(format);
     let first = output_dir.join(format!("{stem}.{extension}"));
     if !first.exists() {
@@ -735,11 +714,11 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("")
                         .to_string();
-                    // `label` is the protocol projection of the core image
-                    // title (or its stable fallback), so it is the safe
-                    // cross-boundary source for the automatic basename.
+                    // `title` preserves the optional core extraction. The
+                    // UI `label` has a stable fallback and must never become
+                    // an output filename.
                     let title = image
-                        .get("label")
+                        .get("title")
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_string);
                     let mut levels = Vec::new();
@@ -1040,7 +1019,8 @@ fn execute_effects(
                         .and_then(|index| attempt.catalog.get(index))
                         .or_else(|| attempt.catalog.first())
                         .and_then(|image| image.title.as_deref());
-                    attempt.output_path = auto_output_path(output_dir, title, attempt.format);
+                    attempt.output_path =
+                        auto_output_path(output_dir, title, attempt.canvas, attempt.format);
                 }
                 match validate_destination(&attempt.output_path, &attempt.format, attempt.overwrite)
                 {
@@ -1737,18 +1717,28 @@ mod tests {
     #[test]
     fn automatic_output_names_are_title_based_and_safe() {
         assert_eq!(
-            safe_output_stem(Some("The / Great: Picture?")),
-            "The-Great-Picture"
+            crate::output::safe_title_stem("The / Great: Picture?"),
+            Some("The _ Great_ Picture_".into())
         );
-        assert_eq!(safe_output_stem(Some("...")), "dezoomify");
-        assert_eq!(safe_output_stem(Some("CON")), "dezoomify");
+        assert_eq!(crate::output::safe_title_stem("..."), None);
+        assert_eq!(crate::output::safe_title_stem("CON"), None);
         assert_eq!(
             auto_output_path(
                 Path::new("/pictures"),
                 Some("A fine work"),
+                None,
                 OutputFormat::Jpeg
             ),
-            PathBuf::from("/pictures/A-fine-work.jpg")
+            PathBuf::from("/pictures/A fine work.jpg")
+        );
+        assert_eq!(
+            auto_output_path(
+                Path::new("/pictures"),
+                None,
+                Some(Vec2d { x: 800, y: 600 }),
+                OutputFormat::Png
+            ),
+            PathBuf::from("/pictures/dezoomify-800x600.png")
         );
     }
 }

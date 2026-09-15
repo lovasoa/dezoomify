@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extensionForSaveFormat, suggestedNameFor } from "../src/save-name.ts";
+import { extensionForSaveFormat, safeTitleStem, suggestedNameFor } from "../src/save-name.ts";
 import { suggestedNameFor as sharedSuggestedNameFor } from "../../shared-ui/src/saveName.ts";
 import {
   BROWSER_SESSION_TRANSPORT_LABEL,
@@ -31,6 +31,14 @@ test("suggestedNameFor builds dezoomify-WxH names with format extensions", () =>
   assert.equal(suggestedNameFor(800, 600, "zif"), "dezoomify-800x600.zif");
   assert.equal(suggestedNameFor(800, 600, "webp"), "dezoomify-800x600.webp");
   assert.equal(suggestedNameFor(800, 600, "iiif-dir"), "dezoomify-800x600.iiif");
+});
+
+test("suggestedNameFor prefers a safe core title and rejects unsafe stems", () => {
+  assert.equal(suggestedNameFor(800, 600, "png", "Portrait: Étude"), "Portrait_ Étude.png");
+  assert.equal(suggestedNameFor(800, 600, "jpeg", "  A / B.  "), "A _ B.jpg");
+  assert.equal(suggestedNameFor(800, 600, "png", "CON"), "dezoomify-800x600.png");
+  assert.equal(suggestedNameFor(800, 600, "png", "..."), "dezoomify-800x600.png");
+  assert.equal(safeTitleStem("A\u0000B"), "A_B");
 });
 
 test("shared-ui re-exports the canonical save-name helper (no fork)", () => {

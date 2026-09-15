@@ -8,6 +8,42 @@ use std::path::Path;
 
 use crate::error::NativeError;
 
+/// Convert an untrusted core title into a portable file stem.
+///
+/// This is the sole native title-to-filename policy. Callers add their own
+/// extension and collision suffix after this conversion.
+#[must_use]
+pub fn safe_title_stem(title: &str) -> Option<String> {
+    let title = title.trim();
+    let mut stem = String::new();
+    for character in title.chars().take(120) {
+        if matches!(
+            character,
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+        ) || character == '\0'
+            || character.is_control()
+        {
+            stem.push('_');
+        } else {
+            stem.push(character);
+        }
+    }
+    let stem = stem.trim_end_matches(['.', ' ']).trim();
+    let device_stem = stem.split('.').next().unwrap_or("").to_ascii_lowercase();
+    let reserved_windows_name = matches!(device_stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || (device_stem.len() == 4
+            && (device_stem.starts_with("com") || device_stem.starts_with("lpt"))
+            && device_stem
+                .as_bytes()
+                .last()
+                .is_some_and(|byte| matches!(byte, b'1'..=b'9')));
+    if stem.is_empty() || stem == "." || stem == ".." || reserved_windows_name {
+        None
+    } else {
+        Some(stem.to_string())
+    }
+}
+
 /// One rendered `iiif-dir` tile set: `(relative path, bytes)` pairs in
 /// sorted relative-path order for a deterministic digest.
 pub type IiifTiles = Vec<(String, Vec<u8>)>;

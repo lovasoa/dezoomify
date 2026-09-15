@@ -43,6 +43,7 @@ let started = false;
 let selected = false;
 let hostFailed = false;
 let lastSource = "";
+let selectedTitle: string | undefined;
 // The engine emits the initial 0/N tile snapshot before it dispatches tile
 // effects. Keep it while a permission view temporarily replaces the job view
 // so approval resumes the same determinate progress display immediately.
@@ -206,7 +207,7 @@ function createAssembly(sourceUrl: string) {
       if (!(blob instanceof Blob)) throw new TypeError("encoded output is not a Blob");
       const url = URL.createObjectURL(blob);
       try {
-        saveBlobViaAnchor(document, url, width, height);
+        saveBlobViaAnchor(document, url, width, height, selectedTitle);
       } finally {
         // The anchor save reads the URL synchronously; revoke lazily so the
         // browser never races a slow download start.
@@ -237,6 +238,7 @@ function handleEvent(event: JobEvent) {
       controller?.cancel();
       return;
     }
+    selectedTitle = selection.title;
     render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
     controller?.selectImage(selection.image);
     controller?.selectLevel(selection.level);

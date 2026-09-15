@@ -81,10 +81,11 @@ export function saveBlobViaAnchor(
   blobUrl: string,
   width?: unknown,
   height?: unknown,
+  title?: unknown,
 ): void {
   const anchor = doc.createElement("a");
   anchor.href = blobUrl;
-  anchor.download = suggestedNameFor(width, height, "png");
+  anchor.download = suggestedNameFor(width, height, "png", title);
   doc.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

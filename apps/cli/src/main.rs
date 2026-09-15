@@ -99,13 +99,10 @@ fn run_single_from_cli(parsed: Args) {
         eprintln!("error: no input given");
         std::process::exit(2);
     }
-    let output = match parsed.output.clone() {
-        Some(output) => output,
-        None => single_auto_output(None, None),
-    };
+    let output = parsed.output.clone();
     let mut parsed = Args {
         input: Some(input.clone()),
-        output: Some(output.clone()),
+        output: output.clone(),
         ..parsed
     };
     if !apply_pickers(&mut parsed) {
@@ -114,7 +111,7 @@ fn run_single_from_cli(parsed: Args) {
         }
         std::process::exit(0);
     }
-    let ok = run_single_inner(&parsed, &input, &output);
+    let ok = run_single_inner(&parsed, &input, output.as_deref());
     if !ok {
         std::process::exit(1);
     }
@@ -144,10 +141,10 @@ fn run_interactive_loop(base: Args) {
             has_errors = true;
             continue;
         }
-        let output = single_auto_output(None, None);
+        let output = base.output.clone();
         let mut parsed = Args {
             input: Some(input.clone()),
-            output: Some(output.clone()),
+            output: output.clone(),
             ..base.clone()
         };
         if !apply_pickers(&mut parsed) {
@@ -156,7 +153,7 @@ fn run_interactive_loop(base: Args) {
             }
             break;
         }
-        if !run_single_inner(&parsed, &input, &output) {
+        if !run_single_inner(&parsed, &input, output.as_deref()) {
             has_errors = true;
         }
     }
@@ -325,11 +322,13 @@ fn emit_verbose_diagnostics(level: &str, parsed: &Args) {
     }
 }
 
-fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
+fn run_single_inner(parsed: &Args, input: &str, output: Option<&Path>) -> bool {
     let level = parsed.logging.as_str();
     emit_verbose_diagnostics(level, parsed);
     let runtime = NativeRuntime::new(1 << 30);
-    let output_str = output.to_string_lossy().into_owned();
+    let output_str = output
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut handle = match runtime.start(JobRequest {
         input_url: input.to_string(),
         output_path: output_str.clone(),
@@ -353,18 +352,25 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
 
     let config = pipeline_config_for(parsed);
     let json = parsed.json;
-    let result = pipeline::run(
-        input,
-        &output_str,
-        parsed.overwrite,
-        &config,
-        &mut |event: PipelineEvent| {
-            handle.emit_detail(&event.kind, event.detail.clone());
-            if let Some(last) = handle.events().last() {
-                print_event(json, last, level);
-            }
-        },
-    );
+    let mut on_event = |event: PipelineEvent| {
+        handle.emit_detail(&event.kind, event.detail.clone());
+        if let Some(last) = handle.events().last() {
+            print_event(json, last, level);
+        }
+    };
+    let result = match output {
+        Some(_) => pipeline::run(input, &output_str, parsed.overwrite, &config, &mut on_event),
+        None => {
+            let output_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            pipeline::run_auto_named(
+                input,
+                &output_dir,
+                dezoomify_native::output::OutputFormat::Png,
+                &config,
+                &mut on_event,
+            )
+        }
+    };
     match result {
         Ok(outcome) => {
             handle.finish();
@@ -480,72 +486,11 @@ fn bulk_output_for(base: Option<&Path>, title: Option<&str>, index: usize) -> Pa
         return arguments::generate_bulk_output_name(base, index);
     }
     if let Some(title) = title {
-        let clean = sanitize_title(title);
-        if !clean.is_empty() {
+        if let Some(clean) = dezoomify_native::output::safe_title_stem(title) {
             return PathBuf::from(format!("{clean}.png"));
         }
     }
     PathBuf::from(format!("dezoomify_{}.png", index + 1))
-}
-
-/// Single-image auto-naming, porting `output_file::get_outname` for the
-/// omitted-output case: sanitized title or `dezoomify` fallback, JPEG-fit
-/// extension, and `_0001` collision suffixes. The title and size are unknown
-/// before the native run, so callers pass `None` and the fallback plus PNG
-/// apply; the helper still honors titles and JPEG fit when given (tests).
-fn single_auto_output(title: Option<&str>, size: Option<(u32, u32)>) -> PathBuf {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let fits_in_jpg = size.is_some_and(|(x, y)| x.max(y) <= u16::MAX as u32);
-    let extension = if fits_in_jpg { "jpg" } else { "png" };
-    let base = title
-        .map(sanitize_title)
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "dezoomify".to_string());
-    let mut path = base_dir.join(format!("{base}.{extension}"));
-    if !path.exists() {
-        return path;
-    }
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("dezoomify")
-        .to_string();
-    for i in 1.. {
-        let candidate = base_dir.join(format!("{stem}_{i:04}.{extension}"));
-        if !candidate.exists() {
-            path = candidate;
-            break;
-        }
-    }
-    path
-}
-
-fn sanitize_title(title: &str) -> String {
-    // Keep readable titles: ": " becomes " - " before sanitizing, mirroring
-    // the reference `filename_from_title`. Remaining illegal characters
-    // (path separators, Windows-reserved `<>:\"/\\|?*`, controls, NUL)
-    // become underscores.
-    let dashed = title.replace(": ", " - ");
-    let mut clean = String::with_capacity(dashed.len());
-    for ch in dashed.chars() {
-        if ch == '/'
-            || ch == '\\'
-            || ch == ':'
-            || ch == '\0'
-            || ch == '?'
-            || ch == '"'
-            || ch == '*'
-            || ch == '<'
-            || ch == '>'
-            || ch == '|'
-            || ch.is_control()
-        {
-            clean.push('_');
-        } else {
-            clean.push(ch);
-        }
-    }
-    clean.trim().to_string()
 }
 
 fn run_one_bulk_image(

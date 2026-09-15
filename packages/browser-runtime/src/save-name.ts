@@ -1,7 +1,8 @@
 // Shared save-name helper: lowest layer, dependency-free.
 //
-// One suggestedNameFor() for every app. Base `dezoomify`, optional `-WxH`
-// suffix when dimensions are known positive integers, extension from format
+// One suggestedNameFor() for every app. A core-extracted title is preferred;
+// otherwise base `dezoomify`, optional `-WxH` suffix when dimensions are known
+// positive integers, extension from format
 // (png default, jpeg/jpg -> jpg, tiff/tif -> tif, zif -> zif, webp -> webp,
 // iiif/iiif-dir -> iiif). Pure, erasable-syntax-only, no I/O or DOM, so
 // Vite/WXT bundles, node type-stripping, and native shells share it.
@@ -32,12 +33,35 @@ export function extensionForSaveFormat(format: unknown): string {
   return "png";
 }
 
+/**
+ * Convert an untrusted core title into a portable file stem. Keep Unicode and
+ * readable punctuation, but reject path syntax and Windows-invalid stems.
+ */
+export function safeTitleStem(title: unknown): string | undefined {
+  if (typeof title !== "string") return undefined;
+  const cleaned = title
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .trim()
+    .replace(/[. ]+$/g, "")
+    .slice(0, 120);
+  if (cleaned === "" || cleaned === "." || cleaned === "..") return undefined;
+  const deviceStem = cleaned.split(".", 1)[0]?.toLowerCase();
+  if (
+    deviceStem === "con" || deviceStem === "prn" || deviceStem === "aux" || deviceStem === "nul" ||
+    /^(com|lpt)[1-9]$/.test(deviceStem ?? "")
+  ) return undefined;
+  return cleaned;
+}
+
 export function suggestedNameFor(
   width: unknown,
   height: unknown,
   format: unknown,
+  title?: unknown,
 ): string {
   const ext = extensionForSaveFormat(format);
+  const stem = safeTitleStem(title);
+  if (stem) return `${stem}.${ext}`;
   const w = typeof width === "number" ? width : Number(width);
   const h = typeof height === "number" ? height : Number(height);
   if (

@@ -104,6 +104,7 @@ fn image_dto(entry: &CatalogEntry) -> Result<ImageDto, ProjectionError> {
                 id: id.parse().map_err(|_| ProjectionError::InvalidImageId {
                     id: image.id.to_string(),
                 })?,
+                title: image.title.clone(),
                 label: image.title.clone().unwrap_or_else(|| image.id.to_string()),
                 format: image.format.to_string(),
                 width,
@@ -122,6 +123,7 @@ fn image_dto(entry: &CatalogEntry) -> Result<ImageDto, ProjectionError> {
                 id: id.parse().map_err(|_| ProjectionError::InvalidImageId {
                     id: image.id.to_string(),
                 })?,
+                title: image.title.clone(),
                 label: image.title.clone().unwrap_or_else(|| image.uri.clone()),
                 format: String::new(),
                 width: 0,
@@ -193,6 +195,7 @@ mod tests {
         assert_eq!(dto.images.len(), 1);
         let image = &dto.images[0];
         assert_eq!(image.id.as_str(), "img:cover");
+        assert_eq!(image.title.as_deref(), Some("Cover"));
         assert_eq!(image.label, "Cover");
         assert_eq!(image.format, "zoomify");
         assert_eq!(image.readiness, Readiness::Ready);
@@ -222,6 +225,7 @@ mod tests {
         })]);
         let dto = project_catalog(&catalog).unwrap();
         assert_eq!(dto.images[0].id.as_str(), "img:0");
+        assert_eq!(dto.images[0].title, None);
         assert_eq!(dto.images[0].label, "img:0");
         assert_eq!(dto.images[0].levels[0].id.as_str(), "lvl:0");
     }

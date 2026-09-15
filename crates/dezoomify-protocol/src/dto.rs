@@ -300,6 +300,10 @@ pub struct LevelDto {
 #[serde(rename_all = "camelCase")]
 pub struct ImageDto {
     pub id: ImageId,
+    /// Optional title extracted by the core format implementation. This stays
+    /// distinct from `label`, whose stable-id fallback is UI-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub label: String,
     pub format: String,
     pub width: u64,
@@ -1100,6 +1104,7 @@ mod tests {
         let catalog = CatalogDto {
             images: vec![ImageDto {
                 id: "img:test".parse().expect("image id"),
+                title: Some("Title".into()),
                 label: "Test".into(),
                 format: "test".into(),
                 width: 512,
