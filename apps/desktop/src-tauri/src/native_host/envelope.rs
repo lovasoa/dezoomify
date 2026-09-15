@@ -7,7 +7,7 @@
 //! scopes only, never values. Diagnostics are redacted separately
 //! (see `redaction.rs`).
 
-use serde::{Deserialize, Serialize};
+pub use dezoomify_protocol::dto::{NativeCookie as CookieEntry, NativeHostRequest as HostRequest};
 
 /// Longest accepted source URL (matches deep-link and protocol bounds).
 pub const MAX_SOURCE_URL_LEN: usize = 2048;
@@ -18,64 +18,6 @@ pub const MAX_COOKIE_NAME_LEN: usize = 256;
 pub const MAX_COOKIE_VALUE_LEN: usize = 4096;
 /// Longest challenge / nonce / job correlation id.
 pub const MAX_TOKEN_LEN: usize = 128;
-
-/// One scoped cookie in a credential message. `origin` is the exact scope
-/// the value may be used for; siblings never receive it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CookieEntry {
-    pub name: String,
-    pub value: String,
-    pub origin: String,
-}
-
-/// Extension -> host requests. `extension_id` is informational only:
-/// browser enforcement of the manifest allowlist authenticates the channel,
-/// never a self-asserted payload field.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum HostRequest {
-    Handshake {
-        #[serde(default)]
-        protocol: Option<String>,
-        #[serde(rename = "clientVersion")]
-        #[serde(default)]
-        client_version: Option<u32>,
-    },
-    Negotiate {
-        #[serde(rename = "clientVersion")]
-        client_version: u32,
-        #[serde(rename = "jobId")]
-        job_id: String,
-        #[serde(rename = "extensionId")]
-        #[serde(default)]
-        extension_id: Option<String>,
-    },
-    Consent {
-        challenge: String,
-        nonce: String,
-        #[serde(rename = "jobId")]
-        job_id: String,
-        origins: Vec<String>,
-        #[serde(rename = "cookieNames")]
-        #[serde(default)]
-        cookie_names: Vec<String>,
-        confirmed: bool,
-    },
-    Credential {
-        challenge: String,
-        nonce: String,
-        #[serde(rename = "jobId")]
-        job_id: String,
-        #[serde(rename = "sourceUrl")]
-        source_url: String,
-        origins: Vec<String>,
-        #[serde(default)]
-        cookies: Vec<CookieEntry>,
-    },
-    Decline {
-        challenge: String,
-    },
-}
 
 /// Parse one framed JSON body into a typed request.
 ///
@@ -109,7 +51,7 @@ pub fn parse_request(body: &[u8]) -> Result<HostRequest, (String, String)> {
 }
 
 /// True for http(s) source URLs without userinfo or secret-bearing content.
-/// Mirrors `HandoffDto::validate` and the desktop deep-link source rules so
+/// Mirrors the desktop deep-link source rules so
 /// handoff stays bounded, non-secret, and untrusted until confirmed.
 #[must_use]
 pub fn validate_source_url(url: &str) -> bool {
@@ -217,7 +159,7 @@ mod tests {
 
     #[test]
     fn known_kinds_parse() {
-        let req = parse_request(br#"{"kind":"handshake","protocol":"1.0"}"#).unwrap();
+        let req = parse_request(br#"{"kind":"handshake","protocol":"2.0"}"#).unwrap();
         assert!(matches!(req, HostRequest::Handshake { .. }));
         let req =
             parse_request(br#"{"kind":"negotiate","clientVersion":2,"jobId":"job:1"}"#).unwrap();

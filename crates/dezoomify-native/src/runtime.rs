@@ -210,7 +210,10 @@ impl JobHandle {
     pub fn event_context(&self) -> BTreeMap<String, String> {
         BTreeMap::from([
             ("job".to_string(), self.id.clone()),
-            ("protocol".to_string(), "1.0".to_string()),
+            (
+                "protocol".to_string(),
+                dezoomify_protocol::PROTOCOL_VERSION.to_string(),
+            ),
             ("input".to_string(), self.origin.clone()),
         ])
     }

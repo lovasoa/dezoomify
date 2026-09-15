@@ -110,7 +110,7 @@ test("generated files list exact commands and channels", () => {
   const a = DESKTOP_META;
   const b = xdezoomify(capGen);
   const c = xdezoomify(desktopCap);
-  for (const field of ["commands", "eventChannels", "encoders", "decoders", "protocol", "nativeHost", "updater", "fingerprint"]) {
+  for (const field of ["commands", "eventChannels", "encoders", "decoders", "protocol", "nativeHost", "updater"]) {
     assert.deepEqual(a[field], b[field], `tauri vs capabilities field ${field}`);
     assert.deepEqual(a[field], c[field], `tauri vs desktop-capabilities field ${field}`);
   }
@@ -126,7 +126,7 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
   assert.deepEqual(DESKTOP_META.deepLink.schemes, ["dezoomify"]);
   for (const doc of [DESKTOP_META, desktopCap]) {
     const x = xdezoomify(doc);
-    assert.deepEqual(x.protocol, { max: "1.0", min: "1.0", version: "1.0" });
+    assert.deepEqual(x.protocol, { max: "2.0", min: "2.0", version: "2.0" });
     assert.deepEqual(sorted(x.encoders), sorted(EXPECTED_ENCODERS));
     assert.equal(x.nativeHost.name, NATIVE_HOST);
     assert.equal(x.updater.enabled, false);
@@ -136,7 +136,7 @@ test("protocol range, encoders, native host, updater stay consistent", () => {
     assert.ok((x.updater.allowlist ?? []).every((u) => u.startsWith("https://")), "https allowlist");
   }
   assert.ok(lib.includes(NATIVE_HOST), "lib native host");
-  assert.ok(integration.includes('"1.0"') && integration.includes(NATIVE_HOST), "integration protocol/host");
+  assert.ok(integration.includes('"2.0"') && integration.includes(NATIVE_HOST), "integration protocol/host");
   const hostSrc = readText("../src-tauri/src/bin/dezoomify-native-host.rs");
   assert.ok(hostSrc.includes(NATIVE_HOST), "native host binary name");
   assert.ok(hostSrc.includes("capability.unavailable"), "fail-closed rejection");
@@ -244,21 +244,14 @@ test("desktop typescript stays host-neutral (no web/extension imports)", () => {
   assert.ok(/default\s*=\s*\[\]/m.test(cargo), "default features stay lean");
 });
 
-test("desktop fingerprint matches protocol-ts fingerprint (Rust/TS/schema agreement)", () => {
-  // Task 6.5: fingerprints match across Rust/TS/schema. The Rust generator
-  // (dto.rs) projects packages/protocol-ts; the desktop capability documents
-  // must carry the same fingerprint and protocol, or N/N-1 negotiation drifts.
-  const protoFp = readJson("../../../packages/protocol-ts/fingerprints.json");
+test("desktop protocol matches the v2-only release contract", () => {
   const desktopCap = readJson("../../../generated/desktop-capabilities.json");
   const x = xdezoomify(desktopCap);
-  assert.equal(x.fingerprint, protoFp.dto, "desktop fingerprint tracks Rust/TS dto fingerprint");
   const desktopProto = desktopCap.protocol ?? x.protocol;
-  assert.equal(desktopProto.version ?? desktopProto, protoFp.protocol, "protocol version tracks");
-  assert.deepEqual(desktopProto, { max: "1.0", min: "1.0", version: "1.0" });
-  // Compat fixtures: single-version rollout per release/compatibility.toml.
+  assert.deepEqual(desktopProto, { max: "2.0", min: "2.0", version: "2.0" });
   const compat = readText("../../../release/compatibility.toml");
-  assert.ok(compat.includes('current = "1.0"'), "compat current is 1.0");
-  assert.ok(compat.includes('n_minus_1 = "1.0"'), "compat N-1 is 1.0");
+  assert.ok(compat.includes('current = "2.0"'), "compat current is 2.0");
+  assert.ok(compat.includes('n_minus_1 = "2.0"'), "compat minimum is 2.0");
 });
 
 test("desktop scenario transcript is minimal and redacted", () => {

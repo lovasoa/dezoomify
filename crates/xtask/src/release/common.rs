@@ -86,19 +86,6 @@ pub(crate) fn load_capabilities() -> Result<Capabilities, String> {
     serde_json::from_str(&text).map_err(|e| format!("bad release-capabilities.json: {e}"))
 }
 
-pub(crate) fn schema_fingerprint() -> Result<String, String> {
-    let path = crate::repo_root().join("generated/desktop-capabilities.json");
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("missing generated/desktop-capabilities.json: {e}"))?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("bad desktop-capabilities.json: {e}"))?;
-    value
-        .get("fingerprint")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .ok_or_else(|| "desktop-capabilities.json lacks fingerprint".to_string())
-}
-
 // ---------------------------------------------------------------------------
 // Plan document
 // ---------------------------------------------------------------------------
@@ -110,7 +97,6 @@ pub(crate) struct Plan {
     pub(crate) channel: String,
     pub(crate) commit: String,
     pub(crate) protocol: PlanProtocol,
-    pub(crate) schema_fingerprint: String,
     pub(crate) capabilities: Vec<String>,
     pub(crate) targets: Vec<PlanTarget>,
 }
@@ -283,7 +269,6 @@ pub(crate) fn plan_from_repo() -> Plan {
             compatibility_current: compat.compatibility.current.clone(),
             compatibility_n_minus_1: compat.compatibility.n_minus_1.clone(),
         },
-        schema_fingerprint: schema_fingerprint().unwrap(),
         capabilities: caps.capabilities.clone(),
         targets: targets
             .list

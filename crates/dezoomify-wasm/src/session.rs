@@ -1243,15 +1243,15 @@ mod tests {
 
     #[test]
     fn version_negotiation_precedes_work() {
-        assert!(Session::new("1.0", "{}").is_ok());
-        assert!(Session::new("1", "{}").is_ok());
-        let error = Session::new("2.0", "{}").unwrap_err();
+        assert!(Session::new("2.0", "{}").is_ok());
+        assert!(Session::new("1", "{}").is_err());
+        let error = Session::new("1.0", "{}").unwrap_err();
         assert_eq!(error.code(), AdapterErrorCode::VersionUnsupported);
     }
 
     #[test]
     fn malformed_dispatch_leaves_session_untouched() {
-        let mut session = Session::new("1.0", "{}").unwrap();
+        let mut session = Session::new("2.0", "{}").unwrap();
         let error = session.dispatch(b"{not json}").unwrap_err();
         assert_eq!(error.code(), AdapterErrorCode::Malformed);
         assert_eq!(session.state(), SessionState::Created);
@@ -1260,7 +1260,7 @@ mod tests {
 
     #[test]
     fn start_delegates_to_engine_and_emits_fifo() {
-        let mut session = Session::new("1.0", "{}").unwrap();
+        let mut session = Session::new("2.0", "{}").unwrap();
         session.dispatch(&start_bytes("job:basic-1")).unwrap();
         assert_eq!(session.state(), SessionState::Discovering);
         let messages = session.drain_messages();

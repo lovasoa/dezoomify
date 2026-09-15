@@ -4,7 +4,7 @@
 // it imports nothing from the network and performs no fetches. It asserts:
 //   1. the required JS surface is genuinely exported and executable
 //      (protocolVersion, Session, dispatch, drain, buffers, dispose),
-//   2. the checked-in wasm transcript golden parses and carries protocol 1.0.
+//   2. the checked-in wasm transcript golden parses and carries protocol 2.0.
 //
 // Real headless-browser coverage runs through `cargo xtask test wasm
 // --browser`, which executes the compiled adapter inside Chromium via the
@@ -48,14 +48,14 @@ describe("P07-EXPORTS: generated JS surface executes", () => {
   const wasm = createRequire(import.meta.url)(GENERATED);
 
   it("exports the protocol version and Session constructor", () => {
-    assert.equal(wasm.protocolVersion(), "1.0");
+    assert.equal(wasm.protocolVersion(), "2.0");
     assert.equal(typeof wasm.Session, "function");
   });
 
   it("executes dispatch and exactly-once message draining", () => {
-    const session = new wasm.Session("1.0", "{}");
+    const session = new wasm.Session("2.0", "{}");
     const command = new TextEncoder().encode(JSON.stringify({
-      protocol: "1.0",
+      protocol: "2.0",
       kind: "command",
       type: "start",
       job: "job:node-bindings-1",
@@ -72,7 +72,7 @@ describe("P07-EXPORTS: generated JS surface executes", () => {
   });
 
   it("moves bytes through the generated arena methods", () => {
-    const session = new wasm.Session("1.0", "{}");
+    const session = new wasm.Session("2.0", "{}");
     const handle = session.allocateBuffer(4);
     session.writeBuffer(handle, 0, Uint8Array.from([3, 1, 4, 1]));
     session.commitBuffer(handle, 4);
@@ -83,13 +83,13 @@ describe("P07-EXPORTS: generated JS surface executes", () => {
 });
 
 describe("P07-WORKFLOWS: transcript golden", () => {
-  it("wasm.json is a protocol-1.0 job-engine-driven transcript array", () => {
+  it("wasm.json is a protocol-2.0 job-engine-driven transcript array", () => {
     assert.ok(existsSync(GOLDEN), "golden wasm.json is checked in");
     const golden = JSON.parse(readFileSync(GOLDEN, "utf8"));
     assert.ok(Array.isArray(golden), "golden is an array");
     assert.ok(golden.length > 3, "delegated lifecycle emits the full engine transcript");
     for (const entry of golden) {
-      assert.equal(entry.protocol, "1.0");
+      assert.equal(entry.protocol, "2.0");
     }
     const types = golden.map((entry) => entry.type);
     assert.equal(types[0], "job-state", "engine state event leads the transcript");

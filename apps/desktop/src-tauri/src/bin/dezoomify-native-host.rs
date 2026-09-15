@@ -28,7 +28,7 @@ use dezoomify_desktop::native_host::redaction;
 
 pub const HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 pub const HOST_VERSION: &str = dezoomify_desktop::APP_VERSION;
-pub const HOST_PROTOCOL: &str = "1.0";
+pub const HOST_PROTOCOL: &str = dezoomify_protocol::dto::PROTOCOL_VERSION;
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn handshake_reports_identity() {
-        let ack = handle_message("{\"kind\":\"handshake\",\"protocol\":\"1.0\"}");
+        let ack = handle_message("{\"kind\":\"handshake\",\"protocol\":\"2.0\"}");
         assert!(ack.contains(HOST_NAME));
         assert!(ack.contains(HOST_VERSION));
         assert!(ack.contains(HOST_PROTOCOL));
@@ -237,12 +237,12 @@ mod tests {
 
     #[test]
     fn framed_round_trip_preserves_bytes() {
-        let payload = br#"{"kind":"handshake","protocol":"1.0"}"#;
+        let payload = br#"{"kind":"handshake","protocol":"2.0"}"#;
         let framed = framing::encode_frame(payload).unwrap();
         let (parsed, consumed) = framing::try_parse_frame(&framed).unwrap().unwrap();
         assert_eq!(parsed, payload);
         assert_eq!(consumed, framed.len());
-        let res = handle_message("{\"kind\":\"handshake\",\"protocol\":\"1.0\"}");
+        let res = handle_message("{\"kind\":\"handshake\",\"protocol\":\"2.0\"}");
         assert!(res.contains("handshake-ack"));
     }
 }

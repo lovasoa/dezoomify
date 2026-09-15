@@ -70,7 +70,7 @@ fn reject_duplicates(text: &str) -> Result<(), String> {
 
 /// Validate an envelope's version before any work is emitted.
 pub fn check_envelope_version(envelope: &ControlEnvelope) -> Result<(), String> {
-    if envelope.protocol == PROTOCOL_VERSION || envelope.protocol == "1" {
+    if envelope.protocol == PROTOCOL_VERSION {
         Ok(())
     } else {
         Err(format!(

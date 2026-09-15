@@ -55,7 +55,7 @@
   "originClean": "n/a (native runtime decodes bytes directly; no canvas taint)",
   "outcome": "failed",
   "output": null,
-  "protocol": "1.0",
+  "protocol": "2.0",
   "provenance": "fixture",
   "readableBytes": true,
   "redacted": true,

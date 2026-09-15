@@ -27,8 +27,8 @@
 
 export const NATIVE_HOST_NAME = "dev.ophir.dezoomify.native_host";
 export const CURRENT_NATIVE_PROTOCOL = 2;
-export const MIN_NATIVE_PROTOCOL = 1;
-export const NATIVE_PROTOCOL_VERSION = "1.0";
+export const MIN_NATIVE_PROTOCOL = 2;
+export const NATIVE_PROTOCOL_VERSION = "2.0";
 export const MAX_ORIGINS = 8;
 export const MAX_COOKIE_NAMES = 64;
 export const MAX_COOKIES = 64;

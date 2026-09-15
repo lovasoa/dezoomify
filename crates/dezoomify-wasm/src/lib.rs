@@ -79,7 +79,7 @@ pub use session::{
     HARD_MAX_TOTAL_BYTES,
 };
 
-/// Protocol major/minor in lossless stable form (`"1.0"`), without creating
+/// Protocol major/minor in lossless stable form (`"2.0"`), without creating
 /// a job. This is the `protocolVersion` export.
 #[must_use]
 pub fn protocol_version() -> &'static str {
@@ -344,8 +344,8 @@ mod tests {
 
     #[test]
     fn version_export_needs_no_session() {
-        assert_eq!(protocol_version(), "1.0");
+        assert_eq!(protocol_version(), "2.0");
         assert_eq!(protocol_version(), PROTOCOL_VERSION);
-        assert_eq!((PROTOCOL_MAJOR, PROTOCOL_MINOR), (1, 0));
+        assert_eq!((PROTOCOL_MAJOR, PROTOCOL_MINOR), (2, 0));
     }
 }

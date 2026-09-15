@@ -32,7 +32,7 @@ pub const HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 /// Host application version.
 pub const HOST_VERSION: &str = crate::APP_VERSION;
 /// Dezoomify protocol version spoken on this channel.
-pub const HOST_PROTOCOL: &str = "1.0";
+pub const HOST_PROTOCOL: &str = dezoomify_protocol::dto::PROTOCOL_VERSION;
 
 /// Allowlist check for the channel extension id. Production hosts always
 /// admit (the browser enforced the manifest); tests inject denials.
@@ -139,7 +139,7 @@ impl HostState {
                 client_version,
             } => {
                 if let Some(p) = protocol {
-                    if p != HOST_PROTOCOL && p != "1" {
+                    if p != HOST_PROTOCOL {
                         return (
                             json_bytes(&Self::error_envelope(
                                 "protocol.incompatible",
@@ -683,7 +683,7 @@ mod tests {
     fn handshake_reports_handoff_capability() {
         let mut state = HostState::production();
         let (res, diag) = state.handle(
-            br#"{"kind":"handshake","protocol":"1.0","clientVersion":2}"#,
+            br#"{"kind":"handshake","protocol":"2.0","clientVersion":2}"#,
             0,
             &mut || fresh_pair("x"),
         );
@@ -699,18 +699,21 @@ mod tests {
             Some(true)
         );
         assert!(diag.is_none());
-        // N-1 accepted, future rejected.
+        // Protocol 1.x and future native versions are rejected.
         let (res, _) = state.handle(
             br#"{"kind":"handshake","protocol":"1.0","clientVersion":1}"#,
             0,
             &mut || fresh_pair("x"),
         );
-        assert!(serde_json::from_slice::<serde_json::Value>(&res)
-            .unwrap()
-            .get("kind")
-            .is_some());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&res)
+                .unwrap()
+                .pointer("/error/code")
+                .and_then(|v| v.as_str()),
+            Some("protocol.incompatible")
+        );
         let (res, _) = state.handle(
-            br#"{"kind":"handshake","protocol":"1.0","clientVersion":9}"#,
+            br#"{"kind":"handshake","protocol":"2.0","clientVersion":9}"#,
             0,
             &mut || fresh_pair("x"),
         );

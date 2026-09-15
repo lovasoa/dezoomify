@@ -346,8 +346,8 @@ async fn query_capabilities(
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
-        protocol_min: "1.0".into(),
-        protocol_max: "1.0".into(),
+        protocol_min: "2.0".into(),
+        protocol_max: "2.0".into(),
         commands: COMMANDS.to_vec(),
     })
 }

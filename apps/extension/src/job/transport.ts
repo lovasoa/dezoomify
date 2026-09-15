@@ -27,7 +27,7 @@ function responseBytes(value: unknown): Uint8Array | null {
  * requestId is mandatory: it binds a future chunk sequence to one WASM
  * effect, not merely to the current job tab.
  *
- * The coordinator is responsible for the protocol ByteChunkDto/ack sequence.
+ * The coordinator owns this extension-local chunk/ack sequence.
  * This small bridge accepts its final assembled reply for now, preserving the
  * request correlation until the generated chunk bindings land.
  */

@@ -41,7 +41,7 @@
   "originClean": "n/a (no fetch was started; no canvas taint)",
   "outcome": "pending-confirmation",
   "output": null,
-  "protocol": "1.0",
+  "protocol": "2.0",
   "provenance": "fixture",
   "readableBytes": false,
   "redacted": true,

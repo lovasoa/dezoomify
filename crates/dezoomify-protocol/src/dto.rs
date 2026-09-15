@@ -1,4 +1,4 @@
-//! Authoritative protocol v1 data transfer objects. Every wire type is
+//! Authoritative protocol v2 data transfer objects. Every wire type is
 //! declared here exactly once; `generate.rs` projects this module into
 //! TypeScript, JSON Schema, and capability manifests.
 
@@ -9,32 +9,15 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Protocol major version. Unknown majors are rejected before any work.
-pub const PROTOCOL_MAJOR: u32 = 1;
+pub const PROTOCOL_MAJOR: u32 = 2;
 /// Protocol minor version. Additive optional fields only.
 pub const PROTOCOL_MINOR: u32 = 0;
 /// Exact version marker carried by every control message.
-pub const PROTOCOL_VERSION: &str = "1.0";
+pub const PROTOCOL_VERSION: &str = "2.0";
 
-/// A negotiated version range `[min, max]` (inclusive, same major).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VersionRange {
-    pub min: String,
-    pub max: String,
-}
-
-impl VersionRange {
-    #[must_use]
-    pub fn v1() -> Self {
-        Self {
-            min: PROTOCOL_VERSION.to_string(),
-            max: PROTOCOL_VERSION.to_string(),
-        }
-    }
-}
-
-/// Returns `Ok(())` for supported v1 versions, else a typed version error.
+/// Returns `Ok(())` for protocol 2.0, else a typed version error.
 pub fn negotiate_version(requested: &str) -> Result<(), ErrorDto> {
-    if requested == PROTOCOL_VERSION || requested == "1" {
+    if requested == PROTOCOL_VERSION {
         Ok(())
     } else {
         Err(ErrorDto::new(
@@ -90,15 +73,7 @@ macro_rules! id_type {
     };
 }
 
-id_type!(SessionId, "sess", "one WASM/job session; freed on dispose");
-id_type!(ScanId, "scan", "one explicit extension scan generation");
-id_type!(CandidateId, "cand", "one scan candidate within its scan");
 id_type!(JobId, "job", "one end-to-end user request");
-id_type!(
-    OperationId,
-    "op",
-    "one core discovery operation within a job"
-);
 id_type!(
     RequestId,
     "req",
@@ -121,7 +96,6 @@ id_type!(
 id_type!(DestinationId, "dst", "one host-granted output destination");
 id_type!(OutputId, "out", "one finalized output within its job");
 id_type!(RecoveryId, "rec", "one recovery decision request");
-id_type!(HandoffId, "hand", "one handoff envelope");
 
 // ---------------------------------------------------------------------------
 // Bounded integers (never `usize` on the wire)
@@ -131,28 +105,6 @@ id_type!(HandoffId, "hand", "one handoff envelope");
 pub const MAX_DIMENSION: u64 = 1 << 30;
 /// Maximum tiles/probes/retries/queue entries.
 pub const MAX_COUNT: u64 = 1 << 24;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BoundedU64(u64);
-
-impl BoundedU64 {
-    pub fn new(value: u64, max: u64) -> Result<Self, ErrorDto> {
-        if value <= max {
-            Ok(Self(value))
-        } else {
-            Err(ErrorDto::new(
-                "protocol.out-of-range",
-                ErrorPhase::Validation,
-                format!("value {value} exceeds bound {max}"),
-            ))
-        }
-    }
-
-    #[must_use]
-    pub fn get(self) -> u64 {
-        self.0
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Runtime limits, format grid, transports (one generation source for TS)
@@ -265,16 +217,6 @@ pub struct BufferHandle {
     pub checksum: Option<String>,
 }
 
-/// Who owns a buffer now; stale reuse is a typed error, never use-after-free.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum BufferState {
-    Allocated,
-    Committed,
-    Consumed,
-    Freed,
-}
-
 // ---------------------------------------------------------------------------
 // Catalog and selection
 // ---------------------------------------------------------------------------
@@ -316,108 +258,6 @@ pub struct CatalogDto {
     pub images: Vec<ImageDto>,
 }
 
-// ---------------------------------------------------------------------------
-// Scan DTOs
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StartScan {
-    pub scan: ScanId,
-    pub tab_label: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CandidateDto {
-    pub id: CandidateId,
-    pub url: String,
-    pub format_hint: String,
-    pub confidence: u8,
-    pub reason: String,
-    pub dedup_key: String,
-    pub source_frame: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScanSnapshot {
-    pub scan: ScanId,
-    pub candidates: Vec<CandidateDto>,
-    pub complete: bool,
-}
-
-// ---------------------------------------------------------------------------
-// Extension source/job bindings
-// ---------------------------------------------------------------------------
-
-/// Browser-verified ownership for one extension job. `tab_id` and `frame_id`
-/// are supplied by the browser message sender, never trusted from webpage
-/// content. A navigation increments `document_generation`, invalidating all
-/// source-context work associated with an earlier document.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SourceBindingDto {
-    pub job: JobId,
-    pub tab_id: i64,
-    pub frame_id: i64,
-    pub document_generation: u32,
-}
-
-/// A bounded, acknowledged discovery delivery from a source-tab script.
-/// Candidates are metadata only; response bytes use chunked transfer and are
-/// never embedded in a control message.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CandidateChunkDto {
-    pub binding: SourceBindingDto,
-    pub request: RequestId,
-    pub candidates: Vec<CandidateDto>,
-    pub complete: bool,
-}
-
-/// A source-context acquisition request. The coordinator routes this only to
-/// the browser sender named by `binding`; page content never supplies a
-/// binding or authorizes an origin itself.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SourceFetchRequestDto {
-    pub binding: SourceBindingDto,
-    pub request: RequestDto,
-}
-
-/// One bounded out-of-band byte chunk. `buffer` ownership follows the normal
-/// buffer lifecycle and `sequence` is acknowledged before another chunk is
-/// retained, providing backpressure across Chromium's JSON message boundary.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ByteChunkDto {
-    pub binding: SourceBindingDto,
-    pub request: RequestId,
-    pub sequence: u32,
-    pub buffer: BufferHandle,
-    pub final_chunk: bool,
-}
-
-/// Receiver acknowledgement for one `ByteChunkDto` sequence.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChunkAcknowledgementDto {
-    pub binding: SourceBindingDto,
-    pub request: RequestId,
-    pub sequence: u32,
-}
-
-/// Source-tab response state for one correlated request. These stable values
-/// let a job retain independent extension transport while accurately reporting
-/// loss of the source document or a required user grant.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ExtensionTransportOutcome {
-    SourceDocumentLost,
-    AccessRequired,
-    RedirectUnavailable,
-    Cancelled,
-    Network,
-    Throttled,
-    Malformed,
-    LimitExceeded,
-    Disconnected,
-}
-
-// ---------------------------------------------------------------------------
 // Job commands (shared UI/CLI -> job)
 // ---------------------------------------------------------------------------
 
@@ -602,10 +442,6 @@ pub enum EventKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum JobEvent {
-    ScanSnapshot {
-        job: JobId,
-        snapshot: ScanSnapshot,
-    },
     JobState {
         job: JobId,
         state: String,
@@ -659,8 +495,7 @@ impl JobEvent {
     #[must_use]
     pub fn kind(&self) -> EventKind {
         match self {
-            Self::ScanSnapshot { .. }
-            | Self::JobState { .. }
+            Self::JobState { .. }
             | Self::Catalog { .. }
             | Self::Progress { .. }
             | Self::OutputReady { .. }
@@ -679,257 +514,6 @@ impl JobEvent {
     pub fn is_terminal(&self) -> bool {
         self.kind() == EventKind::Terminal
     }
-}
-
-// ---------------------------------------------------------------------------
-// Capabilities
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CapabilitiesDto {
-    pub input_schemes: Vec<String>,
-    pub fetch_modes: Vec<String>,
-    pub decoders: Vec<String>,
-    pub processing_ops: Vec<String>,
-    pub encoders: Vec<String>,
-    pub destination_modes: Vec<String>,
-    pub storage_modes: Vec<String>,
-    pub max_concurrency: u64,
-    pub max_tile_bytes: u64,
-    #[serde(default)]
-    pub bulk_supported: bool,
-    #[serde(default = "default_handoff_supported")]
-    pub handoff_supported: bool,
-    /// Pause v1 (suspend-acquisition): the job stops scheduling new tiles,
-    /// finishes in-flight work, retains decoded output, and resumes on
-    /// command. Missing (N-1) defaults to false, disabling pause controls
-    /// without breaking the 1.0 handshake.
-    #[serde(default)]
-    pub paused_supported: bool,
-}
-
-fn default_handoff_supported() -> bool {
-    true
-}
-
-impl CapabilitiesDto {
-    /// Website baseline: 6 concurrent tile workers with per-host 5/s pacing.
-    /// The shared UI gates controls from this declaration and the job engine
-    /// re-validates the final request, so checks are never UI-only.
-    ///
-    /// Todo 5.3: the website runs a single-queue (enqueue while a job runs,
-    /// sequential) in its integration layer, so `bulk_supported` is true.
-    /// The engine stays single-job; the queue never runs concurrent jobs.
-    ///
-    /// Todo 5.7: Pause v1 (suspend-acquisition) is supported, so
-    /// `paused_supported` is true. The website pauses tile scheduling in its
-    /// integration layer; the engine pauses new `acquire-tile` effects.
-    #[must_use]
-    pub fn browser_baseline() -> Self {
-        Self {
-            input_schemes: vec!["https".into(), "http".into()],
-            fetch_modes: vec!["direct".into(), "ordinary-image-display".into()],
-            decoders: vec!["png".into(), "jpeg".into()],
-            processing_ops: vec!["composite".into()],
-            encoders: vec!["png".into()],
-            destination_modes: vec!["save".into()],
-            storage_modes: vec!["none".into()],
-            max_concurrency: 6,
-            max_tile_bytes: 8 << 20,
-            bulk_supported: true,
-            handoff_supported: true,
-            paused_supported: true,
-        }
-    }
-
-    /// Honest native baseline: PNG, JPEG, TIFF, ZIF, and WebP output to a
-    /// single file plus static `iiif-dir` tile trees, with an optional tile resume cache
-    /// and a sequential bulk queue. Deferred bulk-text entries resolve one at
-    /// a time through fresh bounded jobs. Handoff import is supported. Wave 2
-    /// widens these fields only alongside the matching pipeline, encoder,
-    /// cache, and bulk-runner implementation.
-    ///
-    /// Todo 5.3: the desktop integration runs a sequential multi-job queue
-    /// (enqueue, progress per job, cancel one/all, retry failed) over the
-    /// single-job engine, so `bulk_supported` is true. The CLI `--bulk` loop
-    /// keeps its one-bounded-run-per-entry shape and shares the same
-    /// per-entry plus totals reporting.
-    ///
-    /// Todo 5.7: Pause v1 (suspend-acquisition) is supported, so
-    /// `paused_supported` is true. The engine stops scheduling new tiles
-    /// while paused; resume re-drives the pending queue.
-    #[must_use]
-    pub fn native_baseline() -> Self {
-        Self {
-            fetch_modes: vec!["native".into()],
-            decoders: vec!["png".into(), "jpeg".into(), "tiff".into()],
-            encoders: vec![
-                "png".into(),
-                "jpeg".into(),
-                "tiff".into(),
-                "zif".into(),
-                "webp".into(),
-            ],
-            destination_modes: vec!["file".into(), "iiif-dir".into()],
-            storage_modes: vec!["cache".into()],
-            max_concurrency: 16,
-            bulk_supported: true,
-            handoff_supported: true,
-            paused_supported: true,
-            ..Self::browser_baseline()
-        }
-    }
-
-    /// Whether this host offers a queue over the single-job engine.
-    ///
-    /// The shared UI gates queue controls from this declaration; the job
-    /// engine still validates each queued request on its own. Branch on this
-    /// helper (stable capability), never on display strings.
-    #[must_use]
-    pub fn supports_bulk_queue(&self) -> bool {
-        self.bulk_supported
-    }
-
-    /// Negotiated bulk availability for a connection: both peers must support
-    /// the queue. An N-1 peer advertising `bulk_supported: false` (or omitting
-    /// the field, which defaults to false) disables queue controls without
-    /// breaking the version handshake.
-    #[must_use]
-    pub fn negotiated_bulk(local: &Self, remote: &Self) -> bool {
-        local.bulk_supported && remote.bulk_supported
-    }
-
-    /// Whether this host supports Pause v1 (suspend-acquisition).
-    ///
-    /// The shared UI gates pause controls from this declaration; the job
-    /// engine still validates each pause/resume on its own. Branch on this
-    /// helper (stable capability), never on display strings.
-    #[must_use]
-    pub fn supports_pause(&self) -> bool {
-        self.paused_supported
-    }
-
-    /// Negotiated pause availability for a connection: both peers must
-    /// support it. An N-1 peer advertising `paused_supported: false` (or
-    /// omitting the field, which defaults to false) disables pause controls
-    /// without breaking the version handshake.
-    #[must_use]
-    pub fn negotiated_pause(local: &Self, remote: &Self) -> bool {
-        local.paused_supported && remote.paused_supported
-    }
-
-    /// Stable capability keys for manifests and negotiation.
-    #[must_use]
-    pub fn keys(&self) -> Vec<String> {
-        vec![
-            "fetch_modes".into(),
-            "decoders".into(),
-            "encoders".into(),
-            "bulk".into(),
-            "handoff".into(),
-            "pause".into(),
-        ]
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Handoff (untrusted, non-secret, unsigned input)
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HandoffDto {
-    pub id: HandoffId,
-    pub source_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub candidate: Option<CandidateId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selection: Option<ImageId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_intent: Option<String>,
-    pub required_capabilities: Vec<String>,
-    pub provenance_label: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expiry_hint: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub opaque_ref: Option<String>,
-}
-
-impl HandoffDto {
-    /// Reject secrets, credentials, local paths, and signature claims.
-    pub fn validate(&self) -> Result<(), ErrorDto> {
-        for field in [
-            self.source_url.as_str(),
-            self.opaque_ref.as_deref().unwrap_or(""),
-        ] {
-            let lower = field.to_ascii_lowercase();
-            if field.contains('@') && field.contains(':') && field.contains("://") {
-                return Err(ErrorDto::new(
-                    "handoff.rejected",
-                    ErrorPhase::Validation,
-                    "handoff must not carry userinfo credentials",
-                ));
-            }
-            for needle in [
-                "cookie",
-                "set-cookie",
-                "authorization",
-                "bearer",
-                "signature",
-                "token",
-                "access_token",
-                "access-token",
-                "apikey",
-                "api-key",
-                "api_key",
-                "x-api-key",
-                "secret",
-                "password",
-                "session",
-                "file://",
-                "/etc/",
-                "c:\\",
-            ] {
-                if lower.contains(needle) {
-                    return Err(ErrorDto::new(
-                        "handoff.rejected",
-                        ErrorPhase::Validation,
-                        format!("handoff field contains forbidden token {needle}"),
-                    ));
-                }
-            }
-        }
-        if self.source_url.len() > 2048 {
-            return Err(ErrorDto::new(
-                "handoff.rejected",
-                ErrorPhase::Validation,
-                "handoff source_url exceeds 2048 bytes",
-            ));
-        }
-        Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Output
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DestinationDto {
-    pub id: DestinationId,
-    pub format: String,
-    pub width: u64,
-    pub height: u64,
-    pub partial_allowed: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OutputDto {
-    pub id: OutputId,
-    pub destination: DestinationId,
-    pub bytes: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
-    pub partial: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -955,6 +539,69 @@ pub struct RecoveryAction {
     pub kind: RecoveryKind,
     pub scope: String,
     pub rationale: String,
+}
+
+// ---------------------------------------------------------------------------
+// Native Messaging (extension <-> desktop host)
+// ---------------------------------------------------------------------------
+
+/// Native Messaging protocol version. Version 2 is the only accepted version.
+pub const NATIVE_PROTOCOL_VERSION: u32 = 2;
+
+/// One cookie transferred after explicit, origin-scoped consent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeCookie {
+    pub name: String,
+    pub value: String,
+    pub origin: String,
+}
+
+/// Extension-to-native messages. Browser manifest enforcement authenticates
+/// the sender; challenges and nonces provide session binding and replay defense.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum NativeHostRequest {
+    Handshake {
+        #[serde(default)]
+        protocol: Option<String>,
+        #[serde(rename = "clientVersion")]
+        #[serde(default)]
+        client_version: Option<u32>,
+    },
+    Negotiate {
+        #[serde(rename = "clientVersion")]
+        client_version: u32,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        #[serde(rename = "extensionId")]
+        #[serde(default)]
+        extension_id: Option<String>,
+    },
+    Consent {
+        challenge: String,
+        nonce: String,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        origins: Vec<String>,
+        #[serde(rename = "cookieNames")]
+        #[serde(default)]
+        cookie_names: Vec<String>,
+        confirmed: bool,
+    },
+    Credential {
+        challenge: String,
+        nonce: String,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        #[serde(rename = "sourceUrl")]
+        source_url: String,
+        origins: Vec<String>,
+        #[serde(default)]
+        cookies: Vec<NativeCookie>,
+    },
+    Decline {
+        challenge: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1078,8 +725,6 @@ pub enum ControlBody {
     Command(JobCommand),
     Effect(HostEffect),
     Event(JobEvent),
-    Scan(ScanSnapshot),
-    Handoff(HandoffDto),
     Error(ErrorDto),
 }
 

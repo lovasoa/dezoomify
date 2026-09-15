@@ -21,12 +21,12 @@ fn envelope_bytes(body: ControlBody) -> Vec<u8> {
 
 #[wasm_bindgen_test]
 fn protocol_version_is_1_0() {
-    assert_eq!(protocol_version(), "1.0");
+    assert_eq!(protocol_version(), "2.0");
 }
 
 #[wasm_bindgen_test]
 fn session_lifecycle_via_js_surface() {
-    let mut session = Session::new("1.0", "{}").expect("session constructs");
+    let mut session = Session::new("2.0", "{}").expect("session constructs");
     session
         .dispatch(&envelope_bytes(ControlBody::Command(JobCommand::Start {
             job: "job:wasm-pack-1".parse().expect("job id"),

@@ -17,7 +17,7 @@ Backward-compatible protocol additions keep the current major version. Removed f
 
 Web, extension, and desktop perform the [version handshake](protocol.md#version-handshake) before sending job commands. Each artifact supports a documented rolling range of protocol versions. A peer outside that range stops safely and receives `protocol.incompatible` with the appropriate update action.
 
-Handoff data carries app version, protocol version, schema fingerprint, and required capabilities. Receivers reject incompatible or expired data before confirmation or effects. Only the extension-to-native channel can separately request consent for scoped cookies.
+Handoff application input carries its app and protocol versions. Receivers reject incompatible or expired data before confirmation or effects. Only the extension-to-native channel can separately request consent for scoped cookies.
 
 ## Release gates
 
@@ -39,7 +39,7 @@ A release candidate passes:
 orchestration; every stage validates the previous stage's digests and fails
 closed on missing inputs, tools, or secrets. The plan stage freezes a
 deterministic contract (version, tag, commit, protocol range, schema
-fingerprint, capabilities, targets) from Git, `release/config.toml`,
+capabilities, targets) from Git, `release/config.toml`,
 `release/targets.toml`, `release/compatibility.toml`, and
 `generated/release-capabilities.json`. The build stage produces one target's
 artifact on the matching host; every planned target is mandatory. The verify

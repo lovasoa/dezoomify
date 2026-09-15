@@ -2,7 +2,7 @@
 
 use super::common::{
     expected_artifact_name, load_capabilities, load_compatibility, load_config, load_targets,
-    read_plan, schema_fingerprint, validate_version, Plan,
+    read_plan, validate_version, Plan,
 };
 use std::path::{Path, PathBuf};
 
@@ -57,7 +57,6 @@ pub(crate) fn release_verify(plan: &Plan, artifacts: &Path) -> Result<(), String
         || plan.protocol.compatibility_n_minus_1 != compat.compatibility.n_minus_1
         || caps.protocol != plan.protocol.range
         || caps.capabilities != plan.capabilities
-        || plan.schema_fingerprint != schema_fingerprint()?
         || plan.targets.len() != targets.list.len()
         || plan
             .targets

@@ -14,7 +14,7 @@ A pure, host-neutral Rust effect/state machine. It owns the job through output-d
 
 ### `crates/dezoomify-protocol`
 
-The Rust source of truth for commands, events, capabilities, errors, and browser-to-native handoff. It generates the schema and `packages/protocol-ts`; all forms carry protocol-version information. See [Protocol](protocol.md).
+The Rust source of truth for exercised job/WASM messages, errors, and Native Messaging requests. It generates `packages/protocol-ts`; speculative scan, chunk, handoff, capability, and placeholder-schema contracts are absent. See [Protocol](protocol.md).
 
 ### `crates/dezoomify-native`
 
