@@ -52,6 +52,9 @@ Install it from the
    fits in a browser tab. There is no list to pick from in the extension.
    For a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).
 
+Saved files use the image title Dezoomify found. If it cannot find a usable
+title, the extension falls back to `dezoomify-WxH.png`.
+
 ## What the extension does with your data
 
 - It only looks at the page you pointed it at, only after you pressed the

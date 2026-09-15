@@ -14,6 +14,7 @@ fn representative_catalog_shape_round_trips_canonically() {
         images: vec![
             ImageDto {
                 id: "img:cover".parse().unwrap(),
+                title: Some("Cover".into()),
                 label: "Cover".into(),
                 format: "Zoomify".into(),
                 width: 512,
@@ -30,6 +31,7 @@ fn representative_catalog_shape_round_trips_canonically() {
             },
             ImageDto {
                 id: "img:detail".parse().unwrap(),
+                title: None,
                 label: "Detail".into(),
                 format: "IIIF".into(),
                 width: 1024,

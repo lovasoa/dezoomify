@@ -27,6 +27,7 @@
           "height": 512,
           "id": "img:dzi:0",
           "label": "image",
+          "title": "image",
           "levels": [
             {
               "height": 1,

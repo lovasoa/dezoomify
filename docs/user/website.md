@@ -15,7 +15,9 @@ reading is part of it).
    picture, and assembles them. Large images take a while; the progress
    counter tells you how far along you are.
 5. When the picture appears, use the **Save** button (or right-click the
-   image and choose *Save image as…*). The file is saved as a PNG.
+   image and choose *Save image as…*). The file is saved as a PNG and uses
+   the image title Dezoomify found; when no usable title is available, it
+   falls back to `dezoomify-WxH.png`.
 
 If a page offers several images, the website saves the largest one it finds.
 It uses the highest resolution that fits in a browser tab.

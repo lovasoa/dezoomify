@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,12 +101,15 @@ function assertPngShape(bytes) {
   assert.deepEqual([output.width, output.height], [512, 512], "saved image dimensions");
 }
 
-async function readCompletedPng(output, deadline) {
-  let lastError = "file was never created";
+async function readCompletedPng(outputDir, deadline) {
+  let lastError = "no PNG was created";
   while (Date.now() <= deadline) {
-    if (existsSync(output)) {
+    const outputs = readdirSync(outputDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".png"))
+      .map((entry) => path.join(outputDir, entry.name));
+    if (outputs.length === 1) {
       try {
-        const bytes = readFileSync(output);
+        const bytes = readFileSync(outputs[0]);
         // Firefox creates the destination before the download stream has
         // finished. Decode the bytes before returning so the E2E observes a
         // completed save, not merely a visible pathname.
@@ -115,7 +118,7 @@ async function readCompletedPng(output, deadline) {
       } catch (error) {
         lastError = String(error?.message ?? error);
       }
-    }
+    } else if (outputs.length > 1) lastError = `expected one PNG, found ${outputs.length}`;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`Firefox saved an incomplete PNG: ${lastError}`);
@@ -231,9 +234,8 @@ async function runFirefoxJob(base, work) {
     await driver.manage().setTimeouts({ pageLoad: 15000, script: 15000, implicit: 0 });
     const addonId = await driver.installAddon(zip, true);
     assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
-    const output = path.join(downloadsDir, "dezoomify-512x512.png");
     const deadline = Date.now() + 90000;
-    return await readCompletedPng(output, deadline);
+    return await readCompletedPng(downloadsDir, deadline);
   } finally {
     await driver.quit();
   }

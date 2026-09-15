@@ -21,6 +21,21 @@ test("picks the largest declared level of the largest ready image", () => {
   assert.deepEqual(pickEngineSelection(catalog), { image: "img:1", level: "lvl:c" });
 });
 
+test("selection retains the optional core title, never a UI label fallback", () => {
+  const catalog = {
+    images: [{
+      ...image("img:title", [level("lvl:title", 64, 64)]),
+      title: "Found by core",
+      label: "Display label",
+    }],
+  };
+  assert.deepEqual(pickEngineSelection(catalog), {
+    image: "img:title",
+    level: "lvl:title",
+    title: "Found by core",
+  });
+});
+
 test("skips deferred images and images without levels", () => {
   const catalog = {
     images: [

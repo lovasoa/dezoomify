@@ -278,7 +278,7 @@ export class SaveRequiresReadableBytesError extends Error {
 export async function saveReadable(
   surface: ReadableSurfaceForSave,
   format: SaveFormat,
-  opts?: { encode?: EncodeFn },
+  opts?: { encode?: EncodeFn; title?: unknown },
 ): Promise<SaveResult> {
   // Fail closed BEFORE any canvas/pixel API.
   if (!surface.originClean) {
@@ -300,6 +300,6 @@ export async function saveReadable(
     throw new Error("encoder returned empty bytes");
   }
   const mime = mimeFor(format);
-  const filename = suggestedNameFor(surface.width, surface.height, format);
+  const filename = suggestedNameFor(surface.width, surface.height, format, opts?.title);
   return { mime, bytes, width: surface.width, height: surface.height, filename };
 }
