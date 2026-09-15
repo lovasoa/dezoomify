@@ -95,7 +95,6 @@ pub struct JobEvent {
 
 #[derive(Clone, Debug)]
 pub struct JobResult {
-    pub output_hash: String,
     pub events: usize,
 }
 
@@ -182,16 +181,13 @@ impl JobHandle {
         &self.events
     }
 
-    /// Finish with a caller-supplied output digest: hosts must supply a
-    /// digest of bytes they actually wrote, never a stub. The pipeline
-    /// computes the real sha256 of the encoded output it wrote.
-    pub fn finish(&mut self, output_hash: String) -> JobResult {
+    /// Finish after the caller has atomically published the output.
+    pub fn finish(&mut self, _deprecated_output_hash: String) -> JobResult {
         if !self.done {
             self.emit("completed");
             self.done = true;
         }
         JobResult {
-            output_hash,
             events: self.events.len(),
         }
     }

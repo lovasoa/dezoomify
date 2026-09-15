@@ -3,8 +3,7 @@
 //! effects with real HTTP, decode, assemble, encode, and atomic-write fns.
 //!
 //! All network I/O goes through [`crate::http`]; all format logic stays in
-//! `dezoomify-core`; all lifecycle policy stays in `dezoomify-job`. Failures
-//! are honest: the pipeline never fabricates progress, completion, or hashes.
+//! `dezoomify-core`; all lifecycle policy stays in `dezoomify-job`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -444,10 +443,11 @@ pub struct PipelineEvent {
     pub detail: BTreeMap<String, String>,
 }
 
-/// Successful pipeline result with the digest of the bytes actually written.
+/// Successful pipeline result for the bytes actually written.
 #[derive(Clone, Debug)]
 pub struct PipelineOutcome {
     pub output_path: PathBuf,
+    /// Deprecated compatibility field. Native output bytes are not hashed.
     pub output_hash: String,
     pub tile_count: usize,
     pub image_size: Vec2d,
@@ -985,14 +985,6 @@ pub(crate) fn render_iiif_dir(
     ));
     files.sort_by(|a, b| a.0.cmp(&b.0));
     Ok((iiif_info_json(id, width, height), files))
-}
-
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 /// Retry wait for a tile with `failures` prior failures: the base

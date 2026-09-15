@@ -42,8 +42,6 @@
 //!   tier, JPEG at quality `100 - compression`, single-image TIFF or ZIF
 //!   pyramid deflate-compressed at the configured level, lossless WebP,
 //!   or an `iiif-dir` tile
-//!   digest (over the file bytes, or over `info.json` plus tile bytes in
-//!   sorted path order for directories).
 //! * `release-bytes`/`cancel-work` → drop decoded buffers; no output is
 //!   written on the cancel path.
 //! * `request-decision{partial}` → [`PartialPolicy`]: fail (discard, honest
@@ -67,7 +65,6 @@
 //! [`OutputFormat::infer_from_path`]: crate::output::OutputFormat::infer_from_path
 //! [`render_iiif_dir`]: crate::pipeline::render_iiif_dir
 //! [`write_atomic`]: crate::output::write_atomic
-//! [`sha256_hex`]: crate::pipeline::sha256_hex
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -90,8 +87,8 @@ use crate::output::{
 use crate::pipeline::{
     available_memory_bytes, blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp,
     encode_zif_pyramid, exceeds_available_memory, fetch_and_decode_cached, merge_headers,
-    probe_tile_bytes, render_iiif_dir, sha256_hex, PartialDecision, PartialGate, PartialPolicy,
-    PartialRequest, PipelineConfig, PipelineEvent, PipelineOutcome,
+    probe_tile_bytes, render_iiif_dir, PartialDecision, PartialGate, PartialPolicy, PartialRequest,
+    PipelineConfig, PipelineEvent, PipelineOutcome,
 };
 
 /// Deferred-resolution bound: the initial discovery plus this many deferred
@@ -1469,7 +1466,7 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
         });
         blit_onto(&mut target, geom.destination, geom.extent, &decoded.image);
     }
-    let output_hash = match attempt.format {
+    match attempt.format {
         OutputFormat::Png => {
             let encoded = encode_png(
                 &target,
@@ -1482,7 +1479,6 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
             write_atomic(&dest, &encoded)?;
-            format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Jpeg => {
             let encoded = encode_jpeg(&target, attempt.config.jpeg_quality(), icc_profile)?;
@@ -1491,7 +1487,6 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
             write_atomic(&dest, &encoded)?;
-            format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Tiff => {
             let encoded = encode_tiff(&target, attempt.config.compression, icc_profile)?;
@@ -1500,7 +1495,6 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
             write_atomic(&dest, &encoded)?;
-            format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Zif => {
             let encoded = encode_zif_pyramid(&target, attempt.config.compression, icc_profile)?;
@@ -1509,7 +1503,6 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
             write_atomic(&dest, &encoded)?;
-            format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::Webp => {
             let encoded = encode_webp(&target, icc_profile)?;
@@ -1518,7 +1511,6 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                 BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
             );
             write_atomic(&dest, &encoded)?;
-            format!("sha256:{}", sha256_hex(&encoded))
         }
         OutputFormat::IiifDir => {
             let id = attempt
@@ -1534,13 +1526,12 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
                     ("files".to_string(), (tiles.len() + 1).to_string()),
                 ]),
             );
-            let preimage = write_iiif_dir(&dest, &info_json, &tiles)?;
-            format!("sha256:{}", sha256_hex(&preimage))
+            write_iiif_dir(&dest, &info_json, &tiles)?;
         }
     };
     attempt.published = Some(Published {
         output_path: dest,
-        output_hash,
+        output_hash: String::new(),
         tile_count: attempt.decoded.len(),
         image_size: Vec2d {
             x: width,

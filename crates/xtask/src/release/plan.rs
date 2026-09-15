@@ -113,8 +113,7 @@ fn release_notes(plan: &Plan) -> Result<String, String> {
         - Supported protocol: `{}` (peers back to `{}`)\n\
         - Schema fingerprint: `{}`\n\
         - Capabilities: {}\n\n\
-        ## Artifacts\n\n\
-        | Artifact | Sha256 |\n|---|---|\n",
+        ## Artifacts\n\n",
         plan.tag,
         plan.channel,
         &plan.commit[..12],
@@ -129,15 +128,9 @@ fn release_notes(plan: &Plan) -> Result<String, String> {
         }
         let name = super::common::expected_artifact_name(&target.name, &plan.version)
             .ok_or_else(|| format!("target '{}' has no artifact name rule", target.name))?;
-        notes.push_str(&format!("| `{name}` | see `SHA256SUMS` |\n"));
+        notes.push_str(&format!("- `{name}`\n"));
     }
-    notes.push_str(
-        "\nEvery artifact ships with a GPG detached signature (`.sig`); the \
-        signing public key is `release/gpg-public-key.asc` in the repository. \
-        Verify digests against `SHA256SUMS` before use.\n\n\
-        ## Install\n\n\
-        See the [user guide](https://github.com/lovasoa/dezoomify/blob/master/docs/user/README.md).\n\n",
-    );
+    notes.push_str("\n## Install\n\nSee the [user guide](https://github.com/lovasoa/dezoomify/blob/master/docs/user/README.md).\n\n");
     let curated = crate::repo_root()
         .join("release/notes")
         .join(format!("{}.md", plan.version));

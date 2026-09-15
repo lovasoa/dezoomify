@@ -1,12 +1,8 @@
 //! `cargo xtask release build`: build one target's artifact per plan.
 //!
-//! Each target builds into `target/release-dist/<version>/<target>/` and
-//! appends its digest to a per-target `SHA256SUMS` fragment. Fragments stay
-//! separate so parallel builds never share state; the `sign` stage
-//! assembles the aggregate deterministically in plan order. Rebuilds are
-//! refused: digests must stay append-only and stable.
+//! Each target builds into `target/release-dist/<version>/<target>/`.
 
-use super::common::{append_sums, expected_artifact_name, git_commit, plan_dir, read_plan, Plan};
+use super::common::{expected_artifact_name, git_commit, plan_dir, read_plan, Plan};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -38,9 +34,7 @@ pub(crate) fn build_cmd(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Builds one target's artifact and appends its digest to the aggregate
-/// SHA256SUMS. Refuses to rebuild an existing artifact (digests must stay
-/// append-only and stable).
+/// Builds one target's artifact. Refuses to rebuild an existing artifact.
 fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
     let entry = plan
         .targets
@@ -89,18 +83,6 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
     if !out.is_file() || std::fs::metadata(&out).map_err(|e| e.to_string())?.len() == 0 {
         return Err(format!("build produced no artifact at {}", out.display()));
     }
-    // Per-target digest fragment; the aggregate SHA256SUMS is assembled
-    // deterministically at sign time (parallel builds never share state).
-    let fragment = dir.join("SHA256SUMS");
-    if fragment.exists() {
-        return Err(format!(
-            "digest fragment {} already exists; remove target/release-dist/{}/{} to rebuild",
-            fragment.display(),
-            plan.version,
-            target
-        ));
-    }
-    append_sums(&fragment, &format!("{target}/{artifact}"), &out)?;
     Ok(out)
 }
 
@@ -139,7 +121,7 @@ fn build_extension_artifact(browser: &str, out: &Path) -> Result<(), String> {
 /// pipeline (lean shell, frontend, window shell, icons, host bundler), then
 /// copies the single release installer to `out`. Only the artifact named by
 /// `expected_artifact_name` ships; anything else the bundler leaves on disk
-/// is never listed in SHA256SUMS and never signed.
+/// is never published.
 fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(), String> {
     let host_ok = match target_os {
         "linux" => cfg!(target_os = "linux"),
@@ -230,22 +212,4 @@ fn run_cmd(cmd: &[&str]) -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| format!("{} failed", cmd[0]))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::common::{append_sums, parse_sums, temp_root};
-
-    #[test]
-    fn sums_parsing_and_append_guard() {
-        let dir = temp_root("sums");
-        std::fs::create_dir_all(&dir).unwrap();
-        let a = dir.join("a.bin");
-        std::fs::write(&a, b"aaa").unwrap();
-        let sums = dir.join("SHA256SUMS");
-        append_sums(&sums, "a.bin", &a).unwrap();
-        append_sums(&sums, "a.bin", &a).unwrap_err();
-        assert_eq!(parse_sums(&sums).unwrap(), vec!["a.bin".to_string()]);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }

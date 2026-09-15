@@ -137,18 +137,11 @@ jobs:
           package="dezoomify-extension-$BROWSER-$DEZOOMIFY_VERSION.zip"
           verify_dir="$(mktemp -d)"
           trap 'rm -rf "$verify_dir"' EXIT
-          gh release download "$release_tag" --dir "$verify_dir" --pattern "$asset" --pattern "$asset.sig" --pattern SHA256SUMS --pattern SHA256SUMS.sig
+          gh release download "$release_tag" --dir "$verify_dir" --pattern "$asset"
           released_package="$verify_dir/$asset"
           unzip -t "$released_package"
-          export GNUPGHOME="$verify_dir/gnupg"
-          mkdir -m 700 "$GNUPGHOME"
-          gpg --batch --import release/gpg-public-key.asc
-          gpg --batch --verify "$verify_dir/SHA256SUMS.sig" "$verify_dir/SHA256SUMS"
-          gpg --batch --verify "$verify_dir/$asset.sig" "$released_package"
-          digest="$(sha256sum "$released_package" | cut -d' ' -f1)"
-          grep -Fqx "$digest  extension-$BROWSER/$asset" "$verify_dir/SHA256SUMS"
           cp "$released_package" "$package"
-          echo "store package: signed release $release_tag/$asset"
+          echo "store package: GitHub release $release_tag/$asset"
       - name: Draft upload to Chrome Web Store
         if: inputs.browser == 'chromium' && inputs.upload == true
         env:
