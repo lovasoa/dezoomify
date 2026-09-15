@@ -2,10 +2,11 @@ name: store-submit
 # Update the EXISTING store listings (release/config.toml [extension.*]).
 # Never create a new store item: the extension IDs are public and come from
 # release/config.toml (Chromium id + Firefox/AMO guid).
-# Default is dry-run: package the store payload, validate it, and upload it
-# as a workflow artifact. Pass upload=true to push to the existing listing
-# (Chromium: draft upload; Firefox/AMO: listed-channel version upload, which
-# auto-submits for review), and publish=true to publish that Chromium upload.
+# Default is dry-run: package the store payload and upload it as a workflow
+# artifact. Pass upload=true to push to the existing listing (Chromium: draft
+# upload; Firefox/AMO: listed-channel version upload, which auto-submits for
+# review), and publish=true to publish that Chromium upload. Release calls use
+# the immutable GitHub Release ZIP rather than rebuilding the extension.
 # Draft upload and publish fail closed with a clear message when any required
 # secret is missing.
 # Chromium secrets (OAuth only, no IDs): CHROME_WS_CLIENT_ID,
@@ -48,6 +49,17 @@ on:
         required: false
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      browser:
+        required: true
+        type: string
+      commit:
+        required: true
+        type: string
+      release_tag:
+        required: true
+        type: string
 permissions:
   actions: read
   contents: read
@@ -60,23 +72,30 @@ jobs:
     environment: store-submit
     timeout-minutes: 30
     env:
-      # workflow_dispatch supplies inputs.browser; push runs have no inputs.
+      # workflow_dispatch and workflow_call supply inputs.browser; push runs
+      # have no inputs.
       BROWSER: ${{ inputs.browser || 'chromium' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
+        if: github.event_name != 'workflow_call'
         with:
           install: true
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
+        if: github.event_name != 'workflow_call'
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: github.event_name != 'workflow_call'
       - id: bindgen
         uses: ./.github/actions/setup-wasm-bindgen
+        if: github.event_name != 'workflow_call'
       - name: Build wasm glue (generated, never committed)
+        if: github.event_name != 'workflow_call'
         run: |
           set -euo pipefail
           cargo build -p dezoomify-wasm --release --target wasm32-unknown-unknown
@@ -103,6 +122,7 @@ jobs:
           fi
           echo "target listing: $cfg_id (update in place, no new item)"
       - name: Package store payload
+        if: github.event_name != 'workflow_call'
         run: |
           set -euo pipefail
           browser="${BROWSER:-chromium}"
@@ -111,30 +131,34 @@ jobs:
           echo "DEZOOMIFY_VERSION=$version" >> "$GITHUB_ENV"
           cargo xtask build extension
           cp "target/extension/dezoomify-$browser.zip" "dezoomify-extension-$browser-$version.zip"
-          unzip -l "dezoomify-extension-$browser-$version.zip"
-          sha256sum "dezoomify-extension-$browser-$version.zip"
+          unzip -t "dezoomify-extension-$browser-$version.zip"
           echo "package: ok (dezoomify-extension-$browser-$version.zip)"
       - name: Upload artifact (dry-run record)
+        if: github.event_name != 'workflow_call'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dezoomify-extension
           path: dezoomify-extension-*.zip
           retention-days: 30
       - name: Use released package for store mutation
-        if: inputs.upload == true || inputs.publish == true
+        if: github.event_name == 'workflow_call' || inputs.upload == true || inputs.publish == true
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           test "${{ inputs.publish }}" != "true" || test "${{ inputs.upload }}" = "true"
-          sha="$(git rev-parse HEAD)"
-          test "$sha" = "$(git ls-remote origin refs/heads/master | cut -f1)"
-          test -n "$(gh run list --workflow ci.yml --branch master --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          release_tag="rolling-v$DEZOOMIFY_VERSION"
-          git rev-parse "v$DEZOOMIFY_VERSION^{commit}" >/dev/null 2>&1 && release_tag="v$DEZOOMIFY_VERSION"
-          test "$(git rev-parse "$release_tag^{commit}")" = "$sha"
-          asset="dezoomify-$BROWSER-v$DEZOOMIFY_VERSION.zip"
-          package="dezoomify-extension-$BROWSER-$DEZOOMIFY_VERSION.zip"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_call" ]; then
+            release_tag="$RELEASE_TAG"
+            version="${release_tag#rolling-v}"
+            version="${version#v}"
+          else
+            version="$DEZOOMIFY_VERSION"
+            release_tag="rolling-v$version"
+            git rev-parse "v$version^{commit}" >/dev/null 2>&1 && release_tag="v$version"
+          fi
+          asset="dezoomify-$BROWSER-v$version.zip"
+          package="dezoomify-extension-$BROWSER-$version.zip"
           verify_dir="$(mktemp -d)"
           trap 'rm -rf "$verify_dir"' EXIT
           gh release download "$release_tag" --dir "$verify_dir" --pattern "$asset"
@@ -143,14 +167,13 @@ jobs:
           cp "$released_package" "$package"
           echo "store package: GitHub release $release_tag/$asset"
       - name: Draft upload to Chrome Web Store
-        if: inputs.browser == 'chromium' && inputs.upload == true
+        if: inputs.browser == 'chromium' && (github.event_name == 'workflow_call' || inputs.upload == true)
         env:
           CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
           CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
           CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/master | cut -f1)"
           for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
             [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
           done
@@ -186,14 +209,13 @@ jobs:
           echo "http: $put_code"
           [ "$(printf '%s' "$put_out" | tail -n1)" = "SUCCESS" ] || { echo "upload not accepted (see itemError above)"; exit 1; }
       - name: Publish uploaded draft
-        if: inputs.browser == 'chromium' && inputs.publish == true
+        if: inputs.browser == 'chromium' && (github.event_name == 'workflow_call' || inputs.publish == true)
         env:
           CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
           CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
           CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/master | cut -f1)"
           for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
             [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
           done
@@ -242,13 +264,12 @@ jobs:
           echo "http: $pub_code"
           [ "$(printf '%s' "$pub_out" | tail -n1)" = "OK" ] || { echo "publish not accepted (see response above)"; exit 1; }
       - name: Upload listed version to AMO (existing listing)
-        if: inputs.browser == 'firefox' && inputs.upload == true
+        if: inputs.browser == 'firefox' && (github.event_name == 'workflow_call' || inputs.upload == true)
         env:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/master | cut -f1)"
           for v in AMO_JWT_ISSUER AMO_JWT_SECRET; do
             [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
           done

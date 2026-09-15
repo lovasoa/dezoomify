@@ -24,11 +24,21 @@ Run from the tagged revision:
 4. `cargo xtask release verify --plan target/release-dist/<version>/plan.json --artifacts target/release-dist/<version>` (checks the produced artifact names against the plan).
 5. `cargo xtask release publish --plan ... --artifacts ...`.
 
-GitHub Releases provides the release provenance, and store submission remains separate. Desktop installers remain unsigned with no paid Apple/Azure signing; only the Linux `.deb` is buildable. Automatic in-app updates are disabled; users check GitHub Releases manually. Working trees under `target/release-dist/<version>/` are never committed. The user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install).
+The automatic sequence is `master` CI, GitHub Release publication, then
+parallel submission of the exact released Chromium ZIP to the Chrome Web Store
+and Firefox ZIP to AMO. The store jobs do not rebuild the extension; GitHub
+Release artifacts are the source of truth. Submission is automatic, but store
+review remains external and public availability waits for Chrome Web Store or
+AMO approval. Desktop installers remain unsigned with no paid Apple/Azure
+signing; only the Linux `.deb` is buildable. Automatic in-app updates are
+disabled; users check GitHub Releases manually. Working trees under
+`target/release-dist/<version>/` are never committed. The user-facing install
+note lives in the [Desktop app guide](user/desktop-app.md#install).
 
 The `release` workflow performs all five stages. Signing and publishing remain
-separate protected jobs. Store submission remains a separate workflow because
-store review can lag the rolling GitHub release.
+separate protected jobs. It then waits for the parallel reusable store
+submission jobs; a successful release run has reached every distribution target,
+though store approval can still be pending.
 
 ## Update and installer truth
 

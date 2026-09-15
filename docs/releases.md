@@ -53,7 +53,14 @@ committed; `target/` is used so website builds cannot clobber them.
 
 The `release` workflow runs after successful `master` CI and can be dispatched
 with a numbered tag for an important release. Every job uses the same planned
-revision. Local `cargo xtask build desktop` produces
+revision. After GitHub Release assets publish, parallel Chromium and Firefox
+store jobs submit the exact extension ZIPs from that GitHub Release: Chromium
+uploads and publishes its package, and AMO receives a listed-channel upload.
+GitHub Release artifacts are the single source of truth for store submission;
+the store jobs do not rebuild or independently validate them beyond checking
+the transferred ZIP with `unzip -t`. Store review remains external: submission
+is automatic, but public availability waits for Chrome Web Store or AMO
+approval. Local `cargo xtask build desktop` produces
 a real unsigned `.deb` (no paid signing) from the Tauri window shell behind
 the optional `tauri` feature, so `desktop-linux-x86_64` is available;
 `desktop-windows-x86_64` (needs a Windows host with WebView2, WiX, NSIS, and
@@ -62,8 +69,8 @@ Line Tools and `icon.icns`) stay unavailable, and a release never claims an
 artifact it did not build. The operator
 sequence for cutting a release is the runbook in [Operations](operations.md).
 
-GitHub Releases provides release provenance. Store submission remains separate
-because store review may lag rolling releases.
+GitHub Releases provides release provenance and the exact artifacts submitted
+to the extension stores.
 Desktop installers remain unsigned; the published inventory currently has the
 Linux `.deb` only. See the [Desktop app guide](user/desktop-app.md#install).
 

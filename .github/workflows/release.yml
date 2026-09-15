@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_run' && 'rolling' || inputs.ref }}
-  cancel-in-progress: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.head_repository.full_name == github.repository }}
+  cancel-in-progress: false
 
 env:
   SOURCE_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.ref }}
@@ -29,6 +29,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.value }}
       commit: ${{ steps.commit.outputs.value }}
+      release_tag: ${{ steps.release_tag.outputs.value }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,6 +49,14 @@ jobs:
           test -n "$(gh run list --workflow ci.yml --branch master --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
       - id: version
         run: echo "value=$(cargo xtask release version)" >> "$GITHUB_OUTPUT"
+      - id: release_tag
+        run: |
+          version="${{ steps.version.outputs.value }}"
+          tag="rolling-v$version"
+          if git rev-parse "v$version^{commit}" >/dev/null 2>&1; then
+            tag="v$version"
+          fi
+          echo "value=$tag" >> "$GITHUB_OUTPUT"
       - name: Freeze plan
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -166,3 +175,21 @@ jobs:
           v="${{ needs.prepare.outputs.version }}"
           cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
           cargo xtask release publish --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
+
+  submit-chromium:
+    needs: [prepare, publish]
+    uses: ./.github/workflows/store-submit.yml
+    with:
+      browser: chromium
+      commit: ${{ needs.prepare.outputs.commit }}
+      release_tag: ${{ needs.prepare.outputs.release_tag }}
+    secrets: inherit
+
+  submit-firefox:
+    needs: [prepare, publish]
+    uses: ./.github/workflows/store-submit.yml
+    with:
+      browser: firefox
+      commit: ${{ needs.prepare.outputs.commit }}
+      release_tag: ${{ needs.prepare.outputs.release_tag }}
+    secrets: inherit
