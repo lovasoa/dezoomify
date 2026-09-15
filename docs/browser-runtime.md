@@ -1,14 +1,17 @@
 # Browser runtime
 
 `packages/browser-runtime` hosts `crates/dezoomify-wasm` for browser-facing
-effects; it does not contain the shared UI. The runtime owns workers, image
-decode, canvas and save surfaces, and an optional bounded browser cache. WASM
-only adapts core, job, and pure processing code.
+effects; it does not contain the shared UI. The runtime owns browser fetch
+orchestration, request activity, workers, image decode, tile painting, canvas
+and save surfaces, and an optional bounded browser cache. WASM only adapts
+core, job, and pure processing code.
 
 ## Engine-effect assembly
 
-The runtime is the shared effect executor for every browser host of the Rust
-job engine (the extension job tab today, the website after its migration).
+The runtime is the shared effect executor for browser hosts of the Rust job
+engine. The extension job tab uses this executor; the website uses the same
+low-level browser effects with its discovery-session orchestration because
+processed-tile recipes are not yet supported by the engine-effect contract.
 It owns no job policy: retries, cancellation, partial-output decisions, and
 ordering belong to the engine. The executor maps typed host effects onto
 browser execution:
@@ -26,9 +29,11 @@ browser execution:
   and fails typed (`PLAN_INVALID` with a desktop handoff) beyond the
   browser limits. Undeclared sizes are derived from the accumulated
   placements.
-- `finalize-encoder` draws every held tile at its planned placement (the
-  plan is trusted for layout; decoded bitmaps are scaled to the planned
-  extent), closes the bitmaps deterministically, and encodes the surface.
+- `finalize-encoder` draws every held tile at its planned placement and at
+  1:1 pixel scale. Decoded pixels beyond the planned extent are cropped from
+  the right and bottom (as required by padded edge tiles); undersized tiles
+  leave their uncovered region empty. It then closes the bitmaps
+  deterministically and encodes the surface.
 - `publish-output` persists the encoded output exactly once (blob anchor
   save; no `downloads` permission).
 - `release-bytes` closes every host-retained per-tile resource.

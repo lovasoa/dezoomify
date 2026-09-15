@@ -94,6 +94,8 @@ test("fetchDirect honors caller cancellation", async () => {
 
 test("fetchMetadataFor serves direct bytes without the proxy", async () => {
   const h = hooks();
+  const attempts = [];
+  h.onMetadataAttempt = (attempt) => attempts.push(attempt);
   let proxyCalls = 0;
   const fetcher = createWebFetcher({
     fetchImpl: okBytesFetch(),
@@ -106,6 +108,9 @@ test("fetchMetadataFor serves direct bytes without the proxy", async () => {
   assert.equal(res.via, "direct");
   assert.equal(proxyCalls, 0);
   assert.equal(fetcher.getActiveTransport(), "Direct from your browser");
+  assert.deepEqual(attempts.map(({ transport, outcome, bytes }) => ({ transport, outcome, bytes })), [
+    { transport: "direct", outcome: "readable", bytes: 2 },
+  ]);
 });
 
 test("fetchMetadataFor falls back to the eligible proxy after a network failure", async () => {
@@ -190,6 +195,8 @@ test("fetchMetadataFor retries a transient proxy throttle once", async () => {
 
 test("fetchTileFor retries then succeeds, else throws TILE_FAILED", async () => {
   const h = hooks();
+  const attempts = [];
+  h.onTileAttempt = (retrying) => attempts.push(retrying);
   let calls = 0;
   const fetcher = createWebFetcher({
     fetchImpl: async () => {
@@ -207,6 +214,7 @@ test("fetchTileFor retries then succeeds, else throws TILE_FAILED", async () => 
   const res = await fetcher.fetchTileFor("https://a.test/1.png", {});
   assert.equal(calls, 3);
   assert.ok(res.bytes instanceof ArrayBuffer);
+  assert.deepEqual(attempts, [false, true, true]);
   const failing = createWebFetcher({
     fetchImpl: async () => { throw new Error("down"); },
     isProxyEligible: () => ({ eligible: false, reason: "tile" }),
@@ -220,4 +228,14 @@ test("fetchTileFor retries then succeeds, else throws TILE_FAILED", async () => 
     assert.equal(e.code, "TILE_FAILED");
     return true;
   });
+  calls = 0;
+  const once = createWebFetcher({
+    fetchImpl: async () => { calls += 1; throw new Error("down"); },
+    isProxyEligible: () => ({ eligible: false, reason: "tile" }),
+    hooks: h,
+    messages,
+    sleepFn: async () => {},
+  });
+  await assert.rejects(() => once.fetchTileFor("https://a.test/1.png", {}, 0), /could not be saved/);
+  assert.equal(calls, 1, "origin classification performs exactly one readable attempt");
 });

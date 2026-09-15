@@ -1,12 +1,10 @@
-// Minimal preview pan/zoom for the website canvas (todo 2.2 home, moved
-// from `src/main.ts`).
-//
+// Minimal preview pan/zoom for browser canvases.
 // Transform-only and therefore tainted-safe: wheel zoom plus drag pan apply
 // a CSS `translate`/`scale` to `#rendering-canvas` and never call
 // `getImageData`, `toBlob`, `toDataURL`, hashing, or processing. The tainted
 // display-only path stays display-only; preview never promises a clean save.
 // The host document is injected so node tests drive the transform math
-// without a DOM. Keep erasable-syntax-only for the browser `.js` mirrors.
+// without a DOM.
 export const PREVIEW_ZOOM_STEP = 1.25;
 const PREVIEW_WHEEL_STEP_PIXELS = 100;
 

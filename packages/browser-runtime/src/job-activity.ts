@@ -1,5 +1,4 @@
-// Live job activity (todo 2.2 home, moved from `src/main.ts`).
-//
+// Live job activity shared by browser products.
 // Drives the progressive-disclosure job view: pending-request clocks, the
 // longest-wait gauge, the capped technical log, and the delta-gated 500 ms
 // heartbeat whose paints are rAF-batched. The owning orchestrator supplies
@@ -20,6 +19,10 @@ export interface ActivityLog {
   timeoutMs?: number;
   lastProgressAt?: number;
   log?: Array<string>;
+  diagnostics?: string;
+  paused?: boolean;
+  pausedAt?: number;
+  pausedDurationMs?: number;
 }
 
 export interface ActivityHooks {
@@ -43,6 +46,8 @@ export interface JobActivity {
   reportHeartbeat(now?: number): boolean;
   startHeartbeat(): void;
   stopHeartbeat(): void;
+  pause(): void;
+  resume(): void;
 }
 
 /** Capped technical log (oldest dropped first), web parity. */
@@ -117,6 +122,10 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     state.timeoutMs = timeoutMs;
     state.lastProgressAt = at;
     state.log = [];
+    state.diagnostics = undefined;
+    state.paused = false;
+    state.pausedAt = undefined;
+    state.pausedDurationMs = 0;
   }
 
   function touchProgress(): void {
@@ -134,7 +143,10 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
   function pushLog(line: string, maxLines: number = ACTIVITY_MAX_LOG_LINES): void {
     const a = ensure();
     if (!a.log) a.log = [];
-    const elapsed = a.startedAt ? Math.round((now() - a.startedAt) / 1000) : 0;
+    const at = a.pausedAt ?? now();
+    const elapsed = a.startedAt
+      ? Math.round((at - a.startedAt - (a.pausedDurationMs ?? 0)) / 1000)
+      : 0;
     a.log.push(`${elapsed}s: ${line}`);
     if (a.log.length > maxLines) a.log.splice(0, a.log.length - maxLines);
   }
@@ -162,7 +174,7 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
 
   function refreshLongestPending(): void {
     const a = ensure();
-    const at = now();
+    const at = a.pausedAt ?? now();
     a.now = at;
     let longest = 0;
     for (const { startedAt } of pendingStarts.values()) {
@@ -210,6 +222,29 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     }
   }
 
+  function pause(): void {
+    if (state.paused) return;
+    const at = now();
+    state.paused = true;
+    state.pausedAt = at;
+    state.now = at;
+    stopHeartbeat();
+  }
+
+  function resume(): void {
+    if (!state.paused) return;
+    const at = now();
+    const pausedAt = state.pausedAt ?? at;
+    const pausedFor = Math.max(0, at - pausedAt);
+    state.paused = false;
+    state.pausedAt = undefined;
+    state.pausedDurationMs = (state.pausedDurationMs ?? 0) + pausedFor;
+    state.lastProgressAt = (state.lastProgressAt ?? at) + pausedFor;
+    state.now = at;
+    for (const pending of pendingStarts.values()) pending.startedAt += pausedFor;
+    startHeartbeat();
+  }
+
   return {
     state,
     scheduleUpdate: scheduleBatchedUpdate,
@@ -223,5 +258,7 @@ export function createJobActivity(hooks: ActivityHooks): JobActivity {
     reportHeartbeat,
     startHeartbeat,
     stopHeartbeat,
+    pause,
+    resume,
   };
 }

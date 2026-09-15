@@ -1,11 +1,10 @@
-// Website tile policy (todo 2.2 home): politeness, resilience, timeouts.
+// Browser tile policy: politeness, resilience, and timeouts.
 //
-// Moved from `src/main.ts` so the website orchestrator stays thin: this
-// module owns every tile-fetch tuning constant plus the per-host throttle,
+// This module owns every tile-fetch tuning constant plus the per-host throttle,
 // the retry backoff, the adaptive concurrency picker, the combined timeout
 // signal, and the proxy rate-limit delay. Pure and dependency-injected where
 // the host clock or randomness is involved, so node tests drive it with
-// fakes. Keep erasable-syntax-only for the browser `.js` mirrors.
+// fakes.
 import { failure } from "./failure.ts";
 import type { StructuredFailure } from "./failure.ts";
 

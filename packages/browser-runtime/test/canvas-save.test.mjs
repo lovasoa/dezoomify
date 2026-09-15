@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BROWSER_SAVE_COLOR_WARNING, canvasToPngBlob, saveBlobViaAnchor } from "../src/canvas-save.ts";
+import {
+  BROWSER_SAVE_COLOR_WARNING,
+  canvasToPngBlob,
+  isCanvasTaintError,
+  saveBlobViaAnchor,
+} from "../src/canvas-save.ts";
 import { stableErrorCode } from "../src/failure.ts";
 
 test("canvasToPngBlob resolves the encoded blob", async () => {
@@ -17,6 +22,12 @@ test("canvasToPngBlob maps null and throws to OUTPUT_ENCODE_FAILED", async () =>
     assert.equal(e.code, "OUTPUT_ENCODE_FAILED");
     return true;
   });
+});
+
+test("canvasToPngBlob preserves a taint SecurityError for display-only fallback", async () => {
+  const taint = Object.assign(new Error("tainted"), { name: "SecurityError", code: 18 });
+  await assert.rejects(() => canvasToPngBlob({ toBlob: () => { throw taint; } }), (e) => e === taint);
+  assert.equal(isCanvasTaintError(taint), true);
 });
 
 test("stableErrorCode ignores browser exception numeric codes", () => {

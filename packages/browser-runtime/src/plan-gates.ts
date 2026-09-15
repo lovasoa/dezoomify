@@ -1,5 +1,4 @@
-// Browser plan gates (todo 2.2 home, moved from `src/main.ts`).
-//
+// Browser plan gates.
 // Declared sizes fail fast with a desktop handoff link without planning, so
 // the worker never serializes a trillion-tile plan. Undeclared sizes skip
 // the declared gate (probe-driven) and rely on the worker `limit-exceeded`

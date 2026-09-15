@@ -2,7 +2,7 @@
 //
 // Extracted from `./session.ts` so leaf modules (canvas save, assembly,
 // plan gates) can raise typed failures without depending on the discovery
-// client. Keep erasable-syntax-only for the browser `.js` mirrors.
+// client.
 
 export interface StructuredFailure extends Error {
   code: string;

@@ -14,8 +14,7 @@ import {
 } from "../packages/shared-ui/src/history.ts";
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
-import type { JobActivity, ViewContext } from "../packages/shared-ui/src/view.tsx";
-import { suggestedNameFor } from "../packages/shared-ui/src/saveName.ts";
+import type { ViewContext } from "../packages/shared-ui/src/view.tsx";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
   SITE_BUSY_MESSAGE,
@@ -44,6 +43,8 @@ import {
   assertPlanFitsBrowser,
   categoryFor,
   desktopHandoffLink,
+  isAllowedSourceUrl,
+  isLocalFileUrl,
   mapWorkerLimitExceeded,
   phaseFor,
 } from "../packages/browser-runtime/src/plan-gates.ts";
@@ -57,11 +58,28 @@ import {
   summarizeWebQueue,
 } from "../packages/browser-runtime/src/queue.ts";
 import {
+  PREVIEW_ZOOM_STEP,
   createPreviewControls,
+  setCanvasVisible,
 } from "../packages/browser-runtime/src/preview.ts";
 import {
-  PREVIEW_ZOOM_STEP,
-} from "../packages/browser-runtime/src/preview.ts";
+  REQUEST_TIMEOUT_MS,
+  createTileThrottle,
+  hostOf,
+  shortUrl,
+  websiteTileConcurrency,
+} from "../packages/browser-runtime/src/tile-policy.ts";
+import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.ts";
+import { createTilePainter, loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";
+import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
+import { createWebFetcher, type WebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
+import { PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/transport-labels.ts";
+import {
+  BROWSER_SAVE_COLOR_WARNING,
+  canvasToPngBlob,
+  isCanvasTaintError,
+  saveBlobViaAnchor,
+} from "../packages/browser-runtime/src/canvas-save.ts";
 
 // Re-export the shared browser limits for existing website test imports.
 export {
@@ -77,20 +95,9 @@ const preview = createPreviewControls();
 let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
 let currentSeq = 0;
-let activeTransport: string | null = null;
 let client: DiscoveryClient | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
-type TileTransport = "readable" | "ordinary-image";
-
-interface TileOriginState {
-  mode?: TileTransport;
-  ready?: Promise<TileTransport>;
-}
-
-// A CORS policy is stable for a job, so one tile classifies each origin while
-// concurrent tiles wait instead of all repeating the same failed fetch.
-let tileOrigins = new Map<string, TileOriginState>();
 // Pause v1 (todo 5.7, suspend-acquisition): the website stops scheduling new
 // tiles while paused, finishes in-flight work, retains the canvas, and
 // re-drives on resume. Integration-layer only; the engine pause lives in
@@ -157,365 +164,24 @@ function webQueueEnabled(): boolean {
   return isWebQueueAvailable(WEB_QUEUE_CAPS);
 }
 
-/** Per-request timeout applied to every individual HTTP request (30 s). */
-export const REQUEST_TIMEOUT_MS = 30000;
-
-/** True for `file:` URLs pasted into the website input. Local files stay on
- * this computer, so the failed view shows the local-only note (nothing is
- * sent) instead of a deep link. */
-function isLocalFileUrl(urlString: string): boolean {
-  try {
-    return new URL(String(urlString ?? "").trim()).protocol === "file:";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Head-start window for the direct metadata fetch: if the site does not
- * answer within 1500 ms, the eligible metadata proxy takes over
- * automatically (first-wins: the loser is aborted via AbortController so
- * direct and proxy bytes never overlap). 250 ms proved too aggressive on
- * slow sites and caused false proxy fallback; 1500 ms keeps direct-first
- * while failing over promptly. Tiles keep the full 30 s timeout (they
- * never use the proxy).
- */
-export const DIRECT_METADATA_TIMEOUT_MS = 1500;
-
-/**
- * Tile politeness + resilience (todo 5.2) plus adaptive website concurrency
- * (todo 5.4). At most 5 tile request starts per second per host (legacy
- * ZoomManager.MAX_REQUESTS_PER_SECOND parity: 1000/5 ms spacing between
- * starts). The website pool below is adaptive 6-12 from hardwareConcurrency
- * plus RTT within the capability cap, never below the floor of 4; starts for
- * the same host are staggered through a per-host chain so the parallel
- * workers still cap at 5/s combined, they do not each get 5/s. Each tile
- * retries twice (3 attempts) with exponential backoff + jitter; the
- * exhausted failure still maps to TILE_FAILED (never a display string).
- * Native/CLI keep their own max_concurrent of 16 (protocol native baseline);
- * only the website path uses the adaptive 6-12 range.
- */
-export const TILE_MAX_REQUESTS_PER_SECOND = 5;
-export const TILE_MIN_INTERVAL_MS = 1000 / TILE_MAX_REQUESTS_PER_SECOND;
-export const TILE_MAX_RETRIES = 2;
-export const TILE_RETRY_BASE_MS = 250;
-
-/**
- * Website tile concurrency bounds (todo 5.4). The adaptive range is 6-12;
- * 4 is the absolute floor for unknown or constrained hosts. The website cap
- * is 12; native/CLI stay at their own 16 and never read this cap.
- */
-export const TILE_CONCURRENCY_FLOOR = 4;
-export const TILE_CONCURRENCY_MIN = 6;
-export const TILE_CONCURRENCY_MAX = 12;
-export const TILE_CONCURRENCY_CAP = 12;
-export const TILE_RTT_MEDIUM_MS = 400;
-export const TILE_RTT_SLOW_MS = 800;
-
-/**
- * Pure adaptive concurrency: base from core count, minus for slow RTT,
- * clamped to 6-12, then within the capability cap with a floor of 4.
- * Slow networks back off so extra workers do not pile onto timeouts.
- */
-export function pickTileConcurrency(opts?: {
-  hardwareConcurrency?: unknown;
-  rttMs?: unknown;
-  capabilityCap?: unknown;
-}): number {
-  let cap = TILE_CONCURRENCY_CAP;
-  if (typeof opts?.capabilityCap === "number" && Number.isFinite(opts.capabilityCap as number)) {
-    cap = Math.floor(opts.capabilityCap as number);
-  }
-  let cores = 4;
-  if (
-    typeof opts?.hardwareConcurrency === "number" &&
-    Number.isFinite(opts.hardwareConcurrency as number)
-  ) {
-    cores = Math.floor(opts.hardwareConcurrency as number);
-  }
-  let base: number;
-  if (cores <= 2) base = TILE_CONCURRENCY_MIN;
-  else if (cores <= 4) base = 8;
-  else if (cores <= 8) base = 10;
-  else base = TILE_CONCURRENCY_MAX;
-  const rtt = opts?.rttMs;
-  if (typeof rtt === "number" && Number.isFinite(rtt)) {
-    if (rtt >= TILE_RTT_SLOW_MS) base -= 2;
-    else if (rtt >= TILE_RTT_MEDIUM_MS) base -= 1;
-  }
-  const clamped = Math.min(Math.max(base, TILE_CONCURRENCY_MIN), TILE_CONCURRENCY_MAX);
-  return Math.max(TILE_CONCURRENCY_FLOOR, Math.min(clamped, cap));
-}
-
-/**
- * Website concurrency from host hints. hardwareConcurrency sizes the pool;
- * NetworkInformation.rtt (ms, when present) backs off slow links. Every read
- * is best-effort: unknown hosts get the deterministic default (4 cores, no
- * RTT), which still respects the floor.
- */
-export function websiteTileConcurrency(): number {
-  let cores = 4;
-  let rtt: number | undefined;
-  try {
-    if (typeof navigator !== "undefined") {
-      const nav = navigator as unknown as {
-        hardwareConcurrency?: unknown;
-        connection?: { rtt?: unknown };
-      };
-      if (typeof nav.hardwareConcurrency === "number" && Number.isFinite(nav.hardwareConcurrency)) {
-        cores = Math.floor(nav.hardwareConcurrency);
-      }
-      const connRtt = nav.connection?.rtt;
-      if (typeof connRtt === "number" && Number.isFinite(connRtt)) rtt = connRtt;
-    }
-  } catch {
-    // Host globals are best-effort; defaults keep the floor.
-  }
-  return pickTileConcurrency({ hardwareConcurrency: cores, rttMs: rtt, capabilityCap: TILE_CONCURRENCY_CAP });
-}
-
-/**
- * Off-main-thread tile decode (todo 5.4). When Worker plus OffscreenCanvas
- * exist, createImageBitmap plus drawImage run in a singleton decode worker
- * (Blob URL, no extra file) and the ImageBitmap is transferred back; the
- * main thread only paints the finished bitmap. Otherwise this falls back to
- * main-thread createImageBitmap. Full transferControlToOffscreen drawing
- * stays out: it would break the ordinary <img> display-only fallback and the
- * canvas.toBlob save path, while decode offload already removes the costly
- * raster from the main thread.
- */
-let tileDecodeWorker: Worker | null = null;
-let tileDecodeSeq = 0;
-let tileDecodeUnavailable = false;
-const tileDecodePending = new Map<number, { resolve: (b: ImageBitmap) => void; reject: (e: unknown) => void }>();
-
-function tileDecodeWorkerCode(): string {
-  return (
-    "self.onmessage = async (e) => {\n" +
-    "  const data = e.data || {};\n" +
-    "  const id = data.id;\n" +
-    "  try {\n" +
-    "    const bitmap = await createImageBitmap(new Blob([data.bytes]));\n" +
-    "    let out = bitmap;\n" +
-    "    try {\n" +
-    '      if (typeof OffscreenCanvas !== "undefined") {\n' +
-    "        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);\n" +
-    '        const ctx = canvas.getContext("2d");\n' +
-    "        if (ctx) {\n" +
-    "          ctx.drawImage(bitmap, 0, 0);\n" +
-    "          out = canvas.transferToImageBitmap();\n" +
-    "          try { bitmap.close(); } catch (err) {}\n" +
-    "        }\n" +
-    "      }\n" +
-    "    } catch (err) {}\n" +
-    "    self.postMessage({ id, ok: true, bitmap: out }, [out]);\n" +
-    "  } catch (err) {\n" +
-    "    self.postMessage({ id, ok: false, error: String((err && err.message) || err) });\n" +
-    "  }\n" +
-    "};\n"
-  );
-}
-
-function getTileDecodeWorker(): Worker | null {
-  if (tileDecodeUnavailable) return null;
-  if (tileDecodeWorker) return tileDecodeWorker;
-  try {
-    if (typeof Worker === "undefined" || typeof OffscreenCanvas === "undefined") {
-      tileDecodeUnavailable = true;
-      return null;
-    }
-    if (typeof Blob === "undefined" || typeof URL === "undefined") {
-      tileDecodeUnavailable = true;
-      return null;
-    }
-    const createUrl = (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
-    if (typeof createUrl !== "function") {
-      tileDecodeUnavailable = true;
-      return null;
-    }
-    const worker = new Worker(
-      (createUrl as (b: Blob) => string).call(URL, new Blob([tileDecodeWorkerCode()], { type: "text/javascript" })),
-    );
-    worker.onmessage = (e: MessageEvent) => {
-      const data = (e as MessageEvent & { data?: { id?: unknown; ok?: unknown; bitmap?: unknown; error?: unknown } }).data ?? {};
-      const id = typeof data.id === "number" ? data.id : -1;
-      const pending = tileDecodePending.get(id);
-      if (!pending) return;
-      tileDecodePending.delete(id);
-      if (data.ok === true && data.bitmap) {
-        pending.resolve(data.bitmap as ImageBitmap);
-      } else {
-        pending.reject(new Error(typeof data.error === "string" ? data.error : "tile decode failed"));
-      }
-    };
-    worker.onerror = () => {
-      tileDecodeUnavailable = true;
-      for (const [, pending] of tileDecodePending) {
-        try {
-          pending.reject(new Error("tile decode worker failed"));
-        } catch {
-          // Rejecting must never throw.
-        }
-      }
-      tileDecodePending.clear();
-      try {
-        worker.terminate();
-      } catch {
-        // Termination is best-effort.
-      }
-      tileDecodeWorker = null;
-    };
-    tileDecodeWorker = worker;
-    return worker;
-  } catch {
-    tileDecodeUnavailable = true;
-    return null;
-  }
-}
-
-function decodeTileBitmap(bytes: ArrayBuffer): Promise<ImageBitmap> {
-  const worker = getTileDecodeWorker();
-  if (!worker) return createImageBitmap(new Blob([bytes]));
-  try {
-    const id = ++tileDecodeSeq;
-    const copy = bytes.slice(0);
-    const pending = new Promise<ImageBitmap>((resolve, reject) => {
-      tileDecodePending.set(id, { resolve, reject });
-    });
-    try {
-      worker.postMessage({ id, bytes: copy }, [copy]);
-    } catch {
-      tileDecodePending.delete(id);
-      return createImageBitmap(new Blob([bytes]));
-    }
-    return pending.catch(() => createImageBitmap(new Blob([bytes])));
-  } catch {
-    return createImageBitmap(new Blob([bytes]));
-  }
-}
-
-function tileHostOf(url: string): string {
-  try {
-    return new URL(url).host.toLowerCase();
-  } catch {
-    return "";
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-const tileThrottleLast = new Map<string, number>();
-const tileThrottleQueue = new Map<string, Promise<void>>();
-
-/**
- * Stagger tile request starts per host to <=5/s. Chained per host so the
- * parallel workers share one spacing clock: each starter waits for the
- * previous starter for that host, enforces the 200 ms gap, then releases
- * the next waiter.
- */
-function throttleTileStart(url: string): Promise<void> {
-  const host = tileHostOf(url) || "global";
-  const prev = tileThrottleQueue.get(host) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  tileThrottleQueue.set(host, current);
-  const run = (async () => {
-    await prev;
-    const now = Date.now();
-    const last = tileThrottleLast.get(host) ?? 0;
-    const wait = TILE_MIN_INTERVAL_MS - (now - last);
-    if (wait > 0) await sleep(wait);
-    tileThrottleLast.set(host, Date.now());
-  })();
-  return run.finally(release);
-}
-
-function tileRetryDelayMs(retryIndex: number): number {
-  return TILE_RETRY_BASE_MS * Math.pow(2, retryIndex) + Math.random() * 100;
-}
-
 // --- Live job activity (drives the progressive-disclosure job view) ---
-let requestSeq = 0;
-const pendingStarts = new Map<number, { startedAt: number; label: string }>();
-let completedRequests = 0;
-let failedRequests = 0;
+const jobActivity = createJobActivity({ onUpdate: update });
 let tileAttempts = 0;
 let tileRetries = 0;
 const metadataAttempts: Array<{ at: number; transport: string; target: string; outcome: string; durationMs: number; bytes?: number }> = [];
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-let batchedUpdateQueued = false;
-let lastHeartbeatKey = "";
-
-/**
- * Coalesce burst progress into one paint per frame (todo 5.4): tile
- * completions call this instead of update(), so N tiles finishing in the
- * same frame render once. Falls back to a zero-delay timer where rAF is
- * unavailable (e.g. node test imports).
- */
-function scheduleBatchedUpdate(): void {
-  if (batchedUpdateQueued) return;
-  batchedUpdateQueued = true;
-  const flush = () => {
-    batchedUpdateQueued = false;
-    update();
-  };
-  try {
-    if (typeof requestAnimationFrame !== "function") throw new Error("no-rAF");
-    requestAnimationFrame(flush);
-  } catch {
-    setTimeout(flush, 0);
-  }
-}
-
-/** Delta key for the heartbeat: only a real change schedules a paint. */
-function heartbeatKey(): string {
-  const a = viewCtx.jobActivity;
-  if (!a) return "";
-  const longest = typeof a.longestPendingMs === "number" ? Math.floor(a.longestPendingMs / 250) : 0;
-  return `${pendingStarts.size}:${completedRequests}:${failedRequests}:${longest}:${Math.floor(Date.now() / 1000)}`;
-}
-
-function activity(): NonNullable<ViewContext["jobActivity"]> {
-  if (!viewCtx.jobActivity) viewCtx.jobActivity = { timeoutMs: REQUEST_TIMEOUT_MS };
-  return viewCtx.jobActivity as NonNullable<ViewContext["jobActivity"]>;
-}
-
-function activityElapsedMs(a: JobActivity, now = Date.now()): number {
-  const startedAt = a.startedAt ?? now;
-  return Math.max(0, (a.pausedAt ?? now) - startedAt - (a.pausedDurationMs ?? 0));
-}
 
 function resetActivity(url: string): void {
-  pendingStarts.clear();
-  completedRequests = 0;
-  failedRequests = 0;
   tileAttempts = 0;
   tileRetries = 0;
   metadataAttempts.length = 0;
-  const now = Date.now();
-  viewCtx.jobActivity = {
-    url,
-    startedAt: now,
-    now,
-    stepLabel: "Finding the zoomable image…",
-    detail: `Contacting ${hostOf(url)}…`,
-    pendingRequests: 0,
-    completedRequests: 0,
-    failedRequests: 0,
-    longestPendingMs: 0,
-    timeoutMs: REQUEST_TIMEOUT_MS,
-    lastProgressAt: now,
-    log: [],
-  };
+  jobActivity.reset(url, REQUEST_TIMEOUT_MS);
+  jobActivity.state.detail = `Contacting ${hostOf(url)}…`;
+  viewCtx.jobActivity = jobActivity.state;
 }
 
 /** Keep diagnostics bounded and useful without retaining individual tile URLs. */
 function refreshDiagnostics(): void {
-  const a = activity();
+  const a = jobActivity.state;
   const lines: string[] = [];
   if (metadataAttempts.length > 0) {
     lines.push("Metadata requests");
@@ -542,7 +208,7 @@ function recordMetadataAttempt(
   bytes?: number,
 ): void {
   metadataAttempts.push({
-    at: Math.max(0, startedAt - (activity().startedAt ?? startedAt)),
+    at: Math.max(0, startedAt - (jobActivity.state.startedAt ?? startedAt)),
     transport,
     target,
     outcome,
@@ -553,231 +219,17 @@ function recordMetadataAttempt(
   refreshDiagnostics();
 }
 
-function touchProgress(): void {
-  activity().lastProgressAt = Date.now();
-}
-
-function setStep(label: string, detail?: string): void {
-  const a = activity();
-  a.stepLabel = label;
-  if (detail !== undefined) a.detail = detail;
-  touchProgress();
-  update();
-}
-
-function pushLog(line: string): void {
-  const a = activity();
-  if (!a.log) a.log = [];
-  const elapsed = Math.round(activityElapsedMs(a) / 1000);
-  a.log.push(`${elapsed}s: ${line}`);
-  if (a.log.length > 60) a.log.splice(0, a.log.length - 60);
-}
-
-function noteRequestStart(label: string): number {
-  const id = ++requestSeq;
-  pendingStarts.set(id, { startedAt: Date.now(), label });
-  const a = activity();
-  a.pendingRequests = pendingStarts.size;
-  refreshLongestPending();
-  return id;
-}
-
-function noteRequestEnd(id: number, ok: boolean): void {
-  pendingStarts.delete(id);
-  if (ok) completedRequests += 1;
-  else failedRequests += 1;
-  const a = activity();
-  a.pendingRequests = pendingStarts.size;
-  a.completedRequests = completedRequests;
-  a.failedRequests = failedRequests;
-  refreshLongestPending();
-  touchProgress();
-}
-
-function refreshLongestPending(): void {
-  const a = viewCtx.jobActivity;
-  if (!a) return;
-  const now = a.pausedAt ?? Date.now();
-  a.now = now;
-  let longest = 0;
-  for (const { startedAt } of pendingStarts.values()) {
-    longest = Math.max(longest, now - startedAt);
-  }
-  a.longestPendingMs = longest;
-}
-
-function startHeartbeat(): void {
-  stopHeartbeat();
-  lastHeartbeatKey = heartbeatKey();
-  // 500 ms cadence refreshes the data, but the paint is delta-gated and
-  // rAF-batched (todo 5.4): idle ticks with no change render nothing.
-  heartbeatTimer = setInterval(() => {
-    refreshLongestPending();
-    const key = heartbeatKey();
-    if (key === lastHeartbeatKey) return;
-    lastHeartbeatKey = key;
-    scheduleBatchedUpdate();
-  }, 500);
-  const t = heartbeatTimer as unknown as { unref?: () => void };
-  if (t && typeof t.unref === "function") {
-    try {
-      t.unref();
-    } catch {
-      // browser timers lack unref
-    }
-  }
-}
-
-function stopHeartbeat(): void {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-  }
-}
-
-interface TimeoutCombined {
-  signal: AbortSignal;
-  cleanup(): void;
-  timedOut?: () => boolean;
-}
-
-/**
- * Combine a caller signal with the 30 s per-request timeout.
- * Uses AbortSignal.any/timeout when available, manual wiring otherwise.
- */
-function timeoutSignal(parentSignal?: AbortSignal, ms: number = REQUEST_TIMEOUT_MS): TimeoutCombined {
-  const AS = AbortSignal as unknown as {
-    timeout?: (ms: number) => AbortSignal;
-    any?: (signals: AbortSignal[]) => AbortSignal;
-  };
-  if (typeof AbortSignal !== "undefined" && typeof AS.timeout === "function") {
-    const timeout = (AS.timeout as (ms: number) => AbortSignal)(ms);
-    if (parentSignal && typeof AS.any === "function") {
-      return { signal: (AS.any as (s: AbortSignal[]) => AbortSignal)([parentSignal, timeout]), cleanup() {} };
-    }
-    if (!parentSignal) return { signal: timeout, cleanup() {} };
-  }
-  const ctrl = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let onAbort: (() => void) | null = null;
-  const cleanup = () => {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    if (parentSignal && onAbort) parentSignal.removeEventListener("abort", onAbort);
-  };
-  if (parentSignal?.aborted) {
-    ctrl.abort((parentSignal as AbortSignal & { reason?: unknown }).reason);
-    return { signal: ctrl.signal, cleanup() {}, timedOut: () => false };
-  }
-  let timedOut = false;
-  timer = setTimeout(() => {
-    timedOut = true;
-    try {
-      ctrl.abort(new DOMException(`Request timed out after ${ms / 1000}s`, "TimeoutError"));
-    } catch {
-      ctrl.abort();
-    }
-  }, ms);
-  if (parentSignal) {
-    onAbort = () => {
-      cleanup();
-      try {
-        ctrl.abort((parentSignal as AbortSignal & { reason?: unknown }).reason);
-      } catch {
-        ctrl.abort();
-      }
-    };
-    parentSignal.addEventListener("abort", onAbort, { once: true });
-  }
-  return { signal: ctrl.signal, cleanup, timedOut: () => timedOut };
-}
-
 function nextEvent(kind: string, extra: Record<string, unknown> = {}) {
   currentSeq++;
   return { seq: currentSeq, sessionId, kind, ...extra };
 }
 
-function isAllowedSourceUrl(urlString: string): boolean {
-  try {
-    const u = new URL(urlString);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
+const tileThrottle = createTileThrottle();
+const tileDecoder = createTileDecoder();
 
-interface DirectOutcome {
-  outcome: "readable" | "http-error" | "network-error" | "cancelled";
-  finalUrl?: string;
-  status?: number;
-  bytes?: ArrayBuffer;
-  contentType?: string;
-}
-
-async function fetchDirect(
-  url: string,
-  headers?: Record<string, string>,
-  signal?: AbortSignal,
-  ms: number = REQUEST_TIMEOUT_MS,
-  logTimeout: boolean = true,
-): Promise<DirectOutcome> {
-  const reqId = noteRequestStart("direct");
-  const combined = timeoutSignal(signal, ms);
-  try {
-    const res = await fetch(url, { headers, signal: combined.signal, credentials: "omit" });
-    if (!res.ok) {
-      noteRequestEnd(reqId, false);
-      return { outcome: "http-error", finalUrl: res.url, status: res.status };
-    }
-    const bytes = await res.arrayBuffer();
-    noteRequestEnd(reqId, true);
-    let contentType: string | undefined;
-    try {
-      const ct = res.headers?.get?.("content-type");
-      if (typeof ct === "string" && ct !== "") contentType = ct;
-    } catch {
-      // A missing/unreadable header must never break the readable path.
-    }
-    return { outcome: "readable", finalUrl: res.url, status: res.status, bytes, ...(contentType ? { contentType } : {}) };
-  } catch (e) {
-    noteRequestEnd(reqId, false);
-    if (signal?.aborted) return { outcome: "cancelled" };
-    const name = (e as { name?: string })?.name;
-    if (name === "TimeoutError" || (combined.timedOut && combined.timedOut())) {
-      if (logTimeout) pushLog(`Direct metadata fetch did not complete within ${ms} ms: ${shortUrl(url)}`);
-      return { outcome: "network-error" };
-    }
-    return { outcome: "network-error" };
-  } finally {
-    combined.cleanup();
-    update();
-  }
-}
-
-function shortUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    const path = u.pathname.length > 40 ? `…${u.pathname.slice(-39)}` : u.pathname;
-    return `${u.host}${path}`;
-  } catch {
-    return String(url).slice(0, 60);
-  }
-}
-
-/** Hostname of a job's website, for plain-language progress messages. */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "the server";
-  }
-}
-
-// Shared metadata-proxy client (single policy implementation; the inline
-// duplicate is gone). Pre-checks credential-bearing targets, cancellation,
-// and the response-size budget; status codes map to stable machine-readable
-// codes. Request timing instrumentation stays here so the live job view
-// keeps counting proxy attempts.
+// The product-specific proxy transport owns the actual /api/proxy POST.
+// Browser-runtime owns direct-first orchestration, fallback, retries, and
+// failure classification around this injected effect.
 const proxyTransport = createProxyTransport(
   (input: string, init?: Record<string, unknown>) =>
     fetch(input, init as RequestInit).then((res) => ({
@@ -788,374 +240,37 @@ const proxyTransport = createProxyTransport(
   { protocolVersion: 1, maxBytes: PROXY_METADATA_MAX_BYTES },
 );
 
-/**
- * Delay before a single retry after PROXY_RATE_LIMITED (todo 5.1). Honors
- * the relay's Retry-After hint when present (parsed by the transport as
- * retryAfterMs), otherwise backs off 1 s. Returns null when the hint
- * exceeds the UX budget: fail fast with extension/desktop guidance
- * instead of stalling the job on a long throttle.
- */
-const PROXY_RATE_LIMIT_RETRY_BASE_MS = 1000;
-const PROXY_RATE_LIMIT_RETRY_MAX_MS = 5000;
-
-function proxyRateLimitDelayMs(retryAfterMs?: number): number | null {
-  if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)) {
-    if (retryAfterMs <= 0) return 0;
-    if (retryAfterMs > PROXY_RATE_LIMIT_RETRY_MAX_MS) return null;
-    return Math.min(Math.floor(retryAfterMs), PROXY_RATE_LIMIT_RETRY_MAX_MS);
-  }
-  return PROXY_RATE_LIMIT_RETRY_BASE_MS;
-}
-
-async function fetchViaProxy(
-  targetUrl: string,
-  signal?: AbortSignal,
-): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; reason?: string; finalUrl?: string; retryAfterMs?: number }> {
-  const reqId = noteRequestStart("proxy");
-  const combined = timeoutSignal(signal);
-  try {
-    const res = await proxyTransport.fetchViaProxy(targetUrl, { signal: combined.signal });
-    if (!res.ok) {
-      noteRequestEnd(reqId, false);
-      return {
-        ok: false,
-        status: res.status,
-        code: res.code ?? "PROXY_ERROR",
-        ...((res as { reason?: unknown }).reason !== undefined && typeof (res as { reason?: unknown }).reason === "string" && ((res as { reason?: string }).reason as string) !== "" ? { reason: (res as { reason?: string }).reason as string } : {}),
-        ...(typeof res.retryAfterMs === "number" ? { retryAfterMs: res.retryAfterMs } : {}),
-      };
-    }
-    noteRequestEnd(reqId, true);
-    // The relay follows upstream redirects internally; surface the
-    // post-redirect URL when the transport provides it, otherwise fall back
-    // to the requested URL downstream. Never leave the base empty: an empty
-    // final URI makes relative tile URLs (e.g. krpano
-    // galleria_04.tiles/mres_d/...) resolve against the app page (/beta/)
-    // and 404.
-    const upstream = typeof (res as { finalUrl?: unknown }).finalUrl === "string" &&
-        ((res as { finalUrl?: string }).finalUrl as string) !== ""
-      ? ((res as { finalUrl?: string }).finalUrl as string)
-      : targetUrl;
-    return { ok: true, status: res.status, bytes: res.bytes, finalUrl: upstream };
-  } catch (e) {
-    noteRequestEnd(reqId, false);
-    if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-    if (((e as { name?: string })?.name === "TimeoutError") || (combined.timedOut && combined.timedOut())) {
-      pushLog("Metadata proxy request timed out after 30 s.");
-      return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
-    }
-    return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
-  } finally {
-    combined.cleanup();
-    update();
-  }
-}
-
-const DIRECT_LABEL = "Direct from your browser";
-const PROXY_LABEL = "Metadata proxy";
-
-/**
- * Plain words for a relay policy `reason` (mirrors
- * `classifyProxyFailure` in `packages/browser-runtime/src/web-fetch.ts`;
- * the two stay in sync because the website ships its own fetcher rather
- * than the runtime module).
- */
-function proxyPolicyReasonText(reason?: string): string | null {
-  switch (reason) {
-    case "invalid-url":
-    case "scheme":
-    case "userinfo":
-    case "signed-query":
-    case "non-standard-port":
-    case "protocol-version":
-    case "malformed-body":
-    case "method":
-      return "Check the address and try again.";
-    case "loopback-host":
-    case "private-host":
-    case "blocked-ipv4":
-    case "blocked-ipv6":
-    case "dns-rebinding":
-    case "dns-rebinding-v6":
-      return "The website cannot open private or local addresses.";
-    case "content-type":
-      return "The site answered with a file type the website does not check here.";
-    case "redirect-limit":
-    case "redirect-target":
-    case "origin":
-      return "The site redirected in a way the website cannot follow.";
-    default:
-      return null;
-  }
-}
-
-/**
- * Classify a failed proxy result. Our policy denial and an upstream HTTP
- * refusal never share a message or a retryable flag: retrying a 403 from
- * the viewed site never helps, while a 502 might.
- */
-function classifyProxyFailure(
-  proxied: { status: number; code?: string; reason?: string },
-  target: string,
-): { code: string; message: string; retryable: boolean; technical: string } {
-  const code = proxied.code ?? "PROXY_ERROR";
-  const status = proxied.status || 0;
-  const reasonSuffix =
-    typeof proxied.reason === "string" && proxied.reason !== "" ? `, reason=${proxied.reason}` : "";
-  const technical = `metadata proxy: ${code} (HTTP ${status}${reasonSuffix}) fetching ${target}`;
-  if (code === "PROXY_POLICY_DENIED") {
-    const hint = proxyPolicyReasonText(proxied.reason) ?? "Check the address and try again.";
-    return {
-      code: "TRANSPORT_POLICY_DENIED",
-      message:
-        `This address cannot be opened through the website. ${hint} ` +
-        "The browser extension or the desktop app may still work.",
-      retryable: false,
-      technical,
-    };
-  }
-  if (code === "PROXY_BUDGET_EXCEEDED") {
-    return {
-      code: "PROXY_BUDGET_EXCEEDED",
-      message: "This page is too large to check here. Try the desktop app for very large images.",
-      retryable: false,
-      technical,
-    };
-  }
-  if (code === "TRANSPORT_HTTP_ERROR" || status === 401 || status === 403) {
-    if (status === 404) {
-      return {
-        code: "TRANSPORT_HTTP_ERROR",
-        message: "This page could not be found. Check the address and try again.",
-        retryable: false,
-        technical,
-      };
-    }
-    if (status === 401 || status === 403) {
-      return {
-        code: "TRANSPORT_HTTP_ERROR",
-        message:
-          `The site refused to share this file (HTTP ${status}). It may block shared servers; ` +
-          "the browser extension or the desktop app may still work.",
-        retryable: false,
-        technical,
-      };
-    }
-    if (status >= 500 && status <= 599) {
-      return {
-        code: "TRANSPORT_HTTP_ERROR",
-        message: "The site had a problem opening this page. Try again shortly.",
-        retryable: true,
-        technical,
-      };
-    }
-    if (status >= 400 && status <= 499) {
-      return {
-        code: "TRANSPORT_HTTP_ERROR",
-        message: "This page could not be opened. Check the address and try again.",
-        retryable: false,
-        technical,
-      };
-    }
-  }
-  if (code === "TRANSPORT_NETWORK_ERROR" || code === "PROXY_NETWORK_ERROR" || code === "PROXY_ERROR") {
-    return {
-      code: "PROXY_ERROR",
-      message: "The metadata proxy could not fetch this address. Try again shortly.",
-      retryable: true,
-      technical,
-    };
-  }
-  return { code, message: "The metadata proxy could not fetch this address. Try again shortly.", retryable: status >= 500 || status === 0, technical };
-}
-
-/**
- * Fetch one metadata resource for discovery: direct first with a 1500 ms
- * head start, then the eligible metadata proxy after a classified network
- * failure (first-wins: the loser is aborted via AbortController so direct
- * and proxy bytes never overlap). Every readable payload is forwarded to
- * the WASM core, which is the single authority for discovery (it follows
- * secondary resources such as info.json, tour.xml, or tile-info XML). The
- * substring classifier below is a UI hint only and never gates: a head
- * without literals must still reach the core (extension parity, which tries
- * ranked candidates directly), while a generic page still ends as
- * NO_IMAGE_FOUND from the engine.
- *
- * Eligibility stays owned here by the web app (isProxyEligible on a
- * metadata request); integrations execute the supplied transport effects.
- * Tiles never use the proxy. A transient PROXY_RATE_LIMITED retries once
- * after Retry-After/backoff; a persistent throttle fails fast with
- * extension/desktop guidance.
- *
- * Every thrown failure carries two layers: `message` (a plain, actionable
- * sentence for the UI) and `technical` (transport, HTTP status, proxy code,
- * trimmed URL) which the engine feeds into its per-candidate diagnostics and
- * the technical-details section. The two never mix.
- */
-async function fetchMetadataFor(
-  url: string,
-  headers: Record<string, string>,
-): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }> {
-  const target = shortUrl(url);
-  activeTransport = DIRECT_LABEL;
-  // AbortController dedupe: the direct loser is aborted before the proxy
-  // starts so the two transports never overlap on the same resource.
-  const directCtrl = new AbortController();
-  const directStartedAt = Date.now();
-  const direct = await fetchDirect(url, headers, directCtrl.signal, DIRECT_METADATA_TIMEOUT_MS);
-  recordMetadataAttempt(
-    directStartedAt,
-    "direct",
-    target,
-    direct.outcome === "http-error" ? `HTTP ${direct.status ?? 0}` : direct.outcome,
-    direct.bytes?.byteLength,
-  );
-  let via = "direct";
-  let bytes: ArrayBuffer | null = null;
-  let contentType: string | undefined;
-  // Post-redirect base for relative tile URLs. Direct fetches report
-  // res.url; proxied fetches must fall back to the requested URL (the relay
-  // follows redirects internally without exposing the upstream final URL).
-  // Leaving this empty reproduces the krpano regression where
-  // galleria_04.tiles/* resolved against /beta/ and every tile 404'd.
-  let finalUri: string = url;
-  if (direct.outcome === "readable" && direct.bytes) {
-    bytes = direct.bytes;
-    if (typeof direct.finalUrl === "string" && direct.finalUrl !== "") finalUri = direct.finalUrl;
-    if (typeof direct.contentType === "string" && direct.contentType !== "") contentType = direct.contentType;
-  } else if (
-    direct.outcome === "network-error" &&
-    isProxyEligible({ url, kind: "metadata", headers }).eligible
-  ) {
-    try {
-      directCtrl.abort();
-    } catch {
-      // Abort is idempotent when the head-start timeout already fired; it
-      // must never break the automatic proxy fallback.
-    }
-    activeTransport = PROXY_LABEL;
-    via = "proxy";
-    let proxyStartedAt = Date.now();
-    let proxied = await fetchViaProxy(url);
-    recordMetadataAttempt(
-      proxyStartedAt,
-      "metadata proxy",
-      target,
-      proxied.ok ? `HTTP ${proxied.status}` : proxied.code ?? `HTTP ${proxied.status}`,
-      proxied.bytes?.byteLength,
-    );
-    // Retry-After + backoff: one bounded retry converts a transient
-    // token-bucket 429 into success. A persistent throttle, or a
-    // Retry-After beyond the UX budget, still fails fast below with the
-    // extension/desktop guidance (never tiles, never wider eligibility).
-    if (!proxied.ok && proxied.code === "PROXY_RATE_LIMITED") {
-      const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
-      if (delay !== null) {
-        pushLog(`Metadata proxy rate-limited; retrying once after ${delay} ms.`);
-        await sleep(delay);
-        proxyStartedAt = Date.now();
-        proxied = await fetchViaProxy(url);
-        recordMetadataAttempt(
-          proxyStartedAt,
-          "metadata proxy",
-          target,
-          proxied.ok ? `HTTP ${proxied.status}` : proxied.code ?? `HTTP ${proxied.status}`,
-          proxied.bytes?.byteLength,
-        );
-      }
-    }
-    if (!proxied.ok || !proxied.bytes) {
-      if (proxied.code === "PROXY_RATE_LIMITED") {
-        throw failure(
-          "UPSTREAM_RATE_LIMITED",
-          RATE_LIMITED_BY_SITE_MESSAGE,
-          true,
-          undefined,
-          `metadata proxy: upstream rate limit (HTTP 429, PROXY_RATE_LIMITED) fetching ${target}`,
-        );
-      }
-      const classified = classifyProxyFailure(proxied, target);
-      throw failure(classified.code, classified.message, classified.retryable, undefined, classified.technical);
-    }
-    bytes = proxied.bytes;
-    if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "") finalUri = proxied.finalUrl;
-  } else if (direct.outcome === "http-error") {
-    if (direct.status === 429) {
-      // A direct fetch uses the user's own connection, so this throttle is on
-      // their IP, not on our server; the fix is waiting, not another app.
-      throw failure(
-        "UPSTREAM_RATE_LIMITED",
-        SITE_BUSY_MESSAGE,
-        true,
-        undefined,
-        `direct fetch: HTTP 429 Too Many Requests from ${target}`,
-      );
-    }
-    throw failure(
-      "DISCOVERY_HTTP_ERROR",
-      "This page could not be opened. Check the address and try again.",
-      false,
-      undefined,
-      `direct fetch: HTTP ${direct.status} from ${target}`,
-    );
-  } else {
-    throw failure(
-      "DISCOVERY_FAILED",
-      discoveryFailedError(via).message,
-      true,
-      undefined,
-      `direct fetch: no readable response (network error or blocked read) fetching ${target}`,
-    );
-  }
-  // WASM core is authoritative: always forward readable bytes so formats
-  // whose first head carries no zoomable literal (GAC/tour/info.json reached
-  // via secondary resources) still resolve. The classifier is a UI hint only.
-  const hint = classifyReadableBytes(bytes, { via, contentType });
-  if (!hint.found) {
-    pushLog(`content hint: no zoomable marker in first bytes (${via}); running full discovery…`);
-  }
-  return { bytes, finalUri, via };
-}
-
-async function fetchTileFor(
-  url: string,
-  headers: Record<string, string>,
-  maxRetries: number = TILE_MAX_RETRIES,
-): Promise<{ bytes: ArrayBuffer }> {
-  let lastOutcome = "network-error";
-  let lastStatus: number | undefined;
-  for (let attempt = 0; ; attempt++) {
-    await throttleTileStart(url);
-    tileAttempts += 1;
-    if (attempt > 0) tileRetries += 1;
-    refreshDiagnostics();
-    const direct = await fetchDirect(url, headers, undefined, REQUEST_TIMEOUT_MS, false);
-    if (direct.outcome === "readable" && direct.bytes) {
-      return { bytes: direct.bytes };
-    }
-    lastOutcome = direct.outcome;
-    lastStatus = direct.status;
-    if (direct.outcome === "cancelled" || attempt >= maxRetries) {
-      break;
-    }
-    await sleep(tileRetryDelayMs(attempt));
-  }
-  throw failure(
-    "TILE_FAILED",
-    "Part of the image could not be saved. Try again in a moment.",
-    true,
-    undefined,
-    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after ${maxRetries + 1} attempts`,
-  );
-}
-
+const webFetcher: WebFetcher = createWebFetcher({
+  proxyTransport,
+  isProxyEligible,
+  classifyHint: (bytes, info) => classifyReadableBytes(bytes, info),
+  hooks: {
+    onRequestStart: (label) => jobActivity.noteRequestStart(label),
+    onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
+    onLog: (line) => jobActivity.pushLog(line),
+    onUpdate: update,
+    onMetadataAttempt: ({ startedAt, transport, target, outcome, bytes }) =>
+      recordMetadataAttempt(startedAt, transport, target, outcome, bytes),
+    onTileAttempt: (retrying) => {
+      tileAttempts += 1;
+      if (retrying) tileRetries += 1;
+      refreshDiagnostics();
+    },
+  },
+  messages: {
+    rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
+    siteBusy: SITE_BUSY_MESSAGE,
+    discoveryFailed: (via) => discoveryFailedError(via).message,
+  },
+  throttle: (url) => tileThrottle.throttle(url),
+});
 async function probeSizeFor(
   url: string,
   headers: Record<string, string>,
 ): Promise<{ ok: boolean; width: number; height: number }> {
   try {
-    const { bytes } = await fetchTileFor(url, headers);
-    const bitmap = await decodeTileBitmap(bytes);
+    const { bytes } = await webFetcher.fetchTileFor(url, headers);
+    const bitmap = await tileDecoder.decode(bytes);
     const size = { ok: bitmap.width > 0 && bitmap.height > 0, width: bitmap.width, height: bitmap.height };
     bitmap.close();
     return size;
@@ -1163,88 +278,18 @@ async function probeSizeFor(
     // Readable bytes are unavailable (e.g. no CORS grant). Probing only
     // needs dimensions, which a plain <img> reports without byte access.
     try {
-      const img = await loadTileImage(url);
+      const img = await loadTileImage(url, {
+        hooks: {
+          onRequestStart: (label) => jobActivity.noteRequestStart(label),
+          onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
+          onUpdate: update,
+        },
+      });
       return { ok: img.naturalWidth > 0 && img.naturalHeight > 0, width: img.naturalWidth, height: img.naturalHeight };
     } catch {
       return { ok: false, width: 0, height: 0 };
     }
   }
-}
-
-/**
- * Load one tile as an ordinary image element: visible, but with no byte
- * access. Deliberately leaves the CORS opt-in unset, so no CORS grant is
- * needed; drawing the result taints the canvas (legacy ZoomManager.addTile
- * parity). The caller must treat a tainted canvas as display-only: no pixel
- * reads, no toBlob/toDataURL, no programmatic save.
- */
-function loadTileImage(url: string, ms: number = REQUEST_TIMEOUT_MS): Promise<HTMLImageElement> {
-  const reqId = noteRequestStart("img");
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const done = (ok: boolean, value: HTMLImageElement | Error) => {
-      if (timer) clearTimeout(timer);
-      timer = null;
-      noteRequestEnd(reqId, ok);
-      update();
-      if (ok) resolve(value as HTMLImageElement);
-      else reject(value);
-    };
-    img.addEventListener("load", () => done(true, img), { once: true });
-    img.addEventListener(
-      "error",
-      () => done(false, new Error("tile image failed to load")),
-      { once: true },
-    );
-    timer = setTimeout(() => {
-      try {
-        img.src = "";
-      } catch {
-        // Cancelling a hung load must never throw.
-      }
-      done(false, new Error(`tile image timed out after ${ms / 1000}s`));
-    }, ms);
-    // Don't tell the tile host the request comes from dezoomify (legacy parity).
-    img.referrerPolicy = "no-referrer";
-    img.src = url;
-  });
-}
-
-function tileOrigin(url: string): string {
-  try {
-    return new URL(url, typeof window === "undefined" ? undefined : window.location.href).origin;
-  } catch {
-    // Invalid tile URLs fail later through the normal typed fetch path; keep
-    // their classification isolated rather than accidentally sharing one.
-    return url;
-  }
-}
-
-function setCanvasVisible(visible: boolean): void {
-  if (typeof document === "undefined") return;
-  try {
-    const wrapper = document.getElementById("canvas-wrapper");
-    if (wrapper) wrapper.style.display = visible ? "" : "none";
-    const controls = document.getElementById("preview-controls");
-    if (controls && "hidden" in controls) (controls as { hidden: boolean }).hidden = !visible;
-    if (!visible) {
-      try {
-        preview.resetTransform(document);
-      } catch {
-        // Preview reset must never break the job.
-      }
-    }
-  } catch {
-    // Canvas visibility must never break the job.
-  }
-}
-
-/** A browser canvas reports taint as a SecurityError when serialization is attempted. */
-function isCanvasTaintError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const candidate = error as { name?: unknown; code?: unknown };
-  return candidate.name === "SecurityError" || candidate.code === 18;
 }
 
 function disposeClient(): void {
@@ -1254,8 +299,8 @@ function disposeClient(): void {
 
 function reportProgress(current: number, total: number, message: string): void {
   viewCtx.currentProgress = { current, total, message };
-  touchProgress();
-  scheduleBatchedUpdate();
+  jobActivity.touchProgress();
+  jobActivity.scheduleUpdate();
 }
 
 function writeHash(url: string): void {
@@ -1287,133 +332,19 @@ function makeClient(): DiscoveryClient {
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   return createDiscoveryClient({
     worker,
-    fetchMetadata: fetchMetadataFor,
-    fetchTile: fetchTileFor,
+    fetchMetadata: webFetcher.fetchMetadataFor,
+    fetchTile: webFetcher.fetchTileFor,
     probeSize: probeSizeFor,
   });
 }
 
-// Encrypted-tile processing (e.g. Google Arts & Culture XOR-free AES
-// container) goes through the single-pending worker client. Tile fetches
-// run concurrently, so processing calls are serialized here: fetching stays
-// parallel, only the short decrypt step queues.
-let processQueue: Promise<unknown> = Promise.resolve();
-
-function enqueueProcess(client2: DiscoveryClient, recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> {
-  const run = processQueue.then(() => client2.process(recipe, bytes));
-  processQueue = run.catch(() => undefined);
-  return run;
-}
-
-/**
- * Draw one planned tile. Returns true when the tile was painted through
- * ordinary image display (canvas now tainted, display-only); false when it
- * arrived as readable bytes (canvas stays clean).
- *
- * Readable bytes come first so CORS-granting sites keep the clean save. One
- * ordinary tile classifies its origin: a single unreadable fetch followed by
- * a successful plain <img> sends later ordinary tiles straight to <img>.
- * The user sees the picture and can right-click it, but scripts can no longer
- * read or save the canvas.
- * Processed tiles rethrow: decrypt/re-encode needs readable bytes.
- * When the <img> also fails, the original readable failure (with its
- * technical chain) is what the job reports.
- */
-async function drawTile(
-  client2: DiscoveryClient,
-  ctx2d: CanvasRenderingContext2D,
-  tile: PlanTile,
-): Promise<boolean> {
-  const drawBitmap = async (source: ImageBitmap | HTMLImageElement): Promise<void> => {
-    const fullW = source instanceof ImageBitmap ? source.width : source.naturalWidth;
-    const fullH = source instanceof ImageBitmap ? source.height : source.naturalHeight;
-    // Trust the plan for placement: the canvas layout must stay seamless even
-    // when a tile decodes at an unexpected size. Scale the decoded bytes to
-    // the planned extent so no gap appears; diagnostics never retain tile data.
-    const planW = tile.w ?? fullW;
-    const planH = tile.h ?? fullH;
-    if (planW !== fullW || planH !== fullH) {
-      pushLog("A tile size differed from the plan; it was scaled to keep the image seamless.");
-    }
-    if (planW > 0 && planH > 0 && fullW > 0 && fullH > 0) {
-      ctx2d.drawImage(source, 0, 0, fullW, fullH, tile.x, tile.y, planW, planH);
-    }
-  };
-  const drawOrdinaryImage = async (): Promise<void> => {
-    await throttleTileStart(tile.uri);
-    const img = await loadTileImage(tile.uri);
-    await drawBitmap(img);
-  };
-  if (isOrdinaryImageTile(tile.processing)) {
-    const origin = tileOrigin(tile.uri);
-    let state = tileOrigins.get(origin);
-    if (state?.ready) {
-      await state.ready;
-    } else if (!state) {
-      let resolveTransport!: (mode: TileTransport) => void;
-      let rejectTransport!: (reason?: unknown) => void;
-      const ready = new Promise<TileTransport>((resolve, reject) => {
-        resolveTransport = resolve;
-        rejectTransport = reject;
-      });
-      // The worker that owns classification reports failures through drawTile;
-      // this handler prevents a second unhandled rejection before waiters run.
-      void ready.catch(() => undefined);
-      state = { ready };
-      tileOrigins.set(origin, state);
-      try {
-        const { bytes } = await fetchTileFor(tile.uri, tile.headers ?? {}, 0);
-        const bitmap = await decodeTileBitmap(bytes);
-        try {
-          await drawBitmap(bitmap);
-        } finally {
-          bitmap.close();
-        }
-        state.mode = "readable";
-        resolveTransport("readable");
-        return false;
-      } catch (readableFailure) {
-        try {
-          await drawOrdinaryImage();
-          state.mode = "ordinary-image";
-          resolveTransport("ordinary-image");
-          return true;
-        } catch {
-          tileOrigins.delete(origin);
-          rejectTransport(readableFailure);
-          throw readableFailure;
-        }
-      }
-    }
-    if (state.mode === "ordinary-image") {
-      await drawOrdinaryImage();
-      return true;
-    }
-  }
-  let readableFailure: unknown = null;
-  try {
-    let { bytes } = await fetchTileFor(tile.uri, tile.headers ?? {});
-    if (tile.processing && tile.processing !== "none") {
-      bytes = await enqueueProcess(client2, tile.processing, bytes);
-    }
-    const bitmap = await decodeTileBitmap(bytes);
-    try {
-      await drawBitmap(bitmap);
-    } finally {
-      bitmap.close();
-    }
-    return false;
-  } catch (error) {
-    readableFailure = error;
-  }
-  throw readableFailure;
-}
-
 async function runJob(url: string): Promise<void> {
   const token = ++jobToken;
-  tileOrigins = new Map();
+  webFetcher.resetActiveTransport();
+  tileThrottle.reset();
   resetActivity(url);
-  setCanvasVisible(false);
+  setCanvasVisible(document, false);
+  preview.resetTransform(document);
   jobPaused = false;
   viewCtx.paused = false;
   viewCtx.imageChoice = undefined;
@@ -1425,16 +356,16 @@ async function runJob(url: string): Promise<void> {
   // they become active and reach this point.
   writeHash(url);
   let queueOutcome: "done" | "failed" | "cancelled" = "done";
-  startHeartbeat();
-  setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
+  jobActivity.startHeartbeat();
+  jobActivity.setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
   controller.dispatch(nextEvent("start-discovery", { transport: "direct" }) as never);
   update();
   try {
     client = makeClient();
-    pushLog(`Starting discovery for ${shortUrl(url)}`);
+    jobActivity.pushLog(`Starting discovery for ${shortUrl(url)}`);
     const catalog: WebCatalog = await client.start(url);
     if (token !== jobToken) return;
-    const via = activeTransport === PROXY_LABEL ? "proxy" : "direct";
+    const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
     if (catalog.images.length === 0) {
       throw failure(
         "NO_IMAGE_FOUND",
@@ -1443,12 +374,12 @@ async function runJob(url: string): Promise<void> {
         "discovery returned an empty image catalog",
       );
     }
-    pushLog(`Found ${catalog.images.length} image${catalog.images.length === 1 ? "" : "s"}`);
+    jobActivity.pushLog(`Found ${catalog.images.length} image${catalog.images.length === 1 ? "" : "s"}`);
     controller.dispatch(
       nextEvent("images-found", { imageCount: catalog.images.length, transport: via }) as never,
     );
     const foundNoun = catalog.images.length === 1 ? "1 image" : `${catalog.images.length} images`;
-    setStep(
+    jobActivity.setStep(
       `Found ${foundNoun}, saving largest that fits…`,
       "The website saves the first image automatically; use the desktop app to choose another.",
     );
@@ -1464,9 +395,9 @@ async function runJob(url: string): Promise<void> {
       : undefined;
     const declaredFailure = assertDeclaredSizeFitsBrowser(declared, url);
     if (declaredFailure) throw declaredFailure;
-    setStep("Choosing the highest resolution…");
+    jobActivity.setStep("Choosing the highest resolution…");
     controller.dispatch(nextEvent("level-chosen") as never);
-    setStep("Checking the image size…");
+    jobActivity.setStep("Checking the image size…");
     controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
     update();
 
@@ -1479,7 +410,7 @@ async function runJob(url: string): Promise<void> {
       throw error;
     }
     if (token !== jobToken) return;
-    pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
+    jobActivity.pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
     const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
     if (!canvas) {
       throw failure(
@@ -1506,12 +437,12 @@ async function runJob(url: string): Promise<void> {
     // Reveal the canvas before the first tile paints (legacy parity): tiles
     // assemble visibly as they arrive, and the picture stays right-clickable
     // throughout acquisition, whichever finish follows.
-    setCanvasVisible(true);
+    setCanvasVisible(document, true);
     preview.resetTransform(document);
 
     const total = plan.tiles.length;
     viewCtx.imageChoice = { width, height, tiles: total };
-    setStep("Fetching image tiles…", `${total} tiles at full resolution`);
+    jobActivity.setStep("Fetching image tiles…", `${total} tiles at full resolution`);
     reportProgress(0, total, `Saving ${total} tiles…`);
     let done = 0;
     let failed: unknown = null;
@@ -1520,15 +451,29 @@ async function runJob(url: string): Promise<void> {
       viewCtx.originClean = false;
       viewCtx.sourceUrl = url;
       viewCtx.desktopHandoffUrl = desktopHandoffLink(url);
-      setStep("Displaying the image…", "This site shows its pieces without letting the browser keep a copy.");
+      jobActivity.setStep("Displaying the image…", "This site shows its pieces without letting the browser keep a copy.");
       reportProgress(total, total, `Displaying ${total} tiles…`);
-      pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
-      setCanvasVisible(true);
+      jobActivity.pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
+      setCanvasVisible(document, true);
       preview.resetTransform(document);
       controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
       recordWebHistory(url, width, height, "display");
       update();
     };
+    const tilePainter = createTilePainter({
+      fetchTile: (uri, headers) => webFetcher.fetchTileFor(uri, headers),
+      fetchTileOnce: (uri, headers) => webFetcher.fetchTileFor(uri, headers, 0),
+      decode: (bytes) => tileDecoder.decode(bytes),
+      throttle: (uri) => tileThrottle.throttle(uri),
+      processTile: (recipe, bytes) => (client as DiscoveryClient).process(recipe, bytes),
+      isOrdinaryImageTile,
+      hooks: {
+        onRequestStart: (label) => jobActivity.noteRequestStart(label),
+        onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
+        onLog: (line) => jobActivity.pushLog(line),
+        onUpdate: update,
+      },
+    });
     const queue = [...plan.tiles];
     const tileWorker = async (): Promise<void> => {
       while (queue.length && !failed) {
@@ -1544,7 +489,7 @@ async function runJob(url: string): Promise<void> {
         const tile = queue.shift();
         if (!tile) return;
         try {
-          const tileTainted = await drawTile(client as DiscoveryClient, ctx2d, tile);
+          const tileTainted = await tilePainter.drawTile(ctx2d, tile);
           if (tileTainted) tainted = true;
         } catch (error) {
           failed = error;
@@ -1573,22 +518,11 @@ async function runJob(url: string): Promise<void> {
     }
 
     controller.dispatch(nextEvent("save-start") as never);
-    setStep("Assembling the final picture…", "Encoding PNG in your browser");
+    jobActivity.setStep("Assembling the final picture…", "Encoding PNG in your browser");
     reportProgress(total, total, "Encoding PNG…");
     let blob: Blob;
     try {
-      blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(failure(
-            "OUTPUT_ENCODE_FAILED",
-            "The final picture could not be created from the saved pieces.",
-            false,
-            undefined,
-            "canvas.toBlob returned null while encoding the PNG",
-          ))),
-          "image/png",
-        );
-      });
+      blob = await canvasToPngBlob(canvas) as Blob;
     } catch (error) {
       // A browser may defer origin-clean enforcement until toBlob. Keep the
       // assembled canvas visible and never retry serialization in that case.
@@ -1607,11 +541,11 @@ async function runJob(url: string): Promise<void> {
       blobUrl: resultBlobUrl,
     };
     viewCtx.originClean = true;
-    pushLog(`Done: ${width}×${height} PNG (${total} tiles)`);
+    jobActivity.pushLog(`Done: ${width}×${height} PNG (${total} tiles)`);
     // The browser canvas path (createImageBitmap -> drawImage -> toBlob) never
     // preserves the source ICC color profile or EXIF metadata (native keeps
     // the first tile's profile); warn so archived colors are not trusted blindly.
-    pushLog("Colors may shift slightly: the browser save does not keep the original color profile. For exact colors, use the desktop app.");
+    jobActivity.pushLog(BROWSER_SAVE_COLOR_WARNING);
     controller.dispatch(nextEvent("save-done") as never);
     recordWebHistory(url, width, height, "png");
     update();
@@ -1629,7 +563,7 @@ async function runJob(url: string): Promise<void> {
     const message = structured?.message || "Could not save this zoomable image.";
     const detail = structured?.detail ?? structured?.technical;
     // The activity log is technical: prefer the dense chain over UI copy.
-    pushLog(`Failed (${code}): ${structured?.technical || message}`);
+    jobActivity.pushLog(`Failed (${code}): ${structured?.technical || message}`);
     // One-click desktop handoff (todo 5.5): too-large plans fail with the
     // `dezoomify://` link in the view context, so the failed view offers the
     // Send button with the origin/scope consent summary. Only http(s)
@@ -1651,7 +585,7 @@ async function runJob(url: string): Promise<void> {
           // Tiles never use the metadata CORS proxy: a tile failure always
           // reports the direct browser fetch, even when the job's metadata
           // arrived through the proxy.
-          transport: errorTransportFor(code, activeTransport),
+          transport: errorTransportFor(code, webFetcher.getActiveTransport()),
           phase: phaseFor(code),
           ...(detail ? { detail } : {}),
         },
@@ -1660,8 +594,8 @@ async function runJob(url: string): Promise<void> {
     update();
   } finally {
     if (token === jobToken) {
-      stopHeartbeat();
-      refreshLongestPending();
+      jobActivity.stopHeartbeat();
+      jobActivity.refreshLongestPending();
       disposeClient();
       // Sequential queue: the active entry settles, then the first waiting
       // entry (if any) becomes active and starts. A failed entry never stops
@@ -1682,7 +616,7 @@ async function runJob(url: string): Promise<void> {
             currentSeq = 0;
           }
           const summary = summarizeWebQueue(webQueue);
-          pushLog(
+          jobActivity.pushLog(
             `Queue: ${summary.succeeded} done, ${summary.failed} failed, ${summary.pending} waiting`,
           );
           void runJob(next.url);
@@ -1720,7 +654,7 @@ function submitQueuedUrl(url: string): void {
   // Queued behind the active job: no hash write, no cancel of the running
   // job. The hash stays owned by the active URL until it settles.
   const position = webQueue.entries.filter((e) => e.status === "queued").length;
-  pushLog(`Queued ${shortUrl(url)} (position ${position} in queue)`);
+  jobActivity.pushLog(`Queued ${shortUrl(url)} (position ${position} in queue)`);
   update();
 }
 
@@ -1742,12 +676,16 @@ function update(): void {
   const state = controller.getState();
   if (state.status === "downloading" && viewCtx.currentProgress) {
     const progress = viewCtx.currentProgress;
-    progress.active = Math.min(pendingStarts.size, Math.max(0, progress.total - progress.current));
+    progress.active = Math.min(
+      jobActivity.state.pendingRequests ?? 0,
+      Math.max(0, progress.total - progress.current),
+    );
   }
+  const activeTransport = webFetcher.getActiveTransport();
   if (activeTransport && !state.transport) {
     state.transport = activeTransport;
   }
-  if (viewCtx.jobActivity) refreshLongestPending();
+  if (viewCtx.jobActivity) jobActivity.refreshLongestPending();
   renderView(
     appContainer,
     state,
@@ -1795,39 +733,23 @@ function update(): void {
         if (jobPaused) return;
         jobPaused = true;
         viewCtx.paused = true;
-        if (viewCtx.jobActivity) {
-          viewCtx.jobActivity.paused = true;
-          viewCtx.jobActivity.pausedAt = Date.now();
-          viewCtx.jobActivity.now = viewCtx.jobActivity.pausedAt;
-        }
-        stopHeartbeat();
-        pushLog("Paused: no new pieces are being fetched.");
+        jobActivity.pause();
+        jobActivity.pushLog("Paused: no new pieces are being fetched.");
         update();
       },
       onResume() {
         if (!jobPaused) return;
         jobPaused = false;
         viewCtx.paused = false;
-        if (viewCtx.jobActivity) {
-          const now = Date.now();
-          const pausedAt = viewCtx.jobActivity.pausedAt;
-          const pausedFor = pausedAt === undefined ? 0 : Math.max(0, now - pausedAt);
-          viewCtx.jobActivity.paused = false;
-          viewCtx.jobActivity.pausedAt = undefined;
-          viewCtx.jobActivity.pausedDurationMs = (viewCtx.jobActivity.pausedDurationMs ?? 0) + pausedFor;
-          viewCtx.jobActivity.lastProgressAt = (viewCtx.jobActivity.lastProgressAt ?? now) + pausedFor;
-          viewCtx.jobActivity.now = now;
-          for (const pending of pendingStarts.values()) pending.startedAt += pausedFor;
-        }
-        startHeartbeat();
-        pushLog("Resumed: fetching queued pieces again.");
+        jobActivity.resume();
+        jobActivity.pushLog("Resumed: fetching queued pieces again.");
         update();
       },
       onCancel() {
         jobToken += 1;
         jobPaused = false;
         viewCtx.paused = false;
-        stopHeartbeat();
+        jobActivity.stopHeartbeat();
         disposeClient();
         // Stop returns directly to the initial view. Effects from the retired
         // token finish harmlessly without mutating the replacement job.
@@ -1845,8 +767,10 @@ function update(): void {
         viewCtx.imageChoice = undefined;
         viewCtx.sourceUrl = undefined;
         viewCtx.desktopHandoffUrl = undefined;
-        activeTransport = null;
-        setCanvasVisible(false);
+        webFetcher.resetActiveTransport();
+        tileThrottle.reset();
+        setCanvasVisible(document, false);
+        preview.resetTransform(document);
         clearHash();
         if (resultBlobUrl) {
           URL.revokeObjectURL(resultBlobUrl);
@@ -1858,9 +782,12 @@ function update(): void {
         jobToken += 1;
         jobPaused = false;
         viewCtx.paused = false;
-        stopHeartbeat();
+        jobActivity.stopHeartbeat();
         disposeClient();
-        setCanvasVisible(false);
+        webFetcher.resetActiveTransport();
+        tileThrottle.reset();
+        setCanvasVisible(document, false);
+        preview.resetTransform(document);
         sessionId = `sess:web-${Date.now()}`;
         controller.reset(sessionId);
         currentSeq = 0;
@@ -1876,7 +803,6 @@ function update(): void {
         viewCtx.imageChoice = undefined;
         viewCtx.sourceUrl = undefined;
         viewCtx.desktopHandoffUrl = undefined;
-        activeTransport = null;
         clearHash();
         if (resultBlobUrl) {
           URL.revokeObjectURL(resultBlobUrl);
@@ -1896,16 +822,12 @@ function update(): void {
       },
       onSave() {
         if (!resultBlobUrl) return;
-        const anchor = document.createElement("a");
-        anchor.href = resultBlobUrl;
-        anchor.download = suggestedNameFor(
+        saveBlobViaAnchor(
+          document,
+          resultBlobUrl,
           viewCtx.completedInfo?.width,
           viewCtx.completedInfo?.height,
-          "png",
         );
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
       },
       onCopyDiagnostics(text: string) {
         const btn = document.getElementById("dz-btn-copy-diagnostics");

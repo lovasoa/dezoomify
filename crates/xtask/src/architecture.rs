@@ -25,7 +25,52 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     check_shared_ui(&root.join("packages/shared-ui/src"))?;
     check_runtime(&root.join("packages/browser-runtime/src"))?;
     check_browser_single_sources(&root)?;
+    check_website_runtime_usage(&root)?;
     println!("architecture: ok");
+    Ok(())
+}
+
+fn check_website_runtime_usage(root: &Path) -> Result<(), String> {
+    let main_path = root.join("src/main.ts");
+    let main = std::fs::read_to_string(&main_path)
+        .map_err(|e| format!("read {}: {e}", main_path.display()))?;
+    for required in [
+        "createJobActivity",
+        "createTileDecoder",
+        "createTilePainter",
+        "createTileThrottle",
+        "createWebFetcher",
+        "canvasToPngBlob",
+        "saveBlobViaAnchor",
+        "setCanvasVisible",
+    ] {
+        if !main.contains(required) {
+            return Err(format!(
+                "website runtime bypass: {} must use `{required}` from packages/browser-runtime",
+                main_path.display()
+            ));
+        }
+    }
+    for duplicate in [
+        "function fetchDirect(",
+        "function fetchViaProxy(",
+        "function fetchMetadataFor(",
+        "function fetchTileFor(",
+        "function loadTileImage(",
+        "function drawTile(",
+        "function tileDecodeWorkerCode(",
+        "function scheduleBatchedUpdate(",
+        "function setCanvasVisible(",
+        "canvas.toBlob(",
+        "new Image()",
+    ] {
+        if main.contains(duplicate) {
+            return Err(format!(
+                "website runtime duplicate: {} contains `{duplicate}`; use packages/browser-runtime",
+                main_path.display()
+            ));
+        }
+    }
     Ok(())
 }
 

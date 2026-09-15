@@ -77,3 +77,24 @@ test("heartbeat repaints only on real change", () => {
   assert.equal(t.frames.length, 1);
   t.activity.stopHeartbeat();
 });
+
+test("pause excludes paused time from elapsed and pending clocks", () => {
+  const t = tracker();
+  t.activity.reset("https://a.test/", 30000);
+  t.activity.startHeartbeat();
+  const id = t.activity.noteRequestStart("tile");
+  t.now.at += 500;
+  t.activity.pause();
+  assert.equal(t.activity.state.paused, true);
+  assert.equal(t.activity.state.pausedAt, 1500);
+  t.now.at += 5000;
+  t.activity.pushLog("still paused");
+  assert.match(t.activity.state.log.at(-1), /^1s:/);
+  t.activity.resume();
+  assert.equal(t.activity.state.paused, false);
+  assert.equal(t.activity.state.pausedDurationMs, 5000);
+  t.now.at += 250;
+  t.activity.refreshLongestPending();
+  assert.equal(t.activity.state.longestPendingMs, 750);
+  t.activity.noteRequestEnd(id, true);
+});

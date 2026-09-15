@@ -3817,14 +3817,26 @@
       "source_snapshot": "local"
     },
     {
+      "content_type": "application/octet-stream",
+      "id": "web/google-arts-web/payloads/fixtures.test/arts/padded-edge-tile.bin",
+      "license_provenance": "local test fixture (generated, no third-party material)",
+      "path": "web/google-arts-web/payloads/fixtures.test/arts/padded-edge-tile.bin",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "7e9f3b8bfe1200a14d9ad729dee7d7c1a7cc51a8944a7a9e9e49840addbee290",
+      "size": 344,
+      "source_path": "crates/fixture-server/tests/webapp-e2e/webapp.spec.js",
+      "source_snapshot": "local"
+    },
+    {
       "content_type": "text/xml",
       "id": "web/google-arts-web/payloads/fixtures.test/arts/gap/path=g.xml",
       "license_provenance": "local test fixture (generated, no third-party material)",
       "path": "web/google-arts-web/payloads/fixtures.test/arts/gap/path=g.xml",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "b8cd4b2ea9da5f64cef36b3dd02388b4a6b2089c72c400f8df35af528014a32b",
-      "size": 318,
+      "sha256": "4e28ecd623a26b5e7e41d4ccaa3d97241a0ad4cfb754c0125d265a85ca27a213",
+      "size": 320,
       "source_path": "crates/fixture-server/tests/webapp-e2e/webapp.spec.js",
       "source_snapshot": "local"
     },

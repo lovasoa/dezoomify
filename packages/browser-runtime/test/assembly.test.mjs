@@ -91,16 +91,16 @@ test("publish is exactly-once and release is idempotent", async () => {
   assert.equal(events.saved.length, 1);
 });
 
-test("a decoded size mismatch scales to the planned extent and logs", async () => {
+test("a decoded padded edge tile is cropped to the planned extent and logs", async () => {
   const { assembly, ctx2d, events } = harness();
   const bytes = new ArrayBuffer(2);
-  new DataView(bytes).setUint16(0, 10, true); // decodes 10x10
-  await assembly.acquireTile("tile:0", placement(0, 0, { expected_size: { width: 16, height: 16 } }), bytes);
-  assembly.openEncoder("png", { width: 32, height: 32 });
+  new DataView(bytes).setUint16(0, 512, true);
+  await assembly.acquireTile("tile:0", placement(2560, 2048, { expected_size: { width: 428, height: 196 }, canvas: { width: 2988, height: 2244 } }), bytes);
+  assembly.openEncoder("png", { width: 2988, height: 2244 });
   await assembly.finalizeEncoder();
-  assert.deepEqual(ctx2d.draws[0], { source: ctx2d.draws[0].source, sx: 0, sy: 0, sw: 10, sh: 10, dx: 0, dy: 0, dw: 16, dh: 16 });
+  assert.deepEqual(ctx2d.draws[0], { source: ctx2d.draws[0].source, sx: 0, sy: 0, sw: 428, sh: 196, dx: 2560, dy: 2048, dw: 428, dh: 196 });
   assert.equal(events.log.length, 1);
-  assert.equal(events.log[0], "A tile size differed from the plan; it was scaled to keep the image seamless.");
+  assert.equal(events.log[0], "A tile size differed from the plan; only its planned pixel extent was drawn.");
 });
 
 test("undeclared canvas derives the output size from placements", async () => {

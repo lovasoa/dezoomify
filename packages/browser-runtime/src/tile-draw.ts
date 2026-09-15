@@ -1,12 +1,10 @@
-// Tile painting (todo 2.2 home, moved from `src/main.ts`).
-//
+// Tile painting shared by browser products.
 // Readable bytes come first so CORS-granting sites keep the clean save.
 // After the readable retries are exhausted, an unprocessed tile falls back
 // to a plain <img> (no CORS needed): the user sees the picture, but scripts
 // can no longer read or save the canvas. Processed tiles rethrow:
 // decrypt/re-encode needs readable bytes. The host image constructor and
-// timers are injected so node tests drive the fallback with fakes. Keep
-// erasable-syntax-only for the browser `.js` mirrors.
+// timers are injected so node tests drive the fallback with fakes.
 import type { PlanTile } from "./session.ts";
 import type { TileBitmap } from "./tile-decode.ts";
 
@@ -24,6 +22,7 @@ export interface TileDrawHooks {
 
 export interface TileDrawDeps {
   fetchTile(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
+  fetchTileOnce?(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
   decode(bytes: ArrayBuffer): Promise<TileBitmap>;
   throttle?: (url: string) => Promise<void>;
   processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
@@ -70,11 +69,12 @@ export interface PlacedTileGeometry {
 
 /**
  * Draw one decoded tile onto an output surface at its planned placement.
- * Trusts the plan for layout: the canvas stays seamless even when a tile
- * decodes at an unexpected size; the decoded bitmap is scaled to the
- * planned extent so no gap appears. `onMismatch` receives a generic
- * diagnostic when the decoded and planned sizes disagree; it never identifies
- * an individual tile.
+ * Trusts the plan for layout and copies pixels at 1:1 scale. A tile larger
+ * than its planned extent is cropped from the right and bottom; this is how
+ * padded edge tiles are represented by Google Arts & Culture and similar
+ * services. A smaller tile leaves the remainder unpainted instead of
+ * stretching its pixels. `onMismatch` receives a generic diagnostic; it
+ * never identifies an individual tile.
  */
 export function drawPlacedTile(
   ctx2d: Canvas2DLike,
@@ -90,11 +90,13 @@ export function drawPlacedTile(
   const fullH = isImage ? (source as TileImageLike).naturalHeight : (source as TileBitmap).height;
   const planW = geometry.w ?? fullW;
   const planH = geometry.h ?? fullH;
+  const copyW = Math.min(planW, fullW);
+  const copyH = Math.min(planH, fullH);
   if (planW !== fullW || planH !== fullH) {
-    onMismatch?.("A tile size differed from the plan; it was scaled to keep the image seamless.");
+    onMismatch?.("A tile size differed from the plan; only its planned pixel extent was drawn.");
   }
-  if (planW > 0 && planH > 0 && fullW > 0 && fullH > 0) {
-    ctx2d.drawImage(source, 0, 0, fullW, fullH, geometry.x, geometry.y, planW, planH);
+  if (copyW > 0 && copyH > 0) {
+    ctx2d.drawImage(source, 0, 0, copyW, copyH, geometry.x, geometry.y, copyW, copyH);
   }
 }
 
@@ -203,6 +205,9 @@ export interface TilePainter {
  */
 export function createTilePainter(deps: TileDrawDeps): TilePainter {
   const processQueue = deps.processTile ? createProcessQueue(deps.processTile) : null;
+  type TileTransport = "readable" | "ordinary-image";
+  type OriginState = { mode?: TileTransport; ready?: Promise<TileTransport> };
+  const origins = new Map<string, OriginState>();
   const loadImage =
     deps.loadImage ??
     ((url: string, ms?: number) =>
@@ -213,6 +218,14 @@ export function createTilePainter(deps: TileDrawDeps): TilePainter {
         ms: typeof ms === "number" ? ms : (deps.requestTimeoutMs ?? 30000),
         hooks: deps.hooks,
       }));
+
+  function tileOrigin(url: string): string {
+    try {
+      return new URL(url, typeof window === "undefined" ? undefined : window.location.href).origin;
+    } catch {
+      return url;
+    }
+  }
 
   async function drawTile(
     ctx2d: Canvas2DLike,
@@ -227,13 +240,19 @@ export function createTilePainter(deps: TileDrawDeps): TilePainter {
         (line) => deps.hooks.onLog(line),
       );
     };
-    let readableFailure: unknown = null;
-    try {
-      let { bytes } = await deps.fetchTile(tile.uri, tile.headers ?? {});
-      const processTile = opts?.processTile ?? (processQueue ? (r: string, b: ArrayBuffer) => (processQueue as (r: string, b: ArrayBuffer) => Promise<ArrayBuffer>)(r, b) : undefined);
-      if (tile.processing && tile.processing !== "none" && processTile) {
-        bytes = await processTile(tile.processing, bytes);
-      } else if (tile.processing && tile.processing !== "none" && !processTile) {
+    const decodeAndDraw = async (
+      bytes: ArrayBuffer,
+      overrideProcess?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
+    ): Promise<void> => {
+      const processor =
+        overrideProcess ??
+        opts?.processTile ??
+        (processQueue
+          ? (recipe: string, input: ArrayBuffer) => processQueue(recipe, input)
+          : undefined);
+      if (tile.processing && tile.processing !== "none" && processor) {
+        bytes = await processor(tile.processing, bytes);
+      } else if (tile.processing && tile.processing !== "none") {
         throw new Error(`tile processing unavailable for recipe: ${tile.processing}`);
       }
       const bitmap = await deps.decode(bytes);
@@ -246,12 +265,8 @@ export function createTilePainter(deps: TileDrawDeps): TilePainter {
           // Bitmap cleanup is best-effort.
         }
       }
-      return false;
-    } catch (error) {
-      readableFailure = error;
-    }
-    if (!deps.isOrdinaryImageTile(tile.processing)) throw readableFailure;
-    try {
+    };
+    const drawOrdinaryImage = async (): Promise<void> => {
       if (deps.throttle) {
         try {
           await deps.throttle(tile.uri);
@@ -261,10 +276,51 @@ export function createTilePainter(deps: TileDrawDeps): TilePainter {
       }
       const img = await loadImage(tile.uri);
       await drawBitmap(img);
-      return true;
-    } catch {
-      throw readableFailure;
+    };
+
+    if (deps.isOrdinaryImageTile(tile.processing)) {
+      const origin = tileOrigin(tile.uri);
+      let state = origins.get(origin);
+      if (state?.ready) await state.ready;
+      if (!state) {
+        let resolveTransport!: (mode: TileTransport) => void;
+        let rejectTransport!: (reason?: unknown) => void;
+        const ready = new Promise<TileTransport>((resolve, reject) => {
+          resolveTransport = resolve;
+          rejectTransport = reject;
+        });
+        void ready.catch(() => undefined);
+        state = { ready };
+        origins.set(origin, state);
+        try {
+          const fetchFirst = deps.fetchTileOnce ?? deps.fetchTile;
+          const { bytes } = await fetchFirst(tile.uri, tile.headers ?? {});
+          await decodeAndDraw(bytes);
+          state.mode = "readable";
+          resolveTransport("readable");
+          return false;
+        } catch (readableFailure) {
+          try {
+            await drawOrdinaryImage();
+            state.mode = "ordinary-image";
+            resolveTransport("ordinary-image");
+            return true;
+          } catch {
+            origins.delete(origin);
+            rejectTransport(readableFailure);
+            throw readableFailure;
+          }
+        }
+      }
+      if (state.mode === "ordinary-image") {
+        await drawOrdinaryImage();
+        return true;
+      }
     }
+
+    const { bytes } = await deps.fetchTile(tile.uri, tile.headers ?? {});
+    await decodeAndDraw(bytes, opts?.processTile);
+    return false;
   }
 
   return { drawTile };

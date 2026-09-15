@@ -269,6 +269,10 @@ test("entries never fabricate tile progress; negatives carry a structured error"
   const thisFile = fileURLToPath(import.meta.url);
   const srcDir = path.dirname(path.dirname(thisFile));
   const mainTs = fs.readFileSync(path.join(srcDir, "src", "main.ts"), "utf8");
+  const webFetchTs = fs.readFileSync(
+    path.join(srcDir, "packages", "browser-runtime", "src", "web-fetch.ts"),
+    "utf8",
+  );
   // Positive-path fabrications stay banned: no hardcoded dimensions or fake
   // save success. A real save lifecycle is allowed, but only when backed by
   // actual canvas encoding (toBlob) of assembled pixels.
@@ -284,19 +288,26 @@ test("entries never fabricate tile progress; negatives carry a structured error"
   // The WASM core is authoritative: the website forwards every readable
   // payload and lets the engine decide. The substring classifier stays as a
   // UI hint only and must never gate (throw) on a negative hint.
-  assert.ok(mainTs.includes("classifyReadableBytes"), "main.ts keeps classifier as hint");
   assert.ok(
-    mainTs.includes("running full discovery"),
-    "main.ts logs a hint and runs WASM discovery always",
+    mainTs.includes("classifyHint: (bytes, info) => classifyReadableBytes(bytes, info)"),
+    "main.ts injects the website classifier as a hint",
   );
   assert.ok(
-    !mainTs.includes("content classifier: no zoomable-image content"),
-    "main.ts must not fail the job when the first head lacks a zoomable literal",
+    webFetchTs.includes("running full discovery"),
+    "shared web fetcher logs a hint and runs WASM discovery always",
   );
   assert.ok(
-    !mainTs.includes('throw failure(\n      "NO_IMAGE_FOUND"') &&
-      !mainTs.includes('throw failure("NO_IMAGE_FOUND"'),
-    "website fetch must not throw NO_IMAGE_FOUND before the engine runs",
+    mainTs.includes("fetchMetadata: webFetcher.fetchMetadataFor"),
+    "main.ts forwards shared-fetcher metadata to the WASM discovery client",
+  );
+  assert.ok(
+    !webFetchTs.includes("content classifier: no zoomable-image content"),
+    "shared web fetcher must not fail when the first head lacks a zoomable literal",
+  );
+  assert.ok(
+    !webFetchTs.includes('throw failure(\n      "NO_IMAGE_FOUND"') &&
+      !webFetchTs.includes('throw failure("NO_IMAGE_FOUND"'),
+    "shared web fetcher must not throw NO_IMAGE_FOUND before the engine runs",
   );
   // NO_IMAGE_FOUND still exists as the engine's terminal discovery code
   // (worker maps "no discovery candidate accepted" to it).
@@ -343,9 +354,14 @@ test("regression: heads without zoomable literals still reach WASM discovery (GA
   const thisFile = fileURLToPath(import.meta.url);
   const srcDir = path.dirname(path.dirname(thisFile));
   const mainTs = fs.readFileSync(path.join(srcDir, "src", "main.ts"), "utf8");
+  const webFetchTs = fs.readFileSync(
+    path.join(srcDir, "packages", "browser-runtime", "src", "web-fetch.ts"),
+    "utf8",
+  );
   assert.ok(
-    mainTs.includes("running full discovery"),
-    "website forwards literal-free heads to WASM discovery",
+    webFetchTs.includes("running full discovery") &&
+      mainTs.includes("fetchMetadata: webFetcher.fetchMetadataFor"),
+    "shared web fetcher forwards literal-free heads to website WASM discovery",
   );
   // The extension ranks candidates through the same core and never drops one
   // on a head-text pre-filter.
