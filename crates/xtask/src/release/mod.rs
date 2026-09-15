@@ -5,7 +5,7 @@
 //! Layout under `target/release-dist/<version>/` (never committed; `target/`
 //! is chosen so website builds cannot clobber release trees):
 //!   plan.json      deterministic frozen release contract
-//!   notes.md       release notes (metadata + curated `release/notes/<v>.md`)
+//!   notes.md       user-facing release description and changes
 //!   <target>/<artifact>   one directory per buildable target
 //!
 //! The pipeline is split by stage (`plan`, `build`, `verify`, `publish`) over

@@ -7,8 +7,8 @@
 //! only idempotent case).
 
 use super::common::{
-    app_version, git_commit, load_capabilities, load_compatibility, load_config, load_targets,
-    schema_fingerprint, validate_version, ARTIFACTS_ROOT,
+    app_version, git_commit, git_output, load_capabilities, load_compatibility, load_config,
+    load_targets, schema_fingerprint, validate_version, ARTIFACTS_ROOT,
 };
 use super::common::{Plan, PlanProtocol, PlanTarget};
 use std::path::{Path, PathBuf};
@@ -108,38 +108,41 @@ fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
 }
 
 fn release_notes(plan: &Plan) -> Result<String, String> {
-    let mut notes = format!(
-        "# dezoomify {}\n\n`{}` channel release, built from revision `{}`.\n\n\
-        - Supported protocol: `{}` (peers back to `{}`)\n\
-        - Schema fingerprint: `{}`\n\
-        - Capabilities: {}\n\n\
-        ## Artifacts\n\n",
-        plan.tag,
-        plan.channel,
-        &plan.commit[..12],
-        plan.protocol.range,
-        plan.protocol.min_peer,
-        plan.schema_fingerprint,
-        plan.capabilities.join(", "),
-    );
-    for target in &plan.targets {
-        if !target.available {
-            continue;
+    let path = crate::repo_root().join("docs/user/start-here.md");
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let introduction = text
+        .split("\n\n")
+        .nth(2)
+        .ok_or("docs/user/start-here.md has no introduction")?
+        .replace('\n', " ");
+    let reference = format!("refs/tags/{}", plan.tag);
+    let tagged = git_output(&[
+        "for-each-ref",
+        "--format=%(objecttype)%00%(contents)",
+        &reference,
+    ])?;
+    let changes = match tagged.split_once('\0') {
+        Some(("tag", description)) if !description.trim().is_empty() => description.trim().into(),
+        _ => {
+            let parent = format!("{}^", plan.commit);
+            let previous = git_output(&[
+                "describe",
+                "--first-parent",
+                "--tags",
+                "--match=v[0-9]*.[0-9]*.[0-9]*",
+                "--match=rolling-v[0-9]*.[0-9]*.[0-9]*",
+                "--abbrev=0",
+                &parent,
+            ])?;
+            let range = format!("{previous}..{}", plan.commit);
+            git_output(&["log", "--first-parent", "--format=- %s", &range])?
         }
-        let name = super::common::expected_artifact_name(&target.name, &plan.version)
-            .ok_or_else(|| format!("target '{}' has no artifact name rule", target.name))?;
-        notes.push_str(&format!("- `{name}`\n"));
-    }
-    notes.push_str("\n## Install\n\nSee the [user guide](https://github.com/lovasoa/dezoomify/blob/master/docs/user/README.md).\n\n");
-    let curated = crate::repo_root()
-        .join("release/notes")
-        .join(format!("{}.md", plan.version));
-    if let Ok(text) = std::fs::read_to_string(&curated) {
-        notes.push_str("## User-visible changes\n\n");
-        notes.push_str(text.trim_end());
-        notes.push('\n');
-    }
-    Ok(notes)
+    };
+    Ok(format!(
+        "# dezoomify v{}\n\n{introduction}\n\n{changes}\n",
+        plan.version
+    ))
 }
 
 #[cfg(test)]
@@ -152,11 +155,13 @@ mod tests {
         let version = app_version().unwrap().0;
         let base = temp_root("plan");
         let first = std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap();
+        let notes = std::fs::read_to_string(base.join(&version).join("notes.md")).unwrap();
+        assert!(notes.starts_with(&format!("# dezoomify v{version}\n\n")));
+        assert!(!notes.contains("rolling"));
         std::fs::remove_dir_all(&base).unwrap();
         std::fs::create_dir_all(&base).unwrap();
         let second = std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap();
         assert_eq!(first, second);
-        assert!(base.join(&version).join("notes.md").is_file());
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -136,7 +136,7 @@ pub(crate) struct PlanTarget {
     pub(crate) available: bool,
 }
 
-fn git_output(args: &[&str]) -> Result<String, String> {
+pub(crate) fn git_output(args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .args(args)
         .current_dir(crate::repo_root())

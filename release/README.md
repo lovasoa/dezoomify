@@ -11,8 +11,8 @@ This directory is the single reviewed release inventory. Promotion steps
   available; Windows and macOS stay unavailable until a matching host builds
   them; installers ship unsigned and automatic updates are disabled).
 - `compatibility.toml`: the supported protocol version matrix.
-- `notes/<version>.md`: optional curated user-visible changes, included
-  verbatim in the release notes when present.
+- Release notes use an annotated tag message or commit titles since the
+  preceding release tag.
 
 Working release trees (`plan.json`, artifacts) live under
 `target/release-dist/<version>/` and are never committed.

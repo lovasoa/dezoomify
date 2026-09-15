@@ -89,7 +89,7 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
     let mut cmd = Command::new("gh");
     cmd.args(["release", "create", &tag, "--target", &plan.commit])
         .arg("--title")
-        .arg(format!("dezoomify {}", plan.tag))
+        .arg(format!("dezoomify v{}", plan.version))
         .arg("--notes-file")
         .arg(artifacts.join("notes.md"));
     for target in plan.targets.iter().filter(|target| target.available) {

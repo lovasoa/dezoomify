@@ -45,8 +45,9 @@ fingerprint, capabilities, targets) from Git, `release/config.toml`,
 artifact on the matching host; unavailable targets refuse to build. The verify
 stage checks artifact names against the plan. The publish stage verifies again
 and refuses unless `origin/master` is the planned
-revision. Rolling releases use `rolling-v<version>` and become GitHub's latest
-release. Important numbered releases use `vX.Y.Z`. Working
+revision. Release descriptions use the annotated tag message, or commit titles
+since the preceding release tag when no annotation exists. Rolling releases use
+`rolling-v<version>` and become GitHub's latest release. Important numbered releases use `vX.Y.Z`. Working
 release trees live under `target/release-dist/<version>/` and are never
 committed; `target/` is used so website builds cannot clobber them.
 
