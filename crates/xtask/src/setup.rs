@@ -12,12 +12,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
     println!("rustc: {rustc}");
     let cargo = version_of("cargo", &["--version"])?;
     println!("cargo: {cargo}");
-    if !rustc.contains("1.98.0") {
-        failures.push(format!(
-            "rust-toolchain.toml pins 1.98.0, found: {rustc} (run `rustup show` and `rustup update`)"
-        ));
-    }
-
     if let Err(e) = check_node() {
         failures.push(e);
     }
@@ -93,8 +87,9 @@ fn check_node() -> Result<(), String> {
     Ok(())
 }
 
-/// Verify `pnpm` matches the exact version in the root `packageManager`
-/// field. All workspace packages, including E2E harnesses, use this manager.
+/// Ensure `pnpm` is available and matches the exact version in the root
+/// `packageManager` field. All workspace packages, including E2E harnesses,
+/// use this manager.
 fn check_pnpm() -> Result<(), String> {
     let root = super::repo_root();
     let package_path = root.join("package.json");
@@ -112,6 +107,7 @@ fn check_pnpm() -> Result<(), String> {
         .ok_or_else(|| {
             format!("package.json packageManager must be pnpm@<version>, found {manager}")
         })?;
+    super::desktop::bootstrap_pnpm(expected)?;
     let mut command = super::desktop::pnpm_command()?;
     let output = command
         .arg("--version")

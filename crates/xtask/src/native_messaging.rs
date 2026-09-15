@@ -467,6 +467,7 @@ mod tests {
         dir
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn install_round_trip_then_cleanup() {
         let home = temp_home("ok");
@@ -498,6 +499,7 @@ mod tests {
         std::fs::remove_dir_all(&home).unwrap();
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn install_refuses_wildcards_relative_and_foreign() {
         let home = temp_home("refuse");
@@ -510,9 +512,12 @@ mod tests {
         .is_err());
         assert!(install_to(&home, "/opt/host", "*", "dezoomify@dezoomify.example").is_err());
         // Foreign manifest at our destination is never overwritten.
-        let dest = home
-            .join(".config/chromium/NativeMessagingHosts")
-            .join(registration_file_name());
+        let dest = if cfg!(target_os = "macos") {
+            home.join("Library/Application Support/Google/Chrome/NativeMessagingHosts")
+        } else {
+            home.join(".config/chromium/NativeMessagingHosts")
+        }
+        .join(registration_file_name());
         std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
         std::fs::write(&dest, r#"{"name":"other.host","path":"/x"}"#).unwrap();
         let err = install_to(
