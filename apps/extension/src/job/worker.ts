@@ -43,7 +43,7 @@ interface WasmSession {
   protocolHandle(handle: string): string; dispose(): void;
 }
 interface WasmModule { default?: () => Promise<void>; Session: new (protocol: string, quotas: string) => WasmSession; rankCandidates?: (urls: string) => string }
-type WorkerMessage = Record<string, unknown> & { type?: string; jobId?: string; inputUrl?: string; requestId?: string; urls?: unknown; bytes?: unknown; command?: unknown; error?: unknown; quotas?: unknown };
+type WorkerMessage = Record<string, unknown> & { type?: string; jobId?: string; inputUrl?: string; requestId?: string | number; urls?: unknown; bytes?: unknown; command?: unknown; error?: unknown; quotas?: unknown };
 
 export function createJobWorkerHost(deps: { postMessage(message: unknown): void; wasm(): Promise<WasmModule> }) {
   /** @type {any | null} */
@@ -71,7 +71,7 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
     if (disposed) return;
     await wasm.default?.();
     session = new wasm.Session("2.0", JSON.stringify(message.quotas ?? {}));
-    dispatch({ type: "start", job: message.jobId, input_url: message.inputUrl });
+    dispatch({ type: "start", input_url: message.inputUrl });
   }
 
   /**
@@ -108,7 +108,7 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
     // The command envelope carries the canonical protocol reference, not the
     // arena form allocateBuffer returns.
     const buffer = JSON.parse(session.protocolHandle(handleJson));
-    dispatch({ type: "provide-resource", job: message.jobId, request: message.requestId, buffer });
+    dispatch({ type: "provide-resource", request: message.requestId, buffer });
   }
 
   return {
@@ -120,7 +120,7 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
         if (envelope.type === "engine.start") await start(envelope);
         else if (envelope.type === "engine.rank") await rank(envelope);
         else if (envelope.type === "engine.bytes") provideBytes(envelope);
-        else if (envelope.type === "engine.failure") dispatch({ type: "provide-fetch-failure", job: envelope.jobId, request: envelope.requestId, error: envelope.error });
+        else if (envelope.type === "engine.failure") dispatch({ type: "provide-fetch-failure", request: envelope.requestId, error: envelope.error });
         else if (envelope.type === "engine.command") dispatch(object(envelope.command));
         else if (envelope.type === "engine.dispose") {
           disposed = true;

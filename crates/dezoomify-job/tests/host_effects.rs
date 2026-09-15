@@ -5,17 +5,16 @@
 
 mod support;
 
-use dezoomify_job::{Config, JobResponse};
+use dezoomify_job::{Config, JobCommand};
 use support::{ScriptedHost, DZI, DZI_INPUT_URL};
 
 fn host_with_id(job: &str) -> ScriptedHost {
     ScriptedHost::new(job, DZI_INPUT_URL, Config::default()).unwrap()
 }
 
-fn resource(job: &str, request: &str, bytes: Vec<u8>) -> JobResponse {
-    JobResponse::ResourceBytes {
-        job: job.to_string(),
-        request: request.to_string(),
+fn resource(_job: &str, request: u32, bytes: Vec<u8>) -> JobCommand {
+    JobCommand::ResourceBytes {
+        request,
         bytes,
         final_uri: None,
     }
@@ -23,21 +22,15 @@ fn resource(job: &str, request: &str, bytes: Vec<u8>) -> JobResponse {
 
 fn discover_select_grant(host: &mut ScriptedHost, job: &str) {
     host.start().unwrap();
-    host.apply(resource(job, "req:0", DZI.as_bytes().to_vec()))
+    host.apply(resource(job, 0, DZI.as_bytes().to_vec()))
         .unwrap();
     let (image, levels) = host.catalog().expect("catalog event");
-    host.apply(JobResponse::SelectedImage {
-        job: job.to_string(),
-        image,
-    })
-    .unwrap();
-    host.apply(JobResponse::SelectedLevel {
-        job: job.to_string(),
+    host.apply(JobCommand::SelectImage { image }).unwrap();
+    host.apply(JobCommand::SelectLevel {
         level: *levels.last().expect("level"),
     })
     .unwrap();
-    host.apply(JobResponse::DestinationGranted {
-        job: job.to_string(),
+    host.apply(JobCommand::DestinationGranted {
         destination: "dst:0".to_string(),
     })
     .unwrap();
@@ -137,26 +130,19 @@ fn final_uri_rebases_relative_tile_urls() {
     )
     .unwrap();
     host.start().unwrap();
-    host.apply(JobResponse::ResourceBytes {
-        job: "job:redir".to_string(),
-        request: "req:0".to_string(),
+    host.apply(JobCommand::ResourceBytes {
+        request: 0,
         bytes: DZI.as_bytes().to_vec(),
         final_uri: Some("https://cdn.test/new/image.dzi".to_string()),
     })
     .unwrap();
     let (image, levels) = host.catalog().expect("catalog event");
-    host.apply(JobResponse::SelectedImage {
-        job: "job:redir".to_string(),
-        image,
-    })
-    .unwrap();
-    host.apply(JobResponse::SelectedLevel {
-        job: "job:redir".to_string(),
+    host.apply(JobCommand::SelectImage { image }).unwrap();
+    host.apply(JobCommand::SelectLevel {
         level: *levels.last().expect("level"),
     })
     .unwrap();
-    host.apply(JobResponse::DestinationGranted {
-        job: "job:redir".to_string(),
+    host.apply(JobCommand::DestinationGranted {
         destination: "dst:0".to_string(),
     })
     .unwrap();
@@ -179,7 +165,7 @@ fn deferred_entries_expose_their_follow_up_uri() {
     )
     .unwrap();
     host.start().unwrap();
-    host.apply(resource("job:deferred", "req:0", list.as_bytes().to_vec()))
+    host.apply(resource("job:deferred", 0, list.as_bytes().to_vec()))
         .unwrap();
     assert_eq!(host.state(), "AwaitingImageSelection");
     let catalog = host
@@ -202,10 +188,7 @@ fn deferred_entries_expose_their_follow_up_uri() {
         "bulk entries stay deferred: {catalog}"
     );
     // Deferred entries cannot be selected; the host follows the URI instead.
-    let selected = host.apply(JobResponse::SelectedImage {
-        job: "job:deferred".to_string(),
-        image: 0,
-    });
+    let selected = host.apply(JobCommand::SelectImage { image: 0 });
     assert!(selected.is_err(), "deferred images are not selectable");
     assert_eq!(
         host.deferred_uri_for_test(0),

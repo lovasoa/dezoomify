@@ -44,37 +44,33 @@ fn envelope_bytes(body: ControlBody) -> Vec<u8> {
     codec::encode(&envelope).expect("envelope encodes")
 }
 
-fn start_bytes(job: &str) -> Vec<u8> {
+fn start_bytes(_job: &str) -> Vec<u8> {
     envelope_bytes(ControlBody::Command(JobCommand::Start {
-        job: job.parse().expect("job id"),
         input_url: INPUT_URL.to_string(),
     }))
 }
 
-fn cancel_bytes(job: &str) -> Vec<u8> {
-    envelope_bytes(ControlBody::Command(JobCommand::Cancel {
-        job: job.parse().expect("job id"),
-    }))
+fn cancel_bytes(_job: &str) -> Vec<u8> {
+    envelope_bytes(ControlBody::Command(JobCommand::Cancel))
 }
 
 fn provide_resource_bytes(
     session: &Session,
-    job: &str,
+    _job: &str,
     handle: ArenaHandle,
-    request: &dezoomify_protocol::dto::RequestId,
+    request: &u32,
 ) -> Vec<u8> {
     let buffer = session
         .protocol_handle(handle)
         .expect("live handle projects");
     envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
-        job: job.parse().expect("job id"),
-        request: request.clone(),
+        request: *request,
         buffer,
     }))
 }
 
 /// Extract the outstanding discovery request id from drained messages.
-fn discovery_request(messages: &[Vec<u8>]) -> dezoomify_protocol::dto::RequestId {
+fn discovery_request(messages: &[Vec<u8>]) -> u32 {
     for envelope in decode_all(messages) {
         if let ControlBody::Effect(HostEffect::AcquireResource { request, .. }) = envelope.body {
             return request.id;
@@ -237,9 +233,7 @@ fn dispatch_rejects_malformed_and_wrong_versions_atomically() {
         AdapterErrorCode::Malformed
     );
     // Correct shape, unsupported version.
-    let body = ControlBody::Command(JobCommand::Cancel {
-        job: "job:x".parse().unwrap(),
-    });
+    let body = ControlBody::Command(JobCommand::Cancel);
     let mut envelope = ControlEnvelope::new(body).unwrap();
     envelope.protocol = "1.0".to_string();
     let bytes = codec::encode(&envelope).unwrap();
@@ -248,9 +242,7 @@ fn dispatch_rejects_malformed_and_wrong_versions_atomically() {
         AdapterErrorCode::VersionUnsupported
     );
     // Non-command bodies are rejected: the adapter only accepts commands.
-    let event = ControlBody::Event(JobEvent::Cancelled {
-        job: "job:x".parse().unwrap(),
-    });
+    let event = ControlBody::Event(JobEvent::Cancelled);
     let bytes = envelope_bytes(event);
     assert_eq!(
         session.dispatch(&bytes).unwrap_err().code(),
@@ -275,15 +267,13 @@ fn start_dispatch_and_drain_are_fifo_and_once_only() {
     assert_eq!(messages.len(), 2);
     let decoded = decode_all(&messages);
     match &decoded[0].body {
-        ControlBody::Event(JobEvent::JobState { job, state }) => {
-            assert_eq!(job.as_str(), JOB_A);
+        ControlBody::Event(JobEvent::JobState { state }) => {
             assert_eq!(state, "Discovering");
         }
         other => panic!("first message must be job-state, got {other:?}"),
     }
     match &decoded[1].body {
-        ControlBody::Effect(HostEffect::AcquireResource { job, request, .. }) => {
-            assert_eq!(job.as_str(), JOB_A);
+        ControlBody::Effect(HostEffect::AcquireResource { request, .. }) => {
             assert_eq!(request.uri, INPUT_URL);
             assert_eq!(request.purpose, RequestPurpose::Metadata);
         }
@@ -312,8 +302,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     assert_eq!(session.state().as_str(), "AwaitingImageSelection");
     let messages = session.drain_messages();
     match &decode_all(&messages)[0].body {
-        ControlBody::Event(JobEvent::Catalog { job, catalog }) => {
-            assert_eq!(job.as_str(), JOB_A);
+        ControlBody::Event(JobEvent::Catalog { catalog }) => {
             assert_eq!(catalog.images.len(), 1);
             assert_eq!(catalog.images[0].title.as_deref(), Some("image"));
             assert_eq!(catalog.images[0].format, "deepzoom");
@@ -322,26 +311,19 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     }
 
     session
-        .dispatch(&command_bytes(JobCommand::SelectImage {
-            job: JOB_A.parse().unwrap(),
-            image: 0,
-        }))
+        .dispatch(&command_bytes(JobCommand::SelectImage { image: 0 }))
         .expect("select image");
     assert_eq!(session.state().as_str(), "AwaitingLevelSelection");
     session.drain_messages();
 
     session
-        .dispatch(&command_bytes(JobCommand::SelectLevel {
-            job: JOB_A.parse().unwrap(),
-            level: 9,
-        }))
+        .dispatch(&command_bytes(JobCommand::SelectLevel { level: 9 }))
         .expect("select level");
     assert_eq!(session.state().as_str(), "AwaitingDestination");
     session.drain_messages();
 
     session
         .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            job: JOB_A.parse().unwrap(),
             destination: "dst:0".parse().unwrap(),
             granted: true,
         }))
@@ -367,8 +349,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     let messages = session.drain_messages();
     let decoded = decode_all(&messages);
     match &decoded.last().expect("messages").body {
-        ControlBody::Event(JobEvent::Completed { job, output }) => {
-            assert_eq!(job.as_str(), JOB_A);
+        ControlBody::Event(JobEvent::Completed { output }) => {
             assert_eq!(output.as_str(), "out:0");
         }
         other => panic!("expected completed, got {other:?}"),
@@ -381,8 +362,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
 
     // The consumed discovery buffer cannot be replayed.
     let replay = envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
-        job: JOB_A.parse().unwrap(),
-        request: request.clone(),
+        request,
         buffer: meta_reference,
     }));
     assert_eq!(
@@ -402,7 +382,6 @@ fn discovery_failure_and_cancel_paths_follow_the_engine() {
     failing.dispatch(&start_bytes("job:fail-1")).expect("start");
     let first_request = discovery_request(&failing.drain_messages());
     let failure = envelope_bytes(ControlBody::Command(JobCommand::ProvideFetchFailure {
-        job: "job:fail-1".parse().unwrap(),
         request: first_request,
         error: ErrorDto::new(
             "acquisition",
@@ -457,8 +436,8 @@ fn two_interleaved_sessions_stay_isolated() {
     let provide = provide_resource_bytes(&first, "job:iso-1", handle, &request);
     assert_eq!(
         second.dispatch(&provide).unwrap_err().code(),
-        AdapterErrorCode::WrongState,
-        "foreign job ids are rejected"
+        AdapterErrorCode::StaleBuffer,
+        "buffer ownership remains session-local"
     );
     // Each session drains only its own messages.
     assert!(first.drain_messages().is_empty());
@@ -505,9 +484,7 @@ fn dispose_is_idempotent_and_rejects_later_dispatch() {
         "cancel lifecycle is emitted: {drained:?}"
     );
     match &decode_all(&drained).last().expect("messages").body {
-        ControlBody::Event(JobEvent::Cancelled { job }) => {
-            assert_eq!(job.as_str(), "job:disp-1");
-        }
+        ControlBody::Event(JobEvent::Cancelled) => {}
         other => panic!("expected cancelled cleanup, got {other:?}"),
     }
     assert!(session.drain_messages().is_empty());
@@ -521,7 +498,6 @@ fn host_error_text_never_reaches_transcripts() {
         .expect("start");
     let request = discovery_request(&session.drain_messages());
     let failure = envelope_bytes(ControlBody::Command(JobCommand::ProvideFetchFailure {
-        job: "job:redact-1".parse().unwrap(),
         request,
         error: ErrorDto::new(
             "acquisition",
@@ -548,7 +524,6 @@ fn late_sibling_discovery_response_is_ignored_after_job_advances() {
     let mut session = new_session();
     session
         .dispatch(&envelope_bytes(ControlBody::Command(JobCommand::Start {
-            job: "job:late-discovery-1".parse().unwrap(),
             input_url: "https://example.com/viewer/index.html".to_string(),
         })))
         .expect("start");
@@ -568,7 +543,7 @@ fn late_sibling_discovery_response_is_ignored_after_job_advances() {
         .iter()
         .filter_map(|envelope| match envelope.body {
             ControlBody::Effect(HostEffect::AcquireResource { ref request, .. }) => {
-                Some(request.id.clone())
+                Some(request.id)
             }
             _ => None,
         })
@@ -605,22 +580,15 @@ fn late_sibling_discovery_response_is_ignored_after_job_advances() {
         .expect("DZI response accepted");
     session.drain_messages();
     session
-        .dispatch(&command_bytes(JobCommand::SelectImage {
-            job: "job:late-discovery-1".parse().unwrap(),
-            image: 0,
-        }))
+        .dispatch(&command_bytes(JobCommand::SelectImage { image: 0 }))
         .expect("select image");
     session.drain_messages();
     session
-        .dispatch(&command_bytes(JobCommand::SelectLevel {
-            job: "job:late-discovery-1".parse().unwrap(),
-            level: 9,
-        }))
+        .dispatch(&command_bytes(JobCommand::SelectLevel { level: 9 }))
         .expect("select level");
     session.drain_messages();
     session
         .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            job: "job:late-discovery-1".parse().unwrap(),
             destination: "dst:0".parse().unwrap(),
             granted: true,
         }))
@@ -660,20 +628,13 @@ fn basic_success_transcript_matches_golden() {
     transcript.extend(session.drain_messages());
 
     session
-        .dispatch(&command_bytes(JobCommand::SelectImage {
-            job: JOB_A.parse().unwrap(),
-            image: 0,
-        }))
+        .dispatch(&command_bytes(JobCommand::SelectImage { image: 0 }))
         .expect("select image");
     session
-        .dispatch(&command_bytes(JobCommand::SelectLevel {
-            job: JOB_A.parse().unwrap(),
-            level: 9,
-        }))
+        .dispatch(&command_bytes(JobCommand::SelectLevel { level: 9 }))
         .expect("select level");
     session
         .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            job: JOB_A.parse().unwrap(),
             destination: "dst:0".parse().unwrap(),
             granted: true,
         }))
@@ -744,8 +705,7 @@ fn empty_resource_fails_the_job_and_wrong_request_is_rejected() {
     let handle = seal(&mut other, b"metadata-bytes");
     let buffer = other.protocol_handle(handle).expect("projects");
     let wrong = envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
-        job: JOB_A.parse().unwrap(),
-        request: "req:wasm-wrong-9".parse().unwrap(),
+        request: u32::MAX,
         buffer,
     }));
     assert_eq!(

@@ -37,7 +37,7 @@ export type BufferState = "allocated" | "committed" | "consumed" | "freed";
 export type RecoveryKind = "retry" | "edit-input" | "choose-output" | "grant-permission" | "change-transport" | "keep-partial" | "discard-partial" | "handoff-to-native";
 export type EventKind = "replayable" | "transient" | "decision-requesting" | "terminal";
 
-export interface RequestDto { id: string; uri: string; headers: { name: string; value: string }[]; purpose: RequestPurpose }
+export interface RequestDto { id: number; uri: string; headers: { name: string; value: string }[]; purpose: RequestPurpose }
 export interface BufferHandle { id: string; generation: number; length: number; checksum?: string }
 export interface ImageDto { title?: string; format: string; width: number; height: number; readiness: Readiness; sourceKind: string; levels: LevelDto[] }
 export interface LevelDto { label: string; width: number; height: number; tileWidth: number; tileHeight: number }

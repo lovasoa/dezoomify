@@ -3,7 +3,7 @@
 //! executes the job's effects with the existing native fns and projects its
 //! events onto [`PipelineEvent`]s, so CLI/desktop output is unchanged.
 //!
-//! Drive loop: `job.start()` → drain effects → execute → `job.on_response()`
+//! Drive loop: `job.start()` → drain messages → execute effects → `job.on_command()`
 //! → repeat until terminal. Effect mapping:
 //!
 //! * `acquire-resource{uri}` → [`fetch`] + [`merge_headers`], replying
@@ -68,16 +68,16 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant};
 
 use dezoomify_core::core::adaptive::ObservationResult;
 use dezoomify_core::core::model::{ProcessingRecipe, Request};
 use dezoomify_core::Vec2d;
-use dezoomify_job::{Config as JobConfig, Job, JobResponse, State as JobState};
+use dezoomify_job::{
+    Config as JobConfig, DecisionReason, Job, JobCommand, JobEffect, JobEvent, JobMessageBody,
+    State as JobState,
+};
 
 use crate::error::NativeError;
 use crate::http::{fetch, UserHeaders};
@@ -94,8 +94,6 @@ use crate::pipeline::{
 /// Deferred-resolution bound: the initial discovery plus this many deferred
 /// follows, matching the legacy loop limit.
 const MAX_DEFERRED_FOLLOWS: u32 = 10;
-
-static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
 /// Terminal outcome of one job attempt: finished output or a deferred URI to
 /// follow with a fresh job.
@@ -225,11 +223,6 @@ fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat
         }
     }
     first
-}
-
-fn mint_job_id() -> String {
-    let n = NEXT_JOB.fetch_add(1, Ordering::SeqCst);
-    format!("job:native-{n}")
 }
 
 /// Map pipeline bounds onto validated job bounds. Transport byte limits stay
@@ -487,9 +480,8 @@ fn drive_job(
     user: &UserHeaders,
     on_event: &mut dyn FnMut(PipelineEvent),
 ) -> Result<AttemptDone, NativeError> {
-    let job_id = mint_job_id();
     let job_config = job_config_for(config)?;
-    let mut job = Job::new(&job_id, input_url, job_config).map_err(|e| map_setup_error(&e))?;
+    let mut job = Job::new(input_url, job_config).map_err(|e| map_setup_error(&e))?;
     job.set_format(config.format.clone());
     job.start().map_err(|e| map_setup_error(&e))?;
     let mut attempt = Attempt {
@@ -529,13 +521,15 @@ fn drive_job(
             && !job.is_terminal()
             && !attempt.cancel_sent
         {
-            let _ = job.on_response(JobResponse::Cancel {
-                job: job_id.clone(),
-            });
+            let _ = job.on_command(JobCommand::Cancel);
             attempt.cancel_sent = true;
         }
-        for event in job.drain_events() {
-            handle_event(&mut attempt, &event)?;
+        let mut effects = Vec::new();
+        for message in job.drain_messages() {
+            match message.body {
+                JobMessageBody::Event(event) => handle_event(&mut attempt, event)?,
+                JobMessageBody::Effect(effect) => effects.push(effect),
+            }
         }
         if job.state() == JobState::AwaitingImageSelection && !attempt.catalog.is_empty() {
             let selected =
@@ -544,8 +538,7 @@ fn drive_job(
                 attempt.selected_image = Some(selected);
                 reply(
                     &mut job,
-                    JobResponse::SelectedImage {
-                        job: job_id.clone(),
+                    JobCommand::SelectImage {
                         image: u32::try_from(selected).map_err(|_| {
                             NativeError::new("native.internal", "image position overflow")
                         })?,
@@ -576,16 +569,9 @@ fn drive_job(
                 .ok_or_else(|| {
                     NativeError::new("discovery.no-level", "image has no zoom levels")
                 })?;
-            reply(
-                &mut job,
-                JobResponse::SelectedLevel {
-                    job: job_id.clone(),
-                    level,
-                },
-            )?;
+            reply(&mut job, JobCommand::SelectLevel { level })?;
             continue;
         }
-        let effects = job.drain_effects();
         if effects.is_empty() {
             if job.is_terminal() {
                 break;
@@ -609,35 +595,29 @@ fn drive_job(
                 && !job.is_paused()
             {
                 attempt.pause_demonstrated = true;
-                job.on_response(JobResponse::Pause {
-                    job: job_id.clone(),
-                })
-                .map_err(|e| {
+                job.on_command(JobCommand::Pause).map_err(|e| {
                     NativeError::new(
                         "native.internal",
                         format!("pause rejected ({}): {}", e.code, e.message),
                     )
                 })?;
-                for event in job.drain_events() {
-                    handle_event(&mut attempt, &event)?;
-                }
+                // A tile reply may already have queued the next acquisition
+                // before the host pauses. Preserve that work in the FIFO;
+                // the paused engine will settle it after resume.
                 debug_assert!(job.is_paused());
                 attempt.emit(
                     "paused",
                     BTreeMap::from([("acquired".to_string(), attempt.acquired.to_string())]),
                 );
-                job.on_response(JobResponse::Resume {
-                    job: job_id.clone(),
-                })
-                .map_err(|e| {
+                job.on_command(JobCommand::Resume).map_err(|e| {
                     NativeError::new(
                         "native.internal",
                         format!("resume rejected ({}): {}", e.code, e.message),
                     )
                 })?;
-                for event in job.drain_events() {
-                    handle_event(&mut attempt, &event)?;
-                }
+                // Resume may emit both its event and newly scheduled work.
+                // Leave the FIFO intact so the next loop iteration handles
+                // every message in order instead of discarding effects.
                 debug_assert!(!job.is_paused());
                 attempt.emit(
                     "resumed",
@@ -709,8 +689,8 @@ fn drive_job(
     }
 }
 
-fn reply(job: &mut Job, response: JobResponse) -> Result<(), NativeError> {
-    job.on_response(response).map_err(|e| {
+fn reply(job: &mut Job, response: JobCommand) -> Result<(), NativeError> {
+    job.on_command(response).map_err(|e| {
         NativeError::new(
             "native.internal",
             format!("effect reply rejected ({}): {}", e.code, e.message),
@@ -719,107 +699,36 @@ fn reply(job: &mut Job, response: JobResponse) -> Result<(), NativeError> {
     Ok(())
 }
 
-fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<(), NativeError> {
-    let kind = event
-        .get("kind")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    match kind {
-        "catalog" => {
-            let mut catalog = Vec::new();
-            if let Some(images) = event.get("images").and_then(serde_json::Value::as_array) {
-                for image in images {
-                    let ready =
-                        image.get("readiness").and_then(serde_json::Value::as_str) == Some("ready");
-                    let format = image
-                        .get("format")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    // `label` is the protocol projection of the core image
-                    // title (or its stable fallback), so it is the safe
-                    // cross-boundary source for the automatic basename.
-                    let title = image
-                        .get("label")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string);
-                    let mut levels = Vec::new();
-                    if let Some(entries) = image.get("levels").and_then(serde_json::Value::as_array)
-                    {
-                        for level in entries {
-                            levels.push((
-                                level
-                                    .get("width")
-                                    .and_then(serde_json::Value::as_u64)
-                                    .unwrap_or(0),
-                                level
-                                    .get("height")
-                                    .and_then(serde_json::Value::as_u64)
-                                    .unwrap_or(0),
-                            ));
-                        }
-                    }
-                    catalog.push(CatalogImage {
-                        ready,
-                        format,
-                        title,
-                        levels,
-                    });
-                }
-            }
-            attempt.catalog = catalog;
+fn handle_event(attempt: &mut Attempt<'_>, event: JobEvent) -> Result<(), NativeError> {
+    match event {
+        JobEvent::Catalog { catalog } => {
+            attempt.catalog = catalog
+                .images
+                .into_iter()
+                .map(|image| CatalogImage {
+                    ready: image.readiness == dezoomify_protocol::dto::Readiness::Ready,
+                    format: image.format,
+                    title: image.title,
+                    levels: image
+                        .levels
+                        .into_iter()
+                        .map(|level| (level.width, level.height))
+                        .collect(),
+                })
+                .collect();
         }
-        "progress" => {
-            let acquired = event
-                .get("acquired")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0)
-                .to_string();
-            let total = event
-                .get("total")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0)
-                .to_string();
+        JobEvent::Progress { acquired, total } => {
             attempt.emit(
                 "downloading",
                 BTreeMap::from([
-                    ("acquired".to_string(), acquired),
-                    ("total".to_string(), total),
+                    ("acquired".to_string(), acquired.to_string()),
+                    ("total".to_string(), total.to_string()),
                 ]),
             );
         }
-        "failed" => {
-            attempt.failure = Some((
-                event
-                    .get("code")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("native.internal")
-                    .to_string(),
-                event
-                    .get("message")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("job failed")
-                    .to_string(),
-            ));
-        }
-        "missing-work" => {
-            // Engine ledger of tiles that exhausted retries. Tile ids only,
-            // never URLs: safe for the host dialog and the honest terminal.
-            let mut missing = Vec::new();
-            if let Some(failed) = event.get("failed").and_then(serde_json::Value::as_array) {
-                for entry in failed {
-                    if let Some(id) = entry.as_str() {
-                        let trimmed = id.trim();
-                        if !trimmed.is_empty()
-                            && trimmed.len() <= 128
-                            && !trimmed.contains("://")
-                            && !trimmed.contains('/')
-                        {
-                            missing.push(trimmed.to_string());
-                        }
-                    }
-                }
-            }
+        JobEvent::Failed { code, message } => attempt.failure = Some((code, message)),
+        JobEvent::MissingWork { failed } => {
+            let missing: Vec<String> = failed.into_iter().map(|tile| tile.to_string()).collect();
             if !missing.is_empty() {
                 attempt.pending_missing = missing;
             }
@@ -839,21 +748,6 @@ struct TileFetch {
     extent: Option<Vec2d>,
 }
 
-fn point(value: &serde_json::Value) -> Vec2d {
-    Vec2d {
-        x: value
-            .get("x")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok())
-            .unwrap_or(0),
-        y: value
-            .get("y")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok())
-            .unwrap_or(0),
-    }
-}
-
 fn processing_from_name(name: &str) -> ProcessingRecipe {
     match name {
         "google-arts-decrypt" => ProcessingRecipe::GoogleArtsDecrypt,
@@ -861,76 +755,18 @@ fn processing_from_name(name: &str) -> ProcessingRecipe {
     }
 }
 
-fn tile_fetch(effect: &serde_json::Value) -> Option<TileFetch> {
-    let ordinal = effect
-        .get("tile")
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())?;
-    let tile = ordinal.to_string();
-    let uri = effect
-        .get("uri")
-        .and_then(serde_json::Value::as_str)?
-        .to_string();
-    let mut headers = BTreeMap::new();
-    if let Some(map) = effect.get("headers").and_then(serde_json::Value::as_object) {
-        for (name, value) in map {
-            if let Some(value) = value.as_str() {
-                headers.insert(name.to_ascii_lowercase(), value.to_string());
-            }
-        }
-    }
-    Some(TileFetch {
-        ordinal,
-        tile,
-        uri,
-        headers,
-        processing: processing_from_name(
-            effect
-                .get("processing")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("none"),
-        ),
-        destination: effect.get("destination").map(point).unwrap_or_default(),
-        extent: effect
-            .get("expected_size")
-            .filter(|size| !size.is_null())
-            .map(point),
-    })
-}
-
 fn execute_effects(
     job: &mut Job,
     attempt: &mut Attempt<'_>,
-    effects: Vec<serde_json::Value>,
+    effects: Vec<JobEffect>,
 ) -> Result<(), NativeError> {
-    let job_id = job.id().to_string();
     let mut tiles: Vec<TileFetch> = Vec::new();
-    for effect in &effects {
-        let kind = effect
-            .get("kind")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
-        match kind {
-            "acquire-resource" => {
-                // Batch discovery may hold sibling fetches after a winner
-                // already finished discovery; those are moot and skipped
-                // so a late answer never masks the winning catalog.
+    for effect in effects {
+        match effect {
+            JobEffect::AcquireResource { request, uri, .. } => {
                 if job.state() != JobState::Discovering {
                     continue;
                 }
-                let request = effect
-                    .get("request")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let uri = effect
-                    .get("uri")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                // Core discovery headers are empty in practice; defaults plus
-                // scoped user headers match the legacy merge exactly. The
-                // progress event counts attempts, like the legacy loop.
                 let merged = merge_headers(&Request::new(&uri));
                 attempt.discovery_resources += 1;
                 attempt.emit(
@@ -947,91 +783,80 @@ fn execute_effects(
                     None,
                     &attempt.config.fetch,
                 ) {
-                    Ok(outcome) if outcome.ok() => {
-                        reply(
-                            job,
-                            JobResponse::ResourceBytes {
-                                job: job_id.clone(),
-                                request,
-                                bytes: outcome.body,
-                                final_uri: Some(outcome.final_uri),
-                            },
-                        )?;
-                    }
-                    Ok(_) => {
-                        reply(
-                            job,
-                            JobResponse::FetchFailure {
-                                job: job_id.clone(),
-                                request,
-                            },
-                        )?;
-                    }
-                    Err(_) => {
-                        reply(
-                            job,
-                            JobResponse::FetchFailure {
-                                job: job_id.clone(),
-                                request,
-                            },
-                        )?;
-                    }
-                }
-            }
-            "acquire-tile" if is_probe(effect) => {
-                let Some(need) = tile_fetch(effect) else {
-                    return Err(NativeError::new(
-                        "native.internal",
-                        "probe effect lacks tile identity",
-                    ));
-                };
-                let read = probe_tile_bytes(
-                    &need.uri,
-                    &need.headers,
-                    &need.processing,
-                    attempt.config,
-                    attempt.user,
-                );
-                let (available, width, height) = match read.observation {
-                    ObservationResult::Available { size } => {
-                        (true, u64::from(size.x), u64::from(size.y))
-                    }
-                    ObservationResult::Missing => (false, 0, 0),
-                };
-                reply(
-                    job,
-                    JobResponse::ProbeOutcome {
-                        job: job_id.clone(),
-                        tile: need.ordinal,
-                        available,
-                        width,
-                        height,
-                    },
-                )?;
-            }
-            "acquire-tile" => {
-                let Some(need) = tile_fetch(effect) else {
-                    return Err(NativeError::new(
-                        "native.internal",
-                        "tile effect lacks tile identity",
-                    ));
-                };
-                if let Some(canvas) = effect.get("canvas").filter(|v| !v.is_null()) {
-                    attempt.canvas = attempt.canvas.or(Some(point(canvas)));
-                }
-                if !attempt.order.contains(&need.tile) {
-                    attempt.order.push(need.tile.clone());
-                    attempt.geoms.insert(
-                        need.tile.clone(),
-                        TileGeom {
-                            destination: need.destination,
-                            extent: need.extent,
+                    Ok(outcome) if outcome.ok() => reply(
+                        job,
+                        JobCommand::ResourceBytes {
+                            request,
+                            bytes: outcome.body,
+                            final_uri: Some(outcome.final_uri),
                         },
-                    );
+                    )?,
+                    Ok(_) | Err(_) => reply(job, JobCommand::FetchFailure { request })?,
                 }
-                tiles.push(need);
             }
-            "request-destination" => {
+            JobEffect::AcquireTile {
+                tile,
+                uri,
+                headers,
+                processing,
+                destination,
+                expected_size,
+                canvas,
+                probe,
+            } => {
+                let need = TileFetch {
+                    ordinal: tile,
+                    tile: tile.to_string(),
+                    uri,
+                    headers: headers
+                        .into_iter()
+                        .map(|(name, value)| (name.to_ascii_lowercase(), value))
+                        .collect(),
+                    processing: processing_from_name(&processing),
+                    destination,
+                    extent: expected_size,
+                };
+                if probe {
+                    let read = probe_tile_bytes(
+                        &need.uri,
+                        &need.headers,
+                        &need.processing,
+                        attempt.config,
+                        attempt.user,
+                    );
+                    let (available, width, height) = match read.observation {
+                        ObservationResult::Available { size } => {
+                            (true, u64::from(size.x), u64::from(size.y))
+                        }
+                        ObservationResult::Missing => (false, 0, 0),
+                    };
+                    reply(
+                        job,
+                        JobCommand::ProbeOutcome {
+                            tile,
+                            available,
+                            width,
+                            height,
+                        },
+                    )?;
+                } else {
+                    if let Some(canvas) = canvas {
+                        attempt.canvas = attempt.canvas.or(Some(canvas));
+                    }
+                    if !attempt.order.contains(&need.tile) {
+                        attempt.order.push(need.tile.clone());
+                        attempt.geoms.insert(
+                            need.tile.clone(),
+                            TileGeom {
+                                destination: need.destination,
+                                extent: need.extent,
+                            },
+                        );
+                    }
+                    tiles.push(need);
+                }
+            }
+            JobEffect::RequestDestination { .. } => {
                 if let Some(output_dir) = attempt.auto_output_dir.as_deref() {
                     let title = attempt
                         .selected_image
@@ -1044,37 +869,23 @@ fn execute_effects(
                 {
                     Ok(()) => reply(
                         job,
-                        JobResponse::DestinationGranted {
-                            job: job_id.clone(),
-                            destination: "dst:0".to_string(),
+                        JobCommand::DestinationGranted {
+                            destination: "native".to_string(),
                         },
                     )?,
                     Err(error) => {
                         attempt.destination_error = Some(error);
-                        reply(
-                            job,
-                            JobResponse::DestinationDenied {
-                                job: job_id.clone(),
-                            },
-                        )?;
+                        reply(job, JobCommand::DestinationDenied)?;
                     }
                 }
             }
-            "request-decision" => {
-                let reason = effect
-                    .get("reason")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                if reason == "partial" {
-                    let Some(decision) = await_partial_choice(attempt, effect) else {
-                        // Cancelled while waiting: stop honestly without
-                        // writing output.
+            JobEffect::RequestDecision { generation, reason } => {
+                if reason == DecisionReason::Partial {
+                    let Some(decision) = await_partial_choice(attempt, generation) else {
                         if let Some(gate) = attempt.partial_gate.clone() {
                             gate.clear_pending();
                         }
-                        let _ = job.on_response(JobResponse::Cancel {
-                            job: job_id.clone(),
-                        });
+                        let _ = job.on_command(JobCommand::Cancel);
                         attempt.cancel_sent = true;
                         continue;
                     };
@@ -1085,14 +896,7 @@ fn execute_effects(
                                 gate.clear_pending();
                             }
                             attempt.recovery_attempts = attempt.recovery_attempts.saturating_add(1);
-                            let number = attempt.recovery_attempts.max(1);
-                            reply(
-                                job,
-                                JobResponse::RetryReady {
-                                    job: job_id.clone(),
-                                    attempt: format!("att:{number}"),
-                                },
-                            )?;
+                            reply(job, JobCommand::RetryReady)?;
                         }
                         PartialDecision::Keep => {
                             if let Some(gate) = attempt.partial_gate.clone() {
@@ -1100,8 +904,8 @@ fn execute_effects(
                             }
                             reply(
                                 job,
-                                JobResponse::PartialKeep {
-                                    job: job_id.clone(),
+                                JobCommand::PartialChoice {
+                                    generation,
                                     keep: true,
                                 },
                             )?;
@@ -1112,59 +916,34 @@ fn execute_effects(
                             }
                             reply(
                                 job,
-                                JobResponse::PartialKeep {
-                                    job: job_id.clone(),
+                                JobCommand::PartialChoice {
+                                    generation,
                                     keep: false,
                                 },
                             )?;
                         }
                     }
                 } else {
-                    // Destination recovery: one retry re-validates (a
-                    // concurrent writer may have gone away); a repeat denial
-                    // cancels honestly instead of looping forever.
                     attempt.recovery_attempts += 1;
                     if attempt.recovery_attempts > 1 {
-                        let _ = job.on_response(JobResponse::Cancel {
-                            job: job_id.clone(),
-                        });
+                        let _ = job.on_command(JobCommand::Cancel);
                         attempt.cancel_sent = true;
                     } else {
-                        let number = attempt.recovery_attempts;
-                        reply(
-                            job,
-                            JobResponse::RetryReady {
-                                job: job_id.clone(),
-                                attempt: format!("att:{number}"),
-                            },
-                        )?;
+                        reply(job, JobCommand::RetryReady)?;
                     }
                 }
             }
-            "decode-pixels" | "open-encoder" | "finalize-encoder" => {}
-            "publish-output" => publish(attempt)?,
-            "release-bytes" | "cancel-work" => {
-                attempt.decoded.clear();
-            }
-            unknown => {
-                return Err(NativeError::new(
-                    "native.internal",
-                    format!("unknown engine effect kind {unknown}"),
-                ));
-            }
+            JobEffect::DecodePixels { .. }
+            | JobEffect::OpenEncoder { .. }
+            | JobEffect::FinalizeEncoder => {}
+            JobEffect::PublishOutput => publish(attempt)?,
+            JobEffect::ReleaseBytes | JobEffect::CancelWork => attempt.decoded.clear(),
         }
     }
     if !tiles.is_empty() {
         acquire_tiles(job, attempt, tiles)?;
     }
     Ok(())
-}
-
-fn is_probe(effect: &serde_json::Value) -> bool {
-    effect
-        .get("probe")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
 }
 
 /// Interactive partial choice: announce the missing ledger for the host
@@ -1177,10 +956,7 @@ fn is_probe(effect: &serde_json::Value) -> bool {
 /// surface the typed keep/discard/retry dialog. Hosts without a gate
 /// (CLI) skip the wait and answer from the policy directly, preserving
 /// byte-identical output.
-fn await_partial_choice(
-    attempt: &mut Attempt<'_>,
-    effect: &serde_json::Value,
-) -> Option<PartialDecision> {
+fn await_partial_choice(attempt: &mut Attempt<'_>, generation: u32) -> Option<PartialDecision> {
     use std::sync::atomic::Ordering;
     // Prefer the engine ledger; fall back to plan-minus-decoded so a kept
     // partial always names its holes even if the event was missed.
@@ -1196,11 +972,6 @@ fn await_partial_choice(
     missing.dedup();
     let total = attempt.order.len();
     let failed = missing.len().max(1);
-    let recovery = effect
-        .get("recovery")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_string();
     // Counts only plus redacted tile ids; never URLs, paths, or secrets.
     let joined = missing.join(",");
     let mut requested = BTreeMap::new();
@@ -1210,9 +981,7 @@ fn await_partial_choice(
     if !joined.is_empty() {
         requested.insert("missing".to_string(), joined.clone());
     }
-    if !recovery.is_empty() {
-        requested.insert("recovery".to_string(), recovery);
-    }
+    requested.insert("generation".to_string(), generation.to_string());
     attempt.emit("recovery-requested", requested.clone());
     let mut work = BTreeMap::new();
     work.insert("failed".to_string(), failed.to_string());
@@ -1255,7 +1024,6 @@ fn acquire_tiles(
     attempt: &mut Attempt<'_>,
     tiles: Vec<TileFetch>,
 ) -> Result<(), NativeError> {
-    let job_id = job.id().to_string();
     let config = attempt.config;
     let user = attempt.user;
     let cache = attempt
@@ -1375,14 +1143,7 @@ fn acquire_tiles(
         if let Some(image) = image {
             attempt.decoded.insert(tile.clone(), image);
         }
-        reply(
-            job,
-            JobResponse::TileOutcome {
-                job: job_id.clone(),
-                tile: ordinal,
-                ok,
-            },
-        )?;
+        reply(job, JobCommand::TileOutcome { tile: ordinal, ok })?;
     }
     Ok(())
 }

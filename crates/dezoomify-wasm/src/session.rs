@@ -4,10 +4,8 @@
 //! ## Real job-engine delegation
 //!
 //! [`Session`] owns a [`dezoomify_job::Job`] and delegates the whole
-//! lifecycle to it. The adapter is a thin translation layer between the
-//! canonical [`ControlEnvelope`] channel and the engine's effect/event
-//! queues: engine effects and events are drained and projected, in engine
-//! `seq` order, onto typed protocol messages encoded by
+//! lifecycle to it. The adapter projects the engine's single typed FIFO
+//! queue onto typed protocol messages encoded by
 //! [`dezoomify_protocol::codec`].
 //!
 //! Host interaction map (every path is explicit and correlated):
@@ -18,7 +16,7 @@
 //!   metadata resources). The buffer is consumed exactly once (taken out of
 //!   the arena) and forwarded as `ResourceBytes` with its bytes.
 //! * Tile bytes: each `acquire-tile` effect carries an adapter-minted
-//!   `req:tile-<n>` request id plus the tile's complete output placement
+//!   numeric request sequence plus the tile's complete output placement
 //!   (position, planned extent, declared canvas, processing recipe) and the
 //!   engine-declared request headers. Hosts decode during acquisition (the
 //!   native model): `ProvideResource` with that id forwards a successful
@@ -29,7 +27,7 @@
 //!   failed `TileOutcome` (tile request).
 //! * Decisions: `SelectImage`, `SelectLevel`, `DestinationResponse`,
 //!   `RetryReady`, and `PartialChoice` map 1:1 onto engine responses.
-//!   `PartialChoice` must reference the outstanding `rec:*` recovery id.
+//!   `PartialChoice` must reference the outstanding numeric decision generation.
 //! * Codec outcome commands (`ProvideDecodeOutcome`, …) are accepted as
 //!   acknowledged no-ops: this engine does not await them.
 //! * `decode-pixels`/`open-encoder`/`finalize-encoder`/`publish-output`
@@ -50,11 +48,14 @@
 use crate::buffer::{ArenaHandle, ByteArena, MAX_BUFFERS, MAX_BUFFER_BYTES, MAX_TOTAL_BYTES};
 use crate::codec::{decode_envelope, encode_envelope};
 use crate::error::{redact, AdapterError, AdapterErrorCode};
-use dezoomify_job::{Job as EngineJob, JobError as EngineJobError, JobResponse, Outcome};
+use dezoomify_job::{
+    DecisionReason, Job as EngineJob, JobCommand as EngineCommand, JobEffect as EngineEffect,
+    JobError as EngineJobError, JobEvent as EngineEvent, JobMessageBody, Outcome,
+};
 use dezoomify_protocol::dto::{
-    negotiate_version, CatalogDto, ControlBody, ControlEnvelope, EffectId, ErrorDto, ErrorPhase,
-    HeaderDto, HostEffect, JobCommand, JobEvent, JobId, OutputId, PointDto, RecoveryAction,
-    RecoveryId, RecoveryKind, RequestDto, RequestId, RequestPurpose, SizeDto, TilePlacementDto,
+    negotiate_version, ControlBody, ControlEnvelope, EffectId, ErrorDto, ErrorPhase, HeaderDto,
+    HostEffect, JobCommand, JobEvent, OutputId, PointDto, RecoveryAction, RecoveryKind, RequestDto,
+    RequestPurpose, SizeDto, TilePlacementDto,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -180,18 +181,15 @@ pub struct Session {
     arena: ByteArena,
     queue: VecDeque<Vec<u8>>,
     job: Option<EngineJob>,
-    job_id: Option<JobId>,
     state: SessionState,
     disposed: bool,
     max_messages: usize,
     /// Outstanding discovery request ids from acquire-resource effects.
-    live_discovery_requests: HashSet<String>,
+    live_discovery_requests: HashSet<u32>,
     /// Adapter-minted tile request id -> engine tile id.
-    outstanding_tile_requests: HashMap<String, u32>,
+    outstanding_tile_requests: HashMap<u32, u32>,
     /// Recovery id from the latest request-decision effect.
-    pending_recovery: Option<String>,
-    /// Adapter-minted tile request counter.
-    next_tile_request: u32,
+    pending_recovery: Option<u32>,
 }
 
 impl Session {
@@ -247,14 +245,12 @@ impl Session {
             arena: ByteArena::with_limits(max_buffer_bytes, max_total_bytes, max_buffers),
             queue: VecDeque::new(),
             job: None,
-            job_id: None,
             state: SessionState::Created,
             disposed: false,
             max_messages,
             live_discovery_requests: HashSet::new(),
             outstanding_tile_requests: HashMap::new(),
             pending_recovery: None,
-            next_tile_request: 0,
         })
     }
 
@@ -316,12 +312,6 @@ impl Session {
         self.queue.len()
     }
 
-    /// Bound job id, if `Start` was accepted.
-    #[must_use]
-    pub fn job_id(&self) -> Option<&JobId> {
-        self.job_id.as_ref()
-    }
-
     fn require_live(&self) -> Result<(), AdapterError> {
         if self.disposed {
             return Err(AdapterError::new(
@@ -376,9 +366,7 @@ impl Session {
                 // The engine owns the cancellation lifecycle (cancel-work,
                 // release-bytes, terminal events); collect it best-effort so
                 // hosts always observe cancellation even on a full queue.
-                let _ = job.on_response(JobResponse::Cancel {
-                    job: job.id().to_string(),
-                });
+                let _ = job.on_command(EngineCommand::Cancel);
                 let forced = self.absorb();
                 if forced.is_err() {
                     self.force_cancelled_event();
@@ -393,13 +381,11 @@ impl Session {
     }
 
     fn force_cancelled_event(&mut self) {
-        if let Some(job) = self.job_id.clone() {
-            self.state = SessionState::Cancelled;
-            let event = JobEvent::Cancelled { job };
-            if let Ok(envelope) = ControlEnvelope::new(ControlBody::Event(event)) {
-                if let Ok(bytes) = encode_envelope(&envelope) {
-                    self.queue.push_back(bytes);
-                }
+        self.state = SessionState::Cancelled;
+        let event = JobEvent::Cancelled;
+        if let Ok(envelope) = ControlEnvelope::new(ControlBody::Event(event)) {
+            if let Ok(bytes) = encode_envelope(&envelope) {
+                self.queue.push_back(bytes);
             }
         }
     }
@@ -478,101 +464,55 @@ impl Session {
 
     fn dispatch_command(&mut self, command: JobCommand) -> Result<(), AdapterError> {
         match command {
-            JobCommand::Start { job, input_url } => self.on_start(job, input_url),
-            JobCommand::Cancel { job } => {
-                self.require_job(&job)?;
-                let response = JobResponse::Cancel {
-                    job: job.as_str().to_string(),
-                };
-                self.forward(response)
+            JobCommand::Start { input_url } => self.on_start(input_url),
+            JobCommand::Cancel => self.forward(EngineCommand::Cancel),
+            JobCommand::Pause => self.forward(EngineCommand::Pause),
+            JobCommand::Resume => self.forward(EngineCommand::Resume),
+            JobCommand::ProvideResource { request, buffer } => {
+                self.on_provide_resource(request, &buffer)
             }
-            JobCommand::Pause { job } => {
-                self.require_job(&job)?;
-                self.forward(JobResponse::Pause {
-                    job: job.as_str().to_string(),
-                })
+            JobCommand::ProvideFetchFailure { request, error } => {
+                self.on_fetch_failure(request, error)
             }
-            JobCommand::Resume { job } => {
-                self.require_job(&job)?;
-                self.forward(JobResponse::Resume {
-                    job: job.as_str().to_string(),
-                })
-            }
-            JobCommand::ProvideResource {
-                job,
-                request,
-                buffer,
-            } => self.on_provide_resource(job, request.as_str(), &buffer),
-            JobCommand::ProvideFetchFailure {
-                job,
-                request,
-                error,
-            } => self.on_fetch_failure(job, request.as_str(), error),
-            JobCommand::SelectImage { job, image } => {
-                self.require_job(&job)?;
-                self.forward(JobResponse::SelectedImage {
-                    job: job.as_str().to_string(),
-                    image,
-                })
-            }
-            JobCommand::SelectLevel { job, level } => {
-                self.require_job(&job)?;
-                self.forward(JobResponse::SelectedLevel {
-                    job: job.as_str().to_string(),
-                    level,
-                })
-            }
+            JobCommand::SelectImage { image } => self.forward(EngineCommand::SelectImage { image }),
+            JobCommand::SelectLevel { level } => self.forward(EngineCommand::SelectLevel { level }),
             JobCommand::DestinationResponse {
-                job,
                 destination,
                 granted,
             } => {
-                self.require_job(&job)?;
                 let response = if granted {
-                    JobResponse::DestinationGranted {
-                        job: job.as_str().to_string(),
+                    EngineCommand::DestinationGranted {
                         destination: destination.as_str().to_string(),
                     }
                 } else {
-                    JobResponse::DestinationDenied {
-                        job: job.as_str().to_string(),
-                    }
+                    EngineCommand::DestinationDenied
                 };
                 self.forward(response)
             }
-            JobCommand::RetryReady { job, attempt } => {
-                self.require_job(&job)?;
-                self.forward(JobResponse::RetryReady {
-                    job: job.as_str().to_string(),
-                    attempt: attempt.as_str().to_string(),
-                })
-            }
+            JobCommand::RetryReady => self.forward(EngineCommand::RetryReady),
             JobCommand::PartialChoice {
-                job,
-                recovery,
+                generation,
                 keep_partial,
             } => {
-                self.require_job(&job)?;
-                if self.pending_recovery.as_deref() != Some(recovery.as_str()) {
+                if self.pending_recovery != Some(generation) {
                     return Err(AdapterError::new(
                         AdapterErrorCode::WrongState,
                         "partial choice does not match the outstanding recovery",
                     ));
                 }
-                self.forward(JobResponse::PartialKeep {
-                    job: job.as_str().to_string(),
+                self.forward(EngineCommand::PartialChoice {
+                    generation,
                     keep: keep_partial,
                 })
             }
             // Codec outcomes: the lean engine does not await them; accept and
             // acknowledge so richer replays do not diverge.
-            JobCommand::ProvideDecodeOutcome { job, .. }
-            | JobCommand::ProvideProcessOutcome { job, .. }
-            | JobCommand::ProvideWriteOutcome { job, .. }
-            | JobCommand::ProvideEncodeOutcome { job, .. }
-            | JobCommand::ProvideFinalizeOutcome { job, .. }
-            | JobCommand::ProvidePublicationOutcome { job, .. } => {
-                self.require_job(&job)?;
+            JobCommand::ProvideDecodeOutcome { .. }
+            | JobCommand::ProvideProcessOutcome { .. }
+            | JobCommand::ProvideWriteOutcome { .. }
+            | JobCommand::ProvideEncodeOutcome { .. }
+            | JobCommand::ProvideFinalizeOutcome { .. }
+            | JobCommand::ProvidePublicationOutcome { .. } => {
                 if self.state.is_terminal() {
                     return Err(AdapterError::new(
                         AdapterErrorCode::WrongState,
@@ -581,16 +521,6 @@ impl Session {
                 }
                 Ok(())
             }
-        }
-    }
-
-    fn require_job(&self, job: &JobId) -> Result<(), AdapterError> {
-        match self.job_id.as_ref() {
-            Some(bound) if bound == job => Ok(()),
-            _ => Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "command job does not match this session",
-            )),
         }
     }
 
@@ -604,20 +534,20 @@ impl Session {
         Ok(())
     }
 
-    fn forward(&mut self, response: JobResponse) -> Result<(), AdapterError> {
+    fn forward(&mut self, response: EngineCommand) -> Result<(), AdapterError> {
         let outcome = self
             .job
             .as_mut()
             .ok_or_else(|| {
                 AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
             })?
-            .on_response(response)
+            .on_command(response)
             .map_err(Self::engine_error)?;
         let _ = outcome;
         self.absorb()
     }
 
-    fn on_start(&mut self, job: JobId, input_url: String) -> Result<(), AdapterError> {
+    fn on_start(&mut self, input_url: String) -> Result<(), AdapterError> {
         self.require_engine_state(SessionState::Created)?;
         if input_url.is_empty()
             || input_url.len() > 2048
@@ -632,7 +562,6 @@ impl Session {
         // observes tile geometry, so the engine must fail those levels with
         // a typed `job.probe-unsupported` error instead of probing.
         let engine = EngineJob::new(
-            job.as_str(),
             &input_url,
             dezoomify_job::Config {
                 plan_probes: false,
@@ -640,7 +569,6 @@ impl Session {
             },
         )
         .map_err(Self::engine_error)?;
-        self.job_id = Some(job);
         self.job = Some(engine);
         // Start emits the Discovering state event plus one acquire-resource
         // effect per outstanding discovery request; nothing here echoes the
@@ -662,16 +590,14 @@ impl Session {
 
     fn on_provide_resource(
         &mut self,
-        job: JobId,
-        request: &str,
+        request: u32,
         buffer: &dezoomify_protocol::dto::BufferHandle,
     ) -> Result<(), AdapterError> {
-        self.require_job(&job)?;
         // Correlate before touching any state: unknown request ids are
         // atomic rejections.
-        let tile = if self.outstanding_tile_requests.contains_key(request) {
-            Some(self.outstanding_tile_requests[request])
-        } else if self.live_discovery_requests.contains(request) {
+        let tile = if self.outstanding_tile_requests.contains_key(&request) {
+            Some(self.outstanding_tile_requests[&request])
+        } else if self.live_discovery_requests.contains(&request) {
             None
         } else {
             return Err(AdapterError::new(
@@ -694,12 +620,8 @@ impl Session {
                 if ok {
                     self.arena.take_buffer(handle)?;
                 }
-                self.outstanding_tile_requests.remove(request);
-                self.forward(JobResponse::TileOutcome {
-                    job: job.as_str().to_string(),
-                    tile: tile_id,
-                    ok,
-                })
+                self.outstanding_tile_requests.remove(&request);
+                self.forward(EngineCommand::TileOutcome { tile: tile_id, ok })
             }
             None => {
                 // Exactly-once consumption: a replayed reference is stale
@@ -707,7 +629,7 @@ impl Session {
                 // resource fails the job (job.empty-resource) and empty
                 // metadata can never yield a fake success.
                 let bytes = self.arena.take_buffer(handle)?;
-                self.live_discovery_requests.remove(request);
+                self.live_discovery_requests.remove(&request);
                 // Discovery is intentionally concurrent. A sibling metadata
                 // fetch may finish after another candidate has already
                 // produced the catalog and advanced the job into selection,
@@ -718,9 +640,8 @@ impl Session {
                 if self.state != SessionState::Discovering {
                     return Ok(());
                 }
-                self.forward(JobResponse::ResourceBytes {
-                    job: job.as_str().to_string(),
-                    request: request.to_string(),
+                self.forward(EngineCommand::ResourceBytes {
+                    request,
                     bytes,
                     // The browser never reports the post-redirect URL, so the
                     // engine keeps resolving against the request URI here.
@@ -731,16 +652,10 @@ impl Session {
         }
     }
 
-    fn on_fetch_failure(
-        &mut self,
-        job: JobId,
-        request: &str,
-        error: ErrorDto,
-    ) -> Result<(), AdapterError> {
-        self.require_job(&job)?;
-        let tile = if let Some(tile_id) = self.outstanding_tile_requests.get(request) {
+    fn on_fetch_failure(&mut self, request: u32, error: ErrorDto) -> Result<(), AdapterError> {
+        let tile = if let Some(tile_id) = self.outstanding_tile_requests.get(&request) {
             Some(*tile_id)
-        } else if self.live_discovery_requests.contains(request) {
+        } else if self.live_discovery_requests.contains(&request) {
             None
         } else {
             return Err(AdapterError::new(
@@ -751,35 +666,29 @@ impl Session {
         match tile {
             Some(tile_id) => {
                 self.require_engine_state(SessionState::AcquiringTiles)?;
-                self.outstanding_tile_requests.remove(request);
-                self.forward(JobResponse::TileOutcome {
-                    job: job.as_str().to_string(),
+                self.outstanding_tile_requests.remove(&request);
+                self.forward(EngineCommand::TileOutcome {
                     tile: tile_id,
                     ok: false,
                 })
             }
             None => {
-                self.live_discovery_requests.remove(request);
+                self.live_discovery_requests.remove(&request);
                 // A late sibling failure is also a normal consequence of
                 // concurrent discovery after another candidate has won.
                 if self.state != SessionState::Discovering {
                     return Ok(());
                 }
                 let _ = error;
-                self.forward(JobResponse::FetchFailure {
-                    job: job.as_str().to_string(),
-                    request: request.to_string(),
-                })
+                self.forward(EngineCommand::FetchFailure { request })
             }
         }
     }
 
     fn engine_error(error: EngineJobError) -> AdapterError {
         let code = match error.code.as_str() {
-            "job.wrong-job" | "job.post-terminal" | "job.invalid-state" => {
-                AdapterErrorCode::WrongState
-            }
-            "job.invalid-id" | "job.invalid-config" => AdapterErrorCode::Malformed,
+            "job.post-terminal" | "job.invalid-state" => AdapterErrorCode::WrongState,
+            "job.invalid-config" => AdapterErrorCode::Malformed,
             "job.resource-limit" | "job.overflow" => AdapterErrorCode::LimitExceeded,
             _ => AdapterErrorCode::WrongState,
         };
@@ -790,29 +699,27 @@ impl Session {
     // Engine -> adapter projection
     // -----------------------------------------------------------------------
 
-    /// Drain the engine's effects and events and enqueue their typed
-    /// protocol projections in engine `seq` order.
+    /// Drain the engine's already ordered typed queue and project each item
+    /// onto the protocol without JSON inspection or string-kind switching.
     fn absorb(&mut self) -> Result<(), AdapterError> {
-        let job = self.job.as_mut().ok_or_else(|| {
-            AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
-        })?;
-        let mut effects = job.drain_effects();
-        let mut events = job.drain_events();
-        let mut merged: Vec<serde_json::Value> = Vec::new();
-        merged.append(&mut effects);
-        merged.append(&mut events);
-        merged.sort_by_key(|value| value.get("seq").and_then(serde_json::Value::as_u64));
-        for value in &merged {
-            let kind = value
-                .get("kind")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            match kind {
-                "job-state" | "catalog" | "progress" | "warning" | "recovery-requested"
-                | "missing-work" | "levels" | "completed" | "partial-completed" | "failed"
-                | "cancelled" | "paused" | "resumed" => self.enqueue_event(kind, value)?,
-                _ => self.enqueue_effect(kind, value)?,
-            }
+        let messages = self
+            .job
+            .as_mut()
+            .ok_or_else(|| {
+                AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
+            })?
+            .drain_messages();
+        for message in messages {
+            let body = match message.body {
+                JobMessageBody::Effect(effect) => {
+                    ControlBody::Effect(self.project_effect(message.sequence, effect)?)
+                }
+                JobMessageBody::Event(event) => match self.project_event(event) {
+                    Some(event) => ControlBody::Event(event),
+                    None => continue,
+                },
+            };
+            self.enqueue(body)?;
         }
         if let Some(job) = self.job.as_ref() {
             self.state = SessionState::from_engine(job.state());
@@ -820,395 +727,158 @@ impl Session {
         Ok(())
     }
 
-    fn mint_tile_request(&mut self, tile: u32) -> String {
-        let id = format!("req:tile-{}", self.next_tile_request);
-        self.next_tile_request += 1;
-        self.outstanding_tile_requests.insert(id.clone(), tile);
-        id
-    }
-
-    fn enqueue_effect(
+    fn project_effect(
         &mut self,
-        kind: &str,
-        value: &serde_json::Value,
-    ) -> Result<(), AdapterError> {
-        let job_id = self.job_id.clone().ok_or_else(|| {
-            AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
-        })?;
-        let effect = value
-            .get("effect")
-            .and_then(serde_json::Value::as_str)
-            .and_then(EffectId::new)
-            .ok_or_else(|| {
-                AdapterError::new(AdapterErrorCode::Malformed, "engine effect lacks an id")
-            })?;
-        let body = match kind {
-            "acquire-resource" => {
-                let request = self.project_discovery_request(value)?;
-                self.live_discovery_requests
-                    .insert(request.id.as_str().to_string());
+        sequence: u32,
+        effect: EngineEffect,
+    ) -> Result<HostEffect, AdapterError> {
+        let effect_id = EffectId::new(format!("fx:{sequence}"))
+            .ok_or_else(|| AdapterError::new(AdapterErrorCode::Malformed, "effect sequence"))?;
+        Ok(match effect {
+            EngineEffect::AcquireResource { request, uri, .. } => {
+                self.live_discovery_requests.insert(request);
                 HostEffect::AcquireResource {
-                    effect,
-                    job: job_id,
-                    request,
+                    effect: effect_id,
+                    request: RequestDto {
+                        id: request,
+                        uri,
+                        headers: Vec::new(),
+                        purpose: RequestPurpose::Metadata,
+                    },
                 }
             }
-            "acquire-tile" => {
-                let tile = value
-                    .get("tile")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|value| u32::try_from(value).ok())
-                    .ok_or_else(|| {
-                        AdapterError::new(AdapterErrorCode::Malformed, "engine tile ordinal")
-                    })?;
-                let uri = value
-                    .get("uri")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let headers = value
-                    .get("headers")
-                    .and_then(|headers| {
-                        headers.as_object().map(|map| {
-                            map.iter()
-                                .map(|(name, val)| HeaderDto {
-                                    name: name.clone(),
-                                    value: val.as_str().unwrap_or("").to_string(),
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                    })
-                    .unwrap_or_default();
-                let request = RequestDto {
-                    id: RequestId::new(self.mint_tile_request(tile)).ok_or_else(|| {
-                        AdapterError::new(AdapterErrorCode::Malformed, "tile request id")
-                    })?,
-                    uri,
-                    headers,
-                    purpose: RequestPurpose::Tile,
-                };
+            EngineEffect::AcquireTile {
+                tile,
+                uri,
+                headers,
+                processing,
+                destination,
+                expected_size,
+                canvas,
+                probe,
+            } => {
+                let request = sequence;
+                self.outstanding_tile_requests.insert(request, tile);
                 HostEffect::AcquireTile {
-                    effect,
-                    job: job_id,
-                    request,
+                    effect: effect_id,
+                    request: RequestDto {
+                        id: request,
+                        uri,
+                        headers: headers
+                            .into_iter()
+                            .map(|(name, value)| HeaderDto { name, value })
+                            .collect(),
+                        purpose: if probe {
+                            RequestPurpose::Probe
+                        } else {
+                            RequestPurpose::Tile
+                        },
+                    },
                     tile,
-                    placement: Self::project_placement(value)?,
+                    placement: TilePlacementDto {
+                        position: PointDto {
+                            x: u64::from(destination.x),
+                            y: u64::from(destination.y),
+                        },
+                        expected_size: expected_size.map(|size| SizeDto {
+                            width: u64::from(size.x),
+                            height: u64::from(size.y),
+                        }),
+                        canvas: canvas.map(|size| SizeDto {
+                            width: u64::from(size.x),
+                            height: u64::from(size.y),
+                        }),
+                        processing,
+                    },
                 }
             }
-            "request-destination" => HostEffect::RequestDestination {
-                effect,
-                job: job_id,
-                format: value
-                    .get("format")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("png")
-                    .to_string(),
+            EngineEffect::RequestDestination { format } => HostEffect::RequestDestination {
+                effect: effect_id,
+                format,
             },
-            "decode-pixels" => {
-                let tile = value
-                    .get("tile")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|value| u32::try_from(value).ok())
-                    .ok_or_else(|| {
-                        AdapterError::new(AdapterErrorCode::Malformed, "engine tile ordinal")
-                    })?;
-                HostEffect::DecodePixels {
-                    effect,
-                    job: job_id,
-                    tile,
-                }
-            }
-            "open-encoder" => HostEffect::OpenEncoder {
-                effect,
-                job: job_id,
-                format: value
-                    .get("format")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("png")
-                    .to_string(),
-                canvas: Self::project_size(value.get("canvas")),
+            EngineEffect::DecodePixels { tile } => HostEffect::DecodePixels {
+                effect: effect_id,
+                tile,
             },
-            "finalize-encoder" => HostEffect::FinalizeEncoder {
-                effect,
-                job: job_id,
+            EngineEffect::OpenEncoder { format, canvas } => HostEffect::OpenEncoder {
+                effect: effect_id,
+                format,
+                canvas: canvas.map(|size| SizeDto {
+                    width: u64::from(size.x),
+                    height: u64::from(size.y),
+                }),
             },
-            "publish-output" => HostEffect::PublishOutput {
-                effect,
-                job: job_id,
-                output: OutputId::new(
-                    value
-                        .get("output")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("out:0"),
-                )
-                .ok_or_else(|| {
-                    AdapterError::new(AdapterErrorCode::Malformed, "engine output id")
-                })?,
+            EngineEffect::FinalizeEncoder => HostEffect::FinalizeEncoder { effect: effect_id },
+            EngineEffect::PublishOutput => HostEffect::PublishOutput {
+                effect: effect_id,
+                output: OutputId::new("out:0").expect("static output id is valid"),
             },
-            "release-bytes" => HostEffect::ReleaseBytes {
-                effect,
-                job: job_id,
-            },
-            "cancel-work" => HostEffect::CancelWork {
-                effect,
-                job: job_id,
-            },
-            "request-decision" => {
-                let recovery = value
-                    .get("recovery")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(RecoveryId::new)
-                    .ok_or_else(|| {
-                        AdapterError::new(AdapterErrorCode::Malformed, "engine recovery id")
-                    })?;
-                self.pending_recovery = Some(recovery.as_str().to_string());
+            EngineEffect::ReleaseBytes => HostEffect::ReleaseBytes { effect: effect_id },
+            EngineEffect::CancelWork => HostEffect::CancelWork { effect: effect_id },
+            EngineEffect::RequestDecision { generation, .. } => {
+                self.pending_recovery = Some(generation);
                 HostEffect::RequestDecision {
-                    effect,
-                    job: job_id,
-                    recovery,
+                    effect: effect_id,
+                    generation,
                 }
             }
-            other => {
-                return Err(AdapterError::new(
-                    AdapterErrorCode::Malformed,
-                    format!("unknown engine effect kind {other}"),
-                ));
+        })
+    }
+
+    fn project_event(&self, event: EngineEvent) -> Option<JobEvent> {
+        Some(match event {
+            EngineEvent::State { state } => JobEvent::JobState {
+                state: state.name().to_string(),
+            },
+            EngineEvent::Catalog { catalog } => JobEvent::Catalog { catalog },
+            EngineEvent::Levels { .. } => return None,
+            EngineEvent::Progress { acquired, total } => JobEvent::Progress { acquired, total },
+            EngineEvent::Warning { tile, attempt } => {
+                let mut error = ErrorDto::new(
+                    "job.tile-retry",
+                    ErrorPhase::Acquisition,
+                    format!("tile {tile} failed; retry attempt {attempt}"),
+                );
+                error.retryable = true;
+                JobEvent::Warning { error }
             }
-        };
-        self.enqueue(ControlBody::Effect(body))
-    }
-
-    /// Project the engine's tile placement JSON (`destination`,
-    /// `expected_size`, `canvas`, `processing`) onto the protocol DTO.
-    fn project_placement(value: &serde_json::Value) -> Result<TilePlacementDto, AdapterError> {
-        let point = |field: &str| -> Result<PointDto, AdapterError> {
-            let raw = value.get(field).ok_or_else(|| {
-                AdapterError::new(
-                    AdapterErrorCode::Malformed,
-                    "tile placement lacks destination",
-                )
-            })?;
-            let x = raw
-                .get("x")
-                .and_then(serde_json::Value::as_u64)
-                .ok_or_else(|| {
-                    AdapterError::new(AdapterErrorCode::Malformed, "tile placement x")
-                })?;
-            let y = raw
-                .get("y")
-                .and_then(serde_json::Value::as_u64)
-                .ok_or_else(|| {
-                    AdapterError::new(AdapterErrorCode::Malformed, "tile placement y")
-                })?;
-            Ok(PointDto { x, y })
-        };
-        Ok(TilePlacementDto {
-            position: point("destination")?,
-            expected_size: Self::project_size_x_y(value.get("expected_size")),
-            canvas: Self::project_size_x_y(value.get("canvas")),
-            processing: value
-                .get("processing")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("none")
-                .to_string(),
-        })
-    }
-
-    /// Project an engine `{"x","y"}` size (or JSON null) onto `SizeDto`.
-    fn project_size_x_y(value: Option<&serde_json::Value>) -> Option<SizeDto> {
-        let raw = value?;
-        if raw.is_null() {
-            return None;
-        }
-        let width = raw.get("x").and_then(serde_json::Value::as_u64)?;
-        let height = raw.get("y").and_then(serde_json::Value::as_u64)?;
-        Some(SizeDto { width, height })
-    }
-
-    /// Project an engine open-encoder `canvas` field onto `SizeDto`.
-    fn project_size(value: Option<&serde_json::Value>) -> Option<SizeDto> {
-        Self::project_size_x_y(value)
-    }
-
-    fn project_discovery_request(
-        &self,
-        value: &serde_json::Value,
-    ) -> Result<RequestDto, AdapterError> {
-        let id = value
-            .get("request")
-            .and_then(serde_json::Value::as_str)
-            .and_then(RequestId::new)
-            .ok_or_else(|| AdapterError::new(AdapterErrorCode::Malformed, "engine request id"))?;
-        let purpose = match value
-            .get("purpose")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("metadata")
-        {
-            "tile" => RequestPurpose::Tile,
-            "probe" => RequestPurpose::Probe,
-            _ => RequestPurpose::Metadata,
-        };
-        Ok(RequestDto {
-            id,
-            uri: value
-                .get("uri")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            headers: Vec::new(),
-            purpose,
-        })
-    }
-
-    fn enqueue_event(&mut self, kind: &str, value: &serde_json::Value) -> Result<(), AdapterError> {
-        let job_id = self.job_id.clone().ok_or_else(|| {
-            AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
-        })?;
-        let event = match kind {
-            "job-state" => JobEvent::JobState {
-                job: job_id,
-                state: value
-                    .get("state")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-            },
-            "catalog" => JobEvent::Catalog {
-                job: job_id,
-                catalog: self.project_catalog(value)?,
-            },
-            // "levels" is folded into the catalog projection; the lean
-            // engine emits both and the DTO has no separate levels event.
-            "levels" => return Ok(()),
-            "progress" => JobEvent::Progress {
-                job: job_id,
-                acquired: value
-                    .get("acquired")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                total: value
-                    .get("total")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-            },
-            "warning" | "missing-work" => JobEvent::Warning {
-                job: job_id,
-                error: self.project_warning(kind, value),
-            },
-            "recovery-requested" => {
-                let recovery = self
-                    .pending_recovery
-                    .clone()
-                    .and_then(RecoveryId::new)
-                    .ok_or_else(|| AdapterError::new(AdapterErrorCode::Malformed, "recovery id"))?;
-                let reason = value
-                    .get("reason")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown")
-                    .to_string();
+            EngineEvent::MissingWork { failed } => {
+                let mut error = ErrorDto::new(
+                    "job.missing-tiles",
+                    ErrorPhase::Acquisition,
+                    format!("tiles failed: {failed:?}"),
+                );
+                error.retryable = true;
+                JobEvent::Warning { error }
+            }
+            EngineEvent::RecoveryRequested { generation, reason } => {
+                let scope = match reason {
+                    DecisionReason::Destination => "destination",
+                    DecisionReason::Partial => "partial",
+                };
                 JobEvent::RecoveryRequest {
-                    job: job_id,
-                    recovery,
+                    generation,
                     actions: vec![RecoveryAction {
                         id: "retry".to_string(),
                         kind: RecoveryKind::Retry,
-                        scope: reason.clone(),
-                        rationale: format!("Retry the {reason} step"),
+                        scope: scope.to_string(),
+                        rationale: format!("Retry the {scope} step"),
                     }],
                 }
             }
-            "completed" => JobEvent::Completed {
-                job: job_id,
-                output: Self::project_output(value)?,
+            EngineEvent::Completed => JobEvent::Completed {
+                output: OutputId::new("out:0").expect("static output id is valid"),
             },
-            "partial-completed" => JobEvent::PartialCompleted {
-                job: job_id,
-                output: Self::project_output(value)?,
+            EngineEvent::PartialCompleted => JobEvent::PartialCompleted {
+                output: OutputId::new("out:0").expect("static output id is valid"),
             },
-            "failed" => JobEvent::Failed {
-                job: job_id,
-                error: ErrorDto::new(
-                    value
-                        .get("code")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("job.failed"),
-                    ErrorPhase::Discovery,
-                    value
-                        .get("message")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or(""),
-                ),
+            EngineEvent::Failed { code, message } => JobEvent::Failed {
+                error: ErrorDto::new(code, ErrorPhase::Discovery, message),
             },
-            "cancelled" => JobEvent::Cancelled { job: job_id },
-            "paused" => JobEvent::Paused { job: job_id },
-            "resumed" => JobEvent::Resumed { job: job_id },
-            other => {
-                return Err(AdapterError::new(
-                    AdapterErrorCode::Malformed,
-                    format!("unknown engine event kind {other}"),
-                ));
-            }
-        };
-        self.enqueue(ControlBody::Event(event))
-    }
-
-    fn project_catalog(&self, value: &serde_json::Value) -> Result<CatalogDto, AdapterError> {
-        // The engine emits the real projected catalog: a `CatalogDto`-shaped
-        // payload with stable wire ids, geometry, and readiness.
-        serde_json::from_value(value.clone()).map_err(|detail| {
-            AdapterError::new(
-                AdapterErrorCode::Malformed,
-                format!(
-                    "engine catalog does not project: {}",
-                    redact(&detail.to_string())
-                ),
-            )
+            EngineEvent::Cancelled => JobEvent::Cancelled,
+            EngineEvent::Paused => JobEvent::Paused,
+            EngineEvent::Resumed => JobEvent::Resumed,
         })
-    }
-
-    fn project_warning(&self, kind: &str, value: &serde_json::Value) -> ErrorDto {
-        if kind == "missing-work" {
-            let mut error = ErrorDto::new(
-                "job.missing-tiles",
-                ErrorPhase::Acquisition,
-                format!(
-                    "tiles failed: {}",
-                    value
-                        .get("failed")
-                        .map(serde_json::Value::to_string)
-                        .unwrap_or_default()
-                ),
-            );
-            error.retryable = true;
-            error
-        } else {
-            let tile = value
-                .get("tile")
-                .and_then(serde_json::Value::as_u64)
-                .map_or_else(|| "?".to_string(), |value| value.to_string());
-
-            let attempt = value
-                .get("attempt")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let mut error = ErrorDto::new(
-                "job.tile-retry",
-                ErrorPhase::Acquisition,
-                format!("tile {tile} failed; retry attempt {attempt}"),
-            );
-            error.retryable = true;
-            error
-        }
-    }
-
-    fn project_output(value: &serde_json::Value) -> Result<OutputId, AdapterError> {
-        OutputId::new(
-            value
-                .get("output")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("out:0"),
-        )
-        .ok_or_else(|| AdapterError::new(AdapterErrorCode::Malformed, "engine output id"))
     }
 
     fn enqueue(&mut self, body: ControlBody) -> Result<(), AdapterError> {
@@ -1231,9 +901,8 @@ mod tests {
     use super::*;
     use crate::codec::messages_to_json_array;
 
-    fn start_bytes(job: &str) -> Vec<u8> {
+    fn start_bytes(_job: &str) -> Vec<u8> {
         let command = JobCommand::Start {
-            job: job.parse().unwrap(),
             input_url: "https://example.com/image.dzi".to_string(),
         };
         let envelope = ControlEnvelope::new(ControlBody::Command(command)).unwrap();

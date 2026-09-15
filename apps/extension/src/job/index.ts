@@ -49,7 +49,7 @@ let selectedTitle: string | undefined;
 // so approval resumes the same determinate progress display immediately.
 let lastTileProgress: { current: number; total: number } | null = null;
 let accessRequest: { hosts: string[]; requesting: boolean } | null = null;
-let partialDecision: string | null = null;
+let partialDecision: number | null = null;
 const testGrantedOrigins = new Set<string>();
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 
@@ -108,11 +108,11 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
       });
       },
     }) } : {}),
-    ...(partialDecision ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
-      const recovery = partialDecision;
-      if (!recovery) return;
+    ...(partialDecision !== null ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
+      const generation = partialDecision;
+      if (generation === null) return;
       partialDecision = null;
-      controller?.choosePartial(recovery, keep);
+      controller?.choosePartial(generation, keep);
       render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Finishing the image" } });
     } }) } : {}),
   });
@@ -156,9 +156,9 @@ function resolvePermission(message: Record<string, unknown>) {
  * exhausted its retries. Only an explicit user action chooses keep/discard;
  * the engine owns the consequence (encode with missing regions, or fail).
  */
-function showPartialDecision(recovery: string) {
-  if (typeof recovery !== "string" || !recovery.startsWith("rec:")) return;
-  partialDecision = recovery;
+function showPartialDecision(generation: number) {
+  if (!Number.isSafeInteger(generation) || generation < 0) return;
+  partialDecision = generation;
   render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Some tiles are missing" } });
 }
 

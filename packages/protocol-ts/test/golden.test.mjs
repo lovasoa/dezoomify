@@ -82,17 +82,15 @@ test('golden vectors decode with protocol 2.0', () => {
 
 // Mirrors Rust crates/dezoomify-protocol/tests/golden.rs assert_vector_semantics:
 // canonical round-tripping alone would accept a drifted vector, so pin what
-// each vector means (job/fetch.failed + terminal kinds).
+// each vector means (start/fetch.failed + terminal kinds).
 function assertVectorSemantics(id, value) {
   if (id === 'handshake-ok') {
     assert.equal(value.kind, 'command', `${id} kind`);
     assert.equal(value.type, 'start', `${id} type`);
-    assert.equal(value.job, 'job:golden-1', `${id} job`);
     assert.equal(value.input_url, 'https://example.com/item/1', `${id} input_url`);
   } else if (id === 'error-terminal') {
     assert.equal(value.kind, 'event', `${id} kind`);
     assert.equal(value.type, 'failed', `${id} type`);
-    assert.equal(value.job, 'job:golden-1', `${id} job`);
     assert.equal(value.error?.code, 'fetch.failed', `${id} error code`);
     assert.ok(
       ['completed', 'partial-completed', 'failed', 'cancelled'].includes(value.type),

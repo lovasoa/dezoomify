@@ -18,11 +18,20 @@
 
 ## Commands
 
-Commands express user intent and carry a request or job identifier. Image and level selections are zero-based `u32` positions into the authoritative immutable catalog; catalog DTOs do not duplicate those positions. Tiles carry a selected-level-scoped `u32` ordinal. Commands cover discovery, selection, job start, cancellation, pause and resume (Pause v1 suspend-acquisition), recovery choice, and output confirmation. Pause stops scheduling new tiles while in-flight work finishes and decoded output is retained; resume re-drives the pending queue. Duplicate pause is ignored; resume without pause is rejected.
+Commands express user intent within one already-routed job session and do not
+repeat the product's outer job token. Resource requests use job-scoped `u32`
+sequences, image and level selections are zero-based `u32` positions into the
+authoritative immutable catalog, tiles carry a selected-level-scoped `u32`
+ordinal, and recovery choices carry a job-scoped `u32` decision generation.
+Catalog DTOs do not duplicate positions. Commands cover discovery, selection,
+job start, cancellation, pause and resume (Pause v1 suspend-acquisition),
+recovery choice, and output confirmation. Pause stops scheduling new tiles
+while in-flight work finishes and decoded output is retained; resume re-drives
+the pending queue. Duplicate pause is ignored; resume without pause is rejected.
 
 ## Events
 
-Events are ordered per job and include state snapshots, selection requests, phase changes, progress, active transport and transport transitions where applicable, warnings, recovery requests, output readiness, completion, cancellation, failure, and pause/resume (`paused`/`resumed`, replayable, never terminal). Every event has a schema version, sequence number, and correlation identifier. Consumers can request a fresh snapshot after a gap.
+Events are ordered within the routed job session and include state snapshots, selection requests, phase changes, progress, active transport and transport transitions where applicable, warnings, recovery requests, output readiness, completion, cancellation, failure, and pause/resume (`paused`/`resumed`, replayable, never terminal). The protocol does not duplicate the outer routing token inside commands, effects, or events.
 
 ## Capabilities
 

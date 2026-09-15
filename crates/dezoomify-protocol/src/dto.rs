@@ -73,13 +73,6 @@ macro_rules! id_type {
     };
 }
 
-id_type!(JobId, "job", "one end-to-end user request");
-id_type!(
-    RequestId,
-    "req",
-    "one protocol request awaiting correlation"
-);
-id_type!(AttemptId, "att", "one fetch/decode attempt within its tile");
 id_type!(
     EffectId,
     "fx",
@@ -92,7 +85,6 @@ id_type!(
 );
 id_type!(DestinationId, "dst", "one host-granted output destination");
 id_type!(OutputId, "out", "one finalized output within its job");
-id_type!(RecoveryId, "rec", "one recovery decision request");
 
 // ---------------------------------------------------------------------------
 // Bounded integers (never `usize` on the wire)
@@ -162,7 +154,7 @@ pub enum RequestPurpose {
 /// (hosts attach scoped authorization out-of-band and redact logs).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestDto {
-    pub id: RequestId,
+    pub id: u32,
     pub uri: String,
     #[serde(default)]
     pub headers: Vec<HeaderDto>,
@@ -261,79 +253,57 @@ pub struct CatalogDto {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum JobCommand {
     Start {
-        job: JobId,
         input_url: String,
     },
     ProvideResource {
-        job: JobId,
-        request: RequestId,
+        request: u32,
         buffer: BufferHandle,
     },
     ProvideFetchFailure {
-        job: JobId,
-        request: RequestId,
+        request: u32,
         error: ErrorDto,
     },
     SelectImage {
-        job: JobId,
         image: u32,
     },
     SelectLevel {
-        job: JobId,
         level: u32,
     },
     ProvideDecodeOutcome {
-        job: JobId,
         tile: u32,
         ok: bool,
     },
     ProvideProcessOutcome {
-        job: JobId,
         tile: u32,
         ok: bool,
     },
     ProvideWriteOutcome {
-        job: JobId,
         tile: u32,
         ok: bool,
     },
     ProvideEncodeOutcome {
-        job: JobId,
         ok: bool,
     },
     ProvideFinalizeOutcome {
-        job: JobId,
         output: OutputId,
         ok: bool,
     },
     ProvidePublicationOutcome {
-        job: JobId,
         output: OutputId,
         ok: bool,
     },
-    RetryReady {
-        job: JobId,
-        attempt: AttemptId,
-    },
+    RetryReady,
     PartialChoice {
-        job: JobId,
-        recovery: RecoveryId,
+        generation: u32,
         keep_partial: bool,
     },
     DestinationResponse {
-        job: JobId,
         destination: DestinationId,
         granted: bool,
     },
-    Cancel {
-        job: JobId,
-    },
-    Pause {
-        job: JobId,
-    },
-    Resume {
-        job: JobId,
-    },
+    Cancel,
+    Pause,
+    Resume,
 }
 
 // ---------------------------------------------------------------------------
@@ -345,12 +315,10 @@ pub enum JobCommand {
 pub enum HostEffect {
     AcquireResource {
         effect: EffectId,
-        job: JobId,
         request: RequestDto,
     },
     AcquireTile {
         effect: EffectId,
-        job: JobId,
         request: RequestDto,
         /// Engine tile id correlating this acquisition with the later
         /// `decode-pixels` effect for the same tile.
@@ -363,7 +331,6 @@ pub enum HostEffect {
     },
     RequestDestination {
         effect: EffectId,
-        job: JobId,
         format: String,
     },
     /// Decode (or verify the earlier acquisition-time decode of) one tile's
@@ -372,12 +339,10 @@ pub enum HostEffect {
     /// the draw/hold checkpoint; tile bytes never cross the effect.
     DecodePixels {
         effect: EffectId,
-        job: JobId,
         tile: u32,
     },
     ProcessPixels {
         effect: EffectId,
-        job: JobId,
         tile: u32,
     },
     /// Allocate the output surface. `canvas` declares the output size when
@@ -385,22 +350,18 @@ pub enum HostEffect {
     /// accumulated placements. `format` is the output codec id.
     OpenEncoder {
         effect: EffectId,
-        job: JobId,
         format: String,
         canvas: Option<SizeDto>,
     },
     WriteOutput {
         effect: EffectId,
-        job: JobId,
         tile: u32,
     },
     FinalizeEncoder {
         effect: EffectId,
-        job: JobId,
     },
     PublishOutput {
         effect: EffectId,
-        job: JobId,
         output: OutputId,
     },
     /// Release every per-tile resource this host retained for the job
@@ -409,16 +370,13 @@ pub enum HostEffect {
     /// accompanies this effect.
     ReleaseBytes {
         effect: EffectId,
-        job: JobId,
     },
     CancelWork {
         effect: EffectId,
-        job: JobId,
     },
     RequestDecision {
         effect: EffectId,
-        job: JobId,
-        recovery: RecoveryId,
+        generation: u32,
     },
 }
 
@@ -439,52 +397,37 @@ pub enum EventKind {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum JobEvent {
     JobState {
-        job: JobId,
         state: String,
     },
     Catalog {
-        job: JobId,
         catalog: CatalogDto,
     },
     Progress {
-        job: JobId,
         acquired: u64,
         total: u64,
     },
     Warning {
-        job: JobId,
         error: ErrorDto,
     },
     RecoveryRequest {
-        job: JobId,
-        recovery: RecoveryId,
+        generation: u32,
         actions: Vec<RecoveryAction>,
     },
     OutputReady {
-        job: JobId,
         output: OutputId,
     },
     Completed {
-        job: JobId,
         output: OutputId,
     },
     PartialCompleted {
-        job: JobId,
         output: OutputId,
     },
     Failed {
-        job: JobId,
         error: ErrorDto,
     },
-    Cancelled {
-        job: JobId,
-    },
-    Paused {
-        job: JobId,
-    },
-    Resumed {
-        job: JobId,
-    },
+    Cancelled,
+    Paused,
+    Resumed,
 }
 
 impl JobEvent {
