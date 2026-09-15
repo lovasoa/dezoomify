@@ -27,6 +27,6 @@
     "lint": "pnpm -r lint",
     "typecheck": "tsc --noEmit && pnpm -r typecheck",
     "build": "vite build",
-    "test": "node scripts/build-help.mjs && node --import ./test/tsx-loader.mjs --test test/*.test.mjs"
+    "test": "node scripts/build-help.mjs && node --import ./test/tsx-loader.mjs --test-reporter=dot --test \"test/*.test.mjs\""
   }
 }

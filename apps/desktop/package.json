@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --import ../../test/tsx-loader.mjs --test tests/*.test.mjs"
+    "test": "node --import ../../test/tsx-loader.mjs --test-reporter=dot --test \"tests/*.test.mjs\""
   },
   "dependencies": {
     "@dezoomify/browser-runtime": "workspace:*",

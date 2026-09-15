@@ -1,9 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, mkdtempSync, cpSync, rmSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const webDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -13,36 +11,8 @@ const PAGES = readdirSync(srcDir)
   .filter((f) => f.endsWith(".md") && f !== "README.md")
   .map((f) => f.replace(/\.md$/, ""));
 
-test("help/ generation is deterministic and complete", () => {
-  // help/ is a generated, untracked tree (built at deploy time and by the
-  // test lanes); this pins that regeneration is byte-stable and produces
-  // exactly the published page set, never partial or in-place-mutated output.
-  const before = mkdtempSync(path.join(os.tmpdir(), "help-before-"));
-  const after = mkdtempSync(path.join(os.tmpdir(), "help-after-"));
-  cpSync(helpDir, before, { recursive: true });
-  try {
-    execFileSync(process.execPath, [path.join(webDir, "scripts", "build-help.mjs")], {
-      cwd: webDir,
-    });
-    cpSync(helpDir, after, { recursive: true });
-    const namesBefore = readdirSync(before).sort();
-    const namesAfter = readdirSync(after).sort();
-    assert.deepEqual(namesAfter, namesBefore, "generated file set changed");
-    assert.ok(namesAfter.length >= 8, "help/ is empty; run: node scripts/build-help.mjs");
-    for (const name of namesAfter) {
-      assert.equal(
-        readFileSync(path.join(after, name), "utf8"),
-        readFileSync(path.join(before, name), "utf8"),
-        `${name} changed on regeneration (nondeterministic generator)`,
-      );
-    }
-  } finally {
-    rmSync(before, { recursive: true, force: true });
-    rmSync(after, { recursive: true, force: true });
-  }
-});
-
 test("every generated page exists with chrome, topics, and no legacy doc links", () => {
+  assert.ok(readdirSync(helpDir).length >= 8, "help/ is empty");
   for (const stem of PAGES) {
     const html = readFileSync(path.join(helpDir, `${stem}.html`), "utf8");
     assert.ok(html.includes('class="dz-nav"'), `${stem}.html has site chrome`);

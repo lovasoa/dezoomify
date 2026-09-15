@@ -291,5 +291,3 @@ ${indexItems.join("\n")}
 </div>`,
   }),
 );
-
-console.log(`wrote help/index.html and ${PAGES.length} help pages from docs/user/`);

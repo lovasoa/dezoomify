@@ -24,7 +24,6 @@ fn check_size_budget(path: &std::path::Path, budget: u64, label: &str) -> Result
             path.display()
         ));
     }
-    println!("{label}: {size} bytes (budget {budget})");
     Ok(())
 }
 
@@ -86,7 +85,7 @@ pub(crate) fn build_wxt(browser: &str) -> Result<(), String> {
 
 fn run_wxt(browser: &str, command: &str) -> Result<(), String> {
     let root = super::repo_root();
-    let status = super::desktop::pnpm_command()?
+    let output = super::desktop::pnpm_command()?
         .args([
             "--dir",
             "apps/extension",
@@ -95,12 +94,18 @@ fn run_wxt(browser: &str, command: &str) -> Result<(), String> {
             command,
             "--browser",
             browser,
+            "--level",
+            "error",
         ])
         .current_dir(&root)
-        .status()
+        .output()
         .map_err(|e| format!("failed to run WXT for {browser}: {e}"))?;
-    if !status.success() {
-        return Err(format!("WXT {command} failed for {browser}"));
+    if !output.status.success() {
+        return Err(format!(
+            "WXT {command} failed for {browser}:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }
@@ -126,6 +131,7 @@ pub(crate) fn build_wasm_glue() -> Result<(), String> {
     let status = Command::new("cargo")
         .args([
             "build",
+            "--quiet",
             "-p",
             "dezoomify-wasm",
             "--release",
@@ -164,6 +170,24 @@ pub(crate) fn build_wasm_glue() -> Result<(), String> {
 
 pub fn test_extension(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("test extension", args)?;
+    prepare_extension_tests()?;
+    super::command::node_test(&["apps/extension/tests/unit/*.test.mjs"], false)?;
+    test_headless_browser()
+}
+
+pub(crate) fn test_extension_integration() -> Result<(), String> {
+    prepare_extension_tests()?;
+    super::command::node_test(
+        &[
+            "apps/extension/tests/unit/job-worker.test.mjs",
+            "apps/extension/tests/unit/manifest-policy.test.mjs",
+        ],
+        false,
+    )?;
+    test_headless_browser()
+}
+
+fn prepare_extension_tests() -> Result<(), String> {
     // The unit suite imports and executes this exact generated boundary.
     // Build it first so a stale or absent local artifact cannot be mocked
     // away while the store package is broken.
@@ -171,13 +195,6 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
     for browser in ["chrome", "firefox"] {
         build_wxt(browser)?;
     }
-    run_node_glob("apps/extension/tests/unit")?;
-    test_headless_browser()?;
-    // The unit glob already ran above; skip it inside the composed
-    // native-messaging gate so the suite runs once per `test extension`.
-    // Standalone `test native-messaging` omits the flag and stays full.
-    test_native_messaging(&["--skip-unit".to_string()])?;
-    println!("test extension: ok");
     Ok(())
 }
 
@@ -190,7 +207,13 @@ fn test_headless_browser() -> Result<(), String> {
     // `test_extension` has just regenerated the gitignored WASM artifacts;
     // WXT copies those exact bytes through its build hook for both browser runs.
     let status = super::desktop::pnpm_command()?
-        .args(["--filter", "dezoomify-extension-headless", "test"])
+        .args([
+            "--reporter=silent",
+            "--filter",
+            "dezoomify-extension-headless",
+            "test",
+        ])
+        .env("NODE_NO_WARNINGS", "1")
         .current_dir(super::repo_root())
         .status()
         .map_err(|e| format!("failed to run pnpm: {e}"))?;
@@ -200,26 +223,15 @@ fn test_headless_browser() -> Result<(), String> {
 }
 
 pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
-    // Aggregate dedupe: `--skip-unit`/`--no-unit` skips the shared extension
-    // unit glob when the caller already ran it (see `test_extension`).
-    // Standalone invocations omit the flag and stay full.
-    let mut skip_unit = false;
-    let mut rest: Vec<String> = Vec::new();
-    for arg in args {
-        match arg.as_str() {
-            "--skip-unit" | "--no-unit" => skip_unit = true,
-            _ => rest.push(arg.clone()),
-        }
-    }
-    if rest.first().map(String::as_str) == Some("--cleanup-only") {
+    if args.first().map(String::as_str) == Some("--cleanup-only") {
         // Real cleanup: remove our per-user registrations (profile manifest
         // files and, on Windows, HKCU registry values). The unit gate never
         // registers anything in-process, so a clean report afterwards proves
         // no residual registration.
-        if rest.len() > 1 {
+        if args.len() > 1 {
             return Err(format!(
                 "unknown test native-messaging --cleanup-only argument(s): {}",
-                rest[1..].join(" ")
+                args[1..].join(" ")
             ));
         }
         let removed =
@@ -236,7 +248,7 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
     // Protocol + secret-scope checks via extension unit tests, then real
     // per-user registration inspection for the named engine. Browser-specific
     // handshakes need installed browsers; unknown engines fail closed.
-    if let Some(name) = rest.strip_prefix(&["--browser".to_string()]) {
+    if let Some(name) = args.strip_prefix(&["--browser".to_string()]) {
         match name
             .first()
             .and_then(|n| super::native_messaging::normalize_engine(n))
@@ -248,13 +260,7 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
                         name[1..].join(" ")
                     ));
                 }
-                if skip_unit {
-                    println!(
-                        "test native-messaging --browser {engine}: unit skipped (--skip-unit)"
-                    );
-                } else {
-                    run_node_glob("apps/extension/tests/unit")?;
-                }
+                test_native_messaging_units()?;
                 let found = super::native_messaging::inspect_and_report(Some(engine))?;
                 println!(
                     "test native-messaging --browser {engine}: ok ({} registration(s) found)",
@@ -270,93 +276,17 @@ pub fn test_native_messaging(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    super::reject_unknown_args("test native-messaging", &rest)?;
-    if skip_unit {
-        println!("test native-messaging: unit skipped (--skip-unit; covered by test extension)");
-    } else {
-        run_node_glob("apps/extension/tests/unit")?;
-    }
-    test_install_round_trip()?;
-    super::native_messaging::inspect_and_report(None)?;
-    println!("test native-messaging: ok");
-    Ok(())
+    super::reject_unknown_args("test native-messaging", args)?;
+    test_native_messaging_units()
 }
 
-/// Deterministic registration proof: install the reviewed templates into a
-/// temp home, verify exact IDs with no wildcards, then clean up. Never
-/// touches the real profile; the `--cleanup-only` gate covers real-profile
-/// hygiene separately.
-fn test_install_round_trip() -> Result<(), String> {
-    let home = std::env::temp_dir().join(format!(
-        "dz-nm-xtask-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    std::fs::create_dir_all(&home).map_err(|e| format!("create temp home: {e}"))?;
-    let written = super::native_messaging::install_to(
-        &home,
-        "/opt/dezoomify/dezoomify-native-host",
-        "abcdefghijklmnopqrstuvwxyzabcdef",
-        "dezoomify@dezoomify.example",
-    )?;
-    if written.is_empty() {
-        return Err("install round trip wrote no manifests".to_string());
-    }
-    for path in &written {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?;
-        if !super::native_messaging::is_our_manifest(&text) {
-            return Err(format!("installed manifest does not name our host: {path}"));
-        }
-        if text.contains('*') {
-            return Err(format!("installed manifest contains wildcard: {path}"));
-        }
-    }
-    let regs: Vec<super::native_messaging::Registration> = written
-        .iter()
-        .map(|p| super::native_messaging::Registration::File {
-            engine: "chromium",
-            path: std::path::PathBuf::from(p),
-        })
-        .collect();
-    super::native_messaging::cleanup(&regs)?;
-    std::fs::remove_dir_all(&home).map_err(|e| format!("remove temp home: {e}"))?;
-    println!(
-        "test native-messaging: install round trip ok ({} manifest(s))",
-        written.len()
-    );
-    Ok(())
-}
-
-fn run_node_glob(dir: &str) -> Result<(), String> {
-    let full = super::repo_root().join(dir);
-    let mut files: Vec<String> = Vec::new();
-    for entry in std::fs::read_dir(&full).map_err(|e| format!("read dir {dir}: {e}"))? {
-        let path = entry.map_err(|e| format!("dir entry: {e}"))?.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("mjs") {
-            files.push(path.to_string_lossy().into_owned());
-        }
-    }
-    files.sort();
-    let mut args = vec!["--test".to_string()];
-    args.extend(files);
-    let status = Command::new("node")
-        .args(&args)
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run node: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "extension node tests failed".to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn extension_manifests() {
-        assert!(super::build_extension(&[]).is_ok());
-    }
+fn test_native_messaging_units() -> Result<(), String> {
+    super::command::cargo_test(&["-p", "xtask", "native_messaging::tests"])?;
+    super::command::node_test(
+        &[
+            "apps/extension/tests/unit/handoff.test.mjs",
+            "apps/extension/tests/unit/native-handoff.test.mjs",
+        ],
+        false,
+    )
 }

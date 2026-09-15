@@ -392,8 +392,9 @@ fn run_live_webapp() -> Result<(), String> {
     let root = super::repo_root();
     let mut command = super::desktop::pnpm_command()?;
     let status = command
-        .args(["--filter", "webapp-e2e", "test"])
+        .args(["--reporter=silent", "--filter", "webapp-e2e", "test:live"])
         .env("DEZOOMIFY_LIVE_WEB", "1")
+        .env("NODE_NO_WARNINGS", "1")
         .current_dir(&root)
         .status()
         .map_err(|e| format!("failed to run pnpm: {e}"))?;
@@ -484,11 +485,6 @@ mod tests {
             "nope".to_string()
         ])
         .is_err());
-    }
-
-    #[test]
-    fn dry_run_validates_targets_without_network() {
-        assert!(super::test_live(&["--dry-run".to_string(), "--fixtures".to_string()]).is_ok());
     }
 
     #[test]

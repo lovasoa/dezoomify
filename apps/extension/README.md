@@ -16,7 +16,11 @@ using your browser's own session so logged-in and interactive viewers work.
   memory-only.
 
 Contributing: narrow manifest permissions, explicit-action scans with cleanup,
-no private signing keys in shipped JS. Tests: `cargo xtask test extension`.
+no private signing keys in shipped JS. `cargo xtask test extension` is the full
+integration gate: current generated WASM, Chromium and Firefox WXT builds, all
+units, and both headless browsers. The package-local `pnpm test` and
+`pnpm test:unit` scripts are pure unit-only loops with no generated builds or
+browsers.
 Store publishing: `apps/extension/scripts/chrome-webstore-publish.sh`
 (see `.env.example`); CI packages every push via `store-submit`, which
 updates the existing Chromium and Firefox (AMO) listings in place.

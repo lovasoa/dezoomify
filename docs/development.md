@@ -1,9 +1,10 @@
 # Development
 
-The repository is one monorepo. Rust crates, generated protocol artifacts,
-The shared UI, hosts, extension packaging, and release tooling change together.
-Run repository tasks from the root through `cargo xtask`; use direct Cargo or
-pnpm commands only when debugging the task runner or a component-specific test.
+The repository is one monorepo. Rust crates, generated protocol artifacts, the
+shared UI, hosts, extension packaging, and release tooling change together.
+Run repository tasks from the root through `cargo xtask`. Direct Cargo and pnpm
+commands are valid for component-level debugging, but xtask remains the unified
+front door. Node 24 is the minimum supported Node version.
 
 ## Working areas
 
@@ -42,9 +43,14 @@ It never installs browser binaries or Rust toolchains. `check` runs formatting,
 lint, type checking, dependency boundaries, generated-file checks, and manifest
 validation without rewriting source files.
 
-Bare `test` is the fast deterministic unit and contract loop. `test all` runs
-the full deterministic suite. Focused targets are documented in
-[Testing](testing.md). No test other than `test live` contacts public source
+Bare `test` runs `cargo test --workspace` exactly once, then one Node
+dot-reporter process over the website, browser runtime, protocol TypeScript,
+desktop Node, and pure extension unit suites. It does not run `check`, generate
+WASM bindings, build WXT output, or launch browsers. `test all` runs that matrix
+once and adds the generated WASM Node harness, website Chromium E2E, and
+build-dependent Chromium/Firefox extension integration. The desktop real-window
+test remains explicit and excluded from `all`. Focused targets are documented
+in [Testing](testing.md). No test other than `test live` contacts public source
 sites.
 
 `cargo xtask setup` configures this checkout to use the versioned
@@ -192,7 +198,7 @@ Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 
 1. Add core parser/plan coverage and scenario-local payloads.
 2. Run `cargo xtask fixtures verify` and `cargo xtask test core --parity`.
-3. Run `cargo xtask test scenario --scenario <scenario-id>`.
+3. Run `cargo xtask test scenario`.
 
 ### Change the shared UI
 

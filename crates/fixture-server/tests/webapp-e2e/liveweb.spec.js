@@ -7,16 +7,8 @@
 // Both http and https targets are exercised; there is no http/https
 // distinction.
 const { test, expect } = require("@playwright/test");
-const fs = require("node:fs");
-const path = require("node:path");
 
-let ADDR = "";
-
-test.beforeAll(() => {
-  ({ addr: ADDR } = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "addr.json"), "utf8"),
-  ));
-});
+const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
 
 const TARGETS = [
   ["L01", "https://artsandculture.google.com/asset/liza-kottou-0113/3gGrYhjfhcwvbA"],

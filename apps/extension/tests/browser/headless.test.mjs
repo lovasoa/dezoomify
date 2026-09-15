@@ -2,7 +2,7 @@
 // starts a job (headless browsers use the test-only driver), a finite source
 // snapshot reads the tab's retained resource timeline, the dedicated job tab
 // runs the engine end to end, and the output saves as a PNG.
-import test from "node:test";
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -20,6 +20,18 @@ const EXTENSION_ROOT = path.join(REPO_ROOT, "apps/extension");
 const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 const TILE_DIR = path.join(REPO_ROOT, "testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli");
+let fixtureServer;
+let fixtureWork;
+
+before(async () => {
+  fixtureWork = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-fixture-"));
+  fixtureServer = await startFixtureServer(fixtureWork);
+});
+
+after(() => {
+  fixtureServer?.proc.kill();
+  if (fixtureWork) rmSync(fixtureWork, { recursive: true, force: true });
+});
 
 function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermissions = true, sourceHostOnly = false, scenario } = {}) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
@@ -77,7 +89,7 @@ async function startFixtureServer(workDir) {
     else await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.ok(base, "fixture server did not report its address");
-  return { proc, base };
+  return { proc, base, logFile: path.join(workDir, "fixture-requests.jsonl") };
 }
 
 function assertPng(bytes) {
@@ -188,8 +200,8 @@ async function runChromiumJob(base, work, options = {}) {
     const download = downloads[0];
     if (!download) {
       const jobText = await jobPage.locator("body").innerText().catch(() => "<unavailable>");
-      const fixtureLog = existsSync(path.join(work, "fixture-requests.jsonl"))
-        ? readFileSync(path.join(work, "fixture-requests.jsonl"), "utf8").trim()
+      const fixtureLog = existsSync(fixtureServer.logFile)
+        ? readFileSync(fixtureServer.logFile, "utf8").trim()
         : "<unavailable>";
       assert.fail(`the job tab did not save the assembled image in time\njob page: ${jobText}\nbrowser diagnostics: ${diagnostics.join("\n") || "<none>"}\nfixture requests: ${fixtureLog || "<none>"}`);
     }
@@ -241,22 +253,17 @@ async function runFirefoxJob(base, work) {
 
 test("chromium: packaged extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));
-  let server = null;
   try {
-    server = await startFixtureServer(work);
-    assertPng(await runChromiumJob(server.base, work));
+    assertPng(await runChromiumJob(fixtureServer.base, work));
   } finally {
-    if (server) server.proc.kill();
     rmSync(work, { recursive: true, force: true });
   }
 });
 
 test("chromium: optional host grant keeps the React job view mounted", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-permission-"));
-  let server = null;
   try {
-    server = await startFixtureServer(work);
-    assertPng(await runChromiumJob(server.base, work, {
+    assertPng(await runChromiumJob(fixtureServer.base, work, {
       sourceHostOnly: true,
       scenario: "permission",
       async beforeCompletion(jobPage) {
@@ -267,17 +274,14 @@ test("chromium: optional host grant keeps the React job view mounted", { timeout
       },
     }));
   } finally {
-    if (server) server.proc.kill();
     rmSync(work, { recursive: true, force: true });
   }
 });
 
 test("chromium: partial-output actions disappear after the terminal event", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-partial-"));
-  let server = null;
   try {
-    server = await startFixtureServer(work);
-    assertPngShape(await runChromiumJob(server.base, work, {
+    assertPngShape(await runChromiumJob(fixtureServer.base, work, {
       scenario: "corrupt",
       async beforeCompletion(jobPage) {
         const keep = jobPage.locator("[data-dz-partial-choice=keep]");
@@ -288,34 +292,27 @@ test("chromium: partial-output actions disappear after the terminal event", { ti
       },
     }));
   } finally {
-    if (server) server.proc.kill();
     rmSync(work, { recursive: true, force: true });
   }
 });
 
 test("chromium: packaged extension retains the browser session for protected metadata and tiles", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-cookie-session-"));
-  let server = null;
   try {
-    server = await startFixtureServer(work);
     // The fixture page creates an HttpOnly session cookie. Its metadata and
     // every tile return 403 unless the browser attaches that cookie, while
     // this test observes only the successful image, not request headers.
-    assertPng(await runChromiumJob(server.base, work, { scenario: "cookie-session" }));
+    assertPng(await runChromiumJob(fixtureServer.base, work, { scenario: "cookie-session" }));
   } finally {
-    if (server) server.proc.kill();
     rmSync(work, { recursive: true, force: true });
   }
 });
 
 test("firefox: packaged extension runs the job-tab engine flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-"));
-  let server = null;
   try {
-    server = await startFixtureServer(work);
-    assertPng(await runFirefoxJob(server.base, work));
+    assertPng(await runFirefoxJob(fixtureServer.base, work));
   } finally {
-    if (server) server.proc.kill();
     rmSync(work, { recursive: true, force: true });
   }
 });

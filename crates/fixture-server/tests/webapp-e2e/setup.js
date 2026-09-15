@@ -1,71 +1,79 @@
-// Builds the real webapp via scripts/build-site.mjs (wasm + glue + browser
-// JS mirrors + help) and serves the assembled dist/ tree through the
-// deterministic fixture server on loopback, exactly what the website-deploy
-// workflow uploads to Cloudflare Pages. Writes addr.json.
+// Builds the deployed site and runs the deterministic fixture server on an
+// ephemeral loopback port. Playwright owns readiness and process shutdown.
 const { spawnSync, spawn } = require("node:child_process");
-const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 
-async function globalSetup() {
-  const root = path.resolve(__dirname, "..", "..", "..", "..");
-  // Full site build: mirrors, help, wasm adapter (release profile) and its
-  // glue, then the dist/ assembly. wasm-bindgen must be installed and match
-  // the wasm-bindgen version pinned by Cargo.lock.
-  const site = spawnSync("node", ["scripts/build-site.mjs"], {
-    cwd: root,
-    stdio: "inherit",
-  });
-  if (site.status !== 0) throw new Error("failed to build the site (scripts/build-site.mjs)");
+const root = path.resolve(__dirname, "..", "..", "..", "..");
 
-  const targetDir = JSON.parse(spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
-    cwd: root,
-    encoding: "utf8",
-  }).stdout).target_directory;
-  const bin = path.join(targetDir, "debug", `dezoomify-fixture-server${process.platform === "win32" ? ".exe" : ""}`);
-  // Always enter through Cargo: it cheaply reuses a fresh artifact and
-  // recompiles whenever any source or dependency changed.
-  const serverBuild = spawnSync("cargo", ["build", "-p", "dezoomify-fixture-server"], {
-    cwd: root,
-    stdio: "inherit",
-  });
-  if (serverBuild.status !== 0) throw new Error("failed to build fixture server");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dz-webapp-e2e-"));
-  const addrFile = path.join(tmp, "server.addr");
-  const logFile = path.join(tmp, "requests.log");
-  const child = spawn(
-    bin,
-    [
-      "--port", "0",
-      "--write-address", addrFile,
-      "--scenarios-dir", path.join(root, "testdata", "scenarios"),
-      // The web root is the assembled dist/ tree: /src, /packages, /wasm,
-      // /help all resolve exactly as deployed.
-      "--static-dir", path.join(root, "dist"),
-      "--request-log", logFile,
-    ],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  const addr = await new Promise((resolve, reject) => {
-    const deadline = Date.now() + 30000;
-    const poll = () => {
-      try {
-        const text = fs.readFileSync(addrFile, "utf8").trim();
-        if (text) return resolve(text);
-      } catch {}
-      if (Date.now() > deadline) return reject(new Error("server address timeout"));
-      setTimeout(poll, 50);
-    };
-    poll();
-  });
-  child.stderr.on("data", (d) => process.stderr.write(`[fixture-server] ${d}`));
-  child.unref();
-  fs.writeFileSync(
-    path.join(__dirname, "addr.json"),
-    JSON.stringify({ addr: `http://${addr}`, tmp, logFile, pid: child.pid }),
-  );
-  fs.writeFileSync(path.join(tmp, "pid"), String(child.pid));
-  fs.writeFileSync(path.join(__dirname, "tmpdir"), tmp);
+// Full site build: help, wasm adapter (release profile), glue, and dist/.
+const site = spawnSync("node", ["scripts/build-site.mjs"], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, VITE_CONFIG_NATIVE_IGNORE_WARNING: "true" },
+});
+if (site.status !== 0) {
+  process.stderr.write(site.stdout ?? "");
+  process.stderr.write(site.stderr ?? "");
+  throw new Error("failed to build the site (scripts/build-site.mjs)");
 }
 
-module.exports = globalSetup;
+const targetDir = JSON.parse(
+  spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    cwd: root,
+    encoding: "utf8",
+  }).stdout,
+).target_directory;
+const bin = path.join(
+  targetDir,
+  "debug",
+  `dezoomify-fixture-server${process.platform === "win32" ? ".exe" : ""}`,
+);
+// Always enter through Cargo so changed sources or dependencies rebuild.
+const serverBuild = spawnSync("cargo", ["build", "-p", "dezoomify-fixture-server"], {
+  cwd: root,
+  encoding: "utf8",
+});
+if (serverBuild.status !== 0) {
+  process.stderr.write(serverBuild.stdout ?? "");
+  process.stderr.write(serverBuild.stderr ?? "");
+  throw new Error("failed to build fixture server");
+}
+
+const child = spawn(
+  bin,
+  [
+    "--port", "0",
+    "--scenarios-dir", path.join(root, "testdata", "scenarios"),
+    "--static-dir", path.join(root, "dist"),
+  ],
+  { stdio: ["ignore", "inherit", "pipe"] },
+);
+
+let shuttingDown = false;
+let serverOutput = "";
+let readinessPrinted = false;
+child.stderr.on("data", (data) => {
+  serverOutput += data.toString();
+  if (!readinessPrinted) {
+    const ready = serverOutput.match(/fixture server listening at http:\/\/127\.0\.0\.1:\d+/);
+    if (ready) {
+      readinessPrinted = true;
+      process.stderr.write(`${ready[0]}\n`);
+    }
+  }
+});
+process.once("SIGTERM", () => {
+  shuttingDown = true;
+  child.kill("SIGTERM");
+});
+
+child.on("error", (error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+child.on("exit", (code, signal) => {
+  if (!shuttingDown) {
+    process.stderr.write(serverOutput);
+    process.exitCode = code ?? (signal ? 1 : 0);
+  }
+});

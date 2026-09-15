@@ -12,7 +12,18 @@ module.exports = defineConfig({
     navigationTimeout: 20000,
   },
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
-  globalSetup: "./setup.js",
-  globalTeardown: "./teardown.js",
-  reporter: [["list"]],
+  webServer: {
+    command: "node setup.js",
+    wait: {
+      stderr: /fixture server listening at (?<DEZOOMIFY_E2E_ADDR>http:\/\/127\.0\.0\.1:\d+)/,
+    },
+    gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
+    stdout: "ignore",
+    timeout: 10 * 60 * 1000,
+    env: {
+      NODE_NO_WARNINGS: "1",
+      VITE_CONFIG_NATIVE_IGNORE_WARNING: "true",
+    },
+  },
+  reporter: "dot",
 });

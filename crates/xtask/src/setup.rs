@@ -58,7 +58,7 @@ fn check_node() -> Result<(), String> {
     let pin = std::fs::read_to_string(&pin_path)
         .map_err(|e| {
             format!(
-                "cannot read {}: {e} (restore the minimum Node major, e.g. `22`)",
+                "cannot read {}: {e} (restore the minimum Node major, e.g. `24`)",
                 pin_path.display()
             )
         })?
@@ -66,7 +66,7 @@ fn check_node() -> Result<(), String> {
         .to_string();
     if pin.is_empty() {
         return Err(
-            ".node-version is empty (expected the minimum Node major, e.g. `22`)".to_string(),
+            ".node-version is empty (expected the minimum Node major, e.g. `24`)".to_string(),
         );
     }
     println!("node minimum (.node-version): {pin}");
@@ -74,7 +74,7 @@ fn check_node() -> Result<(), String> {
         .map_err(|e| format!("{e} (install Node {pin} or newer so `node --version` works)"))?;
     println!("node: {node}");
     let minimum = node_major(&pin).ok_or_else(|| {
-        format!("cannot parse Node major from .node-version pin `{pin}` (expected e.g. `22`)")
+        format!("cannot parse Node major from .node-version pin `{pin}` (expected e.g. `24`)")
     })?;
     let found = node_major(&node).ok_or_else(|| {
         format!("cannot parse `node --version` output `{node}` (install Node {minimum} or newer)")

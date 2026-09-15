@@ -1,8 +1,4 @@
-//! `cargo xtask test`: fast deterministic aggregate.
-//! Runs check, workspace unit tests, core, protocol, job, wasm, browser, UI,
-//! web, native, scenario, desktop, extension, and native-messaging suites.
-//! Named test targets exist only for their owning layers. Rejects opt-in
-//! live flags; propagates the first nonzero result with a stable summary.
+//! `cargo xtask test`: fast deterministic Rust and JavaScript aggregate.
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
@@ -47,94 +43,26 @@ pub fn run(args: &[String]) -> Result<(), String> {
             args.join(" ")
         ));
     }
-    let mut summary: Vec<(&'static str, bool)> = Vec::new();
-    run_step("check", &mut summary, || super::check::run(&[]))?;
-    run_step("cargo-test", &mut summary, cargo_test)?;
-    run_step("test-core", &mut summary, || super::core::run(&[]))?;
-    run_step(
-        "test-protocol",
-        &mut summary,
-        super::protocol::test_protocol,
-    )?;
-    run_step("test-job", &mut summary, || super::job::run(&[]))?;
-    run_step("test-wasm", &mut summary, || super::wasm::run(&[]))?;
-    run_step("test-browser", &mut summary, || {
-        super::browser::test_browser(&[])
-    })?;
-    run_step("test-ui", &mut summary, || super::browser::test_ui(&[]))?;
-    // Aggregate dedupe: the browser-runtime matrix already ran under
-    // `test-browser`, so `test-web` skips it here and runs only the website
-    // suite. Standalone `test web` omits the flag and stays full; `test all`
-    // adds E2E explicitly via `--e2e --no-unit` (see `ci::test_all`).
-    run_step("test-web", &mut summary, || {
-        super::browser::test_web(&["--skip-browser-matrix".to_string()])
-    })?;
-    run_step("test-native", &mut summary, || {
-        super::native::test_native(&[])
-    })?;
-    run_step("test-scenario", &mut summary, || {
-        super::native::test_scenario(&[])
-    })?;
-    run_step("test-desktop", &mut summary, || {
-        super::desktop::test_desktop(&[])
-    })?;
-    run_step("test-extension", &mut summary, || {
-        super::extension::test_extension(&[])
-    })?;
-    run_step("test-native-messaging", &mut summary, || {
-        super::extension::test_native_messaging(&[])
-    })?;
-    print_summary(&summary);
-    println!("test: all fast deterministic suites pass");
-    Ok(())
-}
-
-fn run_step(
-    name: &'static str,
-    summary: &mut Vec<(&'static str, bool)>,
-    step: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
-    match step() {
-        Ok(()) => {
-            summary.push((name, true));
-            Ok(())
-        }
-        Err(reason) => {
-            summary.push((name, false));
-            print_summary(summary);
-            Err(format!("test step '{name}' failed: {reason}"))
-        }
-    }
+    cargo_test()?;
+    super::browser::generate_web_artifacts()?;
+    node_test()
 }
 
 fn cargo_test() -> Result<(), String> {
-    // Aggregate dedupe: `check` already ran `fixtures verify` in the same
-    // aggregate, so skip the `fixture_manifest` unit test here which would
-    // verify the same corpus a second time. Standalone
-    // `cargo test -p xtask` omits the filter and stays full.
-    let status = std::process::Command::new("cargo")
-        .args([
-            "test",
-            "-p",
-            "xtask",
-            "-p",
-            "dezoomify-fixture-server",
-            "--",
-            "--skip",
-            "fixture_manifest",
-        ])
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run cargo test: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "cargo test failed".to_string())
+    super::command::cargo_test(&["--workspace"])
 }
 
-fn print_summary(summary: &[(&str, bool)]) {
-    println!("test summary:");
-    for (name, ok) in summary {
-        println!("  {}: {}", name, if *ok { "pass" } else { "FAIL" });
-    }
+fn node_test() -> Result<(), String> {
+    super::command::node_test(
+        &[
+            "test/*.test.mjs",
+            "packages/browser-runtime/test/*.test.mjs",
+            "packages/protocol-ts/test/*.test.mjs",
+            "apps/desktop/tests/*.test.mjs",
+            // These two tests consume generated WASM and WXT output. The
+            // explicit extension integration lane regenerates both first.
+            "apps/extension/tests/unit/!(job-worker|manifest-policy).test.mjs",
+        ],
+        true,
+    )
 }

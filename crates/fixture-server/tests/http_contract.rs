@@ -350,6 +350,8 @@ async fn startup_writes_address_after_listening() {
                 .to_str()
                 .expect("utf8"),
         ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .expect("spawn");
     let mut bound = String::new();

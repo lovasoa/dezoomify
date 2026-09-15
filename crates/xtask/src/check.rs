@@ -4,8 +4,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         return Err("usage: cargo xtask check (no options)".to_string());
     }
-    run_cargo(&["fmt", "--all", "--", "--check"])?;
-    run_cargo(&[
+    super::command::cargo(&["fmt", "--all", "--", "--check"])?;
+    super::command::cargo(&[
         "clippy",
         "--workspace",
         "--all-targets",
@@ -35,16 +35,4 @@ fn run_typecheck() -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| "pnpm typecheck failed (run `pnpm typecheck` for details)".to_string())
-}
-
-fn run_cargo(args: &[&str]) -> Result<(), String> {
-    let status = std::process::Command::new("cargo")
-        .args(args)
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run cargo: {e}"))?;
-    if !status.success() {
-        return Err(format!("cargo {} failed", args.join(" ")));
-    }
-    Ok(())
 }

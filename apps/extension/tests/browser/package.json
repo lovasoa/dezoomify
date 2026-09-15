@@ -4,7 +4,7 @@
   "private": true,
   "description": "Headless browser gate for the packaged extension: run the real store packages in Chromium and Firefox through a verified PNG save.",
   "scripts": {
-    "test": "node --test *.test.mjs"
+    "test": "node --test-reporter=dot --test \"*.test.mjs\""
   },
   "devDependencies": {
     "geckodriver": "^6.1.1",

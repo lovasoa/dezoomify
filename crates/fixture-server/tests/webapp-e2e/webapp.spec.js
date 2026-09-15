@@ -7,13 +7,7 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const assert = require("node:assert/strict");
 
-let ADDR = "";
-
-test.beforeAll(() => {
-  ({ addr: ADDR } = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "addr.json"), "utf8"),
-  ));
-});
+const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
 
 function decodePngSize(bytes) {
   assert.equal(bytes.readUInt32BE(0), 0x89504e47 >>> 0, "PNG signature");

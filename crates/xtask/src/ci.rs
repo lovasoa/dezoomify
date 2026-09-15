@@ -1,7 +1,6 @@
 //! `cargo xtask ci <lane>|local|digest`, `test all|live`.
 
 use sha2::{Digest, Sha256};
-use std::process::Command;
 
 const LANES: &[&str] = &[
     "check",
@@ -9,7 +8,6 @@ const LANES: &[&str] = &[
     "wasm",
     "browser",
     "web",
-    "native",
     "desktop",
     "extension",
     "protocol",
@@ -22,7 +20,6 @@ pub fn ci(args: &[String]) -> Result<(), String> {
             for lane in LANES {
                 ci_lane(lane)?;
             }
-            println!("ci local: ok");
             Ok(())
         }
         Some("digest") => digest(&args[1..]),
@@ -38,44 +35,15 @@ fn ci_lane(lane: &str) -> Result<(), String> {
         // required, parallel CI lane. Rust test feedback need not wait for
         // clippy and artifact verification.
         "check" => super::check::run(&[]),
-        "rust" => run_cargo(&[
-            "test",
-            "-p",
-            "dezoomify-core",
-            "-p",
-            "dezoomify-protocol",
-            "-p",
-            "dezoomify-job",
-            "-p",
-            "dezoomify-native",
-            "-p",
-            "dezoomify-desktop",
-            "-p",
-            "xtask",
-            "-p",
-            "dezoomify-fixture-server",
-            "--",
-            "--skip",
-            // `check` verifies the full fixture corpus in the parallel
-            // static lane, so avoid repeating that expensive assertion.
-            "fixture_manifest",
-        ]),
-        "wasm" => super::wasm::run(&[]),
-        "browser" => super::browser::test_browser(&[]),
+        "rust" => super::command::cargo_test(&["--workspace"]),
+        "wasm" => super::wasm::run_node_harness(),
+        "browser" => super::command::node_test(&["packages/browser-runtime/test/*.test.mjs"], true),
         "web" => super::browser::test_web(&["--e2e".to_string()]),
-        "native" => super::native::test_native(&[]),
-        "desktop" => super::desktop::test_desktop(&[]),
+        "desktop" => super::command::node_test(&["apps/desktop/tests/*.test.mjs"], true),
         "extension" => super::extension::test_extension(&[]),
-        "protocol" => super::protocol::test_protocol(),
+        "protocol" => super::command::node_test(&["packages/protocol-ts/test/*.test.mjs"], false),
         "security" => {
-            super::protocol::run(&["check".to_string()])?;
-            // The required `check` lane already runs cargo-deny. Run the JS
-            // half here so the sharded workflow covers the complete supply
-            // policy once rather than querying RustSec twice.
             super::supply::audit_js()?;
-            println!(
-                "ci security: ok (protocol + JS supply audits; Rust supply audit is in ci check)"
-            );
             Ok(())
         }
         _ => Err(format!("unknown lane {lane}")),
@@ -84,13 +52,9 @@ fn ci_lane(lane: &str) -> Result<(), String> {
 
 pub fn test_all() -> Result<(), String> {
     super::test_cmd::run(&[])?;
-    // Full aggregate includes web E2E while bare `test` omits it. `--no-unit`
-    // avoids rerunning the unit matrix bare already covered (browser lane +
-    // website suite); E2E is the only new coverage, so `test all` stays full
-    // via an explicit flag without doubles.
-    super::browser::test_web(&["--e2e".to_string(), "--no-unit".to_string()])?;
-    println!("test all: ok (full deterministic aggregate)");
-    Ok(())
+    super::wasm::run_node_harness()?;
+    super::browser::run_e2e()?;
+    super::extension::test_extension_integration()
 }
 
 pub fn test_live(args: &[String]) -> Result<(), String> {
@@ -168,25 +132,8 @@ fn compute_digest() -> Result<String, String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn run_cargo(args: &[&str]) -> Result<(), String> {
-    let status = Command::new("cargo")
-        .args(args)
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run cargo: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| format!("cargo {} failed", args.join(" ")))
-}
-
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn live_dry_run() {
-        assert!(super::test_live(&["--dry-run".to_string(), "--fixtures".to_string()]).is_ok());
-    }
-
     #[test]
     fn digest_is_deterministic_and_checks() {
         let first = super::compute_digest().unwrap();

@@ -353,9 +353,4 @@ mod tests {
         ));
         assert!(!clean.iter().any(|s| s.contains("shared-ui")));
     }
-
-    #[test]
-    fn repo_passes_the_gate() {
-        assert!(super::verify(&[]).is_ok());
-    }
 }

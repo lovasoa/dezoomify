@@ -56,11 +56,11 @@ pub fn build_desktop(args: &[String]) -> Result<(), String> {
             serde_json::from_str(&text).map_err(|e| format!("bad json {rel}: {e}"))?;
     }
     // The lean shell always compiles: it is the deterministic gate.
-    run_cargo(&["build", "-p", DESKTOP_PKG])?;
+    super::command::cargo(&["build", "-p", DESKTOP_PKG])?;
     println!("build desktop: lean shell compiled (target/debug/dezoomify-desktop)");
     if tauri_system_ready() {
         build_frontend()?;
-        run_cargo(&[
+        super::command::cargo(&[
             "build",
             "-p",
             DESKTOP_PKG,
@@ -99,20 +99,8 @@ pub fn test_desktop(args: &[String]) -> Result<(), String> {
     }
     // Lean shell unit tests: handoff execution, registration, deep links,
     // commands, updater (workspace member, always builds offline).
-    run_cargo(&["test", "-p", DESKTOP_PKG])?;
-    run_node(&["apps/desktop/tests/deep-link.test.mjs"])?;
-    run_node(&["apps/desktop/tests/capabilities.test.mjs"])?;
-    run_node(&["apps/desktop/tests/queue.test.mjs"])?;
-    run_node(&["apps/desktop/tests/diagnostics.test.mjs"])?;
-    // Development-surface smoke: starts the real Vite entrypoint on the
-    // Tauri dev URL and verifies the shared theme resolves through Vite's
-    // module graph. No webview or display is needed.
-    run_node(&["apps/desktop/tests/dev-smoke.test.mjs"])?;
-    // Versioned icon generator (scripts/gen-desktop-icons.py, stdlib-only,
-    // deterministic): re-runs the script and asserts byte-identical PNG/ICO/
-    // ICNS output plus container magic.
-    run_node(&["apps/desktop/tests/icons.test.mjs"])?;
-    println!("test desktop: ok");
+    super::command::cargo_test(&["-p", DESKTOP_PKG])?;
+    run_node(&["apps/desktop/tests/*.test.mjs"])?;
     Ok(())
 }
 
@@ -147,8 +135,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
             "test desktop --e2e-window needs the webview system packages ({WEBKIT_SYSTEM_PACKAGES})"
         ));
     }
-    run_cargo(&[
-        "test",
+    super::command::cargo_test(&[
         "-p",
         DESKTOP_PKG,
         "--features",
@@ -159,9 +146,9 @@ fn test_desktop_e2e_window() -> Result<(), String> {
     // The harness starts this binary from Cargo's target directory. Always
     // ask Cargo to build it so source changes are rebuilt and no lane relies
     // on a binary left by an unrelated command.
-    run_cargo(&["build", "-p", "dezoomify-fixture-server"])?;
+    super::command::cargo(&["build", "-p", "dezoomify-fixture-server"])?;
     build_frontend()?;
-    run_cargo(&[
+    super::command::cargo(&[
         "build",
         "-p",
         DESKTOP_PKG,
@@ -194,6 +181,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         std::time::Duration::from_secs(20 * 60),
         &[
             "--test",
+            "--test-reporter=dot",
             "apps/desktop/tests/window-e2e/specs/desktop.e2e.mjs",
         ],
         &[
@@ -208,7 +196,6 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         ],
         "desktop.e2e.mjs",
     )?;
-    println!("test desktop --e2e-window: ok (real window, hermetic loopback)");
     Ok(())
 }
 
@@ -302,7 +289,7 @@ pub fn dev_desktop() -> Result<(), String> {
             "dev desktop needs the webview system packages ({WEBKIT_SYSTEM_PACKAGES}); the lean shell has no window to develop against"
         ));
     }
-    run_cargo(&[
+    super::command::cargo(&[
         "build",
         "-p",
         DESKTOP_PKG,
@@ -734,7 +721,7 @@ fn program_available(name: &str) -> bool {
 /// PATH for a child that may shell out to `pnpm` (for example the desktop dev
 /// smoke test). `None` keeps the inherited environment when a runnable pnpm
 /// already exists and no repo-local shim needs exposing.
-fn node_path() -> Result<Option<std::ffi::OsString>, String> {
+pub(crate) fn node_path() -> Result<Option<std::ffi::OsString>, String> {
     if program_available("pnpm") {
         return Ok(None);
     }
@@ -897,25 +884,18 @@ fn bundle() -> Result<(), String> {
     Ok(())
 }
 
-fn run_cargo(args: &[&str]) -> Result<(), String> {
-    let status = Command::new("cargo")
-        .args(args)
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run cargo: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| format!("cargo {} failed", args.join(" ")))
-}
-
 fn run_node(args: &[&str]) -> Result<(), String> {
     // Lean desktop suites normally finish in seconds. Preserve headroom for
     // cold Cargo work in the deep-link test, while failing a leaked Node or
     // Vite descendant with the owning spec named instead of letting CI hang.
     let label = args.join(" ");
     // React `.tsx` sources import directly under the test hook.
-    let mut with_loader: Vec<&str> = vec!["--import", "./test/tsx-loader.mjs"];
+    let mut with_loader: Vec<&str> = vec![
+        "--import",
+        "./test/tsx-loader.mjs",
+        "--test",
+        "--test-reporter=dot",
+    ];
     with_loader.extend_from_slice(args);
     run_node_with_deadline(
         std::time::Duration::from_secs(6 * 60),
@@ -930,7 +910,7 @@ fn run_node(args: &[&str]) -> Result<(), String> {
 /// specs against leaked children (a dead app instance can keep node's pipes
 /// or the frontend server open indefinitely), which would otherwise hang CI
 /// until the job timeout instead of failing with the log as evidence.
-fn run_node_with_deadline(
+pub(crate) fn run_node_with_deadline(
     deadline: std::time::Duration,
     args: &[&str],
     env: &[(&str, &str)],
@@ -955,13 +935,13 @@ fn run_node_with_deadline(
                 if status.success() {
                     return Ok(());
                 }
-                return Err(format!("desktop node tests failed ({label})"));
+                return Err(format!("node tests failed ({label})"));
             }
             Ok(None) => {
                 if start.elapsed() > deadline {
                     terminate_owned_process_tree(&mut child);
                     return Err(format!(
-                        "desktop node tests killed after {:.0} s ({label}): the spec process did not exit; \
+                        "node tests killed after {:.0} s ({label}): the spec process did not exit; \
                          a leaked child is holding its pipes or the frontend server open",
                         deadline.as_secs_f32()
                     ));
@@ -975,11 +955,6 @@ fn run_node_with_deadline(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn desktop_logic() {
-        assert!(super::test_desktop(&[]).is_ok());
-    }
-
     #[test]
     fn desktop_test_args() {
         // Unknown flags fail fast without running any suite; the window

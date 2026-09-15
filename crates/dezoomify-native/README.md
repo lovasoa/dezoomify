@@ -16,3 +16,9 @@ cargo xtask test native     # runtime + CLI suites, loopback egress tests
 cargo xtask test scenario   # fixture-server scenarios pinning real digests
 cargo xtask build cli       # the `dezoomify` executable
 ```
+
+The native and scenario suites also run once through the workspace Cargo
+invocation in bare `cargo xtask test`; `test all` does not repeat them. Cargo's
+terse runner keeps passing output compact and prints detailed failures. Direct
+Cargo commands remain valid for debugging, while xtask is the unified front
+door.

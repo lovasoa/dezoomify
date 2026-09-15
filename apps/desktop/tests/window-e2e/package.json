@@ -5,7 +5,7 @@
   "description": "Real-window end-to-end gate for the Tauri desktop app: selenium-webdriver drives the shipped window shell through the embedded W3C WebDriver server against hermetic loopback fixtures, and verifies saved bytes against scenario goldens.",
   "type": "module",
   "scripts": {
-    "test": "node --test specs/desktop.e2e.mjs"
+    "test": "node --test-reporter=dot --test specs/desktop.e2e.mjs"
   },
   "devDependencies": {
     "selenium-webdriver": "^4.48.0"
