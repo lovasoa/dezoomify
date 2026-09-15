@@ -119,7 +119,6 @@ fn release_notes(plan: &Plan) -> Result<String, String> {
     let reference = format!("refs/tags/{}", plan.tag);
     let tagged = git_output(&[
         "for-each-ref",
-        "--count=1",
         "--format=%(objecttype)%00%(contents)",
         &reference,
     ])?;
@@ -131,10 +130,8 @@ fn release_notes(plan: &Plan) -> Result<String, String> {
                 "describe",
                 "--first-parent",
                 "--tags",
-                "--match",
-                "v[0-9]*.[0-9]*.[0-9]*",
-                "--match",
-                "rolling-v[0-9]*.[0-9]*.[0-9]*",
+                "--match=v[0-9]*.[0-9]*.[0-9]*",
+                "--match=rolling-v[0-9]*.[0-9]*.[0-9]*",
                 "--abbrev=0",
                 &parent,
             ])?;
