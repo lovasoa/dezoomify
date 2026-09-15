@@ -81,21 +81,21 @@ jobs:
           ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
-        if: github.event_name != 'workflow_call'
+        if: inputs.commit == ''
         with:
           install: true
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
-        if: github.event_name != 'workflow_call'
+        if: inputs.commit == ''
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: github.event_name != 'workflow_call'
+        if: inputs.commit == ''
       - id: bindgen
         uses: ./.github/actions/setup-wasm-bindgen
-        if: github.event_name != 'workflow_call'
+        if: inputs.commit == ''
       - name: Build wasm glue (generated, never committed)
-        if: github.event_name != 'workflow_call'
+        if: inputs.commit == ''
         run: |
           set -euo pipefail
           cargo build -p dezoomify-wasm --release --target wasm32-unknown-unknown
@@ -122,7 +122,7 @@ jobs:
           fi
           echo "target listing: $cfg_id (update in place, no new item)"
       - name: Package store payload
-        if: github.event_name != 'workflow_call'
+        if: inputs.commit == ''
         run: |
           set -euo pipefail
           browser="${BROWSER:-chromium}"
@@ -134,21 +134,21 @@ jobs:
           unzip -t "dezoomify-extension-$browser-$version.zip"
           echo "package: ok (dezoomify-extension-$browser-$version.zip)"
       - name: Upload artifact (dry-run record)
-        if: github.event_name != 'workflow_call'
+        if: inputs.commit == ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dezoomify-extension
           path: dezoomify-extension-*.zip
           retention-days: 30
       - name: Use released package for store mutation
-        if: github.event_name == 'workflow_call' || inputs.upload == true || inputs.publish == true
+        if: inputs.commit != '' || inputs.upload == true || inputs.publish == true
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           test "${{ inputs.publish }}" != "true" || test "${{ inputs.upload }}" = "true"
-          if [ "$GITHUB_EVENT_NAME" = "workflow_call" ]; then
+          if [ -n "$RELEASE_TAG" ]; then
             release_tag="$RELEASE_TAG"
             version="${release_tag#rolling-v}"
             version="${version#v}"
@@ -167,7 +167,7 @@ jobs:
           cp "$released_package" "$package"
           echo "store package: GitHub release $release_tag/$asset"
       - name: Draft upload to Chrome Web Store
-        if: inputs.browser == 'chromium' && (github.event_name == 'workflow_call' || inputs.upload == true)
+        if: inputs.browser == 'chromium' && (inputs.commit != '' || inputs.upload == true)
         env:
           CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
           CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
@@ -209,7 +209,7 @@ jobs:
           echo "http: $put_code"
           [ "$(printf '%s' "$put_out" | tail -n1)" = "SUCCESS" ] || { echo "upload not accepted (see itemError above)"; exit 1; }
       - name: Publish uploaded draft
-        if: inputs.browser == 'chromium' && (github.event_name == 'workflow_call' || inputs.publish == true)
+        if: inputs.browser == 'chromium' && (inputs.commit != '' || inputs.publish == true)
         env:
           CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
           CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
@@ -264,7 +264,7 @@ jobs:
           echo "http: $pub_code"
           [ "$(printf '%s' "$pub_out" | tail -n1)" = "OK" ] || { echo "publish not accepted (see response above)"; exit 1; }
       - name: Upload listed version to AMO (existing listing)
-        if: inputs.browser == 'firefox' && (github.event_name == 'workflow_call' || inputs.upload == true)
+        if: inputs.browser == 'firefox' && (inputs.commit != '' || inputs.upload == true)
         env:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
