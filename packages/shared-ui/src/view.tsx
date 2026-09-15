@@ -1121,13 +1121,13 @@ function ConfirmDialog({
 // Guidance dialogs.
 // ---------------------------------------------------------------------------
 
-function detectPlatform(hints?: PlatformHints): { name: string; hasInstaller: boolean } {
+function detectPlatform(hints?: PlatformHints): { name: string; installer: string } {
   const ua = (hints?.userAgent ?? "").toLowerCase();
   const platform = (hints?.platform ?? "").toLowerCase();
-  if (ua.includes("win") || platform.includes("win")) return { name: "Windows", hasInstaller: false };
-  if (ua.includes("mac") || platform.includes("mac")) return { name: "macOS", hasInstaller: false };
-  if (ua.includes("linux") || platform.includes("linux")) return { name: "Linux", hasInstaller: true };
-  return { name: "All Platforms", hasInstaller: false };
+  if (ua.includes("win") || platform.includes("win")) return { name: "Windows", installer: ".msi installer" };
+  if (ua.includes("mac") || platform.includes("mac")) return { name: "macOS", installer: "Apple silicon .dmg" };
+  if (ua.includes("linux") || platform.includes("linux")) return { name: "Linux", installer: ".deb installer" };
+  return { name: "your platform", installer: "installer" };
 }
 
 const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
@@ -1139,21 +1139,13 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
       GitHub Releases
     </a>
   );
-  const downloadNote = p.hasInstaller
-    ? (
-        <>
-          Linux installer (.deb, unsigned) is on {releases}. Verify SHA256SUMS and GPG signatures before
-          installing. No auto-update; check Releases manually.
-        </>
-      )
-    : (
-        <>
-          No installer ships for {p.name} yet. Only Linux has a .deb (unsigned) on {releases}.
-        </>
-      );
-  const stepOne = p.hasInstaller
-    ? "Save the Linux .deb (unsigned) from our GitHub Releases page, verify SHA256SUMS and signatures, then install it. There is no auto-update."
-    : `No installer ships for ${p.name} yet; only Linux has an unsigned .deb on our GitHub Releases page. Meanwhile use the website or CLI.`;
+  const downloadNote = (
+    <>
+      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}. No auto-update;
+      check Releases manually.
+    </>
+  );
+  const stepOne = t("view.desktop.step1", { platform: p.name, installer: p.installer });
   mountOverlay(hostDocument, (close) => (
     <ModalCard
       title={t("view.desktop.title")}
@@ -1232,6 +1224,7 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
 
 const CHROME_STORE_URL =
   "https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm";
+const FIREFOX_STORE_URL = "https://addons.mozilla.org/en-US/firefox/addon/dezoomify/";
 
 export function showExtensionGuidance(hostDocument: Document): void {
   mountOverlay(hostDocument, (close) => (
@@ -1263,7 +1256,7 @@ export function showExtensionGuidance(hostDocument: Document): void {
                 <div style={storeNameStyle}>{t("view.ext.chromeStore")}</div>
               </div>
             </a>
-            <div className="dz-btn-store" aria-disabled="true">
+            <a href={FIREFOX_STORE_URL} target="_blank" rel="noopener" className="dz-btn-store">
               <svg
                 width="24"
                 height="24"
@@ -1277,10 +1270,10 @@ export function showExtensionGuidance(hostDocument: Document): void {
                 <path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12c0-2.5 1-4.8 2.6-6.5C7.2 9 8 13 12 14c0-2 1-3.5 2.5-4.5C13 8 11.5 6 12 2z" />
               </svg>
               <div>
-                <div style={storeLabelStyle}>{t("view.ext.firefoxVersion")}</div>
-                <div style={storeNameStyle}>{t("view.ext.firefoxSoon")}</div>
+                <div style={storeLabelStyle}>{t("view.ext.availableOn")}</div>
+                <div style={storeNameStyle}>{t("view.ext.firefoxStore")}</div>
               </div>
-            </div>
+            </a>
           </div>
           <div className="dz-modal-section">
             <div className="dz-modal-section-title">{t("view.ext.whyTitle")}</div>

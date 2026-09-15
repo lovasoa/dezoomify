@@ -63,17 +63,13 @@ pub(crate) fn release_verify(plan: &Plan, artifacts: &Path) -> Result<(), String
             .targets
             .iter()
             .zip(&targets.list)
-            .any(|(planned, target)| {
-                planned.name != target.name
-                    || planned.os != target.os
-                    || planned.available != target.available
-            })
+            .any(|(planned, target)| planned.name != target.name || planned.os != target.os)
     {
         return Err(
             "plan disagrees with the repository release inventory; regenerate the plan".to_string(),
         );
     }
-    for target in plan.targets.iter().filter(|target| target.available) {
+    for target in &plan.targets {
         let name = expected_artifact_name(&target.name, &plan.version)
             .ok_or_else(|| format!("target '{}' has no artifact name rule", target.name))?;
         let artifact = artifacts.join(&target.name).join(name);

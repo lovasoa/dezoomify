@@ -32,8 +32,8 @@ many tiles or strips instead of one image.
 
 Install it from the
 [Chrome Web Store](https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm)
-(works with Chrome, Edge, Brave, and other Chromium-based browsers). A
-Firefox version is on its way.
+(works with Chrome, Edge, Brave, and other Chromium-based browsers) or
+[Firefox Browser Add-ons](https://addons.mozilla.org/en-US/firefox/addon/dezoomify/).
 
 ## Save an image
 

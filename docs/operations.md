@@ -20,7 +20,7 @@ Run from the tagged revision:
 
 1. `export DEZOOMIFY_VERSION="$(cargo xtask release version)"`
 2. `cargo xtask release plan --numbered`
-3. `cargo xtask release build --plan target/release-dist/<version>/plan.json --target <target>` for every available target (each build runs on its matching host; the CLI and Linux desktop targets need a Linux host; the plan lists them).
+3. `cargo xtask release build --plan target/release-dist/<version>/plan.json --target <target>` for every target (each build runs on its matching host; the plan lists them and all are mandatory).
 4. `cargo xtask release verify --plan target/release-dist/<version>/plan.json --artifacts target/release-dist/<version>` (checks the produced artifact names against the plan).
 5. `cargo xtask release publish --plan ... --artifacts ...`.
 
@@ -29,8 +29,8 @@ parallel submission of the exact released Chromium ZIP to the Chrome Web Store
 and Firefox ZIP to AMO. The store jobs do not rebuild the extension; GitHub
 Release artifacts are the source of truth. Submission is automatic, but store
 review remains external and public availability waits for Chrome Web Store or
-AMO approval. Desktop installers remain unsigned with no paid Apple/Azure
-signing; only the Linux `.deb` is buildable. Automatic in-app updates are
+AMO approval. The Linux x86_64 `.deb`, Windows x86_64 `.msi`, and Apple silicon
+macOS `.dmg` installers remain unsigned with no paid Apple/Azure signing. Automatic in-app updates are
 disabled; users check GitHub Releases manually. Working trees under
 `target/release-dist/<version>/` are never committed. The user-facing install
 note lives in the [Desktop app guide](user/desktop-app.md#install).
@@ -44,7 +44,7 @@ though store approval can still be pending.
 
 - No auto-update endpoint exists: `release/config.toml` sets `[updater] enabled = false` with empty endpoints, `tauri.conf.json` ships empty updater endpoints, and the desktop capability sets `updater.enabled: false` with an empty allowlist.
 - Download published artifacts from the corresponding GitHub Release.
-- Windows and macOS ship no installer in this wave; the compatibility matrix and the desktop guide name Linux as the only desktop bundle.
+- Linux x86_64, Windows x86_64, and Apple silicon macOS installers ship in every release.
 
 ## Service levels
 

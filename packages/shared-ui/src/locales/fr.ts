@@ -27,8 +27,7 @@ export const fr = {
   "view.desktop.title": "Application de bureau Dezoomify",
   "view.desktop.subtitle":
     "Application native haute performance pour les oeuvres museales gigapixels et les numerisations locales",
-  "view.desktop.noInstaller":
-    "Aucun installateur pour le moment. Un futur installateur pour {platform} paraitra sur",
+  "view.desktop.installer": "L’{installer} non signé pour {platform} est disponible sur",
   "view.desktop.releasesLink": "GitHub Releases",
   "view.desktop.whyTitle": "Pourquoi utiliser l application de bureau ?",
   "view.desktop.why1Title": "Prend en charge les oeuvres tres grandes :",
@@ -41,7 +40,7 @@ export const fr = {
     "Le site web interrompt la tache avec une erreur et renvoie vers l application de bureau pour l image en pleine taille.",
   "view.desktop.howTitle": "Comment l utiliser",
   "view.desktop.step1":
-    "Aucun installateur pour le moment ; un futur installateur pour {platform} paraitra sur notre page GitHub Releases.",
+    "Téléchargez l’{installer} non signé pour {platform} depuis notre page GitHub Releases, puis installez-le. Il n’y a pas de mise à jour automatique.",
   "view.desktop.step2": "Lancez Dezoomify et collez l adresse de votre image zoomable ou de votre manifeste.",
   "view.desktop.step3":
     "Choisissez la resolution souhaitee et le dossier de destination pour enregistrer l image complete assemblee.",
@@ -55,8 +54,7 @@ export const fr = {
     "Detection automatique des visionneuses pour les archives numeriques protegees et les pages complexes",
   "view.ext.availableOn": "Disponible sur",
   "view.ext.chromeStore": "Chrome Web Store",
-  "view.ext.firefoxVersion": "Version Firefox",
-  "view.ext.firefoxSoon": "En preparation",
+  "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Pourquoi utiliser l extension de navigateur ?",
   "view.ext.why1Title": "Pages avec connexion :",
   "view.ext.why1Body":
@@ -68,8 +66,7 @@ export const fr = {
   "view.ext.why3Body":
     "Elle examine uniquement la page que vous lui avez indiquee, et seulement apres que vous avez appuye sur le bouton. Elle n observe pas votre navigation en arriere-plan.",
   "view.ext.howTitle": "Comment l utiliser en 3 etapes",
-  "view.ext.step1":
-    "Installez l extension depuis le Chrome Web Store. La version Firefox est en preparation.",
+  "view.ext.step1": "Installez l extension depuis le Chrome Web Store ou Firefox Browser Add-ons.",
   "view.ext.step2":
     "Rendez-vous sur la page du musee ou de la bibliotheque qui montre votre oeuvre, en vous connectant si besoin.",
   "view.ext.step3":
