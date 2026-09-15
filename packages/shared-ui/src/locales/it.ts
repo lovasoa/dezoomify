@@ -27,8 +27,7 @@ export const it = {
   "view.desktop.title": "Applicazione desktop Dezoomify",
   "view.desktop.subtitle":
     "Applicazione nativa ad alte prestazioni per opere museali gigapixel e scansioni locali",
-  "view.desktop.noInstaller":
-    "Nessun installatore per ora. Un futuro installatore per {platform} apparira su",
+  "view.desktop.installer": "L’{installer} non firmato per {platform} è disponibile su",
   "view.desktop.releasesLink": "GitHub Releases",
   "view.desktop.whyTitle": "Perche usare l applicazione desktop?",
   "view.desktop.why1Title": "Gestisce opere molto grandi:",
@@ -41,7 +40,7 @@ export const it = {
     "Il sito interrompe l attivita con un errore e rimanda all applicazione desktop per l immagine a piena dimensione.",
   "view.desktop.howTitle": "Come usarla",
   "view.desktop.step1":
-    "Nessun installatore per ora; un futuro installatore per {platform} apparira sulla nostra pagina GitHub Releases.",
+    "Scarica l’{installer} non firmato per {platform} dalla nostra pagina GitHub Releases, quindi installalo. Non sono disponibili aggiornamenti automatici.",
   "view.desktop.step2": "Avvia Dezoomify e incolla l indirizzo della tua immagine zoomabile o del manifesto.",
   "view.desktop.step3":
     "Scegli la risoluzione desiderata e la cartella di destinazione per salvare l immagine completa composta.",
@@ -55,8 +54,7 @@ export const it = {
     "Rilevamento automatico dei visori per archivi digitali protetti e pagine complesse",
   "view.ext.availableOn": "Disponibile su",
   "view.ext.chromeStore": "Chrome Web Store",
-  "view.ext.firefoxVersion": "Versione Firefox",
-  "view.ext.firefoxSoon": "In arrivo",
+  "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Perche usare l estensione del browser?",
   "view.ext.why1Title": "Pagine con accesso:",
   "view.ext.why1Body":
@@ -68,8 +66,7 @@ export const it = {
   "view.ext.why3Body":
     "Osserva solo la pagina che le hai indicato, e solo dopo che hai premuto il pulsante. Non sorveglia la tua navigazione in sottofondo.",
   "view.ext.howTitle": "Come usarla in 3 passi",
-  "view.ext.step1":
-    "Installa l estensione dal Chrome Web Store. La versione Firefox e in arrivo.",
+  "view.ext.step1": "Installa l estensione dal Chrome Web Store o da Firefox Browser Add-ons.",
   "view.ext.step2":
     "Vai alla pagina del museo o della biblioteca che mostra la tua opera, accedendo se serve.",
   "view.ext.step3":

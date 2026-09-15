@@ -92,7 +92,7 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
         .arg(format!("dezoomify v{}", plan.version))
         .arg("--notes-file")
         .arg(artifacts.join("notes.md"));
-    for target in plan.targets.iter().filter(|target| target.available) {
+    for target in &plan.targets {
         let name = expected_artifact_name(&target.name, &plan.version)
             .ok_or_else(|| format!("target '{}' has no artifact name rule", target.name))?;
         cmd.arg(artifacts.join(&target.name).join(name));

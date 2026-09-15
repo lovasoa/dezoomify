@@ -21,6 +21,7 @@ on:
       - pnpm-workspace.yaml
       - .node-version
       - .github/workflows/desktop.yml
+      - .github/actions/setup-windows-bundlers/action.yml
   push:
     branches: [master]
     paths: *desktop-paths
@@ -67,8 +68,8 @@ jobs:
       - name: Real-window E2E (macOS/Windows)
         if: runner.os != 'Linux'
         run: cargo xtask test desktop --e2e-window
-  # Every supported release target builds its real bundle, installs it when
-  # its host tools are available, and verifies that the window stays alive.
+  # Every supported release target builds and installs its real bundle, then
+  # verifies that the window stays alive. Missing host tools fail the job.
   bundle-smoke:
     name: Bundle smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -117,6 +118,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-cli failed" }
           }
           Add-Content -Path $env:GITHUB_PATH -Value "$root\bin"
+      - uses: ./.github/actions/setup-windows-bundlers
+        if: runner.os == 'Windows'
       - name: Bundle, install, and launch smoke (Linux deb)
         if: runner.os == 'Linux'
         run: |
@@ -145,26 +148,19 @@ jobs:
           kill "$APP_PID"
           wait "$APP_PID" 2>/dev/null || true
           hdiutil detach "$MNT"
-      - name: Bundle, install, and launch smoke (Windows nsis or direct exe)
+      - name: Bundle, install, and launch smoke (Windows MSI)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $hasWix = [bool](Get-Command candle -ErrorAction SilentlyContinue)
-          $hasNsis = [bool](Get-Command makensis -ErrorAction SilentlyContinue)
-          if ($hasWix -and $hasNsis) {
-            cargo xtask build desktop 2>&1 | Tee-Object bundle.log
-            if ($LASTEXITCODE -ne 0) { throw "bundle build failed" }
-            $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if (-not $setup) { throw "nsis setup exe missing" }
-            Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
-            $exe = Get-ChildItem "$env:ProgramFiles\Dezoomify" -Recurse -Filter *.exe | Where-Object { $_.Name -notmatch 'uninstall' } | Select-Object -First 1
-            if (-not $exe) { throw "installed exe missing" }
-          } else {
-            cargo build --release -p dezoomify-desktop --features tauri --bin dezoomify-desktop 2>&1 | Tee-Object bundle.log
-            if ($LASTEXITCODE -ne 0) { throw "window release build failed" }
-            $exe = Get-Item target/release/dezoomify-desktop.exe
-          }
+          cargo xtask build desktop 2>&1 | Tee-Object bundle.log
+          if ($LASTEXITCODE -ne 0) { throw "bundle build failed" }
+          $msi = Get-ChildItem target/release/bundle/msi/*.msi | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $msi) { throw "msi installer missing" }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', "`"$($msi.FullName)`"", '/qn', '/norestart') -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "msi install failed with exit code $($install.ExitCode)" }
+          $exe = Get-ChildItem "$env:ProgramFiles\Dezoomify" -Recurse -Filter *.exe | Where-Object { $_.Name -notmatch 'uninstall' } | Select-Object -First 1
+          if (-not $exe) { throw "installed exe missing" }
           $app = Start-Process -FilePath $exe.FullName -PassThru
           Start-Sleep -Seconds 15
           if ($app.HasExited) { throw "smoke launch exited early" }

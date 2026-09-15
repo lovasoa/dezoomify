@@ -76,13 +76,9 @@ fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
             .map(|t| PlanTarget {
                 name: t.name.clone(),
                 os: t.os.clone(),
-                available: t.available,
             })
             .collect(),
     };
-    if plan.targets.iter().filter(|t| t.available).count() == 0 {
-        return Err("release plan has no buildable targets".to_string());
-    }
     let dir = base.join(&version);
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let plan_path = dir.join("plan.json");
@@ -166,21 +162,22 @@ mod tests {
     }
 
     #[test]
-    fn desktop_targets_track_bundle_recipes() {
-        // Linux deb is verified (`cargo xtask build desktop` output);
-        // Windows msi/nsis and macOS dmg have no matching host or tools on
-        // this Linux host, so they stay unavailable.
+    fn desktop_targets_track_release_hosts() {
         let plan = plan_from_repo();
-        let available = |name: &str| {
-            plan.targets
+        let names = plan
+            .targets
+            .iter()
+            .map(|target| target.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"desktop-linux-x86_64"));
+        assert!(names.contains(&"desktop-windows-x86_64"));
+        assert!(names.contains(&"desktop-macos-aarch64"));
+        assert_eq!(
+            names
                 .iter()
-                .find(|t| t.name == name)
-                .unwrap_or_else(|| panic!("{name} in inventory"))
-                .available
-        };
-        assert!(available("desktop-linux-x86_64"));
-        assert!(!available("desktop-windows-x86_64"));
-        assert!(!available("desktop-macos-aarch64"));
-        assert!(!available("desktop-macos-x86_64"));
+                .filter(|name| name.starts_with("desktop-"))
+                .count(),
+            3
+        );
     }
 }

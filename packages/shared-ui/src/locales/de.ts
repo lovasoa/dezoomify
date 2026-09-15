@@ -27,8 +27,7 @@ export const de = {
   "view.desktop.title": "Dezoomify Desktop-App",
   "view.desktop.subtitle":
     "Leistungsstarke native Anwendung fuer gigapixelgrosse Museumsbilder und lokale Scans",
-  "view.desktop.noInstaller":
-    "Noch gibt es kein Installationsprogramm. Ein kuenftiges Programm fuer {platform} erscheint auf",
+  "view.desktop.installer": "Das unsignierte {installer} fuer {platform} ist verfuegbar auf",
   "view.desktop.releasesLink": "GitHub Releases",
   "view.desktop.whyTitle": "Warum die Desktop-App verwenden?",
   "view.desktop.why1Title": "Bewaltigt grossere Kunstwerke:",
@@ -41,7 +40,7 @@ export const de = {
     "Die Website bricht den Auftrag mit einem Fehler ab und verweist fuer das vollstandige Bild auf die Desktop-App.",
   "view.desktop.howTitle": "So verwenden Sie sie",
   "view.desktop.step1":
-    "Noch gibt es kein Installationsprogramm; ein kuenftiges Programm fuer {platform} erscheint auf unserer GitHub-Releases-Seite.",
+    "Laden Sie das unsignierte {installer} fuer {platform} von unserer GitHub-Releases-Seite herunter und installieren Sie es. Es gibt keine automatischen Updates.",
   "view.desktop.step2": "Starten Sie Dezoomify und fuegen Sie die Adresse Ihres zoombaren Bildes oder Manifests ein.",
   "view.desktop.step3":
     "Wahlen Sie die gewuenschte Auflosung und den Zielordner, um das vollstandige zusammengesetzte Bild zu speichern.",
@@ -55,8 +54,7 @@ export const de = {
     "Automatische Viewer-Erkennung fuer passwortgeschuetzte digitale Archive und komplexe Seiten",
   "view.ext.availableOn": "Verfuegbar auf",
   "view.ext.chromeStore": "Chrome Web Store",
-  "view.ext.firefoxVersion": "Firefox-Version",
-  "view.ext.firefoxSoon": "In Vorbereitung",
+  "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Warum die Browser-Erweiterung verwenden?",
   "view.ext.why1Title": "Angemeldete Seiten:",
   "view.ext.why1Body":
@@ -68,8 +66,7 @@ export const de = {
   "view.ext.why3Body":
     "Sie betrachtet nur die Seite, auf die Sie gezeigt haben, und erst nachdem Sie die Schaltflache gedrueckt haben. Sie beobachtet Ihr Surfen nicht im Hintergrund.",
   "view.ext.howTitle": "So verwenden Sie sie in 3 Schritten",
-  "view.ext.step1":
-    "Installieren Sie die Erweiterung aus dem Chrome Web Store. Die Firefox-Version ist in Vorbereitung.",
+  "view.ext.step1": "Installieren Sie die Erweiterung aus dem Chrome Web Store oder von Firefox Browser Add-ons.",
   "view.ext.step2":
     "Offnen Sie die Museums- oder Bibliotheksseite mit Ihrem Kunstwerk und melden Sie sich bei Bedarf an.",
   "view.ext.step3":

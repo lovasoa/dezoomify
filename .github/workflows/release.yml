@@ -71,11 +71,23 @@ jobs:
 
   build:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        target: [cli-linux-x86_64, desktop-linux-x86_64, extension-chromium, extension-firefox]
+        include:
+          - target: cli-linux-x86_64
+            runner: ubuntu-latest
+          - target: desktop-linux-x86_64
+            runner: ubuntu-latest
+          - target: desktop-windows-x86_64
+            runner: windows-latest
+          - target: desktop-macos-aarch64
+            runner: macos-latest
+          - target: extension-chromium
+            runner: ubuntu-latest
+          - target: extension-firefox
+            runner: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,12 +101,23 @@ jobs:
           toolchain: 1.98.0
           targets: wasm32-unknown-unknown
       - uses: ./.github/actions/setup-wasm-bindgen
-      - name: Install desktop tools
+      - name: Install Linux desktop tools
         if: matrix.target == 'desktop-linux-x86_64'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential dpkg-dev xvfb xauth
           cargo install tauri-cli --version '=2.11.4' --locked
+      - name: Install macOS desktop tools
+        if: matrix.target == 'desktop-macos-aarch64'
+        run: cargo install tauri-cli --version '=2.11.4' --locked
+      - name: Install Windows desktop tools
+        if: matrix.target == 'desktop-windows-x86_64'
+        shell: pwsh
+        run: |
+          cargo install tauri-cli --version '=2.11.4' --locked
+          if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-cli failed" }
+      - uses: ./.github/actions/setup-windows-bundlers
+        if: matrix.target == 'desktop-windows-x86_64'
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Download plan
         env:
@@ -105,13 +128,24 @@ jobs:
         env:
           DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
         run: xvfb-run -a cargo xtask test desktop --e2e-window
-      - name: Build artifact
+      - name: Build artifact (Unix)
+        if: runner.os != 'Windows'
         env:
           DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           v="$DEZOOMIFY_VERSION"
           cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
           rm "target/release-dist/$v/plan.json" "target/release-dist/$v/notes.md"
+      - name: Build artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $v = $env:DEZOOMIFY_VERSION
+          cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
+          if ($LASTEXITCODE -ne 0) { throw "release artifact build failed" }
+          Remove-Item "target/release-dist/$v/plan.json", "target/release-dist/$v/notes.md"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.target }}
@@ -134,7 +168,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p target
-          for name in release-plan release-cli-linux-x86_64 release-desktop-linux-x86_64 release-extension-chromium release-extension-firefox; do
+          for name in release-plan release-cli-linux-x86_64 release-desktop-linux-x86_64 release-desktop-windows-x86_64 release-desktop-macos-aarch64 release-extension-chromium release-extension-firefox; do
             gh run download "${{ github.run_id }}" -n "$name" -D dist
           done
           mv dist target/release-dist

@@ -126,6 +126,20 @@ pub fn verify(a: &[String]) -> Result<(), String> {
         ],
         "staleness marker in contract docs (resolve it or move it to plans/)",
     )?;
+    // Release and store availability are live product facts. Keep the
+    // website sources free of the obsolete Linux-only, signature, and
+    // pending-Firefox copy that previously survived release changes.
+    f(
+        &r,
+        &[
+            "-i",
+            "GPG|SHA256SUMS|only (the )?Linux|Linux only|no installer|on its way|coming soon|pending review|Firefox version|In Vorbereitung|En preparation|In arrivo",
+            "README.md",
+            "docs/user/",
+            "packages/shared-ui/src/",
+        ],
+        "stale installer or browser-extension availability copy in website sources",
+    )?;
     // Present tense: top-level contract pages state invariants, so the
     // lowercase future marker has no business there. User guides under
     // docs/user/ keep their own register and stay out of this glob.

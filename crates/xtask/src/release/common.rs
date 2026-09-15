@@ -35,15 +35,10 @@ pub(crate) struct Targets {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct TargetEntry {
     pub(crate) name: String,
     pub(crate) os: String,
-    #[serde(default = "default_available")]
-    pub(crate) available: bool,
-}
-
-fn default_available() -> bool {
-    true
 }
 
 #[derive(Deserialize)]
@@ -63,10 +58,9 @@ pub(crate) struct Capabilities {
     pub(crate) protocol: String,
 }
 
-/// Desktop targets mirror the host bundlers in `release/targets.toml`:
-/// Linux deb is available (verified `cargo xtask build desktop` output);
-/// Windows msi/nsis and macOS dmg stay `available = false` until a matching
-/// host with its bundler tools produces them (docs/releases.md).
+/// Release targets mirror the host bundlers in `release/targets.toml`.
+/// Every declared target is mandatory; a missing recipe, host, tool, or
+/// artifact fails the release rather than narrowing its inventory.
 pub(crate) fn load_targets() -> Result<Targets, String> {
     parse_toml("release/targets.toml")
 }
@@ -130,10 +124,10 @@ pub(crate) struct PlanProtocol {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PlanTarget {
     pub(crate) name: String,
     pub(crate) os: String,
-    pub(crate) available: bool,
 }
 
 pub(crate) fn git_output(args: &[&str]) -> Result<String, String> {
@@ -240,7 +234,6 @@ pub(crate) fn expected_artifact_name(target: &str, version: &str) -> Option<Stri
             Some(format!("dezoomify-desktop-v{version}-windows-x86_64.msi"))
         }
         "desktop-macos-aarch64" => Some(format!("dezoomify-desktop-v{version}-macos-aarch64.dmg")),
-        "desktop-macos-x86_64" => Some(format!("dezoomify-desktop-v{version}-macos-x86_64.dmg")),
         "extension-chromium" => Some(format!("dezoomify-chromium-v{version}.zip")),
         "extension-firefox" => Some(format!("dezoomify-firefox-v{version}.zip")),
         _ => None,
@@ -298,7 +291,6 @@ pub(crate) fn plan_from_repo() -> Plan {
             .map(|t| PlanTarget {
                 name: t.name.clone(),
                 os: t.os.clone(),
-                available: t.available,
             })
             .collect(),
     }

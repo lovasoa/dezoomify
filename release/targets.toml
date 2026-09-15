@@ -2,35 +2,17 @@
 name = "cli-linux-x86_64"
 os = "linux"
 
-# Linux desktop bundle: `cargo xtask build desktop` produces a real unsigned
-# .deb from the Tauri window shell behind the `tauri` feature (verified at
-# target/release/bundle/deb/Dezoomify_3.0.3_amd64.deb; installers ship
-# unsigned, no paid signing).
 [[target]]
 name = "desktop-linux-x86_64"
 os = "linux"
-available = true
 
-# Windows bundles (msi/nsis) need a Windows host with WebView2 plus WiX v3
-# for msi and NSIS for nsis plus apps/desktop/src-tauri/icons/icon.ico; none
-# of these are present on a Linux host, so this target stays unavailable.
 [[target]]
 name = "desktop-windows-x86_64"
 os = "windows"
-available = false
 
-# macOS bundles (dmg) need a macOS host with the Xcode Command Line Tools
-# plus apps/desktop/src-tauri/icons/icon.icns; neither is present on a Linux
-# host, so these targets stay unavailable.
 [[target]]
 name = "desktop-macos-aarch64"
 os = "macos"
-available = false
-
-[[target]]
-name = "desktop-macos-x86_64"
-os = "macos"
-available = false
 
 [[target]]
 name = "extension-chromium"

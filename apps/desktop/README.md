@@ -63,8 +63,9 @@ and launch coverage:
 Linux installs the `deb` (`sudo dpkg -i`) and launches it briefly under
 Xvfb (a 20 s stay-alive proves install + launch + webview init; the window
 shell has no `--version` flag), macOS mounts the `dmg` and execs the binary
-directly (unsigned local build, Gatekeeper/SIP untouched), Windows installs
-silently (`nsis` `/S`, or the direct-exe fallback when WiX/NSIS are absent).
+directly (unsigned local build, Gatekeeper/SIP untouched), while Windows
+requires WiX and NSIS, installs the `msi` bundle silently, and
+fails the job if the installer cannot be built or launched.
 Smoke logs upload as `desktop-bundle-smoke-<os>`. Platform smokes do not
 install browser drivers or claim real-window E2E coverage. The desktop crate's
 lean unit tests also run in the `rust` lane of `ci.yml`. No update flow is
@@ -85,7 +86,7 @@ macOS ships WebKit and Windows ships WebView2.
 
 Bundles are unsigned with no paid Apple/Azure signing in this free
 project; automatic updates are disabled (no update host or key), so check
-GitHub Releases manually. Only the Linux `.deb` is buildable; Windows and
-macOS stay unavailable until a matching host builds them. The user-facing
+GitHub Releases manually. Releases include Linux x86_64 `.deb`, Windows x86_64
+`.msi`, and Apple silicon macOS `.dmg` installers. The user-facing
 install note lives in the [Desktop app
 guide](../../docs/user/desktop-app.md#install).
