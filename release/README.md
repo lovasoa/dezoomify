@@ -1,11 +1,8 @@
 # Release
 
-This directory is the single reviewed release inventory. Signing keys are
-referenced by CI secret name and never checked in; the public half of the
-release signing key lives at `gpg-public-key.asc` and is the only key
-material in the repository. Promotion steps (build → sign → verify →
-publish) run through `cargo xtask release` and the `release` workflow
-with digest verification at every transition; each stage fails closed.
+This directory is the single reviewed release inventory. Promotion steps
+(build → verify → publish) run through `cargo xtask release` and the
+`release` workflow. GitHub Releases provides the release provenance.
 
 - `config.toml`: the protocol range, store identities, and disabled updater
   configuration. App versions come only from numbered Git tags and history.
@@ -14,12 +11,8 @@ with digest verification at every transition; each stage fails closed.
   available; Windows and macOS stay unavailable until a matching host builds
   them; installers ship unsigned and automatic updates are disabled).
 - `compatibility.toml`: the supported protocol version matrix.
-- `checksums/<version>/SHA256SUMS`: the committed digest inventory of numbered
-  releases. Rolling inventories remain attached to their GitHub release.
-- `notes.md` in each working release tree: a user-facing description generated
-  from the introduction in `docs/user/start-here.md`, followed by the annotated
-  numbered tag message or, for a rolling release, commit titles since the
+- Release notes use an annotated tag message or commit titles since the
   preceding release tag.
 
-Working release trees (`plan.json`, artifacts, signatures) live under
+Working release trees (`plan.json`, artifacts) live under
 `target/release-dist/<version>/` and are never committed.

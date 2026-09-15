@@ -21,7 +21,6 @@ export interface DesktopQueueEntry {
   readonly status: DesktopQueueStatus;
   readonly progress: DesktopQueueProgress;
   readonly errorCode?: string;
-  readonly outputHash?: string;
 }
 
 export interface DesktopQueue {
@@ -125,13 +124,13 @@ function replaceEntry(queue: DesktopQueue, next: DesktopQueueEntry): DesktopQueu
 
 /**
  * Advance after the active job reaches a terminal outcome. Marks the active
- * entry done/failed/cancelled (with hash or error code) and promotes the
+ * entry done/failed/cancelled (with an error code when applicable) and promotes the
  * first queued entry, if any. Returns the next entry to start (or null).
  */
 export function finishActiveDesktopEntry(
   queue: DesktopQueue,
   outcome: "done" | "failed" | "cancelled",
-  detail?: { outputHash?: string; errorCode?: string },
+  detail?: { errorCode?: string },
 ): { queue: DesktopQueue; next: DesktopQueueEntry | null } {
   const activeId = queue.activeId;
   if (!activeId) return { queue, next: null };
@@ -144,7 +143,6 @@ export function finishActiveDesktopEntry(
     origin: found.origin,
     status: outcome,
     progress: found.progress,
-    ...(detail?.outputHash ? { outputHash: detail.outputHash } : {}),
     ...(detail?.errorCode ? { errorCode: detail.errorCode } : {}),
   };
   let nextQueue = replaceEntry(queue, finished);
@@ -193,7 +191,6 @@ export function recordDesktopProgress(
       total: Math.max(found.progress.total, safeTotal),
     },
     ...(found.errorCode ? { errorCode: found.errorCode } : {}),
-    ...(found.outputHash ? { outputHash: found.outputHash } : {}),
   };
   return { queue: replaceEntry(queue, next), code: "ok" };
 }

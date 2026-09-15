@@ -124,12 +124,10 @@
   "output": {
     "format": "webp",
     "height": 512,
-    "outputHash": "sha256:ca857af61a00c1a0aacf3940bcfb16e5cfc6bc10d93a40e7b54f1fa54c41ec93",
     "partial": false,
     "tileCount": 4,
     "width": 512
   },
-  "outputHash": "sha256:ca857af61a00c1a0aacf3940bcfb16e5cfc6bc10d93a40e7b54f1fa54c41ec93",
   "protocol": "1.0",
   "provenance": "fixture",
   "readableBytes": true,

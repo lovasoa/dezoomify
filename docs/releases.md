@@ -41,21 +41,13 @@ closed on missing inputs, tools, or secrets. The plan stage freezes a
 deterministic contract (version, tag, commit, protocol range, schema
 fingerprint, capabilities, targets) from Git, `release/config.toml`,
 `release/targets.toml`, `release/compatibility.toml`, and
-`generated/release-capabilities.json`. Its user-facing GitHub description uses
-the introduction from `docs/user/start-here.md`, followed by the annotated
-numbered tag message when present or first-parent commit titles since the
-preceding release tag. The build stage produces one target's
-artifact plus a per-target digest fragment on the matching host; unavailable
-targets refuse to build. The sign stage assembles the aggregate `SHA256SUMS`
-from the fragments in plan order and GPG-detach-signs it and every artifact;
-it runs only with the release signing key (the `release-signing`
-environment secret) and the public key lives at
-`release/gpg-public-key.asc`. The verify stage recomputes every digest,
-checks artifact names against the plan, and validates every signature. The
-publish stage verifies again and refuses unless `origin/master` is the planned
-revision. Rolling releases use `rolling-v<version>` and become GitHub's latest
-release. Important numbered releases use `vX.Y.Z`; their inventory is recorded
-at `release/checksums/<version>/SHA256SUMS`. Working
+`generated/release-capabilities.json`. The build stage produces one target's
+artifact on the matching host; unavailable targets refuse to build. The verify
+stage checks artifact names against the plan. The publish stage verifies again
+and refuses unless `origin/master` is the planned
+revision. Release descriptions use the annotated tag message, or commit titles
+since the preceding release tag when no annotation exists. Rolling releases use
+`rolling-v<version>` and become GitHub's latest release. Important numbered releases use `vX.Y.Z`. Working
 release trees live under `target/release-dist/<version>/` and are never
 committed; `target/` is used so website builds cannot clobber them.
 
@@ -70,8 +62,8 @@ Line Tools and `icon.icns`) stay unavailable, and a release never claims an
 artifact it did not build. The operator
 sequence for cutting a release is the runbook in [Operations](operations.md).
 
-Artifacts are signed with GPG-detached checksums and signatures. Store
-submission remains separate because store review may lag rolling releases.
+GitHub Releases provides release provenance. Store submission remains separate
+because store review may lag rolling releases.
 Desktop installers remain unsigned; the published inventory currently has the
 Linux `.deb` only. See the [Desktop app guide](user/desktop-app.md#install).
 

@@ -3,10 +3,9 @@
 //! Publishing is the only stage that touches the network beyond the local
 //! git remote: it requires the `gh` CLI to be authenticated, the plan's tag
 //! to exist and point at the planned commit, and no pre-existing GitHub
-//! release for the tag. The reviewed `SHA256SUMS` inventory is recorded
-//! under `release/checksums/<version>/` before the release is created.
+//! release for the tag.
 
-use super::common::{parse_sums, read_plan, Plan};
+use super::common::{expected_artifact_name, read_plan, Plan};
 use super::verify::release_verify;
 use std::path::PathBuf;
 use std::process::Command;
@@ -39,7 +38,7 @@ pub(crate) fn publish_cmd(args: &[String]) -> Result<(), String> {
         );
     };
     let p = read_plan(&plan)?;
-    release_verify(&p, &artifacts, false)?;
+    release_verify(&p, &artifacts)?;
     release_publish(&p, &artifacts)?;
     println!("release publish: {}", p.tag);
     Ok(())
@@ -87,26 +86,16 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
             "GitHub release {tag} already exists; refusing to republish"
         ));
     }
-    if plan.channel == "stable" {
-        let inventory = crate::repo_root()
-            .join("release/checksums")
-            .join(&plan.version);
-        std::fs::create_dir_all(&inventory)
-            .map_err(|e| format!("create {}: {e}", inventory.display()))?;
-        std::fs::copy(artifacts.join("SHA256SUMS"), inventory.join("SHA256SUMS"))
-            .map_err(|e| format!("copy SHA256SUMS: {e}"))?;
-    }
     let mut cmd = Command::new("gh");
     cmd.args(["release", "create", &tag, "--target", &plan.commit])
         .arg("--title")
         .arg(format!("dezoomify v{}", plan.version))
         .arg("--notes-file")
-        .arg(artifacts.join("notes.md"))
-        .arg(artifacts.join("SHA256SUMS"))
-        .arg(artifacts.join("SHA256SUMS.sig"));
-    for name in parse_sums(&artifacts.join("SHA256SUMS"))? {
-        cmd.arg(artifacts.join(&name));
-        cmd.arg(artifacts.join(format!("{name}.sig")));
+        .arg(artifacts.join("notes.md"));
+    for target in plan.targets.iter().filter(|target| target.available) {
+        let name = expected_artifact_name(&target.name, &plan.version)
+            .ok_or_else(|| format!("target '{}' has no artifact name rule", target.name))?;
+        cmd.arg(artifacts.join(&target.name).join(name));
     }
     cmd.arg("--latest");
     let status = cmd.status().map_err(|e| format!("failed to run gh: {e}"))?;

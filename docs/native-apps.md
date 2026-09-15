@@ -107,17 +107,10 @@ untouched original destination.
 The desktop updater is inert. `tauri.conf.json` ships empty
 `plugins.updater.endpoints` and an empty `pubkey`; `release/config.toml` sets
 `[updater] enabled = false` with empty endpoints and no key file;
-`UPDATER_PUBKEY` stays empty so validation fails closed; the updater plugin is
-not registered (the `tauri_shell.rs` registration gate skips it while the
-pubkey is empty, so no endpoint is ever polled); the frontend issues no update
-calls; and the capability document sets `updater.enabled: false` with an empty
-allowlist while granting only `updater:allow-check`, which no shipped code
-exercises. Users install new versions manually from GitHub Releases with the
-GPG-detached `SHA256SUMS` verification in the
-[Desktop app guide](user/desktop-app.md#install). Activation requires a key
-ceremony that has not happened: a real public key, deployed endpoints,
-`enabled = true`, and plugin registration. No host or key is invented until
-then; see [Releases](releases.md#desktop-updater).
+the updater plugin is not registered and the frontend issues no update calls.
+Users install new versions manually from GitHub Releases. Activating an updater
+requires a new implemented update design and deployed endpoints; none are
+invented for the shipped product. See [Releases](releases.md#desktop-updater).
 
 ### Desktop bundles
 

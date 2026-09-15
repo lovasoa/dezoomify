@@ -25,19 +25,6 @@ fn scenario_payload(name: &str) -> Vec<u8> {
     .unwrap_or_else(|e| panic!("read payload {name}: {e}"))
 }
 
-fn scenario_expected(name: &str) -> serde_json::Value {
-    serde_json::from_str(
-        &std::fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../testdata/scenarios/native")
-                .join(name)
-                .join("expected/result.json"),
-        )
-        .unwrap_or_else(|e| panic!("expected result for {name}: {e}")),
-    )
-    .expect("expected json")
-}
-
 fn write_tiles(work: &std::path::Path) {
     for tile in ["0_0", "1_0", "0_1", "1_1"] {
         let bytes = scenario_payload(&format!("tile-{tile}.png"));
@@ -85,11 +72,6 @@ fn plain_path_input_with_file_uri_tiles_assembles() {
     assert_eq!(outcome.tile_count, 4);
     assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
     assert!(!outcome.partial);
-    let expected = scenario_expected("cli-dzi");
-    assert_eq!(
-        outcome.output_hash,
-        expected["outputHash"].as_str().expect("outputHash")
-    );
 }
 
 #[test]

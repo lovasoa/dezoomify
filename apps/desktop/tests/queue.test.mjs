@@ -78,9 +78,9 @@ test("failed entry does not stop the rest with CLI-parity summary", () => {
   q = enqueueDesktopQueue(q, "https://example.com/c").queue;
   q = finishActiveDesktopEntry(q, "failed", { errorCode: "tile.download-failed" }).queue;
   assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/b");
-  q = finishActiveDesktopEntry(q, "done", { outputHash: "sha256:abc" }).queue;
+  q = finishActiveDesktopEntry(q, "done").queue;
   assert.equal(activeDesktopEntry(q).inputUrl, "https://example.com/c");
-  q = finishActiveDesktopEntry(q, "done", { outputHash: "sha256:def" }).queue;
+  q = finishActiveDesktopEntry(q, "done").queue;
   assert.equal(q.activeId, null);
   const summary = summarizeDesktopQueue(q);
   assert.deepEqual(summary, { total: 3, succeeded: 2, failed: 1, cancelled: 0, pending: 0 });
@@ -160,7 +160,6 @@ function runQueueScript(doc) {
       const active = activeDesktopEntry(q);
       assert.ok(active, "finish needs an active entry");
       const detail = {};
-      if (step.outputHash) detail.outputHash = step.outputHash;
       if (step.errorCode) detail.errorCode = step.errorCode;
       const res = finishActiveDesktopEntry(q, step.outcome, detail);
       events.push({
@@ -198,7 +197,6 @@ for (const id of ["queue-basic", "queue-retry"]) {
     assert.deepEqual(events, transcript.events, "ordered queue transcript");
     const outcomes = q.entries.map((e) => ({
       status: e.status,
-      ...(e.outputHash ? { outputHash: e.outputHash } : {}),
       ...(e.errorCode ? { errorCode: e.errorCode } : {}),
     }));
     assert.deepEqual(outcomes, doc.golden.outcomes, "per-entry outcomes");

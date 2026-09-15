@@ -1,14 +1,13 @@
-//! Shared release-pipeline inventory, plan document, and digest helpers.
+//! Shared release-pipeline inventory and plan document helpers.
 //!
 //! The `release` command surface lives in `super` (`mod.rs`); the stage
-//! implementations live in `plan`, `build`, `sign`, `verify`, and
+//! implementations live in `plan`, `build`, `verify`, and
 //! `publish`. This module holds what every stage shares: the
 //! `release/*.toml` + `generated/*.json` inventory inputs, the
-//! deterministic plan document, artifact naming, and the sha256, sums-file,
-//! git, and error helpers. Nothing here performs a stage on its own.
+//! deterministic plan document, artifact naming, git, and error helpers.
+//! Nothing here performs a stage on its own.
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -265,51 +264,6 @@ pub(crate) fn validate_version(version: &str) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Digest and sums-file helpers
-// ---------------------------------------------------------------------------
-
-pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let mut h = Sha256::new();
-    h.update(&bytes);
-    Ok(hex(&h.finalize()))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-pub(crate) fn parse_sums(sums: &Path) -> Result<Vec<String>, String> {
-    let text =
-        std::fs::read_to_string(sums).map_err(|e| format!("missing {}: {e}", sums.display()))?;
-    Ok(text
-        .lines()
-        .filter_map(|l| l.split_whitespace().nth(1))
-        .map(str::to_string)
-        .collect())
-}
-
-pub(crate) fn append_sums(sums: &Path, name: &str, file: &Path) -> Result<(), String> {
-    let digest = sha256_file(file)?;
-    let line = format!("{digest}  {name}\n");
-    if sums.exists() {
-        let existing = std::fs::read_to_string(sums).map_err(|e| e.to_string())?;
-        if existing
-            .lines()
-            .any(|l| l.split_whitespace().nth(1) == Some(name))
-        {
-            return Err(format!("SHA256SUMS already lists {name}"));
-        }
-    }
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(sums)
-        .map_err(|e| format!("open {}: {e}", sums.display()))?;
-    f.write_all(line.as_bytes()).map_err(|e| e.to_string())
-}
-
 #[cfg(test)]
 pub(crate) fn temp_root(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("xtask-release-{}-{name}", std::process::id()));

@@ -26,7 +26,6 @@
       "webRequest": 0
     },
     "outputFormat": "png",
-    "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
     "partial": false,
     "pixels": {
       "bottomLeft": [
@@ -115,7 +114,6 @@
     },
     {
       "event": "completed",
-      "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
       "state": "Completed",
       "step": 11
     }

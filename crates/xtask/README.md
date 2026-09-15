@@ -17,7 +17,6 @@ cargo xtask ci <check|rust|wasm|browser|web|native|desktop|extension|protocol|se
 cargo xtask release version
 cargo xtask release plan [--numbered]
 cargo xtask release build --plan <path> --target <target>
-cargo xtask release sign
 cargo xtask release verify --plan <path> --artifacts <path>
 cargo xtask release publish --plan <path> --artifacts <path>
 cargo xtask protocol <generate|check> [options]
@@ -34,7 +33,7 @@ gates.
 are read-only. `protocol generate` is the explicit generated-source update;
 golden candidates require its explicit maintenance option. Builds write only to
 declared generated paths, `target/`, `dist/`, or `artifacts/` as appropriate.
-Release verification uses public keys only.
+Release verification checks the frozen plan and expected artifacts.
 
 ## Examples
 
