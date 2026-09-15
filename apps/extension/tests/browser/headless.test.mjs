@@ -231,7 +231,9 @@ async function runFirefoxJob(base, work) {
     await driver.manage().setTimeouts({ pageLoad: 15000, script: 15000, implicit: 0 });
     const addonId = await driver.installAddon(zip, true);
     assert.equal(addonId, GECKO_ID, `unexpected add-on id ${addonId}`);
-    const output = path.join(downloadsDir, "dezoomify-512x512.png");
+    // The fixture DZI's core descriptor title is `pyramid`; Firefox writes
+    // the anchor's suggested name directly into its configured download dir.
+    const output = path.join(downloadsDir, "pyramid.png");
     const deadline = Date.now() + 90000;
     return await readCompletedPng(output, deadline);
   } finally {
