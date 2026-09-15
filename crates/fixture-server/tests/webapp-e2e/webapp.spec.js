@@ -205,17 +205,20 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
   await download.saveAs(target);
   const bytes = fs.readFileSync(target);
   const { width, height } = decodePngSize(bytes);
-  assert.equal(width, 128, "saved image width");
-  assert.equal(height, 64, "saved image height");
-  // Two signed encrypted tiles decrypt (in wasm) to a solid RGBA PNG. Two
-  // tiles also pin the concurrent-processing path: tile downloads run in
-  // parallel, decrypt steps queue on the single-pending worker client.
+  assert.equal(width, 100, "saved image width clips the padded final column");
+  assert.equal(height, 50, "saved image height clips the padded final row");
+  // The final signed tile decrypts (in wasm) to a full 64×64 PNG whose
+  // useful 36×50 region is red and whose right/bottom padding is black.
+  // Nonzero empty_pels metadata pins 1:1 cropping: scaling the full decoded
+  // tile into the planned extent would pull black padding into these sampled
+  // output pixels. Two tiles also pin concurrent downloads plus serialized
+  // worker-side decrypt processing.
   const { pixels } = decodePngPixels(bytes);
   const at = (x, y) => {
     const o = (y * width + x) * 4;
     return [pixels[o], pixels[o + 1], pixels[o + 2], pixels[o + 3]];
   };
-  for (const [x, y] of [[0, 0], [63, 0], [64, 32], [127, 63], [0, 63], [127, 0]]) {
+  for (const [x, y] of [[0, 0], [63, 0], [64, 32], [99, 49], [0, 49], [99, 0]]) {
     assert.deepEqual(at(x, y), [200, 48, 48, 255], `solid tile color at ${x},${y}`);
   }
   assert.ok(

@@ -270,7 +270,10 @@ test("shipped webapp uses the shared proxy policy (no inline duplicate)", () => 
   }
   assert.ok(mainTs.includes('from "./webIntegration.ts"'), "main.ts must import the shared eligibility policy");
   assert.ok(mainTs.includes('from "./proxyTransport.ts"'), "main.ts must import the shared proxy transport");
-  assert.ok(mainTs.includes("isProxyEligible({"), "main.ts must call the shared policy with a request object");
+  assert.ok(
+    mainTs.includes("createWebFetcher({") && mainTs.includes("isProxyEligible,"),
+    "main.ts must inject the shared eligibility policy into the shared fetcher",
+  );
 });
 
 test("proxy fallback is unconditional; no opt-out UI remains; 1500 ms direct head start", () => {
@@ -283,20 +286,28 @@ test("proxy fallback is unconditional; no opt-out UI remains; 1500 ms direct hea
   const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
   assert.ok(!mainTs.includes("onToggleProxyOptOut"), "webapp must not handle the toggle");
   assert.ok(!mainTs.includes("proxyOptOut"), "webapp must not keep session opt-out state");
+  const fetchTs = fs.readFileSync(
+    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "web-fetch.ts"),
+    "utf8",
+  );
+  const policyTs = fs.readFileSync(
+    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "tile-policy.ts"),
+    "utf8",
+  );
   assert.ok(
-    mainTs.includes("DIRECT_METADATA_TIMEOUT_MS = 1500"),
+    policyTs.includes("DIRECT_METADATA_TIMEOUT_MS = 1500"),
     "direct metadata fetch uses a 1500 ms head start before the proxy takes over",
   );
   assert.ok(
-    mainTs.includes("DIRECT_METADATA_TIMEOUT_MS"),
+    fetchTs.includes("DIRECT_METADATA_TIMEOUT_MS"),
     "metadata discovery applies the direct head-start timeout",
   );
   assert.ok(
-    mainTs.includes("directCtrl.abort()"),
+    fetchTs.includes("directCtrl.abort()"),
     "the direct loser is aborted via AbortController before the proxy starts (dedupe)",
   );
   assert.ok(
-    mainTs.includes("proxyRateLimitDelayMs") && mainTs.includes("retryAfterMs"),
+    fetchTs.includes("proxyRateLimitDelayMs") && fetchTs.includes("retryAfterMs"),
     "PROXY_RATE_LIMITED honors Retry-After with backoff and a single bounded retry",
   );
 });
@@ -321,15 +332,20 @@ test("tile failures report the direct transport, never the metadata proxy", () =
 
 test("shipped webapp paints unreadable ordinary tiles instead of failing", () => {
   const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
+  const tileDrawTs = fs.readFileSync(
+    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "tile-draw.ts"),
+    "utf8",
+  );
   // Readable bytes first, plain <img> fallback for ordinary tiles only.
-  assert.ok(mainTs.includes("isOrdinaryImageTile("), "drawTile must gate the <img> fallback on the recipe");
-  assert.ok(mainTs.includes("new Image()"), "fallback must load tiles as ordinary image elements");
-  assert.ok(!mainTs.includes("crossOrigin"), "fallback <img> must never request CORS");
+  assert.ok(mainTs.includes("createTilePainter({"), "website must use the shared tile painter");
+  assert.ok(tileDrawTs.includes("isOrdinaryImageTile("), "tile painter must gate the <img> fallback on the recipe");
+  assert.ok(tileDrawTs.includes("new Image()"), "fallback must load tiles as ordinary image elements");
+  assert.ok(!tileDrawTs.includes("crossOrigin"), "fallback <img> must never request CORS");
   assert.ok(
     mainTs.includes("preflight-display-only"),
     "a tainted canvas must finish as display-only, never as a save",
   );
-  assert.ok(mainTs.includes("setCanvasVisible(true)"), "display-only must reveal the assembled picture");
+  assert.ok(mainTs.includes("setCanvasVisible(document, true)"), "display-only must reveal the assembled picture");
   // A tainted canvas is never read back programmatically.
   const taintedFinish = mainTs.slice(
     mainTs.indexOf("if (tainted) {"),
@@ -342,19 +358,21 @@ test("shipped webapp paints unreadable ordinary tiles instead of failing", () =>
   assert.ok(html.includes("img-src 'self' data: blob: https:"), "CSP must allow cross-origin tile display");
 });
 
-test("website trusts the tile plan, warns on color profiles, and compresses PNG", () => {
+test("website crops padded edge tiles, warns on color profiles, and compresses PNG", () => {
   const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
-  // Seam: the plan wins for placement; a mis-sized decode is logged generically
-  // and scaled to the planned extent so no gap appears (no Math.min clipping to the decode).
-  assert.ok(mainTs.includes("A tile size differed from the plan"), "drawTile must log plan/decode mismatches without identifying a tile");
-  assert.ok(!mainTs.includes("Math.min(tile.w"), "drawTile must trust the plan, not clip to the decode");
+  // The website and extension assembly share the complete painter, including
+  // 1:1 placement, readable/display classification, decoding and processing.
   assert.ok(
-    mainTs.includes("drawImage(source, 0, 0, fullW, fullH, tile.x, tile.y, planW, planH)"),
-    "drawTile must scale the decoded bytes to the planned extent",
+    mainTs.includes('import { createTilePainter, loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";'),
+    "website must import the shared tile painter",
+  );
+  assert.ok(
+    mainTs.includes("tilePainter.drawTile(ctx2d, tile)"),
+    "website must draw every tile through the shared painter",
   );
   // Color: the browser canvas path strips ICC/EXIF (native preserves the first
   // tile profile), so the completed save must warn that colors may shift.
-  assert.ok(mainTs.includes("Colors may shift"), "website save must warn about the stripped color profile");
+  assert.ok(mainTs.includes("BROWSER_SAVE_COLOR_WARNING"), "website save must log the shared color-profile warning");
   const componentsTs = fs.readFileSync(
     path.join(REPO_ROOT, "packages", "shared-ui", "src", "components.ts"),
     "utf8",

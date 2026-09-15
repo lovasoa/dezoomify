@@ -1,4 +1,4 @@
-// Shared save-name helper (todo 2.2 home: lowest layer, dependency-free).
+// Shared save-name helper: lowest layer, dependency-free.
 //
 // One suggestedNameFor() for every app. Base `dezoomify`, optional `-WxH`
 // suffix when dimensions are known positive integers, extension from format

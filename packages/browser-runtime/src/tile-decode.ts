@@ -1,5 +1,4 @@
-// Off-main-thread tile decode (todo 2.2 home, moved from `src/main.ts`).
-//
+// Off-main-thread tile decode.
 // When Worker plus OffscreenCanvas exist, createImageBitmap plus drawImage
 // run in a singleton decode worker (Blob URL, no extra file) and the
 // ImageBitmap is transferred back; the main thread only paints the finished
@@ -9,7 +8,7 @@
 // offload already removes the costly raster from the main thread.
 //
 // All host constructors are injected so node tests drive the fallback and
-// worker paths with fakes. Keep erasable-syntax-only for the mirrors.
+// worker paths with fakes.
 export interface TileDecodeHost {
   workerCtor?: new (url: string) => TileDecodeWorkerLike;
   createImageBitmap?: (blob: unknown) => Promise<unknown>;

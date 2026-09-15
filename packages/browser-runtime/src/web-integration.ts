@@ -1,6 +1,5 @@
-// Web integration: direct-first, automatic eligible metadata-proxy fallback.
 // Web integration policy: direct-first, automatic eligible metadata-proxy
-// fallback (todo 2.2 home, moved from `src/webIntegration.ts`).
+// fallback.
 //
 // Single implementation for the website: proxy eligibility, ordinary-image
 // rules, error transport mapping, and the pure catalog/level pickers. The

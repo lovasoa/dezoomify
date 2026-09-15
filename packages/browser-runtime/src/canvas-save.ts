@@ -1,10 +1,9 @@
-// Browser canvas save (todo 2.2 home, moved from `src/main.ts`).
-//
+// Browser canvas save shared by browser products.
 // The browser canvas path (createImageBitmap -> drawImage -> toBlob) never
 // preserves the source ICC color profile or EXIF metadata (native keeps the
 // first tile's profile); callers warn so archived colors are not trusted
 // blindly. The canvas host is injected so node tests drive the encode path
-// with fakes. Keep erasable-syntax-only for the browser `.js` mirrors.
+// with fakes.
 import { failure } from "./failure.ts";
 import { suggestedNameFor } from "./save-name.ts";
 
@@ -28,6 +27,13 @@ export interface AnchorLike {
   remove(): void;
 }
 
+/** Browsers report an origin-tainted canvas as a SecurityError. */
+export function isCanvasTaintError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === "SecurityError" || candidate.code === 18;
+}
+
 /** Encode the assembled canvas as a PNG Blob (origin-clean only). */
 export function canvasToPngBlob(canvas: CanvasLike): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -48,6 +54,10 @@ export function canvasToPngBlob(canvas: CanvasLike): Promise<unknown> {
         "image/png",
       );
     } catch (e) {
+      if (isCanvasTaintError(e)) {
+        reject(e);
+        return;
+      }
       reject(
         failure(
           "OUTPUT_ENCODE_FAILED",

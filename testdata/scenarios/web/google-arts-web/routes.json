@@ -19,6 +19,15 @@
    "payload": "payloads/fixtures.test/arts/gap/path=g.xml"
   },
   {
+   "route_id": "fixtures-test-arts-gap-signed-edge-tile",
+   "method": "GET",
+   "host": "fixtures.test",
+   "path_regex": "^/arts/gap/path=x1-y0-z0-t[^/]+$",
+   "status": 200,
+   "headers": {"Content-Type": "application/octet-stream"},
+   "generator": {"type": "arts-signed-tile", "image": "payloads/fixtures.test/arts/padded-edge-tile.bin"}
+  },
+  {
    "route_id": "fixtures-test-arts-gap-signed-tile",
    "method": "GET",
    "host": "fixtures.test",

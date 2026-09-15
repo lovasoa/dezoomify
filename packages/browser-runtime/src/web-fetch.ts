@@ -1,5 +1,4 @@
-// Website fetch orchestration (todo 2.2 home, moved from `src/main.ts`).
-//
+// Website fetch orchestration shared by browser products.
 // Direct browser fetch first; the metadata CORS proxy is an automatic
 // fallback for eligible public metadata only (never tiles, never
 // credentials). The single-policy proxy transport instance is supplied by
@@ -235,6 +234,14 @@ export interface WebFetchHooks {
   onRequestEnd(id: number, ok: boolean): void;
   onLog(line: string): void;
   onUpdate(): void;
+  onMetadataAttempt?(attempt: {
+    startedAt: number;
+    transport: "direct" | "metadata proxy";
+    target: string;
+    outcome: string;
+    bytes?: number;
+  }): void;
+  onTileAttempt?(retrying: boolean): void;
 }
 
 /** Caller-owned UI copy plus the readable-bytes hint (never gates). */
@@ -253,6 +260,7 @@ export interface WebFetchDeps {
   messages: WebFetchMessages;
   sleepFn?: (ms: number) => Promise<void>;
   randomFn?: () => number;
+  nowFn?: () => number;
   throttle?: (url: string) => Promise<void>;
   timeouts?: { requestMs?: number; metadataMs?: number };
 }
@@ -269,7 +277,7 @@ export interface WebFetcher {
     retryAfterMs?: number;
   }>;
   fetchMetadataFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }>;
-  fetchTileFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
+  fetchTileFor(url: string, headers: Record<string, string>, maxRetries?: number): Promise<{ bytes: ArrayBuffer }>;
   getActiveTransport(): string | null;
   resetActiveTransport(): void;
 }
@@ -419,6 +427,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   const requestMs = deps.timeouts?.requestMs ?? REQUEST_TIMEOUT_MS;
   const metadataMs = deps.timeouts?.metadataMs ?? DIRECT_METADATA_TIMEOUT_MS;
   const sleepFn = deps.sleepFn ?? sleep;
+  const now = deps.nowFn ?? Date.now;
   const hooks = deps.hooks;
   let activeTransport: string | null = null;
 
@@ -543,7 +552,15 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     // AbortController dedupe: the direct loser is aborted before the proxy
     // starts so the two transports never overlap on the same resource.
     const directCtrl = new AbortController();
+    const directStartedAt = now();
     const direct = await fetchDirect(url, headers, directCtrl.signal, metadataMs);
+    hooks.onMetadataAttempt?.({
+      startedAt: directStartedAt,
+      transport: "direct",
+      target,
+      outcome: direct.outcome === "http-error" ? `HTTP ${direct.status ?? 0}` : direct.outcome,
+      ...(direct.bytes ? { bytes: direct.bytes.byteLength } : {}),
+    });
     let via = "direct";
     let bytes: ArrayBuffer | null = null;
     let contentType: string | undefined;
@@ -567,7 +584,15 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
       activeTransport = PROXY_TRANSPORT_LABEL;
       via = "proxy";
+      let proxyStartedAt = now();
       let proxied = await fetchViaProxy(url);
+      hooks.onMetadataAttempt?.({
+        startedAt: proxyStartedAt,
+        transport: "metadata proxy",
+        target,
+        outcome: proxied.ok ? `HTTP ${proxied.status}` : proxied.code ?? `HTTP ${proxied.status}`,
+        ...(proxied.bytes ? { bytes: proxied.bytes.byteLength } : {}),
+      });
       // Retry-After + backoff: one bounded retry converts a transient
       // token-bucket 429 into success. A persistent throttle, or a
       // Retry-After beyond the UX budget, still fails fast below with the
@@ -577,7 +602,15 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         if (delay !== null) {
           hooks.onLog(`Metadata proxy rate-limited; retrying once after ${delay} ms.`);
           await sleepFn(delay);
+          proxyStartedAt = now();
           proxied = await fetchViaProxy(url);
+          hooks.onMetadataAttempt?.({
+            startedAt: proxyStartedAt,
+            transport: "metadata proxy",
+            target,
+            outcome: proxied.ok ? `HTTP ${proxied.status}` : proxied.code ?? `HTTP ${proxied.status}`,
+            ...(proxied.bytes ? { bytes: proxied.bytes.byteLength } : {}),
+          });
         }
       }
       if (!proxied.ok || !proxied.bytes) {
@@ -640,10 +673,15 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     return { bytes: bytes as ArrayBuffer, finalUri, via };
   }
 
-  async function fetchTileFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }> {
+  async function fetchTileFor(
+    url: string,
+    headers: Record<string, string>,
+    maxRetries: number = TILE_MAX_RETRIES,
+  ): Promise<{ bytes: ArrayBuffer }> {
     let lastOutcome = "network-error";
     let lastStatus: number | undefined;
     for (let attempt = 0; ; attempt++) {
+      hooks.onTileAttempt?.(attempt > 0);
       if (deps.throttle) {
         try {
           await deps.throttle(url);
@@ -657,12 +695,20 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
       lastOutcome = direct.outcome;
       lastStatus = direct.status;
-      if (direct.outcome === "cancelled" || attempt >= TILE_MAX_RETRIES) {
+      if (direct.outcome === "cancelled" || attempt >= maxRetries) {
         break;
       }
       await sleepFn(tileRetryDelayMs(attempt, deps.randomFn));
     }
-    const error: StructuredFailure = tileFailedError(lastOutcome, lastStatus, url);
+    const error: StructuredFailure = maxRetries === TILE_MAX_RETRIES
+      ? tileFailedError(lastOutcome, lastStatus, url)
+      : failure(
+          "TILE_FAILED",
+          "Part of the image could not be saved. Try again in a moment.",
+          true,
+          undefined,
+          `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after ${maxRetries + 1} attempts`,
+        );
     throw error;
   }
 

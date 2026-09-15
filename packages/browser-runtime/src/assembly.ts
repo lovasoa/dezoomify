@@ -1,10 +1,9 @@
 // Engine-effect canvas assembly executor.
 //
-// One shared executor for every browser host of the Rust job engine (the
-// extension job tab today, the website after its migration): it maps the
-// engine's typed host effects onto browser canvas execution and owns no job
-// policy. The engine owns retries, cancellation, partial-output decisions,
-// and ordering; this module only executes what the effects describe:
+// The browser executor for the Rust job engine maps typed host effects onto
+// canvas execution and owns no job policy. The engine owns retries,
+// cancellation, partial-output decisions, and ordering; this module only
+// executes what the effects describe:
 //
 //   acquire-tile   -> recordPlacement + decode (decode-at-acquisition, the
 //                     native model: a tile that cannot decode reports its
@@ -17,7 +16,7 @@
 //   release-bytes  -> close every retained tile resource
 //
 // All host constructors are injected so node tests drive the full path with
-// fakes. Keep erasable-syntax-only for the browser `.js` mirrors.
+// fakes.
 import { drawPlacedTile } from "./tile-draw.ts";
 import type { Canvas2DLike, PlacedTileGeometry } from "./tile-draw.ts";
 import type { TileBitmap } from "./tile-decode.ts";

@@ -1,13 +1,12 @@
 // Deterministic catalog selection for engine hosts.
 //
-// The extension job tab (and, after migration, the website) drives the Rust
-// job engine, whose catalog event carries wire ids (`img:*`, `lvl:*`) plus
+// The extension job tab drives the Rust job engine, whose catalog event
+// carries wire ids (`img:*`, `lvl:*`) plus
 // declared geometry. Headless callers may provide a deterministic selection
 // rule; this is the shared one: the ready image whose largest declared level
 // is biggest, and inside it the largest level that fits the browser canvas
 // (falling back to the smallest declared level so the plan gate fails fast,
-// mirroring `pickLevel` in `./limits.ts`). Pure: no I/O, no clocks. Keep
-// erasable-syntax-only for the browser `.js` mirrors.
+// mirroring `pickLevel` in `./limits.ts`). Pure: no I/O, no clocks.
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
 import type { BrowserLimits } from "./types.ts";
 import type { CatalogDto, ImageDto, LevelDto } from "../../protocol-ts/src/generated.ts";
