@@ -390,9 +390,9 @@ async function runJob(url: string): Promise<void> {
     if (!selection) {
       throw failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false);
     }
-    const image = catalog.images.find((entry) => entry.id === selection.image);
+    const image = catalog.images[selection.image];
     resultTitle = image?.title;
-    const level = image?.levels.find((entry) => entry.id === selection.level);
+    const level = image?.levels[selection.level];
     const declared = level && level.width > 0 && level.height > 0
       ? { x: level.width, y: level.height }
       : undefined;

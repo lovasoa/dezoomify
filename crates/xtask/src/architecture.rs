@@ -36,6 +36,9 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
     let dto = std::fs::read_to_string(&dto_path)
         .map_err(|e| format!("read {}: {e}", dto_path.display()))?;
     for removed in [
+        "ImageId",
+        "LevelId",
+        "TileId",
         "SessionId",
         "ScanId",
         "CandidateId",
@@ -55,6 +58,12 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
                 "speculative protocol contract `{removed}` has no production producer and consumer"
             ));
         }
+    }
+    let core_model_path = root.join("crates/dezoomify-core/src/core/model.rs");
+    let core_model = std::fs::read_to_string(&core_model_path)
+        .map_err(|e| format!("read {}: {e}", core_model_path.display()))?;
+    if core_model.contains("StableId") {
+        return Err("core catalogs must use immutable positions, not StableId".to_string());
     }
     for (contract, producer, produced, consumer, consumed) in [
         (

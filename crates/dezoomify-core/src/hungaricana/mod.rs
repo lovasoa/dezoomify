@@ -11,7 +11,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId, image_title,
+    LevelDescriptor, Request, image_title,
 };
 
 static LAYER_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -137,7 +137,6 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     let tile_path: Arc<str> = path.clone().into();
     let zoom = max_zoom(metadata.width.max(metadata.height), 512);
     let source = Grid::with_requests(
-        StableId::new("hungaricana:level"),
         Vec2d {
             x: metadata.width,
             y: metadata.height,
@@ -151,9 +150,8 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid Hungaricana grid: {error}")))?;
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("hungaricana:image"),
         title: image_title(&path),
-        format: StableId::new("hungaricana"),
+        format: "hungaricana",
         levels: vec![LevelDescriptor::new(source)],
         ..Default::default()
     })]))

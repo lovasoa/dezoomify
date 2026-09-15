@@ -4,7 +4,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, ProcessingRecipe, Request, StableId,
+    LevelDescriptor, ProcessingRecipe, Request,
 };
 use std::sync::Arc;
 use tile_info::{PageInfo, TileInfo};
@@ -72,10 +72,8 @@ fn catalog(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImageCatalog, Discovery
                 x: tile_width,
                 y: tile_height,
             };
-            let id = StableId::new(format!("gap:{z}"));
             let request_page = Arc::clone(page);
             let source = Grid::with_processed_requests(
-                id,
                 size,
                 tile_size,
                 Vec2d::default(),
@@ -93,9 +91,8 @@ fn catalog(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImageCatalog, Discovery
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("gap:image"),
         title: Some(page.name.clone()),
-        format: StableId::new("google_arts_and_culture"),
+        format: "google_arts_and_culture",
         levels,
         ..Default::default()
     })]))
@@ -160,12 +157,11 @@ mod tests {
                 .iter()
                 .all(|level| level.title.as_deref() == Some(image.title.as_deref().unwrap_or("")))
         );
-        assert!(
-            image
-                .levels
-                .iter()
-                .all(|level| level.display_label().contains("©Designers Anonymes"))
-        );
+        assert!(image.levels.iter().enumerate().all(|(position, level)| {
+            level
+                .display_label(position)
+                .contains("©Designers Anonymes")
+        }));
         assert!(
             image
                 .levels
@@ -218,8 +214,7 @@ mod tests {
         let [CatalogEntry::Ready(image)] = catalog.entries() else {
             panic!("Google Arts produces one ready image");
         };
-        assert_eq!(image.id, StableId::new("gap:image"));
-        assert_eq!(image.format, StableId::new("google_arts_and_culture"));
+        assert_eq!(image.format, "google_arts_and_culture");
         assert_eq!(image.title.as_deref(), Some("©Designers Anonymes"));
 
         let level = image.levels.last().expect("largest level");

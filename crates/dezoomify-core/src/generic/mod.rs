@@ -3,7 +3,6 @@
 use crate::core::adaptive::is_generic_template;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoverableGrid, ImageCatalog, ImageDescriptor, LevelDescriptor,
-    StableId,
 };
 
 pub const SPEC: DezoomerSpec = DezoomerSpec::immediate("generic", |template| Ok(catalog(template)))
@@ -13,11 +12,9 @@ pub const SPEC: DezoomerSpec = DezoomerSpec::immediate("generic", |template| Ok(
 
 fn catalog(template: &str) -> ImageCatalog {
     ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("generic:image"),
         title: Some(template.to_owned()),
-        format: StableId::new("generic"),
+        format: "generic",
         levels: vec![LevelDescriptor::new(DiscoverableGrid::new(
-            StableId::new("generic:level"),
             template.to_owned(),
         ))],
         ..Default::default()

@@ -10,8 +10,8 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Positioned, PositionedTile, ProcessingRecipe, Request, StableId,
-    TileSourceError, resolve_relative,
+    LevelDescriptor, Positioned, PositionedTile, ProcessingRecipe, Request, TileSourceError,
+    resolve_relative,
 };
 
 const ROUTES: &[DiscoveryRoute] = &[
@@ -131,13 +131,11 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
 
     let entries = layers
         .into_iter()
-        .enumerate()
-        .map(|(index, layer)| {
+        .map(|layer| {
             let image_size = layer_size(gigapixel.size, normal_level, layer.level)?;
             let levels = build_levels(&gigapixel, &layer, image_size)?;
             let layer_title = layer.title();
             Ok(CatalogEntry::Ready(ImageDescriptor {
-                id: StableId::new(format!("second-canvas:{}", layer.id(index))),
                 title: document.title.clone().map(|title| {
                     if layer.is_normal() {
                         title
@@ -147,15 +145,13 @@ fn catalog(_: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
                         })
                     }
                 }),
-                format: StableId::new("second_canvas"),
+                format: "second_canvas",
                 levels,
                 ..Default::default()
             }))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
-    ImageCatalog::new(entries)
-        .normalize()
-        .map_err(|error| DiscoveryError::Session(error.to_string()))
+    Ok(ImageCatalog::new(entries).normalize())
 }
 
 fn layer_size(size: Size, normal_level: u32, layer_level: u32) -> Result<Vec2d, DiscoveryError> {
@@ -187,7 +183,6 @@ fn build_levels(
             let validation_origin = Arc::clone(&origin);
             let validation_pattern = Arc::clone(&pattern);
             let validation = Grid::with_requests(
-                StableId::new(format!("second-canvas:{}:{level}", layer.id(0))),
                 level_size,
                 Vec2d::square(gigapixel.tile),
                 Vec2d::default(),
@@ -205,7 +200,6 @@ fn build_levels(
             // Keep their decoded size and let the declared canvas crop padding
             // instead of scaling edge pixels down in browser runtimes.
             let source = Positioned::from_generator(
-                StableId::new(format!("second-canvas:{}:{level}", layer.id(0))),
                 Some(level_size),
                 SecondCanvasTiles {
                     origin: Arc::clone(&origin),
@@ -327,15 +321,6 @@ impl Layer {
             .as_deref()
             .or(self.name.as_deref())
             .is_some_and(|value| value.eq_ignore_ascii_case("normal"))
-    }
-
-    fn id(&self, fallback: usize) -> String {
-        self.kind
-            .as_deref()
-            .or(self.name.as_deref())
-            .map(str::to_ascii_lowercase)
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| fallback.to_string())
     }
 
     fn title(&self) -> Option<String> {

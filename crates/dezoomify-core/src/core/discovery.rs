@@ -626,11 +626,7 @@ impl DiscoveryOperation {
                 }
             }
             DiscoveryStep::Complete(catalog) => {
-                self.catalog = Some(
-                    catalog
-                        .normalize()
-                        .map_err(|error| DiscoveryError::Session(error.to_string()))?,
-                );
+                self.catalog = Some(catalog.normalize());
             }
         }
         Ok(())

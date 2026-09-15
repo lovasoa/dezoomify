@@ -45,39 +45,39 @@ pub struct Job {
     catalog: Option<ImageCatalog>,
     /// Projected wire catalog (same order as `catalog` entries).
     catalog_images: Vec<ImageDto>,
-    selected_image: Option<String>,
+    selected_image: Option<u32>,
     selected_image_index: Option<usize>,
-    selected_level: Option<String>,
+    selected_level: Option<u32>,
     selected_level_index: Option<usize>,
     destination: Option<String>,
-    planned_tiles: Vec<String>,
-    pending_tiles: Vec<String>,
-    in_flight: HashSet<String>,
-    acquired_tiles: HashSet<String>,
-    tile_attempts: HashMap<String, u32>,
+    planned_tiles: Vec<u32>,
+    pending_tiles: Vec<u32>,
+    in_flight: HashSet<u32>,
+    acquired_tiles: HashSet<u32>,
+    tile_attempts: HashMap<u32, u32>,
     /// Tile request URIs by wire tile id (planned and probe tiles).
-    tile_uris: HashMap<String, String>,
+    tile_uris: HashMap<u32, String>,
     /// Core request headers by wire tile id (sent verbatim by native hosts;
     /// browser hosts ignore them).
-    tile_headers: HashMap<String, BTreeMap<String, String>>,
+    tile_headers: HashMap<u32, BTreeMap<String, String>>,
     /// Stable byte-processing recipe names by wire tile id (`none`,
     /// `google-arts-decrypt`).
-    tile_processing: HashMap<String, String>,
+    tile_processing: HashMap<u32, String>,
     /// Output destinations by wire tile id.
-    tile_destinations: HashMap<String, Vec2d>,
+    tile_destinations: HashMap<u32, Vec2d>,
     /// Expected decoded extents by wire tile id (`None` while unknown).
-    tile_extents: HashMap<String, Option<Vec2d>>,
+    tile_extents: HashMap<u32, Option<Vec2d>>,
     /// Declared canvas size for the planned level (`None` while unknown,
     /// e.g. mid-probe or custom layouts that derive it from tiles).
     canvas_size: Option<Vec2d>,
     /// Wire tile ids emitted as probes (answered via `ProbeOutcome`).
-    probe_tiles: HashSet<String>,
+    probe_tiles: HashSet<u32>,
     /// Pending probe continuation; exactly one probe is in flight.
     probe: Option<ProbeContinuation>,
-    probe_tile: Option<String>,
+    probe_tile: Option<u32>,
     probes_emitted: u32,
     recovery_reason: Option<String>,
-    failed_tiles: Vec<String>,
+    failed_tiles: Vec<u32>,
     terminal: Option<String>,
     /// Pause v1 overlay (suspend-acquisition): when true the engine stops
     /// scheduling new `acquire-tile` effects, finishes in-flight work,
@@ -204,16 +204,13 @@ impl Job {
         self.paused
     }
 
-    /// Deferred follow-up URI for a wire image id, if that catalog entry is
+    /// Deferred follow-up URI for a catalog position, if that entry is
     /// still-deferred metadata pointing at another resource. Native hosts
     /// follow the first catalog entry's URI with a fresh job (bounded);
     /// the projected catalog event carries readiness but never URIs.
     #[must_use]
-    pub fn deferred_uri(&self, image: &str) -> Option<String> {
-        let index = self
-            .catalog_images
-            .iter()
-            .position(|entry| entry.id.as_str() == image)?;
+    pub fn deferred_uri(&self, image: u32) -> Option<String> {
+        let index = usize::try_from(image).ok()?;
         match self.catalog.as_ref()?.entries().get(index)? {
             CatalogEntry::Ready(_) => None,
             CatalogEntry::Deferred(deferred) => Some(deferred.uri.clone()),
@@ -325,20 +322,20 @@ impl Job {
                 ..
             } => self.apply_resource_bytes(&request, bytes, final_uri),
             JobResponse::FetchFailure { request, .. } => self.apply_fetch_failure(&request),
-            JobResponse::SelectedImage { image, .. } => self.apply_selected_image(&image),
-            JobResponse::SelectedLevel { level, .. } => self.apply_selected_level(&level),
+            JobResponse::SelectedImage { image, .. } => self.apply_selected_image(image),
+            JobResponse::SelectedLevel { level, .. } => self.apply_selected_level(level),
             JobResponse::DestinationGranted { destination, .. } => {
                 self.apply_destination_granted(&destination)
             }
             JobResponse::DestinationDenied { .. } => self.apply_destination_denied(),
-            JobResponse::TileOutcome { tile, ok, .. } => self.apply_tile_outcome(&tile, ok),
+            JobResponse::TileOutcome { tile, ok, .. } => self.apply_tile_outcome(tile, ok),
             JobResponse::ProbeOutcome {
                 tile,
                 available,
                 width,
                 height,
                 ..
-            } => self.apply_probe_outcome(&tile, available, width, height),
+            } => self.apply_probe_outcome(tile, available, width, height),
             JobResponse::RetryReady { attempt, .. } => self.apply_retry_ready(&attempt),
             JobResponse::PartialKeep { keep, .. } => self.apply_partial_keep(keep),
         }
@@ -403,19 +400,12 @@ impl Job {
             Ok(catalog) => catalog,
             Err(e) => return self.discovery_failed(e),
         };
-        let catalog = match catalog.normalize() {
-            Ok(catalog) => catalog,
-            Err(e) => {
-                return self.fail_via_cleanup("job.catalog-invalid", e.to_string());
-            }
-        };
+        let catalog = catalog.normalize();
         if catalog.is_empty() {
             return self
                 .fail_via_cleanup("job.no-images", "discovery produced no images".to_string());
         }
-        let images = crate::projection::project_catalog(&catalog)
-            .map_err(|e| JobError::new("job.catalog-invalid", e.to_string()))?
-            .images;
+        let images = crate::projection::project_catalog(&catalog).images;
         self.catalog = Some(catalog);
         self.catalog_images = images;
         // Sibling discovery fetches still in flight are moot once the
@@ -536,11 +526,8 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn apply_selected_image(&mut self, image: &str) -> Result<Outcome, JobError> {
-        if dezoomify_protocol::dto::ImageId::new(image).is_none() {
-            return Err(JobError::invalid_id("image must look like img:<suffix>"));
-        }
-        if self.selected_image.as_deref() == Some(image) {
+    fn apply_selected_image(&mut self, image: u32) -> Result<Outcome, JobError> {
+        if self.selected_image == Some(image) {
             return Ok(Outcome::Ignored);
         }
         if self.state != State::AwaitingImageSelection {
@@ -548,24 +535,24 @@ impl Job {
                 "image selection valid only in AwaitingImageSelection",
             ));
         }
-        let index = self
+        let index = usize::try_from(image).map_err(|_| JobError::overflow("image position"))?;
+        let selected = self
             .catalog_images
-            .iter()
-            .position(|entry| entry.id.as_str() == image)
-            .ok_or_else(|| JobError::invalid_state("unknown image id"))?;
-        if self.catalog_images[index].readiness != Readiness::Ready {
+            .get(index)
+            .ok_or_else(|| JobError::invalid_state("image position is out of range"))?;
+        if selected.readiness != Readiness::Ready {
             return Err(JobError::invalid_state(
                 "image metadata was not fetched; the image cannot be selected",
             ));
         }
-        self.selected_image = Some(image.to_string());
+        self.selected_image = Some(image);
         self.selected_image_index = Some(index);
         self.set_state(State::AwaitingLevelSelection)?;
-        let levels: Vec<String> = self.catalog_images[index]
-            .levels
-            .iter()
-            .map(|level| level.id.as_str().to_string())
-            .collect();
+        let levels: Vec<u32> = (0..self.catalog_images[index].levels.len())
+            .map(|position| {
+                u32::try_from(position).map_err(|_| JobError::overflow("level position"))
+            })
+            .collect::<Result<_, _>>()?;
         self.push_event("levels", json!({"image": image, "levels": levels}))?;
         self.push_event(
             "job-state",
@@ -574,11 +561,8 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn apply_selected_level(&mut self, level: &str) -> Result<Outcome, JobError> {
-        if dezoomify_protocol::dto::LevelId::new(level).is_none() {
-            return Err(JobError::invalid_id("level must look like lvl:<suffix>"));
-        }
-        if self.selected_level.as_deref() == Some(level) {
+    fn apply_selected_level(&mut self, level: u32) -> Result<Outcome, JobError> {
+        if self.selected_level == Some(level) {
             return Ok(Outcome::Ignored);
         }
         if self.state != State::AwaitingLevelSelection {
@@ -589,12 +573,16 @@ impl Job {
         let image_index = self
             .selected_image_index
             .ok_or_else(|| JobError::invalid_state("no image selected"))?;
-        let level_index = self.catalog_images[image_index]
+        let level_index =
+            usize::try_from(level).map_err(|_| JobError::overflow("level position"))?;
+        if self.catalog_images[image_index]
             .levels
-            .iter()
-            .position(|entry| entry.id.as_str() == level)
-            .ok_or_else(|| JobError::invalid_state("unknown level id for the selected image"))?;
-        self.selected_level = Some(level.to_string());
+            .get(level_index)
+            .is_none()
+        {
+            return Err(JobError::invalid_state("level position is out of range"));
+        }
+        self.selected_level = Some(level);
         self.selected_level_index = Some(level_index);
         let effect = self.alloc_effect_id()?;
         self.set_state(State::AwaitingDestination)?;
@@ -692,7 +680,7 @@ impl Job {
         >,
         canvas: Option<Vec2d>,
     ) -> Result<(), JobError> {
-        let mut planned: Vec<String> = Vec::new();
+        let mut planned: Vec<u32> = Vec::new();
         for tile in tiles {
             let spec = match tile {
                 Ok(spec) => spec,
@@ -701,23 +689,20 @@ impl Job {
             if spec.role == dezoomify_core::core::model::TileRole::Probe {
                 continue;
             }
-            let ordinal =
-                u32::try_from(spec.id.ordinal).map_err(|_| JobError::overflow("tile ordinal"))?;
+            let ordinal = spec.ordinal;
             if planned.len() + 1 > self.config.max_tiles as usize {
                 return self.fail_via_cleanup(
                     "job.resource-limit",
                     format!("tile plan exceeds max_tiles {}", self.config.max_tiles),
                 );
             }
-            let wire = format!("tile:{ordinal}");
-            self.tile_uris.insert(wire.clone(), spec.request.uri);
-            self.tile_headers.insert(wire.clone(), spec.request.headers);
+            self.tile_uris.insert(ordinal, spec.request.uri);
+            self.tile_headers.insert(ordinal, spec.request.headers);
             self.tile_processing
-                .insert(wire.clone(), processing_name(&spec.processing).to_string());
-            self.tile_destinations
-                .insert(wire.clone(), spec.destination);
-            self.tile_extents.insert(wire.clone(), spec.expected_size);
-            planned.push(wire);
+                .insert(ordinal, processing_name(&spec.processing).to_string());
+            self.tile_destinations.insert(ordinal, spec.destination);
+            self.tile_extents.insert(ordinal, spec.expected_size);
+            planned.push(ordinal);
         }
         if planned.is_empty() {
             return self.fail_via_cleanup(
@@ -752,42 +737,35 @@ impl Job {
                         format!("probe count exceeds max_tiles {}", self.config.max_tiles),
                     );
                 }
-                let wire = format!("tile:probe-{}", self.next_probe);
+                let wire = self.next_probe;
                 self.next_probe = self
                     .next_probe
                     .checked_add(1)
                     .ok_or_else(|| JobError::overflow("probe id"))?;
                 self.probe = Some(continuation);
-                self.probe_tile = Some(wire.clone());
-                self.probe_tiles.insert(wire.clone());
-                self.tile_uris
-                    .insert(wire.clone(), tile.request.uri.clone());
-                self.tile_headers
-                    .insert(wire.clone(), tile.request.headers.clone());
+                self.probe_tile = Some(wire);
+                self.probe_tiles.insert(wire);
+                self.tile_uris.insert(wire, tile.request.uri.clone());
+                self.tile_headers.insert(wire, tile.request.headers.clone());
                 self.tile_processing
-                    .insert(wire.clone(), processing_name(&tile.processing).to_string());
-                self.tile_destinations
-                    .insert(wire.clone(), tile.destination);
-                self.tile_extents.insert(wire.clone(), tile.expected_size);
-                self.in_flight.insert(wire.clone());
-                self.push_acquire_tile(&wire, true)?;
+                    .insert(wire, processing_name(&tile.processing).to_string());
+                self.tile_destinations.insert(wire, tile.destination);
+                self.tile_extents.insert(wire, tile.expected_size);
+                self.in_flight.insert(wire);
+                self.push_acquire_tile(wire, true)?;
                 Ok(())
             }
         }
     }
 
     /// Shared transition from a complete plan into bounded acquisition.
-    fn begin_acquisition(&mut self, planned: Vec<String>) -> Result<(), JobError> {
+    fn begin_acquisition(&mut self, planned: Vec<u32>) -> Result<(), JobError> {
         let total = planned.len() as u64;
         for wire in planned {
             self.planned_tiles.push(wire);
         }
-        self.pending_tiles = self
-            .planned_tiles
-            .iter()
-            .filter(|wire| !self.probe_tiles.contains(*wire))
-            .cloned()
-            .collect();
+        self.probe_tiles.clear();
+        self.pending_tiles = self.planned_tiles.clone();
         self.in_flight.clear();
         self.acquired_tiles.clear();
         self.set_state(State::AcquiringTiles)?;
@@ -819,11 +797,8 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn apply_tile_outcome(&mut self, tile: &str, ok: bool) -> Result<Outcome, JobError> {
-        if dezoomify_protocol::dto::TileId::new(tile).is_none() {
-            return Err(JobError::invalid_id("tile must look like tile:<suffix>"));
-        }
-        if self.probe_tiles.contains(tile) {
+    fn apply_tile_outcome(&mut self, tile: u32, ok: bool) -> Result<Outcome, JobError> {
+        if self.probe_tiles.contains(&tile) {
             return Err(JobError::invalid_state(
                 "probe tiles are answered with a probe outcome, not a tile outcome",
             ));
@@ -833,16 +808,16 @@ impl Job {
                 "tile outcome valid only in AcquiringTiles",
             ));
         }
-        if !self.planned_tiles.contains(&tile.to_string()) {
-            return Err(JobError::invalid_state("unknown tile id"));
+        if !self.planned_tiles.contains(&tile) {
+            return Err(JobError::invalid_state("tile ordinal is out of range"));
         }
-        if self.acquired_tiles.contains(tile) {
+        if self.acquired_tiles.contains(&tile) {
             return Ok(Outcome::Ignored);
         }
         if ok {
-            self.in_flight.remove(tile);
-            self.pending_tiles.retain(|t| t != tile);
-            self.acquired_tiles.insert(tile.to_string());
+            self.in_flight.remove(&tile);
+            self.pending_tiles.retain(|value| *value != tile);
+            self.acquired_tiles.insert(tile);
             let acquired = u64::try_from(self.acquired_tiles.len())
                 .map_err(|_| JobError::overflow("acquired count"))?;
             let total = self.planned_tiles.len() as u64;
@@ -860,15 +835,15 @@ impl Job {
             }
             return Ok(Outcome::Applied);
         }
-        let current = self.tile_attempts.get(tile).copied().unwrap_or(0);
+        let current = self.tile_attempts.get(&tile).copied().unwrap_or(0);
         let next = current
             .checked_add(1)
             .ok_or_else(|| JobError::overflow("tile attempts"))?;
-        self.tile_attempts.insert(tile.to_string(), next);
+        self.tile_attempts.insert(tile, next);
         if next <= self.config.max_retries {
-            self.in_flight.remove(tile);
-            if !self.pending_tiles.contains(&tile.to_string()) {
-                self.pending_tiles.insert(0, tile.to_string());
+            self.in_flight.remove(&tile);
+            if !self.pending_tiles.contains(&tile) {
+                self.pending_tiles.insert(0, tile);
             }
             self.push_event("warning", json!({"tile": tile, "attempt": next}))?;
             // Pause v1: retry wakeups are preserved in `pending_tiles` and
@@ -878,10 +853,10 @@ impl Job {
             }
             return Ok(Outcome::Applied);
         }
-        self.in_flight.remove(tile);
-        self.pending_tiles.retain(|t| t != tile);
-        if !self.failed_tiles.contains(&tile.to_string()) {
-            self.failed_tiles.push(tile.to_string());
+        self.in_flight.remove(&tile);
+        self.pending_tiles.retain(|value| *value != tile);
+        if !self.failed_tiles.contains(&tile) {
+            self.failed_tiles.push(tile);
         }
         self.recovery_reason = Some("tile".to_string());
         let effect = self.alloc_effect_id()?;
@@ -901,20 +876,17 @@ impl Job {
 
     fn apply_probe_outcome(
         &mut self,
-        tile: &str,
+        tile: u32,
         available: bool,
         width: u64,
         height: u64,
     ) -> Result<Outcome, JobError> {
-        if dezoomify_protocol::dto::TileId::new(tile).is_none() {
-            return Err(JobError::invalid_id("tile must look like tile:<suffix>"));
-        }
-        if self.state != State::Planning || self.probe_tile.as_deref() != Some(tile) {
+        if self.state != State::Planning || self.probe_tile != Some(tile) {
             return Err(JobError::invalid_state(
                 "probe outcome valid only for the outstanding probe while Planning",
             ));
         }
-        if !self.probe_tiles.contains(tile) {
+        if !self.probe_tiles.contains(&tile) {
             return Err(JobError::invalid_state("unknown probe tile id"));
         }
         let observation = if available {
@@ -932,7 +904,7 @@ impl Job {
             ObservationResult::Missing
         };
         self.probe_tile = None;
-        self.in_flight.remove(tile);
+        self.in_flight.remove(&tile);
         let Some(continuation) = self.probe.take() else {
             return Err(JobError::invalid_state("no probe continuation pending"));
         };
@@ -1163,8 +1135,8 @@ impl Job {
                 continue;
             }
             self.pending_tiles.remove(0);
-            self.in_flight.insert(next.clone());
-            self.push_acquire_tile(&next, false)?;
+            self.in_flight.insert(next);
+            self.push_acquire_tile(next, false)?;
         }
         Ok(())
     }
@@ -1172,21 +1144,21 @@ impl Job {
     /// Stable byte-processing recipe name for the wire. Hosts that decode
     /// pixels (native) apply it before decoding; hosts that never decode
     /// (browser) ignore it.
-    fn push_acquire_tile(&mut self, wire: &str, probe: bool) -> Result<(), JobError> {
+    fn push_acquire_tile(&mut self, wire: u32, probe: bool) -> Result<(), JobError> {
         let effect = self.alloc_effect_id()?;
-        let uri = self.tile_uris.get(wire).cloned().unwrap_or_default();
-        let headers = self.tile_headers.get(wire).cloned().unwrap_or_default();
+        let uri = self.tile_uris.get(&wire).cloned().unwrap_or_default();
+        let headers = self.tile_headers.get(&wire).cloned().unwrap_or_default();
         let processing = self
             .tile_processing
-            .get(wire)
+            .get(&wire)
             .cloned()
             .unwrap_or_else(|| "none".to_string());
         let destination = self
             .tile_destinations
-            .get(wire)
+            .get(&wire)
             .copied()
             .unwrap_or_default();
-        let extent = self.tile_extents.get(wire).copied().flatten();
+        let extent = self.tile_extents.get(&wire).copied().flatten();
         let mut detail = json!({
             "effect": effect,
             "tile": wire,

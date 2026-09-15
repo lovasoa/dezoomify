@@ -14,7 +14,7 @@ pub const DZI_INPUT_URL: &str = "https://example.test/image.dzi";
 
 /// A real Deep Zoom metadata document: 512x512, 256px tiles, no overlap.
 /// The core parses it into a deepzoom catalog with ten grid levels ordered
-/// ascending by size; the largest (`lvl:dzi:0:0`, last in the list) carries
+/// ascending by size; the largest (last in the list) carries
 /// four tiles with deterministic `image_files` URIs.
 pub const DZI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
@@ -111,7 +111,7 @@ impl ScriptedHost {
 
     /// Deferred follow-up URI for a wire image id, if still deferred.
     #[must_use]
-    pub fn deferred_uri_for_test(&self, image: &str) -> Option<String> {
+    pub fn deferred_uri_for_test(&self, image: u32) -> Option<String> {
         self.job.deferred_uri(image)
     }
 
@@ -135,36 +135,35 @@ impl ScriptedHost {
         serde_json::to_string_pretty(&self.transcript).unwrap_or_else(|_| "[]".to_string()) + "\n"
     }
 
-    /// Ids of a `catalog` event image: `(image id, level ids)`.
-    pub fn catalog(&self) -> Option<(String, Vec<String>)> {
+    /// Positions of the first catalog image and its levels.
+    pub fn catalog(&self) -> Option<(u32, Vec<u32>)> {
         let event = self
             .events
             .iter()
             .rev()
             .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("catalog"))?;
         let image = event.get("images")?.get(0)?;
-        let id = image.get("id")?.as_str()?.to_string();
-        let levels = image
+        let levels: Vec<u32> = image
             .get("levels")?
             .as_array()?
             .iter()
-            .filter_map(|l| l.get("id").and_then(serde_json::Value::as_str))
-            .map(ToString::to_string)
+            .enumerate()
+            .filter_map(|(position, _)| u32::try_from(position).ok())
             .collect();
-        Some((id, levels))
+        Some((0, levels))
     }
 
     /// Every `acquire-tile` effect as `(tile id, uri, probe flag)` in seq order.
-    pub fn tile_effects(&self) -> Vec<(String, String, bool)> {
+    pub fn tile_effects(&self) -> Vec<(u32, String, bool)> {
         self.effects
             .iter()
             .filter(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("acquire-tile"))
             .map(|v| {
                 (
                     v.get("tile")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|value| u32::try_from(value).ok())
+                        .unwrap_or(0),
                     v.get("uri")
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("")

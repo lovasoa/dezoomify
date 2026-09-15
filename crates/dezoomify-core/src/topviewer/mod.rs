@@ -10,7 +10,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId, resolve_relative, resolve_url_template,
+    LevelDescriptor, Request, resolve_relative, resolve_url_template,
 };
 use crate::web_page::decode_html_entities;
 
@@ -268,7 +268,6 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         .replace("{extension}", "jpg");
     let template: Arc<str> = template.into();
     let source = Grid::with_requests(
-        StableId::new("topviewer:level"),
         Vec2d {
             x: width,
             y: height,
@@ -284,9 +283,8 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid TopViewer grid: {error}")))?;
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("topviewer:image"),
         title: filepath.and_then(image_title),
-        format: StableId::new("topviewer"),
+        format: "topviewer",
         levels: vec![LevelDescriptor::new(source)],
         ..Default::default()
     })]))

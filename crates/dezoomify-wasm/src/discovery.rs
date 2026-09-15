@@ -199,47 +199,10 @@ impl DiscoverySession {
             .take()
             .ok_or_else(|| AdapterError::new(AdapterErrorCode::WrongState, "no operation"))?;
         let catalog = operation.finish().map_err(discovery_error)?;
-        let projected = project_catalog(&catalog)
-            .map_err(|error| malformed(format!("catalog projection failed: {error}")))?;
+        let projected = project_catalog(&catalog);
         self.catalog = Some(catalog);
         serde_json::to_string(&projected)
             .map_err(|e| malformed(format!("catalog projection failed: {e}")))
-    }
-
-    fn indexes_for_ids(
-        &self,
-        image_id: &str,
-        level_id: &str,
-    ) -> Result<(usize, usize), AdapterError> {
-        let catalog = self.catalog.as_ref().ok_or_else(|| {
-            AdapterError::new(AdapterErrorCode::WrongState, "discovery not finished")
-        })?;
-        let projected = project_catalog(catalog)
-            .map_err(|error| malformed(format!("catalog projection failed: {error}")))?;
-        for (image_index, image) in projected.images.iter().enumerate() {
-            if image.id.as_str() != image_id {
-                continue;
-            }
-            if let Some(level_index) = image
-                .levels
-                .iter()
-                .position(|level| level.id.as_str() == level_id)
-            {
-                return Ok((image_index, level_index));
-            }
-            return Err(malformed("level id is not in the selected image"));
-        }
-        Err(malformed("image id is not in the catalog"))
-    }
-
-    /// Project the tile plan of a stable protocol image and level id.
-    pub fn level_tiles_by_id(
-        &mut self,
-        image_id: &str,
-        level_id: &str,
-    ) -> Result<String, AdapterError> {
-        let (image, level) = self.indexes_for_ids(image_id, level_id)?;
-        self.level_tiles(image, level)
     }
 
     /// Project the tile plan of one level. For grid/positioned sources this
@@ -329,19 +292,6 @@ impl DiscoverySession {
         };
         let next = step.submit(observation).map_err(tile_error)?;
         self.advance_probe(image, level, next)
-    }
-
-    /// Continue probing a stable protocol image and level id.
-    pub fn probe_submit_by_id(
-        &mut self,
-        image_id: &str,
-        level_id: &str,
-        ok: bool,
-        width: u32,
-        height: u32,
-    ) -> Result<String, AdapterError> {
-        let (image, level) = self.indexes_for_ids(image_id, level_id)?;
-        self.probe_submit(image, level, ok, width, height)
     }
 
     fn advance_probe(
@@ -523,24 +473,8 @@ mod tests {
         let catalog: serde_json::Value = serde_json::from_str(&catalog).expect("catalog parses");
         assert_eq!(catalog["images"].as_array().expect("images").len(), 1);
         assert_eq!(catalog["images"][0]["format"], "zoomify");
-        assert_eq!(catalog["images"][0]["id"], "img:zoomify:image");
+        assert_eq!(catalog["images"][0]["title"], "a");
         assert_eq!(catalog["images"][0]["levels"][0]["tileWidth"], 256);
-
-        let image_id = catalog["images"][0]["id"].as_str().expect("image id");
-        let level_id = catalog["images"][0]["levels"]
-            .as_array()
-            .expect("levels")
-            .iter()
-            .find(|level| level["width"] == 512)
-            .and_then(|level| level["id"].as_str())
-            .expect("512-wide level id");
-        let plan_by_id: serde_json::Value = serde_json::from_str(
-            &session
-                .level_tiles_by_id(image_id, level_id)
-                .expect("stable-id plan"),
-        )
-        .expect("stable-id plan parses");
-        assert_eq!(plan_by_id["canvas"]["x"], 512);
 
         // Largest level: 512x512, 2x2 tiles. Find it by canvas size.
         let mut plan = None;

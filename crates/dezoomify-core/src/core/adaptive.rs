@@ -9,7 +9,7 @@ use regex::Regex;
 use crate::Vec2d;
 use crate::template::{Part, Template};
 
-use super::model::{Request, StableId, TileId, TileRole, TileSpec};
+use super::model::{Request, TileRole, TileSpec};
 use super::tile_plan::{Grid, GridRequests, GridTile, TileSourceError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -78,7 +78,6 @@ fn render_template(template: &Template<Dimension>, x: u32, y: u32) -> String {
 
 #[derive(Clone, Debug)]
 pub struct DiscoverableGrid {
-    level: StableId,
     template: Template<Dimension>,
 }
 
@@ -89,7 +88,6 @@ pub struct DiscoverableGrid {
 /// after which the program can resolve to a normal [`Grid`].
 #[derive(Clone)]
 pub struct AdaptiveSource {
-    level: StableId,
     program: Arc<dyn AdaptiveProgram>,
 }
 
@@ -97,7 +95,6 @@ impl fmt::Debug for AdaptiveSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("AdaptiveSource")
-            .field("level", &self.level)
             .field("program", &self.program)
             .finish()
     }
@@ -110,16 +107,10 @@ pub trait AdaptiveProgram: fmt::Debug + Send + Sync {
 
 impl AdaptiveSource {
     #[must_use]
-    pub fn new(level: StableId, program: impl AdaptiveProgram + 'static) -> Self {
+    pub fn new(program: impl AdaptiveProgram + 'static) -> Self {
         Self {
-            level,
             program: Arc::new(program),
         }
-    }
-
-    #[must_use]
-    pub const fn id(&self) -> &StableId {
-        &self.level
     }
 
     #[must_use]
@@ -130,16 +121,10 @@ impl AdaptiveSource {
 
 impl DiscoverableGrid {
     #[must_use]
-    pub fn new(level: StableId, template: String) -> Self {
+    pub fn new(template: String) -> Self {
         Self {
-            level,
             template: parse_template(template),
         }
-    }
-
-    #[must_use]
-    pub const fn id(&self) -> &StableId {
-        &self.level
     }
 
     #[must_use]
@@ -252,7 +237,7 @@ struct GenericSearch {
     observed: HashMap<Vec2d, bool>,
     output_points: Vec<Vec2d>,
     next_point: Vec2d,
-    next_id: u64,
+    next_ordinal: u32,
     tile_size: Option<Vec2d>,
 }
 
@@ -264,7 +249,7 @@ impl GenericSearch {
             observed: HashMap::new(),
             output_points: Vec::new(),
             next_point: Vec2d::default(),
-            next_id: 0,
+            next_ordinal: 0,
             tile_size: None,
         }
     }
@@ -275,17 +260,20 @@ impl GenericSearch {
         let Some(destination) = point.checked_mul(size) else {
             return DiscoverableStep::Error(TileSourceError::ArithmeticOverflow);
         };
-        let id = self.next_id;
+        let ordinal = self.next_ordinal;
         let template = self.source.template.clone();
         let mut search = self;
-        search.next_id = search.next_id.saturating_add(1);
+        let Some(next_ordinal) = search.next_ordinal.checked_add(1) else {
+            return DiscoverableStep::Error(TileSourceError::ArithmeticOverflow);
+        };
+        search.next_ordinal = next_ordinal;
         let role = if point == Vec2d::default() || search.tile_size.is_some() {
             TileRole::ProbeAndOutput
         } else {
             TileRole::Probe
         };
         let tile = TileSpec {
-            id: TileId::new(search.source.level.clone(), id),
+            ordinal,
             request: Request::new(render_template(&template, point.x, point.y)),
             destination,
             expected_size: None,
@@ -330,7 +318,6 @@ impl GenericSearch {
             .collect::<Option<Vec<_>>>()
             .ok_or(TileSourceError::ArithmeticOverflow)?;
         Grid::new(
-            self.source.level,
             image_size,
             tile_size,
             Vec2d::default(),
@@ -496,7 +483,7 @@ mod tests {
     #[test]
     fn generic_resolves_to_exact_grid() {
         let existing = ["0,0", "1,0", "2,0", "0,1", "1,1", "2,1"];
-        let mut step = DiscoverableGrid::new("level".into(), "{{X}},{{y}}".into()).start();
+        let mut step = DiscoverableGrid::new("{{X}},{{y}}".into()).start();
         for _ in 0..20 {
             step = match step {
                 DiscoverableStep::Probe { tile, continuation } => {
@@ -523,7 +510,7 @@ mod tests {
 
     #[test]
     fn generic_search_without_tiles_is_empty() {
-        let mut step = DiscoverableGrid::new("level".into(), "{{X}},{{Y}}".into()).start();
+        let mut step = DiscoverableGrid::new("{{X}},{{Y}}".into()).start();
         for _ in 0..64 {
             step = match step {
                 DiscoverableStep::Probe { continuation, .. } => {
@@ -540,7 +527,7 @@ mod tests {
     #[test]
     fn coordinate_overflow_becomes_an_adaptive_error() {
         let DiscoverableStep::Probe { continuation, .. } =
-            DiscoverableGrid::new("level".into(), "{{X}},{{Y}}".into()).start()
+            DiscoverableGrid::new("{{X}},{{Y}}".into()).start()
         else {
             panic!("generic search must begin with a probe")
         };

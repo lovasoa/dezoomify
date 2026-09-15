@@ -67,7 +67,7 @@ export interface DiscoveryClientDeps {
 
 export interface DiscoveryClient {
   start(url: string): Promise<WebCatalog>;
-  plan(image: string, level: string): Promise<TilePlan>;
+  plan(image: number, level: number): Promise<TilePlan>;
   process(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer>;
   dispose(): void;
 }
@@ -81,8 +81,8 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
   const { worker } = deps;
   let pending: Pending | null = null;
   let pendingKind: "start" | "plan" | "process" | null = null;
-  let currentImage = "";
-  let currentLevel = "";
+  let currentImage = 0;
+  let currentLevel = 0;
   let disposed = false;
 
   // A worker that never starts (script load failure, corrupted content) would
@@ -235,11 +235,11 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
 
   return {
     start(url: string): Promise<WebCatalog> {
-      currentImage = "";
-      currentLevel = "";
+      currentImage = 0;
+      currentLevel = 0;
       return send({ type: "start", url }, "start") as Promise<WebCatalog>;
     },
-    plan(image: string, level: string): Promise<TilePlan> {
+    plan(image: number, level: number): Promise<TilePlan> {
       currentImage = image;
       currentLevel = level;
       return send({ type: "plan", image, level }, "plan") as Promise<TilePlan>;

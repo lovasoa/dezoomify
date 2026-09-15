@@ -8,7 +8,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId, floor_index,
+    ImageDescriptor, LevelDescriptor, Request, floor_index,
 };
 
 pub const SPEC: DezoomerSpec = DezoomerSpec::new(
@@ -108,9 +108,8 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         ));
     }
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("arcgis:image"),
         title,
-        format: StableId::new("arcgis"),
+        format: "arcgis",
         levels,
         ..Default::default()
     })]))
@@ -174,8 +173,7 @@ fn build_levels(
     tile_info
         .lods
         .into_iter()
-        .enumerate()
-        .map(|(ordinal, lod)| {
+        .map(|lod| {
             if !lod.resolution.is_finite() || lod.resolution <= 0.0 {
                 return Err(DiscoveryError::Session(
                     "invalid ArcGIS LOD resolution".into(),
@@ -202,7 +200,6 @@ fn build_levels(
             let parameters = Arc::clone(parameters);
             let level = lod.level;
             let source = Grid::with_requests(
-                StableId::new(format!("arcgis:{ordinal}")),
                 Vec2d {
                     x: width,
                     y: height,

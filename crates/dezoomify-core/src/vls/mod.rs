@@ -8,7 +8,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId,
+    ImageDescriptor, LevelDescriptor, Request,
 };
 use crate::web_page::page_title;
 
@@ -91,7 +91,6 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     base.set_fragment(None);
     let base: Arc<str> = base.to_string().trim_end_matches('/').into();
     let source = Grid::with_requests(
-        StableId::new("vls:level"),
         Vec2d {
             x: width,
             y: height,
@@ -102,9 +101,8 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid VLS grid: {error}")))?;
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("vls:image"),
         title: page_title(&page),
-        format: StableId::new("vls"),
+        format: "vls",
         levels: vec![LevelDescriptor::new(source)],
         ..Default::default()
     })]))
