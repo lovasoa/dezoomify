@@ -5,10 +5,10 @@
   "type": "module",
   "description": "Test-only Node conformance harness for the dezoomify-wasm adapter. No runtime dependencies, no network.",
   "scripts": {
-    "test": "node --test src/node.spec.mjs",
-    "test:node": "node --test src/node.spec.mjs"
+    "test": "node --test-reporter=dot --test src/node.spec.mjs",
+    "test:node": "node --test-reporter=dot --test src/node.spec.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   }
 }

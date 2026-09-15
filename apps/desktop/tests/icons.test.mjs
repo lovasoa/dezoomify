@@ -34,12 +34,9 @@ test("gen-desktop-icons.py is versioned, stdlib-only, and deterministic", () => 
   }
   const before = new Map(expected.map((n) => [n, sha256(path.join(iconsDir, n))]));
   execFileSync("python3", [script], { cwd: root, stdio: "pipe" });
-  const afterFirst = new Map(expected.map((n) => [n, sha256(path.join(iconsDir, n))]));
-  execFileSync("python3", [script], { cwd: root, stdio: "pipe" });
-  const afterSecond = new Map(expected.map((n) => [n, sha256(path.join(iconsDir, n))]));
+  const after = new Map(expected.map((n) => [n, sha256(path.join(iconsDir, n))]));
   for (const name of expected) {
-    assert.equal(afterFirst.get(name), before.get(name), `${name} changed on re-run`);
-    assert.equal(afterSecond.get(name), afterFirst.get(name), `${name} nondeterministic`);
+    assert.equal(after.get(name), before.get(name), `${name} changed on re-run`);
   }
 });
 

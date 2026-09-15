@@ -6,7 +6,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "test": "node --test ../../test/controller.test.mjs",
+    "test": "node --test-reporter=dot --test ../../test/controller.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {

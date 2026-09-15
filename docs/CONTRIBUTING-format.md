@@ -95,7 +95,7 @@ Run the gates from the repository root:
 ```sh
 cargo xtask fixtures verify
 cargo xtask test core --parity
-cargo xtask test scenario --scenario <scenario-id>
+cargo xtask test scenario
 ```
 
 The pull request contains the pasted URL, the capture output, the expected

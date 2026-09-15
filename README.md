@@ -19,9 +19,15 @@ High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
 ```sh
 cargo xtask setup     # verify tools and install the pnpm workspace
 cargo xtask check     # formatting, lint, artifact validation
-cargo xtask test      # fast deterministic test suite
-cargo xtask test all  # full deterministic suite (no public network)
+cargo xtask test      # one Rust workspace run + one combined Node unit run
+cargo xtask test all  # add generated WASM and browser integration (no public network)
 ```
+
+The fast test does not run `check`, generated WASM bindings, packaging, or
+browsers. Node 24 is the minimum supported Node version. `test all` adds the
+generated WASM Node harness, Chromium website E2E, and full Chromium/Firefox
+extension integration without rerunning the fast matrix; the desktop real
+window remains explicit.
 
 `cargo xtask test live --public` is the only command that contacts real
 websites (explicit opt-in). `cargo xtask --help` lists everything else,

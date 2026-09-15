@@ -139,15 +139,6 @@ mod tests {
     }
 
     #[test]
-    fn repo_is_free_of_em_dashes() {
-        // The whole-point guard: the workspace must cleanly pass.
-        assert!(
-            super::verify(&[]).is_ok(),
-            "repo must contain no em dashes (U+2014); run `cargo xtask check` for the list"
-        );
-    }
-
-    #[test]
     fn skip_dirs_cover_evidence_and_build_output() {
         for dir in [
             ".git",

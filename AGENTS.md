@@ -13,8 +13,8 @@ Run from the repository root:
 
 ```sh
 cargo xtask check          # fmt + clippy + fixture/protocol artifact validation
-cargo xtask test           # fast deterministic suite (never contacts public sites)
-cargo xtask test <lane>    # core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|all
+cargo xtask test           # one Rust workspace run + one combined Node unit run
+cargo xtask test <target>  # core|protocol|job|wasm|browser|ui|web|native|desktop|extension|native-messaging|scenario|all
 cargo xtask build <target> # wasm|web|cli|desktop|extension
 cargo xtask dev <target>   # ui|web|desktop|extension
 cargo xtask release version|plan|build|sign|verify|publish
@@ -26,6 +26,7 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 
 - `cargo xtask test live --public` is the only command that contacts real
   websites; it is opt-in and advisory.
+- Node 24 is the minimum supported Node version.
 - Iterate with `check` plus bare `test`, run the narrowest focused lane after
   each change, and finish with `test all` plus `cargo xtask ci local`.
 - Full grammar: `cargo xtask --help`, [`docs/development.md`](docs/development.md),

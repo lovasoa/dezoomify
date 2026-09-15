@@ -56,29 +56,24 @@ pub fn test_browser(args: &[String]) -> Result<(), String> {
         // expectation contracts without executable inputs; their described
         // flows run end-to-end in the real Chromium E2E below (explicit via
         // --browser, or in test web).
-        println!("test browser --scenario {id}: ok (expectation validated; unit matrix)");
     }
     if build_only {
         return build_only_check();
     }
-    run_node(&["--test", "packages/browser-runtime/test/*.test.mjs"])?;
+    run_node(&["packages/browser-runtime/test/*.test.mjs"])?;
     if browser_flag {
         // Real headless browser run: the webapp E2E drives the compiled wasm
         // adapter, browser-runtime workers, decoding, canvas assembly, and
         // real save inside actual Chromium over the deterministic fixture
         // server. Unknown engines failed closed above.
         run_e2e()?;
-        println!("test browser: ok (headless chromium executed the browser-runtime E2E)");
-    } else {
-        println!("test browser: ok");
     }
     Ok(())
 }
 
 fn build_only_check() -> Result<(), String> {
     // Type-stripped import check: every runtime source must load under node.
-    run_node(&["--test", "packages/browser-runtime/test/types.test.mjs"])?;
-    println!("test browser --build-only: ok");
+    run_node(&["packages/browser-runtime/test/types.test.mjs"])?;
     Ok(())
 }
 
@@ -87,56 +82,25 @@ pub fn test_ui(args: &[String]) -> Result<(), String> {
     // Documented ui gate (docs/testing.md): controller, view rendering,
     // accessibility, i18n, and mobile suites.
     generate_web_artifacts()?;
-    for suite in [
-        "test/controller.test.mjs",
-        "test/view-rendering.test.mjs",
-        "test/ui-i18n.test.mjs",
-        "test/ui-a11y.test.mjs",
-        "test/ui-mobile.test.mjs",
-    ] {
-        run_node(&["--test", suite])?;
-    }
-    println!("test ui: ok");
-    Ok(())
+    run_node(&["test/{controller,view-rendering,ui-i18n,ui-a11y,ui-mobile}.test.mjs"])
 }
 
 pub fn test_web(args: &[String]) -> Result<(), String> {
     let mut e2e = false;
-    let mut skip_browser_matrix = false;
-    let mut no_unit = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--e2e" => e2e = true,
             "--no-e2e" => e2e = false,
-            "--skip-browser-matrix" => skip_browser_matrix = true,
-            "--no-unit" => no_unit = true,
             other => return Err(format!("unknown test web arg '{other}'")),
         }
         i += 1;
     }
     generate_web_artifacts()?;
-    if no_unit {
-        println!("web unit tests: skipped (--no-unit)");
-    } else if skip_browser_matrix {
-        // Aggregate dedupe: the browser-runtime matrix already ran under
-        // `test browser` in the same aggregate, so only the website suite
-        // runs here. Standalone `test web` omits the flag and runs both.
-        run_node(&["--test", "test/*.test.mjs"])?;
-        println!("web unit tests: ok (browser-runtime matrix skipped; covered by test browser)");
-    } else {
-        run_node(&[
-            "--test",
-            "test/*.test.mjs",
-            "packages/browser-runtime/test/*.test.mjs",
-        ])?;
-        println!("web unit tests: ok");
-    }
+    run_node(&["test/*.test.mjs"])?;
     if e2e {
         run_e2e()?;
-        println!("webapp E2E (chromium): ok");
     }
-    println!("test web: ok");
     Ok(())
 }
 
@@ -161,7 +125,7 @@ fn ensure_help_deps() -> Result<(), String> {
 /// Regenerate the untracked web artifacts (help pages) the node test suites
 /// read. The generated files are never committed: deployments build them via
 /// `scripts/build-site.mjs`.
-fn generate_web_artifacts() -> Result<(), String> {
+pub(crate) fn generate_web_artifacts() -> Result<(), String> {
     ensure_help_deps()?;
     let script = "scripts/build-help.mjs";
     let status = Command::new("node")
@@ -183,7 +147,8 @@ fn generate_web_artifacts() -> Result<(), String> {
 pub(crate) fn run_e2e() -> Result<(), String> {
     let root = super::repo_root();
     let status = super::desktop::pnpm_command()?
-        .args(["--filter", "webapp-e2e", "test"])
+        .args(["--reporter=silent", "--filter", "webapp-e2e", "test"])
+        .env("NODE_NO_WARNINGS", "1")
         .current_dir(&root)
         .status()
         .map_err(|e| format!("failed to run pnpm: {e}"))?;
@@ -215,7 +180,7 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
     }
     build_site(false)?;
     check_dist_budget()?;
-    run_node(&["--test", "test/*.test.mjs"])?;
+    run_node(&["test/*.test.mjs"])?;
     println!(
         "build web: ok (help, wasm glue, Vite app, and dist/ assembled by scripts/build-site.mjs)"
     );
@@ -525,48 +490,11 @@ fn dev_desktop() -> Result<(), String> {
 }
 
 fn run_node(args: &[&str]) -> Result<(), String> {
-    // Shell-expand globs (Command does not glob): expand *.test.mjs manually.
-    let mut expanded: Vec<String> = Vec::new();
-    for arg in args {
-        if arg.contains('*') {
-            let pattern = super::repo_root().join(arg);
-            // `repo_root()` is absolute, so a parent always exists; a
-            // missing one is a usage error, not a panic (6.1 unwrap policy).
-            let Some(dir) = pattern.parent() else {
-                return Err(format!("bad glob pattern '{arg}'"));
-            };
-            let dir = dir.to_path_buf();
-            for entry in std::fs::read_dir(&dir).map_err(|e| format!("read dir: {e}"))? {
-                let path = entry.map_err(|e| format!("dir entry: {e}"))?.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("mjs") {
-                    expanded.push(path.to_string_lossy().into_owned());
-                }
-            }
-        } else {
-            expanded.push(arg.to_string());
-        }
-    }
-    // Every suite loads the TSX hook so React `.tsx` sources import directly.
-    let status = Command::new("node")
-        .arg("--import")
-        .arg("./test/tsx-loader.mjs")
-        .args(&expanded)
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run node: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "node tests failed".to_string())
+    super::command::node_test(args, true)
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn browser_build_only() {
-        assert!(super::build_only_check().is_ok());
-    }
-
     #[test]
     fn dev_site_no_wasm_flag() {
         assert_eq!(super::parse_dev_site_args("dev web", &[]), Ok(false));

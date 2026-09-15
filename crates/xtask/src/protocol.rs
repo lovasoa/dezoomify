@@ -74,7 +74,7 @@ fn generate_check() -> Result<(), String> {
 fn check(_args: &[String]) -> Result<(), String> {
     // Markers/fingerprints, golden vectors (Rust), TS goldens, portability.
     generate_check()?;
-    run_cargo(&["test", "-p", "dezoomify-protocol", "--test", "golden"])?;
+    super::command::cargo_test(&["-p", "dezoomify-protocol", "--test", "golden"])?;
     run_node_test()?;
     wasm_portability_check()?;
     println!("protocol check: ok");
@@ -87,16 +87,16 @@ pub fn test_protocol() -> Result<(), String> {
     // inline the check steps instead of calling `check()` which would rerun
     // Node + golden a second time. Each suite still runs once.
     generate_check()?;
-    run_cargo(&["test", "-p", "dezoomify-protocol"])?;
+    super::command::cargo_test(&["-p", "dezoomify-protocol"])?;
     run_node_test()?;
     wasm_portability_check()?;
-    println!("test protocol: ok");
     Ok(())
 }
 
 fn wasm_portability_check() -> Result<(), String> {
-    run_cargo(&[
+    super::command::cargo(&[
         "check",
+        "--quiet",
         "-p",
         "dezoomify-protocol",
         "--target",
@@ -105,39 +105,6 @@ fn wasm_portability_check() -> Result<(), String> {
     ])
 }
 
-fn run_cargo(args: &[&str]) -> Result<(), String> {
-    let status = Command::new("cargo")
-        .args(args)
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run cargo: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| format!("cargo {} failed", args.join(" ")))
-}
-
 fn run_node_test() -> Result<(), String> {
-    let status = Command::new("node")
-        .args(["--test", "packages/protocol-ts/test/*.test.mjs"])
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run node test: {e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "protocol-ts tests failed".to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn protocol_check() {
-        assert!(super::check(&[]).is_ok());
-    }
-
-    #[test]
-    fn protocol_generate_check() {
-        assert!(super::generate(&["--check".to_string()]).is_ok());
-    }
+    super::command::node_test(&["packages/protocol-ts/test/*.test.mjs"], false)
 }

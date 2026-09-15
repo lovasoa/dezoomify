@@ -401,9 +401,4 @@ mod tests {
         assert_eq!(sum_js_bytes(&base).unwrap(), 8);
         std::fs::remove_dir_all(&base).unwrap();
     }
-
-    #[test]
-    fn repo_passes_content_guards() {
-        assert!(super::verify(&[]).is_ok());
-    }
 }
