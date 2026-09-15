@@ -54,8 +54,7 @@ export const it = {
     "Rilevamento automatico dei visori per archivi digitali protetti e pagine complesse",
   "view.ext.availableOn": "Disponibile su",
   "view.ext.chromeStore": "Chrome Web Store",
-  "view.ext.firefoxVersion": "Versione Firefox",
-  "view.ext.firefoxSoon": "In arrivo",
+  "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Perche usare l estensione del browser?",
   "view.ext.why1Title": "Pagine con accesso:",
   "view.ext.why1Body":
@@ -67,8 +66,7 @@ export const it = {
   "view.ext.why3Body":
     "Osserva solo la pagina che le hai indicato, e solo dopo che hai premuto il pulsante. Non sorveglia la tua navigazione in sottofondo.",
   "view.ext.howTitle": "Come usarla in 3 passi",
-  "view.ext.step1":
-    "Installa l estensione dal Chrome Web Store. La versione Firefox e in arrivo.",
+  "view.ext.step1": "Installa l estensione dal Chrome Web Store o da Firefox Browser Add-ons.",
   "view.ext.step2":
     "Vai alla pagina del museo o della biblioteca che mostra la tua opera, accedendo se serve.",
   "view.ext.step3":

@@ -6,7 +6,7 @@ High-resolution zoomable images (IIIF, Deep Zoom, Zoomify, krpano, and more).
   core discovery, direct-first transport with automatic eligible metadata
   proxy fallback, canvas assembly, and real save (Chromium E2E covered).
 - Extension (`apps/extension/`): explicit-action scan with unit coverage;
-  store listing submitted (pending review).
+  available from the Chrome Web Store and Firefox Browser Add-ons.
 - Desktop (`apps/desktop/`): real Tauri window with the five capability
   commands, native save dialog, and installer bundling
   (unsigned Linux x86_64 `.deb`, Windows x86_64 `.msi`, and Apple silicon

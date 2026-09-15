@@ -155,8 +155,7 @@ const en = {
     "Automatic viewer discovery for password-protected digital archives and complex pages",
   "view.ext.availableOn": "Available on",
   "view.ext.chromeStore": "Chrome Web Store",
-  "view.ext.firefoxVersion": "Firefox version",
-  "view.ext.firefoxSoon": "On its way",
+  "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Why use the Browser Extension?",
   "view.ext.why1Title": "Signed-In Pages:",
   "view.ext.why1Body":
@@ -168,8 +167,7 @@ const en = {
   "view.ext.why3Body":
     "It only looks at the page you pointed it at, only after you pressed the button. It does not watch your browsing in the background.",
   "view.ext.howTitle": "How to use it in 3 steps",
-  "view.ext.step1":
-    "Install the extension from the Chrome Web Store. The Firefox version is on its way.",
+  "view.ext.step1": "Install the extension from the Chrome Web Store or Firefox Browser Add-ons.",
   "view.ext.step2":
     "Navigate to the museum or library page displaying your artwork, logging in if needed.",
   "view.ext.step3":

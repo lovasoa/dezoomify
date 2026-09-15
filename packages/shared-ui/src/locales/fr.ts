@@ -54,8 +54,7 @@ export const fr = {
     "Detection automatique des visionneuses pour les archives numeriques protegees et les pages complexes",
   "view.ext.availableOn": "Disponible sur",
   "view.ext.chromeStore": "Chrome Web Store",
-  "view.ext.firefoxVersion": "Version Firefox",
-  "view.ext.firefoxSoon": "En preparation",
+  "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Pourquoi utiliser l extension de navigateur ?",
   "view.ext.why1Title": "Pages avec connexion :",
   "view.ext.why1Body":
@@ -67,8 +66,7 @@ export const fr = {
   "view.ext.why3Body":
     "Elle examine uniquement la page que vous lui avez indiquee, et seulement apres que vous avez appuye sur le bouton. Elle n observe pas votre navigation en arriere-plan.",
   "view.ext.howTitle": "Comment l utiliser en 3 etapes",
-  "view.ext.step1":
-    "Installez l extension depuis le Chrome Web Store. La version Firefox est en preparation.",
+  "view.ext.step1": "Installez l extension depuis le Chrome Web Store ou Firefox Browser Add-ons.",
   "view.ext.step2":
     "Rendez-vous sur la page du musee ou de la bibliotheque qui montre votre oeuvre, en vous connectant si besoin.",
   "view.ext.step3":

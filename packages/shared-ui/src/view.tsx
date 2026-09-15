@@ -1224,6 +1224,7 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
 
 const CHROME_STORE_URL =
   "https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm";
+const FIREFOX_STORE_URL = "https://addons.mozilla.org/en-US/firefox/addon/dezoomify/";
 
 export function showExtensionGuidance(hostDocument: Document): void {
   mountOverlay(hostDocument, (close) => (
@@ -1255,7 +1256,7 @@ export function showExtensionGuidance(hostDocument: Document): void {
                 <div style={storeNameStyle}>{t("view.ext.chromeStore")}</div>
               </div>
             </a>
-            <div className="dz-btn-store" aria-disabled="true">
+            <a href={FIREFOX_STORE_URL} target="_blank" rel="noopener" className="dz-btn-store">
               <svg
                 width="24"
                 height="24"
@@ -1269,10 +1270,10 @@ export function showExtensionGuidance(hostDocument: Document): void {
                 <path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12c0-2.5 1-4.8 2.6-6.5C7.2 9 8 13 12 14c0-2 1-3.5 2.5-4.5C13 8 11.5 6 12 2z" />
               </svg>
               <div>
-                <div style={storeLabelStyle}>{t("view.ext.firefoxVersion")}</div>
-                <div style={storeNameStyle}>{t("view.ext.firefoxSoon")}</div>
+                <div style={storeLabelStyle}>{t("view.ext.availableOn")}</div>
+                <div style={storeNameStyle}>{t("view.ext.firefoxStore")}</div>
               </div>
-            </div>
+            </a>
           </div>
           <div className="dz-modal-section">
             <div className="dz-modal-section-title">{t("view.ext.whyTitle")}</div>

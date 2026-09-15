@@ -54,8 +54,7 @@ export const de = {
     "Automatische Viewer-Erkennung fuer passwortgeschuetzte digitale Archive und komplexe Seiten",
   "view.ext.availableOn": "Verfuegbar auf",
   "view.ext.chromeStore": "Chrome Web Store",
-  "view.ext.firefoxVersion": "Firefox-Version",
-  "view.ext.firefoxSoon": "In Vorbereitung",
+  "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Warum die Browser-Erweiterung verwenden?",
   "view.ext.why1Title": "Angemeldete Seiten:",
   "view.ext.why1Body":
@@ -67,8 +66,7 @@ export const de = {
   "view.ext.why3Body":
     "Sie betrachtet nur die Seite, auf die Sie gezeigt haben, und erst nachdem Sie die Schaltflache gedrueckt haben. Sie beobachtet Ihr Surfen nicht im Hintergrund.",
   "view.ext.howTitle": "So verwenden Sie sie in 3 Schritten",
-  "view.ext.step1":
-    "Installieren Sie die Erweiterung aus dem Chrome Web Store. Die Firefox-Version ist in Vorbereitung.",
+  "view.ext.step1": "Installieren Sie die Erweiterung aus dem Chrome Web Store oder von Firefox Browser Add-ons.",
   "view.ext.step2":
     "Offnen Sie die Museums- oder Bibliotheksseite mit Ihrem Kunstwerk und melden Sie sich bei Bedarf an.",
   "view.ext.step3":
