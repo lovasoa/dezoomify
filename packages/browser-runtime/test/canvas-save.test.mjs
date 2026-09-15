@@ -36,13 +36,13 @@ test("stableErrorCode ignores browser exception numeric codes", () => {
   assert.equal(stableErrorCode(null), "DISCOVERY_FAILED");
 });
 
-test("saveBlobViaAnchor downloads the suggested WxH name", () => {
+test("saveBlobViaAnchor downloads the core title or suggested WxH fallback", () => {
   const appended = [];
   const anchor = { href: "", download: "", clicked: false, click() { this.clicked = true; }, remove() {} };
   const doc = { createElement: () => anchor, body: { appendChild: (el) => appended.push(el) } };
-  saveBlobViaAnchor(doc, "blob:abc", 800, 600);
+  saveBlobViaAnchor(doc, "blob:abc", 800, 600, "An image");
   assert.equal(anchor.href, "blob:abc");
-  assert.equal(anchor.download, "dezoomify-800x600.png");
+  assert.equal(anchor.download, "An image.png");
   assert.equal(anchor.clicked, true);
   assert.equal(appended.length, 1);
 });

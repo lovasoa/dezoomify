@@ -11,14 +11,14 @@ function image(id, levels, readiness = "ready") {
   return { id, readiness, levels };
 }
 
-test("picks the largest declared level of the largest ready image", () => {
+test("picks the largest declared level and preserves the core title", () => {
   const catalog = {
     images: [
       image("img:0", [level("lvl:a", 128, 128), level("lvl:b", 64, 64)]),
-      image("img:1", [level("lvl:c", 512, 512), level("lvl:d", 256, 256)]),
+      { ...image("img:1", [level("lvl:c", 512, 512), level("lvl:d", 256, 256)]), title: "Cover" },
     ],
   };
-  assert.deepEqual(pickEngineSelection(catalog), { image: "img:1", level: "lvl:c" });
+  assert.deepEqual(pickEngineSelection(catalog), { image: "img:1", level: "lvl:c", title: "Cover" });
 });
 
 test("skips deferred images and images without levels", () => {
