@@ -182,7 +182,7 @@ impl JobHandle {
     }
 
     /// Finish after the caller has atomically published the output.
-    pub fn finish(&mut self, _deprecated_output_hash: String) -> JobResult {
+    pub fn finish(&mut self) -> JobResult {
         if !self.done {
             self.emit("completed");
             self.done = true;

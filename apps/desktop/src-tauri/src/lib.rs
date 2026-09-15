@@ -1,7 +1,7 @@
 // Desktop shell library root: shared constants and module wiring.
 //
-// Lean offline shell: pure Rust only (std + serde/serde_json for wire JSON +
-// ed25519 for updater); no Tauri SDK, no network, no filesystem effects in
+// Lean offline shell: pure Rust only (std + serde/serde_json for wire JSON);
+// no Tauri SDK, no network, no filesystem effects in
 // this module. See docs/native-apps.md for the runtime split.
 
 // 6.1 unwrap policy: shipped shell code maps failures to typed
@@ -24,7 +24,6 @@ pub mod install_integration;
 pub mod jobs;
 pub mod native_host;
 pub mod settings;
-pub mod updater;
 
 // The real window shell is behind the `tauri` feature; the default build
 // stays pure standard-library logic with no SDK or webview requirements.

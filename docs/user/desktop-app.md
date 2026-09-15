@@ -69,11 +69,7 @@ in this wave: their bundles build only on their matching hosts, so use the
 and check the releases page for news.
 
 There is no automatic in-app update: when a new version appears on the
-releases page, download it manually and install it yourself. Before
-installing, verify the download: compare its SHA256 against `SHA256SUMS`
-and check the GPG signatures (`SHA256SUMS.sig` plus the per-artifact
-`.sig`) with the key in `release/gpg-public-key.asc`. A mismatch or missing
-signature means do not install.
+releases page, download it manually and install it yourself.
 
 You can also build the app locally with `cargo xtask build desktop`, which
 produces an unsigned installer for the matching host under

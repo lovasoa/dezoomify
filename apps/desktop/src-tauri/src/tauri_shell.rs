@@ -600,30 +600,6 @@ pub fn run() {
     // non-default `testing-webdriver` feature and never reaches a release bundle.
     #[cfg(feature = "testing-webdriver")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
-    // Updater (todo 5.8 decision): automatic updates are disabled.
-    // No update host or key is deployed; users check GitHub Releases
-    // manually. The capability document sets `updater.enabled: false`
-    // with an empty allowlist, `tauri.conf.json` ships empty
-    // `plugins.updater.endpoints`, and `UPDATER_PUBKEY` stays empty so
-    // the plugin never validates (fail closed). The retained
-    // `src/updater.rs` policy (`validate_candidate`) stays unit-tested
-    // for a future self-hosted updater; production `validate_update`
-    // rejects every candidate with `updater.disabled` and the app keeps
-    // working.
-    // Registration gate (interim): the updater plugin is registered only
-    // once a real public key exists. While `UPDATER_PUBKEY` is empty no
-    // signature could validate, so skipping registration keeps the updater
-    // fully inert (no endpoint is ever polled) until the key ceremony
-    // lands. No host or key is invented here.
-    let builder = if crate::updater::UPDATER_PUBKEY.is_empty() {
-        builder
-    } else {
-        builder.plugin(
-            tauri_plugin_updater::Builder::new()
-                .pubkey(crate::updater::UPDATER_PUBKEY)
-                .build(),
-        )
-    };
     macro_rules! command_handler {
         ($($command:ident),* $(,)?) => {
             tauri::generate_handler![$($command),*]
