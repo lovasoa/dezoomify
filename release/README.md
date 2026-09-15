@@ -16,8 +16,10 @@ with digest verification at every transition; each stage fails closed.
 - `compatibility.toml`: the supported protocol version matrix.
 - `checksums/<version>/SHA256SUMS`: the committed digest inventory of numbered
   releases. Rolling inventories remain attached to their GitHub release.
-- `notes/<version>.md`: optional curated user-visible changes, included
-  verbatim in the release notes when present.
+- `notes.md` in each working release tree: a user-facing description generated
+  from the introduction in `docs/user/start-here.md`, followed by the annotated
+  numbered tag message or, for a rolling release, commit titles since the
+  preceding release tag.
 
 Working release trees (`plan.json`, artifacts, signatures) live under
 `target/release-dist/<version>/` and are never committed.

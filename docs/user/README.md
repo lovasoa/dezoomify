@@ -15,7 +15,8 @@ one next step. `docs/product.md` defines the full writing rules.
 
 Rendered order (also the navigation order in the website help section):
 
-1. [start-here](start-here.md): what Dezoomify does and which app to pick.
+1. [start-here](start-here.md): what Dezoomify does and which app to pick. Its
+   opening paragraph is also the introduction in GitHub release descriptions.
 2. [website](website.md): the website, its abilities and limits.
 3. [browser-extension](browser-extension.md): finding images while you
    browse, including signed-in pages.

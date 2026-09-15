@@ -41,7 +41,10 @@ closed on missing inputs, tools, or secrets. The plan stage freezes a
 deterministic contract (version, tag, commit, protocol range, schema
 fingerprint, capabilities, targets) from Git, `release/config.toml`,
 `release/targets.toml`, `release/compatibility.toml`, and
-`generated/release-capabilities.json`. The build stage produces one target's
+`generated/release-capabilities.json`. Its user-facing GitHub description uses
+the introduction from `docs/user/start-here.md`, followed by the annotated
+numbered tag message when present or first-parent commit titles since the
+preceding release tag. The build stage produces one target's
 artifact plus a per-target digest fragment on the matching host; unavailable
 targets refuse to build. The sign stage assembles the aggregate `SHA256SUMS`
 from the fragments in plan order and GPG-detach-signs it and every artifact;

@@ -4,8 +4,8 @@
 
 Dezoomify saves a full-resolution zoomable image as a single picture file you
 can keep. Museums, libraries, and archives often show their artworks in a
-viewer that only displays small pieces of the picture at a time. Dezoomify
-gathers all the pieces and assembles them back into the complete image.
+viewer that displays only small pieces at a time; Dezoomify gathers those
+pieces and assembles them into the complete image.
 
 ## Which app should I use?
 

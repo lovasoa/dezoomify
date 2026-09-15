@@ -10,7 +10,8 @@ Successful `master` CI automatically publishes the next rolling version.
 ### Preparing a release
 
 1. Choose a version greater than `cargo xtask release version` and create the
-   annotated `vX.Y.Z` tag on `master`.
+   annotated `vX.Y.Z` tag on `master`. Write its annotation as the user-facing
+   release description.
 2. Push the tag and dispatch the `release` workflow with that tag as `ref`.
 3. The workflow requires successful CI and edits no app manifest.
 
