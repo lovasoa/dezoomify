@@ -125,12 +125,10 @@
   "output": {
     "format": "png",
     "height": 512,
-    "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
     "partial": false,
     "tileCount": 4,
     "width": 512
   },
-  "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
   "protocol": "1.0",
   "provenance": "fixture",
   "readableBytes": true,

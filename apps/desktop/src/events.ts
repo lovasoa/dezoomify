@@ -62,7 +62,6 @@ export interface JobOutputPayload {
   seq: number;
   kind: string;
   state: string;
-  outputHash: string;
   format: string;
   width: number;
   height: number;

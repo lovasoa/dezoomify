@@ -547,8 +547,8 @@
       "path": "native/cli-dzi/expected/result.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "423e0ee1044e993578cac8e511256a75e210e5a5e49a3e04cfc5f92bd94cf730",
-      "size": 174,
+      "sha256": "03cdba150a2802bfad93c51d735013eb6ead2fb1837e8bc0fdad179c6f2a00a0",
+      "size": 95,
       "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
       "source_snapshot": "local"
     },
@@ -787,8 +787,8 @@
       "path": "native/cli-resume-cache/expected/result.json",
       "sensitive": false,
       "served_urls": [],
-      "sha256": "1b3d0edb13a2c58f91554872a0bc560bd10bfbe1ad087ab9732a1b78644fd9f3",
-      "size": 277,
+      "sha256": "fddb88f706ecd7011f2e7485b30be9fe8c832f5641ab4d197589c3371649c0e0",
+      "size": 198,
       "source_path": "crates/dezoomify-native/tests/pipeline_loopback.rs",
       "source_snapshot": "local"
     },

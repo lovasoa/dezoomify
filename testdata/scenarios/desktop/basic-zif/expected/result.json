@@ -124,12 +124,10 @@
   "output": {
     "format": "zif",
     "height": 512,
-    "outputHash": "sha256:c86d7fb1cb8dafd61bb198145b296bb001acc4ab7a867d4db23e552887ea1e59",
     "partial": false,
     "tileCount": 4,
     "width": 512
   },
-  "outputHash": "sha256:c86d7fb1cb8dafd61bb198145b296bb001acc4ab7a867d4db23e552887ea1e59",
   "protocol": "1.0",
   "provenance": "fixture",
   "readableBytes": true,

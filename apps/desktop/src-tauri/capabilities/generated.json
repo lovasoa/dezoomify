@@ -7,7 +7,6 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "opener:allow-open-url",
-    "updater:allow-check",
     "dezoomify:allow-answer-choice",
     "dezoomify:allow-cancel-job",
     "dezoomify:allow-query-capabilities",

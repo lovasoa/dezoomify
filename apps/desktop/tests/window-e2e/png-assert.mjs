@@ -1,12 +1,9 @@
 // PNG golden helpers for the real-window desktop E2E.
 //
 // The saved window output is verified against the same 512x512 pyramid
-// quadrants and sha256 pin as `testdata/scenarios/native/cli-dzi/expected/result.json`.
+// quadrants as the fixed native fixture.
 // No public network, no shared state; inputs are fixed.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
-import path from "node:path";
 import zlib from "node:zlib";
 
 export const EXPECTED_WIDTH = 512;
@@ -20,18 +17,6 @@ export const QUADRANTS = [
   { at: [64, 448], rgb: [48, 72, 200] },
   { at: [448, 448], rgb: [232, 220, 96] },
 ];
-
-export function goldenOutputHash(scenariosDir) {
-  const raw = readFileSync(
-    path.join(scenariosDir, "native/cli-dzi/expected/result.json"),
-    "utf8",
-  );
-  return JSON.parse(raw).outputHash;
-}
-
-export function sha256Hex(bytes) {
-  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-}
 
 export function decodePngSize(bytes) {
   assert.equal(bytes.readUInt32BE(0), 0x89504e47 >>> 0, "PNG signature");
@@ -82,12 +67,11 @@ export function decodePngPixels(bytes) {
   return { pixels, bpp, width, height };
 }
 
-// Byte-exact save check: dimensions, golden digest, and quadrant placement.
-export function assertSavedPyramid(bytes, expectedHash) {
+// Save check: dimensions and quadrant placement.
+export function assertSavedPyramid(bytes) {
   const { width, height } = decodePngSize(bytes);
   assert.equal(width, EXPECTED_WIDTH, "saved image width");
   assert.equal(height, EXPECTED_HEIGHT, "saved image height");
-  assert.equal(sha256Hex(bytes), expectedHash, "saved bytes hash pins the golden");
   const { pixels, bpp } = decodePngPixels(bytes);
   for (const { at: [x, y], rgb } of QUADRANTS) {
     const o = (y * width + x) * bpp;

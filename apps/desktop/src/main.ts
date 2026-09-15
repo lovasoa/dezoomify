@@ -815,7 +815,7 @@ function launchNativeJob(trimmed: string, token: number): void {
 // entry never stops the rest; totals mirror the CLI bulk contract.
 function settleActiveQueue(
   outcome: "done" | "failed" | "cancelled",
-  detail?: { outputHash?: string; errorCode?: string },
+  detail?: { errorCode?: string },
 ): void {
   if (!activeQueueId) return;
   const finished = finishActiveDesktopEntry(desktopQueue, outcome, detail);
@@ -1555,7 +1555,6 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
         (detailObj ? strField(detailObj, ["mime", "mimeType", "contentType", "encoder", "format"]) : undefined),
       grantedMime(),
     );
-    const outputHash = strField(payload, ["outputHash", "output_hash", "output", "digest"]);
     const missing = isPartial ? extractMissingTiles(payload, detailObj, detailRaw) : [];
     // Sibling basename for the honest partial note (never the granted path;
     // basenames contain no slashes, so a path can never slip through).
@@ -1571,10 +1570,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
         ? siblingRaw
         : null;
     setCompletedSibling(isPartial ? sibling : null);
-    if (outputHash) {
-      const short = outputHash.slice(0, 24);
-      pushLog(isPartial ? `Partial output ready (${short}…)` : `Output ready (${short}…)`);
-    }
+    pushLog(isPartial ? "Partial output ready" : "Output ready");
     if (isPartial && sibling) {
       pushLog(`Partial file: ${sibling}`);
     }
@@ -1593,7 +1589,7 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
         grantedFormat,
       );
     }
-    settleActiveQueue("done", outputHash ? { outputHash } : undefined);
+    settleActiveQueue("done");
     return;
   }
 

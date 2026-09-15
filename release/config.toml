@@ -22,12 +22,7 @@ store_url = "https://addons.mozilla.org/en-US/firefox/addon/dezoomify/"
 
 # Desktop updater decision (todo 5.8): automatic in-app updates are
 # disabled for this free project. No update host is deployed and no updater
-# key exists; users check GitHub Releases manually. Release integrity comes
-# from GPG-detached SHA256SUMS (release/gpg-public-key.asc), verified at
-# sign and publish time with fail-closed secrets. The retained
-# apps/desktop/src-tauri/src/updater.rs validator stays disabled
-# (UPDATER_ENABLED = false, empty endpoints/allowlist/key) and every
-# candidate fails with `updater.disabled`.
+# key exists; users check GitHub Releases manually.
 [updater]
 enabled = false
 channel = "stable"

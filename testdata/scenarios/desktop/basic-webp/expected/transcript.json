@@ -26,7 +26,6 @@
       "webRequest": 0
     },
     "outputFormat": "webp",
-    "outputHash": "sha256:ca857af61a00c1a0aacf3940bcfb16e5cfc6bc10d93a40e7b54f1fa54c41ec93",
     "partial": false,
     "pixels": {
       "bottomLeft": [
@@ -115,7 +114,6 @@
     },
     {
       "event": "completed",
-      "outputHash": "sha256:ca857af61a00c1a0aacf3940bcfb16e5cfc6bc10d93a40e7b54f1fa54c41ec93",
       "state": "Completed",
       "step": 11
     }

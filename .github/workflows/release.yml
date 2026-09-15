@@ -108,7 +108,7 @@ jobs:
           name: release-${{ matrix.target }}
           path: target/release-dist
 
-  sign:
+  verify:
     needs: [prepare, build]
     runs-on: ubuntu-latest
     environment: release-signing
@@ -129,18 +129,17 @@ jobs:
             gh run download "${{ github.run_id }}" -n "$name" -D dist
           done
           mv dist target/release-dist
-      - name: Sign
-        env:
-          RELEASE_GPG_KEY: ${{ secrets.RELEASE_GPG_KEY }}
-          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
-        run: cargo xtask release sign
+      - name: Verify release artifacts
+        run: |
+          v="${{ needs.prepare.outputs.version }}"
+          cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-signed
+          name: release-verified
           path: target/release-dist
 
   publish:
-    needs: [prepare, sign]
+    needs: [prepare, verify]
     runs-on: ubuntu-latest
     environment: release-publish
     permissions:
@@ -154,12 +153,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0
-      - name: Download signed artifacts
+      - name: Download verified artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p target/release-dist
-          gh run download "${{ github.run_id }}" -n release-signed -D target/release-dist
+          gh run download "${{ github.run_id }}" -n release-verified -D target/release-dist
       - name: Verify and publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,12 +166,3 @@ jobs:
           v="${{ needs.prepare.outputs.version }}"
           cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
           cargo xtask release publish --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
-      - name: Record numbered checksum inventory
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          v="${{ needs.prepare.outputs.version }}"
-          git config user.name "dezoomify release bot"
-          git config user.email "noreply@dezoomify.ophir.dev"
-          git add "release/checksums/$v/SHA256SUMS"
-          git commit -m "release: record v$v checksum inventory"
-          git push origin HEAD:master

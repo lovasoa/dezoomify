@@ -20,7 +20,6 @@ pub fn machine_event_detail(
 pub struct CompletedOutput<'a> {
     pub job: &'a str,
     pub seq: u64,
-    pub output_hash: &'a str,
     pub format: &'a str,
     pub width: u32,
     pub height: u32,
@@ -34,7 +33,6 @@ pub fn machine_completed(summary: &CompletedOutput<'_>) -> String {
         "job": summary.job,
         "seq": summary.seq,
         "kind": if summary.partial { "partial-completed" } else { "completed" },
-        "outputHash": summary.output_hash,
         "format": summary.format,
         "width": summary.width,
         "height": summary.height,
@@ -44,8 +42,7 @@ pub fn machine_completed(summary: &CompletedOutput<'_>) -> String {
     .to_string()
 }
 
-/// One bulk entry outcome for summaries: `ok` with an output hash, or
-/// `failed` with a stable error code.
+/// One bulk entry outcome for summaries: `ok`, or `failed` with a stable error code.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BulkItem {
     pub index: usize,
@@ -57,13 +54,13 @@ pub struct BulkItem {
 
 impl BulkItem {
     #[must_use]
-    pub fn ok(index: usize, url: &str, output: &str, output_hash: &str) -> Self {
+    pub fn ok(index: usize, url: &str, output: &str) -> Self {
         Self {
             index,
             url: url.to_string(),
             output: output.to_string(),
             status: "ok".to_string(),
-            detail: output_hash.to_string(),
+            detail: String::new(),
         }
     }
 
@@ -195,7 +192,7 @@ mod tests {
         assert_eq!(machine["total"], 3);
         assert_eq!(machine["succeeded"], 2);
         assert_eq!(machine["failed"], 1);
-        let item = BulkItem::ok(0, "https://example.test/a.dzi", "a_1.png", "sha256:abc");
+        let item = BulkItem::ok(0, "https://example.test/a.dzi", "a_1.png");
         let line: serde_json::Value =
             serde_json::from_str(&machine_bulk_item(&item)).expect("json");
         assert_eq!(line["kind"], "bulk-item");
