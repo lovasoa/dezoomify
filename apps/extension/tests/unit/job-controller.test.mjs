@@ -53,10 +53,9 @@ const TILE_EFFECT = {
   kind: "effect",
   type: "acquire-tile",
   effect: "fx:2",
-  job: "job:test-1",
   tile: 0,
   placement: { position: { x: 0, y: 0 }, expected_size: { width: 16, height: 16 }, canvas: { width: 32, height: 32 }, processing: "none" },
-  request: { id: "req:tile-0", uri: "https://cdn.test/tile_0.jpg", headers: [], purpose: "tile" },
+  request: { id: 0, uri: "https://cdn.test/tile_0.jpg", headers: [], purpose: "tile" },
 };
 
 function flush() { return new Promise((resolve) => setTimeout(resolve, 0)); }
@@ -80,7 +79,7 @@ test("a tile that cannot decode reports a failed acquisition, not a broken outpu
   await flush();
   const failure = sent.find((message) => message.type === "engine.failure");
   assert.ok(failure, "failure outcome was sent");
-  assert.equal(failure.requestId, "req:tile-0");
+  assert.equal(failure.requestId, 0);
   assert.equal(sent.some((message) => message.type === "engine.bytes"), false);
 });
 
@@ -123,8 +122,7 @@ test("metadata requests route through the source transport", async () => {
     kind: "effect",
     type: "acquire-resource",
     effect: "fx:0",
-    job: "job:test-1",
-    request: { id: "req:0", uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
+    request: { id: 0, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
   }]);
   await flush();
   assert.equal(seen[0][0], "source");
@@ -133,14 +131,14 @@ test("metadata requests route through the source transport", async () => {
 test("lifecycle effects and events run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
   controller.handleEngineMessages([
-    { kind: "effect", type: "request-destination", effect: "fx:1", job: "job:test-1", format: "png" },
-    { kind: "event", type: "job-state", job: "job:test-1", state: "AwaitingDestination" },
-    { kind: "effect", type: "decode-pixels", effect: "fx:6", job: "job:test-1", tile: 0 },
-    { kind: "effect", type: "open-encoder", effect: "fx:10", job: "job:test-1", format: "png", canvas: { width: 32, height: 32 } },
-    { kind: "effect", type: "finalize-encoder", effect: "fx:11", job: "job:test-1" },
-    { kind: "effect", type: "publish-output", effect: "fx:12", job: "job:test-1", output: "out:0" },
-    { kind: "effect", type: "release-bytes", effect: "fx:13", job: "job:test-1" },
-    { kind: "event", type: "completed", job: "job:test-1", output: "out:0" },
+    { kind: "effect", type: "request-destination", effect: "fx:1", format: "png" },
+    { kind: "event", type: "job-state", state: "AwaitingDestination" },
+    { kind: "effect", type: "decode-pixels", effect: "fx:6", tile: 0 },
+    { kind: "effect", type: "open-encoder", effect: "fx:10", format: "png", canvas: { width: 32, height: 32 } },
+    { kind: "effect", type: "finalize-encoder", effect: "fx:11" },
+    { kind: "effect", type: "publish-output", effect: "fx:12", output: "out:0" },
+    { kind: "effect", type: "release-bytes", effect: "fx:13" },
+    { kind: "event", type: "completed", output: "out:0" },
   ]);
   await flush();
   await flush();
@@ -148,16 +146,16 @@ test("lifecycle effects and events run in engine order on one chain", async () =
   assert.deepEqual(kinds, ["decodePixels", "openEncoder", "finalizeEncoder", "publishOutput", "release"]);
   assert.deepEqual(assembly.calls[1], ["openEncoder", "png", { width: 32, height: 32 }]);
   const destination = sent.find((message) => message.type === "engine.command");
-  assert.deepEqual(destination.command, { type: "destination-response", job: "job:test-1", destination: "dst:0", granted: true });
+  assert.deepEqual(destination.command, { type: "destination-response", destination: "dst:0", granted: true });
 });
 
-test("partial decisions surface the engine recovery id", async () => {
+test("partial decisions surface the engine decision generation", async () => {
   const { controller, seen } = harness();
   controller.handleEngineMessages([
-    { kind: "effect", type: "request-decision", effect: "fx:9", job: "job:test-1", recovery: "rec:0" },
+    { kind: "effect", type: "request-decision", effect: "fx:9", generation: 0 },
   ]);
   await flush();
-  assert.deepEqual(seen.find(([kind]) => kind === "partial-decision"), ["partial-decision", "rec:0"]);
+  assert.deepEqual(seen.find(([kind]) => kind === "partial-decision"), ["partial-decision", 0]);
 });
 
 test("host execution failures are terminal: render, cancel, skip the rest", async () => {
@@ -165,9 +163,9 @@ test("host execution failures are terminal: render, cancel, skip the rest", asyn
   assembly.openEncoder = () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID" }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { kind: "effect", type: "open-encoder", effect: "fx:10", job: "job:test-1", format: "png", canvas: { width: 99999, height: 99999 } },
-    { kind: "effect", type: "finalize-encoder", effect: "fx:11", job: "job:test-1" },
-    { kind: "event", type: "completed", job: "job:test-1", output: "out:0" },
+    { kind: "effect", type: "open-encoder", effect: "fx:10", format: "png", canvas: { width: 99999, height: 99999 } },
+    { kind: "effect", type: "finalize-encoder", effect: "fx:11" },
+    { kind: "event", type: "completed", output: "out:0" },
   ]);
   await flush();
   await flush();
@@ -180,15 +178,15 @@ test("host execution failures are terminal: render, cancel, skip the rest", asyn
   assert.equal(seen.some(([kind]) => kind === "event"), false);
 });
 
-test("selection commands and partial choices are correlated to the job", async () => {
+test("selection commands and partial choices use positional correlation", async () => {
   const { controller, sent } = harness();
   controller.selectImage(1);
   controller.selectLevel(2);
-  controller.choosePartial("rec:0", true);
+  controller.choosePartial(0, true);
   const commands = sent.map((message) => message.command);
-  assert.deepEqual(commands[0], { type: "select-image", job: "job:test-1", image: 1 });
-  assert.deepEqual(commands[1], { type: "select-level", job: "job:test-1", level: 2 });
-  assert.deepEqual(commands[2], { type: "partial-choice", job: "job:test-1", recovery: "rec:0", keep_partial: true });
+  assert.deepEqual(commands[0], { type: "select-image", image: 1 });
+  assert.deepEqual(commands[1], { type: "select-level", level: 2 });
+  assert.deepEqual(commands[2], { type: "partial-choice", generation: 0, keep_partial: true });
 });
 
 test("disposal releases assembly resources exactly once", async () => {

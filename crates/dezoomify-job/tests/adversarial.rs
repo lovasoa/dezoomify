@@ -1,6 +1,6 @@
 mod support;
 
-use dezoomify_job::{Config, JobResponse};
+use dezoomify_job::{Config, JobCommand};
 use support::{ScriptedHost, DZI, DZI_INPUT_URL};
 
 fn host_with_id(job: &str) -> ScriptedHost {
@@ -15,9 +15,8 @@ fn dzi_bytes() -> Vec<u8> {
 fn duplicate_response_is_ignored() {
     let mut host = host_with_id("job:dup");
     host.start().unwrap();
-    host.apply(JobResponse::ResourceBytes {
-        job: "job:dup".to_string(),
-        request: "req:0".to_string(),
+    host.apply(JobCommand::ResourceBytes {
+        request: 0,
         bytes: dzi_bytes(),
         final_uri: None,
     })
@@ -25,9 +24,8 @@ fn duplicate_response_is_ignored() {
     let len = host.transcript().len();
     // Replaying the consumed discovery request is a safe no-op.
     let outcome = host
-        .apply(JobResponse::ResourceBytes {
-            job: "job:dup".to_string(),
-            request: "req:0".to_string(),
+        .apply(JobCommand::ResourceBytes {
+            request: 0,
             bytes: dzi_bytes(),
             final_uri: None,
         })
@@ -38,59 +36,40 @@ fn duplicate_response_is_ignored() {
 
     // Duplicate tile completion never double-completes work. The largest
     // level is a 2x2 grid, so one tile outcome leaves acquisition running.
-    host.apply(JobResponse::SelectedImage {
-        job: "job:dup".to_string(),
-        image: 0,
-    })
-    .unwrap();
-    host.apply(JobResponse::SelectedLevel {
-        job: "job:dup".to_string(),
-        level: 9,
-    })
-    .unwrap();
-    host.apply(JobResponse::DestinationGranted {
-        job: "job:dup".to_string(),
+    host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
+    host.apply(JobCommand::SelectLevel { level: 9 }).unwrap();
+    host.apply(JobCommand::DestinationGranted {
         destination: "dst:0".to_string(),
     })
     .unwrap();
-    host.apply(JobResponse::TileOutcome {
-        job: "job:dup".to_string(),
-        tile: 0,
-        ok: true,
-    })
-    .unwrap();
+    host.apply(JobCommand::TileOutcome { tile: 0, ok: true })
+        .unwrap();
     let len = host.transcript().len();
     let outcome = host
-        .apply(JobResponse::TileOutcome {
-            job: "job:dup".to_string(),
-            tile: 0,
-            ok: true,
-        })
+        .apply(JobCommand::TileOutcome { tile: 0, ok: true })
         .unwrap();
     assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
 }
 
 #[test]
-fn wrong_job_is_rejected_without_corruption() {
+fn unknown_request_is_ignored_without_corruption() {
     let mut host = host_with_id("job:mine");
     host.start().unwrap();
     let len = host.transcript().len();
     let err = host
-        .apply(JobResponse::ResourceBytes {
-            job: "job:other".to_string(),
-            request: "req:0".to_string(),
+        .apply(JobCommand::ResourceBytes {
+            request: 99,
             bytes: dzi_bytes(),
             final_uri: None,
         })
-        .unwrap_err();
-    assert_eq!(err.code, "job.wrong-job");
+        .unwrap();
+    assert_eq!(err, dezoomify_job::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.state(), "Discovering");
-    // The rightful job still proceeds normally afterwards.
-    host.apply(JobResponse::ResourceBytes {
-        job: "job:mine".to_string(),
-        request: "req:0".to_string(),
+    // The outstanding request still proceeds normally afterwards.
+    host.apply(JobCommand::ResourceBytes {
+        request: 0,
         bytes: dzi_bytes(),
         final_uri: None,
     })
@@ -109,25 +88,15 @@ fn over_limit_tiles_become_typed_terminal_failure() {
     };
     let mut host = ScriptedHost::new("job:limited", DZI_INPUT_URL, tight).unwrap();
     host.start().unwrap();
-    host.apply(JobResponse::ResourceBytes {
-        job: "job:limited".to_string(),
-        request: "req:0".to_string(),
+    host.apply(JobCommand::ResourceBytes {
+        request: 0,
         bytes: dzi_bytes(),
         final_uri: None,
     })
     .unwrap();
-    host.apply(JobResponse::SelectedImage {
-        job: "job:limited".to_string(),
-        image: 0,
-    })
-    .unwrap();
-    host.apply(JobResponse::SelectedLevel {
-        job: "job:limited".to_string(),
-        level: 9,
-    })
-    .unwrap();
-    host.apply(JobResponse::DestinationGranted {
-        job: "job:limited".to_string(),
+    host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
+    host.apply(JobCommand::SelectLevel { level: 9 }).unwrap();
+    host.apply(JobCommand::DestinationGranted {
         destination: "dst:0".to_string(),
     })
     .unwrap();
@@ -143,11 +112,7 @@ fn over_limit_tiles_become_typed_terminal_failure() {
     assert_eq!(failed.len(), 1);
     assert!(failed[0].contains("job.resource-limit"));
     // Post-terminal inputs stay stably rejected with no second terminal.
-    let err = host
-        .apply(JobResponse::Cancel {
-            job: "job:limited".to_string(),
-        })
-        .unwrap_err();
+    let err = host.apply(JobCommand::Cancel).unwrap_err();
     assert_eq!(err.code, "job.post-terminal");
     assert_eq!(host.terminal_count(), 1);
 }
@@ -156,18 +121,11 @@ fn over_limit_tiles_become_typed_terminal_failure() {
 fn double_cancel_is_idempotent() {
     let mut host = host_with_id("job:cancel2");
     host.start().unwrap();
-    host.apply(JobResponse::Cancel {
-        job: "job:cancel2".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::Cancel).unwrap();
     assert_eq!(host.state(), "Cancelled");
     assert_eq!(host.terminal_count(), 1);
     let len = host.transcript().len();
-    let err = host
-        .apply(JobResponse::Cancel {
-            job: "job:cancel2".to_string(),
-        })
-        .unwrap_err();
+    let err = host.apply(JobCommand::Cancel).unwrap_err();
     assert_eq!(err.code, "job.post-terminal");
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.terminal_count(), 1);
@@ -177,9 +135,8 @@ fn double_cancel_is_idempotent() {
 fn empty_resource_bytes_fail_without_catalog() {
     let mut host = host_with_id("job:empty");
     host.start().unwrap();
-    host.apply(JobResponse::ResourceBytes {
-        job: "job:empty".to_string(),
-        request: "req:0".to_string(),
+    host.apply(JobCommand::ResourceBytes {
+        request: 0,
         bytes: Vec::new(),
         final_uri: None,
     })
@@ -208,7 +165,7 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
     )
     .unwrap();
     host.start().unwrap();
-    let requests: Vec<String> = host
+    let requests: Vec<u32> = host
         .effects
         .iter()
         .filter(|effect| {
@@ -217,15 +174,14 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
         .filter_map(|effect| {
             effect
                 .get("request")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|request| u32::try_from(request).ok())
         })
         .collect();
     assert_eq!(requests.len(), 2, "metadata plus input stay outstanding");
     let xml = r#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />"#;
-    host.apply(JobResponse::ResourceBytes {
-        job: "job:batch".to_string(),
-        request: requests[0].clone(),
+    host.apply(JobCommand::ResourceBytes {
+        request: requests[0],
         bytes: xml.as_bytes().to_vec(),
         final_uri: None,
     })
@@ -233,18 +189,16 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
     assert_eq!(host.state(), "AwaitingImageSelection");
     let len = host.transcript().len();
     let late = host
-        .apply(JobResponse::ResourceBytes {
-            job: "job:batch".to_string(),
-            request: requests[1].clone(),
+        .apply(JobCommand::ResourceBytes {
+            request: requests[1],
             bytes: vec![1, 2, 3],
             final_uri: None,
         })
         .unwrap();
     assert_eq!(late, dezoomify_job::Outcome::Ignored);
     let late_failure = host
-        .apply(JobResponse::FetchFailure {
-            job: "job:batch".to_string(),
-            request: requests[1].clone(),
+        .apply(JobCommand::FetchFailure {
+            request: requests[1],
             detail: String::new(),
         })
         .unwrap();

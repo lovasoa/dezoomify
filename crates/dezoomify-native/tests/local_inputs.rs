@@ -123,14 +123,9 @@ fn file_uri_with_remote_host_is_rejected_typed() {
 fn job_validation_accepts_local_but_rejects_remote_file_hosts() {
     use dezoomify_job::{Config, Job};
     let config = Config::default();
-    assert!(Job::new("job:local-plain", "/tmp/tiles.yaml", config.clone()).is_ok());
-    assert!(Job::new("job:local-rel", "tiles.yaml", config.clone()).is_ok());
-    assert!(Job::new("job:local-file", "file:///tmp/tiles.yaml", config.clone()).is_ok());
-    assert!(Job::new(
-        "job:local-localhost",
-        "file://localhost/tmp/tiles.yaml",
-        config.clone()
-    )
-    .is_ok());
-    assert!(Job::new("job:remote-file", "file://other.test/t.png", config).is_err());
+    assert!(Job::new("/tmp/tiles.yaml", config.clone()).is_ok());
+    assert!(Job::new("tiles.yaml", config.clone()).is_ok());
+    assert!(Job::new("file:///tmp/tiles.yaml", config.clone()).is_ok());
+    assert!(Job::new("file://localhost/tmp/tiles.yaml", config.clone()).is_ok());
+    assert!(Job::new("file://other.test/t.png", config).is_err());
 }

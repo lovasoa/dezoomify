@@ -28,4 +28,6 @@ pub use config::{Config, ConfigError};
 pub use job::Job;
 pub use projection::project_catalog;
 pub use state::State;
-pub use transition::{JobError, JobResponse, Outcome};
+pub use transition::{
+    DecisionReason, JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome,
+};

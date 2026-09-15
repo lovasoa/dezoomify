@@ -1,15 +1,11 @@
-//! Deterministic inputs, outcomes, errors, and message builders.
-//!
-//! [`JobResponse`] is the lean test-oriented input enum: every variant carries
-//! its owning `job` id so wrong-job correlation is rejected without state
-//! corruption. Effects and events are `serde_json::Value` objects with
-//! `{kind, seq, job}` plus correlation ids. This lean projection keeps the
-//! engine testable without host I/O; the cross-host wire truth remains
-//! `dezoomify-protocol` DTOs, which the WASM adapter projects onto.
+//! Typed inputs and ordered outputs for the deterministic job engine.
 
+use std::collections::BTreeMap;
+
+use dezoomify_core::Vec2d;
+use dezoomify_protocol::dto::CatalogDto;
 use serde::{Deserialize, Serialize};
 
-/// Stable error for rejected inputs and typed terminal failures.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobError {
     pub code: String,
@@ -23,14 +19,6 @@ impl JobError {
             code: code.to_string(),
             message,
         }
-    }
-
-    #[must_use]
-    pub fn wrong_job(expected: &str) -> Self {
-        Self::new(
-            "job.wrong-job",
-            format!("response for unknown job, expected {expected}"),
-        )
     }
 
     #[must_use]
@@ -50,11 +38,6 @@ impl JobError {
     }
 
     #[must_use]
-    pub fn invalid_id(detail: &str) -> Self {
-        Self::new("job.invalid-id", format!("invalid id: {detail}"))
-    }
-
-    #[must_use]
     pub fn overflow(detail: &str) -> Self {
         Self::new("job.overflow", format!("counter overflow: {detail}"))
     }
@@ -68,143 +51,146 @@ impl std::fmt::Display for JobError {
 
 impl std::error::Error for JobError {}
 
-/// Result of applying one response: state changed or safely ignored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Applied,
     Ignored,
 }
 
-/// Deterministic host/user input driving the state machine.
-///
-/// Every variant carries the owning `job` id for correlation. The enum is
-/// synchronous and carries no clocks, I/O handles, or effect powers, only
-/// ids, host-supplied bytes, observed tile geometry, and decisions.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum JobResponse {
+/// Deterministic host/user input. Correlation is local to one `Job`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JobCommand {
     ResourceBytes {
-        job: String,
-        request: String,
+        request: u32,
         bytes: Vec<u8>,
-        /// Post-redirect URL the bytes were read from, when the host
-        /// followed redirects. The core resolves relative tile URLs against
-        /// it; when absent the engine falls back to the request URI.
-        #[serde(default)]
         final_uri: Option<String>,
     },
     FetchFailure {
-        job: String,
-        request: String,
+        request: u32,
         /// Host fetch detail (HTTP status, category, bounded server
         /// signal). Empty when the host reports nothing beyond failure.
-        #[serde(default)]
         detail: String,
     },
-    SelectedImage {
-        job: String,
+    SelectImage {
         image: u32,
     },
-    SelectedLevel {
-        job: String,
+    SelectLevel {
         level: u32,
     },
     DestinationGranted {
-        job: String,
         destination: String,
     },
-    DestinationDenied {
-        job: String,
-    },
+    DestinationDenied,
     TileOutcome {
-        job: String,
         tile: u32,
         ok: bool,
     },
     ProbeOutcome {
-        job: String,
         tile: u32,
         available: bool,
         width: u64,
         height: u64,
     },
-    RetryReady {
-        job: String,
-        attempt: String,
-    },
-    PartialKeep {
-        job: String,
+    RetryReady,
+    PartialChoice {
+        generation: u32,
         keep: bool,
     },
-    Cancel {
-        job: String,
+    Cancel,
+    Pause,
+    Resume,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecisionReason {
+    Destination,
+    Partial,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JobEffect {
+    AcquireResource {
+        request: u32,
+        uri: String,
+        header_names: Vec<String>,
     },
-    Pause {
-        job: String,
+    AcquireTile {
+        tile: u32,
+        uri: String,
+        headers: BTreeMap<String, String>,
+        processing: String,
+        destination: Vec2d,
+        expected_size: Option<Vec2d>,
+        canvas: Option<Vec2d>,
+        probe: bool,
     },
-    Resume {
-        job: String,
+    RequestDestination {
+        format: String,
+    },
+    DecodePixels {
+        tile: u32,
+    },
+    OpenEncoder {
+        format: String,
+        canvas: Option<Vec2d>,
+    },
+    FinalizeEncoder,
+    PublishOutput,
+    ReleaseBytes,
+    CancelWork,
+    RequestDecision {
+        generation: u32,
+        reason: DecisionReason,
     },
 }
 
-impl JobResponse {
-    /// Owning job id for correlation checks.
-    #[must_use]
-    pub fn job_id(&self) -> &str {
-        match self {
-            Self::ResourceBytes { job, .. }
-            | Self::FetchFailure { job, .. }
-            | Self::SelectedImage { job, .. }
-            | Self::SelectedLevel { job, .. }
-            | Self::DestinationGranted { job, .. }
-            | Self::DestinationDenied { job }
-            | Self::TileOutcome { job, .. }
-            | Self::ProbeOutcome { job, .. }
-            | Self::RetryReady { job, .. }
-            | Self::PartialKeep { job, .. }
-            | Self::Cancel { job }
-            | Self::Pause { job }
-            | Self::Resume { job } => job,
-        }
-    }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JobEvent {
+    State {
+        state: crate::State,
+    },
+    Catalog {
+        catalog: CatalogDto,
+    },
+    Levels {
+        image: u32,
+        levels: Vec<u32>,
+    },
+    Progress {
+        acquired: u64,
+        total: u64,
+    },
+    Warning {
+        tile: u32,
+        attempt: u32,
+    },
+    MissingWork {
+        failed: Vec<u32>,
+    },
+    RecoveryRequested {
+        generation: u32,
+        reason: DecisionReason,
+    },
+    Completed,
+    PartialCompleted,
+    Failed {
+        code: String,
+        message: String,
+    },
+    Cancelled,
+    Paused,
+    Resumed,
 }
 
-/// Build an effect object with `{kind, seq, job}` plus caller detail.
-///
-/// Detail keys are merged after the base keys; base keys always win on
-/// collision so correlation can never be spoofed by detail payloads.
-pub(crate) fn make_effect(
-    kind: &str,
-    seq: u64,
-    job: &str,
-    detail: serde_json::Value,
-) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    map.insert(
-        "kind".to_string(),
-        serde_json::Value::String(kind.to_string()),
-    );
-    map.insert("seq".to_string(), serde_json::Value::from(seq));
-    map.insert(
-        "job".to_string(),
-        serde_json::Value::String(job.to_string()),
-    );
-    if let serde_json::Value::Object(extra) = detail {
-        for (k, v) in extra {
-            if k != "kind" && k != "seq" && k != "job" {
-                map.insert(k, v);
-            }
-        }
-    }
-    serde_json::Value::Object(map)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JobMessageBody {
+    Effect(JobEffect),
+    Event(JobEvent),
 }
 
-/// Build an event object with `{kind, seq, job}` plus caller detail.
-pub(crate) fn make_event(
-    kind: &str,
-    seq: u64,
-    job: &str,
-    detail: serde_json::Value,
-) -> serde_json::Value {
-    make_effect(kind, seq, job, detail)
+/// One item in the job's single FIFO queue.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JobMessage {
+    pub sequence: u32,
+    pub body: JobMessageBody,
 }

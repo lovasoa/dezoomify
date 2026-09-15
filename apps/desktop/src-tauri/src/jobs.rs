@@ -1490,10 +1490,9 @@ impl JobTable {
             .name(format!("dezoomify-{job_id}-discovery"))
             .spawn(move || {
                 let config = dezoomify_job::Config::default();
-                if let Ok(mut engine) = dezoomify_job::Job::new(&job_id, &input_url, config) {
+                if let Ok(mut engine) = dezoomify_job::Job::new(&input_url, config) {
                     let _ = engine.start();
-                    let _ = engine.drain_effects();
-                    let _ = engine.drain_events();
+                    let _ = engine.drain_messages();
                 }
                 // Announce discovery completion through the driver channel so
                 // the pump moves the job to `AwaitingDestination` exactly
@@ -2173,19 +2172,14 @@ fn trailing_index(choice: &str) -> Option<usize> {
 /// Drive a transient engine through `Cancel` for policy parity. Best-effort
 /// and offline (no I/O); failures are ignored because the shell transcript is
 /// the source of truth in the lean fallback.
-fn drive_engine_cancel(job: &str, input_url: &str) {
+fn drive_engine_cancel(_job: &str, input_url: &str) {
     if input_url.is_empty() {
         return;
     }
-    if let Ok(mut engine) =
-        dezoomify_job::Job::new(job, input_url, dezoomify_job::Config::default())
-    {
+    if let Ok(mut engine) = dezoomify_job::Job::new(input_url, dezoomify_job::Config::default()) {
         let _ = engine.start();
-        let _ = engine.on_response(dezoomify_job::JobResponse::Cancel {
-            job: job.to_string(),
-        });
-        let _ = engine.drain_effects();
-        let _ = engine.drain_events();
+        let _ = engine.on_command(dezoomify_job::JobCommand::Cancel);
+        let _ = engine.drain_messages();
     }
 }
 
@@ -3042,24 +3036,20 @@ mod tests {
         let _ = state_before;
         // Engine parity: unknown/consumed request ids replay as Ignored.
         let mut engine =
-            dezoomify_job::Job::new("job:dup", "https://example.com/item", Default::default())
-                .unwrap();
+            dezoomify_job::Job::new("https://example.com/item", Default::default()).unwrap();
         engine.start().unwrap();
         let seq_before = engine.seq();
-        let events_before = engine.pending_event_count();
-        let effects_before = engine.pending_effect_count();
+        let messages_before = engine.pending_message_count();
         let outcome = engine
-            .on_response(dezoomify_job::JobResponse::ResourceBytes {
-                job: "job:dup".to_string(),
-                request: "req:missing".to_string(),
+            .on_command(dezoomify_job::JobCommand::ResourceBytes {
+                request: u32::MAX,
                 bytes: vec![1, 2, 3],
                 final_uri: None,
             })
             .unwrap();
         assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
         assert_eq!(engine.seq(), seq_before, "Ignored bumps no seq");
-        assert_eq!(engine.pending_event_count(), events_before);
-        assert_eq!(engine.pending_effect_count(), effects_before);
+        assert_eq!(engine.pending_message_count(), messages_before);
     }
 
     /// Task 6.1: seq is strictly monotonic increasing across the lifecycle.
@@ -3183,58 +3173,26 @@ mod tests {
         }
     }
 
-    /// Task 6.1: wrong-job / wrong-state / bad-id are rejected without work.
-    ///
-    /// Engine parity uses stable `job.wrong-job`, `job.invalid-state`, and
-    /// `job.invalid-id`; the shell table rejects unmapped ids as `unknown`
-    /// with no events or seq.
+    /// Wrong-state commands are rejected and unknown numeric replies are ignored.
     #[test]
-    fn wrong_job_wrong_state_bad_id_rejected_without_work() {
-        // Engine: wrong-job correlation never corrupts state.
+    fn wrong_state_and_unknown_reply_are_safe() {
         let mut engine =
-            dezoomify_job::Job::new("job:mine", "https://example.com/item", Default::default())
-                .unwrap();
+            dezoomify_job::Job::new("https://example.com/item", Default::default()).unwrap();
         engine.start().unwrap();
         let seq_before = engine.seq();
-        let err = engine
-            .on_response(dezoomify_job::JobResponse::ResourceBytes {
-                job: "job:other".to_string(),
-                request: "req:0".to_string(),
+        let outcome = engine
+            .on_command(dezoomify_job::JobCommand::ResourceBytes {
+                request: u32::MAX,
                 bytes: vec![1],
                 final_uri: None,
             })
-            .unwrap_err();
-        assert_eq!(err.code, "job.wrong-job");
+            .unwrap();
+        assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
         assert_eq!(engine.seq(), seq_before);
-        // Engine: image selection in Discovering is wrong-state.
         let err = engine
-            .on_response(dezoomify_job::JobResponse::SelectedImage {
-                job: "job:mine".to_string(),
-                image: 99,
-            })
+            .on_command(dezoomify_job::JobCommand::SelectImage { image: 99 })
             .unwrap_err();
         assert_eq!(err.code, "job.invalid-state");
-        // Engine: malformed correlation ids are bad-id.
-        let err = engine
-            .on_response(dezoomify_job::JobResponse::ResourceBytes {
-                job: "job:mine".to_string(),
-                request: "bad".to_string(),
-                bytes: vec![1],
-                final_uri: None,
-            })
-            .unwrap_err();
-        assert_eq!(err.code, "job.invalid-id");
-        let err = engine
-            .on_response(dezoomify_job::JobResponse::SelectedImage {
-                job: "job:mine".to_string(),
-                image: 99,
-            })
-            .unwrap_err();
-        assert_eq!(err.code, "job.invalid-state");
-        assert!(
-            dezoomify_job::Job::new("bad-id", "https://example.com/item", Default::default())
-                .is_err()
-        );
         // Shell table: unmapped ids are unknown with no work.
         let mut table = JobTable::new();
         assert_eq!(table.cancel_job("bad-id").unwrap_err(), "unknown");
@@ -3248,27 +3206,20 @@ mod tests {
     #[test]
     fn engine_post_terminal_returns_job_post_terminal_without_work() {
         let mut engine =
-            dezoomify_job::Job::new("job:term", "https://example.com/item", Default::default())
-                .unwrap();
+            dezoomify_job::Job::new("https://example.com/item", Default::default()).unwrap();
         engine.start().unwrap();
         engine
-            .on_response(dezoomify_job::JobResponse::Cancel {
-                job: "job:term".to_string(),
-            })
+            .on_command(dezoomify_job::JobCommand::Cancel)
             .unwrap();
         assert!(engine.is_terminal());
         let seq_before = engine.seq();
-        let events_before = engine.pending_event_count();
-        let effects_before = engine.pending_effect_count();
+        let messages_before = engine.pending_message_count();
         let err = engine
-            .on_response(dezoomify_job::JobResponse::Cancel {
-                job: "job:term".to_string(),
-            })
+            .on_command(dezoomify_job::JobCommand::Cancel)
             .unwrap_err();
         assert_eq!(err.code, "job.post-terminal");
         assert_eq!(engine.seq(), seq_before, "no work after terminal");
-        assert_eq!(engine.pending_event_count(), events_before);
-        assert_eq!(engine.pending_effect_count(), effects_before);
+        assert_eq!(engine.pending_message_count(), messages_before);
         // Shell projection of the same moment.
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();

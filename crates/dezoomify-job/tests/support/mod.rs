@@ -1,12 +1,14 @@
 //! Scripted deterministic host for job workflow tests.
 //!
-//! The host feeds scripted [`JobResponse`] inputs to a [`Job`] and collects a
+//! The host feeds scripted [`JobCommand`] inputs to a [`Job`] and collects a
 //! transcript of `state:` / `effect:` / `event:` strings in deterministic
 //! order. It performs no I/O, clock reads, or randomness during execution.
 
 #![allow(dead_code)]
 
-use dezoomify_job::{Config, Job, JobError, JobResponse, Outcome};
+use dezoomify_job::{
+    Config, DecisionReason, Job, JobCommand, JobEffect, JobError, JobEvent, JobMessageBody, Outcome,
+};
 
 /// Recognizable Deep Zoom input URL: the registry's deepzoom candidate
 /// accepts it and asks for the `.dzi` document at `req:0`.
@@ -39,9 +41,9 @@ impl ScriptedHost {
     ///
     /// # Errors
     ///
-    /// Returns [`JobError`] when the job id, URL, or config is invalid.
-    pub fn new(job_id: &str, input_url: &str, config: Config) -> Result<Self, JobError> {
-        let job = Job::new(job_id, input_url, config)?;
+    /// Returns [`JobError`] when the URL or config is invalid.
+    pub fn new(_job_id: &str, input_url: &str, config: Config) -> Result<Self, JobError> {
+        let job = Job::new(input_url, config)?;
         let last_state = job.state().name().to_string();
         let mut host = Self {
             job,
@@ -72,8 +74,8 @@ impl ScriptedHost {
     ///
     /// Propagates [`JobError`] rejections; rejected and ignored inputs leave
     /// the transcript unchanged.
-    pub fn apply(&mut self, response: JobResponse) -> Result<Outcome, JobError> {
-        let outcome = self.job.on_response(response);
+    pub fn apply(&mut self, response: JobCommand) -> Result<Outcome, JobError> {
+        let outcome = self.job.on_command(response);
         match &outcome {
             Ok(_) => {
                 self.record();
@@ -82,10 +84,10 @@ impl ScriptedHost {
                 // Rejections must not add work: drains stay empty and state is
                 // unchanged, so recording is a no-op. Drain defensively to
                 // prove no queued work leaked.
-                let effects = self.job.drain_effects();
-                let events = self.job.drain_events();
-                debug_assert!(effects.is_empty(), "rejection queued effects");
-                debug_assert!(events.is_empty(), "rejection queued events");
+                debug_assert!(
+                    self.job.drain_messages().is_empty(),
+                    "rejection queued messages"
+                );
             }
         }
         outcome
@@ -177,24 +179,116 @@ impl ScriptedHost {
     }
 
     fn record(&mut self) {
-        let mut pending: Vec<(u64, String)> = Vec::new();
-        for effect in self.job.drain_effects() {
-            self.effects.push(effect.clone());
-            pending.push(format_effect(&effect));
-        }
-        for event in self.job.drain_events() {
-            self.events.push(event.clone());
-            pending.push(format_event(&event));
-        }
-        pending.sort_by_key(|(seq, _)| *seq);
-        for (_, line) in pending {
-            self.transcript.push(line);
+        for message in self.job.drain_messages() {
+            match message.body {
+                JobMessageBody::Effect(effect) => {
+                    let value = effect_json(message.sequence, effect);
+                    self.transcript.push(format_effect(&value).1);
+                    self.effects.push(value);
+                }
+                JobMessageBody::Event(event) => {
+                    let value = event_json(message.sequence, event);
+                    self.transcript.push(format_event(&value).1);
+                    self.events.push(value);
+                }
+            }
         }
         let current = self.job.state().name().to_string();
         if current != self.last_state {
             self.transcript.push(format!("state:{current}"));
             self.last_state = current;
         }
+    }
+}
+
+fn effect_json(seq: u32, effect: JobEffect) -> serde_json::Value {
+    match effect {
+        JobEffect::AcquireResource {
+            request,
+            uri,
+            header_names,
+        } => serde_json::json!({
+            "kind": "acquire-resource", "seq": seq, "request": request,
+            "uri": uri, "header_names": header_names, "purpose": "metadata",
+        }),
+        JobEffect::AcquireTile {
+            tile,
+            uri,
+            headers,
+            processing,
+            destination,
+            expected_size,
+            canvas,
+            probe,
+        } => {
+            let mut value = serde_json::json!({
+                "kind": "acquire-tile", "seq": seq, "tile": tile, "uri": uri,
+                "headers": headers, "processing": processing,
+                "destination": {"x": destination.x, "y": destination.y},
+                "expected_size": expected_size.map(|v| serde_json::json!({"x": v.x, "y": v.y})),
+                "canvas": canvas.map(|v| serde_json::json!({"x": v.x, "y": v.y})),
+            });
+            if probe {
+                value["probe"] = serde_json::Value::Bool(true);
+            }
+            value
+        }
+        JobEffect::RequestDestination { format } => {
+            serde_json::json!({"kind":"request-destination","seq":seq,"format":format})
+        }
+        JobEffect::DecodePixels { tile } => {
+            serde_json::json!({"kind":"decode-pixels","seq":seq,"tile":tile})
+        }
+        JobEffect::OpenEncoder { format, canvas } => {
+            serde_json::json!({"kind":"open-encoder","seq":seq,"format":format,"canvas":canvas.map(|v| serde_json::json!({"x":v.x,"y":v.y}))})
+        }
+        JobEffect::FinalizeEncoder => serde_json::json!({"kind":"finalize-encoder","seq":seq}),
+        JobEffect::PublishOutput => {
+            serde_json::json!({"kind":"publish-output","seq":seq,"output":"out:0"})
+        }
+        JobEffect::ReleaseBytes => serde_json::json!({"kind":"release-bytes","seq":seq}),
+        JobEffect::CancelWork => serde_json::json!({"kind":"cancel-work","seq":seq}),
+        JobEffect::RequestDecision { generation, reason } => serde_json::json!({
+            "kind":"request-decision","seq":seq,"generation":generation,
+            "reason": match reason { DecisionReason::Destination => "destination", DecisionReason::Partial => "partial" },
+        }),
+    }
+}
+
+fn event_json(seq: u32, event: JobEvent) -> serde_json::Value {
+    match event {
+        JobEvent::State { state } => {
+            serde_json::json!({"kind":"job-state","seq":seq,"state":state.name()})
+        }
+        JobEvent::Catalog { catalog } => {
+            serde_json::json!({"kind":"catalog","seq":seq,"images":catalog.images})
+        }
+        JobEvent::Levels { image, levels } => {
+            serde_json::json!({"kind":"levels","seq":seq,"image":image,"levels":levels})
+        }
+        JobEvent::Progress { acquired, total } => {
+            serde_json::json!({"kind":"progress","seq":seq,"acquired":acquired,"total":total})
+        }
+        JobEvent::Warning { tile, attempt } => {
+            serde_json::json!({"kind":"warning","seq":seq,"tile":tile,"attempt":attempt})
+        }
+        JobEvent::MissingWork { failed } => {
+            serde_json::json!({"kind":"missing-work","seq":seq,"failed":failed})
+        }
+        JobEvent::RecoveryRequested { generation, reason } => serde_json::json!({
+            "kind":"recovery-requested","seq":seq,"generation":generation,
+            "reason":match reason { DecisionReason::Destination => "destination", DecisionReason::Partial => "partial" },
+        }),
+        JobEvent::Completed => serde_json::json!({"kind":"completed","seq":seq,"output":"out:0"}),
+        JobEvent::PartialCompleted => {
+            serde_json::json!({"kind":"partial-completed","seq":seq,"output":"out:0"})
+        }
+        JobEvent::Failed { code, message } => {
+            serde_json::json!({"kind":"failed","seq":seq,"code":code,"message":message})
+        }
+        JobEvent::Cancelled => serde_json::json!({"kind":"cancelled","seq":seq}),
+        JobEvent::Paused => serde_json::json!({"kind":"paused","seq":seq}),
+        JobEvent::Resumed => serde_json::json!({"kind":"resumed","seq":seq}),
     }
 }
 
