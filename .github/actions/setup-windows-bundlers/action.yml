@@ -1,0 +1,31 @@
+name: setup-windows-bundlers
+description: Install and expose the pinned WiX v3 and NSIS toolchains
+runs:
+  using: composite
+  steps:
+    - name: Install WiX and NSIS
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        choco install wixtoolset --version=3.14.1.20250415 --yes --no-progress
+        if ($LASTEXITCODE -notin @(0, 1641, 3010)) {
+          throw "WiX installation failed with exit code $LASTEXITCODE"
+        }
+        choco install nsis --version=3.12.0 --yes --no-progress
+        if ($LASTEXITCODE -notin @(0, 1641, 3010)) {
+          throw "NSIS installation failed with exit code $LASTEXITCODE"
+        }
+
+        $wix = Get-ChildItem "${env:ProgramFiles(x86)}\WiX Toolset v3*\bin\candle.exe" -ErrorAction SilentlyContinue |
+          Sort-Object FullName -Descending | Select-Object -First 1
+        $nsis = Get-Item "${env:ProgramFiles(x86)}\NSIS\makensis.exe" -ErrorAction SilentlyContinue
+        if (-not $wix) { throw 'candle.exe is missing after installing WiX' }
+        if (-not $nsis) { throw 'makensis.exe is missing after installing NSIS' }
+
+        Add-Content -Path $env:GITHUB_PATH -Value $wix.Directory.FullName
+        Add-Content -Path $env:GITHUB_PATH -Value $nsis.Directory.FullName
+        & $wix.FullName '-?'
+        if ($LASTEXITCODE -ne 0) { throw 'candle.exe prerequisite check failed' }
+        & $nsis.FullName '-VERSION'
+        if ($LASTEXITCODE -ne 0) { throw 'makensis.exe prerequisite check failed' }

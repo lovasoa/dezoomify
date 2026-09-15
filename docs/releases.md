@@ -42,8 +42,8 @@ deterministic contract (version, tag, commit, protocol range, schema
 fingerprint, capabilities, targets) from Git, `release/config.toml`,
 `release/targets.toml`, `release/compatibility.toml`, and
 `generated/release-capabilities.json`. The build stage produces one target's
-artifact on the matching host; unavailable targets refuse to build. The verify
-stage checks artifact names against the plan. The publish stage verifies again
+artifact on the matching host; every planned target is mandatory. The verify
+stage checks every artifact name against the plan. The publish stage verifies again
 and refuses unless `origin/master` is the planned
 revision. Release descriptions use the annotated tag message, or commit titles
 since the preceding release tag when no annotation exists. Rolling releases use
@@ -60,19 +60,16 @@ GitHub Release artifacts are the single source of truth for store submission;
 the store jobs do not rebuild or independently validate them beyond checking
 the transferred ZIP with `unzip -t`. Store review remains external: submission
 is automatic, but public availability waits for Chrome Web Store or AMO
-approval. Local `cargo xtask build desktop` produces
-a real unsigned `.deb` (no paid signing) from the Tauri window shell behind
-the optional `tauri` feature, so `desktop-linux-x86_64` is available;
-`desktop-windows-x86_64` (needs a Windows host with WebView2, WiX, NSIS, and
-`icon.ico`) and the macOS targets (need a macOS host with the Xcode Command
-Line Tools and `icon.icns`) stay unavailable, and a release never claims an
-artifact it did not build. The operator
+approval. The release builds an unsigned Linux x86_64 `.deb`, Windows x86_64
+`.msi`, and Apple silicon macOS `.dmg` on matching GitHub-hosted runners.
+Windows requires WebView2, WiX, NSIS, and `icon.ico`; macOS requires the Xcode
+Command Line Tools and `icon.icns`. A missing prerequisite fails the release.
+The operator
 sequence for cutting a release is the runbook in [Operations](operations.md).
 
 GitHub Releases provides release provenance and the exact artifacts submitted
 to the extension stores.
-Desktop installers remain unsigned; the published inventory currently has the
-Linux `.deb` only. See the [Desktop app guide](user/desktop-app.md#install).
+Desktop installers remain unsigned. See the [Desktop app guide](user/desktop-app.md#install).
 
 ## Desktop updater
 

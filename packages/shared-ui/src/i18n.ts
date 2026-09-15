@@ -128,8 +128,7 @@ const en = {
   "view.desktop.title": "Dezoomify Desktop App",
   "view.desktop.subtitle":
     "High-performance native application for gigapixel museum artworks and local scans",
-  "view.desktop.noInstaller":
-    "No installer ships for {platform} yet. Only Linux has a .deb (unsigned) on",
+  "view.desktop.installer": "The unsigned {installer} for {platform} is on",
   "view.desktop.releasesLink": "GitHub Releases",
   "view.desktop.whyTitle": "Why use the Desktop App?",
   "view.desktop.why1Title": "Handles Larger Artworks:",
@@ -142,7 +141,7 @@ const en = {
     "The website stops the job with an error and points to the desktop app for the full-size image.",
   "view.desktop.howTitle": "How to use it",
   "view.desktop.step1":
-    "No installer ships for {platform} yet; only Linux has an unsigned .deb on our GitHub Releases page. Verify SHA256SUMS and signatures before installing. There is no auto-update.",
+    "Save the unsigned {installer} for {platform} from our GitHub Releases page, then install it. There is no auto-update.",
   "view.desktop.step2": "Launch Dezoomify and paste your zoomable image or manifest URL.",
   "view.desktop.step3":
     "Select your desired resolution and destination folder to save the complete composite image.",

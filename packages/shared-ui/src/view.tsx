@@ -1121,13 +1121,13 @@ function ConfirmDialog({
 // Guidance dialogs.
 // ---------------------------------------------------------------------------
 
-function detectPlatform(hints?: PlatformHints): { name: string; hasInstaller: boolean } {
+function detectPlatform(hints?: PlatformHints): { name: string; installer: string } {
   const ua = (hints?.userAgent ?? "").toLowerCase();
   const platform = (hints?.platform ?? "").toLowerCase();
-  if (ua.includes("win") || platform.includes("win")) return { name: "Windows", hasInstaller: false };
-  if (ua.includes("mac") || platform.includes("mac")) return { name: "macOS", hasInstaller: false };
-  if (ua.includes("linux") || platform.includes("linux")) return { name: "Linux", hasInstaller: true };
-  return { name: "All Platforms", hasInstaller: false };
+  if (ua.includes("win") || platform.includes("win")) return { name: "Windows", installer: ".msi installer" };
+  if (ua.includes("mac") || platform.includes("mac")) return { name: "macOS", installer: "Apple silicon .dmg" };
+  if (ua.includes("linux") || platform.includes("linux")) return { name: "Linux", installer: ".deb installer" };
+  return { name: "your platform", installer: "installer" };
 }
 
 const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
@@ -1139,21 +1139,13 @@ export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformH
       GitHub Releases
     </a>
   );
-  const downloadNote = p.hasInstaller
-    ? (
-        <>
-          Linux installer (.deb, unsigned) is on {releases}. Verify SHA256SUMS and GPG signatures before
-          installing. No auto-update; check Releases manually.
-        </>
-      )
-    : (
-        <>
-          No installer ships for {p.name} yet. Only Linux has a .deb (unsigned) on {releases}.
-        </>
-      );
-  const stepOne = p.hasInstaller
-    ? "Save the Linux .deb (unsigned) from our GitHub Releases page, verify SHA256SUMS and signatures, then install it. There is no auto-update."
-    : `No installer ships for ${p.name} yet; only Linux has an unsigned .deb on our GitHub Releases page. Meanwhile use the website or CLI.`;
+  const downloadNote = (
+    <>
+      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}. No auto-update;
+      check Releases manually.
+    </>
+  );
+  const stepOne = t("view.desktop.step1", { platform: p.name, installer: p.installer });
   mountOverlay(hostDocument, (close) => (
     <ModalCard
       title={t("view.desktop.title")}

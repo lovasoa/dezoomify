@@ -27,8 +27,7 @@ export const fr = {
   "view.desktop.title": "Application de bureau Dezoomify",
   "view.desktop.subtitle":
     "Application native haute performance pour les oeuvres museales gigapixels et les numerisations locales",
-  "view.desktop.noInstaller":
-    "Aucun installateur pour le moment. Un futur installateur pour {platform} paraitra sur",
+  "view.desktop.installer": "L’{installer} non signé pour {platform} est disponible sur",
   "view.desktop.releasesLink": "GitHub Releases",
   "view.desktop.whyTitle": "Pourquoi utiliser l application de bureau ?",
   "view.desktop.why1Title": "Prend en charge les oeuvres tres grandes :",
@@ -41,7 +40,7 @@ export const fr = {
     "Le site web interrompt la tache avec une erreur et renvoie vers l application de bureau pour l image en pleine taille.",
   "view.desktop.howTitle": "Comment l utiliser",
   "view.desktop.step1":
-    "Aucun installateur pour le moment ; un futur installateur pour {platform} paraitra sur notre page GitHub Releases.",
+    "Téléchargez l’{installer} non signé pour {platform} depuis notre page GitHub Releases, puis installez-le. Il n’y a pas de mise à jour automatique.",
   "view.desktop.step2": "Lancez Dezoomify et collez l adresse de votre image zoomable ou de votre manifeste.",
   "view.desktop.step3":
     "Choisissez la resolution souhaitee et le dossier de destination pour enregistrer l image complete assemblee.",

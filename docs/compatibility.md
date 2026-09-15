@@ -24,12 +24,11 @@ bindings, schema fingerprints, compatibility fixtures, and this matrix (see
 | Website | Current browsers with WebAssembly, workers, and canvas | Real-Chromium end-to-end runs (`cargo xtask test web --e2e`) plus supported browser and OS smoke tests in the release gates |
 | Extension (Chromium) | Chrome 121 or later, plus Edge, Brave, and other Chromium-based browsers (`minimum_chrome_version` 121, required for `wasm-unsafe-eval`) | Headless Chromium end-to-end in `cargo xtask test extension` |
 | Extension (Firefox) | Firefox 128.0 or later (`strict_min_version` 128.0, event-page background) | Headless Firefox end-to-end in `cargo xtask test extension` via Selenium and geckodriver |
-| Desktop app | Windows, macOS, and Linux through the Tauri shell (WebView2 on Windows, WebKit on macOS, webkit2gtk on Linux) | `cargo xtask test desktop`; the Linux `.deb` builds on a Linux host while Windows and macOS bundles build only on their matching hosts |
+| Desktop app | Windows x86_64, Apple silicon macOS, and Linux x86_64 through the Tauri shell (WebView2 on Windows, WebKit on macOS, webkit2gtk on Linux) | `cargo xtask test desktop`; each installer builds and launches on its matching host |
 | CLI | Native binary (Linux `cli-linux-x86_64` target; the same native runtime as the desktop app) | `cargo xtask test native` plus scenario parity |
 
-Desktop installers ship unsigned (no paid Apple or Azure signing); only the
-Linux `.deb` is buildable while Windows and macOS targets stay unavailable
-(see [Releases](releases.md)). Automatic in-app updates are disabled: there
+Desktop installers ship unsigned (no paid Apple or Azure signing) for Linux
+x86_64, Windows x86_64, and Apple silicon macOS (see [Releases](releases.md)). Automatic in-app updates are disabled: there
 is no update host or key, so users check GitHub Releases manually. The
 user-facing install note lives in the [Desktop app
 guide](user/desktop-app.md#install).

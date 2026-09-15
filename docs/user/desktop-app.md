@@ -61,12 +61,10 @@ You can still open the containing folder if the image has been moved.
 
 ## Install
 
-Linux ships an unsigned `.deb` on the [releases
-page](https://github.com/lovasoa/dezoomify/releases/latest) (`desktop-linux-x86_64`;
-no paid Apple/Azure signing anywhere). Windows and macOS ship no installer
-in this wave: their bundles build only on their matching hosts, so use the
-[website](./website.md) or the [command-line tool](./command-line.md) there
-and check the releases page for news.
+The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
+ships unsigned installers for Linux x86_64 (`.deb`), Windows x86_64 (`.msi`),
+and Apple silicon macOS (`.dmg`). There is no paid Apple or Azure signing, so
+the operating system may ask you to confirm that you trust the installer.
 
 There is no automatic in-app update: when a new version appears on the
 releases page, download it manually and install it yourself.

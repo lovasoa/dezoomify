@@ -114,7 +114,7 @@ invented for the shipped product. See [Releases](releases.md#desktop-updater).
 
 ### Desktop bundles
 
-`cargo xtask build desktop` compiles the lean shell first, then the frontend, then the Tauri window shell, then generates icons, then bundles. `--unsigned-test` stops before the bundler and produces no bundle. The bundle target follows the host: Linux produces `deb` via `cargo tauri build --bundles deb`; Windows produces `msi`/`nsis`; macOS produces `dmg`. A target is available only when its recipe and host tools are present; otherwise the build fails closed naming the exact prerequisites.
+`cargo xtask build desktop` compiles the lean shell first, then the frontend, then the Tauri window shell, then generates icons, then bundles. `--unsigned-test` stops before the bundler and produces no bundle. The bundle target follows the host: Linux produces `deb` via `cargo tauri build --bundles deb`; Windows produces `msi`/`nsis`; macOS produces `dmg`. Missing host tools fail closed naming the exact prerequisites.
 
 Linux needs the webview system packages `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` for the window shell plus `dpkg-deb` (package `dpkg-dev`) for the `deb` bundler; icons come from `scripts/gen-desktop-icons.py`, which runs before the bundler. macOS ships WebKit and needs the Xcode Command Line Tools plus `icons/icon.icns` for the `dmg` target. Windows ships WebView2 and needs WiX v3 for the `msi` target and NSIS for the `nsis` target, plus `icons/icon.ico`. Installers ship unsigned.
 
@@ -123,16 +123,14 @@ Install smoke runs per OS in the desktop CI `bundle-smoke` matrix (see
 `dpkg -i` (repairing deps from apt when reported missing) and proves launch
 with a timed stay-alive run under Xvfb; macOS mounts the `dmg` (answering the
 embedded license prompt from stdin) and execs the app binary directly from
-the image; Windows prefers the `nsis` `/S` silent install and falls back to a
-direct release-exe launch smoke when WiX/NSIS are absent from the runner (the
-bundler fails closed by design there, so installer coverage stays with
-nsis-capable hosts). The window shell has no `--version` flag, so every smoke
+the image; Windows requires WiX and NSIS, installs the `msi` bundle silently,
+and fails if either tool or installer is missing. The window shell has no `--version` flag, so every smoke
 proves install plus launch by keeping the app alive for its window
 (15-20 s) and stopping it. Gatekeeper and SIP are never touched on macOS; the
 locally built unsigned Windows binary carries no Mark-of-the-Web, so
-SmartScreen does not intervene and no OS policy is bypassed anywhere. Only
-the Linux `.deb` ships as a release artifact today; the user-facing install
-note lives in the [Desktop app guide](user/desktop-app.md#install).
+SmartScreen does not intervene and no OS policy is bypassed anywhere. The
+Linux x86_64 `.deb`, Windows x86_64 `.msi`, and Apple silicon macOS `.dmg` ship
+as release artifacts; the user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install).
 
 ### Real-window E2E hook
 

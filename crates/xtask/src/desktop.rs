@@ -497,7 +497,7 @@ fn tauri_system_ready() -> bool {
 }
 
 /// The bundler set for this host. Linux produces a real `deb`; Windows
-/// documents `msi`/`nsis`; macOS documents `dmg`. Any other host has no
+/// produces `msi`/`nsis`; macOS produces `dmg`. Any other host has no
 /// bundle recipe.
 #[cfg(target_os = "linux")]
 fn bundle_targets() -> &'static [&'static str] {

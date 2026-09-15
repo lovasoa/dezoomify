@@ -41,11 +41,6 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
         .iter()
         .find(|t| t.name == target)
         .ok_or_else(|| format!("target '{target}' is not in the release plan"))?;
-    if !entry.available {
-        return Err(format!(
-            "target '{target}' is unavailable in this release (see release/targets.toml and docs/releases.md)"
-        ));
-    }
     if plan.commit != git_commit()? {
         return Err(
             "release plan was generated from a different commit; regenerate the plan".to_string(),
@@ -72,10 +67,9 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
     }
     match target {
         "cli-linux-x86_64" => build_cli_artifact(&entry.os, &out)?,
-        "desktop-linux-x86_64"
-        | "desktop-windows-x86_64"
-        | "desktop-macos-aarch64"
-        | "desktop-macos-x86_64" => build_desktop_artifact(target, &entry.os, &out)?,
+        "desktop-linux-x86_64" | "desktop-windows-x86_64" | "desktop-macos-aarch64" => {
+            build_desktop_artifact(target, &entry.os, &out)?
+        }
         "extension-chromium" => build_extension_artifact("chromium", &out)?,
         "extension-firefox" => build_extension_artifact("firefox", &out)?,
         other => return Err(format!("target '{other}' has no build recipe")),
@@ -141,7 +135,6 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
         // the msi; only the msi is the release artifact.
         "desktop-windows-x86_64" => ("msi", "msi", None),
         "desktop-macos-aarch64" => ("dmg", "dmg", Some("aarch64")),
-        "desktop-macos-x86_64" => ("dmg", "dmg", Some("x64")),
         _ => return Err(format!("target '{target}' has no build recipe")),
     };
     let dir = crate::repo_root()
@@ -158,9 +151,6 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
         }
         if let Some(token) = arch_token {
             if !name.contains(token) {
-                continue;
-            }
-            if token == "x64" && name.contains("aarch64") {
                 continue;
             }
         }
