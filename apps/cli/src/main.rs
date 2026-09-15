@@ -368,7 +368,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
     );
     match result {
         Ok(outcome) => {
-            let result = handle.finish();
+            handle.finish();
             if json {
                 println!(
                     "{}",
@@ -401,7 +401,6 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
                     );
                 }
             }
-            drop(result);
             true
         }
         Err(error) => {

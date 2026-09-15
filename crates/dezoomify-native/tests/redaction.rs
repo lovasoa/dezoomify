@@ -14,7 +14,7 @@ fn canaries_never_appear_in_events() {
         })
         .unwrap();
     handle.emit("started");
-    let result = handle.finish("hash-1".into());
+    let result = handle.finish();
     // The input URL (with its secret query) flows through the runtime; every
     // observable surface must carry only the redacted origin.
     let text = format!(
