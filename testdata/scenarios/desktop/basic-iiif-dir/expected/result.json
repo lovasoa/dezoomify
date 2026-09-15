@@ -124,12 +124,10 @@
   "output": {
     "format": "iiif-dir",
     "height": 512,
-    "outputHash": "sha256:e74efc0799357b0e8b3e9f93e34013dd20b3122ac709fe7ec3d8944a699ee9ad",
     "partial": false,
     "tileCount": 4,
     "width": 512
   },
-  "outputHash": "sha256:e74efc0799357b0e8b3e9f93e34013dd20b3122ac709fe7ec3d8944a699ee9ad",
   "protocol": "1.0",
   "provenance": "fixture",
   "readableBytes": true,

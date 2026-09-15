@@ -26,7 +26,6 @@
       "webRequest": 0
     },
     "outputFormat": "zif",
-    "outputHash": "sha256:c86d7fb1cb8dafd61bb198145b296bb001acc4ab7a867d4db23e552887ea1e59",
     "partial": false,
     "pixels": {
       "bottomLeft": [
@@ -115,7 +114,6 @@
     },
     {
       "event": "completed",
-      "outputHash": "sha256:c86d7fb1cb8dafd61bb198145b296bb001acc4ab7a867d4db23e552887ea1e59",
       "state": "Completed",
       "step": 11
     }

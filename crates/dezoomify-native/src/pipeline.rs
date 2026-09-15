@@ -447,8 +447,6 @@ pub struct PipelineEvent {
 #[derive(Clone, Debug)]
 pub struct PipelineOutcome {
     pub output_path: PathBuf,
-    /// Deprecated compatibility field. Native output bytes are not hashed.
-    pub output_hash: String,
     pub tile_count: usize,
     pub image_size: Vec2d,
     /// Stable id of the detected format (e.g. `zoomify`, `iiif`).

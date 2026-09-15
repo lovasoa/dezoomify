@@ -264,6 +264,5 @@ test("desktop fingerprint matches protocol-ts fingerprint (Rust/TS/schema agreem
 test("desktop scenario transcript is minimal and redacted", () => {
   const result = readJson("../../../testdata/scenarios/desktop/basic/expected/result.json");
   assert.ok(Array.isArray(result.states) && result.states.length >= 2, "states");
-  assert.ok(typeof result.outputHash === "string" && result.outputHash.length > 10, "outputHash");
   assert.ok(result.states.includes("completed"), "terminal state");
 });

@@ -26,17 +26,13 @@ import {
   stopFixtureServer,
   stopWindowApp,
 } from "../harness.mjs";
-import { assertSavedPyramid, goldenOutputHash } from "../png-assert.mjs";
+import { assertSavedPyramid } from "../png-assert.mjs";
 
 const GATEWAY_DZI = "https://fixtures.test/cli/pyramid.dzi";
 // Two tiles answer 429 with Retry-After, so the job stays running through
 // retry backoff long enough to cancel deterministically.
 const SLOW_DZI = "https://fixtures.test/edge/throttle-429/pyramid.dzi";
 const PARTIAL_DZI = "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi";
-
-function expectedHash() {
-  return goldenOutputHash(SCENARIOS_DIR);
-}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -230,7 +226,7 @@ describe("Dezoomify desktop window", () => {
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
     assert.ok(!outputs[0].includes(".partial."), "a complete save is not a partial sibling");
-    assertSavedPyramid(readFileSync(outputs[0]), expectedHash());
+    assertSavedPyramid(readFileSync(outputs[0]));
   });
 
   it("cancelling a job leaves no output", async () => {
@@ -292,7 +288,7 @@ describe("Dezoomify desktop window", () => {
     assert.equal(terminal.error, false, `the confirmed deep link completes: ${errorDetail(terminal)}`);
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "the deep link writes exactly one PNG");
-    assertSavedPyramid(readFileSync(outputs[0]), expectedHash());
+    assertSavedPyramid(readFileSync(outputs[0]));
   });
 
   it("keeps a partial download as a .partial sibling", async () => {

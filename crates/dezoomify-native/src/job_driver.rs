@@ -415,7 +415,6 @@ struct TileGeom {
 
 struct Published {
     output_path: PathBuf,
-    output_hash: String,
     tile_count: usize,
     image_size: Vec2d,
     partial: bool,
@@ -651,7 +650,6 @@ fn drive_job(
             debug_assert_eq!(published.partial, partial);
             Ok(AttemptDone::Done(PipelineOutcome {
                 output_path: published.output_path.clone(),
-                output_hash: published.output_hash,
                 tile_count: published.tile_count,
                 image_size: published.image_size,
                 format: attempt
@@ -1531,7 +1529,6 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
     };
     attempt.published = Some(Published {
         output_path: dest,
-        output_hash: String::new(),
         tile_count: attempt.decoded.len(),
         image_size: Vec2d {
             x: width,

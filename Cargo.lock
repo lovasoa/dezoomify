@@ -1060,7 +1060,6 @@ dependencies = [
  "dezoomify-fixture-server",
  "dezoomify-native",
  "serde_json",
- "sha2",
  "tokio",
 ]
 

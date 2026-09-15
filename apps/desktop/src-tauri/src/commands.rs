@@ -687,7 +687,7 @@ mod tests {
                 }
                 _ => {
                     table
-                        .complete_partial_test_output(&id, "sha256:abc", "png", 2, 2, 1)
+                        .complete_partial_test_output(&id, "png", 2, 2, 1)
                         .unwrap();
                 }
             }

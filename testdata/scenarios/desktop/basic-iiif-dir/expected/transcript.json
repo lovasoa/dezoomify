@@ -26,7 +26,6 @@
       "webRequest": 0
     },
     "outputFormat": "iiif-dir",
-    "outputHash": "sha256:e74efc0799357b0e8b3e9f93e34013dd20b3122ac709fe7ec3d8944a699ee9ad",
     "partial": false,
     "pixels": {
       "bottomLeft": [
@@ -115,7 +114,6 @@
     },
     {
       "event": "completed",
-      "outputHash": "sha256:e74efc0799357b0e8b3e9f93e34013dd20b3122ac709fe7ec3d8944a699ee9ad",
       "state": "Completed",
       "step": 11
     }

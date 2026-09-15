@@ -61,8 +61,8 @@ Line Tools and `icon.icns`) stay unavailable, and a release never claims an
 artifact it did not build. The operator
 sequence for cutting a release is the runbook in [Operations](operations.md).
 
-Artifacts are signed with GPG-detached checksums and signatures. Store
-submission remains separate because store review may lag rolling releases.
+GitHub Releases provides release provenance. Store submission remains separate
+because store review may lag rolling releases.
 Desktop installers remain unsigned; the published inventory currently has the
 Linux `.deb` only. See the [Desktop app guide](user/desktop-app.md#install).
 

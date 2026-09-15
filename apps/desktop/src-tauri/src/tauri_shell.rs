@@ -203,7 +203,7 @@ struct CapabilitySnapshot {
 /// keep working, alongside the typed fields each channel documents:
 /// - `job-state`: `{job,jobId,seq,kind,state,detail,origin}`
 /// - `job-progress`: `{job,jobId,seq,kind,state,acquired,total,detail,origin}`
-/// - `job-output`: `{job,jobId,seq,kind,state,outputHash,format,width,height,tileCount,detail,origin}`
+/// - `job-output`: `{job,jobId,seq,kind,state,format,width,height,tileCount,detail,origin}`
 /// - `job-error`: `{job,jobId,seq,kind,state,code,phase,retryable,recovery,message,detail,origin,transport,resource-kind}`
 ///
 /// Only counts, hashes, codes, and the redacted origin cross IPC; tile

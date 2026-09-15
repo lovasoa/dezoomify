@@ -41,11 +41,9 @@
     },
     "outcomes": [
       {
-        "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
         "status": "done"
       },
       {
-        "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91",
         "status": "done"
       }
     ],
@@ -73,8 +71,7 @@
     },
     {
       "op": "finish",
-      "outcome": "done",
-      "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91"
+      "outcome": "done"
     },
     {
       "errorCode": "tile.download-failed",
@@ -87,8 +84,7 @@
     },
     {
       "op": "finish",
-      "outcome": "done",
-      "outputHash": "sha256:90c70b68cc28f9765c14b16ac11a90edc154d81832b30c8bf46573beee25bc91"
+      "outcome": "done"
     }
   ]
 }

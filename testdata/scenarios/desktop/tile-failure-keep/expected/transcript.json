@@ -9,7 +9,6 @@
       "https://fixtures.test/desktop/tile-failure-keep/corrupt_files/9/1_1.png"
     ],
     "outputFormat": "png",
-    "outputHash": "sha256:c5ab0d889885b3884dee28489f29ce945e05d6fa36dc6a3fe3d105dd62b7afa5",
     "partial": true,
     "pixels": {
       "blankQuadrant": [
@@ -80,7 +79,6 @@
     },
     {
       "event": "partial-completed",
-      "outputHash": "sha256:c5ab0d889885b3884dee28489f29ce945e05d6fa36dc6a3fe3d105dd62b7afa5",
       "state": "PartiallyCompleted",
       "step": 10
     }

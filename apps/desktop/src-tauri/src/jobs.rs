@@ -269,9 +269,6 @@ pub struct JobRecord {
     /// Seeds the save dialog's initial directory; the granted destination is
     /// always the real dialog-chosen path.
     pub output_dir: Option<PathBuf>,
-    /// Digest of the bytes the driver actually wrote (`None` until publish;
-    /// never set on the cancel path).
-    pub output_hash: Option<String>,
     /// Monotonic progress: highest `acquired` count observed. Never
     /// decreases across retries; cache hits still count as acquired, so
     /// resume runs continue forward without claiming unknown totals.
@@ -332,17 +329,13 @@ impl std::fmt::Debug for JobRecord {
             .field("destination_format", &self.destination_format)
             .field("destination_overwrite", &self.destination_overwrite)
             .field("output_dir", &self.output_dir)
-            .field("output_hash", &self.output_hash)
             .finish_non_exhaustive()
     }
 }
 
-/// Structured output ready for the `job-output` channel. The hash is the
-/// real sha256 hex of the bytes the driver wrote (single-file bytes, or the
-/// `info.json` + tile-bytes preimage for `iiif-dir`), never a stub.
+/// Structured output ready for the `job-output` channel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobOutputSnapshot {
-    pub output_hash: String,
     pub format: String,
     pub width: u32,
     pub height: u32,
@@ -381,7 +374,6 @@ pub struct ProjectedEmit {
 #[derive(Debug, Clone)]
 struct DriverSuccess {
     saved_path: PathBuf,
-    output_hash: String,
     format: String,
     width: u32,
     height: u32,
@@ -525,11 +517,6 @@ impl JobTable {
         record.saved_path.clone()
     }
 
-    /// Digest of the bytes the driver wrote, if published.
-    pub fn output_hash_for(&self, job: &str) -> Option<String> {
-        self.jobs.get(job).and_then(|r| r.output_hash.clone())
-    }
-
     /// Current shell state, if known.
     pub fn state_of(&self, job: &str) -> Option<JobState> {
         self.jobs.get(job).map(|r| r.state.clone())
@@ -546,7 +533,6 @@ impl JobTable {
     pub fn output_snapshot_for(&self, job: &str) -> Option<JobOutputSnapshot> {
         let record = self.jobs.get(job)?;
         Some(JobOutputSnapshot {
-            output_hash: record.output_hash.clone()?,
             format: record
                 .destination_format
                 .clone()
@@ -612,9 +598,6 @@ impl JobTable {
             return (channel, payload);
         }
         if channel == CHANNEL_JOB_OUTPUT {
-            let output_hash = record
-                .and_then(|r| r.output_hash.clone())
-                .unwrap_or_else(|| redact_message(&event.detail));
             let format = record
                 .and_then(|r| r.destination_format.clone())
                 .unwrap_or_else(|| "png".to_string());
@@ -636,8 +619,6 @@ impl JobTable {
                 "seq": event.seq,
                 "kind": event.kind,
                 "state": state,
-                "outputHash": output_hash,
-                "output_hash": output_hash,
                 "format": format,
                 "width": width,
                 "height": height,
@@ -823,7 +804,6 @@ impl JobTable {
 
         if let Some(record) = self.jobs.get_mut(job) {
             record.cancel_requested = false;
-            record.output_hash = None;
             record.output_width = None;
             record.output_height = None;
             record.output_tile_count = None;
@@ -1024,7 +1004,6 @@ impl JobTable {
                 destination_format: None,
                 destination_overwrite: false,
                 output_dir: None,
-                output_hash: None,
                 progress_acquired: 0,
                 progress_total: 0,
                 output_width: None,
@@ -1258,40 +1237,27 @@ impl JobTable {
     }
 
     /// Complete a live job (test helper modelling native finalization).
-    /// Models the driver publish step: records a real-shaped digest plus
-    /// geometry when available, then emits the terminal `completed` event
-    /// exactly once on the `job-output` channel.
+    /// Models the driver publish step and emits the terminal `completed`
+    /// event exactly once on the `job-output` channel.
     pub fn complete_job(&mut self, job: &str) -> Result<u64, String> {
         self.pump_drivers();
         self.require_live(job)?;
         if let Some(record) = self.jobs.get_mut(job) {
-            // A test-only publish without driver geometry still records a
-            // digest of bytes the test wrote (here the stub digest); real
-            // driver publishes always carry the sha256 of bytes written.
-            if record.output_hash.is_none() {
-                record.output_hash = Some("out:0".to_string());
-            }
             if record.output_tile_count.is_none() {
                 record.output_tile_count = Some(0);
             }
             record.state = JobState::Completed;
         }
-        let detail = self
-            .jobs
-            .get(job)
-            .and_then(|r| r.output_hash.clone())
-            .unwrap_or_else(|| "out:0".to_string());
-        Ok(self.push_event(job, "completed", &detail))
+        Ok(self.push_event(job, "completed", ""))
     }
 
     /// Record a driver publish for tests without spawning I/O: stores the
-    /// real digest plus geometry and emits the terminal output event.
+    /// output geometry and emits the terminal output event.
     /// Post-terminal calls are rejected as stale.
     #[cfg(test)]
     pub fn publish_test_output(
         &mut self,
         job: &str,
-        output_hash: &str,
         format: &str,
         width: u32,
         height: u32,
@@ -1300,7 +1266,6 @@ impl JobTable {
         self.pump_drivers();
         self.require_live(job)?;
         if let Some(record) = self.jobs.get_mut(job) {
-            record.output_hash = Some(output_hash.to_string());
             record.destination_format = Some(
                 record
                     .destination_format
@@ -1312,18 +1277,17 @@ impl JobTable {
             record.output_tile_count = Some(tile_count);
             record.state = JobState::Completed;
         }
-        Ok(self.push_event(job, "completed", output_hash))
+        Ok(self.push_event(job, "completed", ""))
     }
 
     /// Record a kept-partial driver publish for tests without spawning I/O:
-    /// stores the real digest plus geometry and emits the terminal
+    /// stores output geometry and emits the terminal
     /// `partial-completed` output event exactly once (`PartiallyCompleted`).
     /// Post-terminal calls are rejected as stale.
     #[cfg(test)]
     pub fn complete_partial_test_output(
         &mut self,
         job: &str,
-        output_hash: &str,
         format: &str,
         width: u32,
         height: u32,
@@ -1332,7 +1296,6 @@ impl JobTable {
         self.pump_drivers();
         self.require_live(job)?;
         if let Some(record) = self.jobs.get_mut(job) {
-            record.output_hash = Some(output_hash.to_string());
             record.destination_format = Some(
                 record
                     .destination_format
@@ -1347,7 +1310,7 @@ impl JobTable {
             record.pending_partial = None;
             record.state = JobState::PartiallyCompleted;
         }
-        Ok(self.push_event(job, "partial-completed", output_hash))
+        Ok(self.push_event(job, "partial-completed", ""))
     }
 
     /// Honest kept-partial publish for tests: stores the digest, geometry,
@@ -1361,7 +1324,6 @@ impl JobTable {
     pub fn complete_partial_with_ledger_for_test(
         &mut self,
         job: &str,
-        output_hash: &str,
         format: &str,
         width: u32,
         height: u32,
@@ -1375,7 +1337,6 @@ impl JobTable {
         ledger.sort();
         ledger.dedup();
         if let Some(record) = self.jobs.get_mut(job) {
-            record.output_hash = Some(output_hash.to_string());
             record.destination_format = Some(
                 record
                     .destination_format
@@ -1390,7 +1351,7 @@ impl JobTable {
             record.pending_partial = None;
             record.state = JobState::PartiallyCompleted;
         }
-        let detail = partial_detail_json(output_hash, &ledger, sibling);
+        let detail = partial_detail_json(&ledger, sibling);
         Ok(self.push_event(job, "partial-completed", &detail))
     }
 
@@ -1633,7 +1594,6 @@ impl JobTable {
                             .map(str::to_string);
                         Ok(DriverSuccess {
                             saved_path: outcome.output_path,
-                            output_hash: outcome.output_hash,
                             format: outcome.format,
                             width: outcome.image_size.x,
                             height: outcome.image_size.y,
@@ -1911,7 +1871,6 @@ impl JobTable {
                                     .unwrap_or_else(|| "output.partial".to_string());
                                 if let Some(record) = self.jobs.get_mut(&job) {
                                     record.state = JobState::PartiallyCompleted;
-                                    record.output_hash = Some(success.output_hash.clone());
                                     record.output_width = Some(success.width);
                                     record.output_height = Some(success.height);
                                     record.output_tile_count = Some(success.tile_count);
@@ -1926,20 +1885,11 @@ impl JobTable {
                                             record.progress_total.max(success.tile_count as u64);
                                     }
                                 }
-                                let detail = partial_detail_json(
-                                    &self
-                                        .jobs
-                                        .get(&job)
-                                        .and_then(|r| r.output_hash.clone())
-                                        .unwrap_or_else(|| "out:0".to_string()),
-                                    &ledger,
-                                    &sibling,
-                                );
+                                let detail = partial_detail_json(&ledger, &sibling);
                                 self.push_event(&job, "partial-completed", &detail);
                             } else {
                                 if let Some(record) = self.jobs.get_mut(&job) {
                                     record.state = JobState::Completed;
-                                    record.output_hash = Some(success.output_hash.clone());
                                     record.output_width = Some(success.width);
                                     record.output_height = Some(success.height);
                                     record.output_tile_count = Some(success.tile_count);
@@ -1954,12 +1904,7 @@ impl JobTable {
                                             record.progress_total.max(success.tile_count as u64);
                                     }
                                 }
-                                let detail = self
-                                    .jobs
-                                    .get(&job)
-                                    .and_then(|r| r.output_hash.clone())
-                                    .unwrap_or_else(|| "out:0".to_string());
-                                self.push_event(&job, "completed", &detail);
+                                self.push_event(&job, "completed", "");
                             }
                         }
                         Err(failure) => {
@@ -1969,7 +1914,6 @@ impl JobTable {
                                 });
                                 if let Some(record) = self.jobs.get_mut(&job) {
                                     record.state = JobState::Cancelled;
-                                    record.output_hash = None;
                                     record.output_width = None;
                                     record.output_height = None;
                                     record.output_tile_count = None;
@@ -2080,11 +2024,10 @@ fn recovery_detail_json(
     value.to_string()
 }
 
-/// Honest `partial-completed` detail: the output hash plus the missing
-/// ledger and the sibling basename (never the granted path).
-fn partial_detail_json(output_hash: &str, missing: &[String], sibling: &str) -> String {
+/// Honest `partial-completed` detail: the missing ledger and sibling basename
+/// (never the granted path).
+fn partial_detail_json(missing: &[String], sibling: &str) -> String {
     serde_json::json!({
-        "outputHash": output_hash,
         "missing": missing,
         "sibling": sibling,
         "reason": "partial",
@@ -2595,28 +2538,18 @@ mod tests {
     }
 
     #[test]
-    fn output_carries_real_sha256_and_geometry() {
-        // sha256("test"): a real 64-hex digest shape (never a stub).
-        let digest = "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    fn output_carries_geometry() {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table
-            .publish_test_output(&id, digest, "png", 800, 600, 12)
-            .unwrap();
+        table.publish_test_output(&id, "png", 800, 600, 12).unwrap();
         let snapshot = table.output_snapshot_for(&id).unwrap();
-        assert_eq!(snapshot.output_hash, digest);
         assert_eq!(snapshot.format, "png");
         assert_eq!((snapshot.width, snapshot.height), (800, 600));
         assert_eq!(snapshot.tile_count, 12);
-        // Hex part is 64 lowercase hex chars (real sha256, never a stub).
-        let hex_part = snapshot.output_hash.strip_prefix("sha256:").unwrap();
-        assert_eq!(hex_part.len(), 64);
-        assert!(hex_part.chars().all(|c| c.is_ascii_hexdigit()));
         let events = table.events_for(&id);
         let completed = events.iter().find(|e| e.kind == "completed").unwrap();
         let (channel, payload) = table.project_event(&id, completed);
         assert_eq!(channel, CHANNEL_JOB_OUTPUT);
-        assert_eq!(payload["outputHash"], serde_json::json!(digest));
         assert_eq!(payload["format"], serde_json::json!("png"));
         assert_eq!(payload["width"], serde_json::json!(800u32));
         assert_eq!(payload["height"], serde_json::json!(600u32));
@@ -2951,13 +2884,13 @@ mod tests {
         assert_eq!(table.complete_job("job:missing").unwrap_err(), "unknown");
         assert_eq!(
             table
-                .publish_test_output("job:missing", "sha256:abc", "png", 1, 1, 1)
+                .publish_test_output("job:missing", "png", 1, 1, 1)
                 .unwrap_err(),
             "unknown"
         );
         assert_eq!(
             table
-                .complete_partial_test_output("job:missing", "sha256:abc", "png", 1, 1, 1)
+                .complete_partial_test_output("job:missing", "png", 1, 1, 1)
                 .unwrap_err(),
             "unknown"
         );
@@ -2991,27 +2924,11 @@ mod tests {
                     table.cancel_job(&id).unwrap();
                 }
                 "completed" => {
-                    table
-                        .publish_test_output(
-                            &id,
-                            "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-                            "png",
-                            8,
-                            6,
-                            2,
-                        )
-                        .unwrap();
+                    table.publish_test_output(&id, "png", 8, 6, 2).unwrap();
                 }
                 "partial" => {
                     table
-                        .complete_partial_test_output(
-                            &id,
-                            "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-                            "png",
-                            8,
-                            6,
-                            1,
-                        )
+                        .complete_partial_test_output(&id, "png", 8, 6, 1)
                         .unwrap();
                 }
                 _ => {
@@ -3069,14 +2986,12 @@ mod tests {
         );
         assert_eq!(table.complete_job(&id).unwrap_err(), "stale");
         assert_eq!(
-            table
-                .publish_test_output(&id, "sha256:abc", "png", 1, 1, 1)
-                .unwrap_err(),
+            table.publish_test_output(&id, "png", 1, 1, 1).unwrap_err(),
             "stale"
         );
         assert_eq!(
             table
-                .complete_partial_test_output(&id, "sha256:abc", "png", 1, 1, 1)
+                .complete_partial_test_output(&id, "png", 1, 1, 1)
                 .unwrap_err(),
             "stale"
         );
@@ -3092,7 +3007,6 @@ mod tests {
         assert_eq!(table.last_seq(&id), Some(seq_before));
         assert!(table.drain_pending().is_empty(), "no work after terminal");
         assert!(table.destination_for(&id).is_none());
-        assert!(table.output_hash_for(&id).is_none());
         // Late driver pump after a sync terminal adds nothing.
         table.poll_drivers();
         assert_eq!(table.events_for(&id).len(), events_before);
@@ -3159,16 +3073,7 @@ mod tests {
         let s4 = table.last_seq(&id).unwrap();
         assert!(s4 > last, "destination must bump seq");
         last = s4;
-        table
-            .publish_test_output(
-                &id,
-                "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-                "png",
-                4,
-                4,
-                1,
-            )
-            .unwrap();
+        table.publish_test_output(&id, "png", 4, 4, 1).unwrap();
         let terminal_seq = table.last_seq(&id).unwrap();
         assert!(terminal_seq > last);
         let seqs: Vec<u64> = table.events_for(&id).iter().map(|e| e.seq).collect();
@@ -3232,7 +3137,7 @@ mod tests {
             let mut table = JobTable::new();
             let id = table.start_job("https://example.com/item").unwrap();
             table
-                .complete_partial_test_output(&id, "sha256:abc", "png", 2, 2, 1)
+                .complete_partial_test_output(&id, "png", 2, 2, 1)
                 .unwrap();
             assert_eq!(table.state_of(&id), Some(JobState::PartiallyCompleted));
             let events = table.events_for(&id);
@@ -3531,7 +3436,6 @@ mod tests {
         table
             .complete_partial_with_ledger_for_test(
                 &id,
-                "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                 "png",
                 512,
                 512,
@@ -3579,7 +3483,6 @@ mod tests {
             .fail_test_job(&id, "tile.download-failed", "1 tile(s) still failing")
             .unwrap();
         assert_eq!(table.state_of(&id), Some(JobState::Failed));
-        assert!(table.output_hash_for(&id).is_none());
         assert!(table.output_missing_for(&id).is_empty());
         assert!(table.output_sibling_for(&id).is_none());
         let snapshot = table.error_snapshot_for(&id).expect("error snapshot");
