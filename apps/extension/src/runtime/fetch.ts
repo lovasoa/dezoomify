@@ -15,7 +15,7 @@ type TransportCategory = "source-document-lost"|"access-required"|"redirect-unav
 type Purpose = "metadata" | "tile" | "probe";
 type HeaderSource = Headers | Record<string, string> | Array<{ name?: unknown; value?: unknown }>;
 type FetchResponse = Response & { bytes?: Uint8Array; durationMs?: number };
-type FetchOptions = { requestId?: string; purpose?: Purpose; headers?: HeaderSource; maxBytes?: number; timeoutMs?: number; cancelled?: () => boolean; userIntent?: boolean };
+type FetchOptions = { requestId?: number; purpose?: Purpose; headers?: HeaderSource; maxBytes?: number; timeoutMs?: number; cancelled?: () => boolean; userIntent?: boolean };
 type FetchDeps = {
   fetchImpl?: (url: string, init: RequestInit) => Promise<FetchResponse>;
   hasPermission: (origin: string) => boolean | Promise<boolean>;
@@ -198,7 +198,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
   /** @type {Set<AbortController>} */
   const active = new Set<AbortController>();
 
-  /** @param {string} url @param {{ requestId?: string, purpose?: "metadata"|"tile"|"probe", headers?: unknown, maxBytes?: number, timeoutMs?: number, cancelled?: () => boolean }} [opts] */
+  /** @param {string} url @param {{ requestId?: number, purpose?: "metadata"|"tile"|"probe", headers?: unknown, maxBytes?: number, timeoutMs?: number, cancelled?: () => boolean }} [opts] */
   async function fetchResource(url: string, opts: FetchOptions = {}) {
     const parsed = checkedUrl(url);
     const origin = originOf(parsed.href);

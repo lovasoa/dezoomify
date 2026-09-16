@@ -1,13 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 import { importTypeScript } from "./ts-source-loader.mjs";
 
 async function loadController() {
   return importTypeScript(new URL("../../src/job/controller.ts", import.meta.url));
 }
 
+/**
+ * transport.ts imports the shared failure classifier, so unlike the
+ * import-free controller it cannot be loaded from a data: URL as written:
+ * bundle it (esbuild is already the suite's transpiler) and import the exact
+ * module plus its dependency.
+ */
+async function loadTransport() {
+  const bundled = await build({
+    entryPoints: [fileURLToPath(new URL("../../src/job/transport.ts", import.meta.url))],
+    bundle: true,
+    format: "esm",
+    platform: "neutral",
+    target: "es2022",
+    write: false,
+  });
+  const code = bundled.outputFiles[0].text;
+  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(code)}`);
+}
+
 const { createJobController } = await loadController();
+const { createCoordinatorSourceTransport } = await loadTransport();
 
 const BINDING = { jobId: "job:test-1", tabId: 7, frameId: 0, documentGeneration: 1 };
 
@@ -24,14 +46,14 @@ function fakeAssembly() {
   };
 }
 
-function harness({ assembly = fakeAssembly(), acquireTile } = {}) {
+function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport } = {}) {
   if (acquireTile) assembly.acquireTile = acquireTile;
   const sent = [];
   const seen = [];
   const controller = createJobController({
     worker: { postMessage: (message) => sent.push(message) },
     binding: () => BINDING,
-    sourceTransport: {
+    sourceTransport: sourceTransport ?? {
       async fetchResource(request) { seen.push(["source", request]); return { bytes: new Uint8Array([9]) }; },
     },
     extensionTransport: {
@@ -53,10 +75,9 @@ const TILE_EFFECT = {
   kind: "effect",
   type: "acquire-tile",
   effect: "fx:2",
-  job: "job:test-1",
   tile: 0,
   placement: { position: { x: 0, y: 0 }, expected_size: { width: 16, height: 16 }, canvas: { width: 32, height: 32 }, processing: "none" },
-  request: { id: "req:tile-0", uri: "https://cdn.test/tile_0.jpg", headers: [], purpose: "tile" },
+  request: { id: 0, uri: "https://cdn.test/tile_0.jpg", headers: [], purpose: "tile" },
 };
 
 function flush() { return new Promise((resolve) => setTimeout(resolve, 0)); }
@@ -80,7 +101,7 @@ test("a tile that cannot decode reports a failed acquisition, not a broken outpu
   await flush();
   const failure = sent.find((message) => message.type === "engine.failure");
   assert.ok(failure, "failure outcome was sent");
-  assert.equal(failure.requestId, "req:tile-0");
+  assert.equal(failure.requestId, 0);
   assert.equal(sent.some((message) => message.type === "engine.bytes"), false);
 });
 
@@ -123,24 +144,55 @@ test("metadata requests route through the source transport", async () => {
     kind: "effect",
     type: "acquire-resource",
     effect: "fx:0",
-    job: "job:test-1",
-    request: { id: "req:0", uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
+    request: { id: 0, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
   }]);
   await flush();
   assert.equal(seen[0][0], "source");
 });
 
+test("coordinator source fetches name the engine request on the extension bus", async () => {
+  // The coordinator (background service worker) only accepts its own string
+  // request tokens, while the engine correlates by numeric sequence: the
+  // controller must hand the sequence to the transport, which names it once.
+  const bus = [];
+  const sourceTransport = createCoordinatorSourceTransport({
+    async sendMessage(message) { bus.push(message); return { ok: true }; },
+  });
+  const { controller, sent } = harness({ sourceTransport });
+  controller.handleEngineMessages([{
+    kind: "effect",
+    type: "acquire-resource",
+    effect: "fx:0",
+    request: { id: 4, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
+  }]);
+  await flush();
+  assert.deepEqual(
+    bus.map(({ type, requestId, url, purpose }) => ({ type, requestId, url, purpose })),
+    [{ type: "dz.job.fetch", requestId: "req:4", url: "https://source.test/image.dzi", purpose: "metadata" }],
+  );
+  assert.equal(sent.some((message) => message.type === "engine.failure"), false, "a routed fetch must not fail the engine");
+
+  // The coordinator answers under its own token; the assembled bytes settle
+  // the engine's numeric request.
+  sourceTransport.handleMessage({ requestId: "req:4", sourceType: "dz.source.fetch-chunk", bytes: new Uint8Array([1, 2]) });
+  sourceTransport.handleMessage({ requestId: "req:4", sourceType: "dz.source.fetch-complete", ok: true, status: 200, url: "https://source.test/image.dzi" });
+  await flush();
+  const bytes = sent.find((message) => message.type === "engine.bytes");
+  assert.equal(bytes?.requestId, 4);
+  assert.deepEqual([...bytes.bytes], [1, 2]);
+});
+
 test("lifecycle effects and events run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
   controller.handleEngineMessages([
-    { kind: "effect", type: "request-destination", effect: "fx:1", job: "job:test-1", format: "png" },
-    { kind: "event", type: "job-state", job: "job:test-1", state: "AwaitingDestination" },
-    { kind: "effect", type: "decode-pixels", effect: "fx:6", job: "job:test-1", tile: 0 },
-    { kind: "effect", type: "open-encoder", effect: "fx:10", job: "job:test-1", format: "png", canvas: { width: 32, height: 32 } },
-    { kind: "effect", type: "finalize-encoder", effect: "fx:11", job: "job:test-1" },
-    { kind: "effect", type: "publish-output", effect: "fx:12", job: "job:test-1", output: "out:0" },
-    { kind: "effect", type: "release-bytes", effect: "fx:13", job: "job:test-1" },
-    { kind: "event", type: "completed", job: "job:test-1", output: "out:0" },
+    { kind: "effect", type: "request-destination", effect: "fx:1", format: "png" },
+    { kind: "event", type: "job-state", state: "AwaitingDestination" },
+    { kind: "effect", type: "decode-pixels", effect: "fx:6", tile: 0 },
+    { kind: "effect", type: "open-encoder", effect: "fx:10", format: "png", canvas: { width: 32, height: 32 } },
+    { kind: "effect", type: "finalize-encoder", effect: "fx:11" },
+    { kind: "effect", type: "publish-output", effect: "fx:12", output: "out:0" },
+    { kind: "effect", type: "release-bytes", effect: "fx:13" },
+    { kind: "event", type: "completed", output: "out:0" },
   ]);
   await flush();
   await flush();
@@ -148,16 +200,16 @@ test("lifecycle effects and events run in engine order on one chain", async () =
   assert.deepEqual(kinds, ["decodePixels", "openEncoder", "finalizeEncoder", "publishOutput", "release"]);
   assert.deepEqual(assembly.calls[1], ["openEncoder", "png", { width: 32, height: 32 }]);
   const destination = sent.find((message) => message.type === "engine.command");
-  assert.deepEqual(destination.command, { type: "destination-response", job: "job:test-1", destination: "dst:0", granted: true });
+  assert.deepEqual(destination.command, { type: "destination-response", granted: true });
 });
 
-test("partial decisions surface the engine recovery id", async () => {
+test("partial decisions surface the engine decision generation", async () => {
   const { controller, seen } = harness();
   controller.handleEngineMessages([
-    { kind: "effect", type: "request-decision", effect: "fx:9", job: "job:test-1", recovery: "rec:0" },
+    { kind: "effect", type: "request-decision", effect: "fx:9", generation: 0 },
   ]);
   await flush();
-  assert.deepEqual(seen.find(([kind]) => kind === "partial-decision"), ["partial-decision", "rec:0"]);
+  assert.deepEqual(seen.find(([kind]) => kind === "partial-decision"), ["partial-decision", 0]);
 });
 
 test("host execution failures are terminal: render, cancel, skip the rest", async () => {
@@ -165,9 +217,9 @@ test("host execution failures are terminal: render, cancel, skip the rest", asyn
   assembly.openEncoder = () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID" }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { kind: "effect", type: "open-encoder", effect: "fx:10", job: "job:test-1", format: "png", canvas: { width: 99999, height: 99999 } },
-    { kind: "effect", type: "finalize-encoder", effect: "fx:11", job: "job:test-1" },
-    { kind: "event", type: "completed", job: "job:test-1", output: "out:0" },
+    { kind: "effect", type: "open-encoder", effect: "fx:10", format: "png", canvas: { width: 99999, height: 99999 } },
+    { kind: "effect", type: "finalize-encoder", effect: "fx:11" },
+    { kind: "event", type: "completed", output: "out:0" },
   ]);
   await flush();
   await flush();
@@ -180,15 +232,15 @@ test("host execution failures are terminal: render, cancel, skip the rest", asyn
   assert.equal(seen.some(([kind]) => kind === "event"), false);
 });
 
-test("selection commands and partial choices are correlated to the job", async () => {
+test("selection commands and partial choices use positional correlation", async () => {
   const { controller, sent } = harness();
   controller.selectImage(1);
   controller.selectLevel(2);
-  controller.choosePartial("rec:0", true);
+  controller.choosePartial(0, true);
   const commands = sent.map((message) => message.command);
-  assert.deepEqual(commands[0], { type: "select-image", job: "job:test-1", image: 1 });
-  assert.deepEqual(commands[1], { type: "select-level", job: "job:test-1", level: 2 });
-  assert.deepEqual(commands[2], { type: "partial-choice", job: "job:test-1", recovery: "rec:0", keep_partial: true });
+  assert.deepEqual(commands[0], { type: "select-image", image: 1 });
+  assert.deepEqual(commands[1], { type: "select-level", level: 2 });
+  assert.deepEqual(commands[2], { type: "partial-choice", generation: 0, keep_partial: true });
 });
 
 test("disposal releases assembly resources exactly once", async () => {

@@ -2,12 +2,10 @@
 //!
 //! The job decides what must happen next and emits host effects; it never
 //! performs I/O, decodes pixels, reads clocks, or writes output. Hosts feed
-//! explicit [`JobResponse`] inputs and drain [`Job::drain_effects`] and
-//! [`Job::drain_effects`]/events. All counters use checked arithmetic.
+//! explicit [`JobCommand`] inputs and drain one ordered typed message queue.
+//! All counters use checked arithmetic.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-
-use serde_json::json;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeContinuation};
 use dezoomify_core::core::discovery::{
@@ -21,11 +19,12 @@ use dezoomify_protocol::dto::{ImageDto, Readiness};
 
 use crate::config::Config;
 use crate::state::State;
-use crate::transition::{make_effect, make_event, JobError, JobResponse, Outcome};
+use crate::transition::{
+    DecisionReason, JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome,
+};
 
 /// One end-to-end user request driven synchronously by explicit host inputs.
 pub struct Job {
-    id: String,
     input_url: String,
     config: Config,
     /// Format selector: `None` auto-detects via `default_registry`;
@@ -34,11 +33,10 @@ pub struct Job {
     /// typed `job.unknown-dezoomer`.
     format: Option<String>,
     state: State,
-    seq: u64,
-    effects: Vec<serde_json::Value>,
-    events: Vec<serde_json::Value>,
-    /// Outstanding discovery resource fetches: wire request id -> core id.
-    pending_discovery: HashMap<String, usize>,
+    seq: u32,
+    messages: VecDeque<JobMessage>,
+    /// Outstanding discovery resource fetches: request sequence -> core id.
+    pending_discovery: HashMap<u32, usize>,
     /// Core discovery operation while discovery is in flight.
     discovery: Option<DiscoveryOperation>,
     /// Finished core catalog.
@@ -49,7 +47,6 @@ pub struct Job {
     selected_image_index: Option<usize>,
     selected_level: Option<u32>,
     selected_level_index: Option<usize>,
-    destination: Option<String>,
     planned_tiles: Vec<u32>,
     pending_tiles: Vec<u32>,
     in_flight: HashSet<u32>,
@@ -77,6 +74,7 @@ pub struct Job {
     probe_tile: Option<u32>,
     probes_emitted: u32,
     recovery_reason: Option<String>,
+    pending_decision: Option<u32>,
     failed_tiles: Vec<u32>,
     terminal: Option<String>,
     /// Pause v1 overlay (suspend-acquisition): when true the engine stops
@@ -85,8 +83,7 @@ pub struct Job {
     /// variants are unchanged; pause is orthogonal to state.
     paused: bool,
     next_request: u32,
-    next_effect: u32,
-    next_recovery: u32,
+    next_decision: u32,
     next_probe: u32,
 }
 
@@ -95,7 +92,6 @@ impl std::fmt::Debug for Job {
         // The core discovery operation is not `Debug`; the machine summary
         // stays informative without it.
         f.debug_struct("Job")
-            .field("id", &self.id)
             .field("state", &self.state)
             .field("seq", &self.seq)
             .field("terminal", &self.terminal)
@@ -108,12 +104,9 @@ impl Job {
     ///
     /// # Errors
     ///
-    /// Returns a typed [`JobError`] when the job id, input URL, or config is
+    /// Returns a typed [`JobError`] when the input URL or config is
     /// invalid.
-    pub fn new(job_id: &str, input_url: &str, config: Config) -> Result<Self, JobError> {
-        if dezoomify_protocol::dto::JobId::new(job_id).is_none() {
-            return Err(JobError::invalid_id("job id must look like job:<suffix>"));
-        }
+    pub fn new(input_url: &str, config: Config) -> Result<Self, JobError> {
         if !is_valid_input_url(input_url) {
             return Err(JobError::new(
                 "job.invalid-input",
@@ -125,14 +118,12 @@ impl Job {
             return Err(JobError::new(&e.code, e.message));
         }
         Ok(Self {
-            id: job_id.to_string(),
             input_url: input_url.to_string(),
             config,
             format: None,
             state: State::Created,
             seq: 0,
-            effects: Vec::new(),
-            events: Vec::new(),
+            messages: VecDeque::new(),
             pending_discovery: HashMap::new(),
             discovery: None,
             catalog: None,
@@ -141,7 +132,6 @@ impl Job {
             selected_image_index: None,
             selected_level: None,
             selected_level_index: None,
-            destination: None,
             planned_tiles: Vec::new(),
             pending_tiles: Vec::new(),
             in_flight: HashSet::new(),
@@ -158,12 +148,12 @@ impl Job {
             probe_tile: None,
             probes_emitted: 0,
             recovery_reason: None,
+            pending_decision: None,
             failed_tiles: Vec::new(),
             terminal: None,
             paused: false,
             next_request: 0,
-            next_effect: 0,
-            next_recovery: 0,
+            next_decision: 0,
             next_probe: 0,
         })
     }
@@ -174,15 +164,9 @@ impl Job {
         self.state
     }
 
-    /// Owning job id.
-    #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
     /// Monotonic sequence last assigned (checked arithmetic).
     #[must_use]
-    pub fn seq(&self) -> u64 {
+    pub fn seq(&self) -> u32 {
         self.seq
     }
 
@@ -217,40 +201,22 @@ impl Job {
         }
     }
 
-    /// Number of queued effects (drain does not acknowledge until called).
+    /// Number of queued messages.
     #[must_use]
-    pub fn pending_effect_count(&self) -> usize {
-        self.effects.len()
+    pub fn pending_message_count(&self) -> usize {
+        self.messages.len()
     }
 
-    /// Number of queued events.
+    /// Take queued messages exactly once in sequence order.
     #[must_use]
-    pub fn pending_event_count(&self) -> usize {
-        self.events.len()
+    pub fn drain_messages(&mut self) -> Vec<JobMessage> {
+        self.messages.drain(..).collect()
     }
 
-    /// Take queued effects exactly once (FIFO).
+    /// Peek queued messages without acknowledging work.
     #[must_use]
-    pub fn drain_effects(&mut self) -> Vec<serde_json::Value> {
-        std::mem::take(&mut self.effects)
-    }
-
-    /// Take queued events exactly once (FIFO).
-    #[must_use]
-    pub fn drain_events(&mut self) -> Vec<serde_json::Value> {
-        std::mem::take(&mut self.events)
-    }
-
-    /// Peek queued effects without acknowledging work.
-    #[must_use]
-    pub fn peek_effects(&self) -> &[serde_json::Value] {
-        &self.effects
-    }
-
-    /// Peek queued events without acknowledging work.
-    #[must_use]
-    pub fn peek_events(&self) -> &[serde_json::Value] {
-        &self.events
+    pub fn peek_messages(&self) -> &VecDeque<JobMessage> {
+        &self.messages
     }
 
     /// Set the format selector before [`Job::start`]: `None` auto-detects,
@@ -285,61 +251,58 @@ impl Job {
         };
         self.discovery = Some(registry.start(self.input_url.clone()));
         self.set_state(State::Discovering)?;
-        self.push_event("job-state", json!({"state": State::Discovering.name()}))?;
+        self.push_event(JobEvent::State {
+            state: State::Discovering,
+        })?;
         self.drive_discovery()?;
         Ok(Outcome::Applied)
     }
 
     /// Drive one deterministic transition from an explicit host response.
     ///
-    /// Wrong-job and post-terminal inputs are stably rejected with no new
-    /// work. Duplicates are ignored. Valid inputs advance state and queue
+    /// Post-terminal inputs are stably rejected with no new work. Duplicates
+    /// are ignored. Valid inputs advance state and queue
     /// effects/events with monotonic `seq`.
     ///
     /// # Errors
     ///
-    /// Returns [`JobError`] for wrong-job, post-terminal, invalid-state,
-    /// invalid-id, and counter-overflow rejections.
-    pub fn on_response(&mut self, response: JobResponse) -> Result<Outcome, JobError> {
-        if response.job_id() != self.id {
-            return Err(JobError::wrong_job(&self.id));
-        }
+    /// Returns [`JobError`] for post-terminal, invalid-state, and
+    /// counter-overflow rejections.
+    pub fn on_command(&mut self, response: JobCommand) -> Result<Outcome, JobError> {
         if self.terminal.is_some() {
             return Err(JobError::post_terminal());
         }
         // Cancellation is valid in every non-terminal state.
-        if matches!(response, JobResponse::Cancel { .. }) {
+        if matches!(response, JobCommand::Cancel) {
             return self.enter_cancelled();
         }
         match response {
-            JobResponse::Cancel { .. } => self.enter_cancelled(),
-            JobResponse::Pause { .. } => self.apply_pause(),
-            JobResponse::Resume { .. } => self.apply_resume(),
-            JobResponse::ResourceBytes {
+            JobCommand::Cancel => self.enter_cancelled(),
+            JobCommand::Pause => self.apply_pause(),
+            JobCommand::Resume => self.apply_resume(),
+            JobCommand::ResourceBytes {
                 request,
                 bytes,
                 final_uri,
-                ..
-            } => self.apply_resource_bytes(&request, bytes, final_uri),
-            JobResponse::FetchFailure {
-                request, detail, ..
-            } => self.apply_fetch_failure(&request, &detail),
-            JobResponse::SelectedImage { image, .. } => self.apply_selected_image(image),
-            JobResponse::SelectedLevel { level, .. } => self.apply_selected_level(level),
-            JobResponse::DestinationGranted { destination, .. } => {
-                self.apply_destination_granted(&destination)
+            } => self.apply_resource_bytes(request, bytes, final_uri),
+            JobCommand::FetchFailure { request, detail } => {
+                self.apply_fetch_failure(request, &detail)
             }
-            JobResponse::DestinationDenied { .. } => self.apply_destination_denied(),
-            JobResponse::TileOutcome { tile, ok, .. } => self.apply_tile_outcome(tile, ok),
-            JobResponse::ProbeOutcome {
+            JobCommand::SelectImage { image } => self.apply_selected_image(image),
+            JobCommand::SelectLevel { level } => self.apply_selected_level(level),
+            JobCommand::DestinationGranted => self.apply_destination_granted(),
+            JobCommand::DestinationDenied => self.apply_destination_denied(),
+            JobCommand::TileOutcome { tile, ok } => self.apply_tile_outcome(tile, ok),
+            JobCommand::ProbeOutcome {
                 tile,
                 available,
                 width,
                 height,
-                ..
             } => self.apply_probe_outcome(tile, available, width, height),
-            JobResponse::RetryReady { attempt, .. } => self.apply_retry_ready(&attempt),
-            JobResponse::PartialKeep { keep, .. } => self.apply_partial_keep(keep),
+            JobCommand::RetryReady => self.apply_retry_ready(),
+            JobCommand::PartialChoice { generation, keep } => {
+                self.apply_partial_keep(generation, keep)
+            }
         }
     }
 
@@ -375,20 +338,14 @@ impl Job {
                 continue;
             }
             let wire = self.alloc_request_id()?;
-            self.pending_discovery.insert(wire.clone(), need.id.0);
-            let effect = self.alloc_effect_id()?;
+            self.pending_discovery.insert(wire, need.id.0);
             let mut header_names: Vec<String> = need.request.headers.keys().cloned().collect();
             header_names.sort();
-            self.push_effect(
-                "acquire-resource",
-                json!({
-                    "effect": effect,
-                    "request": wire,
-                    "uri": need.request.uri,
-                    "purpose": "metadata",
-                    "header_names": header_names,
-                }),
-            )?;
+            self.push_effect(JobEffect::AcquireResource {
+                request: wire,
+                uri: need.request.uri,
+                header_names,
+            })?;
         }
         Ok(())
     }
@@ -414,12 +371,14 @@ impl Job {
         // catalog wins; drop them so late answers are plain duplicates.
         self.pending_discovery.clear();
         self.set_state(State::AwaitingImageSelection)?;
-        let payload = serde_json::json!({ "images": self.catalog_images });
-        self.push_event("catalog", payload)?;
-        self.push_event(
-            "job-state",
-            json!({"state": State::AwaitingImageSelection.name()}),
-        )?;
+        self.push_event(JobEvent::Catalog {
+            catalog: dezoomify_protocol::dto::CatalogDto {
+                images: self.catalog_images.clone(),
+            },
+        })?;
+        self.push_event(JobEvent::State {
+            state: State::AwaitingImageSelection,
+        })?;
         Ok(())
     }
 
@@ -429,14 +388,11 @@ impl Job {
 
     fn apply_resource_bytes(
         &mut self,
-        request: &str,
+        request: u32,
         bytes: Vec<u8>,
         final_uri: Option<String>,
     ) -> Result<Outcome, JobError> {
-        if dezoomify_protocol::dto::RequestId::new(request).is_none() {
-            return Err(JobError::invalid_id("request must look like req:<suffix>"));
-        }
-        let Some(&core_id) = self.pending_discovery.get(request) else {
+        let Some(&core_id) = self.pending_discovery.get(&request) else {
             return Ok(Outcome::Ignored);
         };
         // Batch discovery emits one effect per outstanding core need; the
@@ -444,12 +400,12 @@ impl Job {
         // still in flight. Late answers for still-pending requests are
         // moot and safely ignored so the winning catalog survives.
         if self.state != State::Discovering {
-            self.pending_discovery.remove(request);
+            self.pending_discovery.remove(&request);
             return Ok(Outcome::Ignored);
         }
         let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         if len > self.config.max_bytes {
-            self.pending_discovery.remove(request);
+            self.pending_discovery.remove(&request);
             self.discovery = None;
             self.fail_via_cleanup(
                 "job.resource-limit",
@@ -458,7 +414,7 @@ impl Job {
             return Ok(Outcome::Applied);
         }
         if bytes.is_empty() {
-            self.pending_discovery.remove(request);
+            self.pending_discovery.remove(&request);
             self.discovery = None;
             self.fail_via_cleanup(
                 "job.empty-resource",
@@ -484,27 +440,24 @@ impl Job {
             operation.provide(response)
         };
         if let Err(e) = outcome {
-            self.pending_discovery.remove(request);
+            self.pending_discovery.remove(&request);
             self.discovery = None;
             self.discovery_failed(e)?;
             return Ok(Outcome::Applied);
         }
-        self.pending_discovery.remove(request);
+        self.pending_discovery.remove(&request);
         self.drive_discovery()?;
         Ok(Outcome::Applied)
     }
 
-    fn apply_fetch_failure(&mut self, request: &str, detail: &str) -> Result<Outcome, JobError> {
-        if dezoomify_protocol::dto::RequestId::new(request).is_none() {
-            return Err(JobError::invalid_id("request must look like req:<suffix>"));
-        }
-        let Some(&core_id) = self.pending_discovery.get(request) else {
+    fn apply_fetch_failure(&mut self, request: u32, detail: &str) -> Result<Outcome, JobError> {
+        let Some(&core_id) = self.pending_discovery.get(&request) else {
             return Ok(Outcome::Ignored);
         };
         // Sibling discovery fetches may still fail after a winner already
         // completed discovery; those late failures are moot and ignored.
         if self.state != State::Discovering {
-            self.pending_discovery.remove(request);
+            self.pending_discovery.remove(&request);
             return Ok(Outcome::Ignored);
         }
         // Name the failed fetch: the core request URI plus the host detail
@@ -536,7 +489,7 @@ impl Job {
                 message,
             })
         };
-        self.pending_discovery.remove(request);
+        self.pending_discovery.remove(&request);
         if let Err(e) = outcome {
             self.discovery = None;
             self.discovery_failed(e)?;
@@ -573,11 +526,10 @@ impl Job {
                 u32::try_from(position).map_err(|_| JobError::overflow("level position"))
             })
             .collect::<Result<_, _>>()?;
-        self.push_event("levels", json!({"image": image, "levels": levels}))?;
-        self.push_event(
-            "job-state",
-            json!({"state": State::AwaitingLevelSelection.name()}),
-        )?;
+        self.push_event(JobEvent::Levels { image, levels })?;
+        self.push_event(JobEvent::State {
+            state: State::AwaitingLevelSelection,
+        })?;
         Ok(Outcome::Applied)
     }
 
@@ -604,33 +556,26 @@ impl Job {
         }
         self.selected_level = Some(level);
         self.selected_level_index = Some(level_index);
-        let effect = self.alloc_effect_id()?;
         self.set_state(State::AwaitingDestination)?;
-        self.push_effect(
-            "request-destination",
-            json!({"effect": effect, "format": "png"}),
-        )?;
-        self.push_event(
-            "job-state",
-            json!({"state": State::AwaitingDestination.name()}),
-        )?;
+        self.push_effect(JobEffect::RequestDestination {
+            format: "png".to_string(),
+        })?;
+        self.push_event(JobEvent::State {
+            state: State::AwaitingDestination,
+        })?;
         Ok(Outcome::Applied)
     }
 
-    fn apply_destination_granted(&mut self, destination: &str) -> Result<Outcome, JobError> {
-        if dezoomify_protocol::dto::DestinationId::new(destination).is_none() {
-            return Err(JobError::invalid_id(
-                "destination must look like dst:<suffix>",
-            ));
-        }
+    fn apply_destination_granted(&mut self) -> Result<Outcome, JobError> {
         if self.state != State::AwaitingDestination {
             return Err(JobError::invalid_state(
                 "destination grant valid only in AwaitingDestination",
             ));
         }
-        self.destination = Some(destination.to_string());
         self.set_state(State::Planning)?;
-        self.push_event("job-state", json!({"state": State::Planning.name()}))?;
+        self.push_event(JobEvent::State {
+            state: State::Planning,
+        })?;
         self.plan_selected_level()?;
         Ok(Outcome::Applied)
     }
@@ -789,8 +734,10 @@ impl Job {
         self.in_flight.clear();
         self.acquired_tiles.clear();
         self.set_state(State::AcquiringTiles)?;
-        self.push_event("progress", json!({"acquired": 0, "total": total}))?;
-        self.push_event("job-state", json!({"state": State::AcquiringTiles.name()}))?;
+        self.push_event(JobEvent::Progress { acquired: 0, total })?;
+        self.push_event(JobEvent::State {
+            state: State::AcquiringTiles,
+        })?;
         self.emit_pending_tiles()?;
         Ok(())
     }
@@ -802,18 +749,19 @@ impl Job {
             ));
         }
         self.recovery_reason = Some("destination".to_string());
-        let effect = self.alloc_effect_id()?;
-        let recovery = self.alloc_recovery_id()?;
+        let generation = self.alloc_decision_generation()?;
         self.set_state(State::AwaitingRecovery)?;
-        self.push_effect(
-            "request-decision",
-            json!({"effect": effect, "recovery": recovery, "reason": "destination"}),
-        )?;
-        self.push_event("recovery-requested", json!({"reason": "destination"}))?;
-        self.push_event(
-            "job-state",
-            json!({"state": State::AwaitingRecovery.name()}),
-        )?;
+        self.push_effect(JobEffect::RequestDecision {
+            generation,
+            reason: DecisionReason::Destination,
+        })?;
+        self.push_event(JobEvent::RecoveryRequested {
+            generation,
+            reason: DecisionReason::Destination,
+        })?;
+        self.push_event(JobEvent::State {
+            state: State::AwaitingRecovery,
+        })?;
         Ok(Outcome::Applied)
     }
 
@@ -841,7 +789,7 @@ impl Job {
             let acquired = u64::try_from(self.acquired_tiles.len())
                 .map_err(|_| JobError::overflow("acquired count"))?;
             let total = self.planned_tiles.len() as u64;
-            self.push_event("progress", json!({"acquired": acquired, "total": total}))?;
+            self.push_event(JobEvent::Progress { acquired, total })?;
             // Pause v1: finish in-flight, retain decoded, defer completion
             // and new scheduling until resume. Resume re-drives completion
             // when every tile has arrived while paused.
@@ -865,7 +813,10 @@ impl Job {
             if !self.pending_tiles.contains(&tile) {
                 self.pending_tiles.insert(0, tile);
             }
-            self.push_event("warning", json!({"tile": tile, "attempt": next}))?;
+            self.push_event(JobEvent::Warning {
+                tile,
+                attempt: next,
+            })?;
             // Pause v1: retry wakeups are preserved in `pending_tiles` and
             // re-driven on resume; no new `acquire-tile` while paused.
             if !self.paused {
@@ -879,18 +830,22 @@ impl Job {
             self.failed_tiles.push(tile);
         }
         self.recovery_reason = Some("tile".to_string());
-        let effect = self.alloc_effect_id()?;
-        let recovery = self.alloc_recovery_id()?;
+        let generation = self.alloc_decision_generation()?;
         self.set_state(State::AwaitingPartialDecision)?;
-        self.push_effect(
-            "request-decision",
-            json!({"effect": effect, "recovery": recovery, "reason": "partial"}),
-        )?;
-        self.push_event("missing-work", json!({"failed": self.failed_tiles.clone()}))?;
-        self.push_event(
-            "job-state",
-            json!({"state": State::AwaitingPartialDecision.name()}),
-        )?;
+        self.push_effect(JobEffect::RequestDecision {
+            generation,
+            reason: DecisionReason::Partial,
+        })?;
+        self.push_event(JobEvent::MissingWork {
+            failed: self.failed_tiles.clone(),
+        })?;
+        self.push_event(JobEvent::RecoveryRequested {
+            generation,
+            reason: DecisionReason::Partial,
+        })?;
+        self.push_event(JobEvent::State {
+            state: State::AwaitingPartialDecision,
+        })?;
         Ok(Outcome::Applied)
     }
 
@@ -935,10 +890,7 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn apply_retry_ready(&mut self, attempt: &str) -> Result<Outcome, JobError> {
-        if dezoomify_protocol::dto::AttemptId::new(attempt).is_none() {
-            return Err(JobError::invalid_id("attempt must look like att:<suffix>"));
-        }
+    fn apply_retry_ready(&mut self) -> Result<Outcome, JobError> {
         match self.state {
             State::AwaitingRecovery => {
                 let reason = self
@@ -947,26 +899,24 @@ impl Job {
                     .ok_or_else(|| JobError::invalid_state("no recovery pending for retry"))?;
                 match reason.as_str() {
                     "destination" => {
-                        let effect = self.alloc_effect_id()?;
                         self.recovery_reason = None;
+                        self.pending_decision = None;
                         self.set_state(State::AwaitingDestination)?;
-                        self.push_effect(
-                            "request-destination",
-                            json!({"effect": effect, "format": "png"}),
-                        )?;
-                        self.push_event(
-                            "job-state",
-                            json!({"state": State::AwaitingDestination.name()}),
-                        )?;
+                        self.push_effect(JobEffect::RequestDestination {
+                            format: "png".to_string(),
+                        })?;
+                        self.push_event(JobEvent::State {
+                            state: State::AwaitingDestination,
+                        })?;
                         Ok(Outcome::Applied)
                     }
                     _ => {
                         self.recovery_reason = None;
+                        self.pending_decision = None;
                         self.set_state(State::AcquiringTiles)?;
-                        self.push_event(
-                            "job-state",
-                            json!({"state": State::AcquiringTiles.name()}),
-                        )?;
+                        self.push_event(JobEvent::State {
+                            state: State::AcquiringTiles,
+                        })?;
                         // Pause v1: retry wakeups are preserved; new tiles
                         // wait for resume.
                         if !self.paused {
@@ -978,9 +928,12 @@ impl Job {
             }
             State::AwaitingPartialDecision => {
                 self.recovery_reason = None;
+                self.pending_decision = None;
                 self.failed_tiles.clear();
                 self.set_state(State::AcquiringTiles)?;
-                self.push_event("job-state", json!({"state": State::AcquiringTiles.name()}))?;
+                self.push_event(JobEvent::State {
+                    state: State::AcquiringTiles,
+                })?;
                 if !self.paused {
                     self.emit_pending_tiles()?;
                 }
@@ -992,13 +945,19 @@ impl Job {
         }
     }
 
-    fn apply_partial_keep(&mut self, keep: bool) -> Result<Outcome, JobError> {
+    fn apply_partial_keep(&mut self, generation: u32, keep: bool) -> Result<Outcome, JobError> {
         if self.state != State::AwaitingPartialDecision {
             return Err(JobError::invalid_state(
                 "partial choice valid only in AwaitingPartialDecision",
             ));
         }
+        if self.pending_decision != Some(generation) {
+            return Err(JobError::invalid_state(
+                "partial choice generation is stale",
+            ));
+        }
         self.recovery_reason = None;
+        self.pending_decision = None;
         if keep {
             self.complete_remaining(true)?;
         } else {
@@ -1011,18 +970,22 @@ impl Job {
     }
 
     fn enter_cancelled(&mut self) -> Result<Outcome, JobError> {
-        let cancel_effect = self.alloc_effect_id()?;
-        let release_effect = self.alloc_effect_id()?;
         self.paused = false;
         self.set_state(State::Cancelling)?;
-        self.push_effect("cancel-work", json!({"effect": cancel_effect}))?;
-        self.push_event("job-state", json!({"state": State::Cancelling.name()}))?;
+        self.push_effect(JobEffect::CancelWork)?;
+        self.push_event(JobEvent::State {
+            state: State::Cancelling,
+        })?;
         self.set_state(State::CleaningUp)?;
-        self.push_effect("release-bytes", json!({"effect": release_effect}))?;
-        self.push_event("job-state", json!({"state": State::CleaningUp.name()}))?;
+        self.push_effect(JobEffect::ReleaseBytes)?;
+        self.push_event(JobEvent::State {
+            state: State::CleaningUp,
+        })?;
         self.set_state(State::Cancelled)?;
-        self.push_event("job-state", json!({"state": State::Cancelled.name()}))?;
-        self.push_event("cancelled", json!({}))?;
+        self.push_event(JobEvent::State {
+            state: State::Cancelled,
+        })?;
+        self.push_event(JobEvent::Cancelled)?;
         self.terminal = Some("cancelled".to_string());
         Ok(Outcome::Applied)
     }
@@ -1037,7 +1000,7 @@ impl Job {
             return Ok(Outcome::Ignored);
         }
         self.paused = true;
-        self.push_event("paused", json!({}))?;
+        self.push_event(JobEvent::Paused)?;
         Ok(Outcome::Applied)
     }
 
@@ -1050,7 +1013,7 @@ impl Job {
             return Err(JobError::invalid_state("resume valid only while paused"));
         }
         self.paused = false;
-        self.push_event("resumed", json!({}))?;
+        self.push_event(JobEvent::Resumed)?;
         if self.state == State::AcquiringTiles
             && self.acquired_tiles.len() == self.planned_tiles.len()
             && !self.planned_tiles.is_empty()
@@ -1076,60 +1039,67 @@ impl Job {
             .filter(|tile| !partial || self.acquired_tiles.contains(tile))
             .collect();
         for tile in tiles_to_decode {
-            let effect = self.alloc_effect_id()?;
-            self.push_effect("decode-pixels", json!({"effect": effect, "tile": tile}))?;
+            self.push_effect(JobEffect::DecodePixels { tile })?;
         }
-        self.push_event("job-state", json!({"state": State::ProcessingTiles.name()}))?;
+        self.push_event(JobEvent::State {
+            state: State::ProcessingTiles,
+        })?;
         self.set_state(State::Encoding)?;
-        let open_effect = self.alloc_effect_id()?;
-        let open_detail = json!({
-            "effect": open_effect,
-            "format": "png",
-            "canvas": self.canvas_size.map(|size| json!({"x": size.x, "y": size.y})).unwrap_or(serde_json::Value::Null),
-        });
-        self.push_effect("open-encoder", open_detail)?;
-        self.push_event("job-state", json!({"state": State::Encoding.name()}))?;
+        self.push_effect(JobEffect::OpenEncoder {
+            format: "png".to_string(),
+            canvas: self.canvas_size,
+        })?;
+        self.push_event(JobEvent::State {
+            state: State::Encoding,
+        })?;
         self.set_state(State::Finalizing)?;
-        let finalize_effect = self.alloc_effect_id()?;
-        self.push_effect("finalize-encoder", json!({"effect": finalize_effect}))?;
-        self.push_event("job-state", json!({"state": State::Finalizing.name()}))?;
+        self.push_effect(JobEffect::FinalizeEncoder)?;
+        self.push_event(JobEvent::State {
+            state: State::Finalizing,
+        })?;
         self.set_state(State::Publishing)?;
-        let publish_effect = self.alloc_effect_id()?;
-        self.push_effect(
-            "publish-output",
-            json!({"effect": publish_effect, "output": "out:0"}),
-        )?;
-        self.push_event("job-state", json!({"state": State::Publishing.name()}))?;
+        self.push_effect(JobEffect::PublishOutput)?;
+        self.push_event(JobEvent::State {
+            state: State::Publishing,
+        })?;
         self.set_state(State::CleaningUp)?;
-        let release_effect = self.alloc_effect_id()?;
-        self.push_effect("release-bytes", json!({"effect": release_effect}))?;
-        self.push_event("job-state", json!({"state": State::CleaningUp.name()}))?;
+        self.push_effect(JobEffect::ReleaseBytes)?;
+        self.push_event(JobEvent::State {
+            state: State::CleaningUp,
+        })?;
         if partial {
             self.set_state(State::PartiallyCompleted)?;
-            self.push_event(
-                "job-state",
-                json!({"state": State::PartiallyCompleted.name()}),
-            )?;
-            self.push_event("partial-completed", json!({"output": "out:0"}))?;
+            self.push_event(JobEvent::State {
+                state: State::PartiallyCompleted,
+            })?;
+            self.push_event(JobEvent::PartialCompleted)?;
             self.terminal = Some("partial-completed".to_string());
         } else {
             self.set_state(State::Completed)?;
-            self.push_event("job-state", json!({"state": State::Completed.name()}))?;
-            self.push_event("completed", json!({"output": "out:0"}))?;
+            self.push_event(JobEvent::State {
+                state: State::Completed,
+            })?;
+            self.push_event(JobEvent::Completed)?;
             self.terminal = Some("completed".to_string());
         }
         Ok(())
     }
 
     fn fail_via_cleanup(&mut self, code: &str, message: String) -> Result<(), JobError> {
-        let release_effect = self.alloc_effect_id()?;
         self.paused = false;
         self.set_state(State::CleaningUp)?;
-        self.push_effect("release-bytes", json!({"effect": release_effect}))?;
-        self.push_event("job-state", json!({"state": State::CleaningUp.name()}))?;
+        self.push_effect(JobEffect::ReleaseBytes)?;
+        self.push_event(JobEvent::State {
+            state: State::CleaningUp,
+        })?;
         self.set_state(State::Failed)?;
-        self.push_event("job-state", json!({"state": State::Failed.name()}))?;
-        self.push_event("failed", json!({"code": code, "message": message}))?;
+        self.push_event(JobEvent::State {
+            state: State::Failed,
+        })?;
+        self.push_event(JobEvent::Failed {
+            code: code.to_string(),
+            message,
+        })?;
         self.terminal = Some("failed".to_string());
         Ok(())
     }
@@ -1165,7 +1135,6 @@ impl Job {
     /// pixels (native) apply it before decoding; hosts that never decode
     /// (browser) ignore it.
     fn push_acquire_tile(&mut self, wire: u32, probe: bool) -> Result<(), JobError> {
-        let effect = self.alloc_effect_id()?;
         let uri = self.tile_uris.get(&wire).cloned().unwrap_or_default();
         let headers = self.tile_headers.get(&wire).cloned().unwrap_or_default();
         let processing = self
@@ -1179,20 +1148,16 @@ impl Job {
             .copied()
             .unwrap_or_default();
         let extent = self.tile_extents.get(&wire).copied().flatten();
-        let mut detail = json!({
-            "effect": effect,
-            "tile": wire,
-            "uri": uri,
-            "headers": headers,
-            "processing": processing,
-            "destination": {"x": destination.x, "y": destination.y},
-            "expected_size": extent.map(|size| json!({"x": size.x, "y": size.y})).unwrap_or(serde_json::Value::Null),
-            "canvas": self.canvas_size.map(|size| json!({"x": size.x, "y": size.y})).unwrap_or(serde_json::Value::Null),
-        });
-        if probe {
-            detail["probe"] = serde_json::Value::Bool(true);
-        }
-        self.push_effect("acquire-tile", detail)?;
+        self.push_effect(JobEffect::AcquireTile {
+            tile: wire,
+            uri,
+            headers,
+            processing,
+            destination,
+            expected_size: extent,
+            canvas: self.canvas_size,
+            probe,
+        })?;
         Ok(())
     }
 
@@ -1201,7 +1166,7 @@ impl Job {
         Ok(())
     }
 
-    fn bump_seq(&mut self) -> Result<u64, JobError> {
+    fn bump_seq(&mut self) -> Result<u32, JobError> {
         let next = self
             .seq
             .checked_add(1)
@@ -1210,45 +1175,41 @@ impl Job {
         Ok(next)
     }
 
-    fn push_effect(&mut self, kind: &str, detail: serde_json::Value) -> Result<(), JobError> {
-        let seq = self.bump_seq()?;
-        let id = self.id.clone();
-        self.effects.push(make_effect(kind, seq, &id, detail));
+    fn push_effect(&mut self, effect: JobEffect) -> Result<(), JobError> {
+        let sequence = self.bump_seq()?;
+        self.messages.push_back(JobMessage {
+            sequence,
+            body: JobMessageBody::Effect(effect),
+        });
         Ok(())
     }
 
-    fn push_event(&mut self, kind: &str, detail: serde_json::Value) -> Result<(), JobError> {
-        let seq = self.bump_seq()?;
-        let id = self.id.clone();
-        self.events.push(make_event(kind, seq, &id, detail));
+    fn push_event(&mut self, event: JobEvent) -> Result<(), JobError> {
+        let sequence = self.bump_seq()?;
+        self.messages.push_back(JobMessage {
+            sequence,
+            body: JobMessageBody::Event(event),
+        });
         Ok(())
     }
 
-    fn alloc_request_id(&mut self) -> Result<String, JobError> {
+    fn alloc_request_id(&mut self) -> Result<u32, JobError> {
         let n = self.next_request;
         let next = n
             .checked_add(1)
             .ok_or_else(|| JobError::overflow("request id"))?;
         self.next_request = next;
-        Ok(format!("req:{n}"))
+        Ok(n)
     }
 
-    fn alloc_effect_id(&mut self) -> Result<String, JobError> {
-        let n = self.next_effect;
+    fn alloc_decision_generation(&mut self) -> Result<u32, JobError> {
+        let n = self.next_decision;
         let next = n
             .checked_add(1)
-            .ok_or_else(|| JobError::overflow("effect id"))?;
-        self.next_effect = next;
-        Ok(format!("fx:{n}"))
-    }
-
-    fn alloc_recovery_id(&mut self) -> Result<String, JobError> {
-        let n = self.next_recovery;
-        let next = n
-            .checked_add(1)
-            .ok_or_else(|| JobError::overflow("recovery id"))?;
-        self.next_recovery = next;
-        Ok(format!("rec:{n}"))
+            .ok_or_else(|| JobError::overflow("decision generation"))?;
+        self.next_decision = next;
+        self.pending_decision = Some(n);
+        Ok(n)
     }
 }
 

@@ -191,7 +191,7 @@ pub mod wasm_api {
 
         /// Project an arena handle onto its canonical protocol reference
         /// (`buffers`): the JSON form `provide-resource` commands carry
-        /// (`{"id":"buf:0","generation":..,"length":..}`), distinct from the
+        /// (`{"id":0,"generation":..,"length":..}`), distinct from the
         /// arena form `allocateBuffer` returns.
         #[wasm_bindgen(js_name = "protocolHandle")]
         pub fn protocol_handle_js(&mut self, handle_json: &str) -> Result<String, JsValue> {

@@ -1,19 +1,16 @@
 [
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "Discovering",
     "type": "job-state"
   },
   {
-    "effect": "fx:0",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "request": {
       "headers": [],
-      "id": "req:0",
+      "id": 0,
       "purpose": "metadata",
       "uri": "https://example.com/image.dzi"
     },
@@ -104,42 +101,35 @@
         }
       ]
     },
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "type": "catalog"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "AwaitingImageSelection",
     "type": "job-state"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "AwaitingLevelSelection",
     "type": "job-state"
   },
   {
-    "effect": "fx:1",
     "format": "png",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "type": "request-destination"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "AwaitingDestination",
     "type": "job-state"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "Planning",
@@ -147,22 +137,18 @@
   },
   {
     "acquired": 0,
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "total": 4,
     "type": "progress"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "AcquiringTiles",
     "type": "job-state"
   },
   {
-    "effect": "fx:2",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "placement": {
       "canvas": {
@@ -187,7 +173,7 @@
           "value": "https://example.com/image_files/9/0_0.jpg"
         }
       ],
-      "id": "req:tile-0",
+      "id": 12,
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/0_0.jpg"
     },
@@ -195,8 +181,6 @@
     "type": "acquire-tile"
   },
   {
-    "effect": "fx:3",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "placement": {
       "canvas": {
@@ -221,7 +205,7 @@
           "value": "https://example.com/image_files/9/0_0.jpg"
         }
       ],
-      "id": "req:tile-1",
+      "id": 13,
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/1_0.jpg"
     },
@@ -229,8 +213,6 @@
     "type": "acquire-tile"
   },
   {
-    "effect": "fx:4",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "placement": {
       "canvas": {
@@ -255,7 +237,7 @@
           "value": "https://example.com/image_files/9/0_0.jpg"
         }
       ],
-      "id": "req:tile-2",
+      "id": 14,
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/0_1.jpg"
     },
@@ -263,8 +245,6 @@
     "type": "acquire-tile"
   },
   {
-    "effect": "fx:5",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "placement": {
       "canvas": {
@@ -289,7 +269,7 @@
           "value": "https://example.com/image_files/9/0_0.jpg"
         }
       ],
-      "id": "req:tile-3",
+      "id": 15,
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/1_1.jpg"
     },
@@ -298,7 +278,6 @@
   },
   {
     "acquired": 1,
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "total": 4,
@@ -306,7 +285,6 @@
   },
   {
     "acquired": 2,
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "total": 4,
@@ -314,7 +292,6 @@
   },
   {
     "acquired": 3,
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "total": 4,
@@ -322,46 +299,36 @@
   },
   {
     "acquired": 4,
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "total": 4,
     "type": "progress"
   },
   {
-    "effect": "fx:6",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "tile": 0,
     "type": "decode-pixels"
   },
   {
-    "effect": "fx:7",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "tile": 1,
     "type": "decode-pixels"
   },
   {
-    "effect": "fx:8",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "tile": 2,
     "type": "decode-pixels"
   },
   {
-    "effect": "fx:9",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "tile": 3,
     "type": "decode-pixels"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "ProcessingTiles",
@@ -372,74 +339,58 @@
       "height": 512,
       "width": 512
     },
-    "effect": "fx:10",
     "format": "png",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "type": "open-encoder"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "Encoding",
     "type": "job-state"
   },
   {
-    "effect": "fx:11",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "type": "finalize-encoder"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "Finalizing",
     "type": "job-state"
   },
   {
-    "effect": "fx:12",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
-    "output": "out:0",
     "protocol": "2.0",
     "type": "publish-output"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "Publishing",
     "type": "job-state"
   },
   {
-    "effect": "fx:13",
-    "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
     "type": "release-bytes"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "CleaningUp",
     "type": "job-state"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
     "protocol": "2.0",
     "state": "Completed",
     "type": "job-state"
   },
   {
-    "job": "job:wasm-basic-1",
     "kind": "event",
-    "output": "out:0",
     "protocol": "2.0",
     "type": "completed"
   }

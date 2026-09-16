@@ -31,70 +31,6 @@ pub fn negotiate_version(requested: &str) -> Result<(), ErrorDto> {
 }
 
 // ---------------------------------------------------------------------------
-// Stable IDs (lossless in JavaScript: short validated strings)
-// ---------------------------------------------------------------------------
-
-macro_rules! id_type {
-    ($name:ident, $prefix:literal, $scope:literal) => {
-        #[doc = concat!("Stable `", $prefix, "` identifier. Scope: ", $scope, ".")]
-        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        pub struct $name(String);
-
-        impl $name {
-            #[must_use]
-            pub fn new(value: impl Into<String>) -> Option<Self> {
-                let value = value.into();
-                let prefix = concat!($prefix, ":");
-                if value.starts_with(prefix) && value.len() > prefix.len() && value.len() <= 128 {
-                    Some(Self(value))
-                } else {
-                    None
-                }
-            }
-
-            #[must_use]
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(&self.0)
-            }
-        }
-
-        impl std::str::FromStr for $name {
-            type Err = String;
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Self::new(s).ok_or_else(|| format!("wrong id kind for {}", $prefix))
-            }
-        }
-    };
-}
-
-id_type!(JobId, "job", "one end-to-end user request");
-id_type!(
-    RequestId,
-    "req",
-    "one protocol request awaiting correlation"
-);
-id_type!(AttemptId, "att", "one fetch/decode attempt within its tile");
-id_type!(
-    EffectId,
-    "fx",
-    "one host effect awaiting exactly one response"
-);
-id_type!(
-    BufferId,
-    "buf",
-    "one byte-buffer handle with generation scope"
-);
-id_type!(DestinationId, "dst", "one host-granted output destination");
-id_type!(OutputId, "out", "one finalized output within its job");
-id_type!(RecoveryId, "rec", "one recovery decision request");
-
-// ---------------------------------------------------------------------------
 // Bounded integers (never `usize` on the wire)
 // ---------------------------------------------------------------------------
 
@@ -162,7 +98,7 @@ pub enum RequestPurpose {
 /// (hosts attach scoped authorization out-of-band and redact logs).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestDto {
-    pub id: RequestId,
+    pub id: u32,
     pub uri: String,
     #[serde(default)]
     pub headers: Vec<HeaderDto>,
@@ -207,7 +143,7 @@ pub struct TilePlacementDto {
 /// Out-of-band byte buffer: JSON references the handle, never base64 bytes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BufferHandle {
-    pub id: BufferId,
+    pub id: u32,
     pub generation: u32,
     pub length: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -260,80 +196,23 @@ pub struct CatalogDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum JobCommand {
-    Start {
-        job: JobId,
-        input_url: String,
-    },
-    ProvideResource {
-        job: JobId,
-        request: RequestId,
-        buffer: BufferHandle,
-    },
-    ProvideFetchFailure {
-        job: JobId,
-        request: RequestId,
-        error: ErrorDto,
-    },
-    SelectImage {
-        job: JobId,
-        image: u32,
-    },
-    SelectLevel {
-        job: JobId,
-        level: u32,
-    },
-    ProvideDecodeOutcome {
-        job: JobId,
-        tile: u32,
-        ok: bool,
-    },
-    ProvideProcessOutcome {
-        job: JobId,
-        tile: u32,
-        ok: bool,
-    },
-    ProvideWriteOutcome {
-        job: JobId,
-        tile: u32,
-        ok: bool,
-    },
-    ProvideEncodeOutcome {
-        job: JobId,
-        ok: bool,
-    },
-    ProvideFinalizeOutcome {
-        job: JobId,
-        output: OutputId,
-        ok: bool,
-    },
-    ProvidePublicationOutcome {
-        job: JobId,
-        output: OutputId,
-        ok: bool,
-    },
-    RetryReady {
-        job: JobId,
-        attempt: AttemptId,
-    },
-    PartialChoice {
-        job: JobId,
-        recovery: RecoveryId,
-        keep_partial: bool,
-    },
-    DestinationResponse {
-        job: JobId,
-        destination: DestinationId,
-        granted: bool,
-    },
-    Cancel {
-        job: JobId,
-    },
-    Pause {
-        job: JobId,
-    },
-    Resume {
-        job: JobId,
-    },
+    Start { input_url: String },
+    ProvideResource { request: u32, buffer: BufferHandle },
+    ProvideFetchFailure { request: u32, error: ErrorDto },
+    SelectImage { image: u32 },
+    SelectLevel { level: u32 },
+    ProvideDecodeOutcome { tile: u32, ok: bool },
+    ProvideProcessOutcome { tile: u32, ok: bool },
+    ProvideWriteOutcome { tile: u32, ok: bool },
+    ProvideEncodeOutcome { ok: bool },
+    ProvideFinalizeOutcome { ok: bool },
+    ProvidePublicationOutcome { ok: bool },
+    RetryReady,
+    PartialChoice { generation: u32, keep_partial: bool },
+    DestinationResponse { granted: bool },
+    Cancel,
+    Pause,
+    Resume,
 }
 
 // ---------------------------------------------------------------------------
@@ -344,13 +223,9 @@ pub enum JobCommand {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum HostEffect {
     AcquireResource {
-        effect: EffectId,
-        job: JobId,
         request: RequestDto,
     },
     AcquireTile {
-        effect: EffectId,
-        job: JobId,
         request: RequestDto,
         /// Engine tile id correlating this acquisition with the later
         /// `decode-pixels` effect for the same tile.
@@ -362,8 +237,6 @@ pub enum HostEffect {
         placement: TilePlacementDto,
     },
     RequestDestination {
-        effect: EffectId,
-        job: JobId,
         format: String,
     },
     /// Decode (or verify the earlier acquisition-time decode of) one tile's
@@ -371,54 +244,31 @@ pub enum HostEffect {
     /// model) find their decoded tile already held and treat this effect as
     /// the draw/hold checkpoint; tile bytes never cross the effect.
     DecodePixels {
-        effect: EffectId,
-        job: JobId,
         tile: u32,
     },
     ProcessPixels {
-        effect: EffectId,
-        job: JobId,
         tile: u32,
     },
     /// Allocate the output surface. `canvas` declares the output size when
     /// the plan knows it; hosts without a declared size derive it from the
     /// accumulated placements. `format` is the output codec id.
     OpenEncoder {
-        effect: EffectId,
-        job: JobId,
         format: String,
         canvas: Option<SizeDto>,
     },
     WriteOutput {
-        effect: EffectId,
-        job: JobId,
         tile: u32,
     },
-    FinalizeEncoder {
-        effect: EffectId,
-        job: JobId,
-    },
-    PublishOutput {
-        effect: EffectId,
-        job: JobId,
-        output: OutputId,
-    },
+    FinalizeEncoder,
+    PublishOutput,
     /// Release every per-tile resource this host retained for the job
     /// (decoded bitmaps, surfaces, buffers). The adapter frees its own
     /// arena bytes when the tile outcome settles, so no buffer reference
     /// accompanies this effect.
-    ReleaseBytes {
-        effect: EffectId,
-        job: JobId,
-    },
-    CancelWork {
-        effect: EffectId,
-        job: JobId,
-    },
+    ReleaseBytes,
+    CancelWork,
     RequestDecision {
-        effect: EffectId,
-        job: JobId,
-        recovery: RecoveryId,
+        generation: u32,
     },
 }
 
@@ -439,52 +289,31 @@ pub enum EventKind {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum JobEvent {
     JobState {
-        job: JobId,
         state: String,
     },
     Catalog {
-        job: JobId,
         catalog: CatalogDto,
     },
     Progress {
-        job: JobId,
         acquired: u64,
         total: u64,
     },
     Warning {
-        job: JobId,
         error: ErrorDto,
     },
     RecoveryRequest {
-        job: JobId,
-        recovery: RecoveryId,
+        generation: u32,
         actions: Vec<RecoveryAction>,
     },
-    OutputReady {
-        job: JobId,
-        output: OutputId,
-    },
-    Completed {
-        job: JobId,
-        output: OutputId,
-    },
-    PartialCompleted {
-        job: JobId,
-        output: OutputId,
-    },
+    OutputReady,
+    Completed,
+    PartialCompleted,
     Failed {
-        job: JobId,
         error: ErrorDto,
     },
-    Cancelled {
-        job: JobId,
-    },
-    Paused {
-        job: JobId,
-    },
-    Resumed {
-        job: JobId,
-    },
+    Cancelled,
+    Paused,
+    Resumed,
 }
 
 impl JobEvent {
@@ -494,15 +323,14 @@ impl JobEvent {
             Self::JobState { .. }
             | Self::Catalog { .. }
             | Self::Progress { .. }
-            | Self::OutputReady { .. }
-            | Self::Paused { .. }
-            | Self::Resumed { .. } => EventKind::Replayable,
+            | Self::OutputReady
+            | Self::Paused
+            | Self::Resumed => EventKind::Replayable,
             Self::Warning { .. } => EventKind::Transient,
             Self::RecoveryRequest { .. } => EventKind::DecisionRequesting,
-            Self::Completed { .. }
-            | Self::PartialCompleted { .. }
-            | Self::Failed { .. }
-            | Self::Cancelled { .. } => EventKind::Terminal,
+            Self::Completed | Self::PartialCompleted | Self::Failed { .. } | Self::Cancelled => {
+                EventKind::Terminal
+            }
         }
     }
 

@@ -79,7 +79,7 @@
     {
       "effect": "publish-output",
       "purpose": "output",
-      "resource": "out:0",
+      "resource": "output",
       "result": "ok"
     },
     {

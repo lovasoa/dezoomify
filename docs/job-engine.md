@@ -4,15 +4,15 @@
 
 ## Model
 
-A job contains immutable input intent and evolving state. Input intent includes the source, selected catalog item and level, processing recipe, output destination and format, retry policy, partial-output policy, and applicable transport preference. State records the current phase, active transport, tile acquisition and processing outcomes, in-flight effect identifiers, failures, cancellation, publication, and cleanup status.
+A job contains immutable input intent and evolving state. Input intent includes the source, selected catalog item and level, processing recipe, output destination and format, retry policy, partial-output policy, and applicable transport preference. State records the current phase, tile acquisition and processing outcomes, outstanding numeric request and decision keys, failures, cancellation, publication, and cleanup status. Product routing tokens remain outside the job.
 
-The engine accepts a command or effect result and returns:
-
-- the next state;
-- zero or more effects for the host;
-- ordered protocol events for observers.
-
-Effect identifiers make late, duplicate, and out-of-order results safe to ignore. The host supplies clock-derived retry wakeups explicitly, so replaying the same inputs produces the same state and events.
+The engine accepts a typed `JobCommand` and appends typed `JobEffect` and
+`JobEvent` values to one FIFO `JobMessage` queue. Every message has a checked
+`u32` sequence. Requests, tiles, and decision generations are numeric and
+scoped to the job instance, so late, duplicate, and out-of-order replies can
+be rejected without parsing JSON or validating prefixed strings. The host
+supplies clock-derived retry wakeups explicitly, so replaying the same inputs
+produces the same state and messages.
 
 ## Phases
 
@@ -72,7 +72,7 @@ paused.
 ## Behavior table (implemented)
 
 `dezoomify-job` is synchronous with monotonic `seq` (checked
-arithmetic), FIFO effect/event queues, and exactly one terminal event.
+arithmetic), one FIFO typed message queue, and exactly one terminal event.
 `Terminal` = `Completed` / `PartiallyCompleted` / `Failed` / `Cancelled`.
 Post-terminal inputs return stable `job.post-terminal` rejection with no work.
 Duplicates return `Outcome::Ignored` with no state change.
@@ -107,26 +107,26 @@ outcome is provided, so the engine never loops on unanswered fetches.
 
 | Input | Valid source state(s) | Validation | Transition | Effects | Events |
 |---|---|---|---|---|---|
-| `start()` | `Created` | Config valid (`max_retries` 0..=1024, 0 is first attempt only), `job:*` id, `http(s)`/`file://`/local-path URL (≤2048B, `file://` only local absolute), known format (`None`/`auto` or registered name, else `Err(job.unknown-dezoomer)` with no transition) | `Created` -> `Discovering` | `acquire-resource` per outstanding discovery request (real URIs, metadata purpose, header names) | `job-state:Discovering` |
-| `ResourceBytes` | `Discovering` | `job` match, outstanding `req:*`, `bytes.len() <= max_bytes`, non-empty | Stay (core asks for more resources) or -> `AwaitingImageSelection` | further `acquire-resource` or none | `job-state`, then `catalog` (projected real catalog) |
-| `ResourceBytes` late (sibling fetch after a winner finished discovery) | Any non-`Discovering` with still-pending `req:*` | `job` match, `req:*` still pending | No transition (winning catalog survives) | none | none (`Ok(Ignored)`) |
+| `start()` | `Created` | Config valid (`max_retries` 0..=1024, 0 is first attempt only), `http(s)`/`file://`/local-path URL (≤2048B, `file://` only local absolute), known format (`None`/`auto` or registered name, else `Err(job.unknown-dezoomer)` with no transition) | `Created` -> `Discovering` | `acquire-resource` per outstanding discovery request (real URIs, metadata purpose, header names) | `job-state:Discovering` |
+| `ResourceBytes` | `Discovering` | outstanding request sequence, `bytes.len() <= max_bytes`, non-empty | Stay (core asks for more resources) or -> `AwaitingImageSelection` | further `acquire-resource` or none | `job-state`, then `catalog` (projected real catalog) |
+| `ResourceBytes` late (sibling fetch after a winner finished discovery) | Any non-`Discovering` with still-pending request sequence | request sequence still pending | No transition (winning catalog survives) | none | none (`Ok(Ignored)`) |
 | `ResourceBytes` over-limit/empty | `Discovering` | `bytes.len() > max_bytes` / empty | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.resource-limit` / `failed:job.empty-resource` (terminal once) |
-| `FetchFailure` | `Discovering` | `job` match, outstanding `req:*` | Core owns fallback: stay `Discovering` (other candidates' `acquire-resource`) or -> `CleaningUp` -> `Failed` | `acquire-resource` or `release-bytes` | `job-state`, or `failed:job.discovery-failed` |
-| `FetchFailure` late (sibling fetch after discovery finished) | Any non-`Discovering` with still-pending `req:*` | `job` match, `req:*` still pending | No transition | none | none (`Ok(Ignored)`) |
-| `SelectedImage` | `AwaitingImageSelection` | `job` match, image position in range and ready (same position replays as `Ignored`) | -> `AwaitingLevelSelection` | none | `levels` (positions), `job-state` |
-| `SelectedLevel` | `AwaitingLevelSelection` | `job` match, level position in range for the selected image (same position replays as `Ignored`) | -> `AwaitingDestination` | `request-destination` (`fx:*`, `png`) | `job-state` |
-| `DestinationGranted` | `AwaitingDestination` | `job` match, `dst:*` | -> `Planning` -> `AcquiringTiles` (grid/positioned source) or stay `Planning` (probe-driven source); plan or probe count `> max_tiles`: -> `CleaningUp` -> `Failed`; probe-driven level with `plan_probes` off: -> `CleaningUp` -> `Failed` | `acquire-tile` up to `max_concurrent_fetches` in plan order, or one `acquire-tile` (`probe: true`) | `job-state:Planning`, `progress:0/total`, `job-state:AcquiringTiles`, or `failed:job.resource-limit` / `failed:job.probe-unsupported` / `failed:job.plan-invalid` / `failed:job.plan-empty` |
-| `ProbeOutcome` | `Planning` | `job` match, outstanding probe ordinal; available observations need positive width/height | One core probe step: next probe (stay `Planning`) or resolved plan -> `AcquiringTiles` | `acquire-tile` (next probe or first plan tiles) | `progress:0/total`, `job-state` |
+| `FetchFailure` | `Discovering` | outstanding request sequence | Core owns fallback: stay `Discovering` (other candidates' `acquire-resource`) or -> `CleaningUp` -> `Failed` | `acquire-resource` or `release-bytes` | `job-state`, or `failed:job.discovery-failed` |
+| `FetchFailure` late (sibling fetch after discovery finished) | Any non-`Discovering` with still-pending request sequence | request sequence still pending | No transition | none | none (`Ok(Ignored)`) |
+| `SelectedImage` | `AwaitingImageSelection` | image position in range and ready (same position replays as `Ignored`) | -> `AwaitingLevelSelection` | none | `levels` (positions), `job-state` |
+| `SelectedLevel` | `AwaitingLevelSelection` | level position in range for the selected image (same position replays as `Ignored`) | -> `AwaitingDestination` | `request-destination` (`png`) | `job-state` |
+| `DestinationGranted` | `AwaitingDestination` |  | -> `Planning` -> `AcquiringTiles` (grid/positioned source) or stay `Planning` (probe-driven source); plan or probe count `> max_tiles`: -> `CleaningUp` -> `Failed`; probe-driven level with `plan_probes` off: -> `CleaningUp` -> `Failed` | `acquire-tile` up to `max_concurrent_fetches` in plan order, or one `acquire-tile` (`probe: true`) | `job-state:Planning`, `progress:0/total`, `job-state:AcquiringTiles`, or `failed:job.resource-limit` / `failed:job.probe-unsupported` / `failed:job.plan-invalid` / `failed:job.plan-empty` |
+| `ProbeOutcome` | `Planning` | outstanding probe ordinal; available observations need positive width/height | One core probe step: next probe (stay `Planning`) or resolved plan -> `AcquiringTiles` | `acquire-tile` (next probe or first plan tiles) | `progress:0/total`, `job-state` |
 | `TileOutcome{ok:true}` on a probe tile | `AcquiringTiles` | probe tiles are answered with `ProbeOutcome` only | No transition | none | none (`Err(job.invalid-state)`) |
-| `DestinationDenied` | `AwaitingDestination` | `job` match | -> `AwaitingRecovery` (`destination`) | `request-decision` | `recovery-requested`, `job-state` |
-| `TileOutcome{ok:true}` | `AcquiringTiles` | `job` match, tile ordinal in plan; acquired replays as `Ignored` | Stay (emit next pending to fill concurrency) or last tile: `ProcessingTiles` -> `Encoding` -> `Finalizing` -> `Publishing` -> `CleaningUp` -> `Completed` | `acquire-tile` (next pending) or `decode-pixels` per tile, `open-encoder`, `finalize-encoder`, `publish-output` (`out:0`), `release-bytes` | `progress:a/total`, then `job-state` chain + `completed` (terminal once) |
-| `TileOutcome{ok:false}` | `AcquiringTiles` | `job` match, tile ordinal in plan | attempts `<= max_retries` (0..=1024, 0 fails immediately with no refetch): stay + retry `acquire-tile`; else -> `AwaitingPartialDecision` | `acquire-tile` (retry) or `request-decision` (`partial`) | `warning` + `progress`, or `missing-work` + `job-state` |
-| `RetryReady` | `AwaitingRecovery` (`destination`), `AwaitingPartialDecision` | `job` match, `att:*` | `destination` -> `AwaitingDestination`; partial -> `AcquiringTiles` (failed tiles retry) | `request-destination` / `acquire-tile` | `job-state` |
-| `PartialKeep{keep:true}` | `AwaitingPartialDecision` | `job` match | Same pipeline as success but -> `PartiallyCompleted` | Same encode/finalize/publish/release | `job-state` chain + `partial-completed` (terminal once) |
-| `PartialKeep{keep:false}` | `AwaitingPartialDecision` | `job` match | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.partial-discarded` |
-| `Cancel` | Any non-terminal (incl. transient `Planning`/`ProcessingTiles`/`Encoding`/`Finalizing`/`Publishing`) | `job` match | -> `Cancelling` -> `CleaningUp` -> `Cancelled` | `cancel-work`, `release-bytes` | `job-state` chain + `cancelled` (terminal once; second `Cancel` is `post-terminal`) |
-| `Pause` | Any non-terminal | `job` match | Overlay on (no state change) | none | `paused` (replayable; duplicate is `Ignored`) |
-| `Resume` | Paused only | `job` match, paused | Overlay off, re-drive pending or complete | `acquire-tile` (pending) or full encode/finalize/publish chain when all arrived paused | `resumed`, then `progress`/`job-state` chain |
-| `TileOutcome{ok:true}` while paused | `AcquiringTiles` + paused | `job` match, `tile:*` in plan | Stay (no new scheduling, completion deferred) | none | `progress:a/total` only |
-| Duplicate/stale | Same state, already-consumed `req:*` or acquired `tile:*` / same selection | Correlation already settled | No transition | none | none (`Ok(Ignored)`) |
-| Wrong-job / wrong-state / bad id / post-terminal | Any | `job` mismatch, unknown id, invalid state, resume-without-pause, or terminal set | No transition, no work | none | none (`Err(job.wrong-job | job.invalid-state | job.invalid-id | job.post-terminal)`) |
+| `DestinationDenied` | `AwaitingDestination` |  | -> `AwaitingRecovery` (`destination`) | `request-decision` | `recovery-requested`, `job-state` |
+| `TileOutcome{ok:true}` | `AcquiringTiles` | tile ordinal in plan; acquired replays as `Ignored` | Stay (emit next pending to fill concurrency) or last tile: `ProcessingTiles` -> `Encoding` -> `Finalizing` -> `Publishing` -> `CleaningUp` -> `Completed` | `acquire-tile` (next pending) or `decode-pixels` per tile, `open-encoder`, `finalize-encoder`, `publish-output`, `release-bytes` | `progress:a/total`, then `job-state` chain + `completed` (terminal once) |
+| `TileOutcome{ok:false}` | `AcquiringTiles` | tile ordinal in plan | attempts `<= max_retries` (0..=1024, 0 fails immediately with no refetch): stay + retry `acquire-tile`; else -> `AwaitingPartialDecision` | `acquire-tile` (retry) or `request-decision` (`partial`) | `warning` + `progress`, or `missing-work` + `job-state` |
+| `RetryReady` | `AwaitingRecovery` (`destination`), `AwaitingPartialDecision` | outstanding recovery | `destination` -> `AwaitingDestination`; partial -> `AcquiringTiles` (failed tiles retry) | `request-destination` / `acquire-tile` | `job-state` |
+| `PartialChoice{generation,keep:true}` | `AwaitingPartialDecision` | outstanding decision generation | Same pipeline as success but -> `PartiallyCompleted` | Same encode/finalize/publish/release | `job-state` chain + `partial-completed` (terminal once) |
+| `PartialChoice{generation,keep:false}` | `AwaitingPartialDecision` | outstanding decision generation | -> `CleaningUp` -> `Failed` | `release-bytes` | `job-state` chain, `failed:job.partial-discarded` |
+| `Cancel` | Any non-terminal (incl. transient `Planning`/`ProcessingTiles`/`Encoding`/`Finalizing`/`Publishing`) |  | -> `Cancelling` -> `CleaningUp` -> `Cancelled` | `cancel-work`, `release-bytes` | `job-state` chain + `cancelled` (terminal once; second `Cancel` is `post-terminal`) |
+| `Pause` | Any non-terminal |  | Overlay on (no state change) | none | `paused` (replayable; duplicate is `Ignored`) |
+| `Resume` | Paused only | paused | Overlay off, re-drive pending or complete | `acquire-tile` (pending) or full encode/finalize/publish chain when all arrived paused | `resumed`, then `progress`/`job-state` chain |
+| `TileOutcome{ok:true}` while paused | `AcquiringTiles` + paused | `tile:*` in plan | Stay (no new scheduling, completion deferred) | none | `progress:a/total` only |
+| Duplicate/stale | Same state, already-consumed request sequence or acquired tile ordinal / same selection | Correlation already settled | No transition | none | none (`Ok(Ignored)`) |
+| Wrong-state / unknown correlation / post-terminal | Any | unknown numeric correlation, invalid state, resume-without-pause, or terminal set | No transition, no work | none | none (`Err(job.invalid-state | job.post-terminal)`) |

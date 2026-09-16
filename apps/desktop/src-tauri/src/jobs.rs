@@ -1197,15 +1197,15 @@ impl JobTable {
     /// (choose-output) at the caller.
     ///
     /// The real dialog path is stored per job and passed to `pipeline::run`
-    /// for atomic publish. Only the opaque destination id (never the path)
-    /// is returned for IPC; transcript events carry the format id only.
+    /// for atomic publish. The path never crosses IPC; transcript events
+    /// carry the format id only.
     pub fn request_destination(
         &mut self,
         job: &str,
         path: &Path,
         format: &str,
         overwrite: bool,
-    ) -> Result<(u64, String), String> {
+    ) -> Result<u64, String> {
         self.pump_drivers();
         self.require_live(job)?;
         let requested =
@@ -1233,7 +1233,7 @@ impl JobTable {
         }
         let seq = self.push_event(job, "destination", format);
         self.spawn_pipeline_worker(job);
-        Ok((seq, destination_id_for(job)))
+        Ok(seq)
     }
 
     /// Complete a live job (test helper modelling native finalization).
@@ -1490,10 +1490,9 @@ impl JobTable {
             .name(format!("dezoomify-{job_id}-discovery"))
             .spawn(move || {
                 let config = dezoomify_job::Config::default();
-                if let Ok(mut engine) = dezoomify_job::Job::new(&job_id, &input_url, config) {
+                if let Ok(mut engine) = dezoomify_job::Job::new(&input_url, config) {
                     let _ = engine.start();
-                    let _ = engine.drain_effects();
-                    let _ = engine.drain_events();
+                    let _ = engine.drain_messages();
                 }
                 // Announce discovery completion through the driver channel so
                 // the pump moves the job to `AwaitingDestination` exactly
@@ -2116,13 +2115,6 @@ fn output_format_for_id(format: &str) -> Option<OutputFormat> {
     }
 }
 
-/// Opaque destination handle for IPC: per-job unique, derived from the job
-/// id only. The real path never crosses IPC and never enters events/logs.
-fn destination_id_for(job: &str) -> String {
-    let suffix = job.strip_prefix("job:").unwrap_or(job);
-    format!("dst:{suffix}")
-}
-
 /// Best-effort removal of uncommitted output (no logging; paths stay
 /// native). The atomic-write temp sibling is never user data and is always
 /// safe to drop. The destination itself is removed only when overwrite was
@@ -2173,19 +2165,14 @@ fn trailing_index(choice: &str) -> Option<usize> {
 /// Drive a transient engine through `Cancel` for policy parity. Best-effort
 /// and offline (no I/O); failures are ignored because the shell transcript is
 /// the source of truth in the lean fallback.
-fn drive_engine_cancel(job: &str, input_url: &str) {
+fn drive_engine_cancel(_job: &str, input_url: &str) {
     if input_url.is_empty() {
         return;
     }
-    if let Ok(mut engine) =
-        dezoomify_job::Job::new(job, input_url, dezoomify_job::Config::default())
-    {
+    if let Ok(mut engine) = dezoomify_job::Job::new(input_url, dezoomify_job::Config::default()) {
         let _ = engine.start();
-        let _ = engine.on_response(dezoomify_job::JobResponse::Cancel {
-            job: job.to_string(),
-        });
-        let _ = engine.drain_effects();
-        let _ = engine.drain_events();
+        let _ = engine.on_command(dezoomify_job::JobCommand::Cancel);
+        let _ = engine.drain_messages();
     }
 }
 
@@ -2317,15 +2304,11 @@ mod tests {
         // Real destination ONLY: the grant stores the dialog-chosen path
         // (here under the settings output dir), not a derived temp path.
         let path = std::path::PathBuf::from("/tmp/dz-out/grant.png");
-        let (seq, destination_id) = table
+        let seq = table
             .request_destination(&id2, &path, "png", false)
             .unwrap();
         assert!(seq >= 1);
         assert_eq!(table.destination_for(&id2).unwrap(), path);
-        assert_eq!(
-            destination_id,
-            format!("dst:{}", id2.strip_prefix("job:").unwrap())
-        );
         table.cancel_job(&id2).unwrap();
     }
 
@@ -2386,16 +2369,11 @@ mod tests {
             .unwrap_err();
         assert_eq!(err, "unsupported format");
         assert!(table.destination_for(&id).is_none());
-        // A matching grant stores the real path and reports an opaque id:
-        // no raw path in the id, format only in the event.
-        let (seq, destination_id) = table.request_destination(&id, &png, "png", false).unwrap();
+        // A matching grant stores the real path; the format is the only
+        // destination detail that enters the event.
+        let seq = table.request_destination(&id, &png, "png", false).unwrap();
         assert!(seq >= 1);
         assert_eq!(table.destination_for(&id).unwrap(), png);
-        assert_eq!(
-            destination_id,
-            format!("dst:{}", id.strip_prefix("job:").unwrap())
-        );
-        assert!(!destination_id.contains("tmp") && !destination_id.contains('/'));
         let events = table.events_for(&id);
         let granted = events.iter().find(|e| e.kind == "destination").unwrap();
         assert_eq!(granted.detail, "png");
@@ -2432,9 +2410,8 @@ mod tests {
         assert!(err.contains("refusing overwrite"), "typed error, got {err}");
         assert!(table.destination_for(&id).is_none());
         // Explicit overwrite confirmation grants the same path.
-        let (.., destination_id) = table.request_destination(&id, &path, "png", true).unwrap();
+        table.request_destination(&id, &path, "png", true).unwrap();
         assert_eq!(table.destination_for(&id).unwrap(), path);
-        assert!(!destination_id.contains("out.png"));
         table.cancel_job(&id).unwrap();
         // Overwrite grants leave pre-existing user data alone on cancel.
         assert_eq!(std::fs::read(&path).unwrap(), b"existing");
@@ -3042,24 +3019,20 @@ mod tests {
         let _ = state_before;
         // Engine parity: unknown/consumed request ids replay as Ignored.
         let mut engine =
-            dezoomify_job::Job::new("job:dup", "https://example.com/item", Default::default())
-                .unwrap();
+            dezoomify_job::Job::new("https://example.com/item", Default::default()).unwrap();
         engine.start().unwrap();
         let seq_before = engine.seq();
-        let events_before = engine.pending_event_count();
-        let effects_before = engine.pending_effect_count();
+        let messages_before = engine.pending_message_count();
         let outcome = engine
-            .on_response(dezoomify_job::JobResponse::ResourceBytes {
-                job: "job:dup".to_string(),
-                request: "req:missing".to_string(),
+            .on_command(dezoomify_job::JobCommand::ResourceBytes {
+                request: u32::MAX,
                 bytes: vec![1, 2, 3],
                 final_uri: None,
             })
             .unwrap();
         assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
         assert_eq!(engine.seq(), seq_before, "Ignored bumps no seq");
-        assert_eq!(engine.pending_event_count(), events_before);
-        assert_eq!(engine.pending_effect_count(), effects_before);
+        assert_eq!(engine.pending_message_count(), messages_before);
     }
 
     /// Task 6.1: seq is strictly monotonic increasing across the lifecycle.
@@ -3183,58 +3156,26 @@ mod tests {
         }
     }
 
-    /// Task 6.1: wrong-job / wrong-state / bad-id are rejected without work.
-    ///
-    /// Engine parity uses stable `job.wrong-job`, `job.invalid-state`, and
-    /// `job.invalid-id`; the shell table rejects unmapped ids as `unknown`
-    /// with no events or seq.
+    /// Wrong-state commands are rejected and unknown numeric replies are ignored.
     #[test]
-    fn wrong_job_wrong_state_bad_id_rejected_without_work() {
-        // Engine: wrong-job correlation never corrupts state.
+    fn wrong_state_and_unknown_reply_are_safe() {
         let mut engine =
-            dezoomify_job::Job::new("job:mine", "https://example.com/item", Default::default())
-                .unwrap();
+            dezoomify_job::Job::new("https://example.com/item", Default::default()).unwrap();
         engine.start().unwrap();
         let seq_before = engine.seq();
-        let err = engine
-            .on_response(dezoomify_job::JobResponse::ResourceBytes {
-                job: "job:other".to_string(),
-                request: "req:0".to_string(),
+        let outcome = engine
+            .on_command(dezoomify_job::JobCommand::ResourceBytes {
+                request: u32::MAX,
                 bytes: vec![1],
                 final_uri: None,
             })
-            .unwrap_err();
-        assert_eq!(err.code, "job.wrong-job");
+            .unwrap();
+        assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
         assert_eq!(engine.seq(), seq_before);
-        // Engine: image selection in Discovering is wrong-state.
         let err = engine
-            .on_response(dezoomify_job::JobResponse::SelectedImage {
-                job: "job:mine".to_string(),
-                image: 99,
-            })
+            .on_command(dezoomify_job::JobCommand::SelectImage { image: 99 })
             .unwrap_err();
         assert_eq!(err.code, "job.invalid-state");
-        // Engine: malformed correlation ids are bad-id.
-        let err = engine
-            .on_response(dezoomify_job::JobResponse::ResourceBytes {
-                job: "job:mine".to_string(),
-                request: "bad".to_string(),
-                bytes: vec![1],
-                final_uri: None,
-            })
-            .unwrap_err();
-        assert_eq!(err.code, "job.invalid-id");
-        let err = engine
-            .on_response(dezoomify_job::JobResponse::SelectedImage {
-                job: "job:mine".to_string(),
-                image: 99,
-            })
-            .unwrap_err();
-        assert_eq!(err.code, "job.invalid-state");
-        assert!(
-            dezoomify_job::Job::new("bad-id", "https://example.com/item", Default::default())
-                .is_err()
-        );
         // Shell table: unmapped ids are unknown with no work.
         let mut table = JobTable::new();
         assert_eq!(table.cancel_job("bad-id").unwrap_err(), "unknown");
@@ -3248,27 +3189,20 @@ mod tests {
     #[test]
     fn engine_post_terminal_returns_job_post_terminal_without_work() {
         let mut engine =
-            dezoomify_job::Job::new("job:term", "https://example.com/item", Default::default())
-                .unwrap();
+            dezoomify_job::Job::new("https://example.com/item", Default::default()).unwrap();
         engine.start().unwrap();
         engine
-            .on_response(dezoomify_job::JobResponse::Cancel {
-                job: "job:term".to_string(),
-            })
+            .on_command(dezoomify_job::JobCommand::Cancel)
             .unwrap();
         assert!(engine.is_terminal());
         let seq_before = engine.seq();
-        let events_before = engine.pending_event_count();
-        let effects_before = engine.pending_effect_count();
+        let messages_before = engine.pending_message_count();
         let err = engine
-            .on_response(dezoomify_job::JobResponse::Cancel {
-                job: "job:term".to_string(),
-            })
+            .on_command(dezoomify_job::JobCommand::Cancel)
             .unwrap_err();
         assert_eq!(err.code, "job.post-terminal");
         assert_eq!(engine.seq(), seq_before, "no work after terminal");
-        assert_eq!(engine.pending_event_count(), events_before);
-        assert_eq!(engine.pending_effect_count(), effects_before);
+        assert_eq!(engine.pending_message_count(), messages_before);
         // Shell projection of the same moment.
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();

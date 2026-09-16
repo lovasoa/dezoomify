@@ -39,6 +39,10 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
         "ImageId",
         "LevelId",
         "TileId",
+        "JobId",
+        "RequestId",
+        "AttemptId",
+        "RecoveryId",
         "SessionId",
         "ScanId",
         "CandidateId",
@@ -64,6 +68,22 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
         .map_err(|e| format!("read {}: {e}", core_model_path.display()))?;
     if core_model.contains("StableId") {
         return Err("core catalogs must use immutable positions, not StableId".to_string());
+    }
+    for path in [
+        "crates/dezoomify-job/src/job.rs",
+        "crates/dezoomify-job/src/transition.rs",
+        "crates/dezoomify-native/src/job_driver.rs",
+        "crates/dezoomify-wasm/src/session.rs",
+    ] {
+        let file = root.join(path);
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+        if text.contains("serde_json::Value") {
+            return Err(format!(
+                "typed job boundary violation: {} uses serde_json::Value",
+                file.display()
+            ));
+        }
     }
     for (contract, producer, produced, consumer, consumed) in [
         (

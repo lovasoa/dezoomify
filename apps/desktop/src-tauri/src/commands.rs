@@ -289,10 +289,10 @@ pub fn dispatch_destination(
         ));
     }
     match table.request_destination(job, path, format, overwrite) {
-        Ok((seq, event)) => Ok(DispatchOutcome {
+        Ok(seq) => Ok(DispatchOutcome {
             job: job.to_string(),
             seq,
-            event,
+            event: "destination".to_string(),
         }),
         Err(kind) if kind == "unknown" => Err(CommandError::unknown_job(job)),
         Err(kind) if kind == "stale" => Err(CommandError::stale_job(job)),

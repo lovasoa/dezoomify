@@ -61,8 +61,8 @@ effects. The controller never grows a second state machine:
 - Catalog selection is deterministic (`engine-selection.ts`): largest ready
   image, largest level that fits the browser canvas. Selection commands
   (`select-image`, `select-level`) are correlated to the job.
-- `request-destination` is always granted (`dst:0`): the browser
-  destination is the blob anchor save, which needs no permission.
+- `request-destination` is always granted: the browser destination is the
+  blob anchor save, which needs no permission.
 - Tile bytes are decoded during acquisition (the native model): a tile
   that cannot decode fails its acquisition outcome and flows through the
   engine's retry and partial policy. The wasm adapter releases its arena

@@ -27,7 +27,10 @@ test("worker and generated WASM complete the first discovery round trip", async 
   await host.onMessage({ type: "engine.start", jobId: "job:one", inputUrl: "https://example.test/image.dzi" });
   const first = sent.flatMap((message) => message.messages ?? []);
   const acquire = first.find((message) => message.type === "acquire-resource");
-  assert.ok(acquire?.request?.id, "engine did not request the input metadata");
+  assert.ok(
+    Number.isSafeInteger(acquire?.request?.id),
+    `engine did not request the input metadata: ${JSON.stringify(sent)}`,
+  );
 
   sent.length = 0;
   const metadata = new TextEncoder().encode('<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>');
