@@ -79,9 +79,6 @@ id_type!(
     "req",
     "one protocol request awaiting correlation"
 );
-id_type!(ImageId, "img", "one catalog image within its catalog");
-id_type!(LevelId, "lvl", "one level within its image");
-id_type!(TileId, "tile", "one tile within its level");
 id_type!(AttemptId, "att", "one fetch/decode attempt within its tile");
 id_type!(
     EffectId,
@@ -231,7 +228,7 @@ pub enum Readiness {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LevelDto {
-    pub id: LevelId,
+    pub label: String,
     pub width: u64,
     pub height: u64,
     pub tile_width: u64,
@@ -241,7 +238,6 @@ pub struct LevelDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageDto {
-    pub id: ImageId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub format: String,
@@ -280,25 +276,25 @@ pub enum JobCommand {
     },
     SelectImage {
         job: JobId,
-        image: ImageId,
+        image: u32,
     },
     SelectLevel {
         job: JobId,
-        level: LevelId,
+        level: u32,
     },
     ProvideDecodeOutcome {
         job: JobId,
-        tile: TileId,
+        tile: u32,
         ok: bool,
     },
     ProvideProcessOutcome {
         job: JobId,
-        tile: TileId,
+        tile: u32,
         ok: bool,
     },
     ProvideWriteOutcome {
         job: JobId,
-        tile: TileId,
+        tile: u32,
         ok: bool,
     },
     ProvideEncodeOutcome {
@@ -358,7 +354,7 @@ pub enum HostEffect {
         request: RequestDto,
         /// Engine tile id correlating this acquisition with the later
         /// `decode-pixels` effect for the same tile.
-        tile: TileId,
+        tile: u32,
         /// Complete output placement for the acquired bytes (see
         /// [`TilePlacementDto`]). Hosts that assemble images read the
         /// placement here, at acquisition time, so acquisition failures and
@@ -377,12 +373,12 @@ pub enum HostEffect {
     DecodePixels {
         effect: EffectId,
         job: JobId,
-        tile: TileId,
+        tile: u32,
     },
     ProcessPixels {
         effect: EffectId,
         job: JobId,
-        tile: TileId,
+        tile: u32,
     },
     /// Allocate the output surface. `canvas` declares the output size when
     /// the plan knows it; hosts without a declared size derive it from the
@@ -396,7 +392,7 @@ pub enum HostEffect {
     WriteOutput {
         effect: EffectId,
         job: JobId,
-        tile: TileId,
+        tile: u32,
     },
     FinalizeEncoder {
         effect: EffectId,
@@ -745,7 +741,6 @@ mod tests {
     fn catalog_json_matches_the_generated_typescript_field_names() {
         let catalog = CatalogDto {
             images: vec![ImageDto {
-                id: "img:test".parse().expect("image id"),
                 title: Some("Test".into()),
                 format: "test".into(),
                 width: 512,
@@ -753,7 +748,7 @@ mod tests {
                 readiness: Readiness::Ready,
                 source_kind: "grid".into(),
                 levels: vec![LevelDto {
-                    id: "lvl:test".parse().expect("level id"),
+                    label: "Level 1".into(),
                     width: 512,
                     height: 512,
                     tile_width: 256,

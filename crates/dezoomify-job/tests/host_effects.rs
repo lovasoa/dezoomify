@@ -33,7 +33,7 @@ fn discover_select_grant(host: &mut ScriptedHost, job: &str) {
     .unwrap();
     host.apply(JobResponse::SelectedLevel {
         job: job.to_string(),
-        level: levels.last().expect("level").clone(),
+        level: *levels.last().expect("level"),
     })
     .unwrap();
     host.apply(JobResponse::DestinationGranted {
@@ -152,7 +152,7 @@ fn final_uri_rebases_relative_tile_urls() {
     .unwrap();
     host.apply(JobResponse::SelectedLevel {
         job: "job:redir".to_string(),
-        level: levels.last().expect("level").clone(),
+        level: *levels.last().expect("level"),
     })
     .unwrap();
     host.apply(JobResponse::DestinationGranted {
@@ -201,19 +201,14 @@ fn deferred_entries_expose_their_follow_up_uri() {
         ),
         "bulk entries stay deferred: {catalog}"
     );
-    let first = images[0]
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .expect("image id")
-        .to_string();
     // Deferred entries cannot be selected; the host follows the URI instead.
     let selected = host.apply(JobResponse::SelectedImage {
         job: "job:deferred".to_string(),
-        image: first.clone(),
+        image: 0,
     });
     assert!(selected.is_err(), "deferred images are not selectable");
     assert_eq!(
-        host.deferred_uri_for_test(&first),
+        host.deferred_uri_for_test(0),
         Some("https://example.test/a.dzi".to_string()),
         "first entry resolves to the first listed URL"
     );

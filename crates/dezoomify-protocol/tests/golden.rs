@@ -150,25 +150,25 @@ fn all_commands(job: &JobId) -> Vec<JobCommand> {
         },
         JobCommand::SelectImage {
             job: job.clone(),
-            image: "img:1".parse().unwrap(),
+            image: 1,
         },
         JobCommand::SelectLevel {
             job: job.clone(),
-            level: "lvl:1".parse().unwrap(),
+            level: 1,
         },
         JobCommand::ProvideDecodeOutcome {
             job: job.clone(),
-            tile: "tile:1".parse().unwrap(),
+            tile: 1,
             ok: true,
         },
         JobCommand::ProvideProcessOutcome {
             job: job.clone(),
-            tile: "tile:1".parse().unwrap(),
+            tile: 1,
             ok: true,
         },
         JobCommand::ProvideWriteOutcome {
             job: job.clone(),
-            tile: "tile:1".parse().unwrap(),
+            tile: 1,
             ok: true,
         },
         JobCommand::ProvideEncodeOutcome {
@@ -230,7 +230,6 @@ fn all_commands(job: &JobId) -> Vec<JobCommand> {
 fn all_events(job: &JobId) -> Vec<JobEvent> {
     let catalog = CatalogDto {
         images: vec![ImageDto {
-            id: "img:1".parse().unwrap(),
             title: Some("One".into()),
             format: "Zoomify".into(),
             width: 256,
@@ -238,7 +237,7 @@ fn all_events(job: &JobId) -> Vec<JobEvent> {
             readiness: Readiness::Ready,
             source_kind: "fixed-grid".into(),
             levels: vec![LevelDto {
-                id: "lvl:1".parse().unwrap(),
+                label: "Level 1".into(),
                 width: 256,
                 height: 256,
                 tile_width: 256,

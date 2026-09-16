@@ -3210,11 +3210,11 @@ mod tests {
         let err = engine
             .on_response(dezoomify_job::JobResponse::SelectedImage {
                 job: "job:mine".to_string(),
-                image: "img:other".to_string(),
+                image: 99,
             })
             .unwrap_err();
         assert_eq!(err.code, "job.invalid-state");
-        // Engine: malformed ids are bad-id.
+        // Engine: malformed correlation ids are bad-id.
         let err = engine
             .on_response(dezoomify_job::JobResponse::ResourceBytes {
                 job: "job:mine".to_string(),
@@ -3227,10 +3227,10 @@ mod tests {
         let err = engine
             .on_response(dezoomify_job::JobResponse::SelectedImage {
                 job: "job:mine".to_string(),
-                image: "bad".to_string(),
+                image: 99,
             })
             .unwrap_err();
-        assert_eq!(err.code, "job.invalid-id");
+        assert_eq!(err.code, "job.invalid-state");
         assert!(
             dezoomify_job::Job::new("bad-id", "https://example.com/item", Default::default())
                 .is_err()

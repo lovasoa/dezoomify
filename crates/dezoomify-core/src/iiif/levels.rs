@@ -9,7 +9,7 @@ use std::sync::Arc;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::{Grid, GridRequests, GridTile, LevelDescriptor, Request, StableId};
+use crate::core::{Grid, GridRequests, GridTile, LevelDescriptor, Request};
 use crate::iiif::tile_info::{ImageInfo, TileSizeFormat};
 use crate::iiif::{IIIFError, service_base_url_for_levels};
 use crate::json_utils::all_json;
@@ -94,9 +94,6 @@ pub(crate) fn levels_from_info(
                             description: "scaled IIIF tile positions overflow u32".into(),
                         });
                     }
-                    let id = StableId::new(format!(
-                        "iiif:level:{tile_ordinal}:{scale_factor}:{scale_ordinal}"
-                    ));
                     let source = IIIFLevel {
                         scale_factor,
                         page_info: Arc::clone(&page_info),
@@ -106,7 +103,6 @@ pub(crate) fn levels_from_info(
                         size_format,
                     };
                     let source = Grid::new(
-                        id.clone(),
                         source.image_size(),
                         tile_size,
                         Vec2d::default(),
@@ -496,7 +492,7 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
         panic!("IIIF tile geometry is a grid");
     };
     let first = plan.tiles_row_major().next().unwrap().unwrap();
-    assert_eq!(&first.id.level, level.id());
+    assert_eq!(first.ordinal, 0);
     assert_eq!(
         first.request.headers.get("Referer").map(String::as_str),
         Some("https://images.example/item/0,0,512,512/512,512/0/default.jpg")

@@ -48,10 +48,10 @@ browser canvas, smallest declared level as the fail-fast fallback).
 
 ## Catalog boundary
 
-Browser hosts consume the protocol `CatalogDto` with stable `img:` and `lvl:`
-identifiers. The WASM discovery session projects its core catalog through the
-same `dezoomify-job` projection as the job engine, and planning accepts those
-stable identifiers. Browser selection, declared-size preflight, and plan gates
+Browser hosts consume the ordered protocol `CatalogDto` without duplicated
+identity fields. The WASM discovery session projects its normalized core
+catalog through the same `dezoomify-job` projection as the job engine, and
+planning accepts zero-based image and level positions. Browser selection, declared-size preflight, and plan gates
 therefore use one generated wire shape; hosts do not define their own catalog
 or level DTOs.
 

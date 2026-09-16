@@ -25,74 +25,73 @@
         {
           "format": "deepzoom",
           "height": 512,
-          "id": "img:dzi:0",
           "levels": [
             {
               "height": 1,
-              "id": "lvl:dzi:0:9",
+              "label": "DZI level 9 (    1 x     1 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 1
             },
             {
               "height": 2,
-              "id": "lvl:dzi:0:8",
+              "label": "DZI level 8 (    2 x     2 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 2
             },
             {
               "height": 4,
-              "id": "lvl:dzi:0:7",
+              "label": "DZI level 7 (    4 x     4 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 4
             },
             {
               "height": 8,
-              "id": "lvl:dzi:0:6",
+              "label": "DZI level 6 (    8 x     8 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 8
             },
             {
               "height": 16,
-              "id": "lvl:dzi:0:5",
+              "label": "DZI level 5 (   16 x    16 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 16
             },
             {
               "height": 32,
-              "id": "lvl:dzi:0:4",
+              "label": "DZI level 4 (   32 x    32 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 32
             },
             {
               "height": 64,
-              "id": "lvl:dzi:0:3",
+              "label": "DZI level 3 (   64 x    64 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 64
             },
             {
               "height": 128,
-              "id": "lvl:dzi:0:2",
+              "label": "DZI level 2 (  128 x   128 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 128
             },
             {
               "height": 256,
-              "id": "lvl:dzi:0:1",
+              "label": "DZI level 1 (  256 x   256 pixels,   1 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 256
             },
             {
               "height": 512,
-              "id": "lvl:dzi:0:0",
+              "label": "DZI level 0 (  512 x   512 pixels,   4 tiles)",
               "tileHeight": 256,
               "tileWidth": 256,
               "width": 512
@@ -192,7 +191,7 @@
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/0_0.jpg"
     },
-    "tile": "tile:0",
+    "tile": 0,
     "type": "acquire-tile"
   },
   {
@@ -226,7 +225,7 @@
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/1_0.jpg"
     },
-    "tile": "tile:1",
+    "tile": 1,
     "type": "acquire-tile"
   },
   {
@@ -260,7 +259,7 @@
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/0_1.jpg"
     },
-    "tile": "tile:2",
+    "tile": 2,
     "type": "acquire-tile"
   },
   {
@@ -294,7 +293,7 @@
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/1_1.jpg"
     },
-    "tile": "tile:3",
+    "tile": 3,
     "type": "acquire-tile"
   },
   {
@@ -334,7 +333,7 @@
     "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
-    "tile": "tile:0",
+    "tile": 0,
     "type": "decode-pixels"
   },
   {
@@ -342,7 +341,7 @@
     "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
-    "tile": "tile:1",
+    "tile": 1,
     "type": "decode-pixels"
   },
   {
@@ -350,7 +349,7 @@
     "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
-    "tile": "tile:2",
+    "tile": 2,
     "type": "decode-pixels"
   },
   {
@@ -358,7 +357,7 @@
     "job": "job:wasm-basic-1",
     "kind": "effect",
     "protocol": "2.0",
-    "tile": "tile:3",
+    "tile": 3,
     "type": "decode-pixels"
   },
   {

@@ -10,7 +10,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId, resolve_relative,
+    LevelDescriptor, Request, resolve_relative,
 };
 use crate::json_utils::all_json;
 
@@ -281,7 +281,7 @@ fn catalog_from_dzi(
     images: impl IntoIterator<Item = DziFile>,
 ) -> Result<ImageCatalog, DiscoveryError> {
     let mut entries = Vec::new();
-    for (image_index, image) in images.into_iter().enumerate() {
+    for image in images {
         if image.tile_size == 0 {
             return Err(DiscoveryError::Session("invalid DZI zero tile size".into()));
         }
@@ -302,12 +302,8 @@ fn catalog_from_dzi(
         .map(|(ordinal, (size, zoom))| {
             let base_url = Arc::clone(&base_url);
             let format = image.format.clone();
-            let source = Grid::with_requests(
-                format!("dzi:{image_index}:{ordinal}").into(),
-                size,
-                tile_size,
-                Vec2d::square(image.overlap),
-                move |tile| {
+            let source =
+                Grid::with_requests(size, tile_size, Vec2d::square(image.overlap), move |tile| {
                     let cell: Vec2d = tile.coord.into();
                     // `?tile=` query bases (NLA) join without a separator.
                     let separator = if base_url.ends_with(['=', '/']) {
@@ -319,9 +315,8 @@ fn catalog_from_dzi(
                         "{base_url}{separator}{zoom}/{}_{}.{format}",
                         cell.x, cell.y
                     ))
-                },
-            )
-            .map_err(|error| DiscoveryError::Session(format!("invalid DZI grid: {error}")))?;
+                })
+                .map_err(|error| DiscoveryError::Session(format!("invalid DZI grid: {error}")))?;
             Ok(LevelDescriptor::new(source).with_title(Some(format!("DZI level {ordinal}"))))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
@@ -332,9 +327,8 @@ fn catalog_from_dzi(
             .next()
             .map(|s| s.trim_end_matches("_files").to_owned());
         entries.push(CatalogEntry::Ready(ImageDescriptor {
-            id: StableId::new(format!("dzi:{image_index}")),
             title,
-            format: StableId::new("deepzoom"),
+            format: "deepzoom",
             levels,
             ..Default::default()
         }));

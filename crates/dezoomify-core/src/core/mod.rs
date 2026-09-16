@@ -24,7 +24,7 @@ pub use discovery::{RequestId, ResourceResponse};
 pub(crate) use model::floor_index;
 pub use model::{
     CatalogEntry, DeferredImage, ImageCatalog, ImageDescriptor, LevelDescriptor, ProcessingRecipe,
-    Request, StableId, TileId, TileRole, TileSpec,
+    Request, TileRole, TileSpec,
 };
 pub use processing::ProcessingError;
 pub use registry::{

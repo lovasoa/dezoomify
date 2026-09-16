@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Positioned, ProcessingRecipe, Request, StableId, TileSourceError,
+    LevelDescriptor, Positioned, ProcessingRecipe, Request, TileSourceError,
 };
 use crate::default_headers;
 
@@ -49,11 +49,9 @@ fn catalog_from_yaml(bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         .map_err(|error| DiscoveryError::Session(format!("invalid tiles.yaml: {error}")))?;
     let size = yaml.width.zip(yaml.height).map(|(x, y)| Vec2d { x, y });
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("custom:image"),
         title: yaml.title,
-        format: StableId::new("custom"),
+        format: "custom",
         levels: vec![LevelDescriptor::new(Positioned::from_generator(
-            StableId::new("custom:level"),
             size,
             CustomTiles {
                 tile_set: yaml.tile_set,
@@ -97,7 +95,7 @@ impl crate::core::tile_plan::PositionedGenerator for CustomTiles {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{TileId, TileRole, TileSource};
+    use crate::core::{TileRole, TileSource};
 
     #[test]
     fn parses_bundled_example_headers() {
@@ -160,7 +158,7 @@ y_template: y
         let tiles: Vec<_> = plan.tiles().collect::<Result<_, _>>().unwrap();
         let first = &tiles[0];
         let last = &tiles[3];
-        assert_eq!(first.id, TileId::new("custom:level".into(), 0));
+        assert_eq!(first.ordinal, 0);
         assert_eq!(first.role, TileRole::Output);
         assert_eq!(first.request.uri, "https://example.test/0/0");
         assert_eq!(last.request.uri, "https://example.test/1/1");

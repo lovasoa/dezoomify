@@ -17,8 +17,8 @@
 
 /**
  * @typedef {Object} AssemblyLike
- * @property {(tile: string, placement: unknown, bytes: ArrayBuffer) => Promise<void>} acquireTile
- * @property {(tile: string) => void} decodePixels
+ * @property {(tile: number, placement: unknown, bytes: ArrayBuffer) => Promise<void>} acquireTile
+ * @property {(tile: number) => void} decodePixels
  * @property {(format: string, canvas?: { width: number, height: number } | null) => void} openEncoder
  * @property {() => Promise<void>} finalizeEncoder
  * @property {() => void} publishOutput
@@ -41,8 +41,8 @@
  * }} deps
  */
 interface AssemblyLike {
-  acquireTile(tile: string, placement: unknown, bytes: ArrayBuffer): Promise<void>;
-  decodePixels(tile: string): void;
+  acquireTile(tile: number, placement: unknown, bytes: ArrayBuffer): Promise<void>;
+  decodePixels(tile: number): void;
   openEncoder(format: string, canvas?: { width: number; height: number } | null): void;
   finalizeEncoder(): Promise<void>;
   publishOutput(): void;
@@ -61,7 +61,7 @@ interface JobControllerDeps {
   onEvent(event: unknown): void;
   onUnsupportedEffect(envelope: unknown): void;
 }
-type EngineEnvelope = { kind: "effect" | "event"; type: string; job: string; request?: { id: string; purpose: string; uri: string; method?: string; headers?: Record<string, string> }; tile?: string; placement?: unknown; format?: string; canvas?: { width: number; height: number } | null; recovery?: string; [key: string]: unknown };
+type EngineEnvelope = { kind: "effect" | "event"; type: string; job: string; request?: { id: string; purpose: string; uri: string; method?: string; headers?: Record<string, string> }; tile?: number; placement?: unknown; format?: string; canvas?: { width: number; height: number } | null; recovery?: string; [key: string]: unknown };
 
 export function createJobController(deps: JobControllerDeps) {
   let cancelled = false;
@@ -89,7 +89,7 @@ export function createJobController(deps: JobControllerDeps) {
         ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: request.id, uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose })
         : await deps.extensionTransport.fetchResource(request.uri, { requestId: request.id, purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
       if (cancelled) return;
-      if (effect.type === "acquire-tile" && effect.tile && effect.placement) {
+      if (effect.type === "acquire-tile" && typeof effect.tile === "number" && effect.placement) {
         // Decode-at-acquisition: the placement is recorded and the bitmap is
         // held before the outcome settles, so assembly never depends on a
         // later bytes hand-off and decode failures retry honestly.
@@ -123,7 +123,8 @@ export function createJobController(deps: JobControllerDeps) {
         sendToEngine({ type: "engine.command", command: { type: "destination-response", job: envelope.job, destination: "dst:0", granted: true } });
         return;
       case "decode-pixels":
-        deps.assembly.decodePixels(String(envelope.tile));
+        if (typeof envelope.tile !== "number") throw new Error("decode-pixels is missing its tile ordinal");
+        deps.assembly.decodePixels(envelope.tile);
         return;
       case "open-encoder":
         deps.assembly.openEncoder(String(envelope.format), envelope.canvas);
@@ -181,8 +182,8 @@ export function createJobController(deps: JobControllerDeps) {
   return {
     handleEngineMessages,
     start(inputUrl: string) { sendToEngine({ type: "engine.start", jobId: deps.binding().jobId, inputUrl }); },
-    selectImage(image: string) { sendToEngine({ type: "engine.command", command: { type: "select-image", job: deps.binding().jobId, image } }); },
-    selectLevel(level: string) { sendToEngine({ type: "engine.command", command: { type: "select-level", job: deps.binding().jobId, level } }); },
+    selectImage(image: number) { sendToEngine({ type: "engine.command", command: { type: "select-image", job: deps.binding().jobId, image } }); },
+    selectLevel(level: number) { sendToEngine({ type: "engine.command", command: { type: "select-level", job: deps.binding().jobId, level } }); },
     choosePartial(recovery: string, keepPartial: boolean) { sendToEngine({ type: "engine.command", command: { type: "partial-choice", job: deps.binding().jobId, recovery, keep_partial: keepPartial } }); },
     resolvePermission(granted: boolean) {
       const pending = [...waitingForPermission.entries()];

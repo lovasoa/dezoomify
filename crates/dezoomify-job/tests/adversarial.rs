@@ -40,12 +40,12 @@ fn duplicate_response_is_ignored() {
     // level is a 2x2 grid, so one tile outcome leaves acquisition running.
     host.apply(JobResponse::SelectedImage {
         job: "job:dup".to_string(),
-        image: "img:dzi:0".to_string(),
+        image: 0,
     })
     .unwrap();
     host.apply(JobResponse::SelectedLevel {
         job: "job:dup".to_string(),
-        level: "lvl:dzi:0:0".to_string(),
+        level: 9,
     })
     .unwrap();
     host.apply(JobResponse::DestinationGranted {
@@ -55,7 +55,7 @@ fn duplicate_response_is_ignored() {
     .unwrap();
     host.apply(JobResponse::TileOutcome {
         job: "job:dup".to_string(),
-        tile: "tile:0".to_string(),
+        tile: 0,
         ok: true,
     })
     .unwrap();
@@ -63,7 +63,7 @@ fn duplicate_response_is_ignored() {
     let outcome = host
         .apply(JobResponse::TileOutcome {
             job: "job:dup".to_string(),
-            tile: "tile:0".to_string(),
+            tile: 0,
             ok: true,
         })
         .unwrap();
@@ -118,12 +118,12 @@ fn over_limit_tiles_become_typed_terminal_failure() {
     .unwrap();
     host.apply(JobResponse::SelectedImage {
         job: "job:limited".to_string(),
-        image: "img:dzi:0".to_string(),
+        image: 0,
     })
     .unwrap();
     host.apply(JobResponse::SelectedLevel {
         job: "job:limited".to_string(),
-        level: "lvl:dzi:0:0".to_string(),
+        level: 9,
     })
     .unwrap();
     host.apply(JobResponse::DestinationGranted {
