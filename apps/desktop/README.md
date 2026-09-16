@@ -76,7 +76,7 @@ exercised anywhere (updater inert).
 `cargo xtask build desktop` compiles the lean shell, then the frontend
 (`apps/desktop/dist/`), then the Tauri window shell, then generates icons
 (`scripts/gen-desktop-icons.py`), then bundles for the matching host:
-Linux `deb` (`cargo tauri build --bundles deb`, needs `dpkg-deb`),
+Linux `deb` (Tauri CLI `tauri build --bundles deb`, needs `dpkg-deb`),
 Windows `msi`/`nsis` (needs WebView2, WiX, NSIS, `icons/icon.ico`),
 macOS `dmg` (needs Xcode CLT, `icons/icon.icns`).
 `cargo xtask build desktop --unsigned-test` compiles everything but
