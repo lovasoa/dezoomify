@@ -16,7 +16,7 @@
     "linkedom": "^0.18.13",
     "typescript": "7.0.2",
     "vite": "^8.2.2",
-    "wrangler": "4.130.0"
+    "wrangler": "4.131.1"
   },
   "pnpm": {
     "overrides": {
