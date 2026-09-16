@@ -1,7 +1,12 @@
-//! Pure discovery for Zoomify viewers and `ImageProperties.xml` pyramids.
+//! Pure discovery for Zoomify viewers, `ImageProperties.xml` pyramids, and
+//! inline `OpenSeadragon` `zoomifytileservice` configurations (which carry
+//! their own geometry, so no metadata fetch is needed).
 
 use std::sync::{Arc, LazyLock};
 
+use serde::{Deserialize, Deserializer};
+
+use crate::json_utils::all_json;
 use crate::web_page::{has_iframe, iframe_source};
 use image_properties::ImageProperties;
 use regex::{Regex, bytes::Regex as BytesRegex};
@@ -18,6 +23,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::UrlPredicate(is_tile_url).map_url(tile_metadata),
     DiscoveryMatch::UrlSuffix("ImageProperties.xml").then(extract_catalog),
     DiscoveryMatch::UrlPredicate(is_broker_url).then(broker_catalog_step),
+    DiscoveryMatch::ContentPredicate(has_inline_tile_service).then(extract_inline_catalog),
     DiscoveryMatch::ContentPredicate(contains_zoomify_declaration)
         .then(extract_image_properties_url),
     DiscoveryMatch::ContentPredicate(has_fluid_access_number).then(extract_fluid_catalog),
@@ -43,6 +49,50 @@ static TILE_SERVICE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     )
     .expect("constant Zoomify tile service pattern")
 });
+
+// Inline OpenSeadragon configurations carry geometry (`width`, `height`,
+// `tilesUrl`, optional `tileSize`), e.g. geographicus.com. They are parsed
+// as JavaScript objects via the shared brace-scan + `json5` helper (which
+// tolerates unquoted keys, single quotes, and trailing commas), never with
+// field regexes. Every field is optional so enclosing viewer objects parse
+// but are filtered out by the marker below.
+#[derive(Debug, Deserialize)]
+struct RawInlineTileService {
+    #[serde(rename = "type", default)]
+    service_type: Option<String>,
+    #[serde(default, deserialize_with = "optional_u32")]
+    width: Option<u32>,
+    #[serde(default, deserialize_with = "optional_u32")]
+    height: Option<u32>,
+    #[serde(default)]
+    #[serde(rename = "tilesUrl")]
+    tiles_url: Option<String>,
+    #[serde(default, deserialize_with = "optional_u32")]
+    #[serde(rename = "tileSize")]
+    tile_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum NumberOrText {
+    Number(u32),
+    Text(String),
+}
+
+fn optional_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<NumberOrText>::deserialize(deserializer).map(|value| {
+        value.and_then(|value| match value {
+            NumberOrText::Number(number) => Some(number),
+            NumberOrText::Text(text) => text.trim().parse().ok(),
+        })
+    })
+}
+
+/// At most this many inline sources become catalog entries.
+const MAX_INLINE_SERVICES: usize = 8;
 
 static SCRIPT_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r"(?is)<script\b[^>]*>(?P<content>.*?)</script\s*>")
@@ -109,6 +159,116 @@ fn extract_image_properties_url(
         &image_uri,
         "ImageProperties.xml",
     ))))
+}
+
+/// Whether a script block declares an inline source *with* geometry.
+/// Path-only declarations (legacy `Z.showImage`, bare `tilesUrl`) keep the
+/// `ImageProperties.xml` route below; only full configurations qualify here.
+fn has_inline_tile_service(bytes: &[u8]) -> bool {
+    inline_tile_services(bytes, "", "").next().is_some()
+}
+
+struct InlineService {
+    width: u32,
+    height: u32,
+    tile_size: u32,
+    tiles_url: String,
+}
+
+fn inline_tile_services<'a>(
+    html: &'a [u8],
+    final_uri: &str,
+    base_href: &str,
+) -> impl Iterator<Item = InlineService> + 'a {
+    let page_base_uri = if base_href.is_empty() {
+        final_uri.to_owned()
+    } else {
+        resolve_relative(final_uri, base_href)
+    };
+    script_blocks(html)
+        .into_iter()
+        .flat_map(|(_, script)| all_json::<RawInlineTileService>(script).collect::<Vec<_>>())
+        .take(MAX_INLINE_SERVICES)
+        .filter_map(move |raw| {
+            if !raw
+                .service_type
+                .as_deref()
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("zoomifytileservice"))
+            {
+                return None;
+            }
+            let (width, height) = (raw.width?, raw.height?);
+            let tiles_url = raw.tiles_url?;
+            if width == 0 || height == 0 || tiles_url.trim().is_empty() {
+                return None;
+            }
+            let tile_size = raw.tile_size.unwrap_or(256);
+            if tile_size == 0 {
+                return None;
+            }
+            let tiles_url = resolve_relative(&page_base_uri, tiles_url.trim())
+                .trim_end_matches('/')
+                .to_owned();
+            Some(InlineService {
+                width,
+                height,
+                tile_size,
+                tiles_url,
+            })
+        })
+}
+
+/// Pyramid tile total using the same halving loop as the XML level builder,
+/// so synthesized metadata produces no count-mismatch warning.
+fn pyramid_tile_count(width: u32, height: u32, tile_size: u32) -> u32 {
+    let mut divisor = 1_u64;
+    let mut total = 0_u64;
+    while u64::from(width) > u64::from(tile_size) * divisor
+        || u64::from(height) > u64::from(tile_size) * divisor
+    {
+        total = total.saturating_add(
+            u64::from(width)
+                .div_ceil(u64::from(tile_size) * divisor)
+                .saturating_mul(u64::from(height).div_ceil(u64::from(tile_size) * divisor)),
+        );
+        divisor = divisor.saturating_mul(2);
+    }
+    u32::try_from(total).unwrap_or(u32::MAX)
+}
+
+fn extract_inline_catalog(
+    _: &DiscoveryContext<'_>,
+    resource: crate::core::DiscoveryResource<'_>,
+) -> Result<DiscoveryStep, DiscoveryError> {
+    let base_href = extract_html_base(resource.bytes()).unwrap_or_default();
+    let services: Vec<InlineService> =
+        inline_tile_services(resource.bytes(), resource.final_uri(), &base_href).collect();
+    if services.is_empty() {
+        return Err(DiscoveryError::Session(
+            "Zoomify viewer page declares no inline image geometry".into(),
+        ));
+    }
+    let mut entries = Vec::with_capacity(services.len());
+    for service in &services {
+        let properties = ImageProperties {
+            width: service.width,
+            height: service.height,
+            tile_size: service.tile_size,
+            num_tiles: pyramid_tile_count(service.width, service.height, service.tile_size),
+        };
+        let mut produced = catalog_from_properties(&service.tiles_url, &properties)
+            .map_err(|_| DiscoveryError::Session("invalid inline Zoomify geometry".into()))?
+            .into_entries();
+        match produced.pop() {
+            Some(CatalogEntry::Ready(image)) => entries.push(CatalogEntry::Ready(image)),
+            _ => {
+                return Err(DiscoveryError::Session(
+                    "invalid inline Zoomify geometry".into(),
+                ));
+            }
+        }
+    }
+    Ok(DiscoveryStep::Complete(ImageCatalog::new(entries)))
 }
 
 fn extract_catalog(
@@ -342,11 +502,17 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
             "Zoomify XML must declare positive WIDTH, HEIGHT, and TILESIZE values".into(),
         ));
     }
-    let base_url: Arc<str> = url
-        .split("/ImageProperties.xml")
-        .next()
-        .unwrap_or(url)
-        .into();
+    catalog_from_properties(
+        url.split("/ImageProperties.xml").next().unwrap_or(url),
+        &properties,
+    )
+}
+
+fn catalog_from_properties(
+    base_url: &str,
+    properties: &ImageProperties,
+) -> Result<ImageCatalog, DiscoveryError> {
+    let base_url: Arc<str> = base_url.into();
     let base_name = base_url
         .trim_end_matches('/')
         .rsplit('/')
@@ -573,6 +739,92 @@ mod tests {
             ))
             .unwrap_err();
         assert!(matches!(error, DiscoveryError::NoCandidateAccepted { .. }));
+    }
+
+    #[test]
+    fn inline_tile_service_completes_without_metadata_fetch() {
+        // Mirrors the geographicus.com OpenSeadragon embed: geometry travels
+        // with the page, so no ImageProperties.xml request may be emitted.
+        let mut operation = operation("https://www.geographicus.com/P/AntiqueMap/example");
+        let need = operation.missing_resources().unwrap().pop().unwrap();
+        assert_eq!(
+            need.request.uri,
+            "https://www.geographicus.com/P/AntiqueMap/example"
+        );
+        operation
+            .provide(ResourceResponse::new(
+                need.id,
+                br#"<html><head><base href="https://www.geographicus.com/mm5/" /></head><body>
+                <script>viewer = OpenSeadragon({ tileSources: [
+                  { type: "zoomifytileservice", width: 7066, height: 9380,
+                    tilesUrl: "/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3/",
+                    tileSize: 256, fileFormat: 'jpg' },
+                  { type: "zoomifytileservice", width: 3020, height: 5000,
+                    tilesUrl: "/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3-image2/",
+                    tileSize: 256, fileFormat: 'jpg' }
+                ] });</script></body></html>"#,
+            ))
+            .unwrap();
+        assert!(operation.missing_resources().unwrap().is_empty());
+        let catalog = operation.finish().unwrap();
+        assert_eq!(catalog.len(), 2);
+        let CatalogEntry::Ready(first) = &catalog.entries()[0] else {
+            panic!("inline Zoomify sources must be ready");
+        };
+        let CatalogEntry::Ready(second) = &catalog.entries()[1] else {
+            panic!("inline Zoomify sources must be ready");
+        };
+        assert!(first.warnings.is_empty());
+        assert_eq!(first.title.as_deref(), Some("Cowboys-mora-1941-3"));
+        assert_eq!(second.title.as_deref(), Some("Cowboys-mora-1941-3-image2"));
+        for image in [first, second] {
+            let TileSource::Grid(plan) = &image.levels[0].source else {
+                panic!("inline Zoomify levels must be grids");
+            };
+            let first_tile = plan.tiles_row_major().next().unwrap().unwrap();
+            assert!(first_tile.request.uri.ends_with("/TileGroup0/0-0-0.jpg"));
+        }
+        let TileSource::Grid(plan) = &first.levels[0].source else {
+            unreachable!()
+        };
+        assert!(plan.tiles_row_major().next().unwrap().unwrap().request.uri.starts_with(
+            "https://www.geographicus.com/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3/TileGroup0/"
+        ));
+    }
+
+    #[test]
+    fn inline_service_accepts_string_dimensions_and_any_case() {
+        let services: Vec<InlineService> = inline_tile_services(
+            br#"<script>var c = {type: 'ZoomifyTileService', width: "1024",
+                height: '768', tilesUrl: "/z/", tileSize: "64",};</script>"#,
+            "https://example.com/page",
+            "",
+        )
+        .collect();
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].width, 1024);
+        assert_eq!(services[0].height, 768);
+        assert_eq!(services[0].tile_size, 64);
+        assert_eq!(services[0].tiles_url, "https://example.com/z");
+    }
+
+    #[test]
+    fn inline_config_without_geometry_falls_back_to_xml() {
+        // A path-only tilesUrl has no width/height, so the legacy metadata
+        // route must still be used.
+        let mut operation = operation("https://example.com/page");
+        let need = operation.missing_resources().unwrap().pop().unwrap();
+        operation
+            .provide(ResourceResponse::new(
+                need.id,
+                br#"<script>var config = {"type": "zoomifytileservice", "tilesUrl": "/zoomify"};</script>"#,
+            ))
+            .unwrap();
+        let follow = operation.missing_resources().unwrap().pop().unwrap();
+        assert_eq!(
+            follow.request.uri,
+            "https://example.com/zoomify/ImageProperties.xml"
+        );
     }
 
     #[test]
