@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+if ! log=$(cargo xtask ci check 2>&1); then
+  printf '%s\n' "$log" >&2
+  exit 1
+fi

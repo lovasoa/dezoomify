@@ -63,7 +63,6 @@ Focused aliases remain available for iteration:
 | `job [--transcripts]` | job engine, with optional workflow/transcript focus |
 | `wasm [--transcripts\|--browser chromium]` | WASM adapter and generated Node harness; optional Chromium website E2E |
 | `browser [--build-only\|--browser chromium\|--scenario <id>]` | browser-runtime Node contracts; a browser selection adds website Chromium E2E |
-| `ui` | shared UI controller, rendering, accessibility, localization, and mobile contracts |
 | `web [--e2e]` | website Node suite; `--e2e` adds Chromium Playwright |
 | `native` | native runtime and CLI Rust suites |
 | `desktop [--e2e-window]` | desktop Rust and Node suites; the option runs the explicit real-window gate instead |

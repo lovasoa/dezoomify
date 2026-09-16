@@ -1,5 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-cargo xtask ci check
-cargo xtask test ui
+cargo fmt --all -- --check
