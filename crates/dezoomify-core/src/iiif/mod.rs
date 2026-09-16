@@ -9,7 +9,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DeferredImage, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, GridRequests, GridTile, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId, resolve_relative,
+    ImageDescriptor, LevelDescriptor, Request, resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
