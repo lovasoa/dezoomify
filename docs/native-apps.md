@@ -114,7 +114,7 @@ invented for the shipped product. See [Releases](releases.md#desktop-updater).
 
 ### Desktop bundles
 
-`cargo xtask build desktop` compiles the lean shell first, then the frontend, then the Tauri window shell, then generates icons, then bundles. `--unsigned-test` stops before the bundler and produces no bundle. The bundle target follows the host: Linux produces `deb` via the Tauri CLI (`tauri build --bundles deb`, resolved as `cargo tauri` or the prebuilt `@tauri-apps/cli` from `pnpm install`); Windows produces `msi`/`nsis`; macOS produces `dmg`. Missing host tools fail closed naming the exact prerequisites.
+`cargo xtask build desktop` compiles the lean shell first, then the frontend, then the Tauri window shell, then generates icons, then bundles. `--unsigned-test` stops before the bundler and produces no bundle. The bundle target follows the host: Linux produces `deb` via the prebuilt Tauri CLI (`pnpm --filter ./apps/desktop exec tauri build --bundles deb`); Windows produces `msi`/`nsis`; macOS produces `dmg`. Missing host tools fail closed naming the exact prerequisites.
 
 Linux needs the webview system packages `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` for the window shell plus `dpkg-deb` (package `dpkg-dev`) for the `deb` bundler; icons come from `scripts/gen-desktop-icons.py`, which runs before the bundler. macOS ships WebKit and needs the Xcode Command Line Tools plus `icons/icon.icns` for the `dmg` target. Windows ships WebView2 and needs WiX v3 for the `msi` target and NSIS for the `nsis` target, plus `icons/icon.ico`. Installers ship unsigned.
 
