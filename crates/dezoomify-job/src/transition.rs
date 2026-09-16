@@ -96,14 +96,18 @@ pub enum JobResponse {
     FetchFailure {
         job: String,
         request: String,
+        /// Host fetch detail (HTTP status, category, bounded server
+        /// signal). Empty when the host reports nothing beyond failure.
+        #[serde(default)]
+        detail: String,
     },
     SelectedImage {
         job: String,
-        image: String,
+        image: u32,
     },
     SelectedLevel {
         job: String,
-        level: String,
+        level: u32,
     },
     DestinationGranted {
         job: String,
@@ -114,12 +118,12 @@ pub enum JobResponse {
     },
     TileOutcome {
         job: String,
-        tile: String,
+        tile: u32,
         ok: bool,
     },
     ProbeOutcome {
         job: String,
-        tile: String,
+        tile: u32,
         available: bool,
         width: u64,
         height: u64,

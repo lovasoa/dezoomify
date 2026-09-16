@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId,
+    ImageDescriptor, LevelDescriptor, Request,
 };
 
 const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
@@ -50,21 +50,17 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
             let reverse = metadata.levels - index - 1;
             let size = metadata.size / 2_u32.pow(reverse);
             let base = Arc::clone(&base);
-            let source = Grid::with_requests(
-                format!("iip:{index}").into(),
-                size,
-                metadata.tile_size,
-                Vec2d::default(),
-                move |tile| Request::new(format!("{base}&JTL={index},{}", tile.row_major_ordinal)),
-            )
-            .map_err(|error| DiscoveryError::Session(format!("invalid IIP grid: {error}")))?;
+            let source =
+                Grid::with_requests(size, metadata.tile_size, Vec2d::default(), move |tile| {
+                    Request::new(format!("{base}&JTL={index},{}", tile.row_major_ordinal))
+                })
+                .map_err(|error| DiscoveryError::Session(format!("invalid IIP grid: {error}")))?;
             Ok(LevelDescriptor::new(source).with_title(Some(format!("IIP level {index}"))))
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
     levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("iip:image"),
-        format: StableId::new("iipimage"),
+        format: "iipimage",
         levels,
         ..Default::default()
     })]))

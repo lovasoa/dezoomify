@@ -54,8 +54,7 @@ use dezoomify_job::{Job as EngineJob, JobError as EngineJobError, JobResponse, O
 use dezoomify_protocol::dto::{
     negotiate_version, CatalogDto, ControlBody, ControlEnvelope, EffectId, ErrorDto, ErrorPhase,
     HeaderDto, HostEffect, JobCommand, JobEvent, JobId, OutputId, PointDto, RecoveryAction,
-    RecoveryId, RecoveryKind, RequestDto, RequestId, RequestPurpose, SizeDto, TileId,
-    TilePlacementDto,
+    RecoveryId, RecoveryKind, RequestDto, RequestId, RequestPurpose, SizeDto, TilePlacementDto,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -188,7 +187,7 @@ pub struct Session {
     /// Outstanding discovery request ids from acquire-resource effects.
     live_discovery_requests: HashSet<String>,
     /// Adapter-minted tile request id -> engine tile id.
-    outstanding_tile_requests: HashMap<String, String>,
+    outstanding_tile_requests: HashMap<String, u32>,
     /// Recovery id from the latest request-decision effect.
     pending_recovery: Option<String>,
     /// Adapter-minted tile request counter.
@@ -513,14 +512,14 @@ impl Session {
                 self.require_job(&job)?;
                 self.forward(JobResponse::SelectedImage {
                     job: job.as_str().to_string(),
-                    image: image.as_str().to_string(),
+                    image,
                 })
             }
             JobCommand::SelectLevel { job, level } => {
                 self.require_job(&job)?;
                 self.forward(JobResponse::SelectedLevel {
                     job: job.as_str().to_string(),
-                    level: level.as_str().to_string(),
+                    level,
                 })
             }
             JobCommand::DestinationResponse {
@@ -671,7 +670,7 @@ impl Session {
         // Correlate before touching any state: unknown request ids are
         // atomic rejections.
         let tile = if self.outstanding_tile_requests.contains_key(request) {
-            Some(self.outstanding_tile_requests[request].clone())
+            Some(self.outstanding_tile_requests[request])
         } else if self.live_discovery_requests.contains(request) {
             None
         } else {
@@ -740,7 +739,7 @@ impl Session {
     ) -> Result<(), AdapterError> {
         self.require_job(&job)?;
         let tile = if let Some(tile_id) = self.outstanding_tile_requests.get(request) {
-            Some(tile_id.clone())
+            Some(*tile_id)
         } else if self.live_discovery_requests.contains(request) {
             None
         } else {
@@ -766,10 +765,20 @@ impl Session {
                 if self.state != SessionState::Discovering {
                     return Ok(());
                 }
-                let _ = error;
+                // Forward the host detail (HTTP status, category, bounded
+                // server signal) so discovery diagnostics can name the
+                // failed fetch instead of reporting "host fetch failed".
+                // Host text is untrusted: redact credential-bearing values
+                // before it crosses into the engine. The full request URL is
+                // named by the engine from its own request record.
+                let detail = crate::error::redact(&error.message)
+                    .chars()
+                    .take(500)
+                    .collect::<String>();
                 self.forward(JobResponse::FetchFailure {
                     job: job.as_str().to_string(),
                     request: request.to_string(),
+                    detail,
                 })
             }
         }
@@ -821,11 +830,10 @@ impl Session {
         Ok(())
     }
 
-    fn mint_tile_request(&mut self, tile: &str) -> String {
+    fn mint_tile_request(&mut self, tile: u32) -> String {
         let id = format!("req:tile-{}", self.next_tile_request);
         self.next_tile_request += 1;
-        self.outstanding_tile_requests
-            .insert(id.clone(), tile.to_string());
+        self.outstanding_tile_requests.insert(id.clone(), tile);
         id
     }
 
@@ -858,9 +866,11 @@ impl Session {
             "acquire-tile" => {
                 let tile = value
                     .get("tile")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .ok_or_else(|| {
+                        AdapterError::new(AdapterErrorCode::Malformed, "engine tile ordinal")
+                    })?;
                 let uri = value
                     .get("uri")
                     .and_then(serde_json::Value::as_str)
@@ -880,7 +890,7 @@ impl Session {
                     })
                     .unwrap_or_default();
                 let request = RequestDto {
-                    id: RequestId::new(self.mint_tile_request(&tile)).ok_or_else(|| {
+                    id: RequestId::new(self.mint_tile_request(tile)).ok_or_else(|| {
                         AdapterError::new(AdapterErrorCode::Malformed, "tile request id")
                     })?,
                     uri,
@@ -891,9 +901,7 @@ impl Session {
                     effect,
                     job: job_id,
                     request,
-                    tile: TileId::new(tile).ok_or_else(|| {
-                        AdapterError::new(AdapterErrorCode::Malformed, "engine tile id")
-                    })?,
+                    tile,
                     placement: Self::project_placement(value)?,
                 }
             }
@@ -909,14 +917,15 @@ impl Session {
             "decode-pixels" => {
                 let tile = value
                     .get("tile")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .ok_or_else(|| {
+                        AdapterError::new(AdapterErrorCode::Malformed, "engine tile ordinal")
+                    })?;
                 HostEffect::DecodePixels {
                     effect,
                     job: job_id,
-                    tile: TileId::new(tile).ok_or_else(|| {
-                        AdapterError::new(AdapterErrorCode::Malformed, "engine tile id")
-                    })?,
+                    tile,
                 }
             }
             "open-encoder" => HostEffect::OpenEncoder {
@@ -1185,8 +1194,8 @@ impl Session {
         } else {
             let tile = value
                 .get("tile")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("tile:?");
+                .and_then(serde_json::Value::as_u64)
+                .map_or_else(|| "?".to_string(), |value| value.to_string());
 
             let attempt = value
                 .get("attempt")

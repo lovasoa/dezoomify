@@ -22,7 +22,7 @@ export interface DirectLike {
     opts?: { headers?: Record<string, string>; signal?: AbortSignal },
   ): Promise<
     | { outcome: "readable"; finalUrl: string; status: number; headers: Record<string, string>; bytes: ArrayBuffer }
-    | { outcome: "http-error"; finalUrl: string; status: number; headers: Record<string, string> }
+    | { outcome: "http-error"; finalUrl: string; status: number; headers: Record<string, string>; preview?: string }
     | { outcome: "network-error"; reason: string }
     | { outcome: "cancelled"; reason: string }
     | { outcome: "policy-denied"; reason: string; code: string }

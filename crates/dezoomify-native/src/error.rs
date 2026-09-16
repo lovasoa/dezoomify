@@ -155,7 +155,7 @@ impl From<dezoomify_core::core::discovery::DiscoveryError> for NativeError {
             E::UnknownRequest(_) | E::RequestAlreadyProvided(_) | E::NotComplete => {
                 Self::new("native.internal", error.to_string())
             }
-            E::Session(_) => Self::new("discovery.failed", error.to_string()),
+            E::Rejected { .. } | E::Session(_) => Self::new("discovery.failed", error.to_string()),
         }
     }
 }

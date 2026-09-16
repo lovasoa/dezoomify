@@ -17,7 +17,7 @@ All parsers and decoders enforce input, dimension, tile-count, allocation, recur
 
 ## Credentials
 
-Authorization headers, cookies, signed URLs, and tokens stay within the runtime that receives them. They are omitted from logs, analytics, cache keys visible to users, error messages, and ordinary handoff payloads.
+Authorization headers, cookies, signed URLs, and tokens stay within the runtime that receives them. They are omitted from analytics, cache keys visible to users, and ordinary handoff payloads. Error details stay on the user's device and may name the full request URL with a bounded server signal; the app reminds the user to remove sign-in details and tokens before sharing, and credentials never enter the prominent message.
 
 The website's direct browser fetch and browser-to-proxy request use credential omission and do not attach cookies or `Authorization`. The proxy also never forwards cookies, `Authorization`, browser credentials, or other caller credentials upstream and never fetches authenticated or otherwise credential-bearing resources. Signed or token-bearing URLs and requests requiring credentials are ineligible for proxy fallback. The extension may use the current browser session only for origins covered by active host permissions. Cookies pass only from extension to native after explicit consent identifies origins, scope, recipient, and job; consent is not reusable for later jobs.
 

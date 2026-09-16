@@ -16,15 +16,15 @@ pub use adaptive::{
     ProbeContinuation,
 };
 pub use discovery::{
-    DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
-    DiscoveryRoute, DiscoveryStep,
+    CandidateDiagnostic, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
+    DiscoveryResource, DiscoveryRoute, DiscoveryStep, RejectionKind,
 };
 #[cfg(test)]
 pub use discovery::{RequestId, ResourceResponse};
 pub(crate) use model::floor_index;
 pub use model::{
     CatalogEntry, DeferredImage, ImageCatalog, ImageDescriptor, LevelDescriptor, ProcessingRecipe,
-    Request, StableId, TileId, TileRole, TileSpec,
+    Request, TileRole, TileSpec,
 };
 pub use processing::ProcessingError;
 pub use registry::{

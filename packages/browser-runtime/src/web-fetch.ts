@@ -23,6 +23,7 @@ import {
   DIRECT_TRANSPORT_LABEL,
   PROXY_TRANSPORT_LABEL,
 } from "./transport-labels.ts";
+import { extractErrorSignal } from "./transport.ts";
 
 /**
  * Frontend guard for the Cloudflare metadata CORS proxy: at most 4 proxy
@@ -197,6 +198,8 @@ export interface DirectOutcome {
   status?: number;
   bytes?: ArrayBuffer;
   contentType?: string;
+  /** Bounded server signal from an HTTP error body (best effort). */
+  preview?: string;
 }
 
 export interface FetchImplLike {
@@ -404,6 +407,25 @@ export function classifyProxyFailure(
   return { code, message: "The metadata proxy could not fetch this address. Try again shortly.", retryable: status >= 500 || status === 0, technical };
 }
 
+/**
+ * Bounded error-body signal for HTTP failures. Reads at most one small
+ * body; oversized or unreadable bodies yield no preview. Never throws.
+ */
+async function readErrorPreview(res: {
+  headers?: unknown;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}): Promise<string> {
+  try {
+    const headersLike = res.headers as { get?: (k: string) => string | null } | null;
+    const declared = Number(headersLike?.get?.("content-length"));
+    if (Number.isSafeInteger(declared) && declared > 16 * 1024) return "";
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    return extractErrorSignal(bytes.slice(0, 4096));
+  } catch {
+    return "";
+  }
+}
+
 function defaultFetchImpl(): FetchImplLike | null {
   try {
     const impl = (globalThis as unknown as { fetch?: unknown }).fetch;
@@ -445,7 +467,13 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       const res = await fetchImpl(url, { headers, signal: combined.signal });
       if (!(res.status >= 200 && res.status <= 299)) {
         hooks.onRequestEnd(reqId, false);
-        return { outcome: "http-error", finalUrl: typeof res.url === "string" ? res.url : url, status: res.status };
+        const preview = await readErrorPreview(res);
+        return {
+          outcome: "http-error",
+          finalUrl: typeof res.url === "string" ? res.url : url,
+          status: res.status,
+          ...(preview ? { preview } : {}),
+        };
       }
       const bytes = await res.arrayBuffer();
       hooks.onRequestEnd(reqId, true);
@@ -540,8 +568,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
    *
    * Every thrown failure carries two layers: `message` (a plain, actionable
    * sentence for the UI) and `technical` (transport, HTTP status, proxy code,
-   * trimmed URL) which the engine feeds into its per-candidate diagnostics
-   * and the technical-details section. The two never mix.
+   * full request URL, and a bounded server signal) which the engine feeds
+   * into its per-candidate diagnostics and the technical-details section.
+   * Details stay on the device; the UI asks the user to strip tokens before
+   * sharing. The two layers never mix.
    */
   async function fetchMetadataFor(
     url: string,
@@ -629,6 +659,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       bytes = proxied.bytes;
       if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "") finalUri = proxied.finalUrl;
     } else if (direct.outcome === "http-error") {
+      // Technical chain names the full request URL and the bounded server
+      // signal; it stays in local-only diagnostics (see the redact hint in
+      // the shared UI) and never in the prominent message.
+      const signal = direct.preview ? ` Server said: "${direct.preview}"` : "";
       if (direct.status === 429) {
         // A direct fetch uses the user's own connection, so this throttle is
         // on their IP, not on our server; the fix is waiting, not another app.
@@ -637,7 +671,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           deps.messages.siteBusy,
           true,
           undefined,
-          `direct fetch: HTTP 429 Too Many Requests from ${target}`,
+          `direct fetch: HTTP 429 Too Many Requests from ${url}.${signal}`,
         );
       }
       throw failure(
@@ -645,7 +679,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         "This page could not be opened. Check the address and try again.",
         false,
         undefined,
-        `direct fetch: HTTP ${direct.status} from ${target}`,
+        `direct fetch: HTTP ${direct.status} from ${url}.${signal}`,
       );
     } else {
       throw failure(

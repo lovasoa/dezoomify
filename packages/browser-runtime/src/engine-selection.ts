@@ -1,8 +1,7 @@
 // Deterministic catalog selection for engine hosts.
 //
 // The extension job tab drives the Rust job engine, whose catalog event
-// carries wire ids (`img:*`, `lvl:*`) plus
-// declared geometry. Headless callers may provide a deterministic selection
+// carries an immutable ordered catalog. Headless callers may provide a deterministic selection
 // rule; this is the shared one: the ready image whose largest declared level
 // is biggest, and inside it the largest level that fits the browser canvas
 // (falling back to the smallest declared level so the plan gate fails fast,
@@ -12,8 +11,8 @@ import type { BrowserLimits } from "./types.ts";
 import type { CatalogDto, ImageDto, LevelDto } from "../../protocol-ts/src/generated.ts";
 
 export interface EngineSelection {
-  image: string;
-  level: string;
+  image: number;
+  level: number;
   /** Optional core-extracted title, never a UI fallback. */
   title?: string;
 }
@@ -37,8 +36,9 @@ export function pickEngineSelection(
 ): EngineSelection | null {
   const images = Array.isArray(catalog?.images) ? catalog.images : [];
   let bestImage: ImageDto | null = null;
+  let bestImageIndex = -1;
   let bestImageArea = -1;
-  for (const image of images) {
+  for (const [imageIndex, image] of images.entries()) {
     if (image?.readiness && image.readiness !== "ready") continue;
     const levels = Array.isArray(image.levels) ? image.levels : [];
     if (levels.length === 0) continue;
@@ -51,33 +51,38 @@ export function pickEngineSelection(
     // They remain selectable; declared geometry is evaluated below.
     if (!bestImage || imageArea >= bestImageArea) {
       bestImage = image;
+      bestImageIndex = imageIndex;
       bestImageArea = imageArea;
     }
   }
   if (!bestImage) return null;
   const levels = Array.isArray(bestImage.levels) ? bestImage.levels : [];
   let best: LevelDto | null = null;
+  let bestIndex = -1;
   let bestArea = -1;
   let smallest: LevelDto | null = null;
+  let smallestIndex = -1;
   let smallestArea = Number.POSITIVE_INFINITY;
-  for (const level of levels) {
+  for (const [levelIndex, level] of levels.entries()) {
     const area = levelArea(level);
     const declared = level.width > 0 && level.height > 0;
     const orderingArea = area ?? Number.POSITIVE_INFINITY;
     if (declared && levelFits(level, limits) && area !== null && area >= bestArea) {
       best = level;
+      bestIndex = levelIndex;
       bestArea = area;
     }
     if (declared && (smallest === null || orderingArea < smallestArea)) {
       smallest = level;
+      smallestIndex = levelIndex;
       smallestArea = orderingArea;
     }
   }
   const chosen = best ?? smallest;
   if (!chosen) return null;
   return {
-    image: bestImage.id,
-    level: chosen.id,
+    image: bestImageIndex,
+    level: best ? bestIndex : smallestIndex,
     ...(typeof bestImage.title === "string" ? { title: bestImage.title } : {}),
   };
 }

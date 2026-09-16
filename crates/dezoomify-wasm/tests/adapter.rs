@@ -22,7 +22,7 @@ const JOB_A: &str = "job:wasm-basic-1";
 const INPUT_URL: &str = "https://example.com/image.dzi";
 /// Real Deep Zoom metadata document: 512x512, 256px tiles, no overlap. The
 /// engine parses it into a deepzoom catalog whose largest level
-/// (`lvl:dzi:0:0`) is a 2x2 grid.
+/// (the last catalog position) is a 2x2 grid.
 const DZI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
   <Size Width="512" Height="512"/>
@@ -315,7 +315,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
         ControlBody::Event(JobEvent::Catalog { job, catalog }) => {
             assert_eq!(job.as_str(), JOB_A);
             assert_eq!(catalog.images.len(), 1);
-            assert_eq!(catalog.images[0].id.as_str(), "img:dzi:0");
+            assert_eq!(catalog.images[0].title.as_deref(), Some("image"));
             assert_eq!(catalog.images[0].format, "deepzoom");
         }
         other => panic!("expected catalog, got {other:?}"),
@@ -324,7 +324,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     session
         .dispatch(&command_bytes(JobCommand::SelectImage {
             job: JOB_A.parse().unwrap(),
-            image: "img:dzi:0".parse().unwrap(),
+            image: 0,
         }))
         .expect("select image");
     assert_eq!(session.state().as_str(), "AwaitingLevelSelection");
@@ -333,7 +333,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     session
         .dispatch(&command_bytes(JobCommand::SelectLevel {
             job: JOB_A.parse().unwrap(),
-            level: "lvl:dzi:0:0".parse().unwrap(),
+            level: 9,
         }))
         .expect("select level");
     assert_eq!(session.state().as_str(), "AwaitingDestination");
@@ -417,6 +417,14 @@ fn discovery_failure_and_cancel_paths_follow_the_engine() {
         ControlBody::Event(JobEvent::Failed { error, .. }) => {
             assert_eq!(error.code, "job.discovery-failed");
             assert!(!error.message.contains("CANARY"));
+            // The engine names the failed request itself, so a fetch failure
+            // is never the bare "host fetch failed" it used to be.
+            assert!(
+                error.message.contains("https://example.com/image.dzi"),
+                "fetch failure must name the request URL: {}",
+                error.message
+            );
+            assert!(error.message.contains("REDACTED"));
         }
         other => panic!("expected failed, got {other:?}"),
     }
@@ -607,14 +615,14 @@ fn late_sibling_discovery_response_is_ignored_after_job_advances() {
     session
         .dispatch(&command_bytes(JobCommand::SelectImage {
             job: "job:late-discovery-1".parse().unwrap(),
-            image: "img:dzi:0".parse().unwrap(),
+            image: 0,
         }))
         .expect("select image");
     session.drain_messages();
     session
         .dispatch(&command_bytes(JobCommand::SelectLevel {
             job: "job:late-discovery-1".parse().unwrap(),
-            level: "lvl:dzi:0:0".parse().unwrap(),
+            level: 9,
         }))
         .expect("select level");
     session.drain_messages();
@@ -662,13 +670,13 @@ fn basic_success_transcript_matches_golden() {
     session
         .dispatch(&command_bytes(JobCommand::SelectImage {
             job: JOB_A.parse().unwrap(),
-            image: "img:dzi:0".parse().unwrap(),
+            image: 0,
         }))
         .expect("select image");
     session
         .dispatch(&command_bytes(JobCommand::SelectLevel {
             job: JOB_A.parse().unwrap(),
-            level: "lvl:dzi:0:0".parse().unwrap(),
+            level: 9,
         }))
         .expect("select level");
     session

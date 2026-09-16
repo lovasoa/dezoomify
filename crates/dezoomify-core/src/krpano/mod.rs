@@ -20,7 +20,7 @@ use crate::core::resolve_relative;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, GridRequests, GridTile, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId,
+    ImageDescriptor, LevelDescriptor, Request,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
 use crate::template::Template;
@@ -430,7 +430,7 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
     let global_title = metadata.get_title().unwrap_or_default().to_owned();
     let mut entries = Vec::new();
 
-    for (image_index, ImageInfo { image, name }) in metadata.into_image_iter().enumerate() {
+    for ImageInfo { image, name } in metadata.into_image_iter() {
         let root_tile_size = image.tilesize.map(Vec2d::square);
         let base_index = image.baseindex;
         let image_title = joined_nonempty([global_title.as_str(), name.as_ref()]);
@@ -458,10 +458,6 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
                 };
                 let level_number = level_index + base_index as usize;
                 for (side_name, template) in all_sides(template, level_number) {
-                    let ordinal = levels.len();
-                    let id = StableId::new(format!(
-                        "krpano:{image_index}:{source_index}:{ordinal}:{side_name}"
-                    ));
                     let face = face_label(shape_name, side_name);
                     let source = KrpanoLevel {
                         base_url: Arc::from(url),
@@ -469,14 +465,13 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
                         template,
                         label: format_level_label(shape_name, side_name, &name),
                     };
-                    let source =
-                        match Grid::new(id.clone(), size, tile_size, Vec2d::default(), source) {
-                            Ok(source) => source,
-                            Err(error) => {
-                                warnings.push(format!("bad krpano level: {error}"));
-                                continue;
-                            }
-                        };
+                    let source = match Grid::new(size, tile_size, Vec2d::default(), source) {
+                        Ok(source) => source,
+                        Err(error) => {
+                            warnings.push(format!("bad krpano level: {error}"));
+                            continue;
+                        }
+                    };
                     levels.push(LevelDescriptor::new(source).with_title(level_title(
                         &global_title,
                         &name,
@@ -487,9 +482,8 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
         }
 
         entries.push(CatalogEntry::Ready(ImageDescriptor {
-            id: StableId::new(format!("krpano:{image_index}")),
             title: image_title,
-            format: StableId::new("krpano"),
+            format: "krpano",
             levels,
             warnings,
         }));
@@ -673,7 +667,8 @@ mod tests {
         let labels: Vec<String> = image
             .levels
             .iter()
-            .map(LevelDescriptor::display_label)
+            .enumerate()
+            .map(|(position, level)| level.display_label(position))
             .collect();
         assert!(labels[0].contains("Cube forward"));
         assert!(labels.iter().all(|l| l.contains(" 1000 x   100 pixels")));

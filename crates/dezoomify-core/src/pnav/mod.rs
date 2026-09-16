@@ -10,8 +10,7 @@ use crate::core::{
     AdaptiveProgram, AdaptiveSource, CatalogEntry, DezoomerSpec, DiscoverableStep,
     DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
     DiscoveryStep, Grid, ImageCatalog, ImageDescriptor, LevelDescriptor, ObservationResult,
-    ProbeContinuation, Request, StableId, TileId, TileRole, TileSourceError, TileSpec,
-    resolve_relative,
+    ProbeContinuation, Request, TileRole, TileSourceError, TileSpec, resolve_relative,
 };
 use crate::web_page::page_title;
 
@@ -112,19 +111,15 @@ fn complete_from_json(
         DiscoveryError::Session("pnav page is missing from discovery history".into())
     })?;
     let title = page_title(&page_text);
-    let source = AdaptiveSource::new(
-        StableId::new("pnav:level"),
-        PnavProgram {
-            image_url: image,
-            width: metadata.width,
-            height: metadata.height,
-        },
-    );
+    let source = AdaptiveSource::new(PnavProgram {
+        image_url: image,
+        width: metadata.width,
+        height: metadata.height,
+    });
     Ok(DiscoveryStep::Complete(ImageCatalog::new([
         CatalogEntry::Ready(ImageDescriptor {
-            id: StableId::new("pnav:image"),
             title,
-            format: StableId::new("pnav"),
+            format: "pnav",
             levels: vec![LevelDescriptor::new(source)],
             ..Default::default()
         }),
@@ -162,7 +157,7 @@ impl AdaptiveProgram for PnavProgram {
     fn start(&self) -> DiscoverableStep {
         let program = self.clone();
         let tile = TileSpec {
-            id: TileId::new(StableId::new("pnav:level"), 0),
+            ordinal: 0,
             request: Request::new(program.probe_url()),
             destination: Vec2d::default(),
             expected_size: None,
@@ -204,38 +199,32 @@ impl PnavProgram {
         let height = self.height;
         let probe_url: Arc<str> = self.probe_url().into();
         let image_url: Arc<str> = self.image_url.into();
-        let source = Grid::with_requests(
-            StableId::new("pnav:level"),
-            image_size,
-            size,
-            Vec2d::default(),
-            move |tile| {
-                let column = tile.coord.column;
-                let row = tile.coord.row;
-                if column == 0 && row == 0 {
-                    return Request::new(probe_url.to_string());
-                }
-                let crop_left = column * TILE_SIZE;
-                let crop_top = row * TILE_SIZE;
-                let crop_width = TILE_SIZE.min(width - crop_left);
-                let crop_height = TILE_SIZE.min(height - crop_top);
-                let last_column = !width.is_multiple_of(TILE_SIZE) && column == width / TILE_SIZE;
-                let last_row = !height.is_multiple_of(TILE_SIZE) && row == height / TILE_SIZE;
-                let output_width = if last_column {
-                    scaled_ceil(crop_width, tile_width)
-                } else {
-                    tile_width
-                };
-                let output_height = if last_row {
-                    scaled_ceil(crop_height, tile_height)
-                } else {
-                    tile_height
-                };
-                Request::new(format!(
-                    "{image_url}?w={output_width}&h={output_height}&cl={crop_left}&ct={crop_top}&cw={crop_width}&ch={crop_height}"
-                ))
-            },
-        )?;
+        let source = Grid::with_requests(image_size, size, Vec2d::default(), move |tile| {
+            let column = tile.coord.column;
+            let row = tile.coord.row;
+            if column == 0 && row == 0 {
+                return Request::new(probe_url.to_string());
+            }
+            let crop_left = column * TILE_SIZE;
+            let crop_top = row * TILE_SIZE;
+            let crop_width = TILE_SIZE.min(width - crop_left);
+            let crop_height = TILE_SIZE.min(height - crop_top);
+            let last_column = !width.is_multiple_of(TILE_SIZE) && column == width / TILE_SIZE;
+            let last_row = !height.is_multiple_of(TILE_SIZE) && row == height / TILE_SIZE;
+            let output_width = if last_column {
+                scaled_ceil(crop_width, tile_width)
+            } else {
+                tile_width
+            };
+            let output_height = if last_row {
+                scaled_ceil(crop_height, tile_height)
+            } else {
+                tile_height
+            };
+            Request::new(format!(
+                "{image_url}?w={output_width}&h={output_height}&cl={crop_left}&ct={crop_top}&cw={crop_width}&ch={crop_height}"
+            ))
+        })?;
         Ok(DiscoverableStep::Resolved {
             grid: source,
             previously_output: vec![Vec2d::default()],

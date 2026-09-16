@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::Vec2d;
 
 use super::adaptive::{AdaptiveSource, DiscoverableGrid};
-use super::model::{ProcessingRecipe, Request, StableId, TileId, TileRole, TileSpec};
+use super::model::{ProcessingRecipe, Request, TileRole, TileSpec};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TileSourceError {
@@ -96,7 +96,6 @@ impl<F: Fn(GridTile) -> Request + Send + Sync> GridRequests for ClosureRequests<
 
 #[derive(Clone)]
 pub struct Grid {
-    level: StableId,
     image_size: Vec2d,
     tile_size: Vec2d,
     overlap: Vec2d,
@@ -108,7 +107,6 @@ pub struct Grid {
 impl fmt::Debug for Grid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Grid")
-            .field("level", &self.level)
             .field("image_size", &self.image_size)
             .field("tile_size", &self.tile_size)
             .field("overlap", &self.overlap)
@@ -121,7 +119,6 @@ impl fmt::Debug for Grid {
 
 impl Grid {
     pub fn new(
-        level: StableId,
         image_size: Vec2d,
         tile_size: Vec2d,
         overlap: Vec2d,
@@ -149,7 +146,6 @@ impl Grid {
             .checked_mul(tile_size.y)
             .ok_or(TileSourceError::ArithmeticOverflow)?;
         Ok(Self {
-            level,
             image_size,
             tile_size,
             overlap,
@@ -160,14 +156,12 @@ impl Grid {
     }
 
     pub fn with_requests(
-        level: StableId,
         image_size: Vec2d,
         tile_size: Vec2d,
         overlap: Vec2d,
         requests: impl Fn(GridTile) -> Request + Send + Sync + 'static,
     ) -> Result<Self, TileSourceError> {
         Self::with_processed_requests(
-            level,
             image_size,
             tile_size,
             overlap,
@@ -177,7 +171,6 @@ impl Grid {
     }
 
     pub(crate) fn with_processed_requests(
-        level: StableId,
         image_size: Vec2d,
         tile_size: Vec2d,
         overlap: Vec2d,
@@ -185,7 +178,6 @@ impl Grid {
         requests: impl Fn(GridTile) -> Request + Send + Sync + 'static,
     ) -> Result<Self, TileSourceError> {
         Self::new(
-            level,
             image_size,
             tile_size,
             overlap,
@@ -199,11 +191,6 @@ impl Grid {
     #[must_use]
     pub const fn image_size(&self) -> Vec2d {
         self.image_size
-    }
-
-    #[must_use]
-    pub const fn id(&self) -> &StableId {
-        &self.level
     }
 
     #[must_use]
@@ -264,7 +251,7 @@ impl Grid {
         }
     }
 
-    fn tile(&self, ordinal: u64) -> TileSpec {
+    fn tile(&self, ordinal: u64) -> Result<TileSpec, TileSourceError> {
         let tile = self.grid_tile(ordinal);
         let mut request = self.requests.request(tile);
         if self.requests.use_first_tile_as_referer() {
@@ -276,14 +263,15 @@ impl Grid {
                 .entry("Referer".into())
                 .or_insert_with(|| self.requests.request(self.grid_tile(0)).uri);
         }
-        TileSpec {
-            id: TileId::new(self.level.clone(), ordinal),
+        let ordinal = u32::try_from(ordinal).map_err(|_| TileSourceError::ArithmeticOverflow)?;
+        Ok(TileSpec {
+            ordinal,
             request,
             destination: tile.destination,
             expected_size: Some(tile.expected_size),
             processing: self.requests.processing(),
             role: TileRole::Output,
-        }
+        })
     }
 }
 
@@ -301,7 +289,7 @@ impl Iterator for GridTiles {
         }
         let ordinal = self.next;
         self.next += 1;
-        Some(Ok(self.grid.tile(ordinal)))
+        Some(self.grid.tile(ordinal))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -324,7 +312,6 @@ pub struct PositionedTile {
 
 #[derive(Clone)]
 pub struct Positioned {
-    level: StableId,
     canvas_size: Option<Vec2d>,
     generator: Arc<dyn PositionedGenerator>,
 }
@@ -332,7 +319,6 @@ pub struct Positioned {
 impl fmt::Debug for Positioned {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Positioned")
-            .field("level", &self.level)
             .field("canvas_size", &self.canvas_size)
             .field("count", &self.count())
             .finish_non_exhaustive()
@@ -341,12 +327,10 @@ impl fmt::Debug for Positioned {
 
 impl Positioned {
     pub(crate) fn from_generator(
-        level: StableId,
         canvas_size: Option<Vec2d>,
         generator: impl PositionedGenerator + 'static,
     ) -> Self {
         Self {
-            level,
             canvas_size,
             generator: Arc::new(generator),
         }
@@ -355,11 +339,6 @@ impl Positioned {
     #[must_use]
     pub const fn image_size(&self) -> Option<Vec2d> {
         self.canvas_size
-    }
-
-    #[must_use]
-    pub const fn id(&self) -> &StableId {
-        &self.level
     }
 
     #[must_use]
@@ -390,13 +369,15 @@ impl Iterator for PositionedTiles {
         }
         let ordinal = self.next;
         self.next += 1;
-        Some(self.source.generator.tile(ordinal).map(|tile| TileSpec {
-            id: TileId::new(self.source.level.clone(), ordinal),
-            request: tile.request,
-            destination: tile.destination,
-            expected_size: None,
-            processing: tile.processing,
-            role: TileRole::Output,
+        Some(self.source.generator.tile(ordinal).and_then(|tile| {
+            Ok(TileSpec {
+                ordinal: u32::try_from(ordinal).map_err(|_| TileSourceError::ArithmeticOverflow)?,
+                request: tile.request,
+                destination: tile.destination,
+                expected_size: None,
+                processing: tile.processing,
+                role: TileRole::Output,
+            })
         }))
     }
 }
@@ -410,16 +391,6 @@ pub enum TileSource {
 }
 
 impl TileSource {
-    #[must_use]
-    pub fn id(&self) -> &StableId {
-        match self {
-            Self::Grid(grid) => grid.id(),
-            Self::Positioned(positioned) => positioned.id(),
-            Self::DiscoverableGrid(discoverable) => discoverable.id(),
-            Self::Adaptive(adaptive) => adaptive.id(),
-        }
-    }
-
     #[must_use]
     pub fn image_size(&self) -> Option<Vec2d> {
         match self {
@@ -479,12 +450,6 @@ impl From<AdaptiveSource> for TileSource {
     }
 }
 
-impl fmt::Display for TileId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.level, self.ordinal)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,7 +465,6 @@ mod tests {
 
     fn grid(overlap: Vec2d) -> Grid {
         Grid::new(
-            "level".into(),
             Vec2d { x: 5, y: 4 },
             Vec2d { x: 3, y: 2 },
             overlap,
@@ -537,7 +501,6 @@ mod tests {
     fn zero_geometry_is_rejected() {
         assert_eq!(
             Grid::new(
-                "level".into(),
                 Vec2d { x: 0, y: 1 },
                 Vec2d::square(1),
                 Vec2d::default(),
@@ -548,7 +511,6 @@ mod tests {
         );
         assert_eq!(
             Grid::new(
-                "level".into(),
                 Vec2d::square(1),
                 Vec2d { x: 0, y: 1 },
                 Vec2d::default(),

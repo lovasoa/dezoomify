@@ -270,14 +270,9 @@ fn catalog_from_manifest_info(
     let warnings: Vec<String> = warning.into_iter().collect();
     let entries: Vec<_> = image_infos
         .into_iter()
-        .enumerate()
-        .map(|(ordinal, image_info)| {
+        .map(|image_info| {
             let title = determine_title(&image_info);
             CatalogEntry::Deferred(DeferredImage {
-                id: StableId::new(format!(
-                    "iiif:manifest:{}:{ordinal}",
-                    image_info.canvas_index
-                )),
                 uri: image_info.image_uri,
                 title,
                 warnings: warnings.clone(),
@@ -298,8 +293,7 @@ fn catalog_from_info(url: &str, raw_info: &[u8]) -> Result<ImageCatalog, Discove
         }
     }
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("iiif:image"),
-        format: StableId::new("iiif"),
+        format: "iiif",
         levels,
         warnings,
         ..Default::default()
@@ -366,63 +360,50 @@ fn levels_from_info(
             let size_format = img.preferred_size_format();
             let page_info = Arc::clone(&img);
             let warnings = warnings.clone();
-            tile_info
-                .scale_factors
-                .iter()
-                .enumerate()
-                .map(move |(scale_ordinal, &scale_factor)| {
-                    if scale_factor == 0 {
-                        return Err(IIIFError::GeometryError {
-                            description: "scale factor must be greater than zero".into(),
-                        });
-                    }
-                    if tile_size.x == 0 || tile_size.y == 0 {
-                        return Err(IIIFError::GeometryError {
-                            description: "IIIF tile dimensions must be greater than zero".into(),
-                        });
-                    }
-                    let scaled_tile_size = tile_size
-                        .checked_mul(Vec2d::square(scale_factor))
-                        .ok_or_else(|| IIIFError::GeometryError {
-                            description: "scaled IIIF tile dimensions overflow u32".into(),
-                        })?;
-                    let level_size = image_size.ceil_div(scale_factor);
-                    let shape = level_size.ceil_div(tile_size);
-                    let last_coord = Vec2d {
-                        x: shape.x.saturating_sub(1),
-                        y: shape.y.saturating_sub(1),
-                    };
-                    if last_coord.checked_mul(scaled_tile_size).is_none() {
-                        return Err(IIIFError::GeometryError {
-                            description: "scaled IIIF tile positions overflow u32".into(),
-                        });
-                    }
-                    let id = StableId::new(format!(
-                        "iiif:level:{tile_ordinal}:{scale_factor}:{scale_ordinal}"
-                    ));
-                    let source = IIIFLevel {
-                        scale_factor,
-                        page_info: Arc::clone(&page_info),
-                        base_url: Arc::clone(&base_url),
-                        quality: Arc::clone(&quality),
-                        format: Arc::clone(&format),
-                        size_format,
-                    };
-                    let source = Grid::new(
-                        id.clone(),
-                        source.image_size(),
-                        tile_size,
-                        Vec2d::default(),
-                        source,
-                    )
+            tile_info.scale_factors.iter().map(move |&scale_factor| {
+                if scale_factor == 0 {
+                    return Err(IIIFError::GeometryError {
+                        description: "scale factor must be greater than zero".into(),
+                    });
+                }
+                if tile_size.x == 0 || tile_size.y == 0 {
+                    return Err(IIIFError::GeometryError {
+                        description: "IIIF tile dimensions must be greater than zero".into(),
+                    });
+                }
+                let scaled_tile_size = tile_size
+                    .checked_mul(Vec2d::square(scale_factor))
+                    .ok_or_else(|| IIIFError::GeometryError {
+                        description: "scaled IIIF tile dimensions overflow u32".into(),
+                    })?;
+                let level_size = image_size.ceil_div(scale_factor);
+                let shape = level_size.ceil_div(tile_size);
+                let last_coord = Vec2d {
+                    x: shape.x.saturating_sub(1),
+                    y: shape.y.saturating_sub(1),
+                };
+                if last_coord.checked_mul(scaled_tile_size).is_none() {
+                    return Err(IIIFError::GeometryError {
+                        description: "scaled IIIF tile positions overflow u32".into(),
+                    });
+                }
+                let source = IIIFLevel {
+                    scale_factor,
+                    page_info: Arc::clone(&page_info),
+                    base_url: Arc::clone(&base_url),
+                    quality: Arc::clone(&quality),
+                    format: Arc::clone(&format),
+                    size_format,
+                };
+                let source = Grid::new(source.image_size(), tile_size, Vec2d::default(), source)
                     .map_err(|error| IIIFError::GeometryError {
                         description: error.to_string(),
                     })?;
-                    Ok(LevelDescriptor::new(source)
-                        .with_title(Some(format!("IIIF level {tile_ordinal}")))
-                        .with_scale_factor(Some(scale_factor))
-                        .with_warnings(warnings.clone()))
-                })
+                Ok(LevelDescriptor::new(source)
+                    .with_title(Some(format!("IIIF level {tile_ordinal}")))
+                    .with_scale_factor(Some(scale_factor))
+                    .with_warnings(warnings.clone()))
+            })
         })
         .collect::<Result<Vec<_>, IIIFError>>()?;
     levels.sort_by_key(|level| level.source.image_size().map_or(0, Vec2d::area));
@@ -904,7 +885,7 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
         panic!("IIIF tile geometry is a grid");
     };
     let first = plan.tiles_row_major().next().unwrap().unwrap();
-    assert_eq!(&first.id.level, level.id());
+    assert_eq!(first.ordinal, 0);
     assert_eq!(
         first.request.headers.get("Referer").map(String::as_str),
         Some("https://images.example/item/0,0,512,512/512,512/0/default.jpg")

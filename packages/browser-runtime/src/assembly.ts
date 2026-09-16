@@ -59,11 +59,11 @@ export interface CanvasAssemblyDeps {
 
 export interface CanvasAssembly {
   /** Record the engine-declared placement and validate its shape. */
-  recordPlacement(tile: string, placement: AssemblyPlacement): void;
+  recordPlacement(tile: number, placement: AssemblyPlacement): void;
   /** Decode-at-acquisition: hold the decoded bitmap for assembly. */
-  acquireTile(tile: string, placement: AssemblyPlacement, bytes: ArrayBuffer): Promise<void>;
+  acquireTile(tile: number, placement: AssemblyPlacement, bytes: ArrayBuffer): Promise<void>;
   /** Verify the tile this effect names is decoded and held. */
-  decodePixels(tile: string): void;
+  decodePixels(tile: number): void;
   /** Validate the output size and allocate the surface. */
   openEncoder(format: string, canvas?: { width: number; height: number } | null): void;
   /** Draw every held tile at its placement, close bitmaps, encode. */
@@ -90,13 +90,13 @@ function placementGeometry(
 }
 
 export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
-  const placements = new Map<string, AssemblyPlacement>();
-  const bitmaps = new Map<string, TileBitmap>();
+  const placements = new Map<number, AssemblyPlacement>();
+  const bitmaps = new Map<number, TileBitmap>();
   let canvas: AssemblyCanvas | null = null;
   let encoded: unknown = null;
   let saved = false;
 
-  function recordPlacement(tile: string, placement: AssemblyPlacement): void {
+  function recordPlacement(tile: number, placement: AssemblyPlacement): void {
     const { x, y } = placement?.position ?? { x: NaN, y: NaN };
     if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x < 0 || y < 0) {
       throw failure(
@@ -111,7 +111,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
   }
 
   async function acquireTile(
-    tile: string,
+    tile: number,
     placement: AssemblyPlacement,
     bytes: ArrayBuffer,
   ): Promise<void> {
@@ -131,7 +131,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     bitmaps.set(tile, bitmap);
   }
 
-  function decodePixels(tile: string): void {
+  function decodePixels(tile: number): void {
     if (!bitmaps.has(tile)) {
       throw failure(
         "OUTPUT_STATE",

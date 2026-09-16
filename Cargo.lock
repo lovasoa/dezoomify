@@ -1065,7 +1065,7 @@ dependencies = [
 
 [[package]]
 name = "dezoomify-core"
-version = "2.20.0"
+version = "3.0.0"
 dependencies = [
  "aes",
  "base64 0.23.1",

@@ -54,7 +54,7 @@ const TILE_EFFECT = {
   type: "acquire-tile",
   effect: "fx:2",
   job: "job:test-1",
-  tile: "tile:0",
+  tile: 0,
   placement: { position: { x: 0, y: 0 }, expected_size: { width: 16, height: 16 }, canvas: { width: 32, height: 32 }, processing: "none" },
   request: { id: "req:tile-0", uri: "https://cdn.test/tile_0.jpg", headers: [], purpose: "tile" },
 };
@@ -135,7 +135,7 @@ test("lifecycle effects and events run in engine order on one chain", async () =
   controller.handleEngineMessages([
     { kind: "effect", type: "request-destination", effect: "fx:1", job: "job:test-1", format: "png" },
     { kind: "event", type: "job-state", job: "job:test-1", state: "AwaitingDestination" },
-    { kind: "effect", type: "decode-pixels", effect: "fx:6", job: "job:test-1", tile: "tile:0" },
+    { kind: "effect", type: "decode-pixels", effect: "fx:6", job: "job:test-1", tile: 0 },
     { kind: "effect", type: "open-encoder", effect: "fx:10", job: "job:test-1", format: "png", canvas: { width: 32, height: 32 } },
     { kind: "effect", type: "finalize-encoder", effect: "fx:11", job: "job:test-1" },
     { kind: "effect", type: "publish-output", effect: "fx:12", job: "job:test-1", output: "out:0" },
@@ -182,12 +182,12 @@ test("host execution failures are terminal: render, cancel, skip the rest", asyn
 
 test("selection commands and partial choices are correlated to the job", async () => {
   const { controller, sent } = harness();
-  controller.selectImage("img:1");
-  controller.selectLevel("lvl:2");
+  controller.selectImage(1);
+  controller.selectLevel(2);
   controller.choosePartial("rec:0", true);
   const commands = sent.map((message) => message.command);
-  assert.deepEqual(commands[0], { type: "select-image", job: "job:test-1", image: "img:1" });
-  assert.deepEqual(commands[1], { type: "select-level", job: "job:test-1", level: "lvl:2" });
+  assert.deepEqual(commands[0], { type: "select-image", job: "job:test-1", image: 1 });
+  assert.deepEqual(commands[1], { type: "select-level", job: "job:test-1", level: 2 });
   assert.deepEqual(commands[2], { type: "partial-choice", job: "job:test-1", recovery: "rec:0", keep_partial: true });
 });
 

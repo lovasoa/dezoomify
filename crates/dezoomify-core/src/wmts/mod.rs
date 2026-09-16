@@ -8,7 +8,7 @@ use quick_xml::reader::Reader;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId, floor_index, resolve_url_template,
+    ImageDescriptor, LevelDescriptor, Request, floor_index, resolve_url_template,
 };
 
 const RADIUS: f64 = 6_378_137.0;
@@ -32,9 +32,8 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         return Err(DiscoveryError::Session("WMTS has no tile matrices".into()));
     }
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("wmts:image"),
         title: Some(context.layer_name),
-        format: StableId::new("wmts"),
+        format: "wmts",
         levels,
         ..Default::default()
     })]))
@@ -510,8 +509,7 @@ fn build_levels(context: &WmtsContext) -> Result<Vec<LevelDescriptor>, Discovery
     context
         .matrices
         .iter()
-        .enumerate()
-        .map(|(ordinal, matrix)| {
+        .map(|matrix| {
             let ((min_column, max_column), (min_row, max_row)) = tile_ranges(context, matrix)?;
             let columns = count_between(min_column, max_column)?;
             let rows = count_between(min_row, max_row)?;
@@ -528,7 +526,6 @@ fn build_levels(context: &WmtsContext) -> Result<Vec<LevelDescriptor>, Discovery
             let matrix_identifier = matrix.identifier.clone();
             let style = context.style.clone();
             let source = Grid::with_requests(
-                StableId::new(format!("wmts:{ordinal}")),
                 Vec2d {
                     x: width,
                     y: height,

@@ -8,12 +8,11 @@ use dezoomify_protocol::dto::*;
 
 #[test]
 fn representative_catalog_shape_round_trips_canonically() {
-    // Representative two-image catalog: stable IDs, preserved order,
-    // ready vs deferred entries, exact dimensions.
+    // Representative two-image catalog: preserved order, ready vs deferred
+    // entries, exact dimensions, and no duplicated positional identity.
     let catalog = CatalogDto {
         images: vec![
             ImageDto {
-                id: "img:cover".parse().unwrap(),
                 title: Some("Cover".into()),
                 format: "Zoomify".into(),
                 width: 512,
@@ -21,7 +20,7 @@ fn representative_catalog_shape_round_trips_canonically() {
                 readiness: Readiness::Ready,
                 source_kind: "fixed-grid".into(),
                 levels: vec![LevelDto {
-                    id: "lvl:cover-0".parse().unwrap(),
+                    label: "Level 1".into(),
                     width: 512,
                     height: 512,
                     tile_width: 256,
@@ -29,7 +28,6 @@ fn representative_catalog_shape_round_trips_canonically() {
                 }],
             },
             ImageDto {
-                id: "img:detail".parse().unwrap(),
                 title: None,
                 format: "IIIF".into(),
                 width: 1024,

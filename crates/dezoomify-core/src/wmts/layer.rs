@@ -16,7 +16,7 @@ use super::tilematrix::{
 use super::tilematrix::{METRES_PER_PIXEL, count_between};
 use crate::Vec2d;
 use crate::core::{
-    DiscoveryError, Grid, LevelDescriptor, Request, StableId, floor_index, resolve_url_template,
+    DiscoveryError, Grid, LevelDescriptor, Request, floor_index, resolve_url_template,
 };
 
 pub(crate) struct WmtsContext {
@@ -177,7 +177,6 @@ pub(crate) fn build_levels(context: &WmtsContext) -> Result<Vec<LevelDescriptor>
             let matrix_identifier = matrix.identifier.clone();
             let style = context.style.clone();
             let source = Grid::with_requests(
-                StableId::new(format!("wmts:{ordinal}")),
                 Vec2d {
                     x: width,
                     y: height,

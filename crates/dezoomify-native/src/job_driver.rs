@@ -95,6 +95,73 @@ use crate::pipeline::{
 /// follows, matching the legacy loop limit.
 const MAX_DEFERRED_FOLLOWS: u32 = 10;
 
+/// Fetch-failure detail for the engine: HTTP status plus a bounded,
+/// single-line server signal extracted from the error body. The engine
+/// names the request URI itself, so the detail carries no URL. ASCII
+/// punctuation only.
+fn fetch_failure_detail(status: u16, body: &[u8]) -> String {
+    let mut detail = format!("HTTP {status}");
+    let text = String::from_utf8_lossy(&body[..body.len().min(4096)]);
+    if text.contains('\0') {
+        return detail;
+    }
+    let mut signal = String::with_capacity(300);
+    let mut last_was_space = true;
+    for ch in strip_tags(&text).chars() {
+        // Whitespace collapses to one space; other controls are dropped.
+        if ch.is_whitespace() {
+            if !last_was_space {
+                signal.push(' ');
+                last_was_space = true;
+            }
+        } else if !ch.is_control() {
+            signal.push(ch);
+            last_was_space = false;
+        }
+        if signal.len() >= 300 {
+            break;
+        }
+    }
+    let signal = dezoomify_protocol::dto::redact_error_text(signal.trim());
+    if signal.is_empty() {
+        detail
+    } else {
+        detail.push_str(": server said \"");
+        detail.push_str(&signal);
+        detail.push('"');
+        detail
+    }
+}
+
+/// Drop `<...>` markup spans (up to 512 chars) from an error body so the
+/// signal reads as text. Unclosed `<` sequences are kept literally.
+fn strip_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '<' {
+            out.push(ch);
+            continue;
+        }
+        let mut span = String::new();
+        let mut closed = false;
+        for next in chars.by_ref().take(512) {
+            if next == '>' {
+                closed = true;
+                break;
+            }
+            span.push(next);
+        }
+        if closed {
+            out.push(' ');
+        } else {
+            out.push('<');
+            out.push_str(&span);
+        }
+    }
+    out
+}
+
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
 /// Terminal outcome of one job attempt: finished output or a deferred URI to
@@ -298,11 +365,12 @@ impl LevelSelection {
     }
 }
 
-fn max_area_id(levels: &[&(String, u64, u64)]) -> Option<String> {
+fn max_area_index(levels: &[&(u64, u64)]) -> Option<u32> {
     levels
         .iter()
-        .max_by_key(|(_, width, height)| u128::from(*width) * u128::from(*height))
-        .map(|(id, _, _)| (*id).clone())
+        .enumerate()
+        .max_by_key(|(_, level)| u128::from(level.0) * u128::from(level.1))
+        .and_then(|(index, _)| u32::try_from(index).ok())
 }
 
 /// Image selection mirrors the reference `choose_image` rule: the exact
@@ -315,20 +383,17 @@ pub(crate) fn select_image_index(count: usize, image_index: Option<usize>) -> Op
     Some(image_index.map_or(0, |requested| requested.min(count - 1)))
 }
 
-pub(crate) fn select_level_id(
-    levels: &[(String, u64, u64)],
-    selection: &LevelSelection,
-) -> Option<String> {
+pub(crate) fn select_level_index(levels: &[(u64, u64)], selection: &LevelSelection) -> Option<u32> {
     if levels.is_empty() {
         return None;
     }
     if let Some(requested) = selection.zoom_level {
         let index = requested.min(levels.len() - 1);
-        return Some(levels[index].0.clone());
+        return u32::try_from(index).ok();
     }
     if selection.largest {
-        let refs: Vec<&(String, u64, u64)> = levels.iter().collect();
-        return max_area_id(&refs);
+        let refs: Vec<&(u64, u64)> = levels.iter().collect();
+        return max_area_index(&refs);
     }
     if selection.max_width.is_some() || selection.max_height.is_some() {
         const UNKNOWN: u64 = u64::MAX;
@@ -339,9 +404,10 @@ pub(crate) fn select_level_id(
                 width
             }
         };
-        let fitting: Vec<&(String, u64, u64)> = levels
+        let fitting: Vec<(usize, &(u64, u64))> = levels
             .iter()
-            .filter(|(_, width, height)| {
+            .enumerate()
+            .filter(|(_, (width, height))| {
                 let width_ok = selection
                     .max_width
                     .is_none_or(|cap| *width != 0 && *width <= u64::from(cap));
@@ -356,13 +422,17 @@ pub(crate) fn select_level_id(
             // than silently exceeding the cap.
             return levels
                 .iter()
-                .min_by_key(|(_, width, _)| width_of(*width))
-                .map(|(id, _, _)| id.clone());
+                .enumerate()
+                .min_by_key(|(_, (width, _))| width_of(*width))
+                .and_then(|(index, _)| u32::try_from(index).ok());
         }
-        return max_area_id(&fitting);
+        return fitting
+            .into_iter()
+            .max_by_key(|(_, (width, height))| u128::from(*width) * u128::from(*height))
+            .and_then(|(index, _)| u32::try_from(index).ok());
     }
-    let refs: Vec<&(String, u64, u64)> = levels.iter().collect();
-    max_area_id(&refs)
+    let refs: Vec<&(u64, u64)> = levels.iter().collect();
+    max_area_index(&refs)
 }
 
 /// Map a terminal job failure onto the stable native code the same failure
@@ -400,11 +470,10 @@ fn map_setup_error(error: &dezoomify_job::JobError) -> NativeError {
 // ---------------------------------------------------------------------------
 
 struct CatalogImage {
-    id: String,
     ready: bool,
     format: String,
     title: Option<String>,
-    levels: Vec<(String, u64, u64)>,
+    levels: Vec<(u64, u64)>,
 }
 
 #[derive(Clone, Copy)]
@@ -539,18 +608,21 @@ fn drive_job(
             let selected =
                 select_image_index(attempt.catalog.len(), attempt.config.image_index).unwrap_or(0);
             if attempt.catalog[selected].ready {
-                let image = attempt.catalog[selected].id.clone();
                 attempt.selected_image = Some(selected);
                 reply(
                     &mut job,
                     JobResponse::SelectedImage {
                         job: job_id.clone(),
-                        image,
+                        image: u32::try_from(selected).map_err(|_| {
+                            NativeError::new("native.internal", "image position overflow")
+                        })?,
                     },
                 )?;
             } else {
                 let uri = job
-                    .deferred_uri(&attempt.catalog[selected].id)
+                    .deferred_uri(u32::try_from(selected).map_err(|_| {
+                        NativeError::new("native.internal", "image position overflow")
+                    })?)
                     .ok_or_else(|| {
                         NativeError::new(
                             "discovery.no-image",
@@ -567,9 +639,10 @@ fn drive_job(
                 .unwrap_or(0)
                 .min(attempt.catalog.len() - 1);
             let selection = LevelSelection::from_config(attempt.config);
-            let level = select_level_id(&attempt.catalog[selected].levels, &selection).ok_or_else(
-                || NativeError::new("discovery.no-level", "image has no zoom levels"),
-            )?;
+            let level = select_level_index(&attempt.catalog[selected].levels, &selection)
+                .ok_or_else(|| {
+                    NativeError::new("discovery.no-level", "image has no zoom levels")
+                })?;
             reply(
                 &mut job,
                 JobResponse::SelectedLevel {
@@ -723,11 +796,6 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
             let mut catalog = Vec::new();
             if let Some(images) = event.get("images").and_then(serde_json::Value::as_array) {
                 for image in images {
-                    let id = image
-                        .get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
                     let ready =
                         image.get("readiness").and_then(serde_json::Value::as_str) == Some("ready");
                     let format = image
@@ -748,11 +816,6 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
                         for level in entries {
                             levels.push((
                                 level
-                                    .get("id")
-                                    .and_then(serde_json::Value::as_str)
-                                    .unwrap_or("")
-                                    .to_string(),
-                                level
                                     .get("width")
                                     .and_then(serde_json::Value::as_u64)
                                     .unwrap_or(0),
@@ -764,7 +827,6 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
                         }
                     }
                     catalog.push(CatalogImage {
-                        id,
                         ready,
                         format,
                         title,
@@ -835,6 +897,7 @@ fn handle_event(attempt: &mut Attempt<'_>, event: &serde_json::Value) -> Result<
 }
 
 struct TileFetch {
+    ordinal: u32,
     tile: String,
     uri: String,
     headers: BTreeMap<String, String>,
@@ -866,10 +929,11 @@ fn processing_from_name(name: &str) -> ProcessingRecipe {
 }
 
 fn tile_fetch(effect: &serde_json::Value) -> Option<TileFetch> {
-    let tile = effect
+    let ordinal = effect
         .get("tile")
-        .and_then(serde_json::Value::as_str)?
-        .to_string();
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())?;
+    let tile = ordinal.to_string();
     let uri = effect
         .get("uri")
         .and_then(serde_json::Value::as_str)?
@@ -883,6 +947,7 @@ fn tile_fetch(effect: &serde_json::Value) -> Option<TileFetch> {
         }
     }
     Some(TileFetch {
+        ordinal,
         tile,
         uri,
         headers,
@@ -960,21 +1025,23 @@ fn execute_effects(
                             },
                         )?;
                     }
-                    Ok(_) => {
+                    Ok(outcome) => {
                         reply(
                             job,
                             JobResponse::FetchFailure {
                                 job: job_id.clone(),
                                 request,
+                                detail: fetch_failure_detail(outcome.status, &outcome.body),
                             },
                         )?;
                     }
-                    Err(_) => {
+                    Err(error) => {
                         reply(
                             job,
                             JobResponse::FetchFailure {
                                 job: job_id.clone(),
                                 request,
+                                detail: error.message.clone(),
                             },
                         )?;
                     }
@@ -1004,7 +1071,7 @@ fn execute_effects(
                     job,
                     JobResponse::ProbeOutcome {
                         job: job_id.clone(),
-                        tile: need.tile,
+                        tile: need.ordinal,
                         available,
                         width,
                         height,
@@ -1269,6 +1336,7 @@ fn acquire_tiles(
     // `max_retries: 0` the engine never issues a retry, so every effect
     // here is a first attempt that always fetches.
     struct Planned {
+        ordinal: u32,
         tile: String,
         backoff: Duration,
     }
@@ -1282,16 +1350,19 @@ fn acquire_tiles(
             failures,
         );
         planned.push(Planned {
+            ordinal: need.ordinal,
             tile: need.tile.clone(),
             backoff,
         });
     }
-    let mut outcomes: Vec<(
+    type TileOutcome = (
+        u32,
         String,
         bool,
         Option<crate::pipeline::DecodedTile>,
         Option<String>,
-    )> = Vec::with_capacity(tiles.len());
+    );
+    let mut outcomes: Vec<TileOutcome> = Vec::with_capacity(tiles.len());
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(tiles.len());
         for (need, plan) in tiles.iter().zip(planned) {
@@ -1308,6 +1379,7 @@ fn acquire_tiles(
                 attempt.throttle_last = Some(Instant::now());
             }
             handles.push((
+                plan.ordinal,
                 plan.tile,
                 scope.spawn(move || {
                     if !plan.backoff.is_zero() {
@@ -1324,22 +1396,27 @@ fn acquire_tiles(
                 }),
             ));
         }
-        for (tile, handle) in handles {
+        for (ordinal, tile, handle) in handles {
             match handle.join() {
-                Ok(Ok(image)) => outcomes.push((tile, true, Some(image), None)),
+                Ok(Ok(image)) => outcomes.push((ordinal, tile, true, Some(image), None)),
                 Ok(Err(error)) => outcomes.push((
+                    ordinal,
                     tile,
                     false,
                     None,
                     Some(format!("{} ({})", error.message, error.code)),
                 )),
-                Err(_) => {
-                    outcomes.push((tile, false, None, Some("tile worker failed".to_string())))
-                }
+                Err(_) => outcomes.push((
+                    ordinal,
+                    tile,
+                    false,
+                    None,
+                    Some("tile worker failed".to_string()),
+                )),
             }
         }
     });
-    for (tile, ok, image, failure) in outcomes {
+    for (ordinal, tile, ok, image, failure) in outcomes {
         if job.state() != JobState::AcquiringTiles {
             // An earlier outcome in this batch already moved the job on
             // (retry-exhausted tile → partial decision): later outcomes are
@@ -1371,7 +1448,7 @@ fn acquire_tiles(
             job,
             JobResponse::TileOutcome {
                 job: job_id.clone(),
-                tile,
+                tile: ordinal,
                 ok,
             },
         )?;
@@ -1593,10 +1670,10 @@ fn publish(attempt: &mut Attempt<'_>) -> Result<(), NativeError> {
 mod tests {
     use super::*;
 
-    fn levels(entries: &[(&str, u64, u64)]) -> Vec<(String, u64, u64)> {
+    fn levels(entries: &[(&str, u64, u64)]) -> Vec<(u64, u64)> {
         entries
             .iter()
-            .map(|(id, width, height)| ((*id).to_string(), *width, *height))
+            .map(|(_, width, height)| (*width, *height))
             .collect()
     }
 
@@ -1620,17 +1697,17 @@ mod tests {
 
     #[test]
     fn largest_level_wins_without_a_cap() {
-        let picked = select_level_id(&levels(&[("a", 256, 256), ("b", 512, 512)]), &uncapped());
-        assert_eq!(picked.as_deref(), Some("b"));
+        let picked = select_level_index(&levels(&[("a", 256, 256), ("b", 512, 512)]), &uncapped());
+        assert_eq!(picked, Some(1));
     }
 
     #[test]
     fn cap_selects_the_largest_fitting_level() {
-        let picked = select_level_id(
+        let picked = select_level_index(
             &levels(&[("small", 128, 128), ("mid", 256, 256), ("big", 512, 512)]),
             &capped(Some(300), None),
         );
-        assert_eq!(picked.as_deref(), Some("mid"));
+        assert_eq!(picked, Some(1));
     }
 
     #[test]
@@ -1638,12 +1715,12 @@ mod tests {
         // Wide but short vs narrow but tall: without a height cap the tall
         // level has the largest fitting area; the height cap excludes it.
         let all = levels(&[("wide", 512, 128), ("tall", 256, 512), ("small", 128, 128)]);
-        let picked = select_level_id(&all, &capped(Some(600), None));
-        assert_eq!(picked.as_deref(), Some("tall"));
-        let picked = select_level_id(&all, &capped(Some(600), Some(256)));
-        assert_eq!(picked.as_deref(), Some("wide"));
-        let picked = select_level_id(&all, &capped(None, Some(200)));
-        assert_eq!(picked.as_deref(), Some("wide"));
+        let picked = select_level_index(&all, &capped(Some(600), None));
+        assert_eq!(picked, Some(1));
+        let picked = select_level_index(&all, &capped(Some(600), Some(256)));
+        assert_eq!(picked, Some(0));
+        let picked = select_level_index(&all, &capped(None, Some(200)));
+        assert_eq!(picked, Some(0));
     }
 
     #[test]
@@ -1655,14 +1732,14 @@ mod tests {
             max_height: Some(200),
             zoom_level: None,
         };
-        let picked = select_level_id(&all, &selection);
-        assert_eq!(picked.as_deref(), Some("big"));
+        let picked = select_level_index(&all, &selection);
+        assert_eq!(picked, Some(1));
     }
 
     #[test]
     fn zoom_level_selects_exact_index_with_last_fallback() {
         let all = levels(&[("small", 100, 100), ("mid", 200, 200), ("big", 400, 400)]);
-        for (requested, expected) in [(0, "small"), (1, "mid"), (2, "big"), (10, "big")] {
+        for (requested, expected) in [(0, 0), (1, 1), (2, 2), (10, 2)] {
             let selection = LevelSelection {
                 largest: false,
                 max_width: None,
@@ -1670,7 +1747,7 @@ mod tests {
                 zoom_level: Some(requested),
             };
             assert_eq!(
-                select_level_id(&all, &selection).as_deref(),
+                select_level_index(&all, &selection),
                 Some(expected),
                 "zoom_level {requested}"
             );
@@ -1686,7 +1763,7 @@ mod tests {
             max_height: Some(200),
             zoom_level: Some(0),
         };
-        assert_eq!(select_level_id(&all, &selection).as_deref(), Some("small"));
+        assert_eq!(select_level_index(&all, &selection), Some(0));
     }
 
     #[test]
@@ -1701,24 +1778,24 @@ mod tests {
 
     #[test]
     fn empty_fit_falls_back_to_the_narrowest_level() {
-        let picked = select_level_id(
+        let picked = select_level_index(
             &levels(&[("big", 512, 512), ("small", 128, 128)]),
             &capped(Some(64), None),
         );
-        assert_eq!(picked.as_deref(), Some("small"));
+        assert_eq!(picked, Some(1));
     }
 
     #[test]
     fn unknown_sizes_never_fit_but_lose_narrowest_tiebreaks() {
         // Probe-declared levels (0x0) cannot satisfy a cap, yet stay
         // selectable when nothing else fits.
-        let picked = select_level_id(&levels(&[("probe", 0, 0)]), &capped(Some(300), None));
-        assert_eq!(picked.as_deref(), Some("probe"));
-        let picked = select_level_id(
+        let picked = select_level_index(&levels(&[("probe", 0, 0)]), &capped(Some(300), None));
+        assert_eq!(picked, Some(0));
+        let picked = select_level_index(
             &levels(&[("probe", 0, 0), ("known", 128, 128)]),
             &capped(Some(64), None),
         );
-        assert_eq!(picked.as_deref(), Some("known"));
+        assert_eq!(picked, Some(1));
     }
 
     #[test]

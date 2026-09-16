@@ -165,6 +165,8 @@ export const de = {
   "view.fail.techDetails": "Technische Fehlerdetails und Fehlermeldung",
   "view.fail.reportBug": "Fehler auf GitHub melden",
   "view.fail.retry": "Erneut versuchen",
+  "view.fail.redactHint":
+    "Die Details unten koennen vollstaendige Adressen und die Serverantwort enthalten. Sie bleiben auf diesem Geraet; entfernen Sie Anmeldedaten und Tokens vor dem Teilen.",
   // Cancelled section.
   "view.cancel.title": "Speichern abgebrochen",
   "view.cancel.message": "Das Speichern des Bildes wurde gestoppt.",

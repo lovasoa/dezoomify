@@ -119,16 +119,14 @@ fn automatic_discovery_selects_every_ready_format() {
     ];
     for (input, resources, format) in cases {
         assert_eq!(
-            ready_image(discover(input, resources).unwrap())
-                .format
-                .as_str(),
+            ready_image(discover(input, resources).unwrap()).format,
             *format
         );
     }
 
     let generic =
         ready_image(discover("https://fixtures.test/tiles/{{X}}_{{Y}}.jpg", &[]).unwrap());
-    assert_eq!(generic.format.as_str(), "generic");
+    assert_eq!(generic.format, "generic");
 
     let input = "https://artsandculture.google.com/asset/test";
     let mut operation = default_registry(input).start(input);
@@ -147,7 +145,7 @@ fn automatic_discovery_selects_every_ready_format() {
         ))
         .unwrap();
     assert_eq!(
-        ready_image(operation.finish().unwrap()).format.as_str(),
+        ready_image(operation.finish().unwrap()).format,
         "google_arts_and_culture"
     );
 
@@ -159,10 +157,9 @@ fn automatic_discovery_selects_every_ready_format() {
         )],
     )
     .unwrap();
-    let [CatalogEntry::Deferred(image)] = catalog.entries() else {
+    let [CatalogEntry::Deferred(_)] = catalog.entries() else {
         panic!("bulk text must produce a deferred entry");
     };
-    assert_eq!(image.id.as_str(), "bulk:0");
 }
 
 #[test]
@@ -185,7 +182,7 @@ fn second_canvas_viewer_page_follows_its_js_configuration() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "second_canvas");
+    assert_eq!(image.format, "second_canvas");
 }
 
 #[test]
@@ -213,7 +210,7 @@ fn second_canvas_museum_page_follows_its_embedded_viewer_configuration() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "second_canvas");
+    assert_eq!(image.format, "second_canvas");
 }
 
 fn grid(level: &LevelDescriptor) -> &Grid {
@@ -235,7 +232,7 @@ fn dezoomer_zoomify_metadata_and_tile_cases() {
     let metadata = br#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="512" NUMTILES="5" VERSION="1.8" TILESIZE="256" />"#;
     let input = "https://fixtures.test/zoomify/ImageProperties.xml";
     let image = ready_image(discover(input, &[(input, metadata)]).unwrap());
-    assert_eq!(image.format.as_str(), "zoomify");
+    assert_eq!(image.format, "zoomify");
     assert_eq!(
         image.levels.last().unwrap().source.image_size(),
         Some(Vec2d::square(512))
@@ -249,7 +246,7 @@ fn dezoomer_zoomify_metadata_and_tile_cases() {
     let tile_input = "https://fixtures.test/zoomify/TileGroup0/1-1-1.jpg";
     let metadata_input = "https://fixtures.test/zoomify/ImageProperties.xml";
     let image = ready_image(discover(tile_input, &[(metadata_input, metadata)]).unwrap());
-    assert_eq!(image.format.as_str(), "zoomify");
+    assert_eq!(image.format, "zoomify");
     assert_eq!(
         image.levels.last().unwrap().source.image_size(),
         Some(Vec2d::square(512))
@@ -301,7 +298,7 @@ fn dezoomer_ngv_viewer_page_case() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "zoomify");
+    assert_eq!(image.format, "zoomify");
     assert!(
         tile_urls(image.levels.last().unwrap())
             .iter()
@@ -330,7 +327,7 @@ fn dezoomer_deepzoom_metadata_and_tile_cases() {
     ];
     for (input, metadata, expected_tile) in cases {
         let image = ready_image(discover(input, &[(input, metadata)]).unwrap());
-        assert_eq!(image.format.as_str(), "deepzoom");
+        assert_eq!(image.format, "deepzoom");
         assert!(
             tile_urls(image.levels.last().unwrap())
                 .iter()
@@ -399,7 +396,7 @@ fn dezoomer_paris_ark_page_case() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "deepzoom");
+    assert_eq!(image.format, "deepzoom");
     assert!(
         tile_urls(image.levels.last().unwrap())
             .iter()
@@ -412,7 +409,7 @@ fn dezoomer_iiif_image_service_cases() {
     let input = "http://127.0.0.1:9877/fixtures/iiif-v2/info.json";
     let image =
         ready_image(discover(input, &[(input, coverage_fixture!("iiif/v2-info.json"))]).unwrap());
-    assert_eq!(image.format.as_str(), "iiif");
+    assert_eq!(image.format, "iiif");
     assert!(
         tile_urls(image.levels.last().unwrap())
             .iter()
@@ -647,7 +644,7 @@ fn dezoomer_iiif_url_adapters_follow_metadata() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "iiif");
+    assert_eq!(image.format, "iiif");
     assert!(tile_urls(image.levels.last().unwrap()).iter().any(|url| url
         == "https://fixtures.test/digital/iiif/OKMaps/6483/256,256,256,256/256,256/0/native.jpg"));
 }
@@ -668,7 +665,7 @@ fn dezoomer_iiif_page_adapters_follow_metadata() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "iiif");
+    assert_eq!(image.format, "iiif");
 
     for (page, page_fixture, info_fixture, id) in [
         (
@@ -702,7 +699,7 @@ fn dezoomer_iipimage_query_case() {
         "https://fixtures.test/iip?FIF=/image.tif&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
     let metadata = b"Max-size:512 512\nTile-size:256 256\nResolution-number:2";
     let image = ready_image(discover(input, &[(metadata_input, metadata)]).unwrap());
-    assert_eq!(image.format.as_str(), "iipimage");
+    assert_eq!(image.format, "iipimage");
     let urls = tile_urls(image.levels.last().unwrap());
     assert_eq!(urls[0], "https://fixtures.test/iip?FIF=/image.tif&JTL=1,0");
     assert_eq!(urls[3], "https://fixtures.test/iip?FIF=/image.tif&JTL=1,3");
@@ -719,7 +716,7 @@ fn dezoomer_krpano_explicit_level_case() {
       </image>
     </krpano>"#;
     let image = ready_image(discover(input, &[(input, metadata)]).unwrap());
-    assert_eq!(image.format.as_str(), "krpano");
+    assert_eq!(image.format, "krpano");
     assert_eq!(
         tile_urls(image.levels.last().unwrap()).last(),
         Some(&"https://fixtures.test/krpano/tiles/l1/2_2.jpg".to_owned())
@@ -727,7 +724,7 @@ fn dezoomer_krpano_explicit_level_case() {
 }
 
 fn resolve_generic(template: &str, available: &[(u32, u32, Vec2d)]) -> (Grid, Vec<Vec2d>) {
-    let mut step = DiscoverableGrid::new("coverage:generic".into(), template.into()).start();
+    let mut step = DiscoverableGrid::new(template.into()).start();
     loop {
         step = match step {
             DiscoverableStep::Probe { tile, continuation } => {
@@ -857,7 +854,7 @@ fn dezoomer_generic_encoded_templates_are_recognized() {
 #[test]
 fn dezoomer_generic_one_by_one_placeholders_are_missing_tiles() {
     let template = "https://fixtures.test/generic/placeholder.svg?x={{X}}&y={{Y}}";
-    let mut step = DiscoverableGrid::new("coverage:placeholder".into(), template.into()).start();
+    let mut step = DiscoverableGrid::new(template.into()).start();
     loop {
         step = match step {
             DiscoverableStep::Probe { tile, continuation } => {
@@ -911,7 +908,7 @@ fn dezoomer_google_short_url_resolves_to_the_google_format() {
         ))
         .unwrap();
     assert_eq!(
-        ready_image(operation.finish().unwrap()).format.as_str(),
+        ready_image(operation.finish().unwrap()).format,
         "google_arts_and_culture"
     );
 }
@@ -1009,9 +1006,7 @@ fn automatic_discovery_selects_part_three_formats() {
 
     for (input, resources, format) in cases {
         assert_eq!(
-            ready_image(discover(input, resources).unwrap())
-                .format
-                .as_str(),
+            ready_image(discover(input, resources).unwrap()).format,
             *format
         );
     }
@@ -1202,7 +1197,7 @@ fn part_three_page_adapters_follow_their_metadata_resources() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "topviewer");
+    assert_eq!(image.format, "topviewer");
 
     let image = ready_image(discover(
         "https://fixtures.test/topviewer/mediabank.html",
@@ -1222,7 +1217,7 @@ fn part_three_page_adapters_follow_their_metadata_resources() {
         ],
     )
     .unwrap());
-    assert_eq!(image.format.as_str(), "topviewer");
+    assert_eq!(image.format, "topviewer");
 
     let detail = "https://fixtures.test/archive/detail/record-id/media/asset-id";
     let media = "https://fixtures.test/mediabank/media/record-id?apiKey=fixture-key";
@@ -1246,7 +1241,7 @@ fn part_three_page_adapters_follow_their_metadata_resources() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "topviewer");
+    assert_eq!(image.format, "topviewer");
 
     let image = ready_image(
         discover(
@@ -1264,7 +1259,7 @@ fn part_three_page_adapters_follow_their_metadata_resources() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "fsi");
+    assert_eq!(image.format, "fsi");
 
     let image = ready_image(
         discover(
@@ -1282,7 +1277,7 @@ fn part_three_page_adapters_follow_their_metadata_resources() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "hungaricana");
+    assert_eq!(image.format, "hungaricana");
 }
 
 #[test]
@@ -1347,7 +1342,7 @@ fn pnav_probe_resolves_scaled_crop_grid_without_repeating_the_probe() {
         )
         .unwrap(),
     );
-    assert_eq!(image.format.as_str(), "pnav");
+    assert_eq!(image.format, "pnav");
     assert_eq!(image.title.as_deref(), Some("Fixture Object"));
 }
 
@@ -1625,9 +1620,9 @@ mod scenario_parity {
             _ => image.levels.first().expect("one level"),
         };
         let display = default_registry(input)
-            .spec_named(image.format.as_str())
+            .spec_named(image.format)
             .map(|s| s.display_name().to_string())
-            .unwrap_or_else(|| image.format.as_str().to_string());
+            .unwrap_or_else(|| image.format.to_string());
         let format = display;
         match &level.source {
             TileSource::Grid(grid) => {
@@ -2014,10 +2009,7 @@ mod scenario_parity {
         use dezoomify_core::Vec2d;
         use dezoomify_core::core::{DiscoverableGrid, DiscoverableStep, ObservationResult};
 
-        let grid = DiscoverableGrid::new(
-            dezoomify_core::core::StableId::new("test"),
-            "http://127.0.0.1/tile.svg?x={{X}}&y={{Y}}".to_string(),
-        );
+        let grid = DiscoverableGrid::new("http://127.0.0.1/tile.svg?x={{X}}&y={{Y}}".to_string());
         let mut step = grid.start();
         let mut probes = 0;
         loop {

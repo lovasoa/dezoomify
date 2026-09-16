@@ -8,7 +8,7 @@ use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
     DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
-    LevelDescriptor, Request, StableId, image_title, resolve_relative,
+    LevelDescriptor, Request, image_title, resolve_relative,
 };
 
 static SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -88,7 +88,6 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
         .to_owned();
     let title = image_title(&source);
     let source = Grid::with_requests(
-        StableId::new("fsi:level"),
         Vec2d {
             x: width,
             y: height,
@@ -117,9 +116,8 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     )
     .map_err(|error| DiscoveryError::Session(format!("invalid FSI grid: {error}")))?;
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("fsi:image"),
         title,
-        format: StableId::new("fsi"),
+        format: "fsi",
         levels: vec![LevelDescriptor::new(source)],
         ..Default::default()
     })]))

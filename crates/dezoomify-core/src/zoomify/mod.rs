@@ -9,8 +9,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryRoute,
-    DiscoveryStep, Grid, ImageCatalog, ImageDescriptor, LevelDescriptor, Request, StableId,
-    resolve_relative,
+    DiscoveryStep, Grid, ImageCatalog, ImageDescriptor, LevelDescriptor, Request, resolve_relative,
 };
 
 mod image_properties;
@@ -362,26 +361,20 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
             let size = info.size;
             let tile_size = info.tile_size;
             let base_url = Arc::clone(&base_url);
-            let source = Grid::with_requests(
-                format!("zoomify:{index}").into(),
-                size,
-                tile_size,
-                Vec2d::default(),
-                move |tile| {
-                    let cell: Vec2d = tile.coord.into();
-                    // Some producers declare only the full-resolution tile
-                    // count and consequently store every level in TileGroup0.
-                    let tile_group = if full_resolution_only {
-                        0
-                    } else {
-                        (u64::from(info.tiles_before) + tile.row_major_ordinal) / 256
-                    };
-                    Request::new(format!(
-                        "{base_url}/TileGroup{tile_group}/{index}-{}-{}.jpg",
-                        cell.x, cell.y
-                    ))
-                },
-            )
+            let source = Grid::with_requests(size, tile_size, Vec2d::default(), move |tile| {
+                let cell: Vec2d = tile.coord.into();
+                // Some producers declare only the full-resolution tile
+                // count and consequently store every level in TileGroup0.
+                let tile_group = if full_resolution_only {
+                    0
+                } else {
+                    (u64::from(info.tiles_before) + tile.row_major_ordinal) / 256
+                };
+                Request::new(format!(
+                    "{base_url}/TileGroup{tile_group}/{index}-{}-{}.jpg",
+                    cell.x, cell.y
+                ))
+            })
             .map_err(|error| DiscoveryError::Session(format!("invalid Zoomify grid: {error}")))?;
             Ok(
                 LevelDescriptor::new(source).with_title(Some(match base_name {
@@ -398,9 +391,8 @@ fn load_catalog(url: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryErr
         .filter(|name| !name.is_empty())
         .map(str::to_owned);
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("zoomify:image"),
         title,
-        format: StableId::new("zoomify"),
+        format: "zoomify",
         levels,
         warnings,
     })]))

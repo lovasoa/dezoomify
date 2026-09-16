@@ -54,6 +54,8 @@ export interface HttpErrorTileResponse {
   finalUrl: string;
   status: number;
   headers: Record<string, string>;
+  /** Bounded, single-line server signal extracted from the error body (best effort). */
+  preview?: string;
 }
 
 export interface NetworkErrorTileResponse {

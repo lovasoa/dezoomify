@@ -39,8 +39,8 @@ export type EventKind = "replayable" | "transient" | "decision-requesting" | "te
 
 export interface RequestDto { id: string; uri: string; headers: { name: string; value: string }[]; purpose: RequestPurpose }
 export interface BufferHandle { id: string; generation: number; length: number; checksum?: string }
-export interface ImageDto { id: string; title?: string; format: string; width: number; height: number; readiness: Readiness; sourceKind: string; levels: LevelDto[] }
-export interface LevelDto { id: string; width: number; height: number; tileWidth: number; tileHeight: number }
+export interface ImageDto { title?: string; format: string; width: number; height: number; readiness: Readiness; sourceKind: string; levels: LevelDto[] }
+export interface LevelDto { label: string; width: number; height: number; tileWidth: number; tileHeight: number }
 export interface CatalogDto { images: ImageDto[] }
 export interface NativeCookie { name: string; value: string; origin: string }
 export type NativeHostRequest =
