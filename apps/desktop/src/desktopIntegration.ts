@@ -71,7 +71,6 @@ export type SaveOutcome = "granted" | "denied" | "cancelled";
 
 export interface SaveResult {
   readonly outcome: SaveOutcome;
-  readonly destinationId?: string;
   readonly reason?: string;
   readonly code?: string;
 }
@@ -158,7 +157,6 @@ function tauriInvoke(): TauriInternals["invoke"] | null {
 
 interface DestinationCommandResult {
   readonly outcome: SaveOutcome;
-  readonly destination_id?: string;
   readonly reason?: string;
   readonly code?: string;
 }
@@ -204,13 +202,9 @@ export function createDesktopIntegration(opts?: {
     if (req.suggestedName.includes("\0") || req.suggestedName.includes("..")) {
       return { outcome: "denied", reason: "invalid-path" };
     }
-    const suffix = req.jobId.slice("job:".length).replace(/[^a-zA-Z0-9_-]/g, "");
-    if (suffix.length === 0) {
-      return { outcome: "denied", reason: "invalid-job-id" };
-    }
     const invoke = tauriInvoke();
     if (!invoke) {
-      return { outcome: "granted", destinationId: `dst:${suffix}` };
+      return { outcome: "granted" };
     }
     try {
       const raw = (await invoke("request_destination", {
@@ -222,10 +216,7 @@ export function createDesktopIntegration(opts?: {
         return { outcome: "denied", reason: "destination-failed" };
       }
       if (raw.outcome === "granted") {
-        if (typeof raw.destination_id === "string" && raw.destination_id.length > 0) {
-          return { outcome: "granted", destinationId: raw.destination_id };
-        }
-        return { outcome: "denied", reason: "destination-failed" };
+        return { outcome: "granted" };
       }
       if (raw.outcome === "cancelled") {
         return {

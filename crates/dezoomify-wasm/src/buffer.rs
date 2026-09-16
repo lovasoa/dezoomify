@@ -18,14 +18,14 @@
 //! truncate large `u64` lengths.
 //!
 //! Protocol correlation: [`ByteArena::to_protocol_handle`] projects a live
-//! handle onto the canonical [`BufferHandle`][dto] (`buf:{id}` + generation +
-//! length); [`ByteArena::resolve_protocol`] parses one back, rejecting wrong
-//! ID kinds as malformed and unknown/stale generations as stale.
+//! handle onto the canonical [`BufferHandle`][dto] (`id` + generation +
+//! length); [`ByteArena::resolve_protocol`] reads one back, rejecting
+//! unknown/stale generations as stale.
 //!
 //! [dto]: dezoomify_protocol::dto::BufferHandle
 
 use crate::error::{AdapterError, AdapterErrorCode};
-use dezoomify_protocol::dto::{BufferHandle as ProtocolBufferHandle, BufferId};
+use dezoomify_protocol::dto::BufferHandle as ProtocolBufferHandle;
 use serde::{Deserialize, Serialize};
 
 /// Default per-buffer cap: the browser baseline `max_tile_bytes` (8 MiB).
@@ -44,14 +44,6 @@ pub struct ArenaHandle {
     /// Allocation generation of this slot. Mismatches are stale, never
     /// use-after-free.
     pub generation: u32,
-}
-
-impl ArenaHandle {
-    /// Canonical `buf:{id}` protocol identifier for this handle.
-    #[must_use]
-    pub fn buffer_id(self) -> Option<BufferId> {
-        BufferId::new(format!("buf:{}", self.id))
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -432,9 +424,6 @@ impl ByteArena {
                 "stale buffer generation",
             ));
         }
-        let id = handle.buffer_id().ok_or_else(|| {
-            AdapterError::new(AdapterErrorCode::Malformed, "buffer id out of range")
-        })?;
         let length = u64::try_from(slot.data.len()).map_err(|_| {
             AdapterError::new(
                 AdapterErrorCode::LimitExceeded,
@@ -442,7 +431,7 @@ impl ByteArena {
             )
         })?;
         Ok(ProtocolBufferHandle {
-            id,
+            id: handle.id,
             generation: handle.generation,
             length,
             checksum: None,
@@ -454,27 +443,14 @@ impl ByteArena {
     ///
     /// # Errors
     ///
-    /// `malformed` for wrong ID kinds or shapes; `stale-buffer` for unknown
-    /// or stale generations; `wrong-state` for live but unsealed buffers.
+    /// `stale-buffer` for unknown or stale generations; `wrong-state` for
+    /// live but unsealed buffers.
     pub fn resolve_protocol(
         &self,
         reference: &ProtocolBufferHandle,
     ) -> Result<ArenaHandle, AdapterError> {
-        let text = reference.id.as_str();
-        let suffix = text.strip_prefix("buf:").ok_or_else(|| {
-            AdapterError::new(
-                AdapterErrorCode::Malformed,
-                "buffer reference has the wrong id kind",
-            )
-        })?;
-        let id: u32 = suffix.parse().map_err(|_| {
-            AdapterError::new(
-                AdapterErrorCode::Malformed,
-                "buffer reference id is not numeric",
-            )
-        })?;
         let handle = ArenaHandle {
-            id,
+            id: reference.id,
             generation: reference.generation,
         };
         let index = self.index_of(handle)?;

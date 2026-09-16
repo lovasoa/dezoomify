@@ -107,10 +107,7 @@ fn destination_grant_flow_completes() {
     let mut host = ScriptedHost::new(&job_id(2), INPUT_URL, test_config()).unwrap();
     let _level_id = discover_and_select(&mut host, 2);
     assert_eq!(host.state(), "AwaitingDestination");
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
 
     // The largest 512x512 level with 256px tiles is a real 2x2 grid.
     let tiles = host.tile_effects();
@@ -181,10 +178,7 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
     config.max_retries = 0;
     let mut host = ScriptedHost::new(&job_id(20), INPUT_URL, config).unwrap();
     let _level_id = discover_and_select(&mut host, 20);
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
     let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
@@ -226,10 +220,7 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
 fn cancel_in_acquiring_tiles_ignores_late_response() {
     let mut host = ScriptedHost::new(&job_id(3), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 3);
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
     let tiles: Vec<u32> = host
         .tile_effects()
         .into_iter()
@@ -284,10 +275,7 @@ fn probe_driven_generic_level_resolves_through_observations() {
     assert_eq!(levels, vec![0]);
     host.apply(JobCommand::SelectImage { image }).unwrap();
     host.apply(JobCommand::SelectLevel { level: 0 }).unwrap();
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
 
     // Answer every probe according to its coordinates until the plan
     // resolves into ordinary tile acquisition.
@@ -390,10 +378,7 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     // The 19 states are unchanged; pause is an orthogonal overlay.
     let mut host = ScriptedHost::new(&job_id(6), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 6);
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
     assert_eq!(host.state(), "AcquiringTiles");
     assert!(!host.job().is_paused());
     let planned: Vec<u32> = host
@@ -452,10 +437,7 @@ fn pause_defers_completion_until_resume() {
     // All tiles finish while paused: completion waits for resume.
     let mut host = ScriptedHost::new(&job_id(7), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 7);
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
     let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
@@ -481,10 +463,7 @@ fn pause_defers_completion_until_resume() {
 fn pause_preserves_retry_wakeup_and_rejects_post_terminal() {
     let mut host = ScriptedHost::new(&job_id(8), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 8);
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
     let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()

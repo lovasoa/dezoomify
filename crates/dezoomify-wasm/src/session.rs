@@ -53,9 +53,9 @@ use dezoomify_job::{
     JobError as EngineJobError, JobEvent as EngineEvent, JobMessageBody, Outcome,
 };
 use dezoomify_protocol::dto::{
-    negotiate_version, ControlBody, ControlEnvelope, EffectId, ErrorDto, ErrorPhase, HeaderDto,
-    HostEffect, JobCommand, JobEvent, OutputId, PointDto, RecoveryAction, RecoveryKind, RequestDto,
-    RequestPurpose, SizeDto, TilePlacementDto,
+    negotiate_version, ControlBody, ControlEnvelope, ErrorDto, ErrorPhase, HeaderDto, HostEffect,
+    JobCommand, JobEvent, PointDto, RecoveryAction, RecoveryKind, RequestDto, RequestPurpose,
+    SizeDto, TilePlacementDto,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -476,14 +476,9 @@ impl Session {
             }
             JobCommand::SelectImage { image } => self.forward(EngineCommand::SelectImage { image }),
             JobCommand::SelectLevel { level } => self.forward(EngineCommand::SelectLevel { level }),
-            JobCommand::DestinationResponse {
-                destination,
-                granted,
-            } => {
+            JobCommand::DestinationResponse { granted } => {
                 let response = if granted {
-                    EngineCommand::DestinationGranted {
-                        destination: destination.as_str().to_string(),
-                    }
+                    EngineCommand::DestinationGranted
                 } else {
                     EngineCommand::DestinationDenied
                 };
@@ -741,13 +736,10 @@ impl Session {
         sequence: u32,
         effect: EngineEffect,
     ) -> Result<HostEffect, AdapterError> {
-        let effect_id = EffectId::new(format!("fx:{sequence}"))
-            .ok_or_else(|| AdapterError::new(AdapterErrorCode::Malformed, "effect sequence"))?;
         Ok(match effect {
             EngineEffect::AcquireResource { request, uri, .. } => {
                 self.live_discovery_requests.insert(request);
                 HostEffect::AcquireResource {
-                    effect: effect_id,
                     request: RequestDto {
                         id: request,
                         uri,
@@ -769,7 +761,6 @@ impl Session {
                 let request = sequence;
                 self.outstanding_tile_requests.insert(request, tile);
                 HostEffect::AcquireTile {
-                    effect: effect_id,
                     request: RequestDto {
                         id: request,
                         uri,
@@ -801,35 +792,24 @@ impl Session {
                     },
                 }
             }
-            EngineEffect::RequestDestination { format } => HostEffect::RequestDestination {
-                effect: effect_id,
-                format,
-            },
-            EngineEffect::DecodePixels { tile } => HostEffect::DecodePixels {
-                effect: effect_id,
-                tile,
-            },
+            EngineEffect::RequestDestination { format } => {
+                HostEffect::RequestDestination { format }
+            }
+            EngineEffect::DecodePixels { tile } => HostEffect::DecodePixels { tile },
             EngineEffect::OpenEncoder { format, canvas } => HostEffect::OpenEncoder {
-                effect: effect_id,
                 format,
                 canvas: canvas.map(|size| SizeDto {
                     width: u64::from(size.x),
                     height: u64::from(size.y),
                 }),
             },
-            EngineEffect::FinalizeEncoder => HostEffect::FinalizeEncoder { effect: effect_id },
-            EngineEffect::PublishOutput => HostEffect::PublishOutput {
-                effect: effect_id,
-                output: OutputId::new("out:0").expect("static output id is valid"),
-            },
-            EngineEffect::ReleaseBytes => HostEffect::ReleaseBytes { effect: effect_id },
-            EngineEffect::CancelWork => HostEffect::CancelWork { effect: effect_id },
+            EngineEffect::FinalizeEncoder => HostEffect::FinalizeEncoder,
+            EngineEffect::PublishOutput => HostEffect::PublishOutput,
+            EngineEffect::ReleaseBytes => HostEffect::ReleaseBytes,
+            EngineEffect::CancelWork => HostEffect::CancelWork,
             EngineEffect::RequestDecision { generation, .. } => {
                 self.pending_recovery = Some(generation);
-                HostEffect::RequestDecision {
-                    effect: effect_id,
-                    generation,
-                }
+                HostEffect::RequestDecision { generation }
             }
         })
     }
@@ -875,12 +855,8 @@ impl Session {
                     }],
                 }
             }
-            EngineEvent::Completed => JobEvent::Completed {
-                output: OutputId::new("out:0").expect("static output id is valid"),
-            },
-            EngineEvent::PartialCompleted => JobEvent::PartialCompleted {
-                output: OutputId::new("out:0").expect("static output id is valid"),
-            },
+            EngineEvent::Completed => JobEvent::Completed,
+            EngineEvent::PartialCompleted => JobEvent::PartialCompleted,
             EngineEvent::Failed { code, message } => JobEvent::Failed {
                 error: ErrorDto::new(code, ErrorPhase::Discovery, message),
             },

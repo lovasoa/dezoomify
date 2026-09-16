@@ -182,8 +182,6 @@ struct Dispatched {
 struct DestinationResult {
     outcome: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    destination_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     code: Option<String>,
@@ -414,7 +412,6 @@ async fn request_destination(
     let Some(path) = chosen else {
         return Ok(DestinationResult {
             outcome: "cancelled",
-            destination_id: None,
             reason: Some("user-cancelled".into()),
             code: None,
         });
@@ -426,7 +423,6 @@ async fn request_destination(
     if path.as_os_str().is_empty() {
         return Ok(DestinationResult {
             outcome: "cancelled",
-            destination_id: None,
             reason: Some("user-cancelled".into()),
             code: None,
         });
@@ -461,27 +457,21 @@ async fn request_destination(
     if let Some(error) = denied {
         return Ok(DestinationResult {
             outcome: "denied",
-            destination_id: None,
             reason: Some(error.message.clone()),
             code: Some(error.code.clone()),
         });
     }
     // Grant the real destination through the validated dispatch; the native
     // runtime reports completion only after atomic output finalization.
-    // Only the opaque destination id crosses IPC; the raw path stays native.
+    // The raw path stays native; it never crosses IPC.
     // Overwrite stays false until an explicit overwrite confirmation exists.
-    let dispatched = {
+    {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
             message: "job table poisoned".into(),
         })?;
-        let outcome = commands::dispatch_destination(&mut table, &job, &format, &path, false)?;
-        Dispatched {
-            job: outcome.job,
-            seq: outcome.seq,
-            event: outcome.event,
-        }
-    };
+        commands::dispatch_destination(&mut table, &job, &format, &path, false)?;
+    }
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
@@ -491,7 +481,6 @@ async fn request_destination(
     }
     Ok(DestinationResult {
         outcome: "granted",
-        destination_id: Some(dispatched.event),
         reason: None,
         code: None,
     })

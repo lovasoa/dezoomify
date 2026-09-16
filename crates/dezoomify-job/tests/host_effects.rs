@@ -30,10 +30,7 @@ fn discover_select_grant(host: &mut ScriptedHost, job: &str) {
         level: *levels.last().expect("level"),
     })
     .unwrap();
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
 }
 
 #[test]
@@ -142,10 +139,7 @@ fn final_uri_rebases_relative_tile_urls() {
         level: *levels.last().expect("level"),
     })
     .unwrap();
-    host.apply(JobCommand::DestinationGranted {
-        destination: "dst:0".to_string(),
-    })
-    .unwrap();
+    host.apply(JobCommand::DestinationGranted).unwrap();
     for (_, uri, _) in host.tile_effects() {
         assert!(
             uri.starts_with("https://cdn.test/new/image_files/"),

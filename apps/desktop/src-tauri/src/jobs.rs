@@ -1197,15 +1197,15 @@ impl JobTable {
     /// (choose-output) at the caller.
     ///
     /// The real dialog path is stored per job and passed to `pipeline::run`
-    /// for atomic publish. Only the opaque destination id (never the path)
-    /// is returned for IPC; transcript events carry the format id only.
+    /// for atomic publish. The path never crosses IPC; transcript events
+    /// carry the format id only.
     pub fn request_destination(
         &mut self,
         job: &str,
         path: &Path,
         format: &str,
         overwrite: bool,
-    ) -> Result<(u64, String), String> {
+    ) -> Result<u64, String> {
         self.pump_drivers();
         self.require_live(job)?;
         let requested =
@@ -1233,7 +1233,7 @@ impl JobTable {
         }
         let seq = self.push_event(job, "destination", format);
         self.spawn_pipeline_worker(job);
-        Ok((seq, destination_id_for(job)))
+        Ok(seq)
     }
 
     /// Complete a live job (test helper modelling native finalization).
@@ -2115,13 +2115,6 @@ fn output_format_for_id(format: &str) -> Option<OutputFormat> {
     }
 }
 
-/// Opaque destination handle for IPC: per-job unique, derived from the job
-/// id only. The real path never crosses IPC and never enters events/logs.
-fn destination_id_for(job: &str) -> String {
-    let suffix = job.strip_prefix("job:").unwrap_or(job);
-    format!("dst:{suffix}")
-}
-
 /// Best-effort removal of uncommitted output (no logging; paths stay
 /// native). The atomic-write temp sibling is never user data and is always
 /// safe to drop. The destination itself is removed only when overwrite was
@@ -2311,15 +2304,11 @@ mod tests {
         // Real destination ONLY: the grant stores the dialog-chosen path
         // (here under the settings output dir), not a derived temp path.
         let path = std::path::PathBuf::from("/tmp/dz-out/grant.png");
-        let (seq, destination_id) = table
+        let seq = table
             .request_destination(&id2, &path, "png", false)
             .unwrap();
         assert!(seq >= 1);
         assert_eq!(table.destination_for(&id2).unwrap(), path);
-        assert_eq!(
-            destination_id,
-            format!("dst:{}", id2.strip_prefix("job:").unwrap())
-        );
         table.cancel_job(&id2).unwrap();
     }
 
@@ -2380,16 +2369,11 @@ mod tests {
             .unwrap_err();
         assert_eq!(err, "unsupported format");
         assert!(table.destination_for(&id).is_none());
-        // A matching grant stores the real path and reports an opaque id:
-        // no raw path in the id, format only in the event.
-        let (seq, destination_id) = table.request_destination(&id, &png, "png", false).unwrap();
+        // A matching grant stores the real path; the format is the only
+        // destination detail that enters the event.
+        let seq = table.request_destination(&id, &png, "png", false).unwrap();
         assert!(seq >= 1);
         assert_eq!(table.destination_for(&id).unwrap(), png);
-        assert_eq!(
-            destination_id,
-            format!("dst:{}", id.strip_prefix("job:").unwrap())
-        );
-        assert!(!destination_id.contains("tmp") && !destination_id.contains('/'));
         let events = table.events_for(&id);
         let granted = events.iter().find(|e| e.kind == "destination").unwrap();
         assert_eq!(granted.detail, "png");
@@ -2426,9 +2410,8 @@ mod tests {
         assert!(err.contains("refusing overwrite"), "typed error, got {err}");
         assert!(table.destination_for(&id).is_none());
         // Explicit overwrite confirmation grants the same path.
-        let (.., destination_id) = table.request_destination(&id, &path, "png", true).unwrap();
+        table.request_destination(&id, &path, "png", true).unwrap();
         assert_eq!(table.destination_for(&id).unwrap(), path);
-        assert!(!destination_id.contains("out.png"));
         table.cancel_job(&id).unwrap();
         // Overwrite grants leave pre-existing user data alone on cancel.
         assert_eq!(std::fs::read(&path).unwrap(), b"existing");

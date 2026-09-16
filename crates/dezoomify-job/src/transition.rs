@@ -77,9 +77,7 @@ pub enum JobCommand {
     SelectLevel {
         level: u32,
     },
-    DestinationGranted {
-        destination: String,
-    },
+    DestinationGranted,
     DestinationDenied,
     TileOutcome {
         tile: u32,

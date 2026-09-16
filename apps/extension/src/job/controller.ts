@@ -120,7 +120,7 @@ export function createJobController(deps: JobControllerDeps) {
     switch (envelope.type) {
       case "request-destination":
         // The browser destination (blob anchor save) is always grantable.
-        sendToEngine({ type: "engine.command", command: { type: "destination-response", destination: "dst:0", granted: true } });
+        sendToEngine({ type: "engine.command", command: { type: "destination-response", granted: true } });
         return;
       case "decode-pixels":
         if (typeof envelope.tile !== "number") throw new Error("decode-pixels is missing its tile ordinal");

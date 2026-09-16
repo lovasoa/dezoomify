@@ -43,7 +43,7 @@ interface WasmSession {
   protocolHandle(handle: string): string; dispose(): void;
 }
 interface WasmModule { default?: () => Promise<void>; Session: new (protocol: string, quotas: string) => WasmSession; rankCandidates?: (urls: string) => string }
-type WorkerMessage = Record<string, unknown> & { type?: string; jobId?: string; inputUrl?: string; requestId?: string | number; urls?: unknown; bytes?: unknown; command?: unknown; error?: unknown; quotas?: unknown };
+type WorkerMessage = Record<string, unknown> & { type?: string; jobId?: string; inputUrl?: string; requestId?: number; urls?: unknown; bytes?: unknown; command?: unknown; error?: unknown; quotas?: unknown };
 
 export function createJobWorkerHost(deps: { postMessage(message: unknown): void; wasm(): Promise<WasmModule> }) {
   /** @type {any | null} */
@@ -95,7 +95,7 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
     } catch {
       ranked = [];
     }
-    deps.postMessage({ type: "engine.ranked", requestId: message.requestId, urls: ranked.length ? ranked : urls });
+    deps.postMessage({ type: "engine.ranked", urls: ranked.length ? ranked : urls });
   }
 
   /** @param {any} message */

@@ -47,7 +47,6 @@ pub struct Job {
     selected_image_index: Option<usize>,
     selected_level: Option<u32>,
     selected_level_index: Option<usize>,
-    destination: Option<String>,
     planned_tiles: Vec<u32>,
     pending_tiles: Vec<u32>,
     in_flight: HashSet<u32>,
@@ -133,7 +132,6 @@ impl Job {
             selected_image_index: None,
             selected_level: None,
             selected_level_index: None,
-            destination: None,
             planned_tiles: Vec::new(),
             pending_tiles: Vec::new(),
             in_flight: HashSet::new(),
@@ -292,9 +290,7 @@ impl Job {
             }
             JobCommand::SelectImage { image } => self.apply_selected_image(image),
             JobCommand::SelectLevel { level } => self.apply_selected_level(level),
-            JobCommand::DestinationGranted { destination } => {
-                self.apply_destination_granted(&destination)
-            }
+            JobCommand::DestinationGranted => self.apply_destination_granted(),
             JobCommand::DestinationDenied => self.apply_destination_denied(),
             JobCommand::TileOutcome { tile, ok } => self.apply_tile_outcome(tile, ok),
             JobCommand::ProbeOutcome {
@@ -570,13 +566,12 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn apply_destination_granted(&mut self, destination: &str) -> Result<Outcome, JobError> {
+    fn apply_destination_granted(&mut self) -> Result<Outcome, JobError> {
         if self.state != State::AwaitingDestination {
             return Err(JobError::invalid_state(
                 "destination grant valid only in AwaitingDestination",
             ));
         }
-        self.destination = Some(destination.to_string());
         self.set_state(State::Planning)?;
         self.push_event(JobEvent::State {
             state: State::Planning,

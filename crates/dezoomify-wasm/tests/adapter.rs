@@ -128,7 +128,7 @@ fn buffer_lifecycle_allocate_write_commit_take_free() {
     let handle = seal(&mut session, b"tile-bytes");
     let reference = session.protocol_handle(handle).expect("projects");
     assert_eq!(reference.length, 10);
-    assert!(reference.id.as_str().starts_with("buf:"));
+    assert_eq!(reference.id, handle.id);
     assert_eq!(reference.generation, handle.generation);
     let taken = session.take_buffer(handle).expect("exactly-once take");
     assert_eq!(taken, b"tile-bytes");
@@ -324,7 +324,6 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
 
     session
         .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            destination: "dst:0".parse().unwrap(),
             granted: true,
         }))
         .expect("grant destination");
@@ -349,9 +348,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     let messages = session.drain_messages();
     let decoded = decode_all(&messages);
     match &decoded.last().expect("messages").body {
-        ControlBody::Event(JobEvent::Completed { output }) => {
-            assert_eq!(output.as_str(), "out:0");
-        }
+        ControlBody::Event(JobEvent::Completed) => {}
         other => panic!("expected completed, got {other:?}"),
     }
     // The engine emitted progress and release effects; tile buffers were
@@ -597,7 +594,6 @@ fn late_sibling_discovery_response_is_ignored_after_job_advances() {
     session.drain_messages();
     session
         .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            destination: "dst:0".parse().unwrap(),
             granted: true,
         }))
         .expect("grant destination");
@@ -643,7 +639,6 @@ fn basic_success_transcript_matches_golden() {
         .expect("select level");
     session
         .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            destination: "dst:0".parse().unwrap(),
             granted: true,
         }))
         .expect("grant destination");

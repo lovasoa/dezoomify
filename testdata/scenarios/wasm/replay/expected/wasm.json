@@ -6,7 +6,6 @@
     "type": "job-state"
   },
   {
-    "effect": "fx:2",
     "kind": "effect",
     "protocol": "2.0",
     "request": {
@@ -119,7 +118,6 @@
     "type": "job-state"
   },
   {
-    "effect": "fx:7",
     "format": "png",
     "kind": "effect",
     "protocol": "2.0",
@@ -151,7 +149,6 @@
     "type": "job-state"
   },
   {
-    "effect": "fx:12",
     "kind": "effect",
     "placement": {
       "canvas": {
@@ -184,7 +181,6 @@
     "type": "acquire-tile"
   },
   {
-    "effect": "fx:13",
     "kind": "effect",
     "placement": {
       "canvas": {
@@ -217,7 +213,6 @@
     "type": "acquire-tile"
   },
   {
-    "effect": "fx:14",
     "kind": "effect",
     "placement": {
       "canvas": {
@@ -250,7 +245,6 @@
     "type": "acquire-tile"
   },
   {
-    "effect": "fx:15",
     "kind": "effect",
     "placement": {
       "canvas": {
@@ -311,28 +305,24 @@
     "type": "progress"
   },
   {
-    "effect": "fx:20",
     "kind": "effect",
     "protocol": "2.0",
     "tile": 0,
     "type": "decode-pixels"
   },
   {
-    "effect": "fx:21",
     "kind": "effect",
     "protocol": "2.0",
     "tile": 1,
     "type": "decode-pixels"
   },
   {
-    "effect": "fx:22",
     "kind": "effect",
     "protocol": "2.0",
     "tile": 2,
     "type": "decode-pixels"
   },
   {
-    "effect": "fx:23",
     "kind": "effect",
     "protocol": "2.0",
     "tile": 3,
@@ -349,7 +339,6 @@
       "height": 512,
       "width": 512
     },
-    "effect": "fx:25",
     "format": "png",
     "kind": "effect",
     "protocol": "2.0",
@@ -362,7 +351,6 @@
     "type": "job-state"
   },
   {
-    "effect": "fx:27",
     "kind": "effect",
     "protocol": "2.0",
     "type": "finalize-encoder"
@@ -374,9 +362,7 @@
     "type": "job-state"
   },
   {
-    "effect": "fx:29",
     "kind": "effect",
-    "output": "out:0",
     "protocol": "2.0",
     "type": "publish-output"
   },
@@ -387,7 +373,6 @@
     "type": "job-state"
   },
   {
-    "effect": "fx:31",
     "kind": "effect",
     "protocol": "2.0",
     "type": "release-bytes"
@@ -406,7 +391,6 @@
   },
   {
     "kind": "event",
-    "output": "out:0",
     "protocol": "2.0",
     "type": "completed"
   }

@@ -947,12 +947,7 @@ fn execute_effects(
                 }
                 match validate_destination(&attempt.output_path, &attempt.format, attempt.overwrite)
                 {
-                    Ok(()) => reply(
-                        job,
-                        JobCommand::DestinationGranted {
-                            destination: "native".to_string(),
-                        },
-                    )?,
+                    Ok(()) => reply(job, JobCommand::DestinationGranted)?,
                     Err(error) => {
                         attempt.destination_error = Some(error);
                         reply(job, JobCommand::DestinationDenied)?;

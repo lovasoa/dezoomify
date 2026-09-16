@@ -123,7 +123,7 @@ fn all_commands() -> Vec<JobCommand> {
         JobCommand::ProvideResource {
             request: 1,
             buffer: BufferHandle {
-                id: "buf:1".parse().unwrap(),
+                id: 1,
                 generation: 1,
                 length: 16,
                 checksum: None,
@@ -139,23 +139,14 @@ fn all_commands() -> Vec<JobCommand> {
         JobCommand::ProvideProcessOutcome { tile: 1, ok: true },
         JobCommand::ProvideWriteOutcome { tile: 1, ok: true },
         JobCommand::ProvideEncodeOutcome { ok: true },
-        JobCommand::ProvideFinalizeOutcome {
-            output: "out:1".parse().unwrap(),
-            ok: true,
-        },
-        JobCommand::ProvidePublicationOutcome {
-            output: "out:1".parse().unwrap(),
-            ok: true,
-        },
+        JobCommand::ProvideFinalizeOutcome { ok: true },
+        JobCommand::ProvidePublicationOutcome { ok: true },
         JobCommand::RetryReady,
         JobCommand::PartialChoice {
             generation: 1,
             keep_partial: true,
         },
-        JobCommand::DestinationResponse {
-            destination: "dst:1".parse().unwrap(),
-            granted: true,
-        },
+        JobCommand::DestinationResponse { granted: true },
         JobCommand::Cancel,
         JobCommand::Pause,
         JobCommand::Resume,
@@ -223,15 +214,9 @@ fn all_events() -> Vec<JobEvent> {
                 rationale: "transient".into(),
             }],
         },
-        JobEvent::OutputReady {
-            output: "out:1".parse().unwrap(),
-        },
-        JobEvent::Completed {
-            output: "out:1".parse().unwrap(),
-        },
-        JobEvent::PartialCompleted {
-            output: "out:1".parse().unwrap(),
-        },
+        JobEvent::OutputReady,
+        JobEvent::Completed,
+        JobEvent::PartialCompleted,
         JobEvent::Failed {
             error: ErrorDto::new("fetch.failed", ErrorPhase::Acquisition, "gone"),
         },
@@ -246,9 +231,9 @@ fn all_events() -> Vec<JobEvent> {
             | JobEvent::Progress { .. }
             | JobEvent::Warning { .. }
             | JobEvent::RecoveryRequest { .. }
-            | JobEvent::OutputReady { .. }
-            | JobEvent::Completed { .. }
-            | JobEvent::PartialCompleted { .. }
+            | JobEvent::OutputReady
+            | JobEvent::Completed
+            | JobEvent::PartialCompleted
             | JobEvent::Failed { .. }
             | JobEvent::Cancelled
             | JobEvent::Paused
@@ -273,9 +258,7 @@ fn malformed_inputs_are_rejected() {
 }
 #[test]
 fn terminal_events_classified() {
-    let terminal = JobEvent::Completed {
-        output: "out:o1".parse().unwrap(),
-    };
+    let terminal = JobEvent::Completed;
     assert!(terminal.is_terminal());
     let transient = JobEvent::Warning {
         error: ErrorDto::new("w.x", ErrorPhase::Discovery, "w"),

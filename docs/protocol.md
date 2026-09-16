@@ -6,13 +6,13 @@
 
 | Interaction | Producer | Consumer | Direction | Ordering | Payload ownership | Failure | Deterministic test |
 |---|---|---|---|---|---|---|---|
-| Discovery fetch need | job | host | job→host effect | FIFO per job | job allocates request ID; host returns bytes or typed failure | typed fetch/decode error | `P05-VARIANTS` golden round trip |
+| Discovery fetch need | job | host | job→host effect | FIFO per job | job allocates a request sequence; host returns bytes or typed failure | typed fetch/decode error | `P05-VARIANTS` golden round trip |
 | Deferred image selection | job | UI | job→UI event | once per catalog | immutable catalog positions | out-of-range selection rejected | `P05-CATALOG` |
 | Fixed tile acquisition | job | host | job→host effect | bounded concurrency | selected-level tile ordinals and out-of-band bytes | retry/partial policy | `P05-BUFFERS` |
 | Adaptive probe/observation | job | host | effect/response pair | deterministic priority | host reports observation | probe limit error | `P05-VARIANTS` |
-| Decode/process/write/encode/finalize/publication | host | job | host→job response | correlated by effect ID | buffers released exactly once | typed outcome | `P05-OUTPUT` |
-| Destination request/response | job | host | effect/response pair | before any write | opaque destination ID | rejection recovers | `P05-OUTPUT` |
-| Recovery choice | job/UI | job | event/command pair | correlated by recovery ID | typed allowed actions | stale choice rejected | `P05-RECOVERY` |
+| Decode/process/write/encode/finalize/publication | host | job | host→job response | FIFO; outcomes correlate by tile or generation | buffers released exactly once | typed outcome | `P05-OUTPUT` |
+| Destination request/response | job | host | effect/response pair | before any write | grant flag; the path never leaves the host | rejection recovers | `P05-OUTPUT` |
+| Recovery choice | job/UI | job | event/command pair | correlated by decision generation | typed allowed actions | stale choice rejected | `P05-RECOVERY` |
 | Progress snapshot | job | UI | job→UI event | monotonic | absolute counts | n/a (transient) | `P05-VARIANTS` |
 | Terminal outcome | job | UI | job→UI event | exactly once | output ID or error | terminal wins | `P05-VARIANTS` |
 

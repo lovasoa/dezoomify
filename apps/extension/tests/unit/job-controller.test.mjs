@@ -200,7 +200,7 @@ test("lifecycle effects and events run in engine order on one chain", async () =
   assert.deepEqual(kinds, ["decodePixels", "openEncoder", "finalizeEncoder", "publishOutput", "release"]);
   assert.deepEqual(assembly.calls[1], ["openEncoder", "png", { width: 32, height: 32 }]);
   const destination = sent.find((message) => message.type === "engine.command");
-  assert.deepEqual(destination.command, { type: "destination-response", destination: "dst:0", granted: true });
+  assert.deepEqual(destination.command, { type: "destination-response", granted: true });
 });
 
 test("partial decisions surface the engine decision generation", async () => {

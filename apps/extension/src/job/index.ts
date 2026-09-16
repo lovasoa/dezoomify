@@ -304,7 +304,7 @@ function candidates(message: Record<string, unknown>) {
   // The document URL is an explicit candidate, so the first entry is not
   // necessarily the zoomable source: rank with the core preference order
   // (resource-timing viewer traffic first) before starting the engine.
-  jobWorker?.postMessage({ type: "engine.rank", requestId: requestId("rank"), urls: values });
+  jobWorker?.postMessage({ type: "engine.rank", urls: values });
 }
 
 function ranked(message: WorkerMessage) {
