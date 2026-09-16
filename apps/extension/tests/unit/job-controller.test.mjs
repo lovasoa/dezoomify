@@ -1,13 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 import { importTypeScript } from "./ts-source-loader.mjs";
 
 async function loadController() {
   return importTypeScript(new URL("../../src/job/controller.ts", import.meta.url));
 }
 
+/**
+ * transport.ts imports the shared failure classifier, so unlike the
+ * import-free controller it cannot be loaded from a data: URL as written:
+ * bundle it (esbuild is already the suite's transpiler) and import the exact
+ * module plus its dependency.
+ */
+async function loadTransport() {
+  const bundled = await build({
+    entryPoints: [fileURLToPath(new URL("../../src/job/transport.ts", import.meta.url))],
+    bundle: true,
+    format: "esm",
+    platform: "neutral",
+    target: "es2022",
+    write: false,
+  });
+  const code = bundled.outputFiles[0].text;
+  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(code)}`);
+}
+
 const { createJobController } = await loadController();
+const { createCoordinatorSourceTransport } = await loadTransport();
 
 const BINDING = { jobId: "job:test-1", tabId: 7, frameId: 0, documentGeneration: 1 };
 
@@ -24,14 +46,14 @@ function fakeAssembly() {
   };
 }
 
-function harness({ assembly = fakeAssembly(), acquireTile } = {}) {
+function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport } = {}) {
   if (acquireTile) assembly.acquireTile = acquireTile;
   const sent = [];
   const seen = [];
   const controller = createJobController({
     worker: { postMessage: (message) => sent.push(message) },
     binding: () => BINDING,
-    sourceTransport: {
+    sourceTransport: sourceTransport ?? {
       async fetchResource(request) { seen.push(["source", request]); return { bytes: new Uint8Array([9]) }; },
     },
     extensionTransport: {
@@ -126,6 +148,38 @@ test("metadata requests route through the source transport", async () => {
   }]);
   await flush();
   assert.equal(seen[0][0], "source");
+});
+
+test("coordinator source fetches name the engine request on the extension bus", async () => {
+  // The coordinator (background service worker) only accepts its own string
+  // request tokens, while the engine correlates by numeric sequence: the
+  // controller must hand the sequence to the transport, which names it once.
+  const bus = [];
+  const sourceTransport = createCoordinatorSourceTransport({
+    async sendMessage(message) { bus.push(message); return { ok: true }; },
+  });
+  const { controller, sent } = harness({ sourceTransport });
+  controller.handleEngineMessages([{
+    kind: "effect",
+    type: "acquire-resource",
+    effect: "fx:0",
+    request: { id: 4, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" },
+  }]);
+  await flush();
+  assert.deepEqual(
+    bus.map(({ type, requestId, url, purpose }) => ({ type, requestId, url, purpose })),
+    [{ type: "dz.job.fetch", requestId: "req:4", url: "https://source.test/image.dzi", purpose: "metadata" }],
+  );
+  assert.equal(sent.some((message) => message.type === "engine.failure"), false, "a routed fetch must not fail the engine");
+
+  // The coordinator answers under its own token; the assembled bytes settle
+  // the engine's numeric request.
+  sourceTransport.handleMessage({ requestId: "req:4", sourceType: "dz.source.fetch-chunk", bytes: new Uint8Array([1, 2]) });
+  sourceTransport.handleMessage({ requestId: "req:4", sourceType: "dz.source.fetch-complete", ok: true, status: 200, url: "https://source.test/image.dzi" });
+  await flush();
+  const bytes = sent.find((message) => message.type === "engine.bytes");
+  assert.equal(bytes?.requestId, 4);
+  assert.deepEqual([...bytes.bytes], [1, 2]);
 });
 
 test("lifecycle effects and events run in engine order on one chain", async () => {

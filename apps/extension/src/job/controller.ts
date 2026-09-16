@@ -33,7 +33,7 @@
  *   extensionTransport: { fetchResource: (url: string, opts?: unknown) => Promise<{ bytes: Uint8Array }>, cancel: () => void },
  *   assembly: AssemblyLike,
  *   classifyFailure: (error: unknown) => { blocked_reason?: string, [key: string]: unknown },
- *   onPermissionRequired: (detail: { hosts: string[], requestId: string, jobId: string }) => void,
+ *   onPermissionRequired: (detail: { hosts: string[], requestId: number, jobId: string }) => void,
  *   onPartialDecision: (recovery: string) => void,
  *   onHostFailure: (error: unknown) => void,
  *   onEvent: (event: any) => void,
@@ -55,7 +55,7 @@ interface JobControllerDeps {
   extensionTransport: { fetchResource(url: string, opts?: unknown): Promise<{ bytes: Uint8Array }>; cancel(): void };
   assembly: AssemblyLike;
   classifyFailure(error: unknown): { blocked_reason?: string; [key: string]: unknown };
-  onPermissionRequired(detail: { hosts: string[]; requestId: string; jobId: string }): void;
+  onPermissionRequired(detail: { hosts: string[]; requestId: number; jobId: string }): void;
   onPartialDecision(generation: number): void;
   onHostFailure(error: unknown): void;
   onEvent(event: unknown): void;
@@ -86,8 +86,8 @@ export function createJobController(deps: JobControllerDeps) {
     const useSource = request.purpose === "metadata" || request.purpose === "probe";
     try {
       const result = useSource
-        ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: String(request.id), uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose })
-        : await deps.extensionTransport.fetchResource(request.uri, { requestId: String(request.id), purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
+        ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: request.id, uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose })
+        : await deps.extensionTransport.fetchResource(request.uri, { requestId: request.id, purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
       if (cancelled) return;
       if (effect.type === "acquire-tile" && typeof effect.tile === "number" && effect.placement) {
         // Decode-at-acquisition: the placement is recorded and the bitmap is
@@ -103,7 +103,7 @@ export function createJobController(deps: JobControllerDeps) {
         // A visible, explicit user action may grant this host. Keep the
         // effect pending so the same acquisition can resume after a grant.
         waitingForPermission.set(request.id, { effect, failure });
-        deps.onPermissionRequired({ hosts, requestId: String(request.id), jobId: deps.binding().jobId });
+        deps.onPermissionRequired({ hosts, requestId: request.id, jobId: deps.binding().jobId });
         return;
       }
       if (!cancelled) sendToEngine({ type: "engine.failure", requestId: request.id, error: failure });

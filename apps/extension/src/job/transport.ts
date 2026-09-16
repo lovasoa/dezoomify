@@ -24,8 +24,11 @@ function responseBytes(value: unknown): Uint8Array | null {
 
 /**
  * Route a source-bound request through the browser-owned coordinator. The
- * requestId is mandatory: it binds a future chunk sequence to one WASM
- * effect, not merely to the current job tab.
+ * engine's numeric request sequence is mandatory: it binds a future chunk
+ * sequence to one WASM effect, not merely to the current job tab. The
+ * coordinator bus speaks its own `req:*` string tokens, so this adapter names
+ * the sequence once on the way out and matches the echoed token back to the
+ * pending engine request.
  *
  * The coordinator owns this extension-local chunk/ack sequence.
  * This small bridge accepts its final assembled reply for now, preserving the
@@ -34,21 +37,22 @@ function responseBytes(value: unknown): Uint8Array | null {
 export function createCoordinatorSourceTransport(deps: { sendMessage(message: unknown): Promise<unknown> }) {
   const pending = new Map<string, PendingSource>();
   return {
-    /** @param {{ binding: JobBinding, requestId: string, uri: string, method?: string, headers: unknown, purpose: string }} request */
-    async fetchResource(request: { binding: JobBinding; requestId: string; uri: string; method?: string; headers: unknown; purpose: string }): Promise<SourceReply> {
-      if (!isJobBinding(request.binding) || typeof request.requestId !== "string" || !request.requestId.startsWith("req:")) {
+    /** @param {{ binding: JobBinding, requestId: number, uri: string, method?: string, headers: unknown, purpose: string }} request */
+    async fetchResource(request: { binding: JobBinding; requestId: number; uri: string; method?: string; headers: unknown; purpose: string }): Promise<SourceReply> {
+      if (!isJobBinding(request.binding) || !Number.isSafeInteger(request.requestId) || request.requestId < 0) {
         throw Object.assign(new Error("invalid source fetch binding"), { category: "malformed" });
       }
+      const token = `req:${request.requestId}`;
       await deps.sendMessage({
         type: "dz.job.fetch",
         ...request.binding,
-        requestId: request.requestId,
+        requestId: token,
         url: request.uri,
         method: request.method,
         headers: request.headers,
         purpose: request.purpose,
       });
-      return await new Promise<SourceReply>((resolve, reject) => pending.set(request.requestId, { resolve, reject, chunks: [], finalUrl: request.uri }));
+      return await new Promise<SourceReply>((resolve, reject) => pending.set(token, { resolve, reject, chunks: [], finalUrl: request.uri }));
     },
     /** Receive a coordinator-routed `dz.source.fetch-*` message. */
     handleMessage(message: { requestId?: string; sourceType?: string; bytes?: unknown; ok?: boolean; status?: number; url?: string }): boolean {
