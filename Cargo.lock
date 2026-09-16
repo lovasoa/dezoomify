@@ -2607,11 +2607,11 @@ dependencies = [
 
 [[package]]
 name = "krpano-decrypt"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b994290b8fab9ea4bdf6f3ab43fe39b0d87ce5e7a95d7d61392872f5ddadfbf"
+checksum = "d0cec8136ca3601249404129873fe12abd0257bfc6df736e7138b645a3c4868d"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "log",
  "regex",
  "thiserror 2.0.20",
