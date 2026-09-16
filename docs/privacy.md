@@ -37,8 +37,12 @@ When something goes wrong, the error message you see is assembled from
 information already on your device.
 
 **What you look at stays yours.** The addresses of the pages you open,
-their titles, and the pictures themselves never end up in any error text,
-any report, or any log of ours.
+their titles, and the pictures themselves never end up in any report or
+log of ours. A page's address can appear in the technical details an app
+shows on your own device, to help you or a volunteer understand what
+failed; those details leave your device only if you copy and send them
+yourself, and the apps remind you to remove sign-in details and tokens
+before sharing.
 
 **The helper server keeps almost no logs.** When it fetches a public
 image description for you, its log records that a request happened, and a

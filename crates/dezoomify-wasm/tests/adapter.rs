@@ -392,15 +392,21 @@ fn discovery_failure_and_cancel_paths_follow_the_engine() {
     match &decode_all(&messages).last().expect("messages").body {
         ControlBody::Event(JobEvent::Failed { error, .. }) => {
             assert_eq!(error.code, "job.discovery-failed");
+            // Host message text never crosses into the engine, so the
+            // canary cannot leak structurally (not merely by redaction).
             assert!(!error.message.contains("CANARY"));
-            // The engine names the failed request itself, so a fetch failure
-            // is never the bare "host fetch failed" it used to be.
+            // The engine block carries the typed bullet, not a URL: the
+            // host names the failed request once, outside the block.
             assert!(
-                error.message.contains("https://example.com/image.dzi"),
-                "fetch failure must name the request URL: {}",
+                error.message.contains("fetching this address"),
+                "fetch failure must render the typed bullet: {}",
                 error.message
             );
-            assert!(error.message.contains("REDACTED"));
+            assert!(
+                !error.message.contains("https://"),
+                "engine block must not embed URLs: {}",
+                error.message
+            );
         }
         other => panic!("expected failed, got {other:?}"),
     }

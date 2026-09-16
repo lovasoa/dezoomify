@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use dezoomify_core::core::discovery::FetchCause;
 use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::CatalogDto;
 use serde::{Deserialize, Serialize};
@@ -67,9 +68,9 @@ pub enum JobCommand {
     },
     FetchFailure {
         request: u32,
-        /// Host fetch detail (HTTP status, category, bounded server
-        /// signal). Empty when the host reports nothing beyond failure.
-        detail: String,
+        /// Typed cause of the failed fetch; the engine groups discovery
+        /// diagnostics on it, never on rendered text.
+        cause: FetchCause,
     },
     SelectImage {
         image: u32,

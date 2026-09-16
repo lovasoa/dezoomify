@@ -8,7 +8,6 @@ import {
   formatMissingSummary,
   phaseFor,
   plainMessageFor,
-  technicalDetailFor,
   trimTechnical,
 } from "./errorCopy.ts";
 
@@ -46,6 +45,7 @@ export interface FailEnv {
   nativeTransport: string;
   host: () => string;
   origin: () => string;
+  sourceUrl: () => string;
   clearPending: () => void;
   stopHeartbeat: () => void;
   pushLog: (line: string) => void;
@@ -69,22 +69,14 @@ export function dispatchFail(env: FailEnv, code: string, message: string, opts?:
     opts?.retryable ?? (code !== "INVALID_URL" && code !== "NO_IMAGE_FOUND" && code !== "OUTPUT_DENIED");
   // Layered presentation: the first message stays a plain jargon-free
   // sentence naming the step, picture source, and single best action.
-  // The technical chain (transport, status, trimmed origin, engine text)
-  // lives only in the collapsible detail.
+  // The shared renderer composes the technical details from the typed
+  // fields below (url line, engine block, trailing context line); the
+  // desktop provenance lines ride as `extras` after it.
   const plain = plainMessageFor(code, message, env.host());
-  const technical = technicalDetailFor(
-    code,
-    message,
-    opts?.detail,
-    {
-      phase,
-      transport,
-      ...(opts?.resourceKind ? { resourceKind: opts.resourceKind } : {}),
-    },
-    env.getStatus(),
-    env.origin(),
-    env.nativeTransport,
-  );
+  const engine = trimTechnical(message || "");
+  const extra = opts?.detail && opts?.detail !== message ? trimTechnical(opts.detail) : "";
+  const detail = [engine, extra].filter(Boolean).join("\n\n");
+  const url = env.sourceUrl();
   env.dispatch({
     seq: env.next(),
     sessionId: env.sessionId(),
@@ -97,7 +89,14 @@ export function dispatchFail(env: FailEnv, code: string, message: string, opts?:
       message: plain,
       transport,
       phase,
-      detail: technical,
+      ...(detail ? { detail } : {}),
+      // Full request URL, rendered verbatim in the on-device details only.
+      ...(url ? { url } : {}),
+      extras: [
+        `Status: ${env.getStatus()}`,
+        `Origin: ${env.origin() === "" ? "n/a" : env.origin()}`,
+        ...(opts?.resourceKind ? [`Resource: ${opts.resourceKind}`] : []),
+      ],
     },
   });
   env.pushLog(`Failed (${code}): ${trimTechnical(message, 160)}`);

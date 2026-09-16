@@ -123,24 +123,21 @@ fn handle_failure(
     request: &Request,
     failure: &ResourceFailure,
 ) -> Result<DiscoveryStep, DiscoveryError> {
-    let message = failure.message.as_str();
-    debug!("krpano: resource failure: {message}");
+    debug!("krpano: fetch failed: {}", failure.cause.describe());
     if let Some(xml) = find_xml(context) {
         warn!(
-            "krpano: viewer JS fetch failed for {}: {message}",
-            redact_uri(xml.final_uri())
+            "krpano: viewer JS fetch failed for {}: {}",
+            redact_uri(xml.final_uri()),
+            failure.cause.describe()
         );
         if let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
         {
             return Ok(DiscoveryStep::Follow(Request::new(uri)));
         }
-        return Err(DiscoveryError::Session(format!(
-            "failed to download krpano viewer script: {message}"
-        )));
     }
-    Err(DiscoveryError::Session(format!(
-        "failed to download krpano metadata: {message}"
-    )))
+    // No recovery left: report the fetch failure with its typed cause
+    // (stage detail lives in the debug log above, never in the error).
+    Err(DiscoveryError::fetch_failed(failure.cause.clone()))
 }
 
 fn find_xml<'a>(context: &DiscoveryContext<'a>) -> Option<DiscoveryResource<'a>> {
@@ -553,7 +550,10 @@ impl GridRequests for KrpanoLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::discovery::{DiscoveryOperation, ResourceFailure, ResourceNeed};
+    use crate::core::discovery::{
+        DiscoveryError, DiscoveryOperation, FetchCause, FetchCode, RejectionKind, ResourceFailure,
+        ResourceNeed, TransportKind,
+    };
     use crate::core::{ResourceResponse, TileSource};
 
     fn image(catalog: ImageCatalog) -> ImageDescriptor {
@@ -1078,13 +1078,18 @@ mod tests {
 
     #[test]
     fn failed_viewer_attempts_advance_to_the_next_candidate() {
-        for failure in [None, Some("unavailable")] {
+        for failure in [false, true] {
             let (mut operation, first) = operation_waiting_for_first_viewer();
-            if let Some(message) = failure {
+            if failure {
                 operation
                     .provide_failure(ResourceFailure {
                         id: first.id,
-                        message: message.into(),
+                        cause: FetchCause {
+                            code: FetchCode::TransportHttpError,
+                            http: Some(404),
+                            transport: TransportKind::Direct,
+                            reason: None,
+                        },
                     })
                     .unwrap();
             } else {
@@ -1106,6 +1111,48 @@ mod tests {
                 "https://example.com/pano/second.js"
             );
         }
+    }
+
+    #[test]
+    fn exhausted_viewer_failures_report_the_typed_cause() {
+        let (mut operation, first) = operation_waiting_for_first_viewer();
+        let cause = FetchCause {
+            code: FetchCode::TransportHttpError,
+            http: Some(403),
+            transport: TransportKind::Direct,
+            reason: None,
+        };
+        operation
+            .provide_failure(ResourceFailure {
+                id: first.id,
+                cause: cause.clone(),
+            })
+            .unwrap();
+        let second = operation.missing_resources().unwrap().pop().unwrap();
+        // The last viewer failure rejects the only candidate, so the
+        // aggregate surfaces from the provide call itself; the krpano
+        // diagnostic must carry the typed fetch cause, not a wrapped
+        // sentence.
+        let error = operation
+            .provide_failure(ResourceFailure {
+                id: second.id,
+                cause: cause.clone(),
+            })
+            .unwrap_err();
+        let DiscoveryError::NoCandidateAccepted { diagnostics } = &error else {
+            panic!("expected no-candidate aggregate, got {error}");
+        };
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.format == "krpano")
+            .expect("krpano diagnostic");
+        assert_eq!(diagnostic.kind, RejectionKind::FetchFailed);
+        assert_eq!(diagnostic.cause.as_ref(), Some(&cause));
+        assert!(
+            error
+                .engine_detail()
+                .contains("krpano: HTTP 403 fetching this address")
+        );
     }
 
     #[test]

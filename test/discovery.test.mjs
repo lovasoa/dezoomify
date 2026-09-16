@@ -4,7 +4,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  classifyDiscovery,
   classifyReadableBytes,
   isZoomableContent,
   looksLikeZoomableJson,
@@ -72,14 +71,12 @@ const ZOOMIFY_PAGE_HTML = `<html><body><script>var zoomifyImagePath="/zoomify/pi
 // Real shape served by lh3.googleusercontent.com at "<base_url>=g".
 const GOOGLE_ARTS_TILEINFO_XML = `<?xml version="1.0" encoding="UTF-8"?><TileInfo tile_width="512" tile_height="512" full_pyramid_depth="4" origin="TOP_LEFT" timestamp="1788621048" tiler_version_number="2" image_width="2446" image_height="3524"><pyramid_level num_tiles_x="1" num_tiles_y="1" inverse_scale="8" empty_pels_x="207" empty_pels_y="72"/><pyramid_level num_tiles_x="2" num_tiles_y="2" inverse_scale="4" empty_pels_x="413" empty_pels_y="2"/></TileInfo>`;
 
-function readable(textOrBytes, extra = {}) {
-  const bytes =
-    typeof textOrBytes === "string" ? textToBytes(textOrBytes) : textOrBytes;
-  return { via: "direct", result: { outcome: "readable", finalUrl: "https://x.test/", status: 200, headers: {}, bytes, ...extra } };
+function hint(textOrBytes, contentType) {
+  return classifyReadableBytes(textOrBytes, { via: "direct", contentType });
 }
 
 test("negative: generic article page (anthropic-like) is NO_IMAGE_FOUND, never tiles", () => {
-  const res = classifyDiscovery("https://www.anthropic.com/research/formalizing-fermats-last-theorem", readable(ANTHROPIC_LIKE_HTML));
+  const res = hint(ANTHROPIC_LIKE_HTML);
   assert.equal(res.found, false);
   assert.equal(res.error.code, "NO_IMAGE_FOUND");
   assert.equal(res.error.category, "discovery");
@@ -105,8 +102,7 @@ test("negative: empty, prose, PWA manifest, schema.org JSON-LD, SVG image tag ar
     // Bare <image> in SVG must not count without DZI structure.
     ["svg-image", `<svg xmlns="http://www.w3.org/2000/svg"><image href="/a.jpg" width="10" height="10"/></svg>`, "image/svg+xml"],
   ]) {
-    const extra = contentType ? { headers: { "content-type": contentType } } : {};
-    const res = classifyDiscovery("https://public.test/page", readable(input, extra));
+    const res = hint(input, contentType);
     assert.equal(res.found, false, name);
     assert.equal(res.error.code, "NO_IMAGE_FOUND", name);
   }
@@ -130,89 +126,7 @@ test("negative: single-image bytes and image content-type never count as zoomabl
   assert.equal(noType.found, false);
 });
 
-test("error: http statuses map to plain retryable/terminal transport errors", () => {
-  const cases = [
-    ["https://public.test/missing", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/missing", status: 404, headers: {} } }, "TRANSPORT_HTTP_ERROR", false],
-    ["https://public.test/denied", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/denied", status: 403, headers: {} } }, "TRANSPORT_HTTP_ERROR", false],
-    ["https://public.test/busy", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/busy", status: 500, headers: {} } }, "TRANSPORT_HTTP_ERROR", true],
-    ["https://public.test/rate", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/rate", status: 429, headers: {} } }, "UPSTREAM_RATE_LIMITED", true],
-  ];
-  for (const [url, fetchOutput, code, retryable] of cases) {
-    const res = classifyDiscovery(url, fetchOutput);
-    assert.equal(res.found, false, url);
-    assert.equal(res.error.code, code, url);
-    assert.equal(res.error.retryable, retryable, url);
-    assert.ok(!res.error.message.match(/cors|proxy|dezoomer|http 429/i), `no jargon in ${url}: ${res.error.message}`);
-  }
-  // A direct 429 throttles the user's own connection, so the copy must not
-  // blame "our server" and must tell the user to wait rather than switch apps.
-  const direct429 = classifyDiscovery("https://public.test/rate", { via: "direct", result: { outcome: "http-error", finalUrl: "https://public.test/rate", status: 429, headers: {} } });
-  assert.ok(!direct429.error.message.includes("our server"), `direct 429 must not mention our server: ${direct429.error.message}`);
-  assert.ok(direct429.error.message.includes("Wait"), `direct 429 must tell the user to wait: ${direct429.error.message}`);
-});
-
-test("error: network, cancelled, policy-denied, and malformed map distinctly", () => {
-  const net = classifyDiscovery("https://public.test/x", { via: "direct", result: { outcome: "network-error", reason: "Failed to fetch" } });
-  assert.equal(net.found, false);
-  assert.equal(net.error.code, "TRANSPORT_NETWORK_ERROR");
-  assert.equal(net.error.retryable, true);
-
-  const cancelled = classifyDiscovery("https://public.test/x", { via: "direct", result: { outcome: "cancelled", reason: "aborted" } });
-  assert.equal(cancelled.found, false);
-  assert.equal(cancelled.cancelled, true);
-
-  const denied = classifyDiscovery("https://public.test/x", { via: "direct", result: { outcome: "policy-denied", reason: "x", code: "TRANSPORT_POLICY_DENIED" } });
-  assert.equal(denied.found, false);
-  assert.equal(denied.error.retryable, false);
-
-  const ordinary = classifyDiscovery("https://public.test/x", { via: "direct", result: { outcome: "ordinary-image-allowed", finalUrl: "https://public.test/x" } });
-  assert.equal(ordinary.found, false);
-  assert.equal(ordinary.error.code, "NO_IMAGE_FOUND");
-
-  const malformed = classifyDiscovery("https://public.test/x", { via: "direct", result: { outcome: "weird" } });
-  assert.equal(malformed.found, false);
-
-  const missing = classifyDiscovery("https://public.test/x", { via: "direct" });
-  assert.equal(missing.found, false);
-});
-
-test("error: proxy failures map without leaking proxy internals to tile progress", () => {
-  const rate = classifyDiscovery("https://public.test/x.json", { via: "proxy", result: { ok: false, status: 429, code: "PROXY_RATE_LIMITED" } });
-  assert.equal(rate.found, false);
-  assert.equal(rate.error.code, "UPSTREAM_RATE_LIMITED");
-  assert.equal(rate.error.retryable, true);
-  // A proxy 429 throttles OUR server's IP, so the copy must explain that the
-  // website limits our server and point to the apps that fetch from the
-  // user's own connection, without jargon.
-  assert.ok(!rate.error.message.match(/cors|proxy|dezoomer|http 429/i), `no jargon: ${rate.error.message}`);
-  assert.ok(rate.error.message.includes("our server"), `proxy 429 must explain our server was throttled: ${rate.error.message}`);
-  assert.ok(rate.error.message.includes("browser extension") && rate.error.message.includes("desktop app"), `proxy 429 must guide to extension/desktop: ${rate.error.message}`);
-
-  const budget = classifyDiscovery("https://public.test/x.json", { via: "proxy", result: { ok: false, status: 413, code: "PROXY_BUDGET_EXCEEDED" } });
-  assert.equal(budget.found, false);
-  assert.equal(budget.error.retryable, false);
-
-  const denied = classifyDiscovery("https://public.test/x.json", { via: "proxy", result: { ok: false, status: 403, code: "PROXY_POLICY_DENIED" } });
-  assert.equal(denied.found, false);
-
-  const http = classifyDiscovery("https://public.test/x.json", { via: "proxy", result: { ok: false, status: 404, code: "TRANSPORT_HTTP_ERROR" } });
-  assert.equal(http.found, false);
-  assert.equal(http.error.code, "TRANSPORT_HTTP_ERROR");
-
-  const proxyCancelled = classifyDiscovery("https://public.test/x.json", { via: "proxy", result: { ok: false, status: 0, code: "TRANSPORT_CANCELLED" } });
-  assert.equal(proxyCancelled.cancelled, true);
-
-  // Proxy success with generic HTML is still negative.
-  const proxyHtml = classifyDiscovery("https://public.test/page", {
-    via: "proxy",
-    result: { ok: true, status: 200, bytes: textToBytes(ANTHROPIC_LIKE_HTML), contentType: "text/html" },
-  });
-  assert.equal(proxyHtml.found, false);
-  assert.equal(proxyHtml.error.code, "NO_IMAGE_FOUND");
-  assert.equal(proxyHtml.via, "proxy");
-});
-
-test("positive: DZI, Zoomify, IIIF, Google Arts tile info, and viewer embeds are found (direct and proxy)", () => {
+test("positive: DZI, Zoomify, IIIF, Google Arts tile info, and viewer embeds are found", () => {
   const positives = [
     ["dzi-xml", DZI_XML, "text/xml"],
     ["zoomify-xml", ZOOMIFY_XML, "text/xml"],
@@ -227,16 +141,7 @@ test("positive: DZI, Zoomify, IIIF, Google Arts tile info, and viewer embeds are
     ["google-arts-tileinfo", GOOGLE_ARTS_TILEINFO_XML, "text/xml"],
   ];
   for (const [name, text, ct] of positives) {
-    const direct = classifyDiscovery("https://public.test/item", {
-      via: "direct",
-      result: { outcome: "readable", finalUrl: "https://public.test/item", status: 200, headers: { "content-type": ct }, bytes: textToBytes(text) },
-    });
-    assert.equal(direct.found, true, `direct ${name}`);
-    const proxy = classifyDiscovery("https://public.test/item", {
-      via: "proxy",
-      result: { ok: true, status: 200, bytes: textToBytes(text), contentType: ct },
-    });
-    assert.equal(proxy.found, true, `proxy ${name}`);
+    assert.equal(hint(textToBytes(text), ct).found, true, name);
     assert.equal(isZoomableContent(text), true, name);
   }
   assert.equal(looksLikeZoomableJson(IIIF_INFO), true);
@@ -244,24 +149,11 @@ test("positive: DZI, Zoomify, IIIF, Google Arts tile info, and viewer embeds are
   assert.equal(hasZoomableContentMarker(OPENSEADRAGON_HTML), true);
 });
 
-test("browser mirror stays in sync with the tested TS classifier", () => {
-  const vectors = [
-    readable(ANTHROPIC_LIKE_HTML),
-    readable(DZI_XML),
-    readable(IIIF_INFO),
-    readable(PWA_MANIFEST),
-    { via: "direct", result: { outcome: "network-error", reason: "x" } },
-    { via: "direct", result: { outcome: "http-error", finalUrl: "https://x/", status: 404, headers: {} } },
-    { via: "proxy", result: { ok: true, status: 200, bytes: textToBytes(OPENSEADRAGON_HTML), contentType: "text/html" } },
-  ];
-  for (const v of vectors) {
-    const a = classifyDiscovery("https://public.test/u", v);
-    const b = discoveryJs.classifyDiscovery("https://public.test/u", v);
-    assert.deepEqual(b, a);
-  }
+test("typed module surface stays exportable (no dead error-path classifier)", () => {
+  assert.equal(typeof discoveryJs.bytesToTextPreview, "function");
+  assert.equal(typeof discoveryJs.bytesToTextPreview(textToBytes("hi")), "string");
   assert.equal(discoveryJs.isZoomableContent(ANTHROPIC_LIKE_HTML), false);
   assert.equal(discoveryJs.isZoomableContent(DZI_XML), true);
-  assert.equal(typeof discoveryJs.bytesToTextPreview(textToBytes("hi")), "string");
   assert.equal(bytesToTextPreview(textToBytes("hi")), "hi");
 });
 
@@ -306,13 +198,23 @@ test("entries never fabricate tile progress; negatives carry a structured error"
   );
   assert.ok(
     !webFetchTs.includes('throw failure(\n      "NO_IMAGE_FOUND"') &&
-      !webFetchTs.includes('throw failure("NO_IMAGE_FOUND"'),
+      !webFetchTs.includes('throw failure("NO_IMAGE_FOUND"') &&
+      !webFetchTs.includes('throw fetchFailure("NO_IMAGE_FOUND"'),
     "shared web fetcher must not throw NO_IMAGE_FOUND before the engine runs",
   );
-  // NO_IMAGE_FOUND still exists as the engine's terminal discovery code
-  // (worker maps "no discovery candidate accepted" to it).
+  // NO_IMAGE_FOUND still exists as the engine's terminal discovery code:
+  // the worker maps the wasm adapter's typed `adapter.no-candidate` code to
+  // it, never a substring of the rendered aggregate.
   const workerJs = fs.readFileSync(path.join(srcDir, "src", "worker.js"), "utf8");
   assert.ok(workerJs.includes('"NO_IMAGE_FOUND"'), "worker still reports NO_IMAGE_FOUND from the engine");
+  assert.ok(
+    workerJs.includes('engine.code === "adapter.no-candidate"'),
+    "worker detects the engine aggregate by its typed adapter code",
+  );
+  assert.ok(
+    !workerJs.includes('includes("no discovery candidate accepted")'),
+    "worker must not sniff the rendered aggregate text",
+  );
   // Negative verdict shape always carries a terminal discovery error.
   const err = noImageFoundError("direct");
   assert.equal(err.code, "NO_IMAGE_FOUND");

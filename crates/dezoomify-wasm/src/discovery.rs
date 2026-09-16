@@ -6,7 +6,9 @@
 //! one provide call, and nothing here performs I/O.
 
 use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult};
-use dezoomify_core::core::discovery::{DiscoveryOperation, ResourceFailure, ResourceResponse};
+use dezoomify_core::core::discovery::{
+    DiscoveryOperation, FetchCause, ResourceFailure, ResourceResponse,
+};
 use dezoomify_core::core::model::{CatalogEntry, ProcessingRecipe, Request, TileRole};
 use dezoomify_core::core::registry::default_registry;
 use dezoomify_core::core::tile_plan::{Grid, TileSource, TileSourceError};
@@ -159,16 +161,22 @@ impl DiscoverySession {
         Ok(())
     }
 
-    /// Report a failed host fetch for one outstanding need.
+    /// Report a failed host fetch for one outstanding need. `cause_json`
+    /// is the serialized core [`FetchCause`] (`{code, http?, transport,
+    /// reason?}`); the core groups discovery diagnostics on the typed
+    /// cause, never on rendered text.
     ///
     /// # Errors
     ///
-    /// `malformed` for unknown request ids or core rejections.
+    /// `malformed` for an undecodable cause, unknown request ids, or core
+    /// rejections.
     pub fn provide_failure(
         &mut self,
         request_id: usize,
-        message: &str,
+        cause_json: &str,
     ) -> Result<(), AdapterError> {
+        let cause: FetchCause = serde_json::from_str(cause_json)
+            .map_err(|e| malformed(format!("provideFailure needs a JSON fetch cause: {e}")))?;
         let operation = self
             .operation
             .as_mut()
@@ -176,7 +184,7 @@ impl DiscoverySession {
         operation
             .provide_failure(ResourceFailure {
                 id: dezoomify_core::core::discovery::RequestId(request_id),
-                message: message.to_string(),
+                cause,
             })
             .map_err(discovery_error)?;
         Ok(())
@@ -440,7 +448,19 @@ pub fn rank_candidates_json(urls_json: &str) -> Result<String, AdapterError> {
 }
 
 fn discovery_error(error: dezoomify_core::core::discovery::DiscoveryError) -> AdapterError {
-    AdapterError::new(AdapterErrorCode::Malformed, redact(&error.to_string()))
+    // A rejected aggregate carries the engine's headline-free bullet
+    // block under its own stable code, so hosts can map it to their
+    // "no image found" copy without sniffing message text. Every other
+    // core error keeps the plain `malformed` mapping.
+    let code = if matches!(
+        error,
+        dezoomify_core::core::discovery::DiscoveryError::NoCandidateAccepted { .. }
+    ) {
+        AdapterErrorCode::NoCandidate
+    } else {
+        AdapterErrorCode::Malformed
+    };
+    AdapterError::new(code, redact(&error.engine_detail()))
 }
 
 fn tile_error(error: TileSourceError) -> AdapterError {

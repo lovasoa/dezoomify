@@ -7,7 +7,7 @@
 //
 //   main -> worker: {type:"start", url}            begin discovery
 //                   {type:"provide", id, bytes, finalUri}
-//                   {type:"fail", id, message}
+//                   {type:"fail", id, cause, url?, http?, preview?, userMessage, code, retryable}
 //                   {type:"plan", image, level}
 //                   {type:"probe-submit", image, level, ok, width, height}
 //                   {type:"process", recipe, bytes}
@@ -15,14 +15,14 @@
 //                   {type:"catalog", catalog}
 //                   {type:"plan", canvas, tiles} | {type:"probe", uri, headers}
 //                   {type:"processed", bytes}
-//                   {type:"error", code, message}
+//                   {type:"error", code, message, detail?, url?, http?, preview?, retryable}
 
-import { failure } from "./failure.ts";
-import type { StructuredFailure } from "./failure.ts";
+import { failure, fetchFailure } from "./failure.ts";
+import type { FetchCause, StructuredFailure } from "./failure.ts";
 import type { CatalogDto } from "../../protocol-ts/src/generated.ts";
 
-export { failure };
-export type { StructuredFailure };
+export { failure, fetchFailure };
+export type { FetchCause, StructuredFailure };
 
 export interface WorkerLike {
   postMessage(msg: unknown, transfer?: Transferable[]): void;
@@ -122,13 +122,30 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
             worker.postMessage({ type: "provide", id, bytes, finalUri: clean }, [bytes]);
           })
           .catch((error: unknown) => {
-            const structured = error as { code?: string; message?: string; technical?: string; retryable?: boolean };
+            const structured = error as {
+              code?: string;
+              message?: string;
+              cause?: FetchCause;
+              url?: string;
+              http?: number;
+              preview?: string;
+              transportKind?: string;
+              retryable?: boolean;
+            };
             worker.postMessage({
               type: "fail",
               id,
-              // The engine aggregates per-candidate diagnostics, so it must
-              // receive the dense technical message, never the UI copy.
-              message: structured?.technical || structured?.message || String(error),
+              // The engine receives the typed cause only: it groups
+              // diagnostics on it and never sees rendered text.
+              cause:
+                structured?.cause ?? {
+                  code: structured?.code || "DISCOVERY_FAILED",
+                  transport: structured?.transportKind || "direct",
+                },
+              // Structured context for the technical-details section.
+              url: structured?.url,
+              http: typeof structured?.http === "number" ? structured.http : undefined,
+              preview: structured?.preview,
               userMessage: structured?.message,
               code: structured?.code || "DISCOVERY_FAILED",
               // Retryability is decided at the failure site (an upstream 403
@@ -183,12 +200,15 @@ export function createDiscoveryClient(deps: DiscoveryClientDeps): DiscoveryClien
         const detail = typeof msg.detail === "string" ? msg.detail : undefined;
         const retryable =
           typeof msg.retryable === "boolean" ? (msg.retryable as boolean) : code !== "NO_IMAGE_FOUND";
-        const err = failure(
-          code,
-          (msg.message as string) || "Discovery failed.",
-          retryable,
-          detail,
-        );
+        const err = failure(code, (msg.message as string) || "Discovery failed.", retryable, detail);
+        // Structured context for the technical-details renderer: the full
+        // request URL is rendered verbatim, on-device only.
+        const url = typeof msg.url === "string" && msg.url !== "" ? msg.url : undefined;
+        const http = typeof msg.http === "number" ? (msg.http as number) : undefined;
+        const preview = typeof msg.preview === "string" && msg.preview !== "" ? msg.preview : undefined;
+        if (url) err.url = url;
+        if (http !== undefined) err.http = http;
+        if (preview) err.preview = preview;
         rejectPending(err);
         return;
       }

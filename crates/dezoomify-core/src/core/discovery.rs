@@ -7,6 +7,8 @@
 use std::borrow::Cow;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use super::model::{ImageCatalog, Request};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -45,10 +47,277 @@ impl ResourceResponse {
         self
     }
 }
+
+/// Transport that attempted a fetch. A grouping-key component, never a
+/// display string: hosts keep their own labels.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TransportKind {
+    Direct,
+    MetadataProxy,
+    BrowserSession,
+    Native,
+    DisplayOnly,
+}
+
+impl TransportKind {
+    /// Lenient wire parse of a host transport string. Aliases cover the
+    /// strings today's hosts actually send; unknown and missing values
+    /// fall back to the direct transport (it is the first every host
+    /// tries), so a stale host never fails discovery outright.
+    #[must_use]
+    pub fn from_wire(value: Option<&str>) -> Self {
+        match value {
+            Some("metadata-proxy" | "proxy") => Self::MetadataProxy,
+            Some("browser-session" | "extension-origin") => Self::BrowserSession,
+            Some("native") => Self::Native,
+            Some("display-only") => Self::DisplayOnly,
+            _ => Self::Direct,
+        }
+    }
+}
+
+/// Stable code of one fetch failure. Variant names mirror the codes the
+/// hosts already emit, so the browser passes its strings through
+/// unmapped; [`FetchCode::Unknown`] exists only to decode foreign codes
+/// (another host's vocabulary) without falling back to rendered text.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum FetchCode {
+    TransportHttpError,
+    DiscoveryHttpError,
+    UpstreamRateLimited,
+    TransportPolicyDenied,
+    ProxyBudgetExceeded,
+    ProxyError,
+    ProxyNetworkError,
+    ProxyRateLimited,
+    DiscoveryFailed,
+    TransportTimeout,
+    TransportNetworkError,
+    TransportBadUrl,
+    TransportBadRedirect,
+    TransportRedirectLimit,
+    TransportSizeLimit,
+    Unknown(String),
+}
+
+impl FetchCode {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::TransportHttpError => "TRANSPORT_HTTP_ERROR",
+            Self::DiscoveryHttpError => "DISCOVERY_HTTP_ERROR",
+            Self::UpstreamRateLimited => "UPSTREAM_RATE_LIMITED",
+            Self::TransportPolicyDenied => "TRANSPORT_POLICY_DENIED",
+            Self::ProxyBudgetExceeded => "PROXY_BUDGET_EXCEEDED",
+            Self::ProxyError => "PROXY_ERROR",
+            Self::ProxyNetworkError => "PROXY_NETWORK_ERROR",
+            Self::ProxyRateLimited => "PROXY_RATE_LIMITED",
+            Self::DiscoveryFailed => "DISCOVERY_FAILED",
+            Self::TransportTimeout => "TRANSPORT_TIMEOUT",
+            Self::TransportNetworkError => "TRANSPORT_NETWORK_ERROR",
+            Self::TransportBadUrl => "TRANSPORT_BAD_URL",
+            Self::TransportBadRedirect => "TRANSPORT_BAD_REDIRECT",
+            Self::TransportRedirectLimit => "TRANSPORT_REDIRECT_LIMIT",
+            Self::TransportSizeLimit => "TRANSPORT_SIZE_LIMIT",
+            Self::Unknown(raw) => raw,
+        }
+    }
+
+    /// Decode a host code string; anything unrecognized stays typed as
+    /// [`FetchCode::Unknown`] so grouping keeps working on the raw code.
+    #[must_use]
+    pub fn from_string(value: impl Into<String>) -> Self {
+        let value = value.into();
+        match value.as_str() {
+            "TRANSPORT_HTTP_ERROR" => Self::TransportHttpError,
+            "DISCOVERY_HTTP_ERROR" => Self::DiscoveryHttpError,
+            "UPSTREAM_RATE_LIMITED" => Self::UpstreamRateLimited,
+            "TRANSPORT_POLICY_DENIED" => Self::TransportPolicyDenied,
+            "PROXY_BUDGET_EXCEEDED" => Self::ProxyBudgetExceeded,
+            "PROXY_ERROR" => Self::ProxyError,
+            "PROXY_NETWORK_ERROR" => Self::ProxyNetworkError,
+            "PROXY_RATE_LIMITED" => Self::ProxyRateLimited,
+            "DISCOVERY_FAILED" => Self::DiscoveryFailed,
+            "TRANSPORT_TIMEOUT" => Self::TransportTimeout,
+            "TRANSPORT_NETWORK_ERROR" => Self::TransportNetworkError,
+            "TRANSPORT_BAD_URL" => Self::TransportBadUrl,
+            "TRANSPORT_BAD_REDIRECT" => Self::TransportBadRedirect,
+            "TRANSPORT_REDIRECT_LIMIT" => Self::TransportRedirectLimit,
+            "TRANSPORT_SIZE_LIMIT" => Self::TransportSizeLimit,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+
+impl fmt::Display for FetchCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for FetchCode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FetchCode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::from_string(String::deserialize(deserializer)?))
+    }
+}
+
+/// Why the metadata proxy (or a host-side fetch policy) refused an
+/// address. Kebab strings mirror the relay's closed reason vocabulary;
+/// [`PolicyReason::Unknown`] decodes reasons added by a newer relay.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum PolicyReason {
+    InvalidUrl,
+    Scheme,
+    Userinfo,
+    SignedQuery,
+    NonStandardPort,
+    ProtocolVersion,
+    MalformedBody,
+    Method,
+    LoopbackHost,
+    PrivateHost,
+    BlockedIpv4,
+    BlockedIpv6,
+    DnsRebinding,
+    DnsRebindingV6,
+    ContentType,
+    RedirectLimit,
+    RedirectTarget,
+    Origin,
+    Unknown(String),
+}
+
+impl PolicyReason {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::InvalidUrl => "invalid-url",
+            Self::Scheme => "scheme",
+            Self::Userinfo => "userinfo",
+            Self::SignedQuery => "signed-query",
+            Self::NonStandardPort => "non-standard-port",
+            Self::ProtocolVersion => "protocol-version",
+            Self::MalformedBody => "malformed-body",
+            Self::Method => "method",
+            Self::LoopbackHost => "loopback-host",
+            Self::PrivateHost => "private-host",
+            Self::BlockedIpv4 => "blocked-ipv4",
+            Self::BlockedIpv6 => "blocked-ipv6",
+            Self::DnsRebinding => "dns-rebinding",
+            Self::DnsRebindingV6 => "dns-rebinding-v6",
+            Self::ContentType => "content-type",
+            Self::RedirectLimit => "redirect-limit",
+            Self::RedirectTarget => "redirect-target",
+            Self::Origin => "origin",
+            Self::Unknown(raw) => raw,
+        }
+    }
+
+    /// Decode a relay reason string; unrecognized values stay typed.
+    #[must_use]
+    pub fn from_string(value: impl Into<String>) -> Self {
+        let value = value.into();
+        match value.as_str() {
+            "invalid-url" => Self::InvalidUrl,
+            "scheme" => Self::Scheme,
+            "userinfo" => Self::Userinfo,
+            "signed-query" => Self::SignedQuery,
+            "non-standard-port" => Self::NonStandardPort,
+            "protocol-version" => Self::ProtocolVersion,
+            "malformed-body" => Self::MalformedBody,
+            "method" => Self::Method,
+            "loopback-host" => Self::LoopbackHost,
+            "private-host" => Self::PrivateHost,
+            "blocked-ipv4" => Self::BlockedIpv4,
+            "blocked-ipv6" => Self::BlockedIpv6,
+            "dns-rebinding" => Self::DnsRebinding,
+            "dns-rebinding-v6" => Self::DnsRebindingV6,
+            "content-type" => Self::ContentType,
+            "redirect-limit" => Self::RedirectLimit,
+            "redirect-target" => Self::RedirectTarget,
+            "origin" => Self::Origin,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+
+impl fmt::Display for PolicyReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for PolicyReason {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PolicyReason {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::from_string(String::deserialize(deserializer)?))
+    }
+}
+
+/// Typed cause of one failed host fetch: the discovery grouping key.
+/// Free text (server signals, host sentences) never enters it, so
+/// identical causes always compare equal.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct FetchCause {
+    pub code: FetchCode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http: Option<u16>,
+    pub transport: TransportKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<PolicyReason>,
+}
+
+impl FetchCause {
+    /// Cause with no HTTP status and no policy reason.
+    #[must_use]
+    pub fn new(code: FetchCode, transport: TransportKind) -> Self {
+        Self {
+            code,
+            http: None,
+            transport,
+            reason: None,
+        }
+    }
+
+    /// Attach an HTTP status.
+    #[must_use]
+    pub fn with_http(mut self, status: u16) -> Self {
+        self.http = Some(status);
+        self
+    }
+
+    /// One rendering of this failure for engine diagnostics. The request
+    /// URL is deliberately absent: callers place it once, outside the
+    /// per-format bullets.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        let status = match self.http {
+            Some(status) => format!("HTTP {status}"),
+            None => self.code.to_string(),
+        };
+        match &self.reason {
+            Some(reason) => format!("{status} fetching this address, reason={reason}"),
+            None => format!("{status} fetching this address"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceFailure {
     pub id: RequestId,
-    pub message: String,
+    pub cause: FetchCause,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ResourceOutcome {
@@ -361,12 +630,14 @@ pub enum RejectionKind {
     Failed,
 }
 
-/// One rejected candidate's diagnostic.
+/// One rejected candidate's diagnostic. Fetch failures carry a typed
+/// [`FetchCause`]; other rejections carry a minimized free-text detail.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidateDiagnostic {
     pub format: String,
     pub kind: RejectionKind,
-    pub message: String,
+    pub cause: Option<FetchCause>,
+    pub detail: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -378,9 +649,12 @@ pub enum DiscoveryError {
     },
     NotComplete,
     /// A candidate rejected the input or resource; `kind` classifies why.
+    /// Fetch failures carry the typed cause; other rejections carry a
+    /// free-text detail.
     Rejected {
         kind: RejectionKind,
-        message: String,
+        cause: Option<FetchCause>,
+        detail: Option<String>,
     },
     /// A format handler or extractor failed without a typed rejection.
     Session(String),
@@ -390,12 +664,69 @@ pub enum DiscoveryError {
 
 impl DiscoveryError {
     /// A candidate rejected the input or resource with a typed kind.
-    pub(crate) fn rejected(kind: RejectionKind, message: impl Into<String>) -> Self {
+    pub(crate) fn rejected(kind: RejectionKind, detail: impl Into<String>) -> Self {
         Self::Rejected {
             kind,
-            message: message.into(),
+            cause: None,
+            detail: Some(detail.into()),
         }
     }
+
+    /// A resource a candidate needed could not be fetched.
+    pub(crate) fn fetch_failed(cause: FetchCause) -> Self {
+        Self::Rejected {
+            kind: RejectionKind::FetchFailed,
+            cause: Some(cause),
+            detail: None,
+        }
+    }
+}
+
+/// Grouping key of one rejection: the typed kind plus whichever payload
+/// the kind carries (fetch causes group on the cause, other rejections
+/// on their minimized free-text detail).
+type RejectionKey<'a> = (RejectionKind, Option<&'a FetchCause>, Option<&'a str>);
+
+/// Per-format diagnostic bullets: fetch rejections group by their typed
+/// `(kind, cause)` key, other rejections by `(kind, detail)`, and
+/// URL-shape misses collapse to one count line. Identical causes read
+/// identically regardless of which format reported them. ASCII only.
+#[must_use]
+pub fn diagnostic_bullets(diagnostics: &[CandidateDiagnostic]) -> Vec<String> {
+    let mut url_misses = 0_usize;
+    let mut grouped: Vec<(RejectionKey<'_>, Vec<&str>)> = Vec::new();
+    for diagnostic in diagnostics {
+        if diagnostic.kind == RejectionKind::DidNotMatchUrl {
+            url_misses += 1;
+            continue;
+        }
+        let key = (
+            diagnostic.kind,
+            diagnostic.cause.as_ref(),
+            diagnostic.detail.as_deref(),
+        );
+        match grouped.iter_mut().find(|(existing, _)| *existing == key) {
+            Some((_, names)) => names.push(diagnostic.format.as_str()),
+            None => grouped.push((key, vec![diagnostic.format.as_str()])),
+        }
+    }
+    let mut lines = Vec::new();
+    for ((_, cause, detail), names) in &grouped {
+        let text = if let Some(cause) = cause {
+            cause.describe()
+        } else if let Some(detail) = detail {
+            (*detail).to_string()
+        } else {
+            "rejected".to_string()
+        };
+        lines.push(format!(" - {}: {}", names.join(", "), text));
+    }
+    if url_misses > 0 {
+        lines.push(format!(
+            " - {url_misses} other format(s) did not match this page address"
+        ));
+    }
+    lines
 }
 
 impl fmt::Display for DiscoveryError {
@@ -405,42 +736,49 @@ impl fmt::Display for DiscoveryError {
             Self::RequestAlreadyProvided(id) => write!(f, "request {} was already supplied", id.0),
             Self::NoCandidateAccepted { diagnostics } => {
                 f.write_str("no discovery candidate accepted the input")?;
-                // Grouped rendering: URL-shape misses collapse to a count,
-                // while identical messages print once with joined format
-                // names. ASCII only: no em dashes or unicode symbols.
-                let mut url_misses = 0_usize;
-                let mut grouped: Vec<(&str, Vec<&str>)> = Vec::new();
-                for diagnostic in diagnostics {
-                    if diagnostic.kind == RejectionKind::DidNotMatchUrl {
-                        url_misses += 1;
-                        continue;
-                    }
-                    match grouped
-                        .iter_mut()
-                        .find(|(message, _)| *message == diagnostic.message)
-                    {
-                        Some((_, names)) => names.push(&diagnostic.format),
-                        None => grouped.push((&diagnostic.message, vec![&diagnostic.format])),
-                    }
-                }
-                for (message, names) in &grouped {
-                    write!(f, "\n - {}: {}", names.join(", "), message)?;
-                }
-                if url_misses > 0 {
-                    let noun = if url_misses == 1 { "format" } else { "formats" };
-                    write!(
-                        f,
-                        "\n - {url_misses} other {noun} did not match this page address"
-                    )?;
+                for line in diagnostic_bullets(diagnostics) {
+                    write!(f, "\n{line}")?;
                 }
                 Ok(())
             }
             Self::NotComplete => f.write_str("discovery is not complete"),
-            Self::Rejected { message, .. } | Self::Session(message) => f.write_str(message),
+            Self::Rejected {
+                cause: Some(cause), ..
+            } => f.write_str(&cause.describe()),
+            Self::Rejected {
+                detail: Some(detail),
+                ..
+            } => f.write_str(detail),
+            Self::Rejected { .. } => f.write_str("candidate rejected the input"),
+            Self::Session(message) => f.write_str(message),
             Self::TransitionLimitExceeded => f.write_str("discovery transition limit exceeded"),
             Self::MetadataSizeLimitExceeded => {
                 f.write_str("discovery metadata size limit exceeded")
             }
+        }
+    }
+}
+
+impl DiscoveryError {
+    /// Engine diagnostics for wire errors: the headline-free per-format
+    /// bullet block for a rejected aggregate, or the plain error text
+    /// otherwise. The headline stays out: callers render their own
+    /// prominent message and never repeat it inside the details.
+    #[must_use]
+    pub fn engine_detail(&self) -> String {
+        match self {
+            Self::NoCandidateAccepted { diagnostics } => {
+                let block = diagnostic_bullets(diagnostics).join("\n");
+                if block.is_empty() {
+                    Self::NoCandidateAccepted {
+                        diagnostics: Vec::new(),
+                    }
+                    .to_string()
+                } else {
+                    block
+                }
+            }
+            other => other.to_string(),
         }
     }
 }
@@ -615,21 +953,30 @@ impl DiscoveryOperation {
             if matches!(self.candidates[index].state, CandidateState::New)
                 && !(self.candidates[index].spec.recognize)(&self.input)
             {
-                let message = self.candidates[index].spec.rejection.to_string();
-                self.reject_candidate(index, RejectionKind::DidNotMatchUrl, message);
+                let detail = self.candidates[index].spec.rejection.to_string();
+                self.reject_candidate(index, RejectionKind::DidNotMatchUrl, None, Some(detail));
                 continue;
             }
             let result = self
                 .advance_candidate(index)
                 .and_then(|step| self.apply_step(index, step));
             match result {
-                Err(DiscoveryError::Rejected { kind, message }) => {
-                    self.reject_candidate(index, kind, message);
+                Err(DiscoveryError::Rejected {
+                    kind,
+                    cause,
+                    detail,
+                }) => {
+                    self.reject_candidate(index, kind, cause, detail);
                 }
                 // A bare session failure comes from a format handler or
                 // extractor: the fetched bytes were unusable.
                 Err(DiscoveryError::Session(message)) => {
-                    self.reject_candidate(index, RejectionKind::InvalidMetadata, message);
+                    self.reject_candidate(
+                        index,
+                        RejectionKind::InvalidMetadata,
+                        None,
+                        Some(message),
+                    );
                 }
                 result => result?,
             }
@@ -697,19 +1044,12 @@ impl DiscoveryOperation {
                 },
                 "resource did not match any discovery route",
             ),
-            // The resource could not be fetched: however the handler
-            // reports it, the cause is a fetch failure.
+            // The resource could not be fetched: handlers may still
+            // recover (krpano tries the next viewer script); otherwise the
+            // failure is reported with its typed cause.
             ResourceOutcome::Failure(failure) => match on_failure {
-                Some(handler) => handler(&context, request, failure).map_err(|error| match error {
-                    DiscoveryError::Session(message) => {
-                        DiscoveryError::rejected(RejectionKind::FetchFailed, message)
-                    }
-                    other => other,
-                }),
-                None => Err(DiscoveryError::rejected(
-                    RejectionKind::FetchFailed,
-                    failure.message.clone(),
-                )),
+                Some(handler) => handler(&context, request, failure),
+                None => Err(DiscoveryError::fetch_failed(failure.cause.clone())),
             },
         }
     }
@@ -725,7 +1065,8 @@ impl DiscoveryOperation {
                     self.reject_candidate(
                         index,
                         RejectionKind::Failed,
-                        "discovery resource limit exceeded".into(),
+                        None,
+                        Some("discovery resource limit exceeded".into()),
                     );
                     return Ok(());
                 };
@@ -733,7 +1074,8 @@ impl DiscoveryOperation {
                     self.reject_candidate(
                         index,
                         RejectionKind::Failed,
-                        "discovery followed the same resource twice".into(),
+                        None,
+                        Some("discovery followed the same resource twice".into()),
                     );
                 } else {
                     self.candidates[index].history.push(id);
@@ -747,12 +1089,19 @@ impl DiscoveryOperation {
         Ok(())
     }
 
-    fn reject_candidate(&mut self, index: usize, kind: RejectionKind, diagnostic: String) {
+    fn reject_candidate(
+        &mut self,
+        index: usize,
+        kind: RejectionKind,
+        cause: Option<FetchCause>,
+        detail: Option<String>,
+    ) {
         let format = self.candidates[index].spec.name.to_owned();
         self.diagnostics.push(CandidateDiagnostic {
             format,
             kind,
-            message: diagnostic,
+            cause,
+            detail,
         });
         self.candidates[index].state = CandidateState::Rejected;
     }
@@ -1016,8 +1365,18 @@ mod tests {
         failure: &ResourceFailure,
     ) -> Result<DiscoveryStep, DiscoveryError> {
         assert_eq!(request.uri, "memory://failure");
-        assert_eq!(failure.message, "expected");
+        assert_eq!(failure.cause.code, FetchCode::DiscoveryFailed);
+        assert_eq!(failure.cause.transport, TransportKind::Direct);
         Ok(DiscoveryStep::Complete(ImageCatalog::default()))
+    }
+
+    fn test_cause(code: FetchCode) -> FetchCause {
+        FetchCause {
+            code,
+            http: None,
+            transport: TransportKind::Direct,
+            reason: None,
+        }
     }
 
     #[test]
@@ -1029,7 +1388,7 @@ mod tests {
         operation
             .provide_failure(ResourceFailure {
                 id: need.id,
-                message: "expected".into(),
+                cause: test_cause(FetchCode::DiscoveryFailed),
             })
             .unwrap();
         assert!(operation.finish().unwrap().is_empty());
@@ -1185,47 +1544,183 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_group_messages_and_collapse_url_misses() {
-        let diagnostic = |format: &str, kind, message: &str| CandidateDiagnostic {
-            format: format.into(),
-            kind,
-            message: message.into(),
+    fn diagnostics_group_by_typed_cause_and_collapse_url_misses() {
+        let http_cause = |status: u16| FetchCause {
+            code: FetchCode::TransportHttpError,
+            http: Some(status),
+            transport: TransportKind::Direct,
+            reason: None,
+        };
+        let diagnostic = |format: &str, kind, cause: Option<FetchCause>, detail: Option<&str>| {
+            CandidateDiagnostic {
+                format: format.into(),
+                kind,
+                cause,
+                detail: detail.map(str::to_string),
+            }
         };
         let error = DiscoveryError::NoCandidateAccepted {
             diagnostics: vec![
                 diagnostic(
                     "custom",
                     RejectionKind::DidNotMatchUrl,
-                    "not a tiles.yaml file",
+                    None,
+                    Some("not a tiles.yaml file"),
                 ),
                 diagnostic(
                     "iiif",
                     RejectionKind::FetchFailed,
-                    "fetch failed for https://example.test/page",
+                    Some(http_cause(403)),
+                    None,
                 ),
                 diagnostic(
                     "zoomify",
                     RejectionKind::FetchFailed,
-                    "fetch failed for https://example.test/page",
+                    Some(http_cause(403)),
+                    None,
                 ),
                 diagnostic(
                     "deepzoom",
                     RejectionKind::InvalidMetadata,
-                    "unable to parse DZI metadata",
+                    None,
+                    Some("unable to parse DZI metadata"),
                 ),
                 diagnostic(
                     "generic",
                     RejectionKind::DidNotMatchUrl,
-                    "not a generic X/Y tile template",
+                    None,
+                    Some("not a generic X/Y tile template"),
                 ),
             ],
         };
         assert_eq!(
             error.to_string(),
             "no discovery candidate accepted the input\
-             \n - iiif, zoomify: fetch failed for https://example.test/page\
+             \n - iiif, zoomify: HTTP 403 fetching this address\
              \n - deepzoom: unable to parse DZI metadata\
-             \n - 2 other formats did not match this page address"
+             \n - 2 other format(s) did not match this page address"
+        );
+        // The engine block for wire diagnostics carries no headline.
+        assert_eq!(
+            error.engine_detail(),
+            " - iiif, zoomify: HTTP 403 fetching this address\
+             \n - deepzoom: unable to parse DZI metadata\
+             \n - 2 other format(s) did not match this page address"
+        );
+    }
+
+    #[test]
+    fn different_causes_never_merge() {
+        let fetch = |cause: FetchCause| CandidateDiagnostic {
+            format: "iiif".into(),
+            kind: RejectionKind::FetchFailed,
+            cause: Some(cause),
+            detail: None,
+        };
+        let causes = [
+            FetchCause {
+                code: FetchCode::TransportHttpError,
+                http: Some(403),
+                transport: TransportKind::Direct,
+                reason: None,
+            },
+            FetchCause {
+                code: FetchCode::TransportHttpError,
+                http: Some(404),
+                transport: TransportKind::Direct,
+                reason: None,
+            },
+            FetchCause {
+                code: FetchCode::TransportHttpError,
+                http: Some(403),
+                transport: TransportKind::MetadataProxy,
+                reason: None,
+            },
+            FetchCause {
+                code: FetchCode::TransportPolicyDenied,
+                http: None,
+                transport: TransportKind::MetadataProxy,
+                reason: Some(PolicyReason::SignedQuery),
+            },
+            FetchCause {
+                code: FetchCode::TransportPolicyDenied,
+                http: None,
+                transport: TransportKind::MetadataProxy,
+                reason: Some(PolicyReason::PrivateHost),
+            },
+            FetchCause {
+                code: FetchCode::from_string("extension.network"),
+                http: None,
+                transport: TransportKind::BrowserSession,
+                reason: None,
+            },
+        ];
+        let error = DiscoveryError::NoCandidateAccepted {
+            diagnostics: causes.iter().map(|cause| fetch(cause.clone())).collect(),
+        };
+        let rendered = error.to_string();
+        let bullets = rendered.lines().skip(1).count();
+        assert_eq!(
+            bullets,
+            causes.len(),
+            "every distinct typed cause keeps its own bullet"
+        );
+        assert!(rendered.contains("reason=signed-query"));
+        assert!(rendered.contains("TRANSPORT_POLICY_DENIED fetching this address"));
+        assert!(rendered.contains("extension.network fetching this address"));
+    }
+
+    #[test]
+    fn fetch_causes_round_trip_through_json() {
+        let cause = FetchCause {
+            code: FetchCode::TransportHttpError,
+            http: Some(503),
+            transport: TransportKind::MetadataProxy,
+            reason: Some(PolicyReason::from_string("future-reason")),
+        };
+        let json = serde_json::to_string(&cause).unwrap();
+        assert_eq!(
+            json,
+            "{\"code\":\"TRANSPORT_HTTP_ERROR\",\"http\":503,\
+             \"transport\":\"metadata-proxy\",\"reason\":\"future-reason\"}"
+        );
+        let decoded: FetchCause = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, cause);
+        // Foreign host codes and unknown transports decode, never fail.
+        let lenient: FetchCause =
+            serde_json::from_str("{\"code\":\"extension.throttled\",\"transport\":\"direct\"}")
+                .unwrap();
+        assert_eq!(
+            lenient.code,
+            FetchCode::Unknown("extension.throttled".into())
+        );
+        assert_eq!(lenient.transport, TransportKind::Direct);
+        assert_eq!(lenient.http, None);
+        assert_eq!(lenient.reason, None);
+    }
+
+    #[test]
+    fn transport_kind_parses_host_strings() {
+        assert_eq!(
+            TransportKind::from_wire(Some("browser-session")),
+            TransportKind::BrowserSession
+        );
+        assert_eq!(
+            TransportKind::from_wire(Some("extension-origin")),
+            TransportKind::BrowserSession
+        );
+        assert_eq!(
+            TransportKind::from_wire(Some("metadata-proxy")),
+            TransportKind::MetadataProxy
+        );
+        assert_eq!(
+            TransportKind::from_wire(Some("native")),
+            TransportKind::Native
+        );
+        assert_eq!(TransportKind::from_wire(None), TransportKind::Direct);
+        assert_eq!(
+            TransportKind::from_wire(Some("stale-host")),
+            TransportKind::Direct
         );
     }
 }

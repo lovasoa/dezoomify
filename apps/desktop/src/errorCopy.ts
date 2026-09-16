@@ -133,20 +133,13 @@ export function readInitialUrl(): string | null {
 }
 
 
-// Redact full http(s) URLs inside free-form technical text down to their
-// redacted origin, so diagnostics never carry paths, queries, or fragments.
-export function redactUrlsInText(text: string): string {
-  return String(text ?? "").replace(/https?:\/\/[^\s"'<>]+/g, (match) => {
-    const origin = redactedOriginOnly(match);
-    return origin === "" ? "the server" : origin;
-  });
-}
-
-
+// Bound free-form technical text. Credentials are already redacted by the
+// backend (`redact_error_text`); the full request URL is deliberately kept
+// verbatim in the on-device details (the shared renderer places it on its
+// own line), so only the length is trimmed here.
 export function trimTechnical(text: string, max = 2000): string {
-  const redacted = redactUrlsInText(text);
-  if (redacted.length <= max) return redacted;
-  return `${redacted.slice(0, max)}…`;
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}…`;
 }
 
 
@@ -264,38 +257,6 @@ export function plainMessageFor(code: string, engineMessage: string, host: strin
     return t("desktop.internal.error", { host });
   }
   return t("desktop.save.fallback", { host });
-}
-
-
-// Technical chain for the collapsible detail only: code, phase, transport,
-// resource kind, status, trimmed origin, and the trimmed non-secret engine
-// text. Never shown as the first message. Phase/transport/resource-kind come
-// from the backend payload when present (stable codes), falling back to the
-// local code mapping only for legacy payloads.
-export function technicalDetailFor(
-  code: string,
-  engineMessage: string,
-  extraDetail: string | undefined,
-  opts: { phase?: string; transport?: string; resourceKind?: string } | undefined,
-  status: string,
-  origin: string,
-  nativeTransport: string,
-): string {
-  const lines = [
-    `Code: ${code}`,
-    `Phase: ${opts?.phase ?? phaseFor(code)}`,
-    `Transport: ${opts?.transport ?? nativeTransport}`,
-  ];
-  if (opts?.resourceKind) lines.push(`Resource: ${opts.resourceKind}`);
-  lines.push(`Status: ${status}`);
-  lines.push(`Origin: ${origin === "" ? "n/a" : origin}`);
-  const engine = trimTechnical(engineMessage || "");
-  if (engine) lines.push(`Engine: ${engine}`);
-  if (extraDetail && extraDetail !== engineMessage) {
-    const extra = trimTechnical(extraDetail);
-    if (extra && extra !== engine) lines.push(`Detail: ${extra}`);
-  }
-  return lines.join("\n");
 }
 
 

@@ -51,7 +51,6 @@ import {
   readInitialUrl,
   redactedOriginOnly,
   strField,
-  technicalDetailFor,
   validateDeepLinkPayload,
 } from "./errorCopy.ts";
 import type { ValidatedDeepLink } from "./errorCopy.ts";
@@ -515,6 +514,7 @@ const failEnv = {
   nativeTransport: NATIVE_TRANSPORT,
   host: () => hostOf(lastInputUrl || activity().url || ""),
   origin: () => redactedOriginOnly(lastInputUrl || activity().url || ""),
+  sourceUrl: () => lastInputUrl || activity().url || "",
   clearPending: () => {
     pendingDecision = null;
     catalogNotice = null;
@@ -608,16 +608,6 @@ function diagnosticsSnapshot() {
     attempt: pendingDecision?.attempt,
     sessionId,
     nativeTransport: NATIVE_TRANSPORT,
-    error: state.error
-      ? {
-          code: state.error.code,
-          category: state.error.category,
-          ...(state.error.phase ? { phase: state.error.phase } : {}),
-          retryable: state.error.retryable,
-          message: state.error.message,
-          ...(state.error.detail ? { detail: state.error.detail } : {}),
-        }
-      : null,
     progress: viewCtx.currentProgress
       ? { current: viewCtx.currentProgress.current, total: viewCtx.currentProgress.total }
       : undefined,
@@ -744,15 +734,6 @@ function launchNativeJob(trimmed: string, token: number): void {
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;
-    const technical = technicalDetailFor(
-      "INVALID_SETTINGS",
-      "These download settings are invalid.",
-      detail,
-      undefined,
-      controller.getState().status,
-      redactedOriginOnly(lastInputUrl || activity().url || ""),
-      NATIVE_TRANSPORT,
-    );
     controller.dispatch({
       seq: nextSeq(),
       sessionId,
@@ -765,7 +746,12 @@ function launchNativeJob(trimmed: string, token: number): void {
         message: t("desktop.settings.invalidSubmit"),
         transport: NATIVE_TRANSPORT,
         phase: "discovery",
-        detail: technical,
+        detail,
+        ...(lastInputUrl ? { url: lastInputUrl } : {}),
+        extras: [
+          `Status: ${controller.getState().status}`,
+          `Origin: ${redactedOriginOnly(lastInputUrl || activity().url || "") || "n/a"}`,
+        ],
       },
     });
     pushLog("Settings invalid; job not started");

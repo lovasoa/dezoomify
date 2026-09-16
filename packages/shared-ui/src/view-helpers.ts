@@ -52,8 +52,39 @@ export function defaultStepFor(status: string): string {
   }
 }
 
+/**
+ * Technical-details text, one shape across every product:
+ *
+ * ```text
+ * url: <full request URL, verbatim>
+ * http: <status>              (only when the failure is an HTTP refusal)
+ * server: "<bounded signal>"  (only when one was captured)
+ *
+ * <engine block: headline-free per-format bullets, real line breaks>
+ *
+ * code:<C> category:<c> retryable:<true|false> transport:<t> phase:<p>[ http:<n>]
+ * <host provenance lines>       (only when the host supplies extras)
+ * ```
+ *
+ * The prominent headline lives outside the details and is never repeated
+ * here; the URL and server signal stay on the user's device.
+ */
 export function errorDiagnosticsText(error: StructuredError): string {
-  const base = `Code: ${error.code}\nCategory: ${error.category}\nRetryable: ${error.retryable}\n` +
-    `Transport: ${error.transport ?? "direct"}\nPhase: ${error.phase ?? "discovery"}\nMessage: ${error.message}`;
-  return error.detail ? `${base}\n\n${error.detail}` : base;
+  const hasHttp = typeof error.http === "number";
+  const lines: string[] = [];
+  if (error.url) lines.push(`url: ${error.url}`);
+  if (hasHttp) lines.push(`http: ${error.http}`);
+  if (error.preview) lines.push(`server: ${error.preview}`);
+  if (error.detail) {
+    if (lines.length > 0) lines.push("");
+    lines.push(error.detail);
+  }
+  let trailing =
+    `code:${error.code} category:${error.category ?? "unknown"} retryable:${error.retryable ? "true" : "false"}` +
+    ` transport:${error.transport ?? "direct"} phase:${error.phase ?? "discovery"}`;
+  if (hasHttp) trailing += ` http:${error.http}`;
+  if (lines.length > 0) lines.push("");
+  lines.push(trailing);
+  if (error.extras) lines.push(...error.extras);
+  return lines.join("\n");
 }

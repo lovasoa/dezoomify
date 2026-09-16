@@ -1,5 +1,6 @@
 mod support;
 
+use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_job::{Config, JobCommand};
 use support::{ScriptedHost, DZI, DZI_INPUT_URL};
 
@@ -193,7 +194,7 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
     let late_failure = host
         .apply(JobCommand::FetchFailure {
             request: requests[1],
-            detail: String::new(),
+            cause: FetchCause::new(FetchCode::DiscoveryFailed, TransportKind::Direct),
         })
         .unwrap();
     assert_eq!(late_failure, dezoomify_job::Outcome::Ignored);

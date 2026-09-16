@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeContinuation};
 use dezoomify_core::core::discovery::{
-    DiscoveryError, DiscoveryOperation, ResourceFailure, ResourceResponse,
+    DiscoveryError, DiscoveryOperation, FetchCause, ResourceFailure, ResourceResponse,
 };
 use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe};
 use dezoomify_core::core::registry::{default_registry, registry_for};
@@ -285,9 +285,7 @@ impl Job {
                 bytes,
                 final_uri,
             } => self.apply_resource_bytes(request, bytes, final_uri),
-            JobCommand::FetchFailure { request, detail } => {
-                self.apply_fetch_failure(request, &detail)
-            }
+            JobCommand::FetchFailure { request, cause } => self.apply_fetch_failure(request, cause),
             JobCommand::SelectImage { image } => self.apply_selected_image(image),
             JobCommand::SelectLevel { level } => self.apply_selected_level(level),
             JobCommand::DestinationGranted => self.apply_destination_granted(),
@@ -383,7 +381,9 @@ impl Job {
     }
 
     fn discovery_failed(&mut self, error: DiscoveryError) -> Result<(), JobError> {
-        self.fail_via_cleanup("job.discovery-failed", error.to_string())
+        // `engine_detail` keeps the headline out: the prominent message
+        // is the host's own copy, never the engine's aggregate.
+        self.fail_via_cleanup("job.discovery-failed", error.engine_detail())
     }
 
     fn apply_resource_bytes(
@@ -450,7 +450,11 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn apply_fetch_failure(&mut self, request: u32, detail: &str) -> Result<Outcome, JobError> {
+    fn apply_fetch_failure(
+        &mut self,
+        request: u32,
+        cause: FetchCause,
+    ) -> Result<Outcome, JobError> {
         let Some(&core_id) = self.pending_discovery.get(&request) else {
             return Ok(Outcome::Ignored);
         };
@@ -460,34 +464,14 @@ impl Job {
             self.pending_discovery.remove(&request);
             return Ok(Outcome::Ignored);
         }
-        // Name the failed fetch: the core request URI plus the host detail
-        // (HTTP status, category, bounded server signal). These stay in
-        // local diagnostics; the UI asks the user to strip tokens before
-        // sharing. ASCII only.
         let core_id = dezoomify_core::core::discovery::RequestId(core_id);
-        let uri = self
-            .discovery
-            .as_ref()
-            .and_then(|operation| operation.request_uri(core_id))
-            .unwrap_or_default()
-            .to_string();
-        let detail = sanitize_fetch_detail(detail);
-        let message = match (uri.is_empty(), detail.is_empty()) {
-            (true, true) => "host fetch failed".to_string(),
-            (false, true) => format!("fetch failed for {uri}"),
-            (true, false) => format!("host fetch failed: {detail}"),
-            (false, false) => format!("fetch failed for {uri}: {detail}"),
-        };
         // The core owns candidate fallback on failure: it may surface another
         // need (a different candidate) or end discovery with a typed error.
         let outcome = {
             let Some(operation) = self.discovery.as_mut() else {
                 return Err(JobError::invalid_state("discovery already finished"));
             };
-            operation.provide_failure(ResourceFailure {
-                id: core_id,
-                message,
-            })
+            operation.provide_failure(ResourceFailure { id: core_id, cause })
         };
         self.pending_discovery.remove(&request);
         if let Err(e) = outcome {
@@ -1223,32 +1207,6 @@ fn processing_name(recipe: &ProcessingRecipe) -> &'static str {
     }
 }
 
-/// Collapse a host fetch detail to one bounded diagnostic line: trim,
-/// collapse inner whitespace (including newlines), strip control
-/// characters, and truncate to 300 chars. Our own generated text stays
-/// ASCII; quoted server signals pass through otherwise unchanged.
-fn sanitize_fetch_detail(detail: &str) -> String {
-    let mut collapsed = String::with_capacity(detail.len().min(300));
-    let mut last_was_space = true;
-    for ch in detail.chars() {
-        // Whitespace (including tabs and newlines) collapses to one space;
-        // other control characters are dropped.
-        if ch.is_whitespace() {
-            if !last_was_space {
-                collapsed.push(' ');
-                last_was_space = true;
-            }
-        } else if !ch.is_control() {
-            collapsed.push(ch);
-            last_was_space = false;
-        }
-        if collapsed.len() >= 300 {
-            break;
-        }
-    }
-    collapsed.trim().to_string()
-}
-
 /// Whether `input_url` names a fetchable input: `http(s)` URLs, local
 /// `file://` URIs (only `file:///abs/path` and `file://localhost/abs/path`,
 /// mirroring the native `fetch_local` mapping; any other `file://` host is
@@ -1269,20 +1227,4 @@ fn is_valid_input_url(input_url: &str) -> bool {
         return rest.starts_with('/');
     }
     true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::sanitize_fetch_detail;
-
-    #[test]
-    fn fetch_detail_is_single_line_bounded_and_control_free() {
-        assert_eq!(
-            sanitize_fetch_detail("HTTP 403:\n  server\tsaid"),
-            "HTTP 403: server said"
-        );
-        assert_eq!(sanitize_fetch_detail("\u{7}\u{8}"), "");
-        assert_eq!(sanitize_fetch_detail("  HTTP 500  "), "HTTP 500");
-        assert_eq!(sanitize_fetch_detail(&"x".repeat(400)).len(), 300);
-    }
 }

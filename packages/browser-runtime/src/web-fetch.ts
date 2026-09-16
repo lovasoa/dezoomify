@@ -6,8 +6,8 @@
 // classifier live in the caller too (`src/discovery.ts`) and arrive as plain
 // data, so this module never imports app layers. Progress and log hooks
 // drive the caller's live job view. Keep erasable-syntax-only.
-import { failure } from "./failure.ts";
-import type { StructuredFailure } from "./failure.ts";
+import { fetchFailure, failure } from "./failure.ts";
+import type { FetchCause, StructuredFailure } from "./failure.ts";
 import {
   DIRECT_METADATA_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
@@ -323,24 +323,27 @@ export interface ClassifiedProxyFailure {
   code: string;
   message: string;
   retryable: boolean;
-  technical: string;
+  /** Typed cause for the engine: the diagnostics grouping key. */
+  cause: FetchCause;
 }
 
 /**
- * Classify a failed proxy result into a user sentence plus a dense
- * technical chain. Our policy denial and an upstream HTTP refusal are
- * genuinely different (retrying a 403 from the viewed site never helps,
- * while a 502 might), so they never share a message or a retryable flag.
+ * Classify a failed proxy result into a user sentence plus a typed cause.
+ * Our policy denial and an upstream HTTP refusal are genuinely different
+ * (retrying a 403 from the viewed site never helps, while a 502 might), so
+ * they never share a message or a retryable flag. The exact relay `reason`
+ * travels inside the cause, never as free text.
  */
 export function classifyProxyFailure(
   proxied: { status: number; code?: string; reason?: string },
-  target: string,
 ): ClassifiedProxyFailure {
   const code = proxied.code ?? "PROXY_ERROR";
   const status = proxied.status || 0;
-  const reasonSuffix =
-    typeof proxied.reason === "string" && proxied.reason !== "" ? `, reason=${proxied.reason}` : "";
-  const technical = `metadata proxy: ${code} (HTTP ${status}${reasonSuffix}) fetching ${target}`;
+  const cause: FetchCause = { code, transport: "metadata-proxy" };
+  if (status > 0) cause.http = status;
+  if (typeof proxied.reason === "string" && proxied.reason !== "") {
+    cause.reason = proxied.reason;
+  }
   if (code === "PROXY_POLICY_DENIED") {
     const hint = proxyPolicyReasonText(proxied.reason) ?? "Check the address and try again.";
     return {
@@ -349,7 +352,7 @@ export function classifyProxyFailure(
         `This address cannot be opened through the website. ${hint} ` +
         "The browser extension or the desktop app may still work.",
       retryable: false,
-      technical,
+      cause: { ...cause, code: "TRANSPORT_POLICY_DENIED" },
     };
   }
   if (code === "PROXY_BUDGET_EXCEEDED") {
@@ -357,7 +360,7 @@ export function classifyProxyFailure(
       code: "PROXY_BUDGET_EXCEEDED",
       message: "This page is too large to check here. Try the desktop app for very large images.",
       retryable: false,
-      technical,
+      cause,
     };
   }
   if (code === "TRANSPORT_HTTP_ERROR" || status === 401 || status === 403) {
@@ -366,7 +369,7 @@ export function classifyProxyFailure(
         code: "TRANSPORT_HTTP_ERROR",
         message: "This page could not be found. Check the address and try again.",
         retryable: false,
-        technical,
+        cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
       };
     }
     if (status === 401 || status === 403) {
@@ -376,7 +379,7 @@ export function classifyProxyFailure(
           `The site refused to share this file (HTTP ${status}). It may block shared servers; ` +
           "the browser extension or the desktop app may still work.",
         retryable: false,
-        technical,
+        cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
       };
     }
     if (status >= 500 && status <= 599) {
@@ -384,7 +387,7 @@ export function classifyProxyFailure(
         code: "TRANSPORT_HTTP_ERROR",
         message: "The site had a problem opening this page. Try again shortly.",
         retryable: true,
-        technical,
+        cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
       };
     }
     if (status >= 400 && status <= 499) {
@@ -392,7 +395,7 @@ export function classifyProxyFailure(
         code: "TRANSPORT_HTTP_ERROR",
         message: "This page could not be opened. Check the address and try again.",
         retryable: false,
-        technical,
+        cause: { ...cause, code: "TRANSPORT_HTTP_ERROR" },
       };
     }
   }
@@ -401,10 +404,15 @@ export function classifyProxyFailure(
       code: "PROXY_ERROR",
       message: "The metadata proxy could not fetch this address. Try again shortly.",
       retryable: true,
-      technical,
+      cause: { ...cause, code: "PROXY_ERROR" },
     };
   }
-  return { code, message: "The metadata proxy could not fetch this address. Try again shortly.", retryable: status >= 500 || status === 0, technical };
+  return {
+    code,
+    message: "The metadata proxy could not fetch this address. Try again shortly.",
+    retryable: status >= 500 || status === 0,
+    cause,
+  };
 }
 
 /**
@@ -566,12 +574,12 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
    * retries once after Retry-After/backoff; a persistent throttle fails fast
    * with extension/desktop guidance.
    *
-   * Every thrown failure carries two layers: `message` (a plain, actionable
-   * sentence for the UI) and `technical` (transport, HTTP status, proxy code,
-   * full request URL, and a bounded server signal) which the engine feeds
-   * into its per-candidate diagnostics and the technical-details section.
-   * Details stay on the device; the UI asks the user to strip tokens before
-   * sharing. The two layers never mix.
+   * Every thrown failure carries its typed cause: `message` is a plain,
+   * actionable sentence for the prominent UI slot, while `cause`
+   * (transport, HTTP status, proxy code, policy reason) plus `url` and
+   * the bounded `preview` server signal feed the engine diagnostics and
+   * the technical-details section. The two layers never mix, and user
+   * copy never enters the engine.
    */
   async function fetchMetadataFor(
     url: string,
@@ -645,50 +653,55 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
       if (!proxied.ok || !proxied.bytes) {
         if (proxied.code === "PROXY_RATE_LIMITED") {
-          throw failure(
-            "UPSTREAM_RATE_LIMITED",
-            deps.messages.rateLimitedBySite,
-            true,
-            undefined,
-            `metadata proxy: upstream rate limit (HTTP 429, PROXY_RATE_LIMITED) fetching ${target}`,
-          );
+          throw fetchFailure("UPSTREAM_RATE_LIMITED", deps.messages.rateLimitedBySite, true, {
+            cause: { code: "UPSTREAM_RATE_LIMITED", http: 429, transport: "metadata-proxy" },
+            url,
+          });
         }
-        const classified = classifyProxyFailure(proxied, target);
-        throw failure(classified.code, classified.message, classified.retryable, undefined, classified.technical);
+        const classified = classifyProxyFailure(proxied);
+        throw fetchFailure(classified.code, classified.message, classified.retryable, {
+          cause: classified.cause,
+          url,
+          transportKind: "metadata-proxy",
+        });
       }
       bytes = proxied.bytes;
       if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "") finalUri = proxied.finalUrl;
     } else if (direct.outcome === "http-error") {
-      // Technical chain names the full request URL and the bounded server
-      // signal; it stays in local-only diagnostics (see the redact hint in
-      // the shared UI) and never in the prominent message.
-      const signal = direct.preview ? ` Server said: "${direct.preview}"` : "";
+      // The typed cause carries the HTTP status and the bounded server
+      // signal; both stay in local-only diagnostics (see the redact hint
+      // in the shared UI) and never in the prominent message.
       if (direct.status === 429) {
         // A direct fetch uses the user's own connection, so this throttle is
         // on their IP, not on our server; the fix is waiting, not another app.
-        throw failure(
-          "UPSTREAM_RATE_LIMITED",
-          deps.messages.siteBusy,
-          true,
-          undefined,
-          `direct fetch: HTTP 429 Too Many Requests from ${url}.${signal}`,
-        );
+        throw fetchFailure("UPSTREAM_RATE_LIMITED", deps.messages.siteBusy, true, {
+          cause: { code: "UPSTREAM_RATE_LIMITED", http: 429, transport: "direct" },
+          url,
+          preview: direct.preview,
+          transportKind: "direct",
+        });
       }
-      throw failure(
+      throw fetchFailure(
         "DISCOVERY_HTTP_ERROR",
         "This page could not be opened. Check the address and try again.",
         false,
-        undefined,
-        `direct fetch: HTTP ${direct.status} from ${url}.${signal}`,
+        {
+          cause: {
+            code: "DISCOVERY_HTTP_ERROR",
+            ...(direct.status ? { http: direct.status } : {}),
+            transport: "direct",
+          },
+          url,
+          preview: direct.preview,
+          transportKind: "direct",
+        },
       );
     } else {
-      throw failure(
-        "DISCOVERY_FAILED",
-        deps.messages.discoveryFailed(via),
-        true,
-        undefined,
-        `direct fetch: no readable response (network error or blocked read) fetching ${target}`,
-      );
+      throw fetchFailure("DISCOVERY_FAILED", deps.messages.discoveryFailed(via), true, {
+        cause: { code: "DISCOVERY_FAILED", transport: "direct" },
+        url,
+        transportKind: "direct",
+      });
     }
     // WASM core is authoritative: always forward readable bytes so formats
     // whose first head carries no zoomable literal still resolve. The

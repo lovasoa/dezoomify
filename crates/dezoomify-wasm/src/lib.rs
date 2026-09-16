@@ -261,14 +261,16 @@ pub mod wasm_api {
         }
 
         /// Report a failed host fetch for one outstanding need.
+        /// `cause_json` is the serialized core fetch cause
+        /// (`{code, http?, transport, reason?}`).
         #[wasm_bindgen(js_name = "provideFailure")]
         pub fn provide_failure(
             &mut self,
             request_id: usize,
-            message: String,
+            cause_json: String,
         ) -> Result<(), JsValue> {
             self.inner
-                .provide_failure(request_id, &message)
+                .provide_failure(request_id, &cause_json)
                 .map_err(js_error)
         }
 

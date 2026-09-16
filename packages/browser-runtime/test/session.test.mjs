@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDiscoveryClient, failure } from "../src/session.ts";
+import { createDiscoveryClient, failure, fetchFailure } from "../src/session.ts";
 
 /**
  * Loopback test worker: runs the worker side of the protocol against a
@@ -156,12 +156,15 @@ test("fetch failures are forwarded to the worker as fail messages", async () => 
   const client = createDiscoveryClient({
     worker,
     fetchMetadata: async () => {
-      throw failure(
+      throw fetchFailure(
         "PROXY_ERROR",
         "The metadata proxy could not fetch this address. Try again shortly.",
-        false,
-        undefined,
-        "metadata proxy: PROXY_ERROR (HTTP 502) fetching site.test/x.json",
+        true,
+        {
+          cause: { code: "PROXY_ERROR", http: 502, transport: "metadata-proxy" },
+          url: "https://site.test/x.json",
+          transportKind: "metadata-proxy",
+        },
       );
     },
     fetchTile: async () => ({ bytes: new ArrayBuffer(1) }),
@@ -170,12 +173,14 @@ test("fetch failures are forwarded to the worker as fail messages", async () => 
   const catalog = await client.start("https://site.test/blocked.json");
   assert.equal(failures.length, 1);
   assert.equal(failures[0].code, "PROXY_ERROR");
-  // The engine aggregates per-candidate diagnostics: it gets the dense
-  // technical message, never the hand-holding UI sentence.
-  assert.equal(
-    failures[0].message,
-    "metadata proxy: PROXY_ERROR (HTTP 502) fetching site.test/x.json",
-  );
+  // The engine receives the typed cause only, never rendered text or UI
+  // copy: the core groups discovery diagnostics on the cause.
+  assert.deepEqual(failures[0].cause, {
+    code: "PROXY_ERROR",
+    http: 502,
+    transport: "metadata-proxy",
+  });
+  assert.equal(failures[0].url, "https://site.test/x.json");
   assert.equal(
     failures[0].userMessage,
     "The metadata proxy could not fetch this address. Try again shortly.",
