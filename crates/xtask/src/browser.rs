@@ -1,4 +1,4 @@
-//! `cargo xtask test browser [--build-only]`, `test ui`, `test web`,
+//! `cargo xtask test browser [--build-only]`, `test web`,
 //! `build web`, `dev ui`, `dev web`: browser-runtime and website gates.
 //! Unit coverage is Node-based with injected fakes (no Playwright browsers
 //! required). Real Chromium/Firefox/WebKit E2E is an explicit exception:
@@ -75,14 +75,6 @@ fn build_only_check() -> Result<(), String> {
     // Type-stripped import check: every runtime source must load under node.
     run_node(&["packages/browser-runtime/test/types.test.mjs"])?;
     Ok(())
-}
-
-pub fn test_ui(args: &[String]) -> Result<(), String> {
-    super::reject_unknown_args("test ui", args)?;
-    // Documented ui gate (docs/testing.md): controller, view rendering,
-    // accessibility, i18n, and mobile suites.
-    generate_web_artifacts()?;
-    run_node(&["test/{controller,view-rendering,ui-i18n,ui-a11y,ui-mobile}.test.mjs"])
 }
 
 pub fn test_web(args: &[String]) -> Result<(), String> {
@@ -353,7 +345,7 @@ fn dev_web(args: &[String]) -> Result<(), String> {
 
 /// Isolated shared-UI development: same served tree, beta app origin. The
 /// shared UI renders inside the new app at /beta; iterate there, then run
-/// `cargo xtask test ui` plus the affected integration lane.
+/// `cargo xtask test web` plus the affected integration lane.
 fn dev_ui(args: &[String]) -> Result<(), String> {
     let no_wasm = parse_dev_site_args("dev ui", args)?;
     if dist_fresh() {

@@ -30,15 +30,12 @@ pub fn check_deny() -> Result<(), String> {
         return Err(install_hint("`cargo deny --version` failed"));
     }
     let status = Command::new("cargo")
-        .args(["deny", "check", "advisories", "licenses", "bans", "sources"])
+        .args(["deny", "check", "--hide-inclusion-graph"])
         .current_dir(super::repo_root())
         .status()
         .map_err(|e| format!("failed to run cargo deny: {e}"))?;
     if !status.success() {
-        return Err(
-            "supply-chain gate failed (`cargo deny check advisories licenses bans sources`; see deny.toml)"
-                .to_string(),
-        );
+        return Err("supply-chain gate failed (`cargo deny check`; see deny.toml)".to_string());
     }
     println!("supply chain (cargo deny): ok");
     Ok(())

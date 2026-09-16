@@ -53,10 +53,9 @@ test remains explicit and excluded from `all`. Focused targets are documented
 in [Testing](testing.md). No test other than `test live` contacts public source
 sites.
 
-`cargo xtask setup` configures this checkout to use the versioned
-`.githooks/pre-commit` hook. The hook runs `cargo xtask ci check` and
-`cargo xtask test ui`, which catch formatting and generated shared-UI artifact
-failures before a commit.
+`cargo xtask setup` configures this checkout to use the versioned hooks.
+`.githooks/pre-commit` checks Rust formatting; `.githooks/pre-push` runs
+`cargo xtask ci check` and prints its log only on failure.
 
 ## Builds
 
@@ -209,7 +208,7 @@ Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 ### Change the shared UI
 
 1. Run `cargo xtask dev ui` while changing host-neutral components.
-2. Run `cargo xtask test ui`, then the affected `test web`, `test desktop`, or
+2. Run `cargo xtask test web`, then the affected `test desktop` or
    `test extension` integration target.
 3. Run `cargo xtask build web` to catch integration and bundle-policy failures.
 
