@@ -4,6 +4,9 @@
 
 use std::sync::{Arc, LazyLock};
 
+use serde::{Deserialize, Deserializer};
+
+use crate::json_utils::all_json;
 use crate::web_page::{has_iframe, iframe_source};
 use image_properties::ImageProperties;
 use regex::{Regex, bytes::Regex as BytesRegex};
@@ -48,28 +51,45 @@ static TILE_SERVICE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 // Inline OpenSeadragon configurations carry geometry (`width`, `height`,
-// `tilesUrl`, optional `tileSize`), e.g. geographicus.com. Each `{...}`
-// block is matched whole so fields from neighbouring sources never mix.
-static INLINE_SERVICE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?is)\{[^{}]*\btype["']?\s*:\s*["']zoomifytileservice["'][^{}]*\}"#)
-        .expect("constant inline Zoomify service pattern")
-});
-static INLINE_WIDTH_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)\bwidth["']?\s*:\s*["']?(?P<value>\d+)"#)
-        .expect("constant inline width pattern")
-});
-static INLINE_HEIGHT_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)\bheight["']?\s*:\s*["']?(?P<value>\d+)"#)
-        .expect("constant inline height pattern")
-});
-static INLINE_TILES_URL_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)\btilesUrl["']?\s*:\s*["'](?P<value>[^"']+)"#)
-        .expect("constant inline tiles URL pattern")
-});
-static INLINE_TILE_SIZE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)\btileSize["']?\s*:\s*["']?(?P<value>\d+)"#)
-        .expect("constant inline tile size pattern")
-});
+// `tilesUrl`, optional `tileSize`), e.g. geographicus.com. They are parsed
+// as JavaScript objects via the shared brace-scan + `json5` helper (which
+// tolerates unquoted keys, single quotes, and trailing commas), never with
+// field regexes. Every field is optional so enclosing viewer objects parse
+// but are filtered out by the marker below.
+#[derive(Debug, Deserialize)]
+struct RawInlineTileService {
+    #[serde(rename = "type", default)]
+    service_type: Option<String>,
+    #[serde(default, deserialize_with = "optional_u32")]
+    width: Option<u32>,
+    #[serde(default, deserialize_with = "optional_u32")]
+    height: Option<u32>,
+    #[serde(default)]
+    #[serde(rename = "tilesUrl")]
+    tiles_url: Option<String>,
+    #[serde(default, deserialize_with = "optional_u32")]
+    #[serde(rename = "tileSize")]
+    tile_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum NumberOrText {
+    Number(u32),
+    Text(String),
+}
+
+fn optional_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<NumberOrText>::deserialize(deserializer).map(|value| {
+        value.and_then(|value| match value {
+            NumberOrText::Number(number) => Some(number),
+            NumberOrText::Text(text) => text.trim().parse().ok(),
+        })
+    })
+}
 
 /// At most this many inline sources become catalog entries.
 const MAX_INLINE_SERVICES: usize = 8;
@@ -155,13 +175,6 @@ struct InlineService {
     tiles_url: String,
 }
 
-fn inline_field(block: &[u8], pattern: &BytesRegex) -> Option<String> {
-    pattern
-        .captures(block)
-        .and_then(|captures| captures.name("value"))
-        .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
-}
-
 fn inline_tile_services<'a>(
     html: &'a [u8],
     final_uri: &str,
@@ -172,33 +185,27 @@ fn inline_tile_services<'a>(
     } else {
         resolve_relative(final_uri, base_href)
     };
-    let mut blocks: Vec<(usize, &[u8])> = script_blocks(html)
+    script_blocks(html)
         .into_iter()
-        .flat_map(|(start, script)| {
-            INLINE_SERVICE_RE
-                .captures_iter(script)
-                .filter_map(move |captures| {
-                    let range = captures.get(0)?.range();
-                    Some((start + range.start, &script[range]))
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    blocks.sort_by_key(|(offset, _)| *offset);
-    blocks
-        .into_iter()
+        .flat_map(|(_, script)| all_json::<RawInlineTileService>(script).collect::<Vec<_>>())
         .take(MAX_INLINE_SERVICES)
-        .filter_map(move |(_, block)| {
-            let width: u32 = inline_field(block, &INLINE_WIDTH_RE)?.parse().ok()?;
-            let height: u32 = inline_field(block, &INLINE_HEIGHT_RE)?.parse().ok()?;
-            let tiles_url = inline_field(block, &INLINE_TILES_URL_RE)?;
+        .filter_map(move |raw| {
+            if !raw
+                .service_type
+                .as_deref()
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("zoomifytileservice"))
+            {
+                return None;
+            }
+            let (width, height) = (raw.width?, raw.height?);
+            let tiles_url = raw.tiles_url?;
             if width == 0 || height == 0 || tiles_url.trim().is_empty() {
                 return None;
             }
-            let tile_size: u32 = inline_field(block, &INLINE_TILE_SIZE_RE)
-                .and_then(|value| value.parse().ok())
-                .filter(|&size| size > 0)
-                .unwrap_or(256);
+            let tile_size = raw.tile_size.unwrap_or(256);
+            if tile_size == 0 {
+                return None;
+            }
             let tiles_url = resolve_relative(&page_base_uri, tiles_url.trim())
                 .trim_end_matches('/')
                 .to_owned();
@@ -783,6 +790,22 @@ mod tests {
         assert!(plan.tiles_row_major().next().unwrap().unwrap().request.uri.starts_with(
             "https://www.geographicus.com/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3/TileGroup0/"
         ));
+    }
+
+    #[test]
+    fn inline_service_accepts_string_dimensions_and_any_case() {
+        let services: Vec<InlineService> = inline_tile_services(
+            br#"<script>var c = {type: 'ZoomifyTileService', width: "1024",
+                height: '768', tilesUrl: "/z/", tileSize: "64",};</script>"#,
+            "https://example.com/page",
+            "",
+        )
+        .collect();
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].width, 1024);
+        assert_eq!(services[0].height, 768);
+        assert_eq!(services[0].tile_size, 64);
+        assert_eq!(services[0].tiles_url, "https://example.com/z");
     }
 
     #[test]
