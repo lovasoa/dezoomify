@@ -175,6 +175,12 @@ generated-marker checks. Golden candidates change only through the explicit
 maintenance option reported by `protocol generate --help`. `fixtures verify`
 validates manifests, provenance, licenses, routes, and hashes.
 
+Playwright resolves to exactly one version repository-wide through the
+`pnpm.overrides` pin in the root `package.json`: every Playwright browser
+build is version-coupled, so the website E2E and the extension headless gate
+cannot consume different engines. A Playwright bump moves the override together
+with the workspace specs.
+
 ## Releases
 
 Release tasks consume an immutable plan. Building does not sign or publish, and

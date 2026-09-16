@@ -73,13 +73,18 @@ jobs:
       # browsers (browser+web E2E, extension headless gate): every other leg
       # skips the download entirely. On a cache hit only
       # the OS dependencies are (re)ensured, never the browsers.
-      - name: Install Playwright Chromium (webapp E2E)
+      - name: Install Playwright Chromium
         if: matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
         run: |
           if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
             pnpm --filter webapp-e2e exec playwright install-deps chromium
           else
             pnpm --filter webapp-e2e exec playwright install --with-deps chromium
+            # The extension headless gate consumes Playwright from its own
+            # workspace package: install its Chromium engine too so a version
+            # skew between the two consumers cannot leave one lane without a
+            # browser. Aligned versions make this a no-op.
+            pnpm --filter dezoomify-extension-headless exec playwright install chromium
           fi
       - name: CI lane (rust)
         if: matrix.lane-group == 'rust'
