@@ -54,7 +54,7 @@ memchr = "2"
 custom_error = "1.7"
 evalexpr = "13"
 itertools = "0.15"
-krpano-decrypt = "0.2"
+krpano-decrypt = "0.2.1"
 base64 = "0.23"
 hmac = "0.13"
 sha1 = "0.11"
@@ -64,7 +64,7 @@ thiserror = "2"
 html-escape = "0.2"
 ureq = "3.4"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
-sha2 = "0.10"
+sha2 = "0.11"
 sysinfo = "0.39"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net"] }

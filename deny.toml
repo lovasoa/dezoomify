@@ -1,7 +1,7 @@
 [advisories]
 
 [licenses]
-allow = ["0BSD", "AGPL-3.0-only", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-1-Clause", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CDLA-Permissive-2.0", "GPL-3.0-only", "GPL-3.0-or-later", "ISC", "MIT", "Unicode-3.0", "Unicode-DFS-2016", "Unlicense", "Zlib"]
+allow = ["0BSD", "AGPL-3.0-only", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CDLA-Permissive-2.0", "GPL-3.0-only", "GPL-3.0-or-later", "ISC", "MIT", "Unicode-3.0", "Unlicense", "Zlib"]
 
 [bans]
 multiple-versions = "warn"
