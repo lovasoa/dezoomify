@@ -2,7 +2,6 @@
 // Provenance block plus the clipboard handoff. The snapshot arrives as plain
 // data, so this module owns no job state. File move, no behavior change.
 import { t } from "@dezoomify/shared-ui";
-import { phaseFor } from "./errorCopy.ts";
 import {
   PROTOCOL_MAX,
   PROTOCOL_MIN,
@@ -16,9 +15,11 @@ export const DESKTOP_APP_VERSION = typeof __DEZOOMIFY_VERSION__ === "string"
   : "0.0.0";
 
 
-// Copy-diagnostics provenance: typed error context, job and attempt ids, app
-// and protocol versions, and the redacted source origin only. Never the full
-// URL, credentials, or response content.
+// Copy-diagnostics provenance: job and attempt ids, app and protocol
+// versions, progress, and the redacted source origin only. The typed
+// error context (url, engine block, trailing code line) comes from the
+// shared renderer, which the caller prepends; it is never duplicated
+// here. Never credentials or response content.
 export interface DiagnosticsSnapshot {
   status: string;
   transport: string | null | undefined;
@@ -26,21 +27,12 @@ export interface DiagnosticsSnapshot {
   attempt: string | undefined;
   sessionId: string;
   nativeTransport: string;
-  error: {
-    code: string;
-    category: string;
-    phase?: string;
-    retryable: boolean;
-    message: string;
-    detail?: string;
-  } | null;
   progress: { current: number; total: number } | undefined;
   origin: string;
   outputActionError?: { action: "open" | "folder"; code: string };
 }
 
 export function buildCopyDiagnostics(snapshot: DiagnosticsSnapshot): string {
-  const error = snapshot.error;
   const lines = [
     `Status: ${snapshot.status}`,
     `Transport: ${snapshot.transport ?? snapshot.nativeTransport}`,
@@ -50,20 +42,11 @@ export function buildCopyDiagnostics(snapshot: DiagnosticsSnapshot): string {
     `App: dezoomify-desktop ${DESKTOP_APP_VERSION}`,
     `Protocol: ${PROTOCOL_VERSION} (min ${PROTOCOL_MIN}, max ${PROTOCOL_MAX})`,
   ];
-  if (error) {
-    lines.push(`Code: ${error.code}`);
-    lines.push(`Category: ${error.category}`);
-    lines.push(`Phase: ${error.phase ?? phaseFor(error.code)}`);
-    lines.push(`Retryable: ${String(error.retryable)}`);
-    lines.push(`Message: ${error.message}`);
-    if (error.detail) lines.push(`Detail: ${error.detail}`);
-  }
-  const progress = snapshot.progress;
   if (snapshot.outputActionError) {
     lines.push(`File action: ${snapshot.outputActionError.action}`);
     lines.push(`File action code: ${snapshot.outputActionError.code}`);
   }
-  if (progress) lines.push(`Tiles: ${progress.current} of ${progress.total}`);
+  if (snapshot.progress) lines.push(`Tiles: ${snapshot.progress.current} of ${snapshot.progress.total}`);
   lines.push(`Origin: ${snapshot.origin === "" ? "n/a" : snapshot.origin}`);
   return lines.join("\n");
 }

@@ -561,6 +561,9 @@ async function runJob(url: string): Promise<void> {
       detail?: string;
       technical?: string;
       retryable?: boolean;
+      url?: string;
+      http?: number;
+      preview?: string;
     };
     const code = stableErrorCode(error);
     const message = structured?.message || "Could not save this zoomable image.";
@@ -591,6 +594,11 @@ async function runJob(url: string): Promise<void> {
           transport: errorTransportFor(code, webFetcher.getActiveTransport()),
           phase: phaseFor(code),
           ...(detail ? { detail } : {}),
+          // Structured fetch context for the technical-details renderer:
+          // the full request URL is rendered verbatim, on-device only.
+          ...(structured?.url ? { url: structured.url } : {}),
+          ...(typeof structured?.http === "number" ? { http: structured.http } : {}),
+          ...(structured?.preview ? { preview: structured.preview } : {}),
         },
       }) as never,
     );

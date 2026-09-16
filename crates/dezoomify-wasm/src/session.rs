@@ -48,6 +48,7 @@
 use crate::buffer::{ArenaHandle, ByteArena, MAX_BUFFERS, MAX_BUFFER_BYTES, MAX_TOTAL_BYTES};
 use crate::codec::{decode_envelope, encode_envelope};
 use crate::error::{redact, AdapterError, AdapterErrorCode};
+use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_job::{
     DecisionReason, Job as EngineJob, JobCommand as EngineCommand, JobEffect as EngineEffect,
     JobError as EngineJobError, JobEvent as EngineEvent, JobMessageBody, Outcome,
@@ -674,17 +675,19 @@ impl Session {
                 if self.state != SessionState::Discovering {
                     return Ok(());
                 }
-                // Forward the host detail (HTTP status, category, bounded
-                // server signal) so discovery diagnostics can name the
-                // failed fetch instead of reporting "host fetch failed".
-                // Host text is untrusted: redact credential-bearing values
-                // before it crosses into the engine. The full request URL is
-                // named by the engine from its own request record.
-                let detail = crate::error::redact(&error.message)
-                    .chars()
-                    .take(500)
-                    .collect::<String>();
-                self.forward(EngineCommand::FetchFailure { request, detail })
+                // Forward the typed cause so the engine groups discovery
+                // diagnostics on `(kind, cause)`, never on rendered text.
+                // Host message text stays out of the engine entirely:
+                // nothing free-form crosses, so there is nothing to
+                // redact or bound here. The full request URL is named by
+                // the host itself, outside the engine block.
+                let cause = FetchCause {
+                    code: FetchCode::from_string(error.code.clone()),
+                    http: None,
+                    transport: TransportKind::from_wire(error.transport.as_deref()),
+                    reason: None,
+                };
+                self.forward(EngineCommand::FetchFailure { request, cause })
             }
         }
     }

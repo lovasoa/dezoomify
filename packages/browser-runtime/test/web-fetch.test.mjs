@@ -158,6 +158,81 @@ test("fetchMetadataFor never proxies HTTP errors or ineligible targets", async (
   });
 });
 
+test("metadata failures carry their typed cause plus the structured details context", async () => {
+  const h = hooks();
+  // Direct HTTP refusal: cause names the status and transport; the full
+  // request URL and the bounded server signal ride alongside.
+  const direct403 = createWebFetcher({
+    fetchImpl: async () => ({
+      url: "https://a.test/x?query=1",
+      status: 403,
+      headers: {},
+      arrayBuffer: async () => new TextEncoder().encode("<html>denied</html>").buffer,
+    }),
+    isProxyEligible: () => ({ eligible: false, reason: "test" }),
+    hooks: h,
+    messages,
+  });
+  await assert.rejects(() => direct403.fetchMetadataFor("https://a.test/x?query=1", {}), (e) => {
+    assert.equal(e.code, "DISCOVERY_HTTP_ERROR");
+    assert.deepEqual(e.cause, { code: "DISCOVERY_HTTP_ERROR", http: 403, transport: "direct" });
+    assert.equal(e.url, "https://a.test/x?query=1");
+    assert.equal(e.http, 403);
+    // The bounded server signal is markup-stripped to one line.
+    assert.equal(e.preview, "denied");
+    assert.equal(e.retryable, false);
+    return true;
+  });
+
+  // Proxy policy denial: the relay reason travels inside the cause.
+  const policy = createWebFetcher({
+    fetchImpl: async () => { throw new Error("Failed to fetch"); },
+    proxyTransport: { fetchViaProxy: async () => ({ ok: false, status: 403, code: "PROXY_POLICY_DENIED", reason: "signed-query" }) },
+    isProxyEligible: () => ({ eligible: true, reason: "public" }),
+    hooks: h,
+    messages,
+  });
+  await assert.rejects(() => policy.fetchMetadataFor("https://a.test/x?sig=1", {}), (e) => {
+    assert.equal(e.code, "TRANSPORT_POLICY_DENIED");
+    assert.deepEqual(e.cause, {
+      code: "TRANSPORT_POLICY_DENIED",
+      http: 403,
+      transport: "metadata-proxy",
+      reason: "signed-query",
+    });
+    assert.equal(e.url, "https://a.test/x?sig=1");
+    return true;
+  });
+
+  // Upstream HTTP refusal through the proxy.
+  const proxy404 = createWebFetcher({
+    fetchImpl: async () => { throw new Error("Failed to fetch"); },
+    proxyTransport: { fetchViaProxy: async () => ({ ok: false, status: 404, code: "TRANSPORT_HTTP_ERROR" }) },
+    isProxyEligible: () => ({ eligible: true, reason: "public" }),
+    hooks: h,
+    messages,
+  });
+  await assert.rejects(() => proxy404.fetchMetadataFor("https://a.test/missing", {}), (e) => {
+    assert.equal(e.code, "TRANSPORT_HTTP_ERROR");
+    assert.deepEqual(e.cause, { code: "TRANSPORT_HTTP_ERROR", http: 404, transport: "metadata-proxy" });
+    return true;
+  });
+
+  // No readable response at all: plain network failure, no HTTP status.
+  const network = createWebFetcher({
+    fetchImpl: async () => { throw new Error("Failed to fetch"); },
+    isProxyEligible: () => ({ eligible: false, reason: "test" }),
+    hooks: h,
+    messages,
+  });
+  await assert.rejects(() => network.fetchMetadataFor("https://a.test/x", {}), (e) => {
+    assert.equal(e.code, "DISCOVERY_FAILED");
+    assert.deepEqual(e.cause, { code: "DISCOVERY_FAILED", transport: "direct" });
+    assert.equal(e.http, undefined);
+    return true;
+  });
+});
+
 test("fetchMetadataFor retries a transient proxy throttle once", async () => {
   const h = hooks();
   let calls = 0;

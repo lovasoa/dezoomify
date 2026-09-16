@@ -188,41 +188,73 @@ test("failed state updates error details in place without destroying error conta
 
 test("error layering: plain message prominent, engine diagnostics only in technical details", () => {
   const el = container();
-  const aggregate =
-    "no discovery candidate accepted the input\n" +
-    " - custom: not a tiles.yaml file\n" +
-    " - google_arts_and_culture: The website hosting this image limits how many pages our server may request from it.";
+  const engineBlock =
+    " - zoomify, iiif, krpano: HTTP 429 fetching this address\n" +
+    " - 2 other format(s) did not match this page address";
   const state = {
     status: "failed",
     seq: 1,
     sessionId: "s3",
     imageCount: 0,
-    transport: "proxy",
+    transport: "metadata-proxy",
     error: {
       code: "UPSTREAM_RATE_LIMITED",
       category: "transport",
       retryable: true,
       message:
         "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened.",
-      detail: aggregate,
-      transport: "proxy",
+      detail: engineBlock,
+      transport: "metadata-proxy",
       phase: "discovery",
+      url: "https://example.test/viewer/tour.xml?sig=abc&lang=fr",
+      http: 429,
+      preview: "Too many requests",
     },
   };
   render(el, state, callbacks);
   const card = el.querySelector(".dz-card");
   const prominent = card.querySelector("#dz-error-message").textContent;
-  assert.ok(!prominent.includes("discovery candidate"), "aggregate must not be prominent");
-  assert.ok(!prominent.includes("custom:"), "per-format diagnostics must not be prominent");
+  assert.ok(!prominent.includes("zoomify"), "engine block must not be prominent");
+  assert.ok(!prominent.includes("429"), "status must not be prominent");
   const diagnostics = card.querySelector("#dz-error-diagnostics").textContent;
-  assert.match(diagnostics, /Code: UPSTREAM_RATE_LIMITED/);
-  assert.match(diagnostics, /no discovery candidate accepted the input/);
-  assert.match(diagnostics, / - custom: not a tiles\.yaml file/);
-  const state2 = { ...state, seq: 2, error: { ...state.error, detail: undefined } };
+  const lines = diagnostics.split("\n");
+  // Four-part order: url, http, server, blank, engine block, blank, trailing.
+  assert.equal(lines[0], "url: https://example.test/viewer/tour.xml?sig=abc&lang=fr");
+  assert.equal(lines[1], "http: 429");
+  assert.equal(lines[2], "server: Too many requests");
+  assert.equal(lines[3], "");
+  assert.equal(lines[4], " - zoomify, iiif, krpano: HTTP 429 fetching this address");
+  assert.equal(lines[5], " - 2 other format(s) did not match this page address");
+  assert.equal(lines[6], "");
+  assert.equal(
+    lines[7],
+    "code:UPSTREAM_RATE_LIMITED category:transport retryable:true transport:metadata-proxy phase:discovery http:429",
+  );
+  assert.equal(lines.length, 8, "exactly one trailing line, nothing after it");
+  // No headline repetition, no JSON, no label style from the old shape.
+  assert.ok(!diagnostics.includes("no discovery candidate"), "no engine headline");
+  assert.ok(!diagnostics.includes("Message:"), "no prominent-message repetition");
+  assert.ok(!diagnostics.includes("{"), "no JSON");
+  // A fresh failure without url/http/detail renders only the trailing line.
+  const state2 = {
+    ...state,
+    seq: 2,
+    error: {
+      code: "NO_IMAGE_FOUND",
+      category: "discovery",
+      retryable: false,
+      message: "No zoomable image could be found.",
+      transport: "direct",
+      phase: "discovery",
+    },
+  };
   render(el, state2, callbacks);
   const diag2 = card.querySelector("#dz-error-diagnostics").textContent;
-  assert.match(diag2, /Message: The website hosting this image/);
-  assert.ok(!diag2.includes("no discovery candidate"), "stale detail must be replaced");
+  assert.equal(
+    diag2,
+    "code:NO_IMAGE_FOUND category:discovery retryable:false transport:direct phase:discovery",
+  );
+  assert.ok(!diag2.includes("example.test"), "stale detail must be replaced");
 });
 
 test("job rail keeps integrated stop and diagnostics-copy controls, and header visibility tracks phase", () => {

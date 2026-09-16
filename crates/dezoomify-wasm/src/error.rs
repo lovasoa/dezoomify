@@ -9,6 +9,7 @@
 //! |---|---|
 //! | `version-unsupported` | protocol version rejected before any work |
 //! | `malformed` | undecodable envelope/JSON/ID, wrong message kind, empty geometry |
+//! | `no-candidate` | discovery ended with no candidate accepting the input |
 //! | `stale-buffer` | unknown/forged handle, generation mismatch, use after free or consume |
 //! | `limit-exceeded` | quota, oversized length, out-of-bounds access, capacity mismatch, arithmetic overflow |
 //! | `wrong-state` | valid handle/message in the wrong lifecycle phase (double commit, unsealed consume, dispatch vs job state, aliasing) |
@@ -30,6 +31,9 @@ pub enum AdapterErrorCode {
     VersionUnsupported,
     /// Undecodable input, wrong message kind, or empty geometry.
     Malformed,
+    /// Discovery ended with no candidate accepting the input; the message
+    /// carries the engine's headline-free per-format bullet block.
+    NoCandidate,
     /// Unknown/forged handle, generation mismatch, use after free/consume.
     StaleBuffer,
     /// Quota, oversized length, out-of-bounds access, capacity mismatch, overflow.
@@ -47,6 +51,7 @@ impl AdapterErrorCode {
         match self {
             Self::VersionUnsupported => "version-unsupported",
             Self::Malformed => "malformed",
+            Self::NoCandidate => "no-candidate",
             Self::StaleBuffer => "stale-buffer",
             Self::LimitExceeded => "limit-exceeded",
             Self::WrongState => "wrong-state",
@@ -96,6 +101,7 @@ impl AdapterError {
         let phase = match self.code {
             AdapterErrorCode::VersionUnsupported => ErrorPhase::Handshake,
             AdapterErrorCode::Disposed => ErrorPhase::Cleanup,
+            AdapterErrorCode::NoCandidate => ErrorPhase::Discovery,
             AdapterErrorCode::Malformed
             | AdapterErrorCode::StaleBuffer
             | AdapterErrorCode::LimitExceeded
@@ -150,6 +156,7 @@ mod tests {
             "version-unsupported"
         );
         assert_eq!(AdapterErrorCode::Malformed.as_str(), "malformed");
+        assert_eq!(AdapterErrorCode::NoCandidate.as_str(), "no-candidate");
         assert_eq!(AdapterErrorCode::StaleBuffer.as_str(), "stale-buffer");
         assert_eq!(AdapterErrorCode::LimitExceeded.as_str(), "limit-exceeded");
         assert_eq!(AdapterErrorCode::WrongState.as_str(), "wrong-state");

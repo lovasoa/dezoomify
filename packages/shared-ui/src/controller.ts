@@ -17,10 +17,18 @@ export interface StructuredError {
   category: string;
   retryable: boolean;
   message: string;
-  /** Raw engine diagnostics (per-format breakdown); rendered only in the collapsible technical section. */
+  /** Raw engine diagnostics (headline-free per-format bullet block); rendered only in the collapsible technical section. */
   detail?: string;
   transport?: string;
   phase?: string;
+  /** Full request URL of the failed fetch; rendered verbatim in on-device details only. */
+  url?: string;
+  /** HTTP status of the failed fetch, when it is an HTTP refusal. */
+  http?: number;
+  /** Bounded single-line server signal captured from an HTTP error body. */
+  preview?: string;
+  /** Host-provided provenance lines (status, origin, resource kind), rendered after the trailing line. */
+  extras?: string[];
 }
 
 export interface ControllerState {

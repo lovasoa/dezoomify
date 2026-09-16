@@ -72,6 +72,7 @@ use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant};
 
 use dezoomify_core::core::adaptive::ObservationResult;
+use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_core::core::model::{ProcessingRecipe, Request};
 use dezoomify_core::Vec2d;
 use dezoomify_job::{
@@ -80,7 +81,7 @@ use dezoomify_job::{
 };
 
 use crate::error::NativeError;
-use crate::http::{fetch, UserHeaders};
+use crate::http::{fetch, FetchOutcome, UserHeaders};
 use crate::output::{
     partial_path_for, validate_destination, write_atomic, write_iiif_dir, OutputFormat,
 };
@@ -95,71 +96,26 @@ use crate::pipeline::{
 /// follows, matching the legacy loop limit.
 const MAX_DEFERRED_FOLLOWS: u32 = 10;
 
-/// Fetch-failure detail for the engine: HTTP status plus a bounded,
-/// single-line server signal extracted from the error body. The engine
-/// names the request URI itself, so the detail carries no URL. ASCII
-/// punctuation only.
-fn fetch_failure_detail(status: u16, body: &[u8]) -> String {
-    let mut detail = format!("HTTP {status}");
-    let text = String::from_utf8_lossy(&body[..body.len().min(4096)]);
-    if text.contains('\0') {
-        return detail;
-    }
-    let mut signal = String::with_capacity(300);
-    let mut last_was_space = true;
-    for ch in strip_tags(&text).chars() {
-        // Whitespace collapses to one space; other controls are dropped.
-        if ch.is_whitespace() {
-            if !last_was_space {
-                signal.push(' ');
-                last_was_space = true;
-            }
-        } else if !ch.is_control() {
-            signal.push(ch);
-            last_was_space = false;
-        }
-        if signal.len() >= 300 {
-            break;
-        }
-    }
-    let signal = dezoomify_protocol::dto::redact_error_text(signal.trim());
-    if signal.is_empty() {
-        detail
-    } else {
-        detail.push_str(": server said \"");
-        detail.push_str(&signal);
-        detail.push('"');
-        detail
-    }
+/// Typed fetch cause for the engine. Native HTTP refusals carry their
+/// status; transport-level failures decode their stable code (unknown
+/// codes stay typed-unknown, so grouping keeps working). The engine
+/// renders the bullet block; the request URL and any server signal stay
+/// host-side, out of the engine path.
+fn fetch_failure_cause(outcome: &FetchOutcome) -> FetchCause {
+    FetchCause::new(FetchCode::TransportHttpError, TransportKind::Native).with_http(outcome.status)
 }
 
-/// Drop `<...>` markup spans (up to 512 chars) from an error body so the
-/// signal reads as text. Unclosed `<` sequences are kept literally.
-fn strip_tags(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars();
-    while let Some(ch) = chars.next() {
-        if ch != '<' {
-            out.push(ch);
-            continue;
-        }
-        let mut span = String::new();
-        let mut closed = false;
-        for next in chars.by_ref().take(512) {
-            if next == '>' {
-                closed = true;
-                break;
-            }
-            span.push(next);
-        }
-        if closed {
-            out.push(' ');
-        } else {
-            out.push('<');
-            out.push_str(&span);
-        }
-    }
-    out
+fn transport_failure_cause(error: &NativeError) -> FetchCause {
+    let code = match error.code.as_str() {
+        "transport.timeout" => FetchCode::TransportTimeout,
+        "transport.network-error" => FetchCode::TransportNetworkError,
+        "transport.bad-url" => FetchCode::TransportBadUrl,
+        "transport.bad-redirect" => FetchCode::TransportBadRedirect,
+        "transport.redirect-limit" => FetchCode::TransportRedirectLimit,
+        "transport.size-limit" => FetchCode::TransportSizeLimit,
+        other => FetchCode::from_string(other),
+    };
+    FetchCause::new(code, TransportKind::Native)
 }
 
 /// Terminal outcome of one job attempt: finished output or a deferred URI to
@@ -862,14 +818,14 @@ fn execute_effects(
                         job,
                         JobCommand::FetchFailure {
                             request,
-                            detail: fetch_failure_detail(outcome.status, &outcome.body),
+                            cause: fetch_failure_cause(&outcome),
                         },
                     )?,
                     Err(error) => reply(
                         job,
                         JobCommand::FetchFailure {
                             request,
-                            detail: error.message.clone(),
+                            cause: transport_failure_cause(&error),
                         },
                     )?,
                 }

@@ -148,7 +148,10 @@ impl From<dezoomify_core::core::discovery::DiscoveryError> for NativeError {
     fn from(error: dezoomify_core::core::discovery::DiscoveryError) -> Self {
         use dezoomify_core::core::discovery::DiscoveryError as E;
         match &error {
-            E::NoCandidateAccepted { .. } => Self::new("discovery.no-image", error.to_string()),
+            // The aggregate carries the headline-free bullet block: the
+            // host renders its own prominent message and never repeats
+            // the engine's headline inside the technical details.
+            E::NoCandidateAccepted { .. } => Self::new("discovery.no-image", error.engine_detail()),
             E::TransitionLimitExceeded | E::MetadataSizeLimitExceeded => {
                 Self::new("tile.limit", error.to_string())
             }
