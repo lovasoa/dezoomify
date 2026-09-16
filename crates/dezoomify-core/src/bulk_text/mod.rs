@@ -2,7 +2,6 @@
 
 use crate::core::{
     CatalogEntry, DeferredImage, DezoomerSpec, DiscoveryError, DiscoveryMatch, ImageCatalog,
-    StableId,
 };
 
 pub const SPEC: DezoomerSpec =
@@ -20,16 +19,13 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
             "no valid URLs found in text file".into(),
         ));
     }
-    Ok(ImageCatalog::new(images.into_iter().enumerate().map(
-        |(index, image)| {
-            CatalogEntry::Deferred(DeferredImage {
-                id: StableId::new(format!("bulk:{index}")),
-                uri: image.uri,
-                title: image.title,
-                warnings: Vec::new(),
-            })
-        },
-    )))
+    Ok(ImageCatalog::new(images.into_iter().map(|image| {
+        CatalogEntry::Deferred(DeferredImage {
+            uri: image.uri,
+            title: image.title,
+            warnings: Vec::new(),
+        })
+    })))
 }
 
 fn is_bulk_file(uri: &str) -> bool {

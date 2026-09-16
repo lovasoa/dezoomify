@@ -6,7 +6,7 @@ dezoomify is one monorepo containing Rust crates, generated protocol bindings, t
 
 ### `crates/dezoomify-core`
 
-A pure Rust library that converts supplied resource bytes and URLs into discovery results, image catalogs, tile plans, and processing recipes. It describes required resources but never fetches them. Its library code performs no network, filesystem, async runtime, image decoding/encoding, UI, DOM, clock, random source, process, or environment access. Pure parsing, URL manipulation, deterministic crypto, serialization, and data-structure libraries plus the `log` facade are permitted. Tests may invoke tooling without making it a normal dependency. Each format registers a stable id with a user-visible display name in one ordered registry; registry order defines automatic precedence.
+A pure Rust library that converts supplied resource bytes and URLs into discovery results, normalized image catalogs, positional tile plans, and processing recipes. It describes required resources but never fetches them. Its library code performs no network, filesystem, async runtime, image decoding/encoding, UI, DOM, clock, random source, process, or environment access. Pure parsing, URL manipulation, deterministic crypto, serialization, and data-structure libraries plus the `log` facade are permitted. Tests may invoke tooling without making it a normal dependency. Each format registers a static name with a user-visible display name in one ordered registry; registry order defines automatic precedence. Catalog and level order is frozen before publication, selection uses array positions, and tiles carry only a selected-level ordinal.
 
 ### `crates/dezoomify-job`
 

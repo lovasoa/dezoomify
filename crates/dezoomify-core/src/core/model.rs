@@ -1,47 +1,12 @@
 //! Neutral values shared by discovery and tile planning.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{self, Write as _};
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use crate::Vec2d;
 
 use super::discovery::DiscoveryError;
 use super::tile_plan::TileSource;
-
-/// A deterministic identifier within one discovery/planning operation.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct StableId(Arc<str>);
-
-impl StableId {
-    #[must_use]
-    pub fn new(value: impl Into<Arc<str>>) -> Self {
-        Self(value.into())
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for StableId {
-    fn from(value: &str) -> Self {
-        Self::new(Arc::<str>::from(value))
-    }
-}
-
-impl From<String> for StableId {
-    fn from(value: String) -> Self {
-        Self::new(Arc::<str>::from(value))
-    }
-}
-
-impl fmt::Display for StableId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
 
 /// One portable resource description, used for both metadata and tiles.
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -86,23 +51,11 @@ pub enum TileRole {
     ProbeAndOutput,
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct TileId {
-    pub level: StableId,
-    pub ordinal: u64,
-}
-
-impl TileId {
-    #[must_use]
-    pub const fn new(level: StableId, ordinal: u64) -> Self {
-        Self { level, ordinal }
-    }
-}
-
 /// A logical tile.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TileSpec {
-    pub id: TileId,
+    /// Zero-based position within the selected level's immutable tile plan.
+    pub ordinal: u32,
     pub request: Request,
     /// Top-left output position. The extent is deliberately optional because
     /// probe and custom-layout tiles may only reveal it after decoding.
@@ -149,18 +102,16 @@ impl LevelDescriptor {
         self
     }
 
-    #[must_use]
-    pub fn id(&self) -> &StableId {
-        self.source.id()
-    }
-
     /// Human-readable label for interactive pickers.
     ///
-    /// Shows the level title (or stable id as a fallback) followed by the
+    /// Shows the level title (or positional label as a fallback) followed by the
     /// image size, tile size and tile count whenever they are known.
     #[must_use]
-    pub fn display_label(&self) -> String {
-        let label = self.title.clone().unwrap_or_else(|| self.id().to_string());
+    pub fn display_label(&self, position: usize) -> String {
+        let label = self
+            .title
+            .clone()
+            .unwrap_or_else(|| format!("Level {}", position + 1));
         let size = self.source.image_size();
         let count = self.source.count();
         if size.is_none() && count.is_none() {
@@ -181,30 +132,17 @@ impl LevelDescriptor {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ImageDescriptor {
-    pub id: StableId,
     pub title: Option<String>,
-    pub format: StableId,
+    /// Static registry name of the format which produced this descriptor.
+    pub format: &'static str,
     pub levels: Vec<LevelDescriptor>,
     pub warnings: Vec<String>,
 }
 
-impl Default for ImageDescriptor {
-    fn default() -> Self {
-        Self {
-            id: StableId::new(""),
-            title: None,
-            format: StableId::new(""),
-            levels: Vec::new(),
-            warnings: Vec::new(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeferredImage {
-    pub id: StableId,
     pub uri: String,
     pub title: Option<String>,
     pub warnings: Vec<String>,
@@ -218,28 +156,6 @@ pub enum CatalogEntry {
 
 #[derive(Clone, Debug, Default)]
 pub struct ImageCatalog(pub Vec<CatalogEntry>);
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CatalogError {
-    DuplicateEntryId(StableId),
-    DuplicateLevelId {
-        image_id: StableId,
-        level_id: StableId,
-    },
-}
-
-impl fmt::Display for CatalogError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::DuplicateEntryId(id) => write!(f, "duplicate catalog entry id: {id}"),
-            Self::DuplicateLevelId { image_id, level_id } => {
-                write!(f, "duplicate level id {level_id} in image {image_id}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for CatalogError {}
 
 /// Floor a fractional tile coordinate, rejecting non-finite or out-of-range
 /// values. `format` names the site format in the error message.
@@ -282,39 +198,22 @@ impl ImageCatalog {
         self.0
     }
 
-    /// Enforce deterministic catalog ordering and stable identifier uniqueness.
-    pub fn normalize(mut self) -> Result<Self, CatalogError> {
-        let mut entry_ids = BTreeSet::new();
+    /// Enforce deterministic level ordering before the catalog is published.
+    #[must_use]
+    pub fn normalize(mut self) -> Self {
         for entry in &mut self.0 {
-            let id = match entry {
-                CatalogEntry::Ready(image) => {
-                    let mut level_ids = BTreeSet::new();
-                    for level in &image.levels {
-                        if !level_ids.insert(level.id().clone()) {
-                            return Err(CatalogError::DuplicateLevelId {
-                                image_id: image.id.clone(),
-                                level_id: level.id().clone(),
-                            });
-                        }
-                    }
-                    if image
-                        .levels
-                        .iter()
-                        .all(|level| level.source.image_size().is_some())
-                    {
-                        image.levels.sort_by_key(|level| {
-                            level.source.image_size().expect("all sizes checked").area()
-                        });
-                    }
-                    image.id.clone()
-                }
-                CatalogEntry::Deferred(image) => image.id.clone(),
-            };
-            if !entry_ids.insert(id.clone()) {
-                return Err(CatalogError::DuplicateEntryId(id));
+            if let CatalogEntry::Ready(image) = entry
+                && image
+                    .levels
+                    .iter()
+                    .all(|level| level.source.image_size().is_some())
+            {
+                image.levels.sort_by_key(|level| {
+                    level.source.image_size().expect("all sizes checked").area()
+                });
             }
         }
-        Ok(self)
+        self
     }
 }
 
@@ -332,10 +231,9 @@ mod tests {
         }
     }
 
-    fn level(id: &str, size: u32) -> LevelDescriptor {
+    fn level(size: u32) -> LevelDescriptor {
         LevelDescriptor::new(
             Grid::new(
-                id.into(),
                 Vec2d::square(size),
                 Vec2d::square(1),
                 Vec2d::default(),
@@ -347,9 +245,8 @@ mod tests {
 
     #[test]
     fn display_label_includes_geometry_and_tile_count() {
-        let mut level = level("gap:0", 100);
+        let mut level = level(100);
         level.source = Grid::new(
-            "level".into(),
             Vec2d::square(100),
             Vec2d::square(100),
             Vec2d::default(),
@@ -357,45 +254,27 @@ mod tests {
         )
         .unwrap()
         .into();
-        let label = level.display_label();
-        assert_eq!(label, "level (  100 x   100 pixels,   1 tiles)");
+        let label = level.display_label(2);
+        assert_eq!(label, "Level 3 (  100 x   100 pixels,   1 tiles)");
         level.title = Some("Krpano Cube forward".into());
-        assert!(level.display_label().starts_with("Krpano Cube forward ("));
+        assert!(level.display_label(2).starts_with("Krpano Cube forward ("));
     }
 
     #[test]
-    fn normalization_orders_levels_and_rejects_duplicate_stable_ids() {
+    fn normalization_orders_levels_deterministically() {
         let catalog = ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-            id: StableId::new("image"),
             title: None,
-            format: StableId::new("test"),
-            levels: vec![level("large", 300), level("small", 100)],
+            format: "test",
+            levels: vec![level(300), level(100)],
             warnings: Vec::new(),
         })])
-        .normalize()
-        .unwrap();
+        .normalize();
         let CatalogEntry::Ready(image) = &catalog.entries()[0] else {
             unreachable!()
         };
-        assert_eq!(image.levels[0].id().as_str(), "small");
-
-        let duplicate = ImageCatalog::new([
-            CatalogEntry::Deferred(DeferredImage {
-                id: StableId::new("same"),
-                uri: "memory://one".into(),
-                title: None,
-                warnings: Vec::new(),
-            }),
-            CatalogEntry::Deferred(DeferredImage {
-                id: StableId::new("same"),
-                uri: "memory://two".into(),
-                title: None,
-                warnings: Vec::new(),
-            }),
-        ]);
-        assert!(matches!(
-            duplicate.normalize(),
-            Err(CatalogError::DuplicateEntryId(id)) if id.as_str() == "same"
-        ));
+        assert_eq!(
+            image.levels[0].source.image_size(),
+            Some(Vec2d::square(100))
+        );
     }
 }

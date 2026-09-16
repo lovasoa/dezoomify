@@ -8,7 +8,7 @@ use url::Url;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId, image_title,
+    ImageDescriptor, LevelDescriptor, Request, image_title,
 };
 
 static SERVER_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -90,9 +90,8 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     let title = image_title(&item);
     let levels = build_levels(width, height, &origin, &catalog_name, &item)?;
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("lizardtech:image"),
         title,
-        format: StableId::new("lizardtech"),
+        format: "lizardtech",
         levels,
         ..Default::default()
     })]))
@@ -140,7 +139,6 @@ fn build_levels(
                 .unwrap_or(origin.as_ref())
                 .into();
             let source = Grid::with_requests(
-                StableId::new(format!("lizardtech:{ordinal}")),
                 Vec2d { x: width, y: height },
                 Vec2d::square(512),
                 Vec2d::default(),

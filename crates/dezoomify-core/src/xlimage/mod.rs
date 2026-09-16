@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::Vec2d;
 use crate::core::{
     CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, DiscoveryRoute, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, StableId,
+    ImageDescriptor, LevelDescriptor, Request,
 };
 
 const INFO_QUERY: &str = "cmd=info";
@@ -56,9 +56,8 @@ fn catalog(url: &str, bytes: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
     let title = image_title(&origin);
 
     Ok(ImageCatalog::new([CatalogEntry::Ready(ImageDescriptor {
-        id: StableId::new("xlimage:image"),
         title,
-        format: StableId::new("xlimage"),
+        format: "xlimage",
         levels,
         ..Default::default()
     })]))
@@ -86,7 +85,6 @@ fn build_levels(
         let height = metadata.height.div_ceil(zoom);
         let origin = Arc::clone(origin);
         let source = Grid::with_requests(
-            StableId::new(format!("xlimage:{zoom}")),
             Vec2d {
                 x: width,
                 y: height,

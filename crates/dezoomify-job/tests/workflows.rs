@@ -23,8 +23,8 @@ fn test_config() -> Config {
 }
 
 /// Provide the DZI document for the outstanding discovery request and
-/// select the first image's last (largest) level. Returns the level id.
-fn discover_and_select(host: &mut ScriptedHost, id: u32) -> String {
+/// Select the first image's last (largest) level. Returns its position.
+fn discover_and_select(host: &mut ScriptedHost, id: u32) -> u32 {
     host.start().unwrap();
     host.apply(JobResponse::ResourceBytes {
         job: job_id(id),
@@ -33,21 +33,20 @@ fn discover_and_select(host: &mut ScriptedHost, id: u32) -> String {
         final_uri: None,
     })
     .unwrap();
-    let (image_id, level_ids) = host.catalog().expect("catalog event");
-    assert!(image_id.starts_with("img:"), "wire image id: {image_id}");
-    assert!(!level_ids.is_empty());
+    let (image, levels) = host.catalog().expect("catalog event");
+    assert!(!levels.is_empty());
     host.apply(JobResponse::SelectedImage {
         job: job_id(id),
-        image: image_id,
+        image,
     })
     .unwrap();
-    let level_id = level_ids.last().expect("level").clone();
+    let level = *levels.last().expect("level");
     host.apply(JobResponse::SelectedLevel {
         job: job_id(id),
-        level: level_id.clone(),
+        level,
     })
     .unwrap();
-    level_id
+    level
 }
 
 #[test]
@@ -71,9 +70,9 @@ fn discover_success_minimal() {
 
     // The catalog event carries the real projected catalog: a deepzoom
     // image whose levels each declare exact geometry.
-    let (image_id, level_ids) = host.catalog().expect("catalog event");
-    assert_eq!(image_id, "img:dzi:0");
-    assert!(level_ids.len() >= 2, "levels: {level_ids:?}");
+    let (image, levels) = host.catalog().expect("catalog event");
+    assert_eq!(image, 0);
+    assert!(levels.len() >= 2, "levels: {levels:?}");
     let catalog_event = host
         .events
         .iter()
@@ -89,7 +88,10 @@ fn discover_success_minimal() {
     let level = &image["levels"][0];
     // Core normalizes levels to ascending size: the first entry is the
     // smallest level (highest ordinal), the last is the largest.
-    assert_eq!(level["id"], "lvl:dzi:0:9");
+    assert_eq!(
+        level["label"],
+        "DZI level 9 (    1 x     1 pixels,   1 tiles)"
+    );
     assert_eq!(level["tileWidth"], 256);
 
     // The discovery fetch effect targets the input URL with metadata purpose.
@@ -125,7 +127,7 @@ fn destination_grant_flow_completes() {
     let tiles = host.tile_effects();
     assert_eq!(tiles.len(), 4, "tile effects: {tiles:?}");
     assert!(tiles.iter().all(|(tile, uri, probe)| {
-        tile.starts_with("tile:") && uri.starts_with("https://example.test/image_files/") && !probe
+        *tile < 4 && uri.starts_with("https://example.test/image_files/") && !probe
     }));
     assert!(
         tiles.iter().all(|(_, uri, _)| uri.ends_with(".jpg")),
@@ -133,11 +135,11 @@ fn destination_grant_flow_completes() {
     );
 
     // Respond with the real planned tile ids.
-    let planned: Vec<String> = tiles.into_iter().map(|(tile, _, _)| tile).collect();
+    let planned: Vec<u32> = tiles.into_iter().map(|(tile, _, _)| tile).collect();
     for tile in &planned {
         host.apply(JobResponse::TileOutcome {
             job: job_id(2),
-            tile: tile.clone(),
+            tile: *tile,
             ok: true,
         })
         .unwrap();
@@ -196,7 +198,7 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
         destination: "dst:0".to_string(),
     })
     .unwrap();
-    let planned: Vec<String> = host
+    let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
         .map(|(tile, _, _)| tile)
@@ -204,13 +206,13 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
 
     host.apply(JobResponse::TileOutcome {
         job: job_id(20),
-        tile: planned[0].clone(),
+        tile: planned[0],
         ok: true,
     })
     .unwrap();
     host.apply(JobResponse::TileOutcome {
         job: job_id(20),
-        tile: planned[1].clone(),
+        tile: planned[1],
         ok: false,
     })
     .unwrap();
@@ -222,15 +224,15 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
     })
     .unwrap();
 
-    let decoded: Vec<&str> = host
+    let decoded: Vec<u64> = host
         .effects
         .iter()
         .filter(|effect| {
             effect.get("kind").and_then(serde_json::Value::as_str) == Some("decode-pixels")
         })
-        .filter_map(|effect| effect.get("tile").and_then(serde_json::Value::as_str))
+        .filter_map(|effect| effect.get("tile").and_then(serde_json::Value::as_u64))
         .collect();
-    assert_eq!(decoded, vec![planned[0].as_str()]);
+    assert_eq!(decoded, vec![u64::from(planned[0])]);
     assert_eq!(host.state(), "PartiallyCompleted");
     assert_eq!(host.job().terminal_kind(), Some("partial-completed"));
 }
@@ -244,14 +246,14 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
         destination: "dst:0".to_string(),
     })
     .unwrap();
-    let tiles: Vec<String> = host
+    let tiles: Vec<u32> = host
         .tile_effects()
         .into_iter()
         .map(|(tile, _, _)| tile)
         .collect();
     host.apply(JobResponse::TileOutcome {
         job: job_id(3),
-        tile: tiles[0].clone(),
+        tile: tiles[0],
         ok: true,
     })
     .unwrap();
@@ -265,7 +267,7 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
     // Late tile outcome after cancellation is stably rejected with no work.
     let late = host.apply(JobResponse::TileOutcome {
         job: job_id(3),
-        tile: tiles[1].clone(),
+        tile: tiles[1],
         ok: true,
     });
     assert!(late.is_err());
@@ -295,17 +297,17 @@ fn probe_driven_generic_level_resolves_through_observations() {
     let mut host = ScriptedHost::new(&job_id(4), TEMPLATE, test_config()).unwrap();
     host.start().unwrap();
     // Generic templates are immediate: discovery completes at start.
-    let (image_id, level_ids) = host.catalog().expect("catalog event");
-    assert_eq!(image_id, "img:generic:image");
-    assert_eq!(level_ids, vec!["lvl:generic:level".to_string()]);
+    let (image, levels) = host.catalog().expect("catalog event");
+    assert_eq!(image, 0);
+    assert_eq!(levels, vec![0]);
     host.apply(JobResponse::SelectedImage {
         job: job_id(4),
-        image: image_id,
+        image,
     })
     .unwrap();
     host.apply(JobResponse::SelectedLevel {
         job: job_id(4),
-        level: "lvl:generic:level".to_string(),
+        level: 0,
     })
     .unwrap();
     host.apply(JobResponse::DestinationGranted {
@@ -345,7 +347,7 @@ fn probe_driven_generic_level_resolves_through_observations() {
         .unwrap();
     }
     assert_eq!(host.state(), "AcquiringTiles");
-    let planned: Vec<(String, String, bool)> = host
+    let planned: Vec<(u32, String, bool)> = host
         .tile_effects()
         .into_iter()
         .filter(|(_, _, probe)| !*probe)
@@ -354,8 +356,7 @@ fn probe_driven_generic_level_resolves_through_observations() {
     assert!(
         planned
             .iter()
-            .all(|(tile, uri, _)| tile.starts_with("tile:")
-                && uri.starts_with("https://example.test/generic/placeholder.svg?x=")),
+            .all(|(_, uri, _)| uri.starts_with("https://example.test/generic/placeholder.svg?x=")),
         "planned URIs follow the template: {planned:?}"
     );
 }
@@ -390,7 +391,7 @@ fn discovery_poll_emits_one_effect_per_outstanding_request() {
     // reports the same request and the engine waits instead of growing.
     let err = host.apply(JobResponse::TileOutcome {
         job: job_id(5),
-        tile: "tile:0".to_string(),
+        tile: 0,
         ok: true,
     });
     assert!(err.is_err());
@@ -428,7 +429,7 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     .unwrap();
     assert_eq!(host.state(), "AcquiringTiles");
     assert!(!host.job().is_paused());
-    let planned: Vec<String> = host
+    let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
         .map(|(tile, _, _)| tile)
@@ -452,7 +453,7 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     // tile is scheduled and completion is deferred.
     host.apply(JobResponse::TileOutcome {
         job: job_id(6),
-        tile: planned[0].clone(),
+        tile: planned[0],
         ok: true,
     })
     .unwrap();
@@ -471,7 +472,7 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     for tile in planned.iter().skip(1) {
         host.apply(JobResponse::TileOutcome {
             job: job_id(6),
-            tile: tile.clone(),
+            tile: *tile,
             ok: true,
         })
         .unwrap();
@@ -491,7 +492,7 @@ fn pause_defers_completion_until_resume() {
         destination: "dst:0".to_string(),
     })
     .unwrap();
-    let planned: Vec<String> = host
+    let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
         .map(|(tile, _, _)| tile)
@@ -500,7 +501,7 @@ fn pause_defers_completion_until_resume() {
     for tile in &planned {
         host.apply(JobResponse::TileOutcome {
             job: job_id(7),
-            tile: tile.clone(),
+            tile: *tile,
             ok: true,
         })
         .unwrap();
@@ -522,7 +523,7 @@ fn pause_preserves_retry_wakeup_and_rejects_post_terminal() {
         destination: "dst:0".to_string(),
     })
     .unwrap();
-    let planned: Vec<String> = host
+    let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
         .map(|(tile, _, _)| tile)
