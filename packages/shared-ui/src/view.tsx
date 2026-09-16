@@ -700,6 +700,7 @@ function FailedView({
           <p className="dz-error-message" id="dz-error-message">
             {error.message}
           </p>
+          <p className="dz-error-redact-hint">{t("view.fail.redactHint")}</p>
         </div>
       </div>
       <div className="dz-guidance-section">

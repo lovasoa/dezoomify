@@ -235,7 +235,10 @@ fn dispatch_resource(
             RouteAction::MapUrl(_) => continue,
         };
     }
-    Err(DiscoveryError::Session(unmatched.into()))
+    Err(DiscoveryError::rejected(
+        RejectionKind::DidNotMatchContent,
+        unmatched,
+    ))
 }
 
 fn map_url(routes: &[DiscoveryRoute], request: Request) -> Result<Request, DiscoveryError> {
@@ -339,15 +342,60 @@ impl PartialEq for DezoomerSpec {
     }
 }
 
+/// Why one discovery candidate rejected an input or a resource. Typed so
+/// callers never branch on display text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RejectionKind {
+    /// The candidate's URL-shape check declined this address. Nothing was
+    /// fetched, so the rejection carries no page-content information.
+    DidNotMatchUrl,
+    /// Fetched bytes matched none of the candidate's routes.
+    DidNotMatchContent,
+    /// The candidate recognized the resource but its metadata was invalid
+    /// or unparseable.
+    InvalidMetadata,
+    /// A resource the candidate needed could not be fetched.
+    FetchFailed,
+    /// The candidate stopped for another reason (resource or transition
+    /// limits, or an internal invariant).
+    Failed,
+}
+
+/// One rejected candidate's diagnostic.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CandidateDiagnostic {
+    pub format: String,
+    pub kind: RejectionKind,
+    pub message: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DiscoveryError {
     UnknownRequest(RequestId),
     RequestAlreadyProvided(RequestId),
-    NoCandidateAccepted { diagnostics: Vec<(String, String)> },
+    NoCandidateAccepted {
+        diagnostics: Vec<CandidateDiagnostic>,
+    },
     NotComplete,
+    /// A candidate rejected the input or resource; `kind` classifies why.
+    Rejected {
+        kind: RejectionKind,
+        message: String,
+    },
+    /// A format handler or extractor failed without a typed rejection.
     Session(String),
     TransitionLimitExceeded,
     MetadataSizeLimitExceeded,
+}
+
+impl DiscoveryError {
+    /// A candidate rejected the input or resource with a typed kind.
+    pub(crate) fn rejected(kind: RejectionKind, message: impl Into<String>) -> Self {
+        Self::Rejected {
+            kind,
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for DiscoveryError {
@@ -357,13 +405,38 @@ impl fmt::Display for DiscoveryError {
             Self::RequestAlreadyProvided(id) => write!(f, "request {} was already supplied", id.0),
             Self::NoCandidateAccepted { diagnostics } => {
                 f.write_str("no discovery candidate accepted the input")?;
-                for (id, diagnostic) in diagnostics {
-                    write!(f, "\n - {id}: {diagnostic}")?;
+                // Grouped rendering: URL-shape misses collapse to a count,
+                // while identical messages print once with joined format
+                // names. ASCII only: no em dashes or unicode symbols.
+                let mut url_misses = 0_usize;
+                let mut grouped: Vec<(&str, Vec<&str>)> = Vec::new();
+                for diagnostic in diagnostics {
+                    if diagnostic.kind == RejectionKind::DidNotMatchUrl {
+                        url_misses += 1;
+                        continue;
+                    }
+                    match grouped
+                        .iter_mut()
+                        .find(|(message, _)| *message == diagnostic.message)
+                    {
+                        Some((_, names)) => names.push(&diagnostic.format),
+                        None => grouped.push((&diagnostic.message, vec![&diagnostic.format])),
+                    }
+                }
+                for (message, names) in &grouped {
+                    write!(f, "\n - {}: {}", names.join(", "), message)?;
+                }
+                if url_misses > 0 {
+                    let noun = if url_misses == 1 { "format" } else { "formats" };
+                    write!(
+                        f,
+                        "\n - {url_misses} other {noun} did not match this page address"
+                    )?;
                 }
                 Ok(())
             }
             Self::NotComplete => f.write_str("discovery is not complete"),
-            Self::Session(message) => f.write_str(message),
+            Self::Rejected { message, .. } | Self::Session(message) => f.write_str(message),
             Self::TransitionLimitExceeded => f.write_str("discovery transition limit exceeded"),
             Self::MetadataSizeLimitExceeded => {
                 f.write_str("discovery metadata size limit exceeded")
@@ -396,7 +469,7 @@ pub struct DiscoveryOperation {
     input: String,
     candidates: Vec<Candidate>,
     requests: Vec<ResourceRecord>,
-    diagnostics: Vec<(String, String)>,
+    diagnostics: Vec<CandidateDiagnostic>,
     catalog: Option<ImageCatalog>,
     transitions: usize,
     retained_bytes: usize,
@@ -502,6 +575,14 @@ impl DiscoveryOperation {
         self.catalog.is_some()
     }
 
+    /// Request URI for a core request id, for fetch-failure diagnostics.
+    #[must_use]
+    pub fn request_uri(&self, id: RequestId) -> Option<&str> {
+        self.requests
+            .get(id.0)
+            .map(|record| record.request.uri.as_str())
+    }
+
     pub fn finish(mut self) -> Result<ImageCatalog, DiscoveryError> {
         self.drive()?;
         self.catalog.take().ok_or(DiscoveryError::NotComplete)
@@ -529,11 +610,27 @@ impl DiscoveryOperation {
             if self.transitions > self.limits.transitions {
                 return Err(DiscoveryError::TransitionLimitExceeded);
             }
+            // URL-shape check: `recognize` runs before any fetch, so a
+            // rejection here is typed `DidNotMatchUrl` (no content read).
+            if matches!(self.candidates[index].state, CandidateState::New)
+                && !(self.candidates[index].spec.recognize)(&self.input)
+            {
+                let message = self.candidates[index].spec.rejection.to_string();
+                self.reject_candidate(index, RejectionKind::DidNotMatchUrl, message);
+                continue;
+            }
             let result = self
                 .advance_candidate(index)
                 .and_then(|step| self.apply_step(index, step));
             match result {
-                Err(DiscoveryError::Session(message)) => self.reject_candidate(index, message),
+                Err(DiscoveryError::Rejected { kind, message }) => {
+                    self.reject_candidate(index, kind, message);
+                }
+                // A bare session failure comes from a format handler or
+                // extractor: the fetched bytes were unusable.
+                Err(DiscoveryError::Session(message)) => {
+                    self.reject_candidate(index, RejectionKind::InvalidMetadata, message);
+                }
                 result => result?,
             }
         }
@@ -543,9 +640,8 @@ impl DiscoveryOperation {
     fn advance_candidate(&mut self, index: usize) -> Result<DiscoveryStep, DiscoveryError> {
         let candidate = &self.candidates[index];
         if matches!(candidate.state, CandidateState::New) {
-            if !(candidate.spec.recognize)(&self.input) {
-                return Err(DiscoveryError::Session(candidate.spec.rejection.into()));
-            }
+            // `drive` already applied the URL-shape check before here.
+            debug_assert!((candidate.spec.recognize)(&self.input));
             return match candidate.spec.program {
                 DiscoveryProgram::Immediate(complete) => {
                     complete(&self.input).map(DiscoveryStep::Complete)
@@ -557,18 +653,21 @@ impl DiscoveryOperation {
         }
 
         let CandidateState::Waiting(id) = candidate.state else {
-            return Err(DiscoveryError::Session(
-                "internal: rejected candidate driven".into(),
+            return Err(DiscoveryError::rejected(
+                RejectionKind::Failed,
+                "internal: rejected candidate driven",
             ));
         };
         let DiscoveryProgram::Rules(routes, on_failure) = candidate.spec.program else {
-            return Err(DiscoveryError::Session(
-                "internal: immediate format follows resources".into(),
+            return Err(DiscoveryError::rejected(
+                RejectionKind::Failed,
+                "internal: immediate format follows resources",
             ));
         };
         let Some(resource) = self.resource(id) else {
-            return Err(DiscoveryError::Session(
-                "internal: ready request missing".into(),
+            return Err(DiscoveryError::rejected(
+                RejectionKind::Failed,
+                "internal: ready request missing",
             ));
         };
         let request = &resource.request;
@@ -578,8 +677,9 @@ impl DiscoveryOperation {
             requests: &self.requests,
         };
         let Some(outcome) = resource.outcome.as_ref() else {
-            return Err(DiscoveryError::Session(
-                "internal: ready candidate lacks outcome".into(),
+            return Err(DiscoveryError::rejected(
+                RejectionKind::Failed,
+                "internal: ready candidate lacks outcome",
             ));
         };
         match outcome {
@@ -597,10 +697,20 @@ impl DiscoveryOperation {
                 },
                 "resource did not match any discovery route",
             ),
-            ResourceOutcome::Failure(failure) => on_failure.map_or_else(
-                || Err(DiscoveryError::Session(failure.message.clone())),
-                |handler| handler(&context, request, failure),
-            ),
+            // The resource could not be fetched: however the handler
+            // reports it, the cause is a fetch failure.
+            ResourceOutcome::Failure(failure) => match on_failure {
+                Some(handler) => handler(&context, request, failure).map_err(|error| match error {
+                    DiscoveryError::Session(message) => {
+                        DiscoveryError::rejected(RejectionKind::FetchFailed, message)
+                    }
+                    other => other,
+                }),
+                None => Err(DiscoveryError::rejected(
+                    RejectionKind::FetchFailed,
+                    failure.message.clone(),
+                )),
+            },
         }
     }
 
@@ -612,12 +722,17 @@ impl DiscoveryOperation {
                     DiscoveryProgram::Immediate(_) => request,
                 };
                 let Some(id) = self.register_request(request) else {
-                    self.reject_candidate(index, "discovery resource limit exceeded".into());
+                    self.reject_candidate(
+                        index,
+                        RejectionKind::Failed,
+                        "discovery resource limit exceeded".into(),
+                    );
                     return Ok(());
                 };
                 if self.candidates[index].history.contains(&id) {
                     self.reject_candidate(
                         index,
+                        RejectionKind::Failed,
                         "discovery followed the same resource twice".into(),
                     );
                 } else {
@@ -632,9 +747,13 @@ impl DiscoveryOperation {
         Ok(())
     }
 
-    fn reject_candidate(&mut self, index: usize, diagnostic: String) {
-        let id = self.candidates[index].spec.name.to_owned();
-        self.diagnostics.push((id, diagnostic));
+    fn reject_candidate(&mut self, index: usize, kind: RejectionKind, diagnostic: String) {
+        let format = self.candidates[index].spec.name.to_owned();
+        self.diagnostics.push(CandidateDiagnostic {
+            format,
+            kind,
+            message: diagnostic,
+        });
         self.candidates[index].state = CandidateState::Rejected;
     }
 
@@ -1066,16 +1185,47 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_are_displayed_one_per_line() {
+    fn diagnostics_group_messages_and_collapse_url_misses() {
+        let diagnostic = |format: &str, kind, message: &str| CandidateDiagnostic {
+            format: format.into(),
+            kind,
+            message: message.into(),
+        };
         let error = DiscoveryError::NoCandidateAccepted {
             diagnostics: vec![
-                ("first".into(), "not first".into()),
-                ("second".into(), "not second".into()),
+                diagnostic(
+                    "custom",
+                    RejectionKind::DidNotMatchUrl,
+                    "not a tiles.yaml file",
+                ),
+                diagnostic(
+                    "iiif",
+                    RejectionKind::FetchFailed,
+                    "fetch failed for https://example.test/page",
+                ),
+                diagnostic(
+                    "zoomify",
+                    RejectionKind::FetchFailed,
+                    "fetch failed for https://example.test/page",
+                ),
+                diagnostic(
+                    "deepzoom",
+                    RejectionKind::InvalidMetadata,
+                    "unable to parse DZI metadata",
+                ),
+                diagnostic(
+                    "generic",
+                    RejectionKind::DidNotMatchUrl,
+                    "not a generic X/Y tile template",
+                ),
             ],
         };
         assert_eq!(
             error.to_string(),
-            "no discovery candidate accepted the input\n - first: not first\n - second: not second"
+            "no discovery candidate accepted the input\
+             \n - iiif, zoomify: fetch failed for https://example.test/page\
+             \n - deepzoom: unable to parse DZI metadata\
+             \n - 2 other formats did not match this page address"
         );
     }
 }

@@ -123,21 +123,23 @@ at a time.
 ## Reporting a problem
 
 One template covers every app. Copy the diagnostics block from the error
-details in the app (it already redacts secrets) and open an issue at
+details in the app (it stays on your device and never carries credentials)
+and open an issue at
 <https://github.com/lovasoa/dezoomify/issues> with:
 
 - the page or manifest address, with tokens removed;
 - the exact error message plus error code, phase, transport, resource kind,
   and blocked reason;
-- the redacted source origin and the capability snapshot from the diagnostics
-  copy;
+- the diagnostics copy, whose failure details may name the full request URL
+  and quote the server reply (remove sign-in details and tokens first);
 - app and protocol versions, browser name and version;
 - what was tried already (retry later, extension, desktop app);
 - a screenshot where it helps.
 
 Never include passwords, cookies, session contents, `Authorization` headers,
-signed query values, full URLs with sensitive queries, local path details, or
-response content. Before reporting, check the [troubleshooting
+signed query values, or local path details. Failure details stay on the
+device; the app reminds you to strip tokens before sharing. Before reporting,
+check the [troubleshooting
 guide](user/troubleshooting.md): a site that limits request rates needs a later
 retry or a personal connection through the extension or desktop app; a busy
 site needs a few minutes; a picture that shows but cannot save needs the

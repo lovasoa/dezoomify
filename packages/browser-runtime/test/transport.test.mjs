@@ -82,13 +82,36 @@ test("http-error is not a CORS/network failure and carries status", async () => 
     status: 404,
     headers: headersMap({}),
     async arrayBuffer() {
-      throw new Error("should not read body for http-error");
+      return new TextEncoder().encode("<html><body>Not found</body></html>").buffer;
     },
   }));
   const r = await t.fetchResource("https://x.test/m");
   assert.equal(r.outcome, "http-error");
   assert.equal(r.status, 404);
+  assert.equal(r.preview, "Not found");
   assert.equal(isClassifiedCorsOrNetworkFailure(r), false);
+});
+
+test("http-error skips the preview for oversized bodies", async () => {
+  let read = 0;
+  const t = createDirectTransport(async () => ({
+    url: "https://x.test/m",
+    status: 403,
+    headers: {
+      forEach(cb) {
+        cb("text/html", "content-type");
+        cb(String(1024 * 1024), "content-length");
+      },
+    },
+    async arrayBuffer() {
+      read += 1;
+      return new ArrayBuffer(0);
+    },
+  }));
+  const r = await t.fetchResource("https://x.test/m");
+  assert.equal(r.outcome, "http-error");
+  assert.equal(r.preview, undefined);
+  assert.equal(read, 0);
 });
 
 test("aborted signal yields cancelled", async () => {

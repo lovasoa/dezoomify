@@ -1272,6 +1272,13 @@ abbr[title] {
   line-height: 1.6;
 }
 
+.dz-error-redact-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--dz-text-muted);
+  line-height: 1.5;
+}
+
 /* Suggested Alternatives (Open, Breathable Layout - No Nested Cards) */
 .dz-guidance-section {
   margin: 1.75rem 0 1.25rem;

@@ -417,6 +417,14 @@ fn discovery_failure_and_cancel_paths_follow_the_engine() {
         ControlBody::Event(JobEvent::Failed { error, .. }) => {
             assert_eq!(error.code, "job.discovery-failed");
             assert!(!error.message.contains("CANARY"));
+            // The engine names the failed request itself, so a fetch failure
+            // is never the bare "host fetch failed" it used to be.
+            assert!(
+                error.message.contains("https://example.com/image.dzi"),
+                "fetch failure must name the request URL: {}",
+                error.message
+            );
+            assert!(error.message.contains("REDACTED"));
         }
         other => panic!("expected failed, got {other:?}"),
     }

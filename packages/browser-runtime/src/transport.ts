@@ -74,6 +74,50 @@ function toSafeHeaders(input: unknown): Record<string, string> {
   return out;
 }
 
+const ERROR_PREVIEW_MAX_BYTES = 4096;
+const ERROR_PREVIEW_MAX_CHARS = 300;
+
+/**
+ * Best-effort server signal from an HTTP error body: decode a bounded
+ * prefix, strip markup, collapse to one line, truncate. Never throws;
+ * returns "" when nothing usable remains. Quoted server content passes
+ * through otherwise unchanged.
+ */
+export function extractErrorSignal(bytes: Uint8Array): string {
+  const slice = bytes.length > ERROR_PREVIEW_MAX_BYTES ? bytes.subarray(0, ERROR_PREVIEW_MAX_BYTES) : bytes;
+  let text = "";
+  try {
+    text = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+  } catch {
+    return "";
+  }
+  // Early binary guard: error pages are text.
+  if (text.includes("\0")) return "";
+  const flat = text
+    .replace(/<[^>]{0,512}>/g, " ")
+    .replace(/[\x00-\x1F\x7F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return flat.length > ERROR_PREVIEW_MAX_CHARS ? flat.slice(0, ERROR_PREVIEW_MAX_CHARS) : flat;
+}
+
+async function errorPreview(response: {
+  headers?: unknown;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}): Promise<{ preview: string } | Record<string, never>> {
+  try {
+    const headers = toSafeHeaders(response.headers);
+    const declared = Number(headers["content-length"]);
+    if (Number.isSafeInteger(declared) && declared > 16 * 1024) return {};
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const preview = extractErrorSignal(bytes);
+    return preview ? { preview } : {};
+  } catch {
+    // Preview is diagnostic only; the http-error outcome stands without it.
+    return {};
+  }
+}
+
 function isAbortError(err: unknown): boolean {
   if (err instanceof DOMException && err.name === "AbortError") return true;
   const e = err as { name?: string; code?: number } | null;
@@ -155,7 +199,7 @@ export function createDirectTransport(fetchImpl: FetchImpl): DirectTransport {
         return { outcome: "network-error", reason };
       }
     }
-    return { outcome: "http-error", finalUrl, status, headers };
+    return { outcome: "http-error", finalUrl, status, headers, ...(await errorPreview(response)) };
   }
 
   return { fetchResource };

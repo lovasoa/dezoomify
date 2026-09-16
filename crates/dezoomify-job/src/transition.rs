@@ -96,6 +96,10 @@ pub enum JobResponse {
     FetchFailure {
         job: String,
         request: String,
+        /// Host fetch detail (HTTP status, category, bounded server
+        /// signal). Empty when the host reports nothing beyond failure.
+        #[serde(default)]
+        detail: String,
     },
     SelectedImage {
         job: String,
