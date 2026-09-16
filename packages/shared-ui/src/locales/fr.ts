@@ -165,6 +165,8 @@ export const fr = {
   "view.fail.techDetails": "Details techniques de l erreur et rapport de bogue",
   "view.fail.reportBug": "Signaler un bogue sur GitHub",
   "view.fail.retry": "Reessayer",
+  "view.fail.redactHint":
+    "Les details ci-dessous peuvent inclure les adresses completes et la reponse du serveur. Ils restent sur cet appareil ; retirez les identifiants et les jetons avant de partager.",
   // Cancelled section.
   "view.cancel.title": "Enregistrement annule",
   "view.cancel.message": "L enregistrement de l image a ete interrompu.",

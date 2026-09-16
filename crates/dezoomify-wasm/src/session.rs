@@ -765,10 +765,20 @@ impl Session {
                 if self.state != SessionState::Discovering {
                     return Ok(());
                 }
-                let _ = error;
+                // Forward the host detail (HTTP status, category, bounded
+                // server signal) so discovery diagnostics can name the
+                // failed fetch instead of reporting "host fetch failed".
+                // Host text is untrusted: redact credential-bearing values
+                // before it crosses into the engine. The full request URL is
+                // named by the engine from its own request record.
+                let detail = crate::error::redact(&error.message)
+                    .chars()
+                    .take(500)
+                    .collect::<String>();
                 self.forward(JobResponse::FetchFailure {
                     job: job.as_str().to_string(),
                     request: request.to_string(),
+                    detail,
                 })
             }
         }

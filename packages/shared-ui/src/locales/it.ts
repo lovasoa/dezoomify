@@ -165,6 +165,8 @@ export const it = {
   "view.fail.techDetails": "Dettagli tecnici dell errore e segnalazione",
   "view.fail.reportBug": "Segnala un problema su GitHub",
   "view.fail.retry": "Riprova",
+  "view.fail.redactHint":
+    "I dettagli sotto possono includere indirizzi completi e la risposta del server. Restano su questo dispositivo; rimuovi credenziali e token prima di condividere.",
   // Cancelled section.
   "view.cancel.title": "Salvataggio annullato",
   "view.cancel.message": "Il salvataggio dell immagine e stato interrotto.",

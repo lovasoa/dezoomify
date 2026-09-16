@@ -245,6 +245,7 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
         .apply(JobResponse::FetchFailure {
             job: "job:batch".to_string(),
             request: requests[1].clone(),
+            detail: String::new(),
         })
         .unwrap();
     assert_eq!(late_failure, dezoomify_job::Outcome::Ignored);

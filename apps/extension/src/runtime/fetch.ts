@@ -153,6 +153,34 @@ export async function readResponseBytes(response: FetchResponse, opts: { maxByte
   return bytes;
 }
 
+const ERROR_SNIPPET_MAX_CHARS = 300;
+
+/**
+ * Bounded server signal from an HTTP error body. Reads a small text body,
+ * strips markup, collapses to one line, truncates. Never throws; returns ""
+ * when nothing usable remains. Local-only diagnostics content.
+ */
+async function errorSignal(response: FetchResponse): Promise<string> {
+  try {
+    const headers = response?.headers as { get?: (name: string) => string | null } | null;
+    const declared = Number(headers?.get?.("content-length"));
+    if (Number.isSafeInteger(declared) && declared > 16 * 1024) return "";
+    const text = typeof (response as { text?: unknown }).text === "function"
+      ? await (response as unknown as { text(): Promise<string> }).text()
+      : "";
+    if (!text || text.includes("\0")) return "";
+    const flat = text.replace(/<[^>]{0,512}>/g, " ").replace(/[\x00-\x1F\x7F]+/g, " ").replace(/\s+/g, " ").trim();
+    return flat.length > ERROR_SNIPPET_MAX_CHARS ? flat.slice(0, ERROR_SNIPPET_MAX_CHARS) : flat;
+  } catch {
+    return "";
+  }
+}
+
+/** Append a bounded server signal to a transport message (ASCII punctuation only). */
+function withSignal(message: string, signal: string): string {
+  return signal ? `${message}. Server said: "${signal}"` : message;
+}
+
 /** @param {string} url */
 function checkedUrl(url: string): URL {
   if (isProxyUrl(url)) throw transportError("malformed", "proxy transport is forbidden in the extension");
@@ -195,11 +223,11 @@ export function createExtensionFetcher(deps: FetchDeps) {
       if (!response || typeof response.status !== "number") throw transportError("malformed", "malformed fetch response");
       if (typeof response.durationMs === "number" && response.durationMs > timeoutMs) throw transportError("network", "fetch timeout");
       if (response.url && response.url !== parsed.href) throw transportError("redirect-unavailable", "redirect permission cannot be validated automatically");
-      if (response.status === 429) throw transportError("throttled", "site is throttling requests");
+      if (response.status === 429) throw transportError("throttled", withSignal("site is throttling requests", await errorSignal(response)));
       if (response.status === 401 || response.status === 403) {
-        throw transportError("access-required", response.status === 401 ? "unauthorized; access cannot be requested automatically" : "forbidden; access cannot be requested automatically", { hosts: [origin] });
+        throw transportError("access-required", withSignal(response.status === 401 ? "unauthorized; access cannot be requested automatically" : "forbidden; access cannot be requested automatically", await errorSignal(response)), { hosts: [origin] });
       }
-      if (response.status < 200 || response.status >= 300) throw transportError("network", `request failed with HTTP ${response.status}`);
+      if (response.status < 200 || response.status >= 300) throw transportError("network", withSignal(`request failed with HTTP ${response.status}`, await errorSignal(response)));
       const contentType = headerValue(response.headers);
       const accepted = opts.purpose === "metadata" ? ALLOWED_MIME_PREFIXES : ALLOWED_MIME_PREFIXES.filter((mime) => mime !== "text/html");
       if (contentType && !accepted.some((prefix) => contentType.toLowerCase().startsWith(prefix))) throw transportError("malformed", `unsupported response type ${contentType}`);
