@@ -106,16 +106,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential dpkg-dev xvfb xauth
-          cargo install tauri-cli --version '=2.11.4' --locked
-      - name: Install macOS desktop tools
-        if: matrix.target == 'desktop-macos-aarch64'
-        run: cargo install tauri-cli --version '=2.11.4' --locked
-      - name: Install Windows desktop tools
-        if: matrix.target == 'desktop-windows-x86_64'
-        shell: pwsh
-        run: |
-          cargo install tauri-cli --version '=2.11.4' --locked
-          if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-cli failed" }
+      # Prebuilt Tauri CLI from the pnpm workspace (@tauri-apps/cli, pinned in
+      # apps/desktop/package.json). setup-pnpm already installed it above, so
+      # this only verifies the version -- no `cargo install` source compile.
+      - uses: ./.github/actions/setup-tauri-cli
+        if: startsWith(matrix.target, 'desktop-')
       - uses: ./.github/actions/setup-windows-bundlers
         if: matrix.target == 'desktop-windows-x86_64'
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

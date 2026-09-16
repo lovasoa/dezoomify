@@ -7,7 +7,8 @@
 //!
 //! Bundle matrix (built on the matching host, `tauri.conf.json`
 //! `bundle.targets` stays `all` and the CLI selects the host bundle):
-//! Linux builds `deb` via `cargo tauri build --bundles deb` (needs
+//! Linux builds `deb` via the Tauri CLI (`tauri build --bundles deb`, resolved
+//! as `cargo tauri` or the prebuilt `@tauri-apps/cli` from pnpm) (needs
 //! `dpkg-deb` plus the generated PNG icons); Windows builds `msi`/`nsis`
 //! (needs WebView2 plus WiX for msi and NSIS for nsis plus `icon.ico`);
 //! macOS builds `dmg` (needs the Xcode Command Line Tools plus `icon.icns`).
@@ -506,6 +507,41 @@ fn bundle_targets() -> &'static [&'static str] {
     &[]
 }
 
+/// Which Tauri CLI answers: `cargo tauri` (the `cargo-tauri` binary from
+/// `cargo install tauri-cli`) or the prebuilt `tauri` from the pnpm workspace
+/// (`@tauri-apps/cli`, pinned in `apps/desktop/package.json`). The prebuilt
+/// CLI avoids compiling the CLI from source, which is minutes on Windows.
+enum TauriCli {
+    Cargo,
+    Pnpm,
+}
+
+fn tauri_cli() -> Option<TauriCli> {
+    if has_cmd("cargo", &["tauri", "--version"]) {
+        return Some(TauriCli::Cargo);
+    }
+    if pnpm_tauri_available() {
+        return Some(TauriCli::Pnpm);
+    }
+    None
+}
+
+/// Whether the pnpm workspace provides the prebuilt `tauri` CLI. Routed
+/// through `pnpm_command()` so the Windows `.cmd` shim resolution applies.
+fn pnpm_tauri_available() -> bool {
+    let mut cmd = match pnpm_command() {
+        Ok(cmd) => cmd,
+        Err(_) => return false,
+    };
+    cmd.args(["--filter", "./apps/desktop", "exec", "tauri", "--version"])
+        .current_dir(super::repo_root())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn has_cmd(cmd: &str, args: &[&str]) -> bool {
     Command::new(cmd)
         .args(args)
@@ -517,9 +553,9 @@ fn has_cmd(cmd: &str, args: &[&str]) -> bool {
 /// Fail closed unless the matching host's bundler recipe and tools are
 /// present. Each branch names the exact prerequisites.
 fn check_bundle_prereqs() -> Result<(), String> {
-    if !has_cmd("cargo", &["tauri", "--version"]) {
+    if tauri_cli().is_none() {
         return Err(
-            "desktop bundling needs the Tauri CLI (install with `cargo install tauri-cli --version \"^2\"` or pass --unsigned-test)"
+            "desktop bundling needs the Tauri CLI (`pnpm install` provides the prebuilt @tauri-apps/cli, or install with `cargo install tauri-cli --version \"^2\"`, or pass --unsigned-test)"
                 .to_string(),
         );
     }
@@ -544,8 +580,7 @@ fn check_bundle_prereqs() -> Result<(), String> {
             missing.push("NSIS (makensis for the nsis target)");
         }
         if !ico.is_file() {
-            missing
-                .push("apps/desktop/src-tauri/icons/icon.ico (generate with `cargo tauri icon`)");
+            missing.push("apps/desktop/src-tauri/icons/icon.ico (generate with `tauri icon`)");
         }
         if !missing.is_empty() {
             return Err(format!(
@@ -566,7 +601,7 @@ fn check_bundle_prereqs() -> Result<(), String> {
         }
         if !icns.is_file() {
             return Err(
-                "desktop bundling on macOS needs apps/desktop/src-tauri/icons/icon.icns (generate with `cargo tauri icon`) or pass --unsigned-test"
+                "desktop bundling on macOS needs apps/desktop/src-tauri/icons/icon.icns (generate with `tauri icon`) or pass --unsigned-test"
                     .to_string(),
             );
         }
@@ -592,7 +627,7 @@ fn build_frontend() -> Result<(), String> {
         );
     }
     // The bundler reads this tree (`tauri.conf.json` frontendDist
-    // `../dist`); fail closed here rather than inside `cargo tauri build`.
+    // `../dist`); fail closed here rather than inside `tauri build`.
     let index = super::repo_root().join("apps/desktop/dist/index.html");
     if !index.is_file() {
         return Err(format!(
@@ -871,15 +906,36 @@ fn bundle() -> Result<(), String> {
     if let Some(config) = version_config.as_deref() {
         args.extend(["--config", config]);
     }
-    let status = Command::new("cargo")
-        .args(&args)
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run cargo tauri: {e}"))?;
+    // `cargo tauri build` and the prebuilt `tauri build` are the same CLI;
+    // the pnpm path goes through `pnpm_command()` so Windows resolves the
+    // `.cmd` shim via `cmd /c`.
+    let cli = tauri_cli();
+    let status = match cli {
+        Some(TauriCli::Cargo) => Command::new("cargo")
+            .args(&args)
+            .current_dir(super::repo_root())
+            .status()
+            .map_err(|e| format!("failed to run cargo tauri: {e}"))?,
+        Some(TauriCli::Pnpm) => {
+            let mut pnpm_args = vec!["--filter", "./apps/desktop", "exec", "tauri"];
+            pnpm_args.extend(args.iter().skip(1).copied());
+            pnpm_command()?
+                .args(&pnpm_args)
+                .current_dir(super::repo_root())
+                .status()
+                .map_err(|e| format!("failed to run the prebuilt Tauri CLI via pnpm: {e}"))?
+        }
+        None => {
+            return Err(
+                "desktop bundling needs the Tauri CLI (`pnpm install` provides the prebuilt @tauri-apps/cli, or install with `cargo install tauri-cli --version \"^2\"`, or pass --unsigned-test)"
+                    .to_string(),
+            );
+        }
+    };
     status
         .success()
         .then_some(())
-        .ok_or_else(|| "desktop bundling failed (cargo tauri build)".to_string())?;
+        .ok_or_else(|| "desktop bundling failed (tauri build)".to_string())?;
     println!("build desktop: ok ({} bundle produced)", targets.join("/"));
     Ok(())
 }
@@ -961,6 +1017,35 @@ mod tests {
         // lane takes exactly one flag.
         assert!(super::test_desktop(&["--bogus".to_string()]).is_err());
         assert!(super::test_desktop(&["--e2e-window".to_string(), "--bogus".to_string()]).is_err());
+    }
+
+    #[test]
+    fn tauri_cli_version_pinned() {
+        // The prebuilt CLI version is pinned in exactly two places: the pnpm
+        // workspace (`apps/desktop/package.json` devDependencies) and the
+        // `setup-tauri-cli` action default. They must agree so CI verifies
+        // the same CLI that `pnpm install` provides.
+        let root = super::super::repo_root();
+        let pkg = root.join("apps/desktop/package.json");
+        let text = std::fs::read_to_string(&pkg).expect("read desktop package.json");
+        let value: serde_json::Value =
+            serde_json::from_str(&text).expect("desktop package.json must be valid json");
+        let pinned = value
+            .pointer("/devDependencies/@tauri-apps~1cli")
+            .and_then(|v| v.as_str())
+            .expect("apps/desktop devDependencies must pin @tauri-apps/cli");
+        let action = root.join(".github/actions/setup-tauri-cli/action.yml");
+        let action_text =
+            std::fs::read_to_string(&action).expect("read setup-tauri-cli action.yml");
+        let default = action_text
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("default:"))
+            .map(str::trim)
+            .expect("setup-tauri-cli must declare a default version");
+        assert_eq!(
+            default, pinned,
+            "setup-tauri-cli default ({default}) must match apps/desktop @tauri-apps/cli pin ({pinned})"
+        );
     }
 
     #[test]

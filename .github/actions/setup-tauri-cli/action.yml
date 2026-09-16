@@ -1,0 +1,21 @@
+name: setup-tauri-cli
+description: Verify the pinned prebuilt Tauri CLI from the pnpm workspace (no cargo install)
+inputs:
+  version:
+    description: Expected @tauri-apps/cli version (must match apps/desktop/package.json)
+    required: false
+    default: 2.11.4
+runs:
+  using: composite
+  steps:
+    - name: Verify prebuilt Tauri CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        expected="${{ inputs.version }}"
+        actual="$(pnpm --filter ./apps/desktop exec tauri --version)"
+        echo "tauri CLI: $actual"
+        case "$actual" in
+          *"tauri-cli $expected"*) ;;
+          *) echo "expected @tauri-apps/cli $expected, got: $actual" >&2; exit 1 ;;
+        esac
