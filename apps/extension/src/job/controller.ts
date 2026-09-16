@@ -86,8 +86,8 @@ export function createJobController(deps: JobControllerDeps) {
     const useSource = request.purpose === "metadata" || request.purpose === "probe";
     try {
       const result = useSource
-        ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: String(request.id), uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose })
-        : await deps.extensionTransport.fetchResource(request.uri, { requestId: String(request.id), purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
+        ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: request.id, uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose })
+        : await deps.extensionTransport.fetchResource(request.uri, { requestId: request.id, purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
       if (cancelled) return;
       if (effect.type === "acquire-tile" && typeof effect.tile === "number" && effect.placement) {
         // Decode-at-acquisition: the placement is recorded and the bitmap is
