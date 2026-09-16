@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
+use regex::bytes::Regex as BytesRegex;
+use std::sync::LazyLock;
 use tile_info::ImageInfo;
 use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DeferredImage, DezoomerSpec, DiscoveryError, DiscoveryMatch, DiscoveryRoute,
-    Grid, GridRequests, GridTile, ImageCatalog, ImageDescriptor, LevelDescriptor, Request,
-    StableId,
+    CatalogEntry, DeferredImage, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
+    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, GridRequests, GridTile, ImageCatalog,
+    ImageDescriptor, LevelDescriptor, Request, StableId, resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -33,6 +35,7 @@ const ROUTES: &[DiscoveryRoute] = &[
         .then(national_gallery::follow_image),
     DiscoveryMatch::ContentPredicate(philadelphia::contains_micrio)
         .then(philadelphia::follow_micrio),
+    DiscoveryMatch::ContentPredicate(has_info_json_url).then(follow_info_json_url),
     DiscoveryMatch::Any.extract(catalog),
 ];
 
@@ -113,6 +116,94 @@ fn manifest_parameter_value(uri: &str) -> Option<String> {
             })
         })
         .filter(|value| !value.is_empty())
+}
+
+/// Absolute, protocol-relative, and path-relative `info.json` references,
+/// e.g. `data-image-url="//img.example/iiif/item/info.json"`. Matches are
+/// candidates only: the fetched payload must still parse as IIIF.
+static ABS_INFO_JSON_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(
+        r#"(?i)(?:https?:)?//[^\s"'<>()\[\]\\]+?/info\.json(?:[?#][^\s"'<>()\[\]\\]*)?"#,
+    )
+    .expect("constant absolute info.json pattern")
+});
+static REL_INFO_JSON_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#"(?i)["'=\s(](?P<url>/?(?:[\w.-]+/)+info\.json(?:[?#][^\s"'<>()\[\]\\]*)?)"#)
+        .expect("constant relative info.json pattern")
+});
+static HTML_BASE_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#"(?is)<base\s+[^>]*\bhref\s*=\s*["'](?P<base>[^"']*)"#)
+        .expect("constant HTML base pattern")
+});
+
+/// At most this many harvested references are ranked; only the best is followed.
+const MAX_HARVESTED_INFO_JSON_URLS: usize = 8;
+/// Upper bound scanned before ranking, so ranking prefers `iiif` URLs even
+/// on pages that mention many `info.json` references.
+const MAX_SCANNED_INFO_JSON_URLS: usize = 32;
+
+fn harvest_info_json_urls(bytes: &[u8]) -> Vec<String> {
+    let mut urls: Vec<String> = Vec::new();
+    for captures in ABS_INFO_JSON_RE.captures_iter(bytes) {
+        if let Some(matched) = captures.get(0) {
+            let text = String::from_utf8_lossy(matched.as_bytes()).into_owned();
+            if !urls.contains(&text) {
+                urls.push(text);
+            }
+        }
+        if urls.len() >= MAX_SCANNED_INFO_JSON_URLS {
+            break;
+        }
+    }
+    if urls.len() < MAX_SCANNED_INFO_JSON_URLS {
+        for captures in REL_INFO_JSON_RE.captures_iter(bytes) {
+            if let Some(matched) = captures.name("url") {
+                let text = String::from_utf8_lossy(matched.as_bytes()).into_owned();
+                if !urls.contains(&text) {
+                    urls.push(text);
+                }
+            }
+            if urls.len() >= MAX_SCANNED_INFO_JSON_URLS {
+                break;
+            }
+        }
+    }
+    urls.sort_by_key(|url| !url.to_lowercase().contains("iiif"));
+    urls.truncate(MAX_HARVESTED_INFO_JSON_URLS);
+    urls
+}
+
+fn has_info_json_url(bytes: &[u8]) -> bool {
+    ABS_INFO_JSON_RE.is_match(bytes) || REL_INFO_JSON_RE.is_match(bytes)
+}
+
+fn page_base_uri(bytes: &[u8], final_uri: &str) -> String {
+    HTML_BASE_RE
+        .captures(bytes)
+        .and_then(|captures| captures.name("base"))
+        .map(|capture| String::from_utf8_lossy(capture.as_bytes()).into_owned())
+        .map_or_else(
+            || final_uri.to_owned(),
+            |base| resolve_relative(final_uri, base.trim()),
+        )
+}
+
+fn follow_info_json_url(
+    _: &DiscoveryContext<'_>,
+    resource: DiscoveryResource<'_>,
+) -> Result<DiscoveryStep, DiscoveryError> {
+    // Payloads that already parse as IIIF (info.json bodies, manifests)
+    // keep the standard extractor; harvesting is for embedder pages.
+    if let Ok(found) = catalog(resource.final_uri(), resource.bytes()) {
+        return Ok(DiscoveryStep::Complete(found));
+    }
+    let base = page_base_uri(resource.bytes(), resource.final_uri());
+    let target = harvest_info_json_urls(resource.bytes())
+        .into_iter()
+        .map(|url| resolve_relative(&base, url.trim()))
+        .find(|url| *url != resource.final_uri())
+        .ok_or_else(|| DiscoveryError::Session("page declares no IIIF info.json URL".into()))?;
+    Ok(DiscoveryStep::Follow(Request::new(target)))
 }
 
 fn catalog(uri: &str, contents: &[u8]) -> Result<ImageCatalog, DiscoveryError> {
@@ -818,6 +909,91 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
         first.request.headers.get("Referer").map(String::as_str),
         Some("https://images.example/item/0,0,512,512/512,512/0/default.jpg")
     );
+}
+
+#[test]
+fn page_with_embedded_info_json_url_is_followed() {
+    // Mirrors bruun-rasmussen.dk: the viewer page carries a
+    // protocol-relative info.json reference in data-image-url.
+    let mut registry = crate::core::Registry::new();
+    registry.register(SPEC);
+    let mut operation = registry.start("https://viewer.example/lots/1/images/1");
+    let need = operation.missing_resources().unwrap().pop().unwrap();
+    operation
+        .provide(crate::core::ResourceResponse::new(
+            need.id,
+            br#"<div id="zoom-viewer"
+                 data-image-url="//img.viewer.example/iiif/Online/2510/br_item.tif/info.json"></div>"#
+                .as_slice(),
+        ))
+        .unwrap();
+    let follow = operation.missing_resources().unwrap().pop().unwrap();
+    assert_eq!(
+        follow.request.uri,
+        "https://img.viewer.example/iiif/Online/2510/br_item.tif/info.json"
+    );
+    operation
+        .provide(crate::core::ResourceResponse::new(
+            follow.id,
+            br#"{
+          "type":"ImageService3", "id":"https://img.viewer.example/iiif/Online/2510/br_item.tif",
+          "width":1000, "height":1500,
+          "tiles":[{"width":256,"height":256,"scaleFactors":[1,2]}]
+        }"#
+            .as_slice(),
+        ))
+        .unwrap();
+    assert!(operation.missing_resources().unwrap().is_empty());
+    let catalog = operation.finish().unwrap();
+    let [CatalogEntry::Ready(image)] = catalog.entries() else {
+        panic!("followed info.json must be ready");
+    };
+    assert_eq!(image.levels.len(), 2);
+    let tiles = tile_urls(level_with_scale(&image.levels, 1));
+    assert!(tiles[0].starts_with("https://img.viewer.example/iiif/Online/2510/br_item.tif/"));
+}
+
+#[test]
+fn harvest_prefers_iiif_candidates_and_resolves_relative_urls() {
+    let urls = harvest_info_json_urls(
+        br"see /docs/info.json and //cdn.example/iiif/item/info.json and ./local/info.json",
+    );
+    assert_eq!(
+        urls,
+        [
+            "//cdn.example/iiif/item/info.json",
+            "/docs/info.json",
+            "./local/info.json",
+        ]
+    );
+    assert_eq!(
+        resolve_relative("https://museum.example/exhibit/page", "./local/info.json"),
+        "https://museum.example/exhibit/local/info.json"
+    );
+}
+
+#[test]
+fn direct_info_json_bodies_are_not_harvested() {
+    // A payload that already parses as IIIF completes directly, even when
+    // it mentions its own info.json URL.
+    let mut registry = crate::core::Registry::new();
+    registry.register(SPEC);
+    let mut operation = registry.start("https://images.example/item/info.json");
+    let need = operation.missing_resources().unwrap().pop().unwrap();
+    operation
+        .provide(crate::core::ResourceResponse::new(
+            need.id,
+            br#"{
+          "type":"ImageService3", "id":"https://images.example/item/info.json",
+          "width":512, "height":512,
+          "tiles":[{"width":256,"scaleFactors":[1]}]
+        }"#
+            .as_slice(),
+        ))
+        .unwrap();
+    assert!(operation.missing_resources().unwrap().is_empty());
+    let catalog = operation.finish().unwrap();
+    assert_eq!(catalog.len(), 1);
 }
 
 #[cfg(test)]
