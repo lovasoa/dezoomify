@@ -1,14 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
-import { importTypeScript } from "./ts-source-loader.mjs";
-
-async function loadTs(rel) {
-  return importTypeScript(new URL(rel, import.meta.url));
-}
-
-const handoff = await loadTs("../../src/background/handoff.ts");
-const native = await loadTs("../../src/background/native.ts");
+import * as handoff from "../../src/background/handoff.ts";
+import * as native from "../../src/background/native.ts";
 
 
 // ---------- website-to-extension handoff ----------

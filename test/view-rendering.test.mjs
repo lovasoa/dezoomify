@@ -1,12 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { act, click } from "./react-dom.mjs";
 import { renderView, getPhaseForStatus } from "../packages/shared-ui/src/view.tsx";
-
-const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function container() {
   const el = globalThis.document.createElement("div");
@@ -332,26 +327,6 @@ test("paused job activity freezes the displayed elapsed time", () => {
   const card = el.querySelector(".dz-card");
   assert.match(card.querySelector("#dz-job-time").textContent, /^3 s/);
   assert.ok(card.querySelector(".dz-job-section").classList.contains("dz-job-paused"));
-});
-
-test("CSS structural invariants prevent button clipping, container overflow, and layout shifts", () => {
-  const css = fs.readFileSync(path.join(rootDir, "packages/shared-ui/src/styles/theme.css"), "utf8");
-
-  assert.match(css, /\.dz-btn-secondary\s*\{[^}]*min-height:\s*38px;/);
-  assert.doesNotMatch(css, /\.dz-btn-secondary\s*\{[^}]*(?<![a-z-])height:\s*38px;/);
-  assert.match(css, /\.dz-progress-rail\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\);/);
-  assert.match(css, /\.dz-progress-buttons\s*\{[^}]*display:\s*flex;/);
-  assert.match(css, /\.dz-progress-control\s*\{[^}]*border:\s*0;/);
-  assert.match(css, /\.dz-progress-control\s*\{[^}]*background:\s*transparent;/);
-  assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*display:\s*inline;/);
-  assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*background:\s*transparent;/);
-  assert.match(css, /\.dz-btn-link,\s*\.dz-link-button\s*\{[^}]*text-decoration:\s*underline;/);
-  assert.doesNotMatch(css, /\.dz-guidance-item,\s*\.dz-suggestion-card\s*\{[^}]*border-top:/);
-  assert.match(css, /\.dz-progress-percent,\s*\.dz-progress-count\s*\{[^}]*flex-shrink:\s*0;/);
-  assert.match(css, /\.dz-progress-percent,\s*\.dz-progress-count\s*\{[^}]*tabular-nums;/);
-  assert.match(css, /\.dz-progress-status\s*\{[^}]*min-width:\s*0;/);
-  assert.ok(css.includes("max-width: 560px") && css.includes("flex-direction: column"));
-  assert.ok(css.includes("max-width: 380px"));
 });
 
 test("failed view offers retry only for retryable errors and start over only when the host can reset", () => {

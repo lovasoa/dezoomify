@@ -1,4 +1,4 @@
-import { asFetchFailure } from "../runtime/fetch.js";
+import { asFetchFailure } from "../runtime/fetch.ts";
 
 /** @typedef {{ jobId: string, tabId: number, frameId: number, documentGeneration: number }} JobBinding */
 

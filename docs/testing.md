@@ -78,9 +78,10 @@ of silently changing coverage.
 
 ## Test locations
 
-- `test/` is the website and shared UI Node suite. The TSX loader imports React
-  sources directly, and xtask generates ignored help pages before tests that
-  consume them.
+- `test/` is the website and shared UI Node suite. Tests import `.ts`
+sources directly (Node strips types natively); the TSX loader only
+transpiles `.tsx` React sources, and xtask generates ignored help pages
+before tests that consume them.
 - `packages/browser-runtime/test/`, `packages/protocol-ts/test/`,
   `apps/desktop/tests/`, and `apps/extension/tests/unit/` are package-owned Node
   suites.

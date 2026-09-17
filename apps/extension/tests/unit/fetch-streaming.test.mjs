@@ -1,13 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { importTypeScript } from "./ts-source-loader.mjs";
-
-async function loadFetch() {
-  return importTypeScript(new URL("../../src/runtime/fetch.ts", import.meta.url));
-}
-
-const { createExtensionFetcher, forwardCoreHeaders } = await loadFetch();
+import { createExtensionFetcher, forwardCoreHeaders } from "../../src/runtime/fetch.ts";
 
 function stream(chunks, { stall = false } = {}) {
   let index = 0;

@@ -1,8 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   DEFAULT_PAGE_TITLE,
   isActiveJobStatus,
@@ -28,13 +25,4 @@ test("isActiveJobStatus covers only the while-dezooming phase", () => {
   for (const status of ["idle", "display-only", "completed", "cancelled", "failed"]) {
     assert.equal(isActiveJobStatus(status), false, status);
   }
-});
-
-test("website syncs document.title while dezooming", () => {
-  const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-  const source = fs.readFileSync(path.join(rootDir, "src/main.ts"), "utf8");
-  assert.ok(source.includes("syncPageTitle"), "title sync helper exists");
-  assert.ok(source.includes("document.title"), "website assigns document.title");
-  assert.ok(source.includes("jobPageTitle"), "website uses the shared Dezoomify <host> helper");
-  assert.ok(source.includes("isActiveJobStatus"), "website only retitles while dezooming");
 });

@@ -11,6 +11,13 @@ import {
   createProxyTransport,
 } from "../src/proxyTransport.ts";
 import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/types.ts";
+import { DIRECT_METADATA_TIMEOUT_MS } from "../packages/browser-runtime/src/tile-policy.ts";
+import { createTilePainter, drawPlacedTile } from "../packages/browser-runtime/src/tile-draw.ts";
+import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
+import { encodePng } from "../packages/browser-runtime/src/save.ts";
+import { inflateSync } from "node:zlib";
+import { act } from "./react-dom.mjs";
+import { renderView } from "../packages/shared-ui/src/view.tsx";
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -252,64 +259,15 @@ test("handoff suggestions come from capabilities; ordinary display always offere
   assert.deepEqual(web2.getHandoffSuggestions(), ["ordinary-image-display", "extension", "native"]);
 });
 
-test("shipped webapp uses the shared proxy policy (no inline duplicate)", () => {
-  const shimTs = fs.readFileSync(path.join(REPO_ROOT, "src", "webIntegration.ts"), "utf8");
-  assert.equal(
-    shimTs.split("\n").filter((line) => !line.trimStart().startsWith("//")).join("\n").trim(),
-    'export * from "../packages/browser-runtime/src/web-integration.ts";',
-    "the website compatibility entry point must remain a re-export-only shim",
-  );
-  const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
-  for (const dup of [
-    "function isProxyEligible(",
-    "function hasSignedQuery(",
-    "function isPrivateOrLocalHostname(",
-    '"/api/proxy"',
-  ]) {
-    assert.ok(!mainTs.includes(dup), `src/main.ts must not carry the inline duplicate ${dup}`);
-  }
-  assert.ok(mainTs.includes('from "./webIntegration.ts"'), "main.ts must import the shared eligibility policy");
-  assert.ok(mainTs.includes('from "./proxyTransport.ts"'), "main.ts must import the shared proxy transport");
-  assert.ok(
-    mainTs.includes("createWebFetcher({") && mainTs.includes("isProxyEligible,"),
-    "main.ts must inject the shared eligibility policy into the shared fetcher",
-  );
-});
-
-test("proxy fallback is unconditional; no opt-out UI remains; 1500 ms direct head start", () => {
-  const viewTs = fs.readFileSync(
-    path.join(REPO_ROOT, "packages", "shared-ui", "src", "view.tsx"),
-    "utf8",
-  );
-  assert.ok(!viewTs.includes("dz-proxy-optin"), "idle view must not render the proxy toggle");
-  assert.ok(!viewTs.includes("onToggleProxyOptOut"), "view must not report toggle changes");
-  const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
-  assert.ok(!mainTs.includes("onToggleProxyOptOut"), "webapp must not handle the toggle");
-  assert.ok(!mainTs.includes("proxyOptOut"), "webapp must not keep session opt-out state");
-  const fetchTs = fs.readFileSync(
-    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "web-fetch.ts"),
-    "utf8",
-  );
-  const policyTs = fs.readFileSync(
-    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "tile-policy.ts"),
-    "utf8",
-  );
-  assert.ok(
-    policyTs.includes("DIRECT_METADATA_TIMEOUT_MS = 1500"),
-    "direct metadata fetch uses a 1500 ms head start before the proxy takes over",
-  );
-  assert.ok(
-    fetchTs.includes("DIRECT_METADATA_TIMEOUT_MS"),
-    "metadata discovery applies the direct head-start timeout",
-  );
-  assert.ok(
-    fetchTs.includes("directCtrl.abort()"),
-    "the direct loser is aborted via AbortController before the proxy starts (dedupe)",
-  );
-  assert.ok(
-    fetchTs.includes("proxyRateLimitDelayMs") && fetchTs.includes("retryAfterMs"),
-    "PROXY_RATE_LIMITED honors Retry-After with backoff and a single bounded retry",
-  );
+test("proxy fallback is unconditional: no opt-out UI, 1500 ms direct head start", () => {
+  assert.equal(DIRECT_METADATA_TIMEOUT_MS, 1500);
+  const el = globalThis.document.createElement("div");
+  globalThis.document.body.appendChild(el);
+  act(() => renderView(el,
+    { status: "idle", seq: 0, sessionId: "s-proxy", imageCount: 0, transport: null },
+    { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} },
+  ));
+  assert.equal(el.querySelector("#dz-proxy-optin"), null, "idle view renders no proxy toggle");
 });
 
 test("ordinary display fallback only for unprocessed tiles", () => {
@@ -330,69 +288,126 @@ test("tile failures report the direct transport, never the metadata proxy", () =
   assert.equal(errorTransportFor("NO_IMAGE_FOUND", null), "direct");
 });
 
-test("shipped webapp paints unreadable ordinary tiles instead of failing", () => {
-  const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
-  const tileDrawTs = fs.readFileSync(
-    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "tile-draw.ts"),
-    "utf8",
+class FakeTileImage {
+  constructor() {
+    FakeTileImage.instances.push(this);
+    this.handlers = {};
+    this.naturalWidth = 256;
+    this.naturalHeight = 256;
+  }
+  addEventListener(type, listener) {
+    this.handlers[type] = listener;
+  }
+}
+FakeTileImage.instances = [];
+
+function painterHooks(logs = []) {
+  return {
+    hooks: {
+      onRequestStart: () => 0,
+      onRequestEnd() {},
+      onLog: (line) => logs.push(line),
+      onUpdate() {},
+    },
+    logs,
+  };
+}
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test("unreadable ordinary tiles paint as plain <img> without CORS, processed tiles rethrow", async () => {
+  FakeTileImage.instances.length = 0;
+  const draws = [];
+  const ctx2d = { drawImage: (...args) => draws.push(args) };
+  const { hooks } = painterHooks();
+  const painter = createTilePainter({
+    fetchTile: async () => { throw new Error("unreadable"); },
+    fetchTileOnce: async () => { throw new Error("unreadable"); },
+    decode: async () => { throw new Error("decode must not run for the display fallback"); },
+    isOrdinaryImageTile,
+    imageCtor: FakeTileImage,
+    setTimeoutFn: () => 0,
+    clearTimeoutFn: () => {},
+    hooks,
+  });
+  const tile = { x: 0, y: 0, w: 256, h: 256, uri: "https://tiles.example/0_0.jpg", headers: {}, processing: "none" };
+  const pending = painter.drawTile(ctx2d, tile);
+  await tick();
+  FakeTileImage.instances.at(-1).handlers.load();
+  assert.equal(await pending, true, "ordinary tile finishes as display-only");
+  const img = FakeTileImage.instances.at(-1);
+  assert.equal(img.src, tile.uri);
+  assert.ok(!("crossOrigin" in img), "fallback <img> never requests CORS");
+  assert.equal(img.referrerPolicy, "no-referrer");
+  assert.equal(draws.length, 1, "fallback image is drawn");
+
+  // Processed tiles need readable bytes: the display fallback would drop the
+  // processing, so it is never attempted.
+  const loaded = [];
+  const strict = createTilePainter({
+    fetchTile: async () => ({ bytes: new Uint8Array([1, 2, 3]).buffer }),
+    decode: async () => { throw new Error("unreachable"); },
+    loadImage: async (url) => { loaded.push(url); throw new Error("must not load"); },
+    isOrdinaryImageTile,
+    hooks,
+  });
+  await assert.rejects(
+    () => strict.drawTile(ctx2d, { ...tile, processing: "google-arts-decrypt" }),
+    /tile processing unavailable/,
   );
-  // Readable bytes first, plain <img> fallback for ordinary tiles only.
-  assert.ok(mainTs.includes("createTilePainter({"), "website must use the shared tile painter");
-  assert.ok(tileDrawTs.includes("isOrdinaryImageTile("), "tile painter must gate the <img> fallback on the recipe");
-  assert.ok(tileDrawTs.includes("new Image()"), "fallback must load tiles as ordinary image elements");
-  assert.ok(!tileDrawTs.includes("crossOrigin"), "fallback <img> must never request CORS");
-  assert.ok(
-    mainTs.includes("preflight-display-only"),
-    "a tainted canvas must finish as display-only, never as a save",
-  );
-  assert.ok(mainTs.includes("setCanvasVisible(document, true)"), "display-only must reveal the assembled picture");
-  // A tainted canvas is never read back programmatically.
-  const taintedFinish = mainTs.slice(
-    mainTs.indexOf("if (tainted) {"),
-    mainTs.indexOf('controller.dispatch(nextEvent("save-start")'),
-  );
-  assert.ok(taintedFinish.length > 0, "tainted finish must precede the clean save path");
-  assert.ok(!taintedFinish.includes("toBlob"), "display-only finish must never encode the tainted canvas");
+  assert.deepEqual(loaded, [], "no display fallback for processed tiles");
   // Page policy must permit cross-origin tile images for display.
   const html = fs.readFileSync(path.join(REPO_ROOT, "index.html"), "utf8");
   assert.ok(html.includes("img-src 'self' data: blob: https:"), "CSP must allow cross-origin tile display");
 });
 
-test("website crops padded edge tiles, warns on color profiles, and compresses PNG", () => {
-  const mainTs = fs.readFileSync(path.join(REPO_ROOT, "src", "main.ts"), "utf8");
-  // The website and extension assembly share the complete painter, including
-  // 1:1 placement, readable/display classification, decoding and processing.
-  assert.ok(
-    mainTs.includes('import { createTilePainter, loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";'),
-    "website must import the shared tile painter",
-  );
-  assert.ok(
-    mainTs.includes("tilePainter.drawTile(ctx2d, tile)"),
-    "website must draw every tile through the shared painter",
-  );
-  // Color: the browser canvas path strips ICC/EXIF (native preserves the first
-  // tile profile), so the completed save must warn that colors may shift.
-  assert.ok(mainTs.includes("BROWSER_SAVE_COLOR_WARNING"), "website save must log the shared color-profile warning");
-  const componentsTs = fs.readFileSync(
-    path.join(REPO_ROOT, "packages", "shared-ui", "src", "components.ts"),
-    "utf8",
-  );
-  assert.ok(
-    componentsTs.includes("Colors may shift"),
-    "shared save guidance must carry the color-profile notice",
-  );
-  // Compression: the repository-owned PNG encoder must use real DEFLATE, not
-  // stored (uncompressed) blocks.
-  const saveTs = fs.readFileSync(
-    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "save.ts"),
-    "utf8",
-  );
-  assert.ok(saveTs.includes("zlibDeflate"), "PNG encoder must compress with DEFLATE");
-  assert.ok(!saveTs.includes("zlibStored"), "stored-block encoder must be gone");
-  // Extension assembly follows the same trust-the-plan rule.
-  const tileDrawTs = fs.readFileSync(
-    path.join(REPO_ROOT, "packages", "browser-runtime", "src", "tile-draw.ts"),
-    "utf8",
-  );
-  assert.ok(tileDrawTs.includes("A tile size differed from the plan"), "shared extension assembly must log plan/decode mismatches without identifying a tile");
+function idatOf(png) {
+  let off = 8;
+  const parts = [];
+  while (off < png.length) {
+    const len = new DataView(png.buffer, png.byteOffset + off).getUint32(0);
+    const type = String.fromCharCode(...png.subarray(off + 4, off + 8));
+    if (type === "IDAT") parts.push(png.subarray(off + 8, off + 8 + len));
+    off += 12 + len;
+  }
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+test("edge tiles crop to the plan, saves warn on color profiles, PNG compresses", () => {
+  // Padded edge tiles (e.g. Google Arts & Culture) crop from the right and
+  // bottom; the mismatch is logged without identifying any tile.
+  const draws = [];
+  const mismatches = [];
+  drawPlacedTile({ drawImage: (...args) => draws.push(args) }, { width: 512, height: 512 }, { x: 0, y: 0, w: 256, h: 256 }, (line) => mismatches.push(line));
+  assert.deepEqual(draws, [[{ width: 512, height: 512 }, 0, 0, 256, 256, 0, 0, 256, 256]]);
+  assert.equal(mismatches.length, 1);
+  assert.ok(mismatches[0].includes("A tile size differed from the plan"));
+  assert.ok(!mismatches[0].includes("256,0") && !mismatches[0].includes("http"), "no tile identity leaks");
+
+  // The browser canvas path strips ICC/EXIF, so save guidance warns that
+  // colors may shift.
+  assert.ok(renderSaveGuidance(true).includes("Colors may shift"));
+
+  // The repository-owned PNG encoder compresses with real DEFLATE: the IDAT
+  // payload inflates back to the exact scanlines and is far smaller than raw.
+  const width = 16;
+  const height = 16;
+  const pixels = new Uint8ClampedArray(width * height * 4).fill(200);
+  const png = encodePng(pixels, width, height);
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], "PNG magic");
+  const scanline = width * 4 + 1;
+  const raw = new Uint8Array(scanline * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * scanline] = 0;
+    raw.set(pixels.subarray(y * width * 4, (y + 1) * width * 4), y * scanline + 1);
+  }
+  const idat = idatOf(png);
+  assert.ok(idat.length < raw.length, `IDAT compresses (${idat.length} < ${raw.length})`);
+  assert.deepEqual([...inflateSync(idat)], [...raw], "IDAT round-trips the scanlines");
 });

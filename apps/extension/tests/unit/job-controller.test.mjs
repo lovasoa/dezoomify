@@ -1,35 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
-import { importTypeScript } from "./ts-source-loader.mjs";
-
-async function loadController() {
-  return importTypeScript(new URL("../../src/job/controller.ts", import.meta.url));
-}
-
-/**
- * transport.ts imports the shared failure classifier, so unlike the
- * import-free controller it cannot be loaded from a data: URL as written:
- * bundle it (esbuild is already the suite's transpiler) and import the exact
- * module plus its dependency.
- */
-async function loadTransport() {
-  const bundled = await build({
-    entryPoints: [fileURLToPath(new URL("../../src/job/transport.ts", import.meta.url))],
-    bundle: true,
-    format: "esm",
-    platform: "neutral",
-    target: "es2022",
-    write: false,
-  });
-  const code = bundled.outputFiles[0].text;
-  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(code)}`);
-}
-
-const { createJobController } = await loadController();
-const { createCoordinatorSourceTransport } = await loadTransport();
+import { createJobController } from "../../src/job/controller.ts";
+import { createCoordinatorSourceTransport } from "../../src/job/transport.ts";
 
 const BINDING = { jobId: "job:test-1", tabId: 7, frameId: 0, documentGeneration: 1 };
 

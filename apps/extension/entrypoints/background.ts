@@ -1,4 +1,4 @@
-import { startBackground } from "../src/background/index.js";
+import { startBackground } from "../src/background/index.ts";
 
 declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
 type TestApi = {

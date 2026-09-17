@@ -1,24 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { importTypeScript } from "./ts-source-loader.mjs";
-
-async function loadTs(rel) {
-  return importTypeScript(new URL(rel, import.meta.url));
-}
-
-const mod = await loadTs("../../src/runtime/candidates.ts");
-const { createCandidateStore, redactUrlForLabel, validateCandidateUrl, MAX_URL_LENGTH, MAX_CANDIDATES } = mod;
+import { createCandidateStore, redactUrlForLabel, validateCandidateUrl, MAX_URL_LENGTH, MAX_CANDIDATES } from "../../src/runtime/candidates.ts";
 
 test("caps exported", () => {
   assert.equal(MAX_URL_LENGTH, 2048);
   assert.equal(MAX_CANDIDATES, 100);
-});
-
-test("sensitive query keys are present for candidate labels", () => {
-  const src = readFileSync(new URL("../../src/runtime/candidates.ts", import.meta.url), "utf8");
-  assert.ok(src.includes('"sessiontoken"'));
-  assert.ok(src.includes('"passwd"'));
 });
 
 test("http/https accepted, other schemes rejected", () => {

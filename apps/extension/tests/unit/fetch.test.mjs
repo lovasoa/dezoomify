@@ -1,13 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { importTypeScript } from "./ts-source-loader.mjs";
-
-async function loadTs(rel) {
-  return importTypeScript(new URL(rel, import.meta.url));
-}
-
-const { createSessionFetcher, isProxyUrl, PROXY_PATH } = await loadTs("../../src/runtime/fetch.ts");
+import { createSessionFetcher, isProxyUrl, PROXY_PATH } from "../../src/runtime/fetch.ts";
 
 function bytes(n, fill = 1) {
   return new Uint8Array(n).fill(fill);
