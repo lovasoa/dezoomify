@@ -1,8 +1,9 @@
 /**
  * Structured interaction logging shared by the extension contexts.
  *
- * One line shape everywhere: `[dezoomify:<context>] [<code> ]<detail>`. The
- * level is carried by the console method, and an absent code is omitted.
+ * One line shape everywhere: `[<context>] [<code> ]<detail>`. The context
+ * bracket is omitted for the default `background` context, the level is
+ * carried by the console method, and an absent code is omitted.
  * Contexts are `background` (the coordinator/service worker), `job` (the
  * dedicated job tab), and `worker` (the WASM session worker). Interaction
  * milestones log at info, high-frequency per-tile/per-chunk detail at debug,
@@ -16,6 +17,7 @@
 export const LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
 export type LogLevel = keyof typeof LOG_LEVELS;
 export const LOG_MAX_CHARS = 500;
+export const DEFAULT_LOG_CONTEXT = "background";
 
 export interface LogEntry {
   context: string;
@@ -51,7 +53,7 @@ export interface Logger {
  */
 export function createLogger(context: string, options: { level?: LogLevel | number; sink?: LogSink } = {}): Logger {
   const safeContext = typeof context === "string" && context ? context : "extension";
-  const prefix = `[dezoomify:${safeContext}]`;
+  const prefix = safeContext === DEFAULT_LOG_CONTEXT ? "" : `[${safeContext}]`;
   let level = typeof options.level === "number" ? options.level : LOG_LEVELS[options.level ?? "info"];
   let sink: LogSink | null = options.sink ?? null;
 
@@ -68,7 +70,8 @@ export function createLogger(context: string, options: { level?: LogLevel | numb
       const safeCode = typeof code === "string" ? code : "";
       let text = formatDetail(detail);
       if (text.length > LOG_MAX_CHARS) text = text.slice(0, LOG_MAX_CHARS) + "…";
-      const entry: LogEntry = { context: safeContext, level: safeLevel, code: safeCode, detail: text, line: `${prefix}${safeCode ? ` ${safeCode}` : ""}${text ? ` ${text}` : ""}` };
+      const line = [prefix, safeCode, text].filter(Boolean).join(" ");
+      const entry: LogEntry = { context: safeContext, level: safeLevel, code: safeCode, detail: text, line };
       if (sink) { try { sink(entry); } catch {} }
       else { try { (globalThis.console as unknown as Record<string, ((line: string) => void) | undefined>)?.[safeLevel]?.(entry.line); } catch {} }
     } catch {}
