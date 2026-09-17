@@ -32,8 +32,8 @@ export const CORE_REQUEST_HEADERS = Object.freeze([
 
 /** MIME families accepted for bytes intended for an image or metadata parser. */
 export const ALLOWED_MIME_PREFIXES = Object.freeze([
-  "image/", "application/xml", "text/xml", "application/json", "text/plain",
-  "text/html", "application/octet-stream",
+  "image/", "application/xml", "text/xml", "application/json", "application/ld+json",
+  "text/plain", "text/html", "application/octet-stream",
 ]);
 
 /** @param {string} url */

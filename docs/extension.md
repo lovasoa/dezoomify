@@ -39,17 +39,22 @@ never silently opens another page.
 
 ## Fetching
 
-The extension fetches with tab-origin direct fetch under the narrowest grant:
-`activeTab` for the clicked tab, or an explicitly granted optional host
-permission for another origin or redirect target. It uses the current browser
-session and validates each operation's URL, method, declared headers, result
-shape, and byte cap.
+The extension fetches readable bytes with a tab-origin direct fetch under the
+narrowest grant: `activeTab` for the clicked tab, or an explicitly granted
+optional host permission for another origin or redirect target. Credentials
+default to same-origin, so the page's session applies to its own origin while a
+public cross-origin metadata server answering
+`Access-Control-Allow-Origin: *` stays readable. When the source-tab fetch
+fails, the job retries the request through the independent extension-origin
+transport, which uses the current browser session under an optional host grant
+and pauses for that grant when it is missing. Every operation validates its
+URL, method, declared headers, result shape, and byte cap.
 
-Readable metadata, processed tiles, and clean saves use tab-origin bytes. The
-extension never uses the metadata CORS proxy. If readable fetching is
-unavailable for an ordinary unprocessed tile, the job may use an ordinary
-`<img>` display fallback; the result stays visible but tainted and cannot be
-read or programmatically saved.
+Readable metadata, processed tiles, and clean saves use the browser session's
+readable bytes. The extension never uses the metadata CORS proxy. If readable
+fetching is unavailable for an ordinary unprocessed tile, the job may use an
+ordinary `<img>` display fallback; the result stays visible but tainted and
+cannot be read or programmatically saved.
 
 ## Job and save
 

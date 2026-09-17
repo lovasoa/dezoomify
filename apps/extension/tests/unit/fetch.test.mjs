@@ -139,6 +139,21 @@ test("metadata accepts HTML while tiles do not", async () => {
   await assert.rejects(() => f.fetchResource("https://a.example/x", { userIntent: true, purpose: "tile" }), /unsupported/);
 });
 
+test("metadata accepts IIIF application/ld+json", async () => {
+  const h = makeHarness();
+  h.grant("https://a.example");
+  h.deps.fetchImpl = async (url) => ({
+    status: 200,
+    url,
+    headers: { "content-type": 'application/ld+json;profile="http://iiif.io/api/image/3/context.json"' },
+    bytes: bytes(5),
+    redirectChain: [url],
+  });
+  const f = createSessionFetcher(h.deps);
+  const metadata = await f.fetchResource("https://a.example/info.json", { userIntent: true, purpose: "metadata" });
+  assert.equal(metadata.bytes.length, 5);
+});
+
 test("401/403 classified without automatic handoff", async () => {
   for (const status of [401, 403]) {
     const h = makeHarness();
