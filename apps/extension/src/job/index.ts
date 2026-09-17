@@ -215,13 +215,12 @@ function presentEngineFailure(raw: unknown): StructuredError {
 function onHostFailure(error: unknown) {
   if (hostFailed) return;
   hostFailed = true;
-  const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "unknown";
+  const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "output-failed";
   const phase = error && typeof error === "object" && "phase" in error ? String((error as { phase?: unknown }).phase) : "unknown";
   jobLog.error("host-failure", `jobId=${binding?.jobId ?? "unknown"} code=${code} phase=${phase} message=${error instanceof Error ? error.message : String(error)}`);
   const candidate = error && typeof error === "object"
     ? error as { code?: unknown; message?: unknown; retryable?: unknown; detail?: unknown; phase?: unknown; transport?: unknown }
     : null;
-  const code = candidate && typeof candidate.code === "string" ? candidate.code : "output-failed";
   const message = code === "adapter.wrong-state"
     ? "The extension lost sync while reading this image. Start the scan again."
     : (typeof candidate?.message === "string" ? candidate.message : "The image could not be assembled in this tab.");
@@ -231,7 +230,7 @@ function onHostFailure(error: unknown) {
     engineDetail: typeof candidate?.detail === "string" ? candidate.detail : undefined,
     category: "extension",
     retryable: candidate?.retryable === true,
-    phase: typeof candidate?.phase === "string" ? candidate.phase : undefined,
+    phase,
     transport: typeof candidate?.transport === "string" ? candidate.transport : undefined,
     host: sourceHost(),
   });
