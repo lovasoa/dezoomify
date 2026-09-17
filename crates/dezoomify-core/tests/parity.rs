@@ -307,6 +307,32 @@ fn dezoomer_ngv_viewer_page_case() {
 }
 
 #[test]
+fn dezoomer_geographicus_inline_viewer_page_case() {
+    // Full page captured from the recorded HAR: dozens of unrelated JSON
+    // objects precede the OpenSeadragon `tileSources` block. Discovery must
+    // complete from the inline geometry alone; no ImageProperties.xml is
+    // provided, so a regression that falls back to the metadata route fails
+    // here instead of silently 404ing in production.
+    let input = "https://www.geographicus.com/P/AntiqueMap/philippinen-berghaus-1832-2";
+    let catalog = discover(
+        input,
+        &[(
+            input,
+            coverage_fixture!("zoomify/geographicus-inline-viewer.html"),
+        )],
+    )
+    .unwrap();
+    assert_eq!(catalog.len(), 2);
+    let image = ready_image(catalog);
+    assert_eq!(image.format, "zoomify");
+    let first_tile = tile_urls(&image.levels[0]).into_iter().next().unwrap();
+    assert_eq!(
+        first_tile,
+        "https://www.geographicus.com/mm5/graphics/00000001/zoomify/Philippinen-berghaus-1832-2/TileGroup0/0-0-0.jpg"
+    );
+}
+
+#[test]
 fn dezoomer_deepzoom_metadata_and_tile_cases() {
     let cases = [
         (

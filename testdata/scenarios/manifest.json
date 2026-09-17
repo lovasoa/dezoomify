@@ -1970,6 +1970,18 @@
     },
     {
       "content_type": "text/html",
+      "id": "rs-core/formats/payloads/dezoomify-core/testdata/coverage/zoomify/geographicus-inline-viewer.html",
+      "license_provenance": "third-party page captured as a discovery regression fixture (no third-party code redistributed)",
+      "path": "rs-core/formats/payloads/dezoomify-core/testdata/coverage/zoomify/geographicus-inline-viewer.html",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "246c69f6952ddd0ec78c7baeea555d8db723652de6f65f7ddeec70008cc0a58f",
+      "size": 126883,
+      "source_path": "recorded HAR capture of www.geographicus.com/P/AntiqueMap/philippinen-berghaus-1832-2",
+      "source_snapshot": "2026-09-17"
+    },
+    {
+      "content_type": "text/html",
       "id": "rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html",
       "license_provenance": "GPL-3.0-only (Rust source)",
       "path": "rs-core/formats/payloads/dezoomify-core/testdata/google_arts_and_culture/page_source.html",
