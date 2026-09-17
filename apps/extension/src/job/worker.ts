@@ -4,7 +4,7 @@
  * this file cannot grow a second JavaScript state machine.
  */
 
-import { createLogger } from "../logging.js";
+import { createLogger } from "@dezoomify/browser-runtime/logging";
 
 const encoder = new TextEncoder();
 
@@ -155,6 +155,9 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
 // the extension root so it stays a generated public artifact, not JS source.
 if (typeof self !== "undefined" && "postMessage" in self && typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope) {
   const workerLogger = createLogger("worker");
+  // Forward accepted worker lines to the job tab so the failed view's
+  // technical details include the core session trace, not only job-tab lines.
+  workerLogger.addSink((entry) => self.postMessage({ type: "engine.log", level: entry.level, code: entry.code, line: entry.line }));
   const host = createJobWorkerHost({
     postMessage: (message) => self.postMessage(message),
     wasm: () => import(/* @vite-ignore */ new URL("../wasm/dezoomify-wasm.js", self.location.href).href),

@@ -4,10 +4,10 @@ import { readFileSync } from "node:fs";
 import { transpileTypeScript } from "./ts-source-loader.mjs";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
-const loggingSrc = read("../../src/logging.ts").replace(/^export\s+/gm, "");
+const loggingSrc = read("../../../../packages/browser-runtime/src/logging.ts").replace(/^export\s+/gm, "");
 const operationsSrc = read("../../src/background/source-operations.ts").replace(/^export\s+/gm, "");
 const indexSrc = read("../../src/background/index.ts")
-  .replace(/^import .*logging\.js";\s*$/m, "")
+  .replace(/^import .*browser-runtime\/logging";\s*$/m, "")
   .replace(/^import .*source-operations\.js";\s*$/m, "");
 const backgroundSrc = transpileTypeScript(`${loggingSrc}\n${operationsSrc}\n${indexSrc}`, "background-combined.ts");
 const tick = () => new Promise((resolve) => setImmediate(resolve));

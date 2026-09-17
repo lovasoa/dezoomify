@@ -8,7 +8,7 @@
  */
 
 import { collectCandidates, fetchSource } from "./source-operations.js";
-import { LOG_LEVELS, LOG_MAX_CHARS, createLogger } from "../logging.js";
+import { LOG_LEVELS, LOG_MAX_CHARS, createLogger } from "@dezoomify/browser-runtime/logging";
 
 type LogLevel = keyof typeof LOG_LEVELS;
 type Message = Record<string, unknown> & { type?: string; requestId?: string; jobId?: string; tabId?: number; frameId?: number; documentGeneration?: number; url?: string; method?: string; headers?: unknown; origins?: unknown };

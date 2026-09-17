@@ -1,8 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { importTypeScript } from "./ts-source-loader.mjs";
-
-const { createLogger, LOG_MAX_CHARS } = await importTypeScript(new URL("../../src/logging.ts", import.meta.url));
+import { createLogger, LOG_MAX_CHARS } from "../src/logging.ts";
 
 test("logger prefixes its context and filters by level", () => {
   const entries = [];
@@ -22,6 +20,23 @@ test("the default context and an absent code are omitted", () => {
   logger.info("job-created", "detail");
   logger.info(undefined, "no code");
   assert.deepEqual(entries.map((entry) => entry.line), ["job-created detail", "no code"]);
+});
+
+test("a host can omit its own context bracket", () => {
+  const entries = [];
+  const logger = createLogger("app", { level: "info", defaultContext: "app", sink: (entry) => entries.push(entry) });
+  logger.info("started", "detail");
+  assert.deepEqual(entries.map((entry) => entry.line), ["started detail"]);
+});
+
+test("addSink observes alongside the configured sink", () => {
+  const primary = [];
+  const observer = [];
+  const logger = createLogger("job", { level: "info", sink: (entry) => primary.push(entry) });
+  logger.addSink((entry) => observer.push(entry));
+  logger.info("code", "detail");
+  assert.equal(primary.length, 1);
+  assert.equal(observer.length, 1);
 });
 
 test("logger bounds detail and a throwing sink cannot stop logging", () => {

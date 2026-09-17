@@ -4,10 +4,10 @@ import { readFileSync } from "node:fs";
 import { transpileTypeScript } from "./ts-source-loader.mjs";
 
 function source(path) { return readFileSync(new URL(path, import.meta.url), "utf8"); }
-const logging = source("../../src/logging.ts").replace(/^export\s+/gm, "");
+const logging = source("../../../../packages/browser-runtime/src/logging.ts").replace(/^export\s+/gm, "");
 const operations = source("../../src/background/source-operations.ts").replace(/^export\s+/gm, "");
 const index = source("../../src/background/index.ts")
-  .replace(/^import .*logging\.js";\s*$/m, "")
+  .replace(/^import .*browser-runtime\/logging";\s*$/m, "")
   .replace(/^import .*source-operations\.js";\s*$/m, "");
 const text = transpileTypeScript(`${logging}\n${operations}\n${index}`, "background-combined.ts");
 

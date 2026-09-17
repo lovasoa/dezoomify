@@ -1,17 +1,17 @@
 /**
- * Structured interaction logging shared by the extension contexts.
+ * Structured interaction logging shared by every product.
  *
- * One line shape everywhere: `[<context>] [<code> ]<detail>`. The context
- * bracket is omitted for the default `background` context, the level is
- * carried by the console method, and an absent code is omitted.
- * Contexts are `background` (the coordinator/service worker), `job` (the
- * dedicated job tab), and `worker` (the WASM session worker). Interaction
- * milestones log at info, high-frequency per-tile/per-chunk detail at debug,
- * recoverable states at warn, and terminal failures at error. Logged URLs are
- * written in full; details are bounded.
+ * One line shape everywhere: `[<context>] [<code> ]<detail>`. A context equal
+ * to the configured default (background for the extension coordinator) omits
+ * its bracket, the level is carried by the console method, and an absent code
+ * is omitted. Interaction milestones log at info, high-frequency per-tile and
+ * per-chunk detail at debug, recoverable states at warn, and terminal failures
+ * at error. Logged URLs are written in full; details are bounded.
  *
- * The module intentionally imports nothing so `background/index.ts` can inline
- * it into the classic Firefox artifact without resolving a module graph.
+ * The module imports nothing so hosts can inline it or bundle it in isolation
+ * (the extension worker imports the `./logging` subpath, never the barrel).
+ * Console output is the default sink; additional sinks observe every accepted
+ * entry (the graphical products forward them into the job view's log).
  */
 
 export const LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
@@ -36,6 +36,14 @@ export function formatDetail(detail: unknown): string {
   return String(detail);
 }
 
+export interface LoggerOptions {
+  level?: LogLevel | number;
+  /** Replaces the default console sink. */
+  sink?: LogSink;
+  /** Context whose bracket is omitted from the line. */
+  defaultContext?: string;
+}
+
 export interface Logger {
   log(level: LogLevel, code?: string, detail?: unknown): void;
   debug(code?: string, detail?: unknown): void;
@@ -43,25 +51,29 @@ export interface Logger {
   warn(code?: string, detail?: unknown): void;
   error(code?: string, detail?: unknown): void;
   setLevel(level: string | number): void;
+  /** Replace every sink (console is restored when omitted/not a function). */
   setSink(sink: unknown): void;
+  /** Observe accepted entries without displacing the console sink. */
+  addSink(sink: LogSink): void;
   levels: typeof LOG_LEVELS;
 }
 
-/**
- * @param {string} context short context name used in the line prefix
- * @param {{ level?: LogLevel | number, sink?: LogSink }} [options]
- */
-export function createLogger(context: string, options: { level?: LogLevel | number; sink?: LogSink } = {}): Logger {
-  const safeContext = typeof context === "string" && context ? context : "extension";
-  const prefix = safeContext === DEFAULT_LOG_CONTEXT ? "" : `[${safeContext}]`;
+export function createLogger(context: string, options: LoggerOptions = {}): Logger {
+  const safeContext = typeof context === "string" && context ? context : "app";
+  const defaultContext = options.defaultContext ?? DEFAULT_LOG_CONTEXT;
+  const prefix = safeContext === defaultContext ? "" : `[${safeContext}]`;
   let level = typeof options.level === "number" ? options.level : LOG_LEVELS[options.level ?? "info"];
-  let sink: LogSink | null = options.sink ?? null;
+  const consoleSink: LogSink = (entry) => {
+    try { (globalThis.console as unknown as Record<string, ((line: string) => void) | undefined>)?.[entry.level]?.(entry.line); } catch { /* console unavailable */ }
+  };
+  let sinks: LogSink[] = typeof options.sink === "function" ? [options.sink] : [consoleSink];
 
   function setLevel(next: string | number) {
     if (typeof next === "string" && next in LOG_LEVELS) level = LOG_LEVELS[next as LogLevel];
     else if (typeof next === "number" && Number.isFinite(next)) level = next;
   }
-  function setSink(next: unknown) { sink = typeof next === "function" ? next as LogSink : null; }
+  function setSink(next: unknown) { sinks = typeof next === "function" ? [next as LogSink] : [consoleSink]; }
+  function addSink(next: LogSink) { if (typeof next === "function") sinks.push(next); }
 
   function log(levelName: LogLevel, code: string | undefined, detail: unknown = "") {
     try {
@@ -72,9 +84,10 @@ export function createLogger(context: string, options: { level?: LogLevel | numb
       if (text.length > LOG_MAX_CHARS) text = text.slice(0, LOG_MAX_CHARS) + "…";
       const line = [prefix, safeCode, text].filter(Boolean).join(" ");
       const entry: LogEntry = { context: safeContext, level: safeLevel, code: safeCode, detail: text, line };
-      if (sink) { try { sink(entry); } catch {} }
-      else { try { (globalThis.console as unknown as Record<string, ((line: string) => void) | undefined>)?.[safeLevel]?.(entry.line); } catch {} }
-    } catch {}
+      for (const sink of sinks) {
+        try { sink(entry); } catch { /* one sink must not stop the others */ }
+      }
+    } catch { /* logging must never break the caller */ }
   }
 
   return {
@@ -85,6 +98,7 @@ export function createLogger(context: string, options: { level?: LogLevel | numb
     error: (code, detail) => log("error", code, detail),
     setLevel,
     setSink,
+    addSink,
     levels: LOG_LEVELS,
   };
 }

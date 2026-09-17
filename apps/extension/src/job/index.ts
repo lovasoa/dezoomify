@@ -10,7 +10,7 @@ import {
   saveBlobViaAnchor,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.js";
-import { createLogger } from "../logging.js";
+import { createLogger } from "@dezoomify/browser-runtime/logging";
 import { createJobController } from "./controller.js";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
@@ -26,11 +26,20 @@ type ExtensionApi = {
 type Failure = { code: string; category: string; retryable: boolean; message: string };
 type ViewContext = SharedViewContext & { failure?: Failure };
 type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: Failure; catalog?: { images?: unknown[] } };
-type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[] };
+type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[]; line?: string };
 
 const hostGlobal = globalThis as typeof globalThis & { browser?: ExtensionApi; chrome?: ExtensionApi };
 const api = hostGlobal.browser ?? hostGlobal.chrome;
 const jobLog = createLogger("job");
+// Mirror accepted log lines into the job view's technical-details log (and the
+// copied diagnostics) so a failed job shows the interaction trace. Worker
+// lines arrive over `engine.log` and join the same buffer.
+const UI_LOG_MAX_LINES = 120;
+const uiLogLines: string[] = [];
+jobLog.addSink((entry) => {
+  uiLogLines.push(entry.line);
+  if (uiLogLines.length > UI_LOG_MAX_LINES) uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
+});
 
 /** @type {any | null} */
 let binding: JobBinding | null = null;
@@ -70,6 +79,7 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
   const target = root();
   if (!target) return;
   seq += 1;
+  const viewActivity = { ...(ctx.jobActivity ?? {}), ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}) };
   renderView(target, { status, seq, sessionId: binding?.jobId ?? "job:pending", transport: "browser-session", imageCount: 0, ...(ctx.failure ? { error: ctx.failure } : {}) }, {
     onSubmitUrl: () => {},
     onCancel: closeJob,
@@ -79,6 +89,7 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
     onSave: () => {},
   }, {
     ...ctx,
+    ...(Object.keys(viewActivity).length ? { jobActivity: viewActivity } : {}),
   }, {
     ...(accessRequest ? { replace: createElement(AccessRequestView, {
       origin: accessRequest.hosts.length === 1 ? accessRequest.hosts[0] : "the required image host",
@@ -326,6 +337,10 @@ function setup(bound: unknown) {
       controller?.handleEngineMessages(messages);
     }
     else if (event.data?.type === "engine.ranked") ranked(event.data);
+    else if (event.data?.type === "engine.log" && typeof event.data.line === "string") {
+      uiLogLines.push(event.data.line);
+      if (uiLogLines.length > UI_LOG_MAX_LINES) uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
+    }
     else if (event.data?.type === "engine.error") { jobLog.error("worker-error", `jobId=${binding?.jobId ?? "unknown"} message=${JSON.stringify(event.data.error)}`); onHostFailure(event.data.error); }
   });
   render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });

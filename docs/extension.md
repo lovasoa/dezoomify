@@ -106,6 +106,13 @@ for the finite `scripting.executeScript()` operations, `source-fetch-*`,
 (`session-created`, `command-dispatched`, `messages-drained`, `effect-*`,
 `engine-event`, `core-error`).
 
+The logger lives in `packages/browser-runtime/src/logging.ts`
+(`@dezoomify/browser-runtime/logging`) so every product shares one
+implementation; the extension imports the `./logging` subpath, never the
+barrel. The job tab mirrors its accepted lines plus the worker's forwarded
+`engine.log` lines into the job view's technical-details log, so both the job
+and failed views (and copied diagnostics) carry the interaction trace.
+
 Interaction milestones log at info, high-frequency per-tile and per-chunk
 detail at debug, recoverable states at warn, and terminal failures at error.
 The default level is info. Logged URLs are written in full for diagnosis;
