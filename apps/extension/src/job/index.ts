@@ -8,8 +8,10 @@ import {
   createEngineHost,
   createProbeSize,
   createTileDecoder,
+  dispatchTyped,
   pickEngineSelection,
   saveBlobViaAnchor,
+  type DispatchTable,
   type WorkerHostOutput,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
@@ -18,7 +20,7 @@ import type { EngineHost } from "@dezoomify/browser-runtime";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFailure, isJobBinding } from "./transport.ts";
 import type { JobBinding } from "./transport.ts";
-import type { JobEvent } from "@dezoomify/wasm-bindings";
+import type { JobEvent, ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
 declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
 declare const __DEZOOMIFY_TEST_PERMISSION_MOCK__: boolean;
@@ -268,7 +270,7 @@ function onHostFailure(error: unknown) {
 }
 
 /** Apply one core processing recipe through the worker session. */
-function processTile(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> {
+function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
   if (!jobWorker) return Promise.reject(Object.assign(new Error("worker unavailable"), { code: "WORKER_FAILED" }));
   const requestId = ++processSeq;
   return new Promise((resolve, reject) => {
@@ -311,57 +313,59 @@ function createAssembly(sourceUrl: string) {
   });
 }
 
-function handleEvent(event: JobEvent) {
-  if (hostFailed) return;
-  switch (event.type) {
-    case "progress":
-      jobLog.debug("engine-progress", `acquired=${event.acquired} total=${event.total}`);
-      lastTileProgress = { current: event.acquired, total: event.total };
-      render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
-      return;
-    case "failed":
-      jobLog.error("engine-event", `type=failed error=${JSON.stringify(event.error)}`);
-      partialDecision = null;
-      render("failed", { failure: presentEngineFailure(event.error), jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
-      return;
-    case "cancelled":
-      jobLog.info("engine-event", "type=cancelled");
-      partialDecision = null;
-      render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } });
-      return;
-    case "completed":
-    case "partial-completed":
-      jobLog.info("engine-event", `type=${event.type}`);
-      partialDecision = null;
-      render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } });
-      return;
-    case "catalog": {
-      if (selected) return;
-      jobLog.info("engine-event", `type=catalog images=${event.catalog.images.length}`);
-      selected = true;
-      const selection = pickEngineSelection(event.catalog);
-      if (!selection) {
-        onHostFailure(Object.assign(new Error("No downloadable image was found on this page."), { code: "NO_IMAGE_FOUND", retryable: false }));
-        controller?.cancel();
-        return;
-      }
-      selectedTitle = selection.title;
-      render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
-      controller?.selectImage(selection.image);
-      controller?.selectLevel(selection.level);
+const eventHandlers = {
+  progress: (event) => {
+    jobLog.debug("engine-progress", `acquired=${event.acquired} total=${event.total}`);
+    lastTileProgress = { current: event.acquired, total: event.total };
+    render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
+  },
+  failed: (event) => {
+    jobLog.error("engine-event", `type=failed error=${JSON.stringify(event.error)}`);
+    partialDecision = null;
+    render("failed", { failure: presentEngineFailure(event.error), jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
+  },
+  cancelled: () => {
+    jobLog.info("engine-event", "type=cancelled");
+    partialDecision = null;
+    render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } });
+  },
+  completed: () => {
+    jobLog.info("engine-event", "type=completed");
+    partialDecision = null;
+    render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: "Completed" } });
+  },
+  "partial-completed": () => {
+    jobLog.info("engine-event", "type=partial-completed");
+    partialDecision = null;
+    render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: "Completed (partial)" } });
+  },
+  catalog: (event) => {
+    if (selected) return;
+    jobLog.info("engine-event", `type=catalog images=${event.catalog.images.length}`);
+    selected = true;
+    const selection = pickEngineSelection(event.catalog);
+    if (!selection) {
+      onHostFailure(Object.assign(new Error("No downloadable image was found on this page."), { code: "NO_IMAGE_FOUND", retryable: false }));
+      controller?.cancel();
       return;
     }
-    case "warning":
-      jobLog.warn("engine-warning", JSON.stringify(event.error));
-      return;
-    case "recovery-request":
-    case "job-state":
-    case "paused":
-    case "resumed":
-      return;
-    default:
-      return event satisfies never;
-  }
+    selectedTitle = selection.title;
+    render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
+    controller?.selectImage(selection.image);
+    controller?.selectLevel(selection.level);
+  },
+  warning: (event) => {
+    jobLog.warn("engine-warning", JSON.stringify(event.error));
+  },
+  "recovery-request": () => {},
+  "job-state": () => {},
+  paused: () => {},
+  resumed: () => {},
+} satisfies DispatchTable<JobEvent, void>;
+
+function handleEvent(event: JobEvent) {
+  if (hostFailed) return;
+  dispatchTyped(eventHandlers, event);
 }
 
 function setup(bound: unknown) {
@@ -473,7 +477,6 @@ function startAttempt() {
     loadImage: (url: string) => new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve({
-        ok: img.naturalWidth > 0 && img.naturalHeight > 0,
         width: img.naturalWidth,
         height: img.naturalHeight,
         image: img,
@@ -500,12 +503,6 @@ function startAttempt() {
     onRecoveryRequested: showPartialDecision,
     onHostFailure,
     onEvent: handleEvent,
-    onUnsupportedEffect: (effect) => {
-      // An effect this host cannot execute is a contract gap, never a fake
-      // success: fail visibly instead of pretending it was performed.
-      onHostFailure(Object.assign(new Error(`This app cannot yet perform the ${effect.type} step.`), { code: "EFFECT_UNSUPPORTED", retryable: false }));
-      controller?.cancel();
-    },
   });
   worker.addEventListener("message", (event: MessageEvent<WorkerHostOutput>) => {
     if (event.data?.type === "engine.messages") {

@@ -104,7 +104,7 @@ fn check(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("protocol check", args)?;
     generate(&["--check".to_string()])?;
     super::command::cargo_test(&["-p", "dezoomify-protocol"])?;
-    run_node_test()?;
+    typecheck_binding()?;
     wasm_portability_check()?;
     println!("protocol check: ok");
     Ok(())
@@ -113,7 +113,7 @@ fn check(args: &[String]) -> Result<(), String> {
 pub fn test_protocol() -> Result<(), String> {
     generate(&["--check".to_string()])?;
     super::command::cargo_test(&["-p", "dezoomify-protocol"])?;
-    run_node_test()?;
+    typecheck_binding()?;
     wasm_portability_check()
 }
 
@@ -129,6 +129,15 @@ fn wasm_portability_check() -> Result<(), String> {
     ])
 }
 
-fn run_node_test() -> Result<(), String> {
-    super::command::node_test(&["packages/wasm-bindings/test/*.test.mjs"], false)
+fn typecheck_binding() -> Result<(), String> {
+    let status = super::desktop::pnpm_command()?
+        .args(["--filter", "@dezoomify/wasm-bindings", "typecheck"])
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|e| format!("run generated binding typecheck: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("generated binding TypeScript compilation failed".to_string())
+    }
 }

@@ -38,9 +38,8 @@ The executor maps typed host effects onto browser execution:
   `downloads` permission), releases resources, and replies with typed success
   or failure. A tainted display-only canvas skips encoding.
 
-Processing recipes beyond `none` run through the WASM session's pure
-`applyProcessing` op, serialized by the assembly; an unavailable recipe
-fails typed instead of silently dropping the recipe. Ordinary unprocessed
+The generated `ProcessingRecipe` union selects the WASM session's pure
+`applyProcessing` operation, serialized by the assembly. Ordinary unprocessed
 tiles that cannot be read as bytes fall back to an ordinary `<img>`
 (display-only): the canvas taints, no bytes are produced, and the job
 completes as display-only. Per-origin classification means only the first
@@ -56,10 +55,12 @@ browser canvas, smallest declared level as the fail-fast fallback).
 session transition returns its messages directly. The worker owns no parallel
 declaration of Rust contract types.
 
-`engine-host.ts` exhaustively handles the generated effect and event unions.
-It is the single browser conversion from a closed `HostFailure` into
-`ErrorDto`, deriving the phase from the effect. Website and extension inject
-transport implementations but share this conversion and worker integration.
+`engine-host.ts` exhaustively handles generated effects through a typed handler
+table, and each product does the same for generated events. It is the single
+browser conversion from a closed `HostFailure` into `FetchFailureDto`.
+The Rust session combines those host facts with its correlated request to
+construct `ErrorDto`. Website and extension inject transport implementations
+but share this conversion and worker integration.
 
 ## Catalog boundary
 

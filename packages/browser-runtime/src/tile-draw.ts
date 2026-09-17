@@ -161,11 +161,11 @@ export function loadTileImage(
  * calls are serialized here: fetching stays parallel, only the short decrypt
  * step queues.
  */
-export function createProcessQueue(
-  processTile: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
-): (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer> {
+export function createProcessQueue<Recipe>(
+  processTile: (recipe: Recipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
+): (recipe: Recipe, bytes: ArrayBuffer) => Promise<ArrayBuffer> {
   let tail: Promise<unknown> = Promise.resolve();
-  return (recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> => {
+  return (recipe: Recipe, bytes: ArrayBuffer): Promise<ArrayBuffer> => {
     const run = tail.then(() => processTile(recipe, bytes));
     tail = run.catch(() => undefined);
     return run;

@@ -19,14 +19,6 @@ export const ERROR_CODES = {
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
-export type TileTransportOutcome =
-  | "readable"
-  | "ordinary-image-allowed"
-  | "http-error"
-  | "network-error"
-  | "cancelled"
-  | "policy-denied";
-
 export type TileResourceKind = "metadata" | "tile";
 
 export interface TileRequest {
@@ -88,11 +80,13 @@ export interface TileSurface {
   dispose(): void;
 }
 
-export interface SaveCapability {
-  readonly available: boolean;
-  readonly code?: ErrorCode;
-  readonly reason?: string;
-}
+export type SaveCapability =
+  | { readonly available: true }
+  | {
+      readonly available: false;
+      readonly code: typeof SAVE_REQUIRES_READABLE_BYTES;
+      readonly reason: string;
+    };
 
 export interface BrowserLimits {
   maxWidth: number;
@@ -114,52 +108,6 @@ export {
   NATIVE_TRANSPORT_LABEL,
   PROXY_TRANSPORT_LABEL,
 } from "./transport-labels.ts";
-
-export type BrowserSessionEventKind =
-  | "transport-attempt"
-  | "progress"
-  | "completed"
-  | "failed"
-  | "cancelled";
-
-export interface BrowserSessionEvent {
-  seq: number;
-  kind: BrowserSessionEventKind;
-  activeTransport?: string;
-  detail?: string;
-}
-
-export interface ProtocolErrorShape {
-  code: ErrorCode;
-  category: string;
-  retryable: boolean;
-  cancelled: boolean;
-  message: string;
-  context?: Record<string, string | number | boolean>;
-}
-
-export function assertNever(value: never, message?: string): never {
-  throw new Error(message ?? `unexpected value: ${String(value)}`);
-}
-
-export function describeOutcome(outcome: TileTransportOutcome): string {
-  switch (outcome) {
-    case "readable":
-      return "readable bytes available";
-    case "ordinary-image-allowed":
-      return "ordinary image display allowed";
-    case "http-error":
-      return "http error response";
-    case "network-error":
-      return "network or CORS failure";
-    case "cancelled":
-      return "cancelled";
-    case "policy-denied":
-      return "denied by policy";
-    default:
-      return assertNever(outcome, `unknown outcome: ${String(outcome)}`);
-  }
-}
 
 export function saveCapabilityFor(originClean: boolean): SaveCapability {
   if (originClean) return { available: true };

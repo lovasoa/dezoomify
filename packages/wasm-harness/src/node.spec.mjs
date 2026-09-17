@@ -73,13 +73,10 @@ describe("generated typed WASM surface", () => {
       request: request.id,
       error: {
         code: "PROXY_ERROR",
-        phase: "acquisition",
         retryable: true,
         message: "The metadata proxy returned an error.",
         recovery: [],
-        request: request.uri,
         transport: "metadata-proxy",
-        resource_kind: "metadata",
         http: 502,
         preview: "upstream timeout",
       },

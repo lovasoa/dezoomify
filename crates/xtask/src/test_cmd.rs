@@ -56,7 +56,6 @@ fn node_test() -> Result<(), String> {
         &[
             "test/*.test.mjs",
             "packages/browser-runtime/test/*.test.mjs",
-            "packages/wasm-bindings/test/*.test.mjs",
             "apps/desktop/tests/*.test.mjs",
             // These two tests consume generated WASM and WXT output. The
             // explicit extension integration lane regenerates both first.

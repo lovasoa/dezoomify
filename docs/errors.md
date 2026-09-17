@@ -16,7 +16,7 @@ Each error includes:
 
 Codes are durable protocol API. Messages may improve without changing behavior. Secrets, cookies, authorization headers, signed query values, and local path details are redacted before logging or serialization.
 
-Hosts may preserve host-specific error source chains internally, but only the typed shape crosses the contract. Browser products classify a host failure once, and the shared browser runtime creates the generated `ErrorDto`. Its phase is derived from the effect being answered: metadata is `discovery`, tile/probe work is `acquisition`, and output completion is `output`. Never branch on display strings.
+Hosts may preserve host-specific error source chains internally, but only the typed shape crosses the contract. Browser products classify a fetch failure once into generated `FetchFailureDto`, containing only host-observed facts. The Rust session uses the outstanding request correlation to construct `ErrorDto`: metadata is `discovery`, tile/probe work is `acquisition`, and the original request and resource kind come from the emitted effect. Product code cannot supply contradictory context. Output completion uses a generated `ErrorDto` with phase `output`. Never branch on display strings.
 
 Adapter faults are not job failures. Invalid external objects or invalid session state return the error branch of `DispatchResult` and produce an internal contract-failure screen. They cannot replace a transport failure already accepted by the job engine.
 

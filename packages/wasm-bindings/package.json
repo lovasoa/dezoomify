@@ -8,5 +8,8 @@
     ".": {
       "types": "./src/generated.d.ts"
     }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
   }
 }

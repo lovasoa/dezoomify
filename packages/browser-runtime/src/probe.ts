@@ -6,15 +6,17 @@
 // grant). The website and the extension share this implementation so
 // probe-driven levels behave identically on both products.
 
-export interface ProbeSize {
-  ok: boolean;
+export type ProbeSize =
+  | { status: "missing" }
+  | {
+  status: "available";
   width: number;
   height: number;
   /** Readable bytes retained when the probe can also satisfy output. */
   bytes?: ArrayBuffer;
   /** Plain image retained when probing succeeded through display fallback. */
   image?: ProbeImage;
-}
+};
 
 export interface ProbeImage {
   naturalWidth: number;
@@ -35,7 +37,17 @@ export interface ProbeSizeDeps {
   /** Measure dimensions without byte access (plain <img> fallback). */
   loadImage?: (
     url: string,
-  ) => Promise<{ ok: boolean; width: number; height: number; image?: ProbeImage }>;
+  ) => Promise<{ width: number; height: number; image?: ProbeImage }>;
+}
+
+function observedSize(
+  width: number,
+  height: number,
+  retained: { bytes?: ArrayBuffer; image?: ProbeImage } = {},
+): ProbeSize {
+  return width > 0 && height > 0
+    ? { status: "available", width, height, ...retained }
+    : { status: "missing" };
 }
 
 export function createProbeSize(deps: ProbeSizeDeps): (url: string, headers: Record<string, string>) => Promise<ProbeSize> {
@@ -54,21 +66,21 @@ export function createProbeSize(deps: ProbeSizeDeps): (url: string, headers: Rec
       ) {
         throw error;
       }
-      if (!deps.loadImage) return { ok: false, width: 0, height: 0 };
+      if (!deps.loadImage) return { status: "missing" };
       try {
-        return await deps.loadImage(url);
+        const observed = await deps.loadImage(url);
+        return observedSize(
+          observed.width,
+          observed.height,
+          observed.image ? { image: observed.image } : {},
+        );
       } catch {
-        return { ok: false, width: 0, height: 0 };
+        return { status: "missing" };
       }
     }
     try {
       const bitmap = await deps.decode(bytes);
-      const size: ProbeSize = {
-        ok: bitmap.width > 0 && bitmap.height > 0,
-        width: bitmap.width,
-        height: bitmap.height,
-        bytes,
-      };
+      const size = observedSize(bitmap.width, bitmap.height, { bytes });
       try {
         bitmap.close();
       } catch {
@@ -78,11 +90,16 @@ export function createProbeSize(deps: ProbeSizeDeps): (url: string, headers: Rec
     } catch {
       // Readable bytes are unavailable (e.g. no CORS grant). Probing only
       // needs dimensions, which a plain <img> reports without byte access.
-      if (!deps.loadImage) return { ok: false, width: 0, height: 0 };
+      if (!deps.loadImage) return { status: "missing" };
       try {
-        return await deps.loadImage(url);
+        const observed = await deps.loadImage(url);
+        return observedSize(
+          observed.width,
+          observed.height,
+          observed.image ? { image: observed.image } : {},
+        );
       } catch {
-        return { ok: false, width: 0, height: 0 };
+        return { status: "missing" };
       }
     }
   };

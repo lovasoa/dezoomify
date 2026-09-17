@@ -31,8 +31,8 @@ Bare `cargo xtask test` is the fast aggregate. It performs exactly:
 1. One `cargo test --workspace` invocation, using quiet Cargo output and
    libtest's terse format.
 2. Help-page generation followed by one Node test process, using the dot
-   reporter, over the website, browser runtime, generated WASM declaration,
-   desktop Node, and pure extension unit suites.
+   reporter, over the website, browser runtime, desktop Node, and pure
+   extension unit suites.
 
 The native Rust and Node runners keep successful output compact and print
 detailed failing tests. The fast aggregate never runs `cargo xtask check`,
@@ -82,9 +82,11 @@ of silently changing coverage.
 sources directly (Node strips types natively); the TSX loader only
 transpiles `.tsx` React sources, and xtask generates ignored help pages
 before tests that consume them.
-- `packages/browser-runtime/test/`, `packages/wasm-bindings/test/`,
-  `apps/desktop/tests/`, and `apps/extension/tests/unit/` are package-owned Node
-  suites.
+- `packages/browser-runtime/test/`, `apps/desktop/tests/`, and
+  `apps/extension/tests/unit/` are package-owned Node suites.
+- `packages/wasm-bindings` is checked by compiling TypeScript directly against
+  the tracked generated declaration; declaration spelling is not a runtime
+  test subject.
 - `packages/wasm-harness/` consumes freshly generated Node bindings only in its
   focused, `all`, and WASM CI lanes.
 - `crates/fixture-server/tests/webapp-e2e/` is the Chromium Playwright website

@@ -23,8 +23,8 @@
 //!   immediately: tile bytes are never retained server-side. Empty tile
 //!   buffers forward a failed `TileOutcome` (the engine retries).
 //! * Probe observations: each `acquire-tile` with `purpose: probe` is
-//!   answered with `ProvideProbeOutcome` (request id plus observed size, or
-//!   `ok:false` when missing) and forwarded as the engine `ProbeOutcome`.
+//!   answered with `ProvideProbeOutcome` (request id plus a discriminated
+//!   available/missing observation) and forwarded as the engine `ProbeOutcome`.
 //!   Probe bytes are measured by the host and never retained.
 //! * Display-only tiles: `ProvideDisplayOutcome` answers a tile that the
 //!   host holds as an ordinary image (no readable bytes) with a successful
@@ -55,9 +55,10 @@ use dezoomify_job::{
     RecoveryChoice as EngineRecoveryChoice,
 };
 use dezoomify_protocol::dto::{
-    ErrorDto, ErrorPhase, ErrorTransport, HeaderDto, HostEffect, HostMessage, JobCommand, JobEvent,
-    JobState as ProtocolJobState, PointDto, RecoveryAction, RecoveryChoice, RecoveryKind,
-    RequestDto, RequestPurpose, SessionConfig, SizeDto, TilePlacementDto,
+    ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostEffect, HostMessage,
+    JobCommand, JobEvent, JobState as ProtocolJobState, PointDto, ProbeOutcome, ProcessingRecipe,
+    RecoveryAction, RecoveryChoice, RecoveryKind, RequestDto, RequestPurpose, ResourceKind,
+    SessionConfig, SizeDto, TilePlacementDto,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -155,6 +156,8 @@ pub struct Session {
     live_discovery_requests: HashSet<u32>,
     /// Adapter-minted tile request id -> engine tile id.
     outstanding_tile_requests: HashMap<u32, u32>,
+    /// Complete adapter-emitted request context, keyed by its correlation id.
+    request_context: HashMap<u32, RequestDto>,
     /// Adapter-minted probe request ids (subset of tile requests emitted
     /// while planning probe-driven levels).
     probe_requests: HashSet<u32>,
@@ -172,8 +175,8 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// `malformed` for zero quotas; `limit-exceeded` for quotas above the
-    /// hard ceilings.
+    /// `limit-exceeded` for quotas above the hard ceilings. Zero-valued
+    /// positive quotas cannot deserialize into [`SessionConfig`].
     pub fn new(config: SessionConfig) -> Result<Self, AdapterError> {
         let max_buffer_bytes = Self::quota(
             config.max_buffer_bytes,
@@ -197,13 +200,13 @@ impl Session {
         // job is created, so zero/oversized values fail typed there.
         let mut job_config = dezoomify_job::Config::default();
         if let Some(value) = config.max_concurrent_fetches {
-            job_config.max_concurrent_fetches = value;
+            job_config.max_concurrent_fetches = value.get();
         }
         if let Some(value) = config.max_concurrent_decodes {
-            job_config.max_concurrent_decodes = value;
+            job_config.max_concurrent_decodes = value.get();
         }
         if let Some(value) = config.max_tiles {
-            job_config.max_tiles = value;
+            job_config.max_tiles = value.get();
         }
         if let Some(value) = config.max_retries {
             job_config.max_retries = value;
@@ -216,6 +219,7 @@ impl Session {
             disposed: false,
             live_discovery_requests: HashSet::new(),
             outstanding_tile_requests: HashMap::new(),
+            request_context: HashMap::new(),
             probe_requests: HashSet::new(),
             pending_recovery: None,
             terminal_discovery_error: None,
@@ -223,42 +227,34 @@ impl Session {
     }
 
     fn quota(
-        requested: Option<u64>,
+        requested: Option<std::num::NonZeroU64>,
         default: u64,
         hard: u64,
         name: &str,
     ) -> Result<u64, AdapterError> {
         match requested {
             None => Ok(default),
-            Some(0) => Err(AdapterError::new(
-                AdapterErrorCode::Malformed,
-                format!("session quota {name} must be non-zero"),
-            )),
-            Some(value) if value > hard => Err(AdapterError::new(
+            Some(value) if value.get() > hard => Err(AdapterError::new(
                 AdapterErrorCode::LimitExceeded,
                 format!("session quota {name} of {value} exceeds hard ceiling {hard}"),
             )),
-            Some(value) => Ok(value),
+            Some(value) => Ok(value.get()),
         }
     }
 
     fn quota_usize(
-        requested: Option<usize>,
+        requested: Option<std::num::NonZeroUsize>,
         default: usize,
         hard: usize,
         name: &str,
     ) -> Result<usize, AdapterError> {
         match requested {
             None => Ok(default),
-            Some(0) => Err(AdapterError::new(
-                AdapterErrorCode::Malformed,
-                format!("session quota {name} must be non-zero"),
-            )),
-            Some(value) if value > hard => Err(AdapterError::new(
+            Some(value) if value.get() > hard => Err(AdapterError::new(
                 AdapterErrorCode::LimitExceeded,
                 format!("session quota {name} of {value} exceeds hard ceiling {hard}"),
             )),
-            Some(value) => Ok(value),
+            Some(value) => Ok(value.get()),
         }
     }
 
@@ -402,7 +398,11 @@ impl Session {
     ///
     /// `disposed` after disposal; `malformed` for unknown recipes or
     /// processing failures.
-    pub fn apply_processing(&self, recipe: &str, bytes: Vec<u8>) -> Result<Vec<u8>, AdapterError> {
+    pub fn apply_processing(
+        &self,
+        recipe: ProcessingRecipe,
+        bytes: Vec<u8>,
+    ) -> Result<Vec<u8>, AdapterError> {
         self.require_live()?;
         crate::discovery::apply_processing_recipe(recipe, bytes)
     }
@@ -425,17 +425,10 @@ impl Session {
             JobCommand::ProvideFetchFailure { request, error } => {
                 self.on_fetch_failure(request, error)
             }
-            JobCommand::ProvideProbeOutcome {
-                request,
-                ok,
-                width,
-                height,
-            } => self.on_probe_outcome(request, ok, width, height),
-            JobCommand::ProvideDisplayOutcome {
-                request,
-                width,
-                height,
-            } => self.on_display_outcome(request, width, height),
+            JobCommand::ProvideProbeOutcome { request, outcome } => {
+                self.on_probe_outcome(request, outcome)
+            }
+            JobCommand::ProvideDisplayOutcome { request } => self.on_display_outcome(request),
             JobCommand::SelectImage { image } => self.forward(EngineCommand::SelectImage { image }),
             JobCommand::SelectLevel { level } => self.forward(EngineCommand::SelectLevel { level }),
             JobCommand::RecoveryChoice { generation, choice } => {
@@ -576,6 +569,7 @@ impl Session {
                     self.arena.take_buffer(handle)?;
                 }
                 self.outstanding_tile_requests.remove(&request);
+                self.request_context.remove(&request);
                 self.forward(EngineCommand::TileOutcome { tile: tile_id, ok })
             }
             None => {
@@ -585,6 +579,7 @@ impl Session {
                 // metadata can never yield a fake success.
                 let bytes = self.arena.take_buffer(handle)?;
                 self.live_discovery_requests.remove(&request);
+                self.request_context.remove(&request);
                 // Discovery is intentionally concurrent. A sibling metadata
                 // fetch may finish after another candidate has already
                 // produced the catalog and advanced the job into selection,
@@ -611,9 +606,7 @@ impl Session {
     fn on_probe_outcome(
         &mut self,
         request: u32,
-        ok: bool,
-        width: u64,
-        height: u64,
+        outcome: ProbeOutcome,
     ) -> Result<Vec<HostMessage>, AdapterError> {
         let tile_id = match self.outstanding_tile_requests.get(&request) {
             Some(tile_id) => *tile_id,
@@ -631,15 +624,12 @@ impl Session {
             ));
         }
         self.require_engine_state(SessionState::Planning)?;
-        let available = ok && width > 0 && height > 0;
-        let (width, height) = if available { (width, height) } else { (0, 0) };
         self.outstanding_tile_requests.remove(&request);
         self.probe_requests.remove(&request);
+        self.request_context.remove(&request);
         self.forward(EngineCommand::ProbeOutcome {
             tile: tile_id,
-            available,
-            width,
-            height,
+            outcome,
         })
     }
 
@@ -647,12 +637,7 @@ impl Session {
     /// an ordinary image element (no readable bytes) and the engine records
     /// a successful acquisition; the tainted canvas completes as
     /// display-only downstream.
-    fn on_display_outcome(
-        &mut self,
-        request: u32,
-        width: u64,
-        height: u64,
-    ) -> Result<Vec<HostMessage>, AdapterError> {
+    fn on_display_outcome(&mut self, request: u32) -> Result<Vec<HostMessage>, AdapterError> {
         let tile_id = match self.outstanding_tile_requests.get(&request) {
             Some(tile_id) => *tile_id,
             None => {
@@ -668,14 +653,9 @@ impl Session {
                 "probe requests are answered with provide-probe-outcome, not provide-display-outcome",
             ));
         }
-        if width == 0 || height == 0 {
-            return Err(AdapterError::new(
-                AdapterErrorCode::WrongState,
-                "display outcomes need positive width and height",
-            ));
-        }
         self.require_engine_state(SessionState::AcquiringTiles)?;
         self.outstanding_tile_requests.remove(&request);
+        self.request_context.remove(&request);
         self.forward(EngineCommand::TileOutcome {
             tile: tile_id,
             ok: true,
@@ -685,8 +665,14 @@ impl Session {
     fn on_fetch_failure(
         &mut self,
         request: u32,
-        mut error: ErrorDto,
+        failure: FetchFailureDto,
     ) -> Result<Vec<HostMessage>, AdapterError> {
+        let context = self.request_context.get(&request).cloned().ok_or_else(|| {
+            AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "failure does not match an outstanding request",
+            )
+        })?;
         let tile = if let Some(tile_id) = self.outstanding_tile_requests.get(&request) {
             Some(*tile_id)
         } else if self.live_discovery_requests.contains(&request) {
@@ -699,28 +685,27 @@ impl Session {
         };
         match tile {
             Some(tile_id) => {
-                error.phase = ErrorPhase::Acquisition;
                 if self.probe_requests.contains(&request) {
                     self.require_engine_state(SessionState::Planning)?;
                     self.outstanding_tile_requests.remove(&request);
                     self.probe_requests.remove(&request);
+                    self.request_context.remove(&request);
                     return self.forward(EngineCommand::ProbeOutcome {
                         tile: tile_id,
-                        available: false,
-                        width: 0,
-                        height: 0,
+                        outcome: ProbeOutcome::Missing,
                     });
                 }
                 self.require_engine_state(SessionState::AcquiringTiles)?;
                 self.outstanding_tile_requests.remove(&request);
+                self.request_context.remove(&request);
                 self.forward(EngineCommand::TileOutcome {
                     tile: tile_id,
                     ok: false,
                 })
             }
             None => {
-                error.phase = ErrorPhase::Discovery;
                 self.live_discovery_requests.remove(&request);
+                self.request_context.remove(&request);
                 // A late sibling failure is also a normal consequence of
                 // concurrent discovery after another candidate has won.
                 if self.state != SessionState::Discovering {
@@ -733,20 +718,33 @@ impl Session {
                 // redact or bound here. The full request URL is named by
                 // the host itself, outside the engine block.
                 let cause = FetchCause {
-                    code: FetchCode::from_string(error.code.clone()),
-                    http: error.http,
-                    transport: match error.transport.unwrap_or(ErrorTransport::Direct) {
+                    code: FetchCode::from_string(failure.code.clone()),
+                    http: failure.http,
+                    transport: match failure.transport {
                         ErrorTransport::Direct => TransportKind::Direct,
                         ErrorTransport::MetadataProxy => TransportKind::MetadataProxy,
                         ErrorTransport::BrowserSession => TransportKind::BrowserSession,
                         ErrorTransport::Native => TransportKind::Native,
                         ErrorTransport::DisplayOnly => TransportKind::DisplayOnly,
                     },
-                    reason: error
+                    reason: failure
                         .blocked_reason
                         .map(|reason| PolicyReason::from_string(reason.as_str())),
                 };
-                self.terminal_discovery_error = Some(error);
+                self.terminal_discovery_error = Some(ErrorDto {
+                    code: failure.code,
+                    phase: ErrorPhase::Discovery,
+                    retryable: failure.retryable,
+                    message: failure.message,
+                    recovery: failure.recovery,
+                    request: Some(context.uri),
+                    transport: Some(failure.transport),
+                    blocked_reason: failure.blocked_reason,
+                    resource_kind: Some(ResourceKind::Metadata),
+                    http: failure.http,
+                    preview: failure.preview,
+                    detail: failure.detail,
+                });
                 self.forward(EngineCommand::FetchFailure { request, cause })
             }
         }
@@ -802,14 +800,14 @@ impl Session {
         Ok(match effect {
             EngineEffect::AcquireResource { request, uri, .. } => {
                 self.live_discovery_requests.insert(request);
-                HostEffect::AcquireResource {
-                    request: RequestDto {
-                        id: request,
-                        uri,
-                        headers: Vec::new(),
-                        purpose: RequestPurpose::Metadata,
-                    },
-                }
+                let request = RequestDto {
+                    id: request,
+                    uri,
+                    headers: Vec::new(),
+                    purpose: RequestPurpose::Metadata,
+                };
+                self.request_context.insert(request.id, request.clone());
+                HostEffect::AcquireResource { request }
             }
             EngineEffect::AcquireTile {
                 tile,
@@ -827,20 +825,22 @@ impl Session {
                 if probe {
                     self.probe_requests.insert(request);
                 }
-                HostEffect::AcquireTile {
-                    request: RequestDto {
-                        id: request,
-                        uri,
-                        headers: headers
-                            .into_iter()
-                            .map(|(name, value)| HeaderDto { name, value })
-                            .collect(),
-                        purpose: if probe {
-                            RequestPurpose::Probe
-                        } else {
-                            RequestPurpose::Tile
-                        },
+                let request = RequestDto {
+                    id: request,
+                    uri,
+                    headers: headers
+                        .into_iter()
+                        .map(|(name, value)| HeaderDto { name, value })
+                        .collect(),
+                    purpose: if probe {
+                        RequestPurpose::Probe
+                    } else {
+                        RequestPurpose::Tile
                     },
+                };
+                self.request_context.insert(request.id, request.clone());
+                HostEffect::AcquireTile {
+                    request,
                     tile,
                     placement: TilePlacementDto {
                         position: PointDto {
@@ -855,7 +855,14 @@ impl Session {
                             width: u64::from(size.x),
                             height: u64::from(size.y),
                         }),
-                        processing,
+                        processing: match processing {
+                            dezoomify_core::core::model::ProcessingRecipe::None => {
+                                ProcessingRecipe::None
+                            }
+                            dezoomify_core::core::model::ProcessingRecipe::GoogleArtsDecrypt => {
+                                ProcessingRecipe::GoogleArtsDecrypt
+                            }
+                        },
                         probe_output,
                     },
                 }

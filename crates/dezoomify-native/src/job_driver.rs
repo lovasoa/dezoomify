@@ -72,6 +72,7 @@ use dezoomify_job::{
     Config as JobConfig, Job, JobCommand, JobEffect, JobEvent, JobMessageBody, RecoveryChoice,
     State as JobState,
 };
+use dezoomify_protocol::dto::ProbeOutcome;
 
 use crate::error::NativeError;
 use crate::http::{fetch, FetchOutcome, UserHeaders};
@@ -376,8 +377,8 @@ pub(crate) fn select_level_index(levels: &[(u64, u64)], selection: &LevelSelecti
     max_area_index(&refs)
 }
 
-/// Map a terminal job failure onto the stable native code the same failure
-/// had before the migration, preserving the engine message.
+/// Map a terminal job failure onto the stable native product code while
+/// preserving the engine message.
 pub(crate) fn map_failure_code(code: &str) -> &'static str {
     match code {
         "job.discovery-failed" | "job.catalog-invalid" | "job.empty-resource" => "discovery.failed",
@@ -760,13 +761,6 @@ struct TileFetch {
     extent: Option<Vec2d>,
 }
 
-fn processing_from_name(name: &str) -> ProcessingRecipe {
-    match name {
-        "google-arts-decrypt" => ProcessingRecipe::GoogleArtsDecrypt,
-        _ => ProcessingRecipe::None,
-    }
-}
-
 fn execute_effects(
     job: &mut Job,
     attempt: &mut Attempt<'_>,
@@ -838,7 +832,7 @@ fn execute_effects(
                         .into_iter()
                         .map(|(name, value)| (name.to_ascii_lowercase(), value))
                         .collect(),
-                    processing: processing_from_name(&processing),
+                    processing,
                     destination,
                     extent: expected_size,
                 };
@@ -850,12 +844,21 @@ fn execute_effects(
                         attempt.config,
                         attempt.user,
                     );
-                    let (available, width, height) = match read.observation {
+                    let outcome = match read.observation {
                         ObservationResult::Available { size } => {
-                            (true, u64::from(size.x), u64::from(size.y))
+                            match (
+                                std::num::NonZeroU64::new(u64::from(size.x)),
+                                std::num::NonZeroU64::new(u64::from(size.y)),
+                            ) {
+                                (Some(width), Some(height)) => {
+                                    ProbeOutcome::Available { width, height }
+                                }
+                                _ => ProbeOutcome::Missing,
+                            }
                         }
-                        ObservationResult::Missing => (false, 0, 0),
+                        ObservationResult::Missing => ProbeOutcome::Missing,
                     };
+                    let available = matches!(outcome, ProbeOutcome::Available { .. });
                     if available && probe_output {
                         let key = tile.to_string();
                         attempt.canvas = attempt.canvas.or(canvas);
@@ -874,15 +877,7 @@ fn execute_effects(
                         }
                         attempt.acquired = attempt.acquired.saturating_add(1);
                     }
-                    reply(
-                        job,
-                        JobCommand::ProbeOutcome {
-                            tile,
-                            available,
-                            width,
-                            height,
-                        },
-                    )?;
+                    reply(job, JobCommand::ProbeOutcome { tile, outcome })?;
                 } else {
                     if let Some(canvas) = canvas {
                         attempt.canvas = attempt.canvas.or(Some(canvas));

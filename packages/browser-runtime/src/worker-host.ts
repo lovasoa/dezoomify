@@ -4,11 +4,17 @@
 import type {
   DispatchResult,
   ErrorDto,
+  FetchFailureDto,
   HostMessage,
   JobCommand,
+  JobInputDto,
+  ProcessingRecipe,
+  ProbeOutcome,
   Session as WasmSession,
   SessionConfig,
 } from "@dezoomify/wasm-bindings";
+import { dispatchTyped } from "./typed-dispatch.ts";
+import type { DispatchTable } from "./typed-dispatch.ts";
 
 export type WorkerHostLog = (
   level: "debug" | "info" | "warn" | "error",
@@ -35,13 +41,13 @@ export interface WorkerHostWasm {
 }
 
 export type WorkerHostMessage =
-  | { type: "engine.start"; jobId: string; inputs: Array<{ url: string; contents?: string }>; quotas?: SessionConfig }
+  | { type: "engine.start"; jobId: string; inputs: JobInputDto[]; quotas?: SessionConfig }
   | { type: "engine.bytes"; requestId: number; bytes: Uint8Array; finalUri?: string }
-  | { type: "engine.probe"; requestId: number; ok: boolean; width: number; height: number }
-  | { type: "engine.display"; requestId: number; width: number; height: number }
-  | { type: "engine.process"; requestId: number; recipe: string; bytes: Uint8Array | ArrayBuffer }
+  | { type: "engine.probe"; requestId: number; outcome: ProbeOutcome }
+  | { type: "engine.display"; requestId: number }
+  | { type: "engine.process"; requestId: number; recipe: ProcessingRecipe; bytes: Uint8Array | ArrayBuffer }
   | { type: "engine.rank"; requestId: number; urls: string[] }
-  | { type: "engine.failure"; requestId: number; error: ErrorDto }
+  | { type: "engine.failure"; requestId: number; error: FetchFailureDto }
   | { type: "engine.command"; command: JobCommand }
   | { type: "engine.dispose" };
 
@@ -86,7 +92,7 @@ export function createJobWorkerHost(deps: {
     const wasm = await deps.wasm();
     if (disposed) return;
     await wasm.default?.();
-    session = new wasm.Session(message.quotas ?? ({} as SessionConfig));
+    session = new wasm.Session(message.quotas ?? {});
     log("info", "session-created", `jobId=${String(message.jobId)} typed-abi=true`);
     dispatch({ type: "start", inputs: message.inputs });
   }
@@ -100,18 +106,18 @@ export function createJobWorkerHost(deps: {
     const finalUri = message.finalUri !== "" ? message.finalUri : undefined;
     dispatch({
       type: "provide-resource",
-      request: message.requestId as number,
+      request: message.requestId,
       buffer,
       ...(finalUri ? { final_uri: finalUri } : {}),
     });
   }
 
   function provideProbe(message: Extract<WorkerHostMessage, { type: "engine.probe" }>): void {
-    dispatch({ type: "provide-probe-outcome", request: message.requestId, ok: message.ok, width: message.width, height: message.height });
+    dispatch({ type: "provide-probe-outcome", request: message.requestId, outcome: message.outcome });
   }
 
   function provideDisplay(message: Extract<WorkerHostMessage, { type: "engine.display" }>): void {
-    dispatch({ type: "provide-display-outcome", request: message.requestId, width: message.width, height: message.height });
+    dispatch({ type: "provide-display-outcome", request: message.requestId });
   }
 
   function processTile(message: Extract<WorkerHostMessage, { type: "engine.process" }>): void {
@@ -120,38 +126,43 @@ export function createJobWorkerHost(deps: {
       ? message.bytes
       : new Uint8Array(message.bytes);
     try {
-      const out = new Uint8Array(session.applyProcessing(message.recipe, bytes)).slice();
+      const out = new Uint8Array(session.applyProcessing({ recipe: message.recipe }, bytes)).slice();
       deps.postMessage({ type: "engine.processed", requestId: message.requestId, bytes: out.buffer }, [out.buffer]);
     } catch (error) {
       deps.postMessage({ type: "engine.process-failed", requestId: message.requestId, error: abiFault(error) });
     }
   }
 
+  const messageHandlers = {
+    "engine.start": start,
+    "engine.bytes": provideBytes,
+    "engine.probe": provideProbe,
+    "engine.display": provideDisplay,
+    "engine.process": processTile,
+    "engine.rank": (input) => {
+      deps.postMessage({ type: "engine.ranked", requestId: input.requestId, urls: input.urls });
+    },
+    "engine.failure": (input) => {
+      dispatch({ type: "provide-fetch-failure", request: input.requestId, error: input.error });
+    },
+    "engine.command": (input) => dispatch(input.command),
+    "engine.dispose": () => {
+      log("info", "session-disposed", "");
+      disposed = true;
+      try {
+        if (session) publish(session.dispose());
+      } finally {
+        session = null;
+      }
+    },
+  } satisfies DispatchTable<WorkerHostMessage, void | Promise<void>>;
+
   return {
     async onMessage(message: unknown) {
       if (!message || typeof message !== "object" || disposed) return;
       const input = message as WorkerHostMessage;
       try {
-        if (input.type === "engine.start") await start(input);
-        else if (input.type === "engine.bytes") provideBytes(input);
-        else if (input.type === "engine.probe") provideProbe(input);
-        else if (input.type === "engine.display") provideDisplay(input);
-        else if (input.type === "engine.process") processTile(input);
-        else if (input.type === "engine.rank") {
-          deps.postMessage({ type: "engine.ranked", requestId: input.requestId, urls: input.urls });
-        }
-        else if (input.type === "engine.failure") {
-          dispatch({ type: "provide-fetch-failure", request: input.requestId, error: input.error });
-        } else if (input.type === "engine.command") dispatch(input.command);
-        else if (input.type === "engine.dispose") {
-          log("info", "session-disposed", "");
-          disposed = true;
-          try {
-            if (session) publish(session.dispose());
-          } finally {
-            session = null;
-          }
-        }
+        await dispatchTyped(messageHandlers, input);
       } catch (error) {
         const failure = abiFault(error);
         log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message}`);

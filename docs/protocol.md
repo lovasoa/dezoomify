@@ -24,29 +24,34 @@ One JavaScript `Session` owns one Rust job and byte arena:
 Commands, effects, events, configuration, errors, URLs, and handles cross as
 native JavaScript objects converted fallibly by `tsify` and
 `serde-wasm-bindgen`. Binary resource bodies stay in the bounded WASM arena.
+Closed concepts such as processing recipes and output formats are generated
+string-literal unions, never free-form strings. Available probe observations
+deserialize into non-zero dimensions; a missing observation is a separate
+union variant.
 
 ## Commands, effects, and events
 
 `JobCommand` expresses user intent or answers one correlated effect. `Start`
 carries ordered discovery roots. Resource answers carry a job-scoped request
-number and either a buffer reference or a complete `ErrorDto`. Image and level
+number and either a buffer reference or a `FetchFailureDto`. Image and level
 choices are zero-based positions in the immutable catalog. Recovery choices
 carry the outstanding decision generation.
 
 `HostEffect` is exhaustive: resource acquisition, tile/probe acquisition,
 output finalization, host cancellation, and recovery decisions. `JobEvent` is
 also exhaustive and carries state, catalog, progress, warnings, recovery, and
-terminal outcomes. Website and extension handling switch on these generated
-unions.
+terminal outcomes. Website, extension, and worker boundaries use exhaustive
+typed handler tables over these generated unions.
 
 ## Errors
 
 `ErrorDto` contains a stable code, phase, retryability, user message, recovery
 actions, and optional request URI, transport, resource kind, blocked reason,
-HTTP status, bounded server signal, and diagnostic detail. The browser host
-derives the phase from the effect it is answering. Rust derives it again at
-the session boundary, so a product classifier cannot choose a contradictory
-phase. See [Errors and recovery](errors.md).
+HTTP status, bounded server signal, and diagnostic detail. A browser fetch
+failure crosses as `FetchFailureDto`, which contains only facts the host can
+observe. The Rust session recovers the correlated request and derives phase,
+request URI, and resource kind, so a product classifier cannot omit or invent
+them. See [Errors and recovery](errors.md).
 
 An adapter fault is a separate `DispatchResult` branch. It represents invalid
 external input or session misuse and never replaces a job failure.

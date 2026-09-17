@@ -2,7 +2,7 @@
 //! through `Ts<JobCommand>`/`Ts<DispatchResult>` by wasm-bindgen.
 
 use dezoomify_protocol::dto::{
-    BlockedReason, ErrorDto, ErrorPhase, ErrorTransport, HostMessage, JobCommand, JobEvent,
+    BlockedReason, ErrorPhase, ErrorTransport, FetchFailureDto, HostMessage, JobCommand, JobEvent,
     JobInputDto, SessionConfig,
 };
 use dezoomify_wasm::{AdapterErrorCode, Session};
@@ -44,15 +44,17 @@ fn typed_fetch_error_requires_and_preserves_context() {
             _ => None,
         })
         .expect("discovery request");
-    let mut error = ErrorDto::new(
-        "PROXY_ERROR",
-        ErrorPhase::Discovery,
-        "The metadata proxy failed.",
-    );
-    error.retryable = true;
-    error.transport = Some(ErrorTransport::MetadataProxy);
-    error.http = Some(502);
-    error.blocked_reason = Some(BlockedReason::Network);
+    let error = FetchFailureDto {
+        code: "PROXY_ERROR".into(),
+        retryable: true,
+        message: "The metadata proxy failed.".into(),
+        recovery: Vec::new(),
+        transport: ErrorTransport::MetadataProxy,
+        blocked_reason: Some(BlockedReason::Network),
+        http: Some(502),
+        preview: None,
+        detail: None,
+    };
     let messages = session
         .dispatch(JobCommand::ProvideFetchFailure { request, error })
         .expect("typed failure accepted");
@@ -70,7 +72,7 @@ fn typed_fetch_error_requires_and_preserves_context() {
 #[test]
 fn typed_config_and_handles_enforce_limits_and_generation() {
     let mut session = Session::new(SessionConfig {
-        max_buffer_bytes: Some(4),
+        max_buffer_bytes: std::num::NonZeroU64::new(4),
         ..SessionConfig::default()
     })
     .expect("bounded session");

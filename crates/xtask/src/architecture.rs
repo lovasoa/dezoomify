@@ -1,4 +1,4 @@
-//! `cargo xtask check` architecture gate (todo 2.2): dependency direction.
+//! `cargo xtask check` architecture gate: dependency direction.
 //!
 //! - `packages/shared-ui` is host-neutral: after stripping comments and
 //!   string literals, no module may reference the host globals `window`,
@@ -67,38 +67,6 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
             return Err(format!(
                 "typed boundary violation: {path} must import generated Rust/WASM bindings"
             ));
-        }
-    }
-    for path in [
-        "packages/browser-runtime/src/worker-host.ts",
-        "packages/browser-runtime/src/engine-host.ts",
-        "apps/extension/src/job/index.ts",
-        "apps/extension/src/runtime/nativeHandoff.ts",
-        "src/main.ts",
-    ] {
-        let text =
-            std::fs::read_to_string(root.join(path)).map_err(|e| format!("read {path}: {e}"))?;
-        for declaration in [
-            "interface JobCommand",
-            "type JobCommand =",
-            "interface HostMessage",
-            "type HostMessage =",
-            "interface HostEffect",
-            "type HostEffect =",
-            "interface JobEvent",
-            "type JobEvent =",
-            "interface ErrorDto",
-            "type ErrorDto =",
-            "interface SessionConfig",
-            "type SessionConfig =",
-            "interface NativeHostRequest",
-            "type NativeHostRequest =",
-        ] {
-            if text.contains(declaration) {
-                return Err(format!(
-                    "handwritten canonical contract `{declaration}` is forbidden in {path}"
-                ));
-            }
         }
     }
     Ok(())

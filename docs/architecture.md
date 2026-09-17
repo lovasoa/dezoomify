@@ -14,7 +14,7 @@ A pure, host-neutral Rust effect/state machine. It owns discovery, selection, pl
 
 ### `crates/dezoomify-protocol`
 
-The Rust source of truth for job/WASM values, errors, and Native Messaging requests. `Tsify` and `wasm-bindgen` generate `packages/wasm-bindings`; TypeScript products import that package. See [Cross-language contracts](protocol.md).
+The Rust source of truth for job/WASM values, errors, processing recipes, output formats, probe outcomes, and Native Messaging requests. `Tsify` and `wasm-bindgen` generate `packages/wasm-bindings`; TypeScript products import that package. See [Cross-language contracts](protocol.md).
 
 ### `crates/dezoomify-native`
 
@@ -105,6 +105,7 @@ cannot refine the plan, core returns the manifest-declared grid unchanged.
 
 - Core and job logic remain deterministic and testable without I/O.
 - URLs, headers, credentials, bytes, and output destinations cross boundaries only through typed values. Rust contract types are never redeclared by browser boundary modules.
+- Closed generated unions are consumed through exhaustive typed handler tables. Correlated Rust state supplies context such as error phase and request identity rather than accepting it again from a host.
 - Runtime differences appear as negotiated [capabilities](protocol.md#capabilities), and automatic fallback is exposed through active-transport state rather than hidden.
 - Errors cross host boundaries as stable protocol errors with typed [recovery actions](errors.md).
 - Shared scenarios cover the native runtime and CLI (`native/cli-dzi`, `native/cli-tile-failure`); see [Testing](testing.md).

@@ -27,14 +27,14 @@ function harness({ fetchResource, loadDisplayImage, assembly = fakeAssembly(), p
     }),
     cancelFetch: () => seen.push(["cancel"]),
     assembly,
-    probeSize: probeSize ?? (async () => ({ ok: true, width: 256, height: 256 })),
+    probeSize: probeSize ?? (async () => ({ status: "available", width: 256, height: 256 })),
     ...(loadDisplayImage ? { loadDisplayImage } : {}),
     classifyFailure: (error) => ({
       blocked_reason: error?.category ?? "network",
       code: error?.code ?? "network",
       retryable: error?.retryable ?? true,
       message: String(error?.message ?? error),
-      transport: error?.transport,
+      transport: error?.transport ?? "direct",
       http: error?.http,
       preview: error?.preview,
       detail: error?.detail,
@@ -43,7 +43,6 @@ function harness({ fetchResource, loadDisplayImage, assembly = fakeAssembly(), p
     onRecoveryRequested: () => seen.push(["recovery"]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
     onEvent: (event) => seen.push(["event", event.type]),
-    onUnsupportedEffect: (effect) => seen.push(["unsupported", effect.type]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   return { controller, sent, seen, assembly, logs };
@@ -74,27 +73,27 @@ test("metadata carries the observed post-redirect URL", async () => {
 });
 
 test("probe effects report measurements without retaining tiles", async () => {
-  const { controller, sent, assembly } = harness({ probeSize: async () => ({ ok: true, width: 256, height: 128 }) });
-  controller.handleEngineMessages([{ ...TILE, request: { id: 7, uri: "https://cdn.test/p.jpg", headers: {}, purpose: "probe" } }]);
+  const { controller, sent, assembly } = harness({ probeSize: async () => ({ status: "available", width: 256, height: 128 }) });
+  controller.handleEngineMessages([{ ...TILE, request: { id: 7, uri: "https://cdn.test/p.jpg", headers: [], purpose: "probe" } }]);
   await flush();
   const probe = sent.find((message) => message.type === "engine.probe");
-  assert.deepEqual([probe?.requestId, probe?.ok, probe?.width, probe?.height], [7, true, 256, 128]);
+  assert.deepEqual([probe?.requestId, probe?.outcome], [7, { status: "available", width: 256, height: 128 }]);
   assert.equal(assembly.calls.some(([kind]) => kind === "acquireTile"), false);
 });
 
 test("probe-and-output effects retain readable bytes for final assembly", async () => {
   const bytes = new ArrayBuffer(8);
   const { controller, sent, assembly } = harness({
-    probeSize: async () => ({ ok: true, width: 256, height: 128, bytes }),
+    probeSize: async () => ({ status: "available", width: 256, height: 128, bytes }),
   });
   controller.handleEngineMessages([{
     ...TILE,
     placement: { ...TILE.placement, probe_output: true },
-    request: { id: 8, uri: "https://cdn.test/p.jpg", headers: {}, purpose: "probe" },
+    request: { id: 8, uri: "https://cdn.test/p.jpg", headers: [], purpose: "probe" },
   }]);
   await flush();
   assert.deepEqual(assembly.calls[0], ["acquireTile", 0, { ...TILE.placement, probe_output: true }, bytes]);
-  assert.equal(sent.find((message) => message.type === "engine.probe")?.ok, true);
+  assert.deepEqual(sent.find((message) => message.type === "engine.probe")?.outcome, { status: "available", width: 256, height: 128 });
 });
 
 test("unreadable ordinary tiles fall back to display-only and memoize the origin", async () => {

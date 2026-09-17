@@ -2,6 +2,7 @@
 //! here exactly once and `tsify` projects it into the WASM declaration.
 
 use serde::{Deserialize, Serialize};
+use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 
 // ---------------------------------------------------------------------------
 // Bounded integers (always safe across the JavaScript boundary)
@@ -103,6 +104,31 @@ pub struct SizeDto {
     pub height: u64,
 }
 
+/// A closed byte transformation applied before image decoding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ProcessingRecipe {
+    #[default]
+    None,
+    GoogleArtsDecrypt,
+}
+
+/// Typed argument for the pure WASM tile-processing operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ProcessingRequest {
+    pub recipe: ProcessingRecipe,
+}
+
+/// The browser output representation requested by the job engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum OutputFormat {
+    Png,
+}
+
 /// Host-neutral placement of one tile in the output image, projected from
 /// the core tile plan. `position` is the top-left output corner;
 /// `expected_size` is the planned extent when the plan declares it (absent
@@ -116,7 +142,7 @@ pub struct TilePlacementDto {
     pub position: PointDto,
     pub expected_size: Option<SizeDto>,
     pub canvas: Option<SizeDto>,
-    pub processing: String,
+    pub processing: ProcessingRecipe,
     /// Whether a successful probe is also part of the final output plan.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub probe_output: bool,
@@ -187,6 +213,19 @@ pub struct JobInputDto {
     pub contents: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ProbeOutcome {
+    Missing,
+    Available {
+        #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+        width: NonZeroU64,
+        #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+        height: NonZeroU64,
+    },
+}
+
 impl JobInputDto {
     #[must_use]
     pub fn new(url: impl Into<String>) -> Self {
@@ -217,7 +256,7 @@ pub enum JobCommand {
     },
     ProvideFetchFailure {
         request: u32,
-        error: ErrorDto,
+        error: FetchFailureDto,
     },
     SelectImage {
         image: u32,
@@ -232,20 +271,13 @@ pub enum JobCommand {
     /// reports a missing probe.
     ProvideProbeOutcome {
         request: u32,
-        ok: bool,
-        width: u64,
-        height: u64,
+        outcome: ProbeOutcome,
     },
     /// Display-only observation for one outstanding `acquire-tile` in
-    /// `AcquiringTiles`. The host holds an ordinary image element (no
-    /// readable bytes, canvas taints on draw) and the adapter forwards a
-    /// successful `TileOutcome`; the tainted output completes as
-    /// display-only downstream. Width/height are the observed image
-    /// dimensions and must be positive.
+    /// `AcquiringTiles`. The host has already retained a valid ordinary
+    /// image element and the adapter forwards a successful `TileOutcome`.
     ProvideDisplayOutcome {
         request: u32,
-        width: u64,
-        height: u64,
     },
     RecoveryChoice {
         generation: u32,
@@ -285,7 +317,7 @@ pub enum HostEffect {
     /// assembles/encodes when readable, and replies exactly once.
     FinalizeOutput {
         partial: bool,
-        format: String,
+        format: OutputFormat,
         canvas: Option<SizeDto>,
     },
     CancelWork,
@@ -605,6 +637,25 @@ pub enum ResourceKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct FetchFailureDto {
+    pub code: String,
+    pub retryable: bool,
+    pub message: String,
+    #[serde(default)]
+    pub recovery: Vec<RecoveryAction>,
+    pub transport: ErrorTransport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<BlockedReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ErrorDto {
     pub code: String,
     pub phase: ErrorPhase,
@@ -707,17 +758,23 @@ pub fn redact_error_text(input: &str) -> String {
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct SessionConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_buffer_bytes: Option<u64>,
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_buffer_bytes: Option<NonZeroU64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_total_bytes: Option<u64>,
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_total_bytes: Option<NonZeroU64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_buffers: Option<usize>,
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_buffers: Option<NonZeroUsize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_concurrent_fetches: Option<u32>,
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_concurrent_fetches: Option<NonZeroU32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_concurrent_decodes: Option<u32>,
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_concurrent_decodes: Option<NonZeroU32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_tiles: Option<u32>,
+    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
+    pub max_tiles: Option<NonZeroU32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
 }

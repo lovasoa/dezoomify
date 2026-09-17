@@ -79,7 +79,9 @@ pub use session::{
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_api {
     use super::{buffer::ArenaHandle, session::Session};
-    use dezoomify_protocol::dto::{BufferHandle, ErrorDto, HostMessage, JobCommand, SessionConfig};
+    use dezoomify_protocol::dto::{
+        BufferHandle, ErrorDto, HostMessage, JobCommand, ProcessingRequest, SessionConfig,
+    };
     use serde::Serialize;
     use tsify::{Ts, Tsify};
     use wasm_bindgen::prelude::*;
@@ -205,9 +207,14 @@ pub mod wasm_api {
         /// Apply one core processing recipe to tile bytes (pure: no job
         /// state, same recipes as the discovery adapter).
         #[wasm_bindgen(js_name = "applyProcessing")]
-        pub fn apply_processing(&self, recipe: &str, bytes: &[u8]) -> Result<Vec<u8>, JsError> {
+        pub fn apply_processing(
+            &self,
+            request: Ts<ProcessingRequest>,
+            bytes: &[u8],
+        ) -> Result<Vec<u8>, JsError> {
+            let request = request.to_rust().map_err(conversion_error)?;
             self.inner
-                .apply_processing(recipe, bytes.to_vec())
+                .apply_processing(request.recipe, bytes.to_vec())
                 .map_err(|error| JsError::new(&error.to_string()))
         }
 

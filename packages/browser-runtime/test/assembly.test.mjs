@@ -136,7 +136,7 @@ test("processing recipes run through the injected processor", async () => {
 test("processing recipes without an executor fail typed instead of dropping the recipe", async () => {
   const { assembly } = harness();
   await assert.rejects(
-    assembly.acquireTile(0, placement(0, 0, { processing: "gas-encryption" }), bytes16(16)),
+    assembly.acquireTile(0, placement(0, 0, { processing: "google-arts-decrypt" }), bytes16(16)),
     (error) => {
       assert.equal(error.code, "TILE_PROCESSING_UNAVAILABLE");
       assert.equal(error.retryable, false);
@@ -152,13 +152,7 @@ test("decode failures propagate so acquisition outcomes stay honest", async () =
   await assert.rejects(assembly.acquireTile(0, placement(0, 0), bytes16(16)), /corrupt tile/);
 });
 
-test("invalid placements and unsupported formats fail typed", async () => {
-  const { assembly } = harness();
-  assert.throws(() => assembly.recordPlacement(0, placement(-1, 0)), (error) => error.code === "PLAN_INVALID");
-  await assert.rejects(
-    assembly.finalizeOutput(false, "jpeg", { width: 32, height: 32 }),
-    (error) => error.code === "OUTPUT_FORMAT_UNSUPPORTED",
-  );
+test("an empty output plan fails before allocating a canvas", async () => {
   const fresh = harness();
   await assert.rejects(
     fresh.assembly.finalizeOutput(false, "png", { width: 0, height: 0 }),

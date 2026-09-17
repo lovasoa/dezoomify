@@ -271,14 +271,10 @@ test("proxy fallback is unconditional: no opt-out UI, 1500 ms direct head start"
 });
 
 test("ordinary display fallback only for unprocessed tiles", () => {
-  for (const processing of [undefined, null, "", "none"]) {
-    assert.equal(isOrdinaryImageTile(processing), true, JSON.stringify(processing));
-  }
+  assert.equal(isOrdinaryImageTile("none"), true);
   // Processed tiles need readable bytes: display fallback would drop the
   // processing, so it is never allowed.
-  for (const processing of ["google-arts-decrypt", "xor", "NONE", "None"]) {
-    assert.equal(isOrdinaryImageTile(processing), false, JSON.stringify(processing));
-  }
+  assert.equal(isOrdinaryImageTile("google-arts-decrypt"), false);
 });
 
 test("tile failures report the direct transport, never the metadata proxy", () => {

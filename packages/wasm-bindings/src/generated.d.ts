@@ -1,6 +1,11 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
+ * A closed byte transformation applied before image decoding.
+ */
+export type ProcessingRecipe = "none" | "google-arts-decrypt";
+
+/**
  * A pixel size (output canvas or planned tile extent).
  */
 export interface SizeDto {
@@ -35,7 +40,7 @@ export interface TilePlacementDto {
     position: PointDto;
     expected_size: SizeDto | undefined;
     canvas: SizeDto | undefined;
-    processing: string;
+    processing: ProcessingRecipe;
     /**
      * Whether a successful probe is also part of the final output plan.
      */
@@ -101,6 +106,18 @@ export interface CatalogDto {
 }
 
 /**
+ * The browser output representation requested by the job engine.
+ */
+export type OutputFormat = "png";
+
+/**
+ * Typed argument for the pure WASM tile-processing operation.
+ */
+export interface ProcessingRequest {
+    recipe: ProcessingRecipe;
+}
+
+/**
  * Typed reference to bytes owned by the WASM arena.
  */
 export interface BufferHandle {
@@ -120,6 +137,18 @@ export interface ErrorDto {
     transport?: ErrorTransport;
     blocked_reason?: BlockedReason;
     resource_kind?: ResourceKind;
+    http?: number;
+    preview?: string;
+    detail?: string;
+}
+
+export interface FetchFailureDto {
+    code: string;
+    retryable: boolean;
+    message: string;
+    recovery?: RecoveryAction[];
+    transport: ErrorTransport;
+    blocked_reason?: BlockedReason;
     http?: number;
     preview?: string;
     detail?: string;
@@ -173,15 +202,17 @@ export type ErrorPhase = "handshake" | "validation" | "discovery" | "acquisition
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
-export type HostEffect = { type: "acquire-resource"; request: RequestDto } | { type: "acquire-tile"; request: RequestDto; tile: number; placement: TilePlacementDto } | { type: "finalize-output"; partial: boolean; format: string; canvas: SizeDto | undefined } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
+export type HostEffect = { type: "acquire-resource"; request: RequestDto } | { type: "acquire-tile"; request: RequestDto; tile: number; placement: TilePlacementDto } | { type: "finalize-output"; partial: boolean; format: OutputFormat; canvas: SizeDto | undefined } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
 
 export type HostMessage = ({ kind: "effect" } & HostEffect) | ({ kind: "event" } & JobEvent);
 
-export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "provide-resource"; request: number; buffer: BufferHandle; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: ErrorDto } | { type: "select-image"; image: number } | { type: "select-level"; level: number } | { type: "provide-probe-outcome"; request: number; ok: boolean; width: number; height: number } | { type: "provide-display-outcome"; request: number; width: number; height: number } | { type: "recovery-choice"; generation: number; choice: RecoveryChoice } | { type: "finalization-succeeded" } | { type: "finalization-failed"; error: ErrorDto } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
+export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "provide-resource"; request: number; buffer: BufferHandle; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "select-image"; image: number } | { type: "select-level"; level: number } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "recovery-choice"; generation: number; choice: RecoveryChoice } | { type: "finalization-succeeded" } | { type: "finalization-failed"; error: ErrorDto } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
 
 export type JobEvent = { type: "job-state"; state: JobState } | { type: "catalog"; catalog: CatalogDto } | { type: "progress"; acquired: number; total: number } | { type: "warning"; error: ErrorDto } | { type: "recovery-request"; generation: number; actions: RecoveryAction[] } | { type: "completed" } | { type: "partial-completed" } | { type: "failed"; error: ErrorDto } | { type: "cancelled" } | { type: "paused" } | { type: "resumed" };
 
 export type JobState = "Created" | "Discovering" | "AwaitingImageSelection" | "AwaitingLevelSelection" | "Planning" | "AcquiringTiles" | "AwaitingPartialDecision" | "Finalizing" | "Cancelling" | "Completed" | "PartiallyCompleted" | "Failed" | "Cancelled";
+
+export type ProbeOutcome = { status: "missing" } | { status: "available"; width: number; height: number };
 
 export type Readiness = "ready" | "deferred";
 
@@ -206,7 +237,7 @@ export class Session {
      * Apply one core processing recipe to tile bytes (pure: no job
      * state, same recipes as the discovery adapter).
      */
-    applyProcessing(recipe: string, bytes: Uint8Array): Uint8Array;
+    applyProcessing(request: ProcessingRequest, bytes: Uint8Array): Uint8Array;
     /**
      * Project an arena handle onto its canonical protocol reference
      * (`buffers`): typed `provide-resource` commands carry a
@@ -250,7 +281,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_session_free: (a: number, b: number) => void;
     readonly session_allocateBuffer: (a: number, b: number) => [number, number, number];
-    readonly session_applyProcessing: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly session_applyProcessing: (a: number, b: any, c: number, d: number) => [number, number, number, number];
     readonly session_bufferHandle: (a: number, b: any) => [number, number, number];
     readonly session_commitBuffer: (a: number, b: any, c: number) => [number, number];
     readonly session_dispatch: (a: number, b: any) => [number, number, number];

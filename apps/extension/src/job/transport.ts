@@ -1,4 +1,5 @@
 import { asFetchFailure } from "../runtime/fetch.ts";
+import type { AcquireEffect } from "@dezoomify/browser-runtime";
 
 /** @typedef {{ jobId: string, tabId: number, frameId: number, documentGeneration: number }} JobBinding */
 
@@ -91,16 +92,6 @@ export function engineFailure(error: unknown) {
   return asFetchFailure(error);
 }
 
-export interface EngineResourceEffect {
-  request?: {
-    id: number;
-    purpose: string;
-    uri: string;
-    method?: string;
-    headers?: Record<string, string> | Array<{ name: string; value: string }>;
-  };
-}
-
 /**
  * Route one engine effect fetch for the extension. Metadata prefers the
  * monitored tab's origin context and falls back to the granted
@@ -115,17 +106,15 @@ export function createEngineResourceFetcher(deps: {
   extensionTransport: { fetchResource(url: string, opts?: unknown): Promise<{ bytes: Uint8Array }> };
   cancelled(): boolean;
   onSourceFailure?(cause: { code?: unknown; blocked_reason?: unknown }): void;
-}): (effect: EngineResourceEffect) => Promise<{ bytes: Uint8Array }> {
-  return async (effect: EngineResourceEffect): Promise<{ bytes: Uint8Array }> => {
+}): (effect: AcquireEffect) => Promise<{ bytes: Uint8Array }> {
+  return async (effect: AcquireEffect): Promise<{ bytes: Uint8Array }> => {
     const request = effect.request;
-    if (!request) throw Object.assign(new Error("effect has no request"), { code: "adapter.malformed" });
     if (request.purpose === "metadata") {
       try {
         const result = await deps.sourceTransport.fetchResource({
           binding: deps.binding(),
           requestId: request.id,
           uri: request.uri,
-          method: request.method,
           headers: request.headers,
           purpose: request.purpose,
         });

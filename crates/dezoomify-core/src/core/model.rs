@@ -33,7 +33,7 @@ impl Request {
 
 /// A byte-processing operation applied to a fetched tile payload before it
 /// is decoded as an image.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProcessingRecipe {
     None,
     /// Strips Google Arts & Culture tile encryption (see
