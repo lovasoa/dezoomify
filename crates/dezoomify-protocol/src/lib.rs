@@ -1,11 +1,9 @@
-//! Canonical protocol version 2: the single authored source for commands,
-//! effects, responses, events, capabilities, handoff, output, recovery, and
-//! errors. `packages/protocol-ts` is generated from [`dto`]; never duplicate
-//! these shapes by hand.
+//! Authoritative typed contracts for job commands, host effects, events,
+//! errors, and native messaging. Browser bindings are derived from these
+//! Rust types by the WASM build.
 
-// Protocol errors intentionally carry structured context (transport, blocked
-// reason, resource kind, recovery actions); boxing them would complicate the
-// canonical JSON projection without runtime benefit.
+// Contract errors intentionally carry structured context (transport, blocked
+// reason, resource kind, recovery actions); boxing them has no runtime benefit.
 #![allow(clippy::result_large_err)]
 #![forbid(unsafe_code)]
 // 6.1 unwrap policy: shipped code maps failures to typed protocol errors
@@ -14,8 +12,4 @@
 // this crate-root attribute.
 #![deny(clippy::unwrap_used)]
 
-pub mod codec;
 pub mod dto;
-pub mod generate;
-
-pub use dto::{PROTOCOL_MAJOR, PROTOCOL_MINOR, PROTOCOL_VERSION};

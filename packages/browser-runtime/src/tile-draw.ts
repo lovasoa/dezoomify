@@ -149,7 +149,7 @@ export function loadTileImage(
       }
       done(false, new Error(`tile image timed out after ${ms / 1000}s`));
     }, ms);
-    // Don't tell the tile host the request comes from dezoomify (legacy parity).
+    // Let the browser choose its ordinary image-request referrer behavior.
     img.referrerPolicy = "no-referrer";
     img.src = url;
   });

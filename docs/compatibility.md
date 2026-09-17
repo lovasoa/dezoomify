@@ -1,15 +1,14 @@
 # Compatibility
 
-## Protocol versions
+## Installed extension and desktop versions
 
-Current and minimum protocol are 2.0 (single-version rollout; see `release/compatibility.toml`).
-
-Every connection starts with the [version handshake](protocol.md#version-handshake):
-application version and protocol version. Protocol 1.x and future versions stop
-safely with `protocol.incompatible` and an update recovery action; there is no
-translation layer. Handoff application input remains untrusted and requires
-confirmation before effects. Release automation verifies generated bindings,
-compatibility fixtures, and this matrix (see [Releases](releases.md)).
+The extension and desktop app can be installed independently. Their Native
+Messaging channel starts with an explicit version check and rejects an
+unsupported peer before consent or credential transfer. The request and reply
+shapes are generated from the Rust contract; neither product translates an
+unsupported schema. Handoff input remains untrusted and requires confirmation
+before effects. Release automation verifies the supported Native Messaging
+range and this matrix (see [Releases](releases.md)).
 
 ## Browsers and operating systems
 

@@ -10,6 +10,7 @@ import {
   createTileDecoder,
   pickEngineSelection,
   saveBlobViaAnchor,
+  type WorkerHostOutput,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
 import { createLogger } from "@dezoomify/browser-runtime/logging";
@@ -17,6 +18,7 @@ import type { EngineHost } from "@dezoomify/browser-runtime";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFailure, isJobBinding } from "./transport.ts";
 import type { JobBinding } from "./transport.ts";
+import type { JobEvent } from "@dezoomify/wasm-bindings";
 
 declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
 declare const __DEZOOMIFY_TEST_PERMISSION_MOCK__: boolean;
@@ -26,8 +28,6 @@ type ExtensionApi = {
   permissions?: { contains?(request: { origins: string[] }): Promise<boolean>; request?(request: { origins: string[] }): Promise<boolean> };
 };
 type ViewContext = SharedViewContext & { failure?: StructuredError };
-type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: unknown; catalog?: { images?: unknown[] } };
-type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; line?: string; requestId?: unknown; bytes?: unknown };
 
 const hostGlobal = globalThis as typeof globalThis & { browser?: ExtensionApi; chrome?: ExtensionApi };
 const api = hostGlobal.browser ?? hostGlobal.chrome;
@@ -221,11 +221,13 @@ function sourceHost(): string {
  */
 function presentEngineFailure(raw: unknown): StructuredError {
   const candidate = raw && typeof raw === "object"
-    ? raw as { code?: unknown; message?: unknown; retryable?: unknown; phase?: unknown; transport?: unknown }
+    ? raw as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown; phase?: unknown; transport?: unknown; request?: unknown; http?: unknown; preview?: unknown }
     : null;
   return describeFailure({
     code: typeof candidate?.code === "string" ? candidate.code : "job.failed",
-    engineDetail: typeof candidate?.message === "string" ? candidate.message : "",
+    engineDetail: typeof candidate?.detail === "string"
+      ? candidate.detail
+      : (typeof candidate?.message === "string" ? candidate.message : ""),
     retryable: typeof candidate?.retryable === "boolean" ? candidate.retryable : undefined,
     phase: typeof candidate?.phase === "string" ? candidate.phase : undefined,
     // The extension always fetches under the granted browser session; the
@@ -233,6 +235,9 @@ function presentEngineFailure(raw: unknown): StructuredError {
     // otherwise misreport `direct`.
     transport: typeof candidate?.transport === "string" ? candidate.transport : "browser-session",
     host: sourceHost(),
+    url: typeof candidate?.request === "string" ? candidate.request : undefined,
+    http: typeof candidate?.http === "number" ? candidate.http : undefined,
+    preview: typeof candidate?.preview === "string" ? candidate.preview : undefined,
   });
 }
 
@@ -308,34 +313,54 @@ function createAssembly(sourceUrl: string) {
 
 function handleEvent(event: JobEvent) {
   if (hostFailed) return;
-  if (event.type === "progress") {
-    if (typeof event.acquired !== "number" || typeof event.total !== "number") return;
-    jobLog.debug("engine-progress", `acquired=${event.acquired} total=${event.total}`);
-    lastTileProgress = { current: event.acquired, total: event.total };
-    render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
-  }
-  else if (event.type === "failed") {
-    jobLog.error("engine-event", `type=failed error=${event.error ? JSON.stringify(event.error) : "unknown"}`);
-    partialDecision = null;
-    render("failed", { failure: presentEngineFailure(event.error), jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
-  }
-  else if (event.type === "cancelled") { jobLog.info("engine-event", "type=cancelled"); partialDecision = null; render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } }); }
-  else if (event.type === "completed" || event.type === "partial-completed") { jobLog.info("engine-event", `type=${event.type}`); partialDecision = null; render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } }); }
-  else if (event.type === "catalog" && !selected) {
-    jobLog.info("engine-event", `type=catalog images=${Array.isArray(event.catalog?.images) ? event.catalog.images.length : 0}`);
-    selected = true;
-    const selection = pickEngineSelection(
-      (event.catalog ?? {}) as Parameters<typeof pickEngineSelection>[0],
-    );
-    if (!selection) {
-      onHostFailure(Object.assign(new Error("No downloadable image was found on this page."), { code: "NO_IMAGE_FOUND", retryable: false }));
-      controller?.cancel();
+  switch (event.type) {
+    case "progress":
+      jobLog.debug("engine-progress", `acquired=${event.acquired} total=${event.total}`);
+      lastTileProgress = { current: event.acquired, total: event.total };
+      render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
+      return;
+    case "failed":
+      jobLog.error("engine-event", `type=failed error=${JSON.stringify(event.error)}`);
+      partialDecision = null;
+      render("failed", { failure: presentEngineFailure(event.error), jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
+      return;
+    case "cancelled":
+      jobLog.info("engine-event", "type=cancelled");
+      partialDecision = null;
+      render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } });
+      return;
+    case "completed":
+    case "partial-completed":
+      jobLog.info("engine-event", `type=${event.type}`);
+      partialDecision = null;
+      render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } });
+      return;
+    case "catalog": {
+      if (selected) return;
+      jobLog.info("engine-event", `type=catalog images=${event.catalog.images.length}`);
+      selected = true;
+      const selection = pickEngineSelection(event.catalog);
+      if (!selection) {
+        onHostFailure(Object.assign(new Error("No downloadable image was found on this page."), { code: "NO_IMAGE_FOUND", retryable: false }));
+        controller?.cancel();
+        return;
+      }
+      selectedTitle = selection.title;
+      render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
+      controller?.selectImage(selection.image);
+      controller?.selectLevel(selection.level);
       return;
     }
-    selectedTitle = selection.title;
-    render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
-    controller?.selectImage(selection.image);
-    controller?.selectLevel(selection.level);
+    case "warning":
+      jobLog.warn("engine-warning", JSON.stringify(event.error));
+      return;
+    case "recovery-request":
+    case "job-state":
+    case "paused":
+    case "resumed":
+      return;
+    default:
+      return event satisfies never;
   }
 }
 
@@ -475,17 +500,16 @@ function startAttempt() {
     onRecoveryRequested: showPartialDecision,
     onHostFailure,
     onEvent: handleEvent,
-    onUnsupportedEffect: (effect: unknown) => {
+    onUnsupportedEffect: (effect) => {
       // An effect this host cannot execute is a contract gap, never a fake
       // success: fail visibly instead of pretending it was performed.
-      const type = effect && typeof effect === "object" && "type" in effect ? String(effect.type) : "unknown";
-      onHostFailure(Object.assign(new Error(`This app cannot yet perform the ${type} step.`), { code: "EFFECT_UNSUPPORTED", retryable: false }));
+      onHostFailure(Object.assign(new Error(`This app cannot yet perform the ${effect.type} step.`), { code: "EFFECT_UNSUPPORTED", retryable: false }));
       controller?.cancel();
     },
   });
-  worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
+  worker.addEventListener("message", (event: MessageEvent<WorkerHostOutput>) => {
     if (event.data?.type === "engine.messages") {
-      const messages = event.data.messages ?? [];
+      const messages = event.data.messages;
       jobLog.debug("worker-message", `type=engine.messages count=${messages.length}`);
       controller?.handleEngineMessages(messages);
     }

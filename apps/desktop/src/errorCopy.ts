@@ -331,7 +331,7 @@ export const DEEP_LINK_SECRET_QUERY_KEYS = new Set([
   "x-api-key",
 ]);
 // Single shared vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
-// `testdata/redaction-vectors.json`, and `packages/protocol-ts/src/generated.ts`.
+// `testdata/redaction-vectors.json`, and the generated Rust bindings.
 // Matching is exact per key (case-insensitive), never substring, so
 // `/cookie-recipe/` stays valid while `?token=secret` is rejected.
 

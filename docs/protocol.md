@@ -1,58 +1,68 @@
-# Protocol
+# Cross-language contracts
 
-`crates/dezoomify-protocol` is the Rust source of the exercised job/WASM and Native Messaging boundaries. It generates `packages/protocol-ts` bindings and owns serialization and compatibility tests. A protocol type exists only when production code has both a producer and a consumer; `cargo xtask check` enforces those ownership markers.
+`crates/dezoomify-protocol` is the single source of truth for job commands,
+host effects, job events, errors, configuration, buffer references, catalogs,
+and Native Messaging requests. Its Rust definitions derive `Serialize`,
+`Deserialize`, and `Tsify`. The real `wasm-bindgen` declaration is tracked in
+`packages/wasm-bindings` and imported by every TypeScript boundary.
 
-## Protocol v2 boundary interactions
+`cargo xtask protocol generate` builds `dezoomify-wasm` and writes that
+declaration. `cargo xtask protocol generate --check` builds it in a temporary
+directory and compares it byte-for-byte with the tracked package. TypeScript
+compilation against the declaration is part of `cargo xtask check`.
 
-| Interaction | Producer | Consumer | Direction | Ordering | Payload ownership | Failure | Deterministic test |
-|---|---|---|---|---|---|---|---|
-| Discovery fetch need | job | host | job→host effect | FIFO per job | job allocates a request sequence; host returns bytes or typed failure | typed fetch/decode error | `P05-VARIANTS` golden round trip |
-| Deferred image selection | job | UI | job→UI event | once per catalog | immutable catalog positions | out-of-range selection rejected | `P05-CATALOG` |
-| Fixed tile acquisition | job | host | job→host effect | bounded concurrency | selected-level tile ordinals and out-of-band bytes | retry/partial policy | `P05-BUFFERS` |
-| Adaptive probe/observation | job | host | effect/response pair | deterministic priority | host reports observation | probe limit error | `P05-VARIANTS` |
-| Output finalization | job | host | one effect/response pair | after acquisition | job phase | typed failure cancels/cleans once | `P05-OUTPUT` |
-| Recovery choice | job/UI | job | event/command pair | correlated by decision generation | typed allowed actions | stale choice rejected | `P05-RECOVERY` |
-| Progress snapshot | job | UI | job→UI event | monotonic | absolute counts | n/a (transient) | `P05-VARIANTS` |
-| Terminal outcome | job | UI | job→UI event | exactly once | output ID or error | terminal wins | `P05-VARIANTS` |
+## WASM session ABI
 
-## Commands
+One JavaScript `Session` owns one Rust job and byte arena:
 
-Commands express user intent within one already-routed job session and do not
-repeat the product's outer job token. `Start` carries an ordered non-empty
-`inputs` batch of `{url, contents?}` discovery roots; supplied contents avoid
-fetching that root, while URL-only roots retain ordinary on-demand fetching.
-Resource requests use job-scoped `u32`
-sequences, image and level selections are zero-based `u32` positions into the
-authoritative immutable catalog, tiles carry a selected-level-scoped `u32`
-ordinal, and recovery choices carry a job-scoped `u32` decision generation.
-Catalog DTOs do not duplicate positions. Commands cover discovery, selection,
-job start, cancellation, pause and resume (Pause v1 suspend-acquisition),
-recovery choice, and output confirmation. Pause stops scheduling new tiles
-while in-flight work finishes and decoded output is retained; resume re-drives
-the pending queue. Duplicate pause is ignored; resume without pause is rejected.
+- `new Session(SessionConfig)` validates typed quotas;
+- `dispatch(JobCommand)` returns a `DispatchResult` immediately;
+- a successful result contains ordered `HostMessage[]` values;
+- `dispose()` returns its final `DispatchResult` and is repeat-safe;
+- arena methods exchange generated `ArenaHandle` and `BufferHandle` objects.
 
-## Events
+Commands, effects, events, configuration, errors, URLs, and handles cross as
+native JavaScript objects converted fallibly by `tsify` and
+`serde-wasm-bindgen`. Binary resource bodies stay in the bounded WASM arena.
 
-Events are ordered within the routed job session and include state snapshots, selection requests, phase changes, progress, active transport and transport transitions where applicable, warnings, recovery requests, completion, cancellation, failure, and pause/resume (`paused`/`resumed`, replayable, never terminal). The protocol does not duplicate the outer routing token inside commands, effects, or events.
+## Commands, effects, and events
 
-## Capabilities
+`JobCommand` expresses user intent or answers one correlated effect. `Start`
+carries ordered discovery roots. Resource answers carry a job-scoped request
+number and either a buffer reference or a complete `ErrorDto`. Image and level
+choices are zero-based positions in the immutable catalog. Recovery choices
+carry the outstanding decision generation.
 
-The website baseline reports encoders `[png, jpeg, tiff]`.
-
-Each product reports its concrete capabilities at its product boundary. Capability documents are not a cross-version job DTO and carry no synthetic schema fingerprint. The job engine validates final requests, so UI gating is never the only check.
+`HostEffect` is exhaustive: resource acquisition, tile/probe acquisition,
+output finalization, host cancellation, and recovery decisions. `JobEvent` is
+also exhaustive and carries state, catalog, progress, warnings, recovery, and
+terminal outcomes. Website and extension handling switch on these generated
+unions.
 
 ## Errors
 
-Protocol errors contain a stable code, phase, retryability, safe user message, structured context, and permitted recovery actions. Host exception text is diagnostic data and never becomes the contract. See [Errors](errors.md).
+`ErrorDto` contains a stable code, phase, retryability, user message, recovery
+actions, and optional request URI, transport, resource kind, blocked reason,
+HTTP status, bounded server signal, and diagnostic detail. The browser host
+derives the phase from the effect it is answering. Rust derives it again at
+the session boundary, so a product classifier cannot choose a contradictory
+phase. See [Errors and recovery](errors.md).
 
-## Handoff
+An adapter fault is a separate `DispatchResult` branch. It represents invalid
+external input or session misuse and never replaces a job failure.
 
-A website or deep-link handoff is application input rather than a general protocol envelope. The receiver treats every field as untrusted, validates it by URL parsing plus exact sensitive-key matching, and requires user confirmation. No credentials travel in the URL and no client-side signing is used.
+## Native Messaging version check
 
-Extension-to-native handoff uses only allowlisted Native Messaging. Browser enforcement of the native host's allowed extension IDs authenticates the extension sender to the native host. A fresh challenge and one-use nonce bind the handoff messages to one explicit consent session and prevent replay; they do not establish sender identity. Cookies use that separate consent-bound channel, are scoped to named origins, and are not intentionally persisted; consent names origins, scope, recipient, and job, stays memory-only, and never carries over to later jobs. See [Security](security.md#credentials).
+The independently installed extension and desktop app perform an explicit
+version check. `NativeHostRequest` is generated from Rust and the
+native host rejects unsupported versions; it does not translate schemas.
+Browser allowlisting authenticates the extension sender. A fresh challenge and
+single-use nonce bind one consented credential handoff and prevent replay.
 
-## Version handshake
+Website and deep-link handoff inputs are product inputs, not part of the WASM
+session ABI. They remain independently validated as untrusted URLs.
 
-Every job/WASM or Native Messaging connection requires protocol 2.0 before exchanging job data. Protocol 1.x is rejected through `protocol.incompatible`; there is no translation or version alias. Declared fields, challenges, and nonces do not establish identity. On the extension-to-native channel, sender authentication comes from browser enforcement of the native host's allowed extension IDs; challenge and nonce provide session binding and replay defense only.
+## Product capabilities
 
-Release automation verifies generated files, compatibility fixtures, and the supported version matrix. See [Releases](releases.md).
+The website baseline reports encoders `[png, jpeg, tiff]`. Capability values
+belong to product integrations; the job engine still validates requested work.

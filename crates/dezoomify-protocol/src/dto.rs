@@ -1,49 +1,22 @@
-//! Authoritative protocol v2 data transfer objects. Every wire type is
-//! declared here exactly once; `generate.rs` projects this module into
-//! TypeScript, JSON Schema, and capability manifests.
+//! Authoritative cross-language contract types. Every shared type is declared
+//! here exactly once and `tsify` projects it into the WASM declaration.
 
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
-// Version
+// Bounded integers (always safe across the JavaScript boundary)
 // ---------------------------------------------------------------------------
 
-/// Protocol major version. Unknown majors are rejected before any work.
-pub const PROTOCOL_MAJOR: u32 = 2;
-/// Protocol minor version. Additive optional fields only.
-pub const PROTOCOL_MINOR: u32 = 0;
-/// Exact version marker carried by every control message.
-pub const PROTOCOL_VERSION: &str = "2.0";
-
-/// Returns `Ok(())` for protocol 2.0, else a typed version error.
-pub fn negotiate_version(requested: &str) -> Result<(), ErrorDto> {
-    if requested == PROTOCOL_VERSION {
-        Ok(())
-    } else {
-        Err(ErrorDto::new(
-            "protocol.incompatible",
-            ErrorPhase::Handshake,
-            format!(
-                "unsupported protocol version {requested}; this host speaks {PROTOCOL_VERSION}"
-            ),
-        ))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Bounded integers (never `usize` on the wire)
-// ---------------------------------------------------------------------------
-
-/// Maximum coordinate/dimension/count on the wire (fits JS safe integers).
+/// Maximum coordinate/dimension/count (fits JavaScript safe integers).
 pub const MAX_DIMENSION: u64 = 1 << 30;
-/// Maximum tiles/probes/retries/queue entries.
+/// Maximum tiles, probes, or retries.
 pub const MAX_COUNT: u64 = 1 << 24;
 
 // ---------------------------------------------------------------------------
 // Runtime limits, format grid, transports (one generation source for TS)
 // ---------------------------------------------------------------------------
 
-/// Largest browser-tab canvas area in pixels (16384 x 16384, legacy parity).
+/// Largest browser-tab canvas area in pixels (16384 x 16384).
 pub const MAX_BROWSER_AREA: u64 = 268_435_456;
 /// Metadata proxy response cap in bytes (2 MiB, mirrors the server limit).
 pub const PROXY_MAX_BYTES: u64 = 2_097_152;
@@ -87,6 +60,7 @@ pub const POWER_USER_FORMATS: &[&str] = &["custom", "bulk_text"];
 /// Purpose of a resource request (metadata vs tile vs probe).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum RequestPurpose {
     Metadata,
     Tile,
@@ -97,6 +71,7 @@ pub enum RequestPurpose {
 /// the core's approved normalization; secret headers are never carried here
 /// (hosts attach scoped authorization out-of-band and redact logs).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct RequestDto {
     pub id: u32,
     pub uri: String,
@@ -106,6 +81,7 @@ pub struct RequestDto {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct HeaderDto {
     pub name: String,
     pub value: String,
@@ -113,6 +89,7 @@ pub struct HeaderDto {
 
 /// A position in the output image, in pixels from the top-left corner.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct PointDto {
     pub x: u64,
     pub y: u64,
@@ -120,6 +97,7 @@ pub struct PointDto {
 
 /// A pixel size (output canvas or planned tile extent).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct SizeDto {
     pub width: u64,
     pub height: u64,
@@ -133,6 +111,7 @@ pub struct SizeDto {
 /// the host must apply to the acquired bytes before decoding. Native
 /// assembly and browser canvas hosts consume the same values.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct TilePlacementDto {
     pub position: PointDto,
     pub expected_size: Option<SizeDto>,
@@ -143,8 +122,9 @@ pub struct TilePlacementDto {
     pub probe_output: bool,
 }
 
-/// Out-of-band byte buffer: JSON references the handle, never base64 bytes.
+/// Typed reference to bytes owned by the WASM arena.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct BufferHandle {
     pub id: u32,
     pub generation: u32,
@@ -159,6 +139,7 @@ pub struct BufferHandle {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum Readiness {
     Ready,
     Deferred,
@@ -166,6 +147,7 @@ pub enum Readiness {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct LevelDto {
     pub label: String,
     pub width: u64,
@@ -176,6 +158,7 @@ pub struct LevelDto {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ImageDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -189,6 +172,7 @@ pub struct ImageDto {
 
 /// Stable ordered catalog projection (never exposes private core enums).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct CatalogDto {
     pub images: Vec<ImageDto>,
 }
@@ -196,10 +180,11 @@ pub struct CatalogDto {
 /// One ordered discovery root. `contents` is omitted when the host only has
 /// a reference and discovery should acquire it normally.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct JobInputDto {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub contents: Option<Vec<u8>>,
+    pub contents: Option<String>,
 }
 
 impl JobInputDto {
@@ -217,6 +202,7 @@ impl JobInputDto {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum JobCommand {
     Start {
         inputs: Vec<JobInputDto>,
@@ -280,6 +266,7 @@ pub enum JobCommand {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum HostEffect {
     AcquireResource {
         request: RequestDto,
@@ -320,11 +307,30 @@ pub enum EventKind {
     Terminal,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum JobState {
+    Created,
+    Discovering,
+    AwaitingImageSelection,
+    AwaitingLevelSelection,
+    Planning,
+    AcquiringTiles,
+    AwaitingPartialDecision,
+    Finalizing,
+    Cancelling,
+    Completed,
+    PartiallyCompleted,
+    Failed,
+    Cancelled,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum JobEvent {
     JobState {
-        state: String,
+        state: JobState,
     },
     Catalog {
         catalog: CatalogDto,
@@ -375,6 +381,7 @@ impl JobEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum RecoveryChoice {
     Keep,
     Retry,
@@ -387,6 +394,7 @@ pub enum RecoveryChoice {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum RecoveryKind {
     Retry,
     EditInput,
@@ -399,6 +407,7 @@ pub enum RecoveryKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct RecoveryAction {
     pub id: String,
     pub kind: RecoveryKind,
@@ -412,9 +421,12 @@ pub struct RecoveryAction {
 
 /// Native Messaging protocol version. Version 2 is the only accepted version.
 pub const NATIVE_PROTOCOL_VERSION: u32 = 2;
+/// Display form used by the independently installed native-host handshake.
+pub const NATIVE_PROTOCOL_VERSION_TEXT: &str = "2.0";
 
 /// One cookie transferred after explicit, origin-scoped consent.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct NativeCookie {
     pub name: String,
     pub value: String,
@@ -425,6 +437,7 @@ pub struct NativeCookie {
 /// the sender; challenges and nonces provide session binding and replay defense.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum NativeHostRequest {
     Handshake {
         #[serde(default)]
@@ -475,6 +488,7 @@ pub enum NativeHostRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum ErrorPhase {
     Handshake,
     Validation,
@@ -487,7 +501,110 @@ pub enum ErrorPhase {
     Cleanup,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ErrorTransport {
+    Direct,
+    MetadataProxy,
+    BrowserSession,
+    Native,
+    DisplayOnly,
+}
+
+impl ErrorTransport {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::MetadataProxy => "metadata-proxy",
+            Self::BrowserSession => "browser-session",
+            Self::Native => "native",
+            Self::DisplayOnly => "display-only",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum BlockedReason {
+    AccessRequired,
+    BlockedIpv4,
+    BlockedIpv6,
+    Cancelled,
+    ContentType,
+    DnsRebinding,
+    DnsRebindingV6,
+    Forbidden,
+    InvalidUrl,
+    LimitExceeded,
+    LoopbackHost,
+    Malformed,
+    MalformedBody,
+    Method,
+    Network,
+    NonStandardPort,
+    Origin,
+    PrivateHost,
+    ProtocolVersion,
+    RedirectLimit,
+    RedirectTarget,
+    RedirectUnavailable,
+    Scheme,
+    SignedQuery,
+    SourceDocumentLost,
+    Throttled,
+    Userinfo,
+}
+
+impl BlockedReason {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AccessRequired => "access-required",
+            Self::BlockedIpv4 => "blocked-ipv4",
+            Self::BlockedIpv6 => "blocked-ipv6",
+            Self::Cancelled => "cancelled",
+            Self::ContentType => "content-type",
+            Self::DnsRebinding => "dns-rebinding",
+            Self::DnsRebindingV6 => "dns-rebinding-v6",
+            Self::Forbidden => "forbidden",
+            Self::InvalidUrl => "invalid-url",
+            Self::LimitExceeded => "limit-exceeded",
+            Self::LoopbackHost => "loopback-host",
+            Self::Malformed => "malformed",
+            Self::MalformedBody => "malformed-body",
+            Self::Method => "method",
+            Self::Network => "network",
+            Self::NonStandardPort => "non-standard-port",
+            Self::Origin => "origin",
+            Self::PrivateHost => "private-host",
+            Self::ProtocolVersion => "protocol-version",
+            Self::RedirectLimit => "redirect-limit",
+            Self::RedirectTarget => "redirect-target",
+            Self::RedirectUnavailable => "redirect-unavailable",
+            Self::Scheme => "scheme",
+            Self::SignedQuery => "signed-query",
+            Self::SourceDocumentLost => "source-document-lost",
+            Self::Throttled => "throttled",
+            Self::Userinfo => "userinfo",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ResourceKind {
+    Metadata,
+    Tile,
+    Probe,
+    Output,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ErrorDto {
     pub code: String,
     pub phase: ErrorPhase,
@@ -498,11 +615,17 @@ pub struct ErrorDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub transport: Option<String>,
+    pub transport: Option<ErrorTransport>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocked_reason: Option<String>,
+    pub blocked_reason: Option<BlockedReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub resource_kind: Option<String>,
+    pub resource_kind: Option<ResourceKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 impl ErrorDto {
@@ -518,18 +641,21 @@ impl ErrorDto {
             transport: None,
             blocked_reason: None,
             resource_kind: None,
+            http: None,
+            preview: None,
+            detail: None,
         }
     }
 
     #[must_use]
-    pub fn with_transport(mut self, transport: impl Into<String>) -> Self {
-        self.transport = Some(transport.into());
+    pub fn with_transport(mut self, transport: ErrorTransport) -> Self {
+        self.transport = Some(transport);
         self
     }
 
     #[must_use]
-    pub fn with_resource(mut self, kind: impl Into<String>) -> Self {
-        self.resource_kind = Some(kind.into());
+    pub fn with_resource(mut self, kind: ResourceKind) -> Self {
+        self.resource_kind = Some(kind);
         self
     }
 }
@@ -574,62 +700,32 @@ pub fn redact_error_text(input: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Top-level control envelope (one stable externally tagged representation)
+// Typed WASM session boundary
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ControlEnvelope {
-    pub protocol: String,
-    #[serde(flatten)]
-    pub body: ControlBody,
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct SessionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_buffer_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_total_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_buffers: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_fetches: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_decodes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tiles: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum ControlBody {
-    Command(JobCommand),
+pub enum HostMessage {
     Effect(HostEffect),
     Event(JobEvent),
-    Error(ErrorDto),
-}
-
-impl ControlEnvelope {
-    pub fn new(body: ControlBody) -> Result<Self, ErrorDto> {
-        Ok(Self {
-            protocol: PROTOCOL_VERSION.to_string(),
-            body,
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn catalog_json_matches_the_generated_typescript_field_names() {
-        let catalog = CatalogDto {
-            images: vec![ImageDto {
-                title: Some("Test".into()),
-                format: "test".into(),
-                width: 512,
-                height: 512,
-                readiness: Readiness::Ready,
-                source_kind: "grid".into(),
-                levels: vec![LevelDto {
-                    label: "Level 1".into(),
-                    width: 512,
-                    height: 512,
-                    tile_width: 256,
-                    tile_height: 256,
-                }],
-            }],
-        };
-        let value = serde_json::to_value(catalog).expect("catalog serializes");
-        assert_eq!(value["images"][0]["title"], "Test");
-        assert_eq!(value["images"][0]["sourceKind"], "grid");
-        assert_eq!(value["images"][0]["levels"][0]["tileWidth"], 256);
-        assert!(value["images"][0].get("source_kind").is_none());
-        assert!(value["images"][0]["levels"][0].get("tile_width").is_none());
-    }
 }

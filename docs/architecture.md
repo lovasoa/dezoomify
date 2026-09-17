@@ -1,6 +1,6 @@
 # Architecture
 
-dezoomify is one monorepo containing Rust crates, generated protocol bindings, the shared UI, browser-extension packaging, and native applications. Dependencies point inward toward pure domain libraries; hosts own all effects.
+dezoomify is one monorepo containing Rust crates, generated WASM bindings, the shared UI, browser-extension packaging, and native applications. Dependencies point inward toward pure domain libraries; hosts own all effects.
 
 ## Components
 
@@ -10,11 +10,11 @@ A pure Rust library that converts supplied resource bytes and URLs into discover
 
 ### `crates/dezoomify-job`
 
-A pure, host-neutral Rust effect/state machine. It owns discovery, selection, planning, acquisition, recovery choices, and the phase-gated finalization result. The host owns destinations, codecs, saving, and display-only status behind one awaited `FinalizeOutput` effect. Hosts feed typed commands into the machine and drain one ordered queue of typed effects and events. The engine owns no routing identifier; browser and desktop integrations retain their opaque job tokens outside it. The browser runtime drives it through the WASM adapter; the native runtime drives it directly through its job driver. See [Job engine](job-engine.md).
+A pure, host-neutral Rust effect/state machine. It owns discovery, selection, planning, acquisition, recovery choices, and the phase-gated finalization result. The host owns destinations, codecs, saving, and display-only status behind one awaited `FinalizeOutput` effect. Hosts feed typed commands into the machine and consume its ordered effects and events. The engine owns no routing identifier; browser and desktop integrations retain their opaque job tokens outside it. The browser runtime drives it through the WASM adapter; the native runtime drives it directly through its job driver. See [Job engine](job-engine.md).
 
 ### `crates/dezoomify-protocol`
 
-The Rust source of truth for exercised job/WASM messages, errors, and Native Messaging requests. It generates `packages/protocol-ts`; speculative scan, chunk, handoff, capability, and placeholder-schema contracts are absent. See [Protocol](protocol.md).
+The Rust source of truth for job/WASM values, errors, and Native Messaging requests. `Tsify` and `wasm-bindgen` generate `packages/wasm-bindings`; TypeScript products import that package. See [Cross-language contracts](protocol.md).
 
 ### `crates/dezoomify-native`
 
@@ -22,7 +22,7 @@ The native effect implementation: HTTP transport, local-file access, image decod
 
 ### `crates/dezoomify-wasm`
 
-The WASM adapter for core, job, and pure processing code. It does not own fetching, workers, decoding, browser canvases, storage, or output saves. See [Browser runtime](browser-runtime.md).
+The generated typed WASM ABI for core, job, and pure processing code. A session accepts generated command objects and returns generated result objects for every transition. It does not own fetching, workers, decoding, browser canvases, storage, or output saves. See [Browser runtime](browser-runtime.md).
 
 ### `packages/shared-ui`
 
@@ -77,7 +77,7 @@ production. The dev server (`scripts/dev-server.mjs`) serves the assembled
 
 ### Support workspaces
 
-`packages/protocol-ts` contains generated TypeScript protocol bindings. `crates/fixture-server` serves controlled origins, `testdata/scenarios` contains shared declarative cases, and `crates/xtask` owns repository generation and validation tasks.
+`packages/wasm-bindings` contains the tracked declaration emitted by the real WASM build. `crates/fixture-server` serves controlled origins, `testdata/scenarios` contains shared declarative scenarios, and `crates/xtask` owns repository generation and validation tasks.
 
 ## Data flow
 
@@ -104,7 +104,7 @@ cannot refine the plan, core returns the manifest-declared grid unchanged.
 ## Boundary rules
 
 - Core and job logic remain deterministic and testable without I/O.
-- URLs, headers, credentials, bytes, and output destinations cross boundaries only through typed values.
+- URLs, headers, credentials, bytes, and output destinations cross boundaries only through typed values. Rust contract types are never redeclared by browser boundary modules.
 - Runtime differences appear as negotiated [capabilities](protocol.md#capabilities), and automatic fallback is exposed through active-transport state rather than hidden.
 - Errors cross host boundaries as stable protocol errors with typed [recovery actions](errors.md).
 - Shared scenarios cover the native runtime and CLI (`native/cli-dzi`, `native/cli-tile-failure`); see [Testing](testing.md).

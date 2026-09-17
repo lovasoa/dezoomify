@@ -22,7 +22,7 @@ import {
   websiteTileConcurrency,
 } from "../src/tile-policy.ts";
 
-test("tile tuning constants keep legacy parity", () => {
+test("tile tuning constants match the browser runtime limits", () => {
   assert.equal(REQUEST_TIMEOUT_MS, 30000);
   assert.equal(DIRECT_METADATA_TIMEOUT_MS, 1500);
   assert.equal(TILE_MAX_REQUESTS_PER_SECOND, 5);

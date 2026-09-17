@@ -81,7 +81,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   // The pipeline must reach the completed state with real dimensions.
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
   await expect(page.getByText(/512/)).toBeVisible();
-  // Tiles paint live during acquisition (legacy parity), so the assembled
+  // Tiles paint live during acquisition, so the assembled
   // picture stays visible next to the save button on the clean path too.
   const canvas = page.locator("#rendering-canvas");
   await expect(canvas).toBeVisible();
@@ -125,27 +125,32 @@ test("webapp fails honestly on a page without a zoomable signal", async ({ page 
   assert.match(body, /No zoomable image was found/i);
 });
 
-// `.invalid` never resolves (RFC 2606), so the direct browser fetch fails
-// deterministically with a network error, offline or online. The metadata
-// URL is public and credential-free, hence proxy-eligible: the fallback
-// itself is the behavior under test.
-const UNREACHABLE_METADATA_URL = "https://dezoomify.invalid/unreachable.json";
+const FAILED_METADATA_URL = "https://fixtures.test/errors/info.json";
 
-test("default job attempts the metadata proxy after direct failure", async ({ page }) => {
+test("metadata proxy failure reaches the error UI with its complete typed context", async ({ page }) => {
   let proxyPosts = 0;
+  await page.route((url) => url.href === FAILED_METADATA_URL, (route) => route.abort());
   await page.route("**/api/proxy", (route) => {
     if (route.request().method() === "POST") proxyPosts += 1;
     route.fulfill({
-      status: 403,
+      status: 502,
       contentType: "application/json",
-      body: JSON.stringify({ code: "PROXY_POLICY_DENIED" }),
+      body: JSON.stringify({ code: "PROXY_ERROR", reason: "origin" }),
     });
   });
   await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
-  await page.locator("#dz-url-input").fill(UNREACHABLE_METADATA_URL);
+  await page.locator("#dz-url-input").fill(FAILED_METADATA_URL);
   await page.getByRole("button", { name: /find image/i }).click();
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
-  assert.ok(proxyPosts >= 1, "job must attempt the metadata proxy after direct failure");
+  assert.equal(proxyPosts, 1, "the failed direct metadata request falls back exactly once");
+
+  const diagnostics = await page.locator("#dz-error-diagnostics").textContent();
+  assert.ok(diagnostics);
+  assert.match(diagnostics, /code:PROXY_ERROR\b/);
+  assert.match(diagnostics, /phase:discovery\b/);
+  assert.match(diagnostics, /transport:metadata-proxy\b/);
+  assert.match(diagnostics, /http:502\b/);
+  assert.doesNotMatch(diagnostics, /adapter\.|engine\.error/);
 });
 
 // Production topology of a Google Arts & Culture asset page: no CORS grant

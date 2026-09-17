@@ -14,6 +14,9 @@ importers:
 
   .:
     dependencies:
+      '@dezoomify/wasm-bindings':
+        specifier: workspace:*
+        version: link:packages/wasm-bindings
       markdown-it:
         specifier: 15.0.2
         version: 15.0.2
@@ -109,6 +112,9 @@ importers:
       '@dezoomify/shared-ui':
         specifier: workspace:*
         version: link:../../packages/shared-ui
+      '@dezoomify/wasm-bindings':
+        specifier: workspace:*
+        version: link:../../packages/wasm-bindings
       react:
         specifier: ^19.0.0
         version: 19.3.0
@@ -153,9 +159,11 @@ importers:
         specifier: 1.63.0
         version: 1.63.0
 
-  packages/browser-runtime: {}
-
-  packages/protocol-ts: {}
+  packages/browser-runtime:
+    dependencies:
+      '@dezoomify/wasm-bindings':
+        specifier: workspace:*
+        version: link:../wasm-bindings
 
   packages/shared-ui:
     devDependencies:
@@ -171,6 +179,8 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.3.0(react@19.3.0)
+
+  packages/wasm-bindings: {}
 
   packages/wasm-harness: {}
 

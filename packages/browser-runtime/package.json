@@ -11,6 +11,9 @@
     "./worker-host": "./src/worker-host.ts",
     "./engine-host": "./src/engine-host.ts"
   },
+  "dependencies": {
+    "@dezoomify/wasm-bindings": "workspace:*"
+  },
   "scripts": {
     "test": "node --test-reporter=dot --test \"test/*.test.mjs\"",
     "typecheck": "tsc --noEmit"

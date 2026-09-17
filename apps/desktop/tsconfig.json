@@ -3,7 +3,7 @@
     "target": "es2022",
     "module": "esnext",
     "moduleResolution": "bundler",
-    "lib": ["es2022", "dom", "dom.iterable"],
+    "lib": ["es2022", "esnext.disposable", "dom", "dom.iterable"],
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,

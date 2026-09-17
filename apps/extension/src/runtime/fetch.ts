@@ -7,6 +7,8 @@
  * Source-document requests are owned by the coordinator/source script; this
  * transport is only for extension-origin requests with an existing host grant.
  */
+import { blockedReason } from "@dezoomify/browser-runtime";
+import type { HostFailure } from "@dezoomify/browser-runtime";
 
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
@@ -53,17 +55,15 @@ export function transportError(category: TransportCategory, message: string, ext
 }
 
 /** @param {unknown} error */
-export function asFetchFailure(error: unknown) {
+export function asFetchFailure(error: unknown): HostFailure {
   const candidate = error as { category?: unknown; code?: unknown; message?: unknown } | null;
-  const category = typeof candidate?.category === "string" ? candidate.category : "network";
+  const category = blockedReason(candidate?.category) ?? "network";
   return {
     code: `extension.${category}`,
-    phase: "acquisition",
     retryable: category === "network" || category === "throttled",
     message: typeof candidate?.message === "string" ? candidate.message : "Extension transport failed",
-    recovery: [],
     blocked_reason: category,
-    transport: "extension-origin",
+    transport: "browser-session",
   };
 }
 

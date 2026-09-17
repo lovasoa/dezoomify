@@ -49,11 +49,23 @@ image. The deterministic catalog selection for engine hosts lives in
 `engine-selection.ts` (largest ready image, largest level that fits the
 browser canvas, smallest declared level as the fail-fast fallback).
 
+## Generated WASM boundary
+
+`worker-host.ts` imports `SessionConfig`, `JobCommand`, `DispatchResult`,
+`HostMessage`, and the handle types from `@dezoomify/wasm-bindings`. Every
+session transition returns its messages directly. The worker owns no parallel
+declaration of Rust contract types.
+
+`engine-host.ts` exhaustively handles the generated effect and event unions.
+It is the single browser conversion from a closed `HostFailure` into
+`ErrorDto`, deriving the phase from the effect. Website and extension inject
+transport implementations but share this conversion and worker integration.
+
 ## Catalog boundary
 
-Browser hosts consume the ordered protocol `CatalogDto` without duplicated
+Browser hosts consume the ordered generated `CatalogDto` without duplicated
 identity fields. The job engine projects its normalized core catalog through
-one generated wire shape, and planning accepts zero-based image and level
+one generated type, and planning accepts zero-based image and level
 positions. Browser selection, declared-size preflight, and plan gates
 therefore use that shape; hosts do not define their own catalog
 or level DTOs.

@@ -1,6 +1,9 @@
 # Releases
 
-The monorepo produces coordinated core libraries, protocol bindings, the website, extension, CLI, and desktop artifacts. A release records one version and the exact protocol range each artifact supports.
+The monorepo produces coordinated core libraries, generated bindings, the
+website, extension, CLI, and desktop artifacts. A release records one version
+and the Native Messaging range supported by independently installed extension
+and desktop artifacts.
 
 ## Versioning
 
@@ -8,26 +11,29 @@ The release version identifies a tested source revision across all apps.
 `cargo xtask release version` derives it from Git: `vX.Y.Z` is `X.Y.Z`, and
 each following first-parent commit increments `Z`. App manifests do not author
 release versions; builds receive the derived value as `DEZOOMIFY_VERSION`.
-The protocol has an independent version because installed products do not
-update at the same time.
-
-Backward-compatible protocol additions keep the current major version. Removed fields, changed meanings, or incompatible command and event behavior require a new protocol major version. Error codes remain stable within a supported protocol major.
+The extension-to-desktop Native Messaging channel has an independent version
+because those two installed products do not update at the same time. Generated
+WASM bindings are built and shipped with their browser product from the same
+source revision and have no independent compatibility range.
 
 ## Compatibility
 
-Web, extension, and desktop perform the [version handshake](protocol.md#version-handshake) before sending job commands. Each artifact supports a documented rolling range of protocol versions. A peer outside that range stops safely and receives `protocol.incompatible` with the appropriate update action.
-
-Handoff application input carries its app and protocol versions. Receivers reject incompatible or expired data before confirmation or effects. Only the extension-to-native channel can separately request consent for scoped cookies.
+The extension and desktop perform the [Native Messaging version
+check](protocol.md#native-messaging-version-check) before any consent or
+credential message. A peer outside the supported range stops safely with an
+update action. Handoff application input carries its application version;
+receivers reject unsupported or expired data before confirmation or effects.
+Only the extension-to-native channel can request consent for scoped cookies.
 
 ## Release gates
 
 A release candidate passes:
 
 - full Rust and TypeScript formatting, lint, and unit suites;
-- Rust-source-to-TypeScript-and-schema generation checks and clean-tree checks;
+- Rust-source-to-TypeScript binding generation checks and clean-tree checks;
 - shared scenarios on native, WASM, shared UI, extension, Tauri, and CLI targets;
 - supported browser and operating-system smoke tests;
-- protocol upgrade, downgrade, event-gap, and handoff fixtures;
+- Native Messaging version rejection, event-gap, and handoff fixtures;
 - encoder output and large-image boundary tests;
 - website direct-first request-order and classified automatic proxy-fallback tests;
 - proxy public-resource eligibility, credential omission, redirect, and active-transport display audits;
@@ -38,9 +44,9 @@ A release candidate passes:
 `cargo xtask release plan|build|sign|verify|publish` is the only release
 orchestration; every stage validates the previous stage's digests and fails
 closed on missing inputs, tools, or secrets. The plan stage freezes a
-deterministic contract (version, tag, commit, protocol range, schema
+deterministic contract (version, tag, commit, Native Messaging range,
 capabilities, targets) from Git, `release/config.toml`,
-`release/targets.toml`, `release/compatibility.toml`, and
+`release/targets.toml`, the Native Messaging support range, and
 `generated/release-capabilities.json`. The build stage produces one target's
 artifact on the matching host; every planned target is mandatory. The verify
 stage checks every artifact name against the plan. The publish stage verifies again

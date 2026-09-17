@@ -1,9 +1,12 @@
-//! `cargo xtask protocol generate|check`: deterministic Rust-derived
-//! TypeScript/schema/capability artifacts. Generation writes tracked output
-//! only on explicit `generate`; `check` and `generate --check` compare bytes
-//! in a temp tree without updating tracked files.
+//! Generated WASM ABI declaration checks.
+//!
+//! Rust DTOs are authoritative. `wasm-bindgen` and `tsify` produce the only
+//! TypeScript declaration consumed by browser products.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+const TRACKED_DECLARATION: &str = "packages/wasm-bindings/src/generated.d.ts";
 
 pub fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -20,61 +23,87 @@ fn generate(args: &[String]) -> Result<(), String> {
     if args.len() > 1 {
         return Err("usage: cargo xtask protocol generate [--check]".to_string());
     }
-    if args.first().map(String::as_str) == Some("--check") {
-        return generate_check();
-    }
-    if !args.is_empty() {
+    let check = args.first().map(String::as_str) == Some("--check");
+    if !args.is_empty() && !check {
         return Err(format!("unknown protocol generate arg '{}'", args[0]));
     }
-    let status = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "dezoomify-protocol",
-            "--bin",
-            "generate-protocol",
-            "--",
-            "--out",
-            "packages/protocol-ts",
-        ])
-        .current_dir(super::repo_root())
-        .status()
-        .map_err(|e| format!("failed to run generator: {e}"))?;
-    if !status.success() {
-        return Err("protocol generate failed".to_string());
+    let generated = emit_declaration()?;
+    let tracked = super::repo_root().join(TRACKED_DECLARATION);
+    if check {
+        compare(&generated, &tracked)
+    } else {
+        std::fs::copy(&generated, &tracked).map_err(|e| {
+            format!(
+                "copy generated binding {} to {}: {e}",
+                generated.display(),
+                tracked.display()
+            )
+        })?;
+        println!("protocol generate: wrote {}", tracked.display());
+        Ok(())
     }
-    println!("protocol generate: ok");
-    Ok(())
 }
 
-fn generate_check() -> Result<(), String> {
-    let status = Command::new("cargo")
+fn emit_declaration() -> Result<PathBuf, String> {
+    super::command::cargo(&[
+        "build",
+        "--quiet",
+        "--release",
+        "-p",
+        "dezoomify-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+    ])?;
+    let target = super::cargo_target_directory()?;
+    let input = target.join("wasm32-unknown-unknown/release/dezoomify_wasm.wasm");
+    let output =
+        std::env::temp_dir().join(format!("dezoomify-wasm-bindings-{}", std::process::id()));
+    if output.exists() {
+        std::fs::remove_dir_all(&output)
+            .map_err(|e| format!("clear temporary binding directory: {e}"))?;
+    }
+    std::fs::create_dir_all(&output)
+        .map_err(|e| format!("create temporary binding directory: {e}"))?;
+    let status = Command::new("wasm-bindgen")
         .args([
-            "run",
-            "-q",
-            "-p",
-            "dezoomify-protocol",
-            "--bin",
-            "generate-protocol",
-            "--",
-            "--out",
-            "packages/protocol-ts",
-            "--check",
+            "--target",
+            "web",
+            "--typescript",
+            "--out-name",
+            "dezoomify-wasm",
         ])
+        .arg("--out-dir")
+        .arg(&output)
+        .arg(&input)
         .current_dir(super::repo_root())
         .status()
-        .map_err(|e| format!("failed to run generator check: {e}"))?;
+        .map_err(|e| format!("run wasm-bindgen (run `cargo xtask setup`): {e}"))?;
     if !status.success() {
-        return Err("protocol generate --check found drift".to_string());
+        return Err("wasm-bindgen failed while generating the typed ABI".to_string());
     }
-    Ok(())
+    Ok(output.join("dezoomify-wasm.d.ts"))
 }
 
-fn check(_args: &[String]) -> Result<(), String> {
-    // Generated marker, golden vectors (Rust/TypeScript), and portability.
-    generate_check()?;
-    super::command::cargo_test(&["-p", "dezoomify-protocol", "--test", "golden"])?;
+fn compare(generated: &Path, tracked: &Path) -> Result<(), String> {
+    let actual = std::fs::read(generated)
+        .map_err(|e| format!("read generated declaration {}: {e}", generated.display()))?;
+    let expected = std::fs::read(tracked)
+        .map_err(|e| format!("read tracked declaration {}: {e}", tracked.display()))?;
+    if actual == expected {
+        println!("protocol binding: generated declaration is current");
+        Ok(())
+    } else {
+        Err(format!(
+            "generated WASM declaration drifted: run `cargo xtask protocol generate` ({})",
+            tracked.display()
+        ))
+    }
+}
+
+fn check(args: &[String]) -> Result<(), String> {
+    super::reject_unknown_args("protocol check", args)?;
+    generate(&["--check".to_string()])?;
+    super::command::cargo_test(&["-p", "dezoomify-protocol"])?;
     run_node_test()?;
     wasm_portability_check()?;
     println!("protocol check: ok");
@@ -82,15 +111,10 @@ fn check(_args: &[String]) -> Result<(), String> {
 }
 
 pub fn test_protocol() -> Result<(), String> {
-    // Dedupe: `cargo test -p dezoomify-protocol` already covers the golden
-    // `--test golden` suite and `run_node_test` covers the TS goldens, so
-    // inline the check steps instead of calling `check()` which would rerun
-    // Node + golden a second time. Each suite still runs once.
-    generate_check()?;
+    generate(&["--check".to_string()])?;
     super::command::cargo_test(&["-p", "dezoomify-protocol"])?;
     run_node_test()?;
-    wasm_portability_check()?;
-    Ok(())
+    wasm_portability_check()
 }
 
 fn wasm_portability_check() -> Result<(), String> {
@@ -106,5 +130,5 @@ fn wasm_portability_check() -> Result<(), String> {
 }
 
 fn run_node_test() -> Result<(), String> {
-    super::command::node_test(&["packages/protocol-ts/test/*.test.mjs"], false)
+    super::command::node_test(&["packages/wasm-bindings/test/*.test.mjs"], false)
 }

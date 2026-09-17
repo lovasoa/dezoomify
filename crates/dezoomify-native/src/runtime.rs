@@ -212,7 +212,7 @@ impl JobHandle {
             ("job".to_string(), self.id.clone()),
             (
                 "protocol".to_string(),
-                dezoomify_protocol::PROTOCOL_VERSION.to_string(),
+                dezoomify_protocol::dto::NATIVE_PROTOCOL_VERSION_TEXT.to_string(),
             ),
             ("input".to_string(), self.origin.clone()),
         ])

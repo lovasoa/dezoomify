@@ -3,6 +3,7 @@
 // Extracted from `./session.ts` so leaf modules (canvas save, assembly,
 // plan gates) can raise typed failures without depending on the discovery
 // client.
+import type { BlockedReason, ErrorTransport } from "@dezoomify/wasm-bindings";
 
 export interface StructuredFailure extends Error {
   code: string;
@@ -26,7 +27,7 @@ export interface StructuredFailure extends Error {
   /** HTTP status when the failure is an HTTP refusal. */
   http?: number;
   /** Transport kind id (`direct`, `metadata-proxy`, ...). */
-  transportKind?: string;
+  transportKind?: ErrorTransport;
   /** Bounded single-line server signal captured from an HTTP error body. */
   preview?: string;
 }
@@ -35,8 +36,55 @@ export interface StructuredFailure extends Error {
 export interface FetchCause {
   code: string;
   http?: number;
-  transport: string;
-  reason?: string;
+  transport: ErrorTransport;
+  reason?: BlockedReason;
+}
+
+export function errorTransport(value: unknown): ErrorTransport | undefined {
+  switch (value) {
+    case "direct": return "direct";
+    case "metadata-proxy":
+    case "metadata proxy":
+    case "proxy": return "metadata-proxy";
+    case "browser-session":
+    case "extension-origin": return "browser-session";
+    case "native": return "native";
+    case "display-only": return "display-only";
+    default: return undefined;
+  }
+}
+
+export function blockedReason(value: unknown): BlockedReason | undefined {
+  switch (value) {
+    case "access-required":
+    case "blocked-ipv4":
+    case "blocked-ipv6":
+    case "cancelled":
+    case "content-type":
+    case "dns-rebinding":
+    case "dns-rebinding-v6":
+    case "forbidden":
+    case "invalid-url":
+    case "limit-exceeded":
+    case "loopback-host":
+    case "malformed":
+    case "malformed-body":
+    case "method":
+    case "network":
+    case "non-standard-port":
+    case "origin":
+    case "private-host":
+    case "protocol-version":
+    case "redirect-limit":
+    case "redirect-target":
+    case "redirect-unavailable":
+    case "scheme":
+    case "signed-query":
+    case "source-document-lost":
+    case "throttled":
+    case "userinfo": return value;
+    default: return undefined;
+  }
 }
 
 /** Return a stable string code from an arbitrary host-side failure. */
@@ -75,7 +123,7 @@ export function fetchFailure(
     cause: FetchCause;
     url?: string;
     preview?: string;
-    transportKind?: string;
+    transportKind?: ErrorTransport;
   },
 ): StructuredFailure {
   const error = failure(code, message, retryable);

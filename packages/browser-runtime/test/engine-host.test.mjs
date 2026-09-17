@@ -29,12 +29,21 @@ function harness({ fetchResource, loadDisplayImage, assembly = fakeAssembly(), p
     assembly,
     probeSize: probeSize ?? (async () => ({ ok: true, width: 256, height: 256 })),
     ...(loadDisplayImage ? { loadDisplayImage } : {}),
-    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: error?.code ?? "network", retryable: true, message: String(error?.message ?? error) }),
+    classifyFailure: (error) => ({
+      blocked_reason: error?.category ?? "network",
+      code: error?.code ?? "network",
+      retryable: error?.retryable ?? true,
+      message: String(error?.message ?? error),
+      transport: error?.transport,
+      http: error?.http,
+      preview: error?.preview,
+      detail: error?.detail,
+    }),
     onPermissionRequired: () => {},
     onRecoveryRequested: () => seen.push(["recovery"]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
     onEvent: (event) => seen.push(["event", event.type]),
-    onUnsupportedEffect: (envelope) => seen.push(["unsupported", envelope.type]),
+    onUnsupportedEffect: (effect) => seen.push(["unsupported", effect.type]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   return { controller, sent, seen, assembly, logs };

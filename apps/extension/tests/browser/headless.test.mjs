@@ -18,6 +18,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
 const EXTENSION_ROOT = path.join(REPO_ROOT, "apps/extension");
 const GECKO_ID = "{14074c89-8a5f-4813-98df-a7117f062871}";
+const GECKODRIVER = path.join(HERE, "node_modules", ".bin", process.platform === "win32" ? "geckodriver.cmd" : "geckodriver");
 const STATIC_DIR = path.join(HERE, "fixtures-static");
 const TILE_DIR = path.join(REPO_ROOT, "testdata/scenarios/native/cli-dzi/payloads/fixtures.test/cli");
 let fixtureServer;
@@ -238,10 +239,13 @@ async function runFirefoxJob(base, work) {
   options.setPreference("browser.download.folderList", 2);
   options.setPreference("browser.download.useDownloadDir", true);
   options.setPreference("browser.helperApps.neverAsk.saveToDisk", "image/png");
-  // Selenium Manager otherwise writes below the user's home directory,
-  // which is commonly read-only in hermetic local/CI runs.
-  process.env.SE_CACHE_PATH = path.join(work, "selenium-cache");
-  const driver = await new webdriver.Builder().forBrowser("firefox").setFirefoxOptions(options).build();
+  assert.ok(existsSync(GECKODRIVER), "the pinned geckodriver package is not installed");
+  const service = new firefox.ServiceBuilder(GECKODRIVER);
+  const driver = await new webdriver.Builder()
+    .forBrowser("firefox")
+    .setFirefoxOptions(options)
+    .setFirefoxService(service)
+    .build();
   try {
     await driver.manage().setTimeouts({ pageLoad: 15000, script: 15000, implicit: 0 });
     const addonId = await driver.installAddon(zip, true);

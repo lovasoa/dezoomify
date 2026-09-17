@@ -41,12 +41,12 @@ function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport, prob
     assembly,
     probeSize: probeSize ?? (async () => ({ ok: true, width: 256, height: 256 })),
     ...(displayOnly ? { loadDisplayImage: async () => ({ naturalWidth: 64, naturalHeight: 64 }) } : {}),
-    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: error?.code ?? "extension.network", retryable: true, message: String(error?.message ?? error) }),
+    classifyFailure: (error) => ({ blocked_reason: "network", code: error?.code ?? "extension.network", retryable: true, message: String(error?.message ?? error) }),
     onPermissionRequired: (detail) => seen.push(["permission", detail]),
     onRecoveryRequested: (generation) => seen.push(["recovery-decision", generation]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
     onEvent: (event) => seen.push(["event", event.type]),
-    onUnsupportedEffect: (envelope) => seen.push(["unsupported", envelope.type]),
+    onUnsupportedEffect: (effect) => seen.push(["unsupported", effect.type]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   return { controller, sent, seen, assembly, logs };

@@ -32,7 +32,7 @@ pub const HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 /// Host application version.
 pub const HOST_VERSION: &str = crate::APP_VERSION;
 /// Dezoomify protocol version spoken on this channel.
-pub const HOST_PROTOCOL: &str = dezoomify_protocol::dto::PROTOCOL_VERSION;
+pub const HOST_PROTOCOL: &str = dezoomify_protocol::dto::NATIVE_PROTOCOL_VERSION_TEXT;
 
 /// Allowlist check for the channel extension id. Production hosts always
 /// admit (the browser enforced the manifest); tests inject denials.

@@ -1,6 +1,6 @@
 # Development
 
-The repository is one monorepo. Rust crates, generated protocol artifacts, the
+The repository is one monorepo. Rust crates, generated WASM bindings, the
 shared UI, hosts, extension packaging, and release tooling change together.
 Run repository tasks from the root through `cargo xtask`. Direct Cargo and pnpm
 commands are valid for component-level debugging, but xtask remains the unified
@@ -12,8 +12,8 @@ front door. Node 24 is the minimum supported Node version.
   processing recipes.
 - `crates/dezoomify-job` contains the pure effect/state machine through output
   finalization and cleanup.
-- `crates/dezoomify-protocol` is the Rust protocol source for the schema and
-  `packages/protocol-ts`.
+- `crates/dezoomify-protocol` is the authoritative Rust contract source;
+  `packages/wasm-bindings` tracks the declaration emitted by `wasm-bindgen`.
 - `crates/dezoomify-native` contains native effects used by CLI and Tauri.
 - `crates/dezoomify-wasm` adapts core and job behavior for browser hosts.
 - `packages/shared-ui` is the shared UI; `packages/browser-runtime` owns
@@ -44,7 +44,7 @@ lint, type checking, dependency boundaries, generated-file checks, and manifest
 validation without rewriting source files.
 
 Bare `test` runs `cargo test --workspace` exactly once, then one Node
-dot-reporter process over the website, browser runtime, protocol TypeScript,
+dot-reporter process over the website, browser runtime, generated declaration,
 desktop Node, and pure extension unit suites. It does not run `check`, generate
 WASM bindings, build WXT output, or launch browsers. `test all` runs that matrix
 once and adds the generated WASM Node harness, website Chromium E2E, and
@@ -168,10 +168,9 @@ cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
 
 `protocol generate` refreshes the checked-in TypeScript bindings. Its `--check`
-form compares against a temporary generation, while `protocol check` runs
-cross-language goldens, portability, and
-generated-marker checks. Golden candidates change only through the explicit
-maintenance option reported by `protocol generate --help`. `fixtures verify`
+form compares against a declaration emitted by the real WASM build, while
+`protocol check` compiles the Rust contract, runs the generated-package tests,
+and checks WASM portability. `fixtures verify`
 validates manifests, provenance, licenses, routes, and hashes.
 
 Playwright resolves to exactly one version repository-wide through the

@@ -1,4 +1,4 @@
-//! `cargo xtask build wasm` / `cargo xtask test wasm [--transcripts|--browser <name>]`.
+//! `cargo xtask build wasm` / `cargo xtask test wasm [--browser <name>]`.
 //! Adapter-only gate: target/tool versions, forbidden capabilities, adapter
 //! tests, Node harness, and native/WASM transcript equality. The `--browser`
 //! flag runs the Node harness and then a real headless-Chromium pass over
@@ -20,12 +20,10 @@ pub fn build_wasm(_args: &[String]) -> Result<(), String> {
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {
-    let mut transcripts = false;
     let mut browser: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--transcripts" => transcripts = true,
             "--browser" => {
                 i += 1;
                 browser = Some(args.get(i).ok_or("missing --browser <name>")?.clone());
@@ -33,9 +31,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
             other => return Err(format!("unknown test wasm option '{other}'")),
         }
         i += 1;
-    }
-    if transcripts {
-        return transcripts_only();
     }
     if let Some(name) = browser {
         // Only chromium engine coverage exists in this environment
@@ -50,14 +45,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
     super::command::cargo_test(&["-p", "dezoomify-wasm"])?;
     run_node_harness()?;
     Ok(())
-}
-
-fn transcripts_only() -> Result<(), String> {
-    // The real transcript gate is the adapter's runtime comparison against
-    // the checked-in golden (tests/adapter.rs
-    // basic_success_transcript_matches_golden); run it rather than statically
-    // grepping the checked-in file, which cannot detect golden rot.
-    super::command::cargo_test(&["-p", "dezoomify-wasm", "--test", "adapter", "transcript"])
 }
 
 fn browser_focus(_name: &str) -> Result<(), String> {

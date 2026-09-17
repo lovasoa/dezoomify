@@ -17,9 +17,9 @@
 //! a panic. `usize` conversions are fallible so 32-bit WASM targets cannot
 //! truncate large `u64` lengths.
 //!
-//! Protocol correlation: [`ByteArena::to_protocol_handle`] projects a live
+//! Contract correlation: [`ByteArena::to_buffer_handle`] projects a live
 //! handle onto the canonical [`BufferHandle`][dto] (`id` + generation +
-//! length); [`ByteArena::resolve_protocol`] reads one back, rejecting
+//! length); [`ByteArena::resolve_buffer_handle`] reads one back, rejecting
 //! unknown/stale generations as stale.
 //!
 //! [dto]: dezoomify_protocol::dto::BufferHandle
@@ -36,7 +36,7 @@ pub const MAX_TOTAL_BYTES: u64 = 64 << 20;
 pub const MAX_BUFFERS: usize = 256;
 
 /// Opaque handle to one arena generation. Serialize-safe for JS transfer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, tsify::Tsify)]
 pub struct ArenaHandle {
     /// Slot index. Never reused for a different live allocation without a
     /// generation bump.
@@ -62,7 +62,7 @@ struct Slot {
 }
 /// Bounded arena. Single-threaded by construction (owned by one `Session`);
 /// the host must not call back into it while another call borrows it;
-/// see the reentrancy rule in `lib.rs` (polling/draining only, no callbacks).
+/// see the reentrancy rule in `lib.rs` (no callbacks while borrowed).
 #[derive(Debug)]
 pub struct ByteArena {
     slots: Vec<Slot>,
@@ -388,7 +388,7 @@ impl ByteArena {
                 self.free_list.push(index);
             }
             SlotState::Consumed => {
-                // Ownership already moved out by `take_buffer` (which queued
+                // Ownership already moved out by `take_buffer` (which returned
                 // the reuse entry); just mark the state.
                 slot.state = SlotState::Freed;
             }
@@ -405,12 +405,12 @@ impl ByteArena {
         self.total_retained = 0;
     }
 
-    /// Project a live handle onto its canonical protocol reference.
+    /// Project a live handle onto its generated contract reference.
     ///
     /// # Errors
     ///
     /// `stale-buffer` for unknown/stale handles.
-    pub fn to_protocol_handle(
+    pub fn to_buffer_handle(
         &self,
         handle: ArenaHandle,
     ) -> Result<ProtocolBufferHandle, AdapterError> {
@@ -427,7 +427,7 @@ impl ByteArena {
         let length = u64::try_from(slot.data.len()).map_err(|_| {
             AdapterError::new(
                 AdapterErrorCode::LimitExceeded,
-                "buffer length does not fit the wire",
+                "buffer length does not fit the JavaScript number range",
             )
         })?;
         Ok(ProtocolBufferHandle {
@@ -438,14 +438,14 @@ impl ByteArena {
         })
     }
 
-    /// Parse a canonical protocol buffer reference back to an arena handle
+    /// Resolve a generated buffer reference back to an arena handle
     /// and require it to be sealed (`Committed`).
     ///
     /// # Errors
     ///
     /// `stale-buffer` for unknown or stale generations; `wrong-state` for
     /// live but unsealed buffers.
-    pub fn resolve_protocol(
+    pub fn resolve_buffer_handle(
         &self,
         reference: &ProtocolBufferHandle,
     ) -> Result<ArenaHandle, AdapterError> {

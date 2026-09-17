@@ -32,40 +32,6 @@ pub fn verify(args: &[String]) -> Result<(), String> {
 }
 
 fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
-    let dto_path = root.join("crates/dezoomify-protocol/src/dto.rs");
-    let dto = std::fs::read_to_string(&dto_path)
-        .map_err(|e| format!("read {}: {e}", dto_path.display()))?;
-    for removed in [
-        "ImageId",
-        "LevelId",
-        "TileId",
-        "JobId",
-        "RequestId",
-        "AttemptId",
-        "EffectId",
-        "DestinationId",
-        "OutputId",
-        "RecoveryId",
-        "SessionId",
-        "ScanId",
-        "CandidateId",
-        "OperationId",
-        "HandoffId",
-        "StartScan",
-        "ScanSnapshot",
-        "CandidateChunkDto",
-        "ByteChunkDto",
-        "CapabilitiesDto",
-        "HandoffDto",
-        "DestinationDto",
-        "OutputDto",
-    ] {
-        if dto.contains(removed) {
-            return Err(format!(
-                "speculative protocol contract `{removed}` has no production producer and consumer"
-            ));
-        }
-    }
     let core_model_path = root.join("crates/dezoomify-core/src/core/model.rs");
     let core_model = std::fs::read_to_string(&core_model_path)
         .map_err(|e| format!("read {}: {e}", core_model_path.display()))?;
@@ -88,45 +54,49 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
             ));
         }
     }
-    for (contract, producer, produced, consumer, consumed) in [
-        (
-            "JobCommand",
-            "packages/browser-runtime/src/worker-host.ts",
-            "kind: \"command\"",
-            "crates/dezoomify-wasm/src/session.rs",
-            "JobCommand",
-        ),
-        (
-            "HostEffect",
-            "crates/dezoomify-wasm/src/session.rs",
-            "HostEffect",
-            "packages/browser-runtime/src/engine-host.ts",
-            "message.type",
-        ),
-        (
-            "JobEvent",
-            "crates/dezoomify-wasm/src/session.rs",
-            "JobEvent",
-            "apps/extension/src/job/index.ts",
-            "handleEvent",
-        ),
-        (
-            "NativeHostRequest",
-            "apps/extension/src/runtime/nativeHandoff.ts",
-            "kind: \"handshake\"",
-            "apps/desktop/src-tauri/src/native_host/envelope.rs",
-            "NativeHostRequest",
-        ),
+    for path in [
+        "packages/browser-runtime/src/worker-host.ts",
+        "packages/browser-runtime/src/engine-host.ts",
+        "apps/extension/src/job/index.ts",
+        "apps/extension/src/runtime/nativeHandoff.ts",
+        "src/main.ts",
     ] {
-        for (role, path, needle) in [
-            ("producer", producer, produced),
-            ("consumer", consumer, consumed),
+        let text =
+            std::fs::read_to_string(root.join(path)).map_err(|e| format!("read {path}: {e}"))?;
+        if !text.contains("@dezoomify/wasm-bindings") {
+            return Err(format!(
+                "typed boundary violation: {path} must import generated Rust/WASM bindings"
+            ));
+        }
+    }
+    for path in [
+        "packages/browser-runtime/src/worker-host.ts",
+        "packages/browser-runtime/src/engine-host.ts",
+        "apps/extension/src/job/index.ts",
+        "apps/extension/src/runtime/nativeHandoff.ts",
+        "src/main.ts",
+    ] {
+        let text =
+            std::fs::read_to_string(root.join(path)).map_err(|e| format!("read {path}: {e}"))?;
+        for declaration in [
+            "interface JobCommand",
+            "type JobCommand =",
+            "interface HostMessage",
+            "type HostMessage =",
+            "interface HostEffect",
+            "type HostEffect =",
+            "interface JobEvent",
+            "type JobEvent =",
+            "interface ErrorDto",
+            "type ErrorDto =",
+            "interface SessionConfig",
+            "type SessionConfig =",
+            "interface NativeHostRequest",
+            "type NativeHostRequest =",
         ] {
-            let text = std::fs::read_to_string(root.join(path))
-                .map_err(|e| format!("read {path}: {e}"))?;
-            if !text.contains(needle) {
+            if text.contains(declaration) {
                 return Err(format!(
-                    "protocol contract `{contract}` lacks its production {role} marker `{needle}` in {path}"
+                    "handwritten canonical contract `{declaration}` is forbidden in {path}"
                 ));
             }
         }

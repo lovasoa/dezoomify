@@ -15,6 +15,7 @@ import {
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
 import type { ViewContext } from "../packages/shared-ui/src/view.tsx";
+import type { ErrorDto, JobEvent } from "@dezoomify/wasm-bindings";
 import { DEFAULT_PAGE_TITLE, isActiveJobStatus, jobPageTitle } from "../packages/shared-ui/src/view-helpers.ts";
 import { describeFailure } from "../packages/shared-ui/src/failure.ts";
 import {
@@ -32,8 +33,14 @@ import {
   createEngineHost,
   createProbeSize,
   type EngineHost,
+  type WorkerHostOutput,
 } from "../packages/browser-runtime/src/index.ts";
-import { failure, stableErrorCode } from "../packages/browser-runtime/src/failure.ts";
+import {
+  blockedReason,
+  errorTransport,
+  failure,
+  stableErrorCode,
+} from "../packages/browser-runtime/src/failure.ts";
 import {
   BROWSER_LIMITS,
   BROWSER_MAX_CANVAS_AREA,
@@ -385,13 +392,12 @@ function createAssembly(sourceUrl: string): ReturnType<typeof createCanvasAssemb
 }
 
 /** Shared presenter for engine failures: headline plus stable classification. */
-function presentEngineFailure(error: unknown, url: string, token: number): void {
+function presentEngineFailure(error: ErrorDto, url: string, token: number): void {
   if (token !== jobToken) return;
-  const structured = error as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown; url?: unknown; http?: unknown; preview?: unknown };
-  const code = typeof structured?.code === "string" ? structured.code : "job.failed";
+  const code = error.code;
   const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
   const lower = code.toLowerCase();
-  webLog.error("failed", `code=${code} message=${String(structured?.message ?? code)}`);
+  webLog.error("failed", `code=${code} message=${error.message}`);
   if (code === "PLAN_INVALID" || code === "job.resource-limit") {
     const link = desktopHandoffLink(url);
     if (link !== "") {
@@ -411,16 +417,17 @@ function presentEngineFailure(error: unknown, url: string, token: number): void 
     nextEvent("fail", {
       error: describeFailure({
         code,
-        engineDetail: typeof structured?.message === "string" ? structured.message : undefined,
+        engineDetail: error.detail ?? error.message,
         ...(discoveryCopy
-          ? { message: discoveryCopy.message, category: discoveryCopy.category, phase: "discovery" }
+          ? { message: discoveryCopy.message, category: discoveryCopy.category }
           : {}),
-        retryable: discoveryCopy ? discoveryCopy.retryable : (typeof structured?.retryable === "boolean" ? structured.retryable : undefined),
-        transport: errorTransportFor(code, webFetcher.getActiveTransport()),
+        phase: error.phase,
+        retryable: discoveryCopy ? discoveryCopy.retryable : error.retryable,
+        transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
         host: hostOf(url),
-        url: typeof structured?.url === "string" ? structured.url : undefined,
-        http: typeof structured?.http === "number" ? structured.http : undefined,
-        preview: typeof structured?.preview === "string" ? structured.preview : undefined,
+        url: error.request,
+        http: error.http,
+        preview: error.preview,
       }),
     }) as never,
   );
@@ -515,14 +522,14 @@ async function runJob(url: string): Promise<void> {
     settle();
   };
 
-  const onEngineEvent = (event: Record<string, unknown>): void => {
+  const onEngineEvent = (event: JobEvent): void => {
     if (token !== jobToken) return;
     switch (event.type) {
       case "catalog": {
         if (selected) return;
         selected = true;
-        const catalog = event.catalog as { images?: Array<{ title?: string; levels?: Array<{ width?: number; height?: number }> }> } | undefined;
-        const images = Array.isArray(catalog?.images) ? catalog!.images! : [];
+        const catalog = event.catalog;
+        const images = catalog.images;
         const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
         if (images.length === 0) {
           controller.dispatch(nextEvent("images-found", { imageCount: 0, transport: via }) as never);
@@ -530,7 +537,7 @@ async function runJob(url: string): Promise<void> {
           return;
         }
         controller.dispatch(nextEvent("images-found", { imageCount: images.length, transport: via }) as never);
-        const selection = pickEngineSelection(catalog as Parameters<typeof pickEngineSelection>[0], BROWSER_LIMITS);
+        const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
         if (!selection) {
           onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
           return;
@@ -562,7 +569,6 @@ async function runJob(url: string): Promise<void> {
         return;
       }
       case "recovery-request":
-      case "output-ready":
       case "job-state":
       case "paused":
       case "resumed":
@@ -596,7 +602,7 @@ async function runJob(url: string): Promise<void> {
         return;
       }
       default:
-        return;
+        return event satisfies never;
     }
   };
 
@@ -635,21 +641,38 @@ async function runJob(url: string): Promise<void> {
         },
       }),
     classifyFailure: (error) => {
-      const structured = error as { blocked_reason?: unknown; retryable?: unknown; message?: unknown };
+      const structured = error as {
+        blocked_reason?: unknown;
+        retryable?: unknown;
+        message?: unknown;
+        cause?: { reason?: unknown; transport?: unknown; http?: unknown };
+        transportKind?: unknown;
+        http?: unknown;
+        preview?: unknown;
+        detail?: unknown;
+      };
+      const reason = blockedReason(structured?.blocked_reason)
+        ?? blockedReason(structured?.cause?.reason);
+      const transport = errorTransport(structured?.transportKind)
+        ?? errorTransport(structured?.cause?.transport);
       return {
         code: stableErrorCode(error),
-        ...(typeof structured?.blocked_reason === "string" ? { blocked_reason: structured.blocked_reason } : {}),
-        retryable: structured?.retryable,
-        message: typeof structured?.message === "string" ? structured.message : undefined,
-      } as { blocked_reason?: string; [key: string]: unknown };
+        retryable: structured?.retryable === true,
+        message: typeof structured?.message === "string" ? structured.message : "The browser could not read this resource.",
+        ...(reason ? { blocked_reason: reason } : {}),
+        ...(transport ? { transport } : {}),
+        ...(typeof structured?.http === "number" ? { http: structured.http } : {}),
+        ...(typeof structured?.cause?.http === "number" ? { http: structured.cause.http } : {}),
+        ...(typeof structured?.preview === "string" ? { preview: structured.preview } : {}),
+        ...(typeof structured?.detail === "string" ? { detail: structured.detail } : {}),
+      };
     },
     onPermissionRequired: () => { /* the website has no host grants */ },
     onRecoveryRequested: (generation) => { engineHost?.chooseRecovery(generation, "discard"); },
     onHostFailure,
-    onEvent: (event) => onEngineEvent(event as Record<string, unknown>),
+    onEvent: onEngineEvent,
     onUnsupportedEffect: (effect) => {
-      const type = effect && typeof effect === "object" && "type" in effect ? String((effect as { type?: unknown }).type) : "unknown";
-      onHostFailure(failure("EFFECT_UNSUPPORTED", `This app cannot yet perform the ${type} step.`, false));
+      onHostFailure(failure("EFFECT_UNSUPPORTED", `This app cannot yet perform the ${effect.type} step.`, false));
     },
     log: (level, code, detail) => {
       if (level === "error") webLog.error(code, detail);
@@ -659,11 +682,11 @@ async function runJob(url: string): Promise<void> {
   });
   engineHost = host;
 
-  worker.addEventListener("message", (event: MessageEvent<Record<string, unknown>>) => {
+  worker.addEventListener("message", (event: MessageEvent<WorkerHostOutput>) => {
     const data = event.data;
     if (!data || typeof data.type !== "string") return;
     if (data.type === "engine.messages") {
-      engineHost?.handleEngineMessages(Array.isArray(data.messages) ? data.messages : []);
+      engineHost?.handleEngineMessages(data.messages);
       return;
     }
     if (data.type === "engine.processed" || data.type === "engine.process-failed") {
@@ -690,7 +713,7 @@ async function runJob(url: string): Promise<void> {
     if (token !== jobToken) return;
   } catch (error) {
     if (token !== jobToken) return;
-    presentEngineFailure(error, url, token);
+    onHostFailure(error);
   } finally {
     if (token === jobToken) {
       jobActivity.stopHeartbeat();
