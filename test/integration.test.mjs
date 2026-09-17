@@ -12,7 +12,7 @@ import {
 } from "../src/proxyTransport.ts";
 import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/types.ts";
 import { DIRECT_METADATA_TIMEOUT_MS } from "../packages/browser-runtime/src/tile-policy.ts";
-import { createTilePainter, drawPlacedTile } from "../packages/browser-runtime/src/tile-draw.ts";
+import { drawPlacedTile } from "../packages/browser-runtime/src/tile-draw.ts";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
 import { encodePng } from "../packages/browser-runtime/src/save.ts";
 import { inflateSync } from "node:zlib";
@@ -288,75 +288,9 @@ test("tile failures report the direct transport, never the metadata proxy", () =
   assert.equal(errorTransportFor("NO_IMAGE_FOUND", null), "direct");
 });
 
-class FakeTileImage {
-  constructor() {
-    FakeTileImage.instances.push(this);
-    this.handlers = {};
-    this.naturalWidth = 256;
-    this.naturalHeight = 256;
-  }
-  addEventListener(type, listener) {
-    this.handlers[type] = listener;
-  }
-}
-FakeTileImage.instances = [];
-
-function painterHooks(logs = []) {
-  return {
-    hooks: {
-      onRequestStart: () => 0,
-      onRequestEnd() {},
-      onLog: (line) => logs.push(line),
-      onUpdate() {},
-    },
-    logs,
-  };
-}
-
-const tick = () => new Promise((resolve) => setImmediate(resolve));
-
-test("unreadable ordinary tiles paint as plain <img> without CORS, processed tiles rethrow", async () => {
-  FakeTileImage.instances.length = 0;
-  const draws = [];
-  const ctx2d = { drawImage: (...args) => draws.push(args) };
-  const { hooks } = painterHooks();
-  const painter = createTilePainter({
-    fetchTile: async () => { throw new Error("unreadable"); },
-    fetchTileOnce: async () => { throw new Error("unreadable"); },
-    decode: async () => { throw new Error("decode must not run for the display fallback"); },
-    isOrdinaryImageTile,
-    imageCtor: FakeTileImage,
-    setTimeoutFn: () => 0,
-    clearTimeoutFn: () => {},
-    hooks,
-  });
-  const tile = { x: 0, y: 0, w: 256, h: 256, uri: "https://tiles.example/0_0.jpg", headers: {}, processing: "none" };
-  const pending = painter.drawTile(ctx2d, tile);
-  await tick();
-  FakeTileImage.instances.at(-1).handlers.load();
-  assert.equal(await pending, true, "ordinary tile finishes as display-only");
-  const img = FakeTileImage.instances.at(-1);
-  assert.equal(img.src, tile.uri);
-  assert.ok(!("crossOrigin" in img), "fallback <img> never requests CORS");
-  assert.equal(img.referrerPolicy, "no-referrer");
-  assert.equal(draws.length, 1, "fallback image is drawn");
-
-  // Processed tiles need readable bytes: the display fallback would drop the
-  // processing, so it is never attempted.
-  const loaded = [];
-  const strict = createTilePainter({
-    fetchTile: async () => ({ bytes: new Uint8Array([1, 2, 3]).buffer }),
-    decode: async () => { throw new Error("unreachable"); },
-    loadImage: async (url) => { loaded.push(url); throw new Error("must not load"); },
-    isOrdinaryImageTile,
-    hooks,
-  });
-  await assert.rejects(
-    () => strict.drawTile(ctx2d, { ...tile, processing: "google-arts-decrypt" }),
-    /tile processing unavailable/,
-  );
-  assert.deepEqual(loaded, [], "no display fallback for processed tiles");
-  // Page policy must permit cross-origin tile images for display.
+test("page policy permits cross-origin tile images for display", () => {
+  // The engine-host display fallback draws ordinary <img> elements; the page
+  // CSP must allow cross-origin tile images for that path.
   const html = fs.readFileSync(path.join(REPO_ROOT, "index.html"), "utf8");
   assert.ok(html.includes("img-src 'self' data: blob: https:"), "CSP must allow cross-origin tile display");
 });

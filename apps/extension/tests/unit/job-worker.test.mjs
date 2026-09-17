@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as wasm from "../../../../wasm/dezoomify-wasm.js";
-import { createJobWorkerHost } from "../../src/job/worker.ts";
+import { createJobWorkerHost } from "@dezoomify/browser-runtime/worker-host";
 
 await wasm.default({
   module_or_path: readFileSync(new URL("../../../../wasm/dezoomify-wasm_bg.wasm", import.meta.url)),

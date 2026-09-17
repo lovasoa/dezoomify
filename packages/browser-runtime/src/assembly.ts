@@ -2,23 +2,22 @@
 //
 // The browser executor for the Rust job engine maps typed host effects onto
 // canvas execution and owns no job policy. The engine owns retries,
-// cancellation, partial-output decisions, and ordering; this module only
-// executes what the effects describe:
+// cancellation, recovery, and ordering; this module only executes what the
+// effects describe:
 //
-//   acquire-tile   -> recordPlacement + decode (decode-at-acquisition, the
-//                     native model: a tile that cannot decode reports its
-//                     acquisition failure through the tile outcome)
-//   decode-pixels  -> verify the held decoded tile
-//   open-encoder   -> validate the output dimensions and allocate the canvas
-//   finalize-encoder -> draw every held tile at its planned placement,
-//                     close the bitmaps, encode the output
-//   publish-output -> persist the encoded output
-//   release-bytes  -> close every retained tile resource
+//   acquire-tile      -> recordPlacement + decode (decode-at-acquisition, the
+//                        native model: a tile that cannot decode reports its
+//                        acquisition failure through the tile outcome)
+//   finalize-output   -> validate the output size and format, allocate the
+//                        surface, draw every held tile at its planned
+//                        placement, encode and save; a tainted canvas stays
+//                        display-only and produces no bytes
+//   cancel-work       -> close every retained tile resource
 //
 // All host constructors are injected so node tests drive the full path with
 // fakes.
-import { drawPlacedTile } from "./tile-draw.ts";
-import type { Canvas2DLike, PlacedTileGeometry } from "./tile-draw.ts";
+import { createProcessQueue, drawPlacedTile } from "./tile-draw.ts";
+import type { Canvas2DLike, PlacedTileGeometry, TileImageLike } from "./tile-draw.ts";
 import type { TileBitmap } from "./tile-decode.ts";
 import { canvasTooLargeFailure } from "./plan-gates.ts";
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
@@ -43,6 +42,12 @@ export interface AssemblyCanvas {
 export interface CanvasAssemblyDeps {
   /** Decode acquired tile bytes into a bitmap (tile-decode's decoder). */
   decode(bytes: ArrayBuffer): Promise<TileBitmap>;
+  /**
+   * Apply one core processing recipe (e.g. `google-arts-decrypt`) to raw
+   * tile bytes before decoding. Hosts route this through the WASM session's
+   * pure `applyProcessing` op; calls are serialized by the assembly.
+   */
+  processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
   /** Allocate the output surface; called only after limit validation. */
   createCanvas(width: number, height: number): AssemblyCanvas;
   /** Encode the assembled surface (canvas-to-blob on the job tab). */
@@ -55,6 +60,14 @@ export interface CanvasAssemblyDeps {
   limits?: BrowserLimits;
   /** Diagnostics sink for placement/decode size mismatches. */
   log?(line: string): void;
+  /**
+   * Called once when the output becomes display-only (an ordinary image was
+   * drawn, or encoding failed because the canvas tainted). Hosts switch the
+   * UI to the display-only presentation.
+   */
+  onDisplayOnly?(): void;
+  /** Recognizes a canvas-taint encoding failure (host-provided). */
+  isTaintError?(error: unknown): boolean;
 }
 
 export interface CanvasAssembly {
@@ -62,14 +75,26 @@ export interface CanvasAssembly {
   recordPlacement(tile: number, placement: AssemblyPlacement): void;
   /** Decode-at-acquisition: hold the decoded bitmap for assembly. */
   acquireTile(tile: number, placement: AssemblyPlacement, bytes: ArrayBuffer): Promise<void>;
-  /** Verify the tile this effect names is decoded and held. */
-  decodePixels(tile: number): void;
-  /** Validate the output size and allocate the surface. */
-  openEncoder(format: string, canvas?: { width: number; height: number } | null): void;
-  /** Draw every held tile at its placement, close bitmaps, encode. */
-  finalizeEncoder(): Promise<void>;
-  /** Persist the encoded output exactly once. */
-  publishOutput(): void;
+  /**
+   * Display-only acquisition: hold an ordinary image element for assembly.
+   * The canvas taints when it is drawn, so the job can only complete as
+   * display-only (no pixel reads, no programmatic save).
+   */
+  acquireDisplayTile(tile: number, placement: AssemblyPlacement, image: TileImageLike): void;
+  /** Whether any display-only tile was acquired (output is tainted). */
+  isTainted(): boolean;
+  /** Output dimensions from the declared canvas or accumulated placements. */
+  dimensions(): { width: number; height: number } | null;
+  /**
+   * The one awaited output operation: validate the destination, draw the
+   * retained tiles, encode and save, or keep a tainted canvas display-only.
+   * Throws a typed failure when the output cannot be produced.
+   */
+  finalizeOutput(
+    partial: boolean,
+    format: string,
+    canvas?: { width: number; height: number } | null,
+  ): Promise<void>;
   /** Close every retained tile resource (idempotent). */
   release(): void;
 }
@@ -92,9 +117,11 @@ function placementGeometry(
 export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
   const placements = new Map<number, AssemblyPlacement>();
   const bitmaps = new Map<number, TileBitmap>();
+  const displayImages = new Map<number, TileImageLike>();
+  const processQueue = deps.processTile ? createProcessQueue(deps.processTile) : null;
   let canvas: AssemblyCanvas | null = null;
-  let encoded: unknown = null;
-  let saved = false;
+  let canvasSize: { width: number; height: number } | null = null;
+  let tainted = false;
 
   function recordPlacement(tile: number, placement: AssemblyPlacement): void {
     const { x, y } = placement?.position ?? { x: NaN, y: NaN };
@@ -116,61 +143,96 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     bytes: ArrayBuffer,
   ): Promise<void> {
     recordPlacement(tile, placement);
+    let input = bytes;
     if (!isPlainRecipe(placement.processing)) {
-      // The canvas host has no processing executor for engine jobs yet:
-      // fail typed instead of silently dropping the recipe.
-      throw failure(
-        "TILE_PROCESSING_UNAVAILABLE",
-        "This image needs a processing step this app cannot run yet. Use the desktop app for it.",
-        false,
-        undefined,
-        `tile ${tile} requires processing recipe ${placement.processing}`,
-      );
+      if (!processQueue) {
+        // No processing executor: fail typed instead of silently dropping
+        // the recipe.
+        throw failure(
+          "TILE_PROCESSING_UNAVAILABLE",
+          "This image needs a processing step this app cannot run yet. Use the desktop app for it.",
+          false,
+          undefined,
+          `tile ${tile} requires processing recipe ${placement.processing}`,
+        );
+      }
+      input = await processQueue(String(placement.processing), bytes);
     }
-    const bitmap = await deps.decode(bytes);
+    const bitmap = await deps.decode(input);
     bitmaps.set(tile, bitmap);
   }
 
-  function decodePixels(tile: number): void {
-    if (!bitmaps.has(tile)) {
-      throw failure(
-        "OUTPUT_STATE",
-        "The saved pieces could not be assembled.",
-        false,
-        undefined,
-        `decode-pixels for tile ${tile} without a held decoded tile`,
-      );
-    }
+  function markDisplayOnly(): void {
+    if (tainted) return;
+    tainted = true;
+    deps.onDisplayOnly?.();
   }
 
-  /** Output size: the declared canvas, else the union of placements. */
-  function outputSize(canvasSize?: { width: number; height: number } | null): {
-    width: number;
-    height: number;
-  } {
-    if (canvasSize && canvasSize.width > 0 && canvasSize.height > 0) {
-      return { width: canvasSize.width, height: canvasSize.height };
-    }
+  function acquireDisplayTile(
+    tile: number,
+    placement: AssemblyPlacement,
+    image: TileImageLike,
+  ): void {
+    recordPlacement(tile, placement);
+    displayImages.set(tile, image);
+    markDisplayOnly();
+  }
+
+  function isTainted(): boolean {
+    return tainted;
+  }
+
+  function dimensions(): { width: number; height: number } | null {
+    if (canvasSize) return { ...canvasSize };
+    const derived = derivedSize();
+    if (derived.width > 0 && derived.height > 0) return derived;
+    return null;
+  }
+
+  /** Output size from accumulated placements (declared canvas unknown). */
+  function derivedSize(): { width: number; height: number } {
     let width = 0;
     let height = 0;
     for (const [tile, placement] of placements) {
       const bitmap = bitmaps.get(tile);
-      const w = placement.expected_size?.width ?? bitmap?.width ?? 0;
-      const h = placement.expected_size?.height ?? bitmap?.height ?? 0;
+      const image = displayImages.get(tile);
+      const w = placement.expected_size?.width
+        ?? bitmap?.width
+        ?? image?.naturalWidth
+        ?? 0;
+      const h = placement.expected_size?.height
+        ?? bitmap?.height
+        ?? image?.naturalHeight
+        ?? 0;
       width = Math.max(width, placement.position.x + (w > 0 ? w : 0));
       height = Math.max(height, placement.position.y + (h > 0 ? h : 0));
     }
     return { width, height };
   }
 
-  function openEncoder(format: string, canvasSize?: { width: number; height: number } | null): void {
+  /** Output size: the declared canvas, else the union of placements. */
+  function outputSize(declared?: { width: number; height: number } | null): {
+    width: number;
+    height: number;
+  } {
+    if (declared && declared.width > 0 && declared.height > 0) {
+      return { width: declared.width, height: declared.height };
+    }
+    return derivedSize();
+  }
+
+  async function finalizeOutput(
+    _partial: boolean,
+    format: string,
+    declared?: { width: number; height: number } | null,
+  ): Promise<void> {
     if (canvas) {
       throw failure(
         "OUTPUT_STATE",
         "The output surface is already open.",
         false,
         undefined,
-        "open-encoder arrived twice",
+        "finalize-output arrived twice",
       );
     }
     if (format !== "png") {
@@ -179,17 +241,17 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
         "This app cannot save that image format yet.",
         false,
         undefined,
-        `open-encoder format ${format}`,
+        `finalize-output format ${format}`,
       );
     }
-    const size = outputSize(canvasSize);
+    const size = outputSize(declared);
     if (!(size.width > 0 && size.height > 0)) {
       throw failure(
         "PLAN_INVALID",
         "The image size could not be determined.",
         false,
         undefined,
-        `open-encoder derived an empty canvas ${size.width}x${size.height}`,
+        `finalize-output derived an empty canvas ${size.width}x${size.height}`,
       );
     }
     const verdict = probeLimits(size, deps.limits ?? BROWSER_LIMITS);
@@ -198,51 +260,48 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       throw canvasTooLargeFailure(size.width, size.height, deps.sourceUrl ?? "", verdict.reason);
     }
     canvas = deps.createCanvas(size.width, size.height);
-  }
+    canvasSize = { width: size.width, height: size.height };
 
-  async function finalizeEncoder(): Promise<void> {
-    if (!canvas || encoded !== null) {
-      throw failure(
-        "OUTPUT_STATE",
-        "The saved pieces could not be assembled.",
-        false,
-        undefined,
-        "finalize-encoder without an open encoder",
-      );
-    }
     for (const [tile, placement] of placements) {
       const bitmap = bitmaps.get(tile);
-      if (!bitmap) continue; // missing tile: the partial region stays empty
+      const image = displayImages.get(tile);
+      const source = bitmap ?? image;
+      if (!source) continue; // missing tile: the partial region stays empty
       try {
-        drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap), (line) =>
+        drawPlacedTile(canvas.ctx2d, source, placementGeometry(placement, bitmap), (line) =>
           deps.log?.(line),
         );
       } finally {
         bitmaps.delete(tile);
-        try {
-          bitmap.close();
-        } catch {
-          // Bitmap cleanup is best-effort.
+        displayImages.delete(tile);
+        if (bitmap) {
+          try {
+            bitmap.close();
+          } catch {
+            // Bitmap cleanup is best-effort.
+          }
         }
       }
     }
-    encoded = await deps.encode(canvas);
-  }
 
-  function publishOutput(): void {
-    if (encoded === null || !canvas) {
-      throw failure(
-        "OUTPUT_STATE",
-        "The final picture is not ready to save.",
-        false,
-        undefined,
-        "publish-output without an encoded output",
-      );
+    if (tainted) {
+      // A tainted canvas can never be read or encoded: the drawn picture
+      // stays visible as display-only output and no bytes are produced.
+      return;
     }
-    if (!saved) {
-      deps.save(encoded, canvas.width, canvas.height);
-      saved = true;
+    let encoded: unknown;
+    try {
+      encoded = await deps.encode(canvas);
+    } catch (error) {
+      // A browser may defer origin-clean enforcement until encoding. The
+      // assembled picture stays visible as display-only instead of failing.
+      if (deps.isTaintError?.(error)) {
+        markDisplayOnly();
+        return;
+      }
+      throw error;
     }
+    deps.save(encoded, canvas.width, canvas.height);
   }
 
   function release(): void {
@@ -254,17 +313,19 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       }
     }
     bitmaps.clear();
+    displayImages.clear();
     canvas = null;
-    encoded = null;
+    canvasSize = null;
+    tainted = false;
   }
 
   return {
     recordPlacement,
     acquireTile,
-    decodePixels,
-    openEncoder,
-    finalizeEncoder,
-    publishOutput,
+    acquireDisplayTile,
+    isTainted,
+    dimensions,
+    finalizeOutput,
     release,
   };
 }

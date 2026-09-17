@@ -1,14 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTilePainter, createProcessQueue, loadTileImage } from "../src/tile-draw.ts";
+import { createProcessQueue, drawPlacedTile, loadTileImage } from "../src/tile-draw.ts";
 
-function hooks(log = []) {
+function hooks() {
   let seq = 0;
   return {
-    log,
     onRequestStart() { seq += 1; return seq; },
     onRequestEnd() {},
-    onLog(line) { log.push(line); },
+    onLog() {},
     onUpdate() {},
   };
 }
@@ -26,115 +25,35 @@ function bitmap(w = 256, h = 256) {
   return { width: w, height: h, closed: false, close() { this.closed = true; } };
 }
 
-test("drawTile paints readable bytes at the planned extent", async () => {
+test("drawPlacedTile paints readable bytes at the planned extent", () => {
   const log = [];
   const ctx = ctx2d();
-  const painter = createTilePainter({
-    fetchTile: async () => ({ bytes: new ArrayBuffer(8) }),
-    decode: async () => bitmap(256, 256),
-    isOrdinaryImageTile: () => true,
-    hooks: hooks(log),
-  });
-  const tainted = await painter.drawTile(ctx, { uri: "https://a.test/1.png", headers: {}, x: 0, y: 0, w: 256, h: 256, processing: "none" });
-  assert.equal(tainted, false);
+  drawPlacedTile(ctx, bitmap(256, 256), { x: 0, y: 0, w: 256, h: 256 }, (line) => log.push(line));
   assert.equal(ctx.drawn.length, 1);
   assert.deepEqual(ctx.drawn[0], { sw: 256, sh: 256, dx: 0, dy: 0, dw: 256, dh: 256 });
   assert.deepEqual(log, []);
 });
 
-test("drawTile does not stretch an undersized tile", async () => {
+test("drawPlacedTile does not stretch an undersized tile", () => {
   const log = [];
   const ctx = ctx2d();
-  const painter = createTilePainter({
-    fetchTile: async () => ({ bytes: new ArrayBuffer(8) }),
-    decode: async () => bitmap(100, 100),
-    isOrdinaryImageTile: () => true,
-    hooks: hooks(log),
-  });
-  await painter.drawTile(ctx, { uri: "https://a.test/1.png", headers: {}, x: 256, y: 0, w: 256, h: 256, processing: "none" });
+  drawPlacedTile(ctx, bitmap(100, 100), { x: 256, y: 0, w: 256, h: 256 }, (line) => log.push(line));
   assert.equal(ctx.drawn.length, 1);
   assert.deepEqual(ctx.drawn[0], { sw: 100, sh: 100, dx: 256, dy: 0, dw: 100, dh: 100 });
   assert.ok(log.some((line) => line.includes("A tile size differed from the plan")), "mismatch logged without identifying a tile");
   assert.ok(log.every((line) => !line.includes("a.test") && !line.includes("256,0")), "mismatch log has no tile URL or coordinates");
 });
 
-test("drawTile crops a full-sized padded Google edge tile at 1:1 scale", async () => {
+test("drawPlacedTile crops a full-sized padded Google edge tile at 1:1 scale", () => {
   const ctx = ctx2d();
-  const painter = createTilePainter({
-    fetchTile: async () => ({ bytes: new ArrayBuffer(8) }),
-    decode: async () => bitmap(512, 512),
-    isOrdinaryImageTile: () => true,
-    hooks: hooks(),
-  });
-  await painter.drawTile(ctx, { uri: "https://a.test/edge.bin", headers: {}, x: 2560, y: 2048, w: 428, h: 196, processing: "none" });
+  drawPlacedTile(ctx, bitmap(512, 512), { x: 2560, y: 2048, w: 428, h: 196 });
   assert.deepEqual(ctx.drawn[0], { sw: 428, sh: 196, dx: 2560, dy: 2048, dw: 428, dh: 196 });
 });
 
-test("drawTile falls back to ordinary display for unprocessed tiles", async () => {
+test("drawPlacedTile measures ordinary image elements by natural size", () => {
   const ctx = ctx2d();
-  let loaded = 0;
-  const painter = createTilePainter({
-    fetchTile: async () => { throw new Error("no CORS grant"); },
-    decode: async () => bitmap(),
-    loadImage: async () => { loaded += 1; return { naturalWidth: 256, naturalHeight: 128 }; },
-    isOrdinaryImageTile: (p) => p === "none",
-    hooks: hooks(),
-  });
-  const tainted = await painter.drawTile(ctx, { uri: "https://a.test/1.png", headers: {}, x: 0, y: 0, processing: "none" });
-  assert.equal(tainted, true);
-  assert.equal(loaded, 1);
-  assert.equal(ctx.drawn.length, 1);
-});
-
-test("drawTile classifies an origin once and skips repeated unreadable fetches", async () => {
-  const ctx = ctx2d();
-  let readableAttempts = 0;
-  let loaded = 0;
-  const painter = createTilePainter({
-    fetchTile: async () => { throw new Error("unexpected retrying fetch"); },
-    fetchTileOnce: async () => { readableAttempts += 1; throw new Error("no CORS grant"); },
-    decode: async () => bitmap(),
-    loadImage: async () => { loaded += 1; return { naturalWidth: 256, naturalHeight: 256 }; },
-    isOrdinaryImageTile: (p) => p === "none",
-    hooks: hooks(),
-  });
-  const first = painter.drawTile(ctx, { uri: "https://a.test/1.png", headers: {}, x: 0, y: 0, processing: "none" });
-  const second = painter.drawTile(ctx, { uri: "https://a.test/2.png", headers: {}, x: 256, y: 0, processing: "none" });
-  assert.deepEqual(await Promise.all([first, second]), [true, true]);
-  assert.equal(readableAttempts, 1);
-  assert.equal(loaded, 2);
-});
-
-test("drawTile rethrows readable failures for processed tiles", async () => {
-  const ctx = ctx2d();
-  const failure = new Error("tile fetch: network-error");
-  const painter = createTilePainter({
-    fetchTile: async () => { throw failure; },
-    decode: async () => bitmap(),
-    loadImage: async () => ({ naturalWidth: 1, naturalHeight: 1 }),
-    isOrdinaryImageTile: (p) => p === "none",
-    hooks: hooks(),
-  });
-  await assert.rejects(
-    painter.drawTile(ctx, { uri: "https://a.test/1.png", headers: {}, x: 0, y: 0, processing: "decrypt" }),
-    (e) => e === failure,
-  );
-});
-
-test("drawTile reports the readable failure when display also fails", async () => {
-  const ctx = ctx2d();
-  const failure = new Error("tile fetch: network-error");
-  const painter = createTilePainter({
-    fetchTile: async () => { throw failure; },
-    decode: async () => bitmap(),
-    loadImage: async () => { throw new Error("img 404"); },
-    isOrdinaryImageTile: () => true,
-    hooks: hooks(),
-  });
-  await assert.rejects(
-    painter.drawTile(ctx, { uri: "https://a.test/1.png", headers: {}, x: 0, y: 0, processing: "none" }),
-    (e) => e === failure,
-  );
+  drawPlacedTile(ctx, { naturalWidth: 256, naturalHeight: 128 }, { x: 0, y: 0, w: 256, h: 256 });
+  assert.deepEqual(ctx.drawn[0], { sw: 256, sh: 128, dx: 0, dy: 0, dw: 256, dh: 128 });
 });
 
 test("createProcessQueue serializes processing while fetching stays parallel", async () => {

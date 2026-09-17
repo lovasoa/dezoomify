@@ -243,7 +243,7 @@ fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat
 
 /// Map pipeline bounds onto validated job bounds. Transport byte limits stay
 /// identical on both sides so the fetch layer, not the engine, reports
-/// oversize resources; probe planning stays enabled for native.
+/// oversize resources.
 fn job_config_for(config: &PipelineConfig) -> Result<JobConfig, NativeError> {
     let tiles = config.max_tiles.clamp(1, 16_777_216) as u32;
     // The engine requires concurrency within the tile budget; the legacy
@@ -263,7 +263,6 @@ fn job_config_for(config: &PipelineConfig) -> Result<JobConfig, NativeError> {
         max_retries: retries,
         max_buffers: buffers,
         max_bytes,
-        plan_probes: true,
     };
     job.validate().map_err(|e| {
         NativeError::new(
@@ -385,7 +384,7 @@ pub(crate) fn map_failure_code(code: &str) -> &'static str {
         "job.no-images" => "discovery.no-image",
         "job.unknown-dezoomer" => "discovery.unknown-dezoomer",
         "job.resource-limit" => "tile.limit",
-        "job.plan-invalid" | "job.probe-unsupported" => "discovery.tile-plan",
+        "job.plan-invalid" => "discovery.tile-plan",
         "job.plan-empty" => "discovery.no-level",
         "job.partial-discarded" => "tile.download-failed",
         _ => "native.internal",

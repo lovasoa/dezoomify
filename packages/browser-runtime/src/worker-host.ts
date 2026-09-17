@@ -1,0 +1,233 @@
+// Shared job-worker entrypoint for browser products (website + extension).
+// A thin host around the Rust/WASM Session: commands and effects remain
+// protocol envelopes, so this module never grows a second JavaScript state
+// machine. Product workers wrap it with their bundler-specific glue import
+// and worker-scope bootstrap.
+
+export type WorkerHostLog = (level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown) => void;
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function engineError(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error);
+  let parsed = error;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      /* legacy string error */
+    }
+  }
+  const candidate = object(parsed);
+  const code = typeof candidate.code === "string" ? candidate.code : "adapter.malformed";
+  const message = typeof candidate.message === "string" ? candidate.message : raw;
+  return {
+    code,
+    phase: typeof candidate.phase === "string" ? candidate.phase : "validation",
+    retryable: candidate.retryable === true,
+    message,
+    detail: `${code}: ${message}`,
+    transport: "browser-session",
+  };
+}
+
+const encoder = new TextEncoder();
+
+function commandBytes(command: Record<string, unknown>): Uint8Array {
+  return encoder.encode(`${JSON.stringify({ protocol: "2.0", kind: "command", ...command })}\n`);
+}
+
+export interface WorkerHostSession {
+  drainMessages(): string;
+  dispatch(command: Uint8Array): void;
+  allocateBuffer(length: number): string;
+  writeBuffer(handle: string, offset: number, bytes: Uint8Array): void;
+  commitBuffer(handle: string, length: number): void;
+  protocolHandle(handle: string): string;
+  applyProcessing(recipe: string, bytes: Uint8Array): Uint8Array;
+  dispose(): void;
+}
+
+export interface WorkerHostWasm {
+  default?: () => Promise<void>;
+  Session: new (protocol: string, quotas: string) => WorkerHostSession;
+  rankCandidates?: (urls: string) => string;
+}
+
+export type WorkerHostMessage = Record<string, unknown> & {
+  type?: string;
+  jobId?: string;
+  inputUrl?: string;
+  requestId?: number;
+  urls?: unknown;
+  bytes?: unknown;
+  command?: unknown;
+  error?: unknown;
+  quotas?: unknown;
+  recipe?: unknown;
+  ok?: unknown;
+  width?: unknown;
+  height?: unknown;
+  finalUri?: unknown;
+};
+
+export function createJobWorkerHost(deps: {
+  postMessage(message: unknown, transfer?: Transferable[]): void;
+  wasm(): Promise<WorkerHostWasm>;
+  log?: WorkerHostLog;
+}) {
+  const log: WorkerHostLog = deps.log ?? (() => {});
+  let session: WorkerHostSession | null = null;
+  let disposed = false;
+
+  function flush() {
+    if (!session) return;
+    let messages: unknown;
+    try {
+      messages = JSON.parse(session.drainMessages());
+    } catch (error) {
+      log("error", "core-error", `phase=drain message=${error instanceof Error ? error.message : String(error)}`);
+      deps.postMessage({ type: "engine.error", error: engineError(error) });
+      return;
+    }
+    if (Array.isArray(messages) && messages.length) {
+      const effects = messages.filter((message) => (message as { kind?: unknown })?.kind === "effect").length;
+      const events = messages.filter((message) => (message as { kind?: unknown })?.kind === "event").length;
+      log("debug", "messages-drained", `effects=${effects} events=${events} total=${messages.length}`);
+      deps.postMessage({ type: "engine.messages", messages });
+    }
+  }
+
+  function dispatch(command: Record<string, unknown>) {
+    if (!session || disposed) return;
+    const request = command.request;
+    log("debug", "command-dispatched", `command=${String(command.type)}${request !== undefined ? ` request=${String(request)}` : ""}`);
+    session.dispatch(commandBytes(command));
+    flush();
+  }
+
+  async function start(message: WorkerHostMessage) {
+    const wasm = await deps.wasm();
+    if (disposed) return;
+    await wasm.default?.();
+    session = new wasm.Session("2.0", JSON.stringify(message.quotas ?? {}));
+    log("info", "session-created", `jobId=${String(message.jobId)} protocol=2.0`);
+    dispatch({ type: "start", input_url: message.inputUrl });
+  }
+
+  /**
+   * Rank candidate URLs with the core preference order. Runs before any
+   * session exists; the wasm module load is shared with engine.start.
+   * Unknown or failing rank calls fall back to the caller-supplied order.
+   */
+  async function rank(message: WorkerHostMessage) {
+    const urls = Array.isArray(message.urls) ? message.urls.filter((url): url is string => typeof url === "string") : [];
+    let ranked: string[] = [];
+    try {
+      const wasm = await deps.wasm();
+      // The glue must be initialized before any binding call, exactly like
+      // engine.start: an uninitialized call throws and would silently fall
+      // back to the unranked input order.
+      await wasm.default?.();
+      if (!disposed && typeof wasm.rankCandidates === "function") {
+        const parsed = JSON.parse(wasm.rankCandidates(JSON.stringify(urls)));
+        if (Array.isArray(parsed)) {
+          ranked = parsed.map((entry: unknown) => object(entry).url).filter((url): url is string => typeof url === "string");
+        }
+      }
+    } catch {
+      ranked = [];
+    }
+    log("info", "rank-completed", `in=${urls.length} out=${ranked.length}`);
+    deps.postMessage({ type: "engine.ranked", urls: ranked.length ? ranked : urls });
+  }
+
+  function provideBytes(message: WorkerHostMessage) {
+    if (!session || disposed || !(message.bytes instanceof Uint8Array)) return;
+    const handle = JSON.parse(session.allocateBuffer(message.bytes.byteLength));
+    const handleJson = JSON.stringify(handle);
+    session.writeBuffer(handleJson, 0, message.bytes);
+    session.commitBuffer(handleJson, message.bytes.byteLength);
+    // The command envelope carries the canonical protocol reference, not the
+    // arena form allocateBuffer returns.
+    const buffer = JSON.parse(session.protocolHandle(handleJson));
+    const finalUri = typeof message.finalUri === "string" && message.finalUri !== "" ? message.finalUri : undefined;
+    dispatch({
+      type: "provide-resource",
+      request: message.requestId,
+      buffer,
+      ...(finalUri ? { final_uri: finalUri } : {}),
+    });
+  }
+
+  function provideProbe(message: WorkerHostMessage) {
+    if (!session || disposed || !Number.isSafeInteger(message.requestId) || (message.requestId as number) < 0) return;
+    const ok = message.ok === true;
+    const width = typeof message.width === "number" && Number.isSafeInteger(message.width) && (message.width as number) > 0 ? message.width : 0;
+    const height = typeof message.height === "number" && Number.isSafeInteger(message.height) && (message.height as number) > 0 ? message.height : 0;
+    dispatch({ type: "provide-probe-outcome", request: message.requestId, ok, width, height });
+  }
+
+  function provideDisplay(message: WorkerHostMessage) {
+    if (!session || disposed || !Number.isSafeInteger(message.requestId) || (message.requestId as number) < 0) return;
+    const width = typeof message.width === "number" && Number.isSafeInteger(message.width) && (message.width as number) > 0 ? message.width : 0;
+    const height = typeof message.height === "number" && Number.isSafeInteger(message.height) && (message.height as number) > 0 ? message.height : 0;
+    dispatch({ type: "provide-display-outcome", request: message.requestId, width, height });
+  }
+
+  function processTile(message: WorkerHostMessage) {
+    if (!session || disposed) return;
+    const requestId = message.requestId;
+    const recipe = typeof message.recipe === "string" ? message.recipe : "none";
+    const bytes = message.bytes instanceof Uint8Array
+      ? message.bytes
+      : message.bytes instanceof ArrayBuffer
+        ? new Uint8Array(message.bytes)
+        : null;
+    if (!Number.isSafeInteger(requestId) || !bytes) return;
+    try {
+      const processed = session.applyProcessing(recipe, bytes);
+      const out = new Uint8Array(processed).slice();
+      deps.postMessage({ type: "engine.processed", requestId, bytes: out.buffer }, [out.buffer]);
+    } catch (error) {
+      const failure = engineError(error);
+      log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message}`);
+      deps.postMessage({ type: "engine.process-failed", requestId, error: failure });
+    }
+  }
+
+  return {
+    async onMessage(message: unknown) {
+      if (!message || typeof message !== "object" || disposed) return;
+      const envelope = message as WorkerHostMessage;
+      try {
+        if (envelope.type === "engine.start") await start(envelope);
+        else if (envelope.type === "engine.rank") await rank(envelope);
+        else if (envelope.type === "engine.bytes") provideBytes(envelope);
+        else if (envelope.type === "engine.probe") provideProbe(envelope);
+        else if (envelope.type === "engine.display") provideDisplay(envelope);
+        else if (envelope.type === "engine.process") processTile(envelope);
+        else if (envelope.type === "engine.failure") {
+          dispatch({ type: "provide-fetch-failure", request: envelope.requestId, error: envelope.error });
+        } else if (envelope.type === "engine.command") dispatch(object(envelope.command));
+        else if (envelope.type === "engine.dispose") {
+          log("info", "session-disposed", "");
+          disposed = true;
+          try {
+            session?.dispose();
+          } finally {
+            session = null;
+          }
+        }
+      } catch (error) {
+        const failure = engineError(error);
+        log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message}`);
+        deps.postMessage({ type: "engine.error", error: failure });
+      }
+    },
+  };
+}
+
+export type JobWorkerHost = ReturnType<typeof createJobWorkerHost>;

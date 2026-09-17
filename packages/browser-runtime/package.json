@@ -7,7 +7,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./logging": "./src/logging.ts"
+    "./logging": "./src/logging.ts",
+    "./worker-host": "./src/worker-host.ts",
+    "./engine-host": "./src/engine-host.ts"
   },
   "scripts": {
     "test": "node --test-reporter=dot --test \"test/*.test.mjs\"",

@@ -8,8 +8,7 @@
 //! `dezoomify-core` (pure and deterministic), the projected catalog is
 //! emitted on the `catalog` event, selection is explicit over real catalog
 //! ids, and tile plans are the real per-level plans (fixed-geometry grids
-//! directly; probe-driven sources through the core probe step machine when
-//! `config.plan_probes` allows it).
+//! directly; probe-driven sources through the core probe step machine).
 
 #![forbid(unsafe_code)]
 // 6.1 unwrap policy: shipped engine code maps failures to typed `JobError`s

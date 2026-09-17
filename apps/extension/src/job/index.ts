@@ -5,15 +5,17 @@ import type { StructuredError, UiStatus, ViewContext as SharedViewContext } from
 import {
   canvasToPngBlob,
   createCanvasAssembly,
+  createEngineHost,
+  createProbeSize,
   createTileDecoder,
   pickEngineSelection,
   saveBlobViaAnchor,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
 import { createLogger } from "@dezoomify/browser-runtime/logging";
-import { createJobController } from "./controller.ts";
+import type { EngineHost } from "@dezoomify/browser-runtime";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
-import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.ts";
+import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFailure, isJobBinding } from "./transport.ts";
 import type { JobBinding } from "./transport.ts";
 
 declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
@@ -25,7 +27,7 @@ type ExtensionApi = {
 };
 type ViewContext = SharedViewContext & { failure?: StructuredError };
 type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: unknown; catalog?: { images?: unknown[] } };
-type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[]; line?: string };
+type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[]; line?: string; requestId?: unknown; bytes?: unknown };
 
 const hostGlobal = globalThis as typeof globalThis & { browser?: ExtensionApi; chrome?: ExtensionApi };
 const api = hostGlobal.browser ?? hostGlobal.chrome;
@@ -42,8 +44,7 @@ jobLog.addSink((entry) => {
 
 /** @type {any | null} */
 let binding: JobBinding | null = null;
-/** @type {ReturnType<typeof createJobController> | null} */
-let controller: ReturnType<typeof createJobController> | null = null;
+let controller: EngineHost | null = null;
 let sourceTransport: ReturnType<typeof createCoordinatorSourceTransport> | null = null;
 let jobWorker: Worker | null = null;
 /** @type {ReturnType<typeof createCanvasAssembly> | null} */
@@ -60,6 +61,12 @@ let selectedTitle: string | undefined;
 let lastTileProgress: { current: number; total: number } | null = null;
 let accessRequest: { hosts: string[]; requesting: boolean } | null = null;
 let partialDecision: number | null = null;
+// Display-only origins for this attempt: an ordinary image succeeded there,
+// so later tiles of the same origin skip the failing readable fetch.
+const displayOnlyOrigins = new Set<string>();
+// Cross-worker processing calls (session.applyProcessing) awaiting a reply.
+const pendingProcess = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }>();
+let processSeq = 0;
 const testGrantedOrigins = new Set<string>();
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 
@@ -141,7 +148,7 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
       const generation = partialDecision;
       if (generation === null) return;
       partialDecision = null;
-      controller?.choosePartial(generation, keep);
+      controller?.chooseRecovery(generation, keep ? "keep" : "discard");
       render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Finishing the image" } });
     } }) } : {}),
   });
@@ -255,10 +262,21 @@ function onHostFailure(error: unknown) {
   render("failed", { failure, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
 }
 
+/** Apply one core processing recipe through the worker session. */
+function processTile(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> {
+  if (!jobWorker) return Promise.reject(Object.assign(new Error("worker unavailable"), { code: "WORKER_FAILED" }));
+  const requestId = ++processSeq;
+  return new Promise((resolve, reject) => {
+    pendingProcess.set(requestId, { resolve, reject });
+    jobWorker?.postMessage({ type: "engine.process", requestId, recipe, bytes }, [bytes]);
+  });
+}
+
 function createAssembly(sourceUrl: string) {
   const decoder = createTileDecoder();
   return createCanvasAssembly({
     decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
+    processTile,
     createCanvas: (width: number, height: number) => {
       const element = document.createElement("canvas");
       element.width = width;
@@ -352,6 +370,8 @@ function stopAttempt() {
   try { assembly?.release(); } catch { /* bitmap cleanup is best effort */ }
   assembly = null;
   sourceTransport = null;
+  for (const { reject } of pendingProcess.values()) reject(Object.assign(new Error("attempt stopped"), { code: "WORKER_FAILED" }));
+  pendingProcess.clear();
 }
 
 /** Clear every per-attempt flag and buffer; the source binding is untouched. */
@@ -364,6 +384,7 @@ function resetAttemptState() {
   lastTileProgress = null;
   accessRequest = null;
   partialDecision = null;
+  displayOnlyOrigins.clear();
 }
 
 /**
@@ -399,18 +420,58 @@ function startAttempt() {
     cancel: () => fetcher.cancel(),
   };
   sourceTransport = createCoordinatorSourceTransport({ sendMessage: send });
-  controller = createJobController({
-    worker,
+  let attemptCancelled = false;
+  const cancelFetch = () => { attemptCancelled = true; fetcher.cancel(); };
+  // Metadata prefers the source tab's origin context and falls back to the
+  // granted extension-origin session; tiles always use the extension origin.
+  const fetchResource = createEngineResourceFetcher({
     binding: () => activeBinding,
     sourceTransport,
     extensionTransport,
+    cancelled: () => attemptCancelled,
+    onSourceFailure: (cause) => jobLog.warn("source-fetch-failed", `code=${String(cause.code ?? cause.blocked_reason ?? "network")} retrying=extension-origin`),
+  });
+  const probeDecoder = createTileDecoder();
+  const probeSize = createProbeSize({
+    fetchTile: async (url: string, headers: Record<string, string>) => {
+      const result = await extensionTransport.fetchResource(url, {
+        headers,
+        purpose: "probe",
+        userIntent: true,
+      });
+      const bytes = result.bytes instanceof Uint8Array
+        ? new Uint8Array(result.bytes).slice().buffer as ArrayBuffer
+        : result.bytes as unknown as ArrayBuffer;
+      return { bytes };
+    },
+    decode: (bytes: ArrayBuffer) => probeDecoder.decode(bytes),
+    loadImage: (url: string) => new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({
+        ok: img.naturalWidth > 0 && img.naturalHeight > 0,
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      });
+      img.onerror = () => reject(new Error("probe image failed to load"));
+      img.src = url;
+    }),
+  });
+  controller = createEngineHost({
+    worker,
+    jobId: () => activeBinding.jobId,
+    fetchResource,
+    cancelFetch,
     get assembly() {
       if (!assembly) throw new Error("output assembly is not initialized");
       return assembly;
     },
+    // Browser session baseline: 6 concurrent tile fetches (matches the
+    // website). The engine validates the budget at job creation.
+    quotas: { max_concurrent_fetches: 6 },
+    probeSize,
     classifyFailure: engineFailure,
     onPermissionRequired: showAccessRequired,
-    onPartialDecision: showPartialDecision,
+    onRecoveryRequested: showPartialDecision,
     onHostFailure,
     onEvent: handleEvent,
     onUnsupportedEffect: (effect: unknown) => {
@@ -428,6 +489,15 @@ function startAttempt() {
       controller?.handleEngineMessages(messages);
     }
     else if (event.data?.type === "engine.ranked") ranked(event.data);
+    else if (event.data?.type === "engine.processed" || event.data?.type === "engine.process-failed") {
+      const requestId = typeof event.data.requestId === "number" ? event.data.requestId : -1;
+      const pending = pendingProcess.get(requestId);
+      if (pending) {
+        pendingProcess.delete(requestId);
+        if (event.data.type === "engine.processed" && event.data.bytes instanceof ArrayBuffer) pending.resolve(event.data.bytes);
+        else pending.reject(Object.assign(new Error("tile processing failed"), { code: "tile.processing-failed" }));
+      }
+    }
     else if (event.data?.type === "engine.log" && typeof event.data.line === "string") {
       uiLogLines.push(event.data.line);
       if (uiLogLines.length > UI_LOG_MAX_LINES) uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
