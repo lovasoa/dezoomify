@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { act } from "./react-dom.mjs";
+import { act, click } from "./react-dom.mjs";
 import { renderView, getPhaseForStatus } from "../packages/shared-ui/src/view.tsx";
 
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -353,3 +353,41 @@ test("CSS structural invariants prevent button clipping, container overflow, and
   assert.ok(css.includes("max-width: 560px") && css.includes("flex-direction: column"));
   assert.ok(css.includes("max-width: 380px"));
 });
+
+test("failed view offers retry only for retryable errors and start over only when the host can reset", () => {
+  const el = container();
+  const retryable = {
+    status: "failed",
+    seq: 1,
+    sessionId: "s1",
+    imageCount: 0,
+    transport: "direct",
+    error: { code: "transport.network-error", category: "transport", retryable: true, message: "The network failed." },
+  };
+  let retried = 0;
+  let resets = 0;
+  const withBoth = { ...callbacks, onReset: () => { resets += 1; }, onRetrySameUrl: () => { retried += 1; } };
+  render(el, retryable, withBoth);
+  const card = el.querySelector(".dz-card");
+  const retry = card.querySelector("#dz-btn-try-again");
+  assert.ok(retry, "retry offered for a retryable error");
+  assert.ok(card.querySelector("#dz-btn-start-over"), "start over offered when the host provides a reset");
+  click(retry);
+  assert.equal(retried, 1, "retry invokes onRetrySameUrl");
+  assert.equal(resets, 0, "retry never falls through to reset");
+
+  const nonRetryable = { ...retryable, seq: 2, error: { ...retryable.error, retryable: false } };
+  render(el, nonRetryable, withBoth);
+  assert.equal(card.querySelector("#dz-btn-try-again"), null, "no retry for a non-retryable error");
+  assert.ok(card.querySelector("#dz-btn-start-over"), "start over stays available");
+
+  const noReset = { onSubmitUrl: () => {}, onCancel: () => {}, onRetrySameUrl: () => { retried += 1; } };
+  render(el, nonRetryable, noReset);
+  assert.equal(card.querySelector("#dz-btn-try-again"), null);
+  assert.equal(card.querySelector("#dz-btn-start-over"), null, "no start over when the host cannot reset");
+  render(el, retryable, noReset);
+  assert.equal(card.querySelector("#dz-btn-start-over"), null, "retry-only host never shows start over");
+  click(card.querySelector("#dz-btn-try-again"));
+  assert.equal(retried, 2, "retry stays wired without a reset callback");
+});
+

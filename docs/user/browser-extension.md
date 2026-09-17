@@ -52,6 +52,14 @@ Install it from the
    fits in a browser tab. There is no list to pick from in the extension.
    For a different image or the full resolution, use the [desktop app](./desktop-app.md) or the [command-line tool](./command-line.md).
 
+## If something goes wrong
+
+A temporary failure shows **Try again** in the job tab. Pressing it reads the
+page again and restarts the job from the page's retained entries. If the
+message instead points to another fix, the problem is not temporary. There is
+no **Start over** in the extension: to work on a different image, open its page
+and press the Dezoomify toolbar button.
+
 ## What the extension does with your data
 
 - It only looks at the page you pointed it at, only after you pressed the

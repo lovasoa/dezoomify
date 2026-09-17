@@ -535,9 +535,11 @@ function DisplayOnlyView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: V
         </div>
       </div>
       <div className="dz-actions-row">
-        <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset()}>
-          {t("view.display.startOver")}
-        </button>
+        {callbacks.onReset ? (
+          <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset?.()}>
+            {t("view.display.startOver")}
+          </button>
+        ) : null}
         {handoffUrl !== "" ? (
           <a
             className="dz-btn-secondary"
@@ -653,9 +655,11 @@ function CompletedView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: Vie
             {t("view.done.saveNow")}
           </button>
         ) : null}
-        <button type="button" className="dz-btn-secondary" id="dz-btn-another" onClick={() => callbacks.onReset()}>
-          {t("view.done.another")}
-        </button>
+        {callbacks.onReset ? (
+          <button type="button" className="dz-btn-secondary" id="dz-btn-another" onClick={() => callbacks.onReset?.()}>
+            {t("view.done.another")}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -763,18 +767,22 @@ function FailedView({
         </div>
       </details>
       <div className="dz-actions-row">
-        <button
-          type="button"
-          className="dz-btn-tactile"
-          id="dz-btn-try-again"
-          style={{ minWidth: "140px" }}
-          onClick={() => (callbacks.onRetrySameUrl ?? callbacks.onReset)()}
-        >
-          {t("view.fail.retry")}
-        </button>
-        <button type="button" className="dz-btn-secondary" id="dz-btn-start-over" onClick={() => callbacks.onReset()}>
-          {t("view.display.startOver")}
-        </button>
+        {error.retryable && callbacks.onRetrySameUrl ? (
+          <button
+            type="button"
+            className="dz-btn-tactile"
+            id="dz-btn-try-again"
+            style={{ minWidth: "140px" }}
+            onClick={() => callbacks.onRetrySameUrl?.()}
+          >
+            {t("view.fail.retry")}
+          </button>
+        ) : null}
+        {callbacks.onReset ? (
+          <button type="button" className="dz-btn-secondary" id="dz-btn-start-over" onClick={() => callbacks.onReset?.()}>
+            {t("view.display.startOver")}
+          </button>
+        ) : null}
         {handoffUrl !== "" && !isFile ? (
           <a
             className="dz-btn-secondary"
@@ -814,9 +822,11 @@ function CancelledView({ callbacks }: { callbacks: ViewCallbacks }) {
       </h2>
       <p className="dz-notice-message">{t("view.cancel.message")}</p>
       <div className="dz-actions-row">
-        <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset()}>
-          {t("view.display.startOver")}
-        </button>
+        {callbacks.onReset ? (
+          <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset?.()}>
+            {t("view.display.startOver")}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -828,9 +838,11 @@ function GenericView({ state, callbacks }: { state: ControllerState; callbacks: 
       <p style={{ color: "var(--dz-text-secondary)" }}>
         Status: <strong>{state.status}</strong>
       </p>
-      <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset()}>
-        {t("view.generic.reset")}
-      </button>
+      {callbacks.onReset ? (
+        <button type="button" className="dz-btn-secondary" id="dz-btn-reset" onClick={() => callbacks.onReset?.()}>
+          {t("view.generic.reset")}
+        </button>
+      ) : null}
     </div>
   );
 }

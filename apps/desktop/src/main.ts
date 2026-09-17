@@ -2236,6 +2236,12 @@ function update() {
       onCopyDiagnostics(text: string) {
         handleCopyDiagnostics(() => `${text}\n\n${buildCopyDiagnostics(diagnosticsSnapshot())}`);
       },
+      onRetrySameUrl() {
+        // Re-run the last submitted address. `handleSubmitUrl` resets the
+        // terminal state first, so this is a true retry rather than a no-op.
+        const url = lastInputUrl || viewCtx.jobActivity?.url || "";
+        if (isValidInputUrl(url)) handleSubmitUrl(url);
+      },
       onReset() {
         handleReset();
       },

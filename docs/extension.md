@@ -10,10 +10,13 @@ tab monitoring.
 
 ## Discovery
 
-Scanning begins only after an explicit toolbar action. The icon is grey while
-idle and blue with a dot while the job is active. The source binding is
-invalidated on navigation, tab close, cancellation, or worker restart. The
-background never polls, enumerates tabs, or rearms a source operation.
+Scanning begins only after an explicit toolbar action or an explicit retry of
+a retryable failure in the job tab. The icon is grey while idle and blue with a
+dot while the job is active. The source binding is invalidated on navigation,
+tab close, cancellation, or worker restart. The background never polls or
+enumerates tabs. Each attempt, the first and every retry, takes exactly one
+bounded source snapshot; a retry discards any snapshot still in flight from the
+previous attempt and starts a new engine attempt.
 
 Candidates come from the monitored tab's own performance timeline. The
 background deliberately observes no traffic: a `webRequest` listener without
@@ -58,7 +61,10 @@ reads or serialization calls afterward.
 
 User-visible job failures stay in the job tab. Background failures keep an
 error badge and action title until the user clicks again or the source tab
-leaves the bound page.
+leaves the bound page. A retryable failure offers Retry in the job tab: pressing
+it takes a fresh snapshot of the bound page and starts a new attempt. The
+extension never offers Start over, because a new job begins from the page's
+toolbar button, not from an address entered in the job tab.
 
 ## Native handoff
 

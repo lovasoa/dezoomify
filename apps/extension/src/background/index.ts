@@ -15,7 +15,7 @@ type Message = Record<string, unknown> & { type?: string; requestId?: string; jo
 type CandidateSnapshot = { ok: true; documentUrl: string; urls: string[]; overflow: number };
 type CandidateBatch = { requestId: string; urls: string[]; overflow: number; documentUrl: string };
 type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; chunks?: Array<{ sequence: number; bytes: number[] }> };
-type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string>; primary: boolean };
+type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string>; primary: boolean };
 type BrowserApi = {
   action?: { setIcon?: (details: unknown) => Promise<void>; setBadgeText?: (details: unknown) => Promise<void>; onClicked?: { addListener?: (listener: (tab: BrowserTab) => void) => void } };
   tabs?: { sendMessage?: (tabId: number, message: unknown, options?: { frameId: number }) => Promise<unknown>; update?: (tabId: number, details: unknown) => Promise<unknown>; create?: (details: unknown) => Promise<BrowserTab>; onRemoved?: { addListener?: (listener: (tabId: number) => void) => void }; onUpdated?: { addListener?: (listener: (tabId: number, changeInfo: { url?: string }) => void) => void } };
@@ -139,6 +139,7 @@ async function restoreBindings() {
         typeof raw.documentGeneration !== "number" || typeof raw.jobTabId !== "number") continue;
       const entry: Entry = {
         jobId: raw.jobId, tabId: raw.tabId, frameId: raw.frameId, documentGeneration: raw.documentGeneration,
+        attemptGeneration: 0,
         jobTabId: raw.jobTabId, sourceUrl: typeof raw.sourceUrl === "string" ? raw.sourceUrl : "",
         sourceValid: false, jobActive: false, jobReady: false, jobRunning: false, heldCandidates: [],
         seenCandidates: new Set<string>(), snapshotCount: 0,
@@ -217,7 +218,7 @@ async function createJob(tab: BrowserTab) {
     return;
   }
   const entry: Entry = {
-    jobId, tabId, frameId: 0, documentGeneration: 0, jobTabId: jobTab.id, sourceUrl: tab.url,
+    jobId, tabId, frameId: 0, documentGeneration: 0, attemptGeneration: 0, jobTabId: jobTab.id, sourceUrl: tab.url,
     sourceValid: true, jobActive: true, jobReady: false, jobRunning: false, heldCandidates: [],
     seenCandidates: new Set<string>(), snapshotCount: 0, grantedOrigins: new Set<string>(), primary: true,
   };
@@ -321,11 +322,29 @@ function invalidateSourceDocument(entry: Entry, reason: string) {
   backgroundLog("info", "source-invalidated", `tab ${entry.tabId} ${reason}`);
 }
 
+/**
+ * Begin a fresh discovery attempt for the bound source document. Each attempt
+ * owns its candidate dedup and snapshot budget, so an explicit user retry
+ * re-sends the page's current candidates instead of reusing the previous
+ * attempt's dedup state. Snapshots already in flight from the prior attempt are
+ * discarded by the `attemptGeneration` guard in `requestCandidateSnapshot`.
+ */
+function startAttempt(entry: Entry) {
+  entry.attemptGeneration += 1;
+  entry.jobRunning = false;
+  entry.seenCandidates.clear();
+  entry.snapshotCount = 0;
+  backgroundLog("info", "attempt-started", `jobId=${entry.jobId} attempt=${entry.attemptGeneration}`);
+  void requestCandidateSnapshot(entry);
+}
+
 async function requestCandidateSnapshot(entry: Entry) {
   if (!sourceOperationAllowed(entry) || entry.snapshotCount >= MAX_SNAPSHOTS) return;
   entry.snapshotCount += 1;
+  const attempt = entry.attemptGeneration;
   try {
     const snapshot = await executeSourceOperation(entry, collectCandidates, [], "collect") as CandidateSnapshot | null;
+    if (!sourceOperationAllowed(entry) || entry.attemptGeneration !== attempt) return;
     if (!snapshot || snapshot.ok !== true || !Array.isArray(snapshot.urls) ||
       typeof snapshot.documentUrl !== "string" || !isPublicHttpUrl(snapshot.documentUrl) ||
       !Number.isSafeInteger(snapshot.overflow) || snapshot.overflow < 0 ||
@@ -340,7 +359,7 @@ async function requestCandidateSnapshot(entry: Entry) {
     backgroundLog("info", "active-tab-op-result", `op=collect tab=${entry.tabId} candidates=${snapshot.urls.length} overflow=${snapshot.overflow} doc=${snapshot.documentUrl}`);
     forwardCandidates(entry, snapshot);
   } catch (error) {
-    if (!sourceOperationAllowed(entry)) return;
+    if (!sourceOperationAllowed(entry) || entry.attemptGeneration !== attempt) return;
     entry.sourceValid = false;
     setBadge(entry.tabId, true, true);
     sendToJob(entry, "dz.job.binding", makeRequestId("source-snapshot-failed"), { sourceValid: false, code: "source-snapshot-failed" });
@@ -455,7 +474,7 @@ function wire() {
         backgroundLog("info", "binding-ready", `jobId=${entry.jobId} sourceValid=${entry.sourceValid} tab=${entry.tabId} frame=${entry.frameId} gen=${entry.documentGeneration}`);
         sendToJob(entry, "dz.job.binding", message.requestId, { sourceValid: entry.sourceValid, documentUrl: entry.sourceUrl });
         flushHeldCandidates(job);
-        void requestCandidateSnapshot(entry);
+        startAttempt(job);
       } else if (message.type === "dz.job.fetch" && entry.sourceValid && entry.jobActive) {
         (jobs.get(entry.jobId) ?? entry).jobRunning = true;
         void dispatchSourceFetch(entry, message);
@@ -463,6 +482,13 @@ function wire() {
         backgroundLog("debug", "job-message-rejected", `type=${message.type} request=${message.requestId} reason=inactive-source`);
       } else if (message.type === "dz.job.candidates-more" && entry.sourceValid && entry.jobActive) {
         void requestCandidateSnapshot(entry);
+      } else if (message.type === "dz.job.retry" && entry.sourceValid && entry.jobActive) {
+        // Explicit user retry of a retryable failure: take one fresh bounded
+        // snapshot of the bound source document and start a new attempt.
+        backgroundLog("info", "job-retry", `jobId=${entry.jobId} tab=${entry.tabId}`);
+        startAttempt(jobs.get(entry.jobId) ?? entry);
+      } else if (message.type === "dz.job.retry") {
+        backgroundLog("debug", "job-message-rejected", `type=${message.type} reason=inactive-source`);
       } else if (message.type === "dz.job.cancel") {
         backgroundLog("info", "job-cancelled", `jobId=${entry.jobId} tab=${entry.tabId}`);
         entry.jobRunning = false;

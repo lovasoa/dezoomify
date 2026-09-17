@@ -6,7 +6,7 @@ import type { ReactElement, ReactNode } from "react";
 export interface ViewCallbacks {
   onSubmitUrl(url: string): void;
   onCancel(): void;
-  onReset(): void;
+  onReset?(): void;
   onRetrySameUrl?(): void;
   onSave?(): void;
   onOpenOutput?(): void;
