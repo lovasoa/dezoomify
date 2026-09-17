@@ -188,7 +188,6 @@ fn inline_tile_services<'a>(
     script_blocks(html)
         .into_iter()
         .flat_map(|(_, script)| all_json::<RawInlineTileService>(script).collect::<Vec<_>>())
-        .take(MAX_INLINE_SERVICES)
         .filter_map(move |raw| {
             if !raw
                 .service_type
@@ -216,6 +215,7 @@ fn inline_tile_services<'a>(
                 tiles_url,
             })
         })
+        .take(MAX_INLINE_SERVICES)
 }
 
 /// Pyramid tile total using the same halving loop as the XML level builder,
@@ -790,6 +790,42 @@ mod tests {
         assert!(plan.tiles_row_major().next().unwrap().unwrap().request.uri.starts_with(
             "https://www.geographicus.com/mm5/graphics/00000001/zoomify/Cowboys-mora-1941-3/TileGroup0/"
         ));
+    }
+
+    #[test]
+    fn inline_service_survives_unrelated_json_objects_earlier_in_the_page() {
+        // Regression: the service cap must count matched services, never the
+        // unrelated JSON objects that real pages carry ahead of the viewer
+        // (geographicus.com ships dozens of analytics/bootstrap objects before
+        // its OpenSeadragon `tileSources` block).
+        let mut page = String::from("<html><body>");
+        page.extend((0..12).map(|index| {
+            format!("<script>var config{index} = {{type: \"other\", width: {index}, height: 1}};</script>")
+        }));
+        page.push_str(
+            r#"<script>
+                viewer = OpenSeadragon({ tileSources: [
+                  { type: "zoomifytileservice", width: 7066, height: 9380,
+                    tilesUrl: "/mm5/graphics/zoomify/Cowboys-mora-1941-3/", tileSize: 256 },
+                  { type: "zoomifytileservice", width: 3020, height: 5000,
+                    tilesUrl: "/mm5/graphics/zoomify/Cowboys-mora-1941-3-image2/", tileSize: 256 }
+                ] });</script></body></html>"#,
+        );
+        let mut operation = operation("https://www.geographicus.com/P/AntiqueMap/example");
+        let need = operation.missing_resources().unwrap().pop().unwrap();
+        operation
+            .provide(ResourceResponse::new(need.id, page.into_bytes()))
+            .unwrap();
+        assert!(
+            operation.missing_resources().unwrap().is_empty(),
+            "the inline config must complete discovery without fetching ImageProperties.xml"
+        );
+        let catalog = operation.finish().unwrap();
+        assert_eq!(catalog.len(), 2);
+        let CatalogEntry::Ready(first) = &catalog.entries()[0] else {
+            panic!("inline Zoomify sources must be ready");
+        };
+        assert_eq!(first.title.as_deref(), Some("Cowboys-mora-1941-3"));
     }
 
     #[test]

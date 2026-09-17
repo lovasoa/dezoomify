@@ -15,6 +15,7 @@ import {
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
 import type { ViewContext } from "../packages/shared-ui/src/view.tsx";
+import { describeFailure } from "../packages/shared-ui/src/failure.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
   SITE_BUSY_MESSAGE,
@@ -41,12 +42,10 @@ import {
 import {
   assertDeclaredSizeFitsBrowser,
   assertPlanFitsBrowser,
-  categoryFor,
   desktopHandoffLink,
   isAllowedSourceUrl,
   isLocalFileUrl,
   mapWorkerLimitExceeded,
-  phaseFor,
 } from "../packages/browser-runtime/src/plan-gates.ts";
 import { pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
@@ -572,10 +571,8 @@ async function runJob(url: string): Promise<void> {
       preview?: string;
     };
     const code = stableErrorCode(error);
-    const message = structured?.message || "Could not save this zoomable image.";
-    const detail = structured?.detail ?? structured?.technical;
     // The activity log is technical: prefer the dense chain over UI copy.
-    webLog.error("failed", `code=${code} message=${structured?.technical || message}`);
+    webLog.error("failed", `code=${code} message=${structured?.technical || structured?.message || code}`);
     // One-click desktop handoff (todo 5.5): too-large plans fail with the
     // `dezoomify://` link in the view context, so the failed view offers the
     // Send button with the origin/scope consent summary. Only http(s)
@@ -589,23 +586,22 @@ async function runJob(url: string): Promise<void> {
     }
     controller.dispatch(
       nextEvent("fail", {
-        error: {
+        // One shared presenter owns the headline/detail split and the stable
+        // classification; the website adds only its transport context.
+        error: describeFailure({
           code,
-          category: categoryFor(code),
-          retryable: structured?.retryable ?? code !== "NO_IMAGE_FOUND",
-          message,
+          engineDetail: structured?.detail ?? structured?.technical,
+          message: structured?.message,
+          retryable: structured?.retryable,
           // Tiles never use the metadata CORS proxy: a tile failure always
           // reports the direct browser fetch, even when the job's metadata
           // arrived through the proxy.
           transport: errorTransportFor(code, webFetcher.getActiveTransport()),
-          phase: phaseFor(code),
-          ...(detail ? { detail } : {}),
-          // Structured fetch context for the technical-details renderer:
-          // the full request URL is rendered verbatim, on-device only.
-          ...(structured?.url ? { url: structured.url } : {}),
-          ...(typeof structured?.http === "number" ? { http: structured.http } : {}),
-          ...(structured?.preview ? { preview: structured.preview } : {}),
-        },
+          host: hostOf(url),
+          url: structured?.url,
+          http: structured?.http,
+          preview: structured?.preview,
+        }),
       }) as never,
     );
     update();
