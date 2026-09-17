@@ -23,6 +23,7 @@ pub mod custom_yaml;
 pub mod dzi;
 pub mod fsi;
 pub mod generic;
+pub mod gigapan;
 pub mod google_arts_and_culture;
 pub mod hungaricana;
 pub mod iiif;

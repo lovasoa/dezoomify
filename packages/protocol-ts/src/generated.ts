@@ -14,6 +14,7 @@ export const FORMAT_GRID = [
   { id: "custom", displayName: "Custom tiles", powerUser: true },
   { id: "google_arts_and_culture", displayName: "Arts & Culture", powerUser: false },
   { id: "zoomify", displayName: "Zoomify", powerUser: false },
+  { id: "gigapan", displayName: "Gigapan", powerUser: false },
   { id: "iiif", displayName: "IIIF", powerUser: false },
   { id: "deepzoom", displayName: "Seadragon (Deep Zoom Image)", powerUser: false },
   { id: "generic", displayName: "Generic dezoomer", powerUser: false },

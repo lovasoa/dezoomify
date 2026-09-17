@@ -77,6 +77,14 @@ fn automatic_discovery_selects_every_ready_format() {
             "zoomify",
         ),
         (
+            "https://gigapan.com/gigapans/116906/",
+            &[ (
+                "https://gigapan.com/gigapans/116906/",
+                br#"<script>var gigapan = {"gigapan":{"id":116906,"name":"Machu Picchu","width":206996,"height":77069,"levels":11}};</script>"#,
+            ) ],
+            "gigapan",
+        ),
+        (
             "https://fixtures.test/iiif/info.json",
             &[ (
                 "https://fixtures.test/iiif/info.json",
