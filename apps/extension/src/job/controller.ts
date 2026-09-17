@@ -87,10 +87,24 @@ export function createJobController(deps: JobControllerDeps) {
     settled.add(request.id);
     const useSource = request.purpose === "metadata" || request.purpose === "probe";
     log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=${request.purpose} route=${useSource ? "source" : "extension"}`);
+    const extensionFetch = () => deps.extensionTransport.fetchResource(request.uri, { requestId: request.id, purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
     try {
-      const result = useSource
-        ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: request.id, uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose })
-        : await deps.extensionTransport.fetchResource(request.uri, { requestId: request.id, purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
+      let result: { bytes: Uint8Array; finalUrl?: string };
+      if (useSource) {
+        try {
+          result = await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: request.id, uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose });
+        } catch (sourceError) {
+          // The source-tab fetch is CORS-bound and only credential-safe
+          // same-origin. A source-context failure falls back to the
+          // independent extension-origin transport, which uses the session
+          // under an optional host grant (and pauses for that grant).
+          const cause = deps.classifyFailure(sourceError);
+          log("warn", "source-fetch-failed", `type=${effect.type} request=${request.id} code=${String(cause.code ?? cause.blocked_reason ?? "network")} retrying=extension-origin`);
+          result = await extensionFetch();
+        }
+      } else {
+        result = await extensionFetch();
+      }
       if (cancelled) return;
       log("debug", "effect-outcome", `type=${effect.type} request=${request.id} bytes=${result.bytes.byteLength}`);
       if (effect.type === "acquire-tile" && typeof effect.tile === "number" && effect.placement) {

@@ -47,9 +47,11 @@ protocol bindings are consumed by the entrypoints: `dz.source.fetch-chunk`,
 Extension-local outcomes categorize source-document loss, access required,
 redirect-policy limitations, cancellation, network and throttling failures,
 malformed responses, streaming limits, and native/channel disconnection.
-`access-required` pauses the job with host names and rationale; only a visible
-job-tab action can invoke the browser permission prompt. Automatic redirects
-are not retrospectively accepted as validated.
+A failed source-context fetch falls back to the independent extension-origin
+transport; an `access-required` outcome from that retry pauses the job with
+host names and rationale, and only a visible job-tab action can invoke the
+browser permission prompt. Automatic redirects are not retrospectively
+accepted as validated.
 
 ## Job-tab engine hosting
 

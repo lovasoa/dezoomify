@@ -152,6 +152,29 @@ test("metadata requests route through the source transport", async () => {
   assert.equal(seen[0][0], "source");
 });
 
+test("a failed source fetch retries through the extension-origin transport", async () => {
+  // `fetchSource` runs in the clicked tab's origin and is CORS-bound: a
+  // wildcard-CORS response rejects a credentialed request, and extension-only
+  // pages may block the source context entirely. The independent
+  // extension-origin transport (host-granted, not CORS-bound) must recover it.
+  const { controller, sent, seen } = harness({
+    sourceTransport: { async fetchResource() { throw Object.assign(new Error("cors"), { category: "network" }); } },
+  });
+  controller.handleEngineMessages([{
+    kind: "effect",
+    type: "acquire-resource",
+    effect: "fx:0",
+    request: { id: 0, uri: "https://cdn.test/info.json", headers: [], purpose: "metadata" },
+  }]);
+  await flush();
+  const fallback = seen.find(([kind]) => kind === "extension");
+  assert.equal(fallback?.[1], "https://cdn.test/info.json");
+  const bytes = sent.find((message) => message.type === "engine.bytes");
+  assert.equal(bytes?.requestId, 0);
+  assert.deepEqual([...bytes.bytes], [1, 2, 3]);
+  assert.equal(sent.some((message) => message.type === "engine.failure"), false);
+});
+
 test("controller traces core effects, events, and fetch outcomes", async () => {
   const { controller, sent, logs } = harness();
   controller.handleEngineMessages([

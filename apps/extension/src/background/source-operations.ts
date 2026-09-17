@@ -50,8 +50,11 @@ export function collectCandidates(): { ok: true; documentUrl: string; urls: stri
 
 /**
  * Fetch one engine-declared source request in the source tab's origin and
- * return only bounded, structured-cloneable data. Cookies/session credentials
- * are supplied by the browser; they are never part of this result.
+ * return only bounded, structured-cloneable data. Credentials default to
+ * same-origin: the page's session applies to its own origin, while public
+ * cross-origin metadata uses ordinary CORS instead of credentialed CORS.
+ * The coordinator retries a failed source request through the extension-origin
+ * transport. Cookies/session credentials are never part of this result.
  */
 export async function fetchSource(request: SourceRequest): Promise<FetchFailure | { ok: true; status: number; url: string; bytes: number; chunks: SourceChunk[] }> {
   const MAX_URL_LENGTH = 2048;
@@ -79,7 +82,7 @@ export async function fetchSource(request: SourceRequest): Promise<FetchFailure 
 
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   try {
-    const response = await fetch(parsed.href, { method, headers, credentials: "include", signal: controller?.signal });
+    const response = await fetch(parsed.href, { method, headers, signal: controller?.signal });
     const responseUrl = response?.url || parsed.href;
     let responseParsed;
     try { responseParsed = new URL(responseUrl); } catch { return fail("invalid-response"); }
