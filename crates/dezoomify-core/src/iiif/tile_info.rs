@@ -30,6 +30,10 @@ pub struct ImageInfo {
     #[serde(alias = "preferredFormats", skip_serializing_if = "Option::is_none")]
     pub formats: Option<Vec<String>>,
 
+    // Used in IIIF version 3:
+    #[serde(rename = "extraFeatures", skip_serializing_if = "Option::is_none")]
+    pub extra_features: Option<Vec<String>>,
+
     // Used in IIIF version 2 :
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tiles: Option<Vec<TileInfo>>,
@@ -116,6 +120,15 @@ impl ImageInfo {
         } else {
             TileSizeFormat::WidthHeight
         }
+    }
+
+    #[must_use]
+    pub fn supports_v3_size_upscaling(&self) -> bool {
+        self.iiif_type.as_deref() == Some("ImageService3")
+            && self
+                .extra_features
+                .as_ref()
+                .is_some_and(|features| features.iter().any(|feature| feature == "sizeUpscaling"))
     }
 
     #[must_use]

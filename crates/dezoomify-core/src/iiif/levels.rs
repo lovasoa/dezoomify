@@ -61,6 +61,7 @@ pub(crate) fn levels_from_info(
             let quality = Arc::from(img.best_quality());
             let format = Arc::from(img.best_format());
             let size_format = img.preferred_size_format();
+            let use_size_upscaling = img.supports_v3_size_upscaling();
             let page_info = Arc::clone(&img);
             let warnings = warnings.clone();
             tile_info
@@ -104,6 +105,7 @@ pub(crate) fn levels_from_info(
                         quality: Arc::clone(&quality),
                         format: Arc::clone(&format),
                         size_format,
+                        use_size_upscaling,
                     };
                     let source = Grid::new(
                         id.clone(),
@@ -133,6 +135,7 @@ struct IIIFLevel {
     quality: Arc<str>,
     format: Arc<str>,
     size_format: TileSizeFormat,
+    use_size_upscaling: bool,
 }
 
 impl IIIFLevel {
@@ -171,7 +174,8 @@ impl GridRequests for IIIFLevel {
             tile_size = TileSizeFormatter {
                 w: tile_size.x,
                 h: tile_size.y,
-                format: self.size_format
+                format: self.size_format,
+                use_size_upscaling: self.use_size_upscaling && self.scale_factor == 1,
             },
             rotation = 0,
             quality = self.quality,
@@ -231,10 +235,14 @@ struct TileSizeFormatter {
     w: u32,
     h: u32,
     format: TileSizeFormat,
+    use_size_upscaling: bool,
 }
 
 impl std::fmt::Display for TileSizeFormatter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.use_size_upscaling && self.format == TileSizeFormat::WidthHeight {
+            write!(f, "^")?;
+        }
         match self.format {
             TileSizeFormat::WidthHeight => write!(f, "{},{}", self.w, self.h),
             TileSizeFormat::Width => write!(f, "{},", self.w),
@@ -345,6 +353,56 @@ fn test_missing_id() {
             "http://test.com/0,0,512,350/512,350/0/default.jpg",
             "http://test.com/512,0,88,350/88,350/0/default.jpg"
         ]
+    );
+}
+
+#[test]
+fn v3_size_upscaling_prefixes_only_full_resolution_explicit_sizes() {
+    let data = br#"{
+      "type": "ImageService3",
+      "width": 512,
+      "height": 512,
+      "extraFeatures": ["sizeUpscaling"],
+      "tiles": [{ "width": 256, "scaleFactors": [1, 2] }]
+    }"#;
+    let levels = levels("https://example.com/image/info.json", data).unwrap();
+    assert_eq!(
+        tile_urls(level_with_scale(&levels, 1))[0],
+        "https://example.com/image/0,0,256,256/^256,256/0/default.jpg"
+    );
+    assert_eq!(
+        tile_urls(level_with_scale(&levels, 2))[0],
+        "https://example.com/image/0,0,512,512/256,256/0/default.jpg"
+    );
+}
+
+#[test]
+fn size_upscaling_does_not_change_width_only_or_v2_requests() {
+    let width_only = br#"{
+      "type": "ImageService3",
+      "width": 512,
+      "height": 512,
+      "profile": {"supports": ["sizeByW"]},
+      "extraFeatures": ["sizeByW", "sizeUpscaling"],
+      "tiles": [{ "width": 256, "scaleFactors": [1] }]
+    }"#;
+    let levels = levels("https://example.com/v3/info.json", width_only).unwrap();
+    assert_eq!(
+        tile_urls(level_with_scale(&levels, 1))[0],
+        "https://example.com/v3/0,0,256,256/256,/0/default.jpg"
+    );
+
+    let v2 = br#"{
+      "@type": "iiif:Image",
+      "width": 512,
+      "height": 512,
+      "extraFeatures": ["sizeUpscaling"],
+      "tiles": [{ "width": 256, "scaleFactors": [1] }]
+    }"#;
+    let levels = levels("https://example.com/v2/info.json", v2).unwrap();
+    assert_eq!(
+        tile_urls(level_with_scale(&levels, 1))[0],
+        "https://example.com/v2/0,0,256,256/256,256/0/default.jpg"
     );
 }
 
