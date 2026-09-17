@@ -2,7 +2,7 @@
 name: New site support
 about: Reporting a site that currently does not work with dezoomify
 title: "[new site support]"
-labels: new site support
+labels: new site support, unconfirmed
 assignees: lovasoa
 
 ---

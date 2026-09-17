@@ -73,19 +73,33 @@ test("static accessibility contract: live job region announces progress with a l
 
 test("static accessibility contract: failed view layers guidance with named recovery actions", () => {
   const el = makeContainer();
-  render(el, {
-    status: "failed",
-    seq: 1,
-    sessionId: "s1",
-    imageCount: 0,
-    transport: "direct",
-    error: { code: "X", category: "c", retryable: true, message: "No zoomable image could be found." },
-  });
+  render(
+    el,
+    {
+      status: "failed",
+      seq: 1,
+      sessionId: "s1",
+      imageCount: 0,
+      transport: "direct",
+      error: { code: "X", category: "c", retryable: true, message: "No zoomable image could be found." },
+    },
+    callbacks,
+    { sourceUrl: "https://museum.example.org/viewer?page=1" },
+  );
   const card = el.querySelector(".dz-card");
   assert.ok((card.querySelector("#dz-error-message").textContent || "").length > 0, "error message slot is populated");
   assertButtonsNamed(card, "failed");
-  const report = card.querySelector(".dz-diagnostics-report");
+  const report = card.querySelector(".dz-diagnostics-report a");
   assert.ok(report, "bug-report path stays reachable from the failed view");
+  const href = report.getAttribute("href") || "";
+  const parsed = new URL(href);
+  assert.equal(`${parsed.origin}${parsed.pathname}`, "https://github.com/lovasoa/dezoomify/issues/new");
+  assert.equal(parsed.searchParams.get("labels"), "new site support,unconfirmed");
+  assert.ok((parsed.searchParams.get("title") || "").startsWith("[new site support]"), "issue title is prefilled");
+  const body = parsed.searchParams.get("body") || "";
+  assert.ok(body.includes("https://museum.example.org/viewer?page=1"), "body carries the source address");
+  assert.ok(body.includes("No zoomable image could be found."), "body carries the engine error");
+  assert.ok(body.includes("code:X"), "body carries the diagnostics code line");
 });
 
 test("native completion opens saved output without browser save guidance", () => {

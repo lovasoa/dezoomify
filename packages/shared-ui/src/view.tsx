@@ -26,7 +26,7 @@ import type {
 } from "./view-types.ts";
 import {
   defaultStepFor, displaySourceUrl, errorDiagnosticsText, handoffOriginFor,
-  hostFromUrl, isFileHandoffSource,
+  hostFromUrl, isFileHandoffSource, reportIssueUrl,
 } from "./view-helpers.ts";
 
 export { getPhaseForStatus } from "./view-types.ts";
@@ -683,6 +683,7 @@ function FailedView({
   const isFile = isFileHandoffSource(source);
   const origin = isFile ? "" : handoffOriginFor(handoffUrl, source);
   const label = origin !== "" ? t("view.handoff.sendOrigin", { origin }) : t("view.handoff.send");
+  const reportHref = reportIssueUrl({ source, error, activityLog: activityLogText(ctx) });
   const hostDoc = globalThis.document;
   return (
     <div className="dz-view-body dz-error-section dz-fade-in">
@@ -754,7 +755,7 @@ function FailedView({
         ) : null}
         <div className="dz-diagnostics-report">
           <a
-            href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md"
+            href={reportHref}
             target="_blank"
             rel="noopener"
           >

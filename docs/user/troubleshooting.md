@@ -112,11 +112,13 @@ and the [desktop app](./desktop-app.md).
 
 - Disable other browser extensions and try once more; some of them
   interfere with Dezoomify.
-- If you believe Dezoomify should support this site,
-  [open an issue](https://github.com/lovasoa/dezoomify/issues) with the
-  address of the page, the exact error message, and your browser's name and
-  version. A screenshot helps too. Leave out anything private: no
-  passwords, no cookies, no signed-in addresses with tokens in them.
+- If you believe Dezoomify should support this site, use the report link on
+  the error screen. It opens GitHub with the page address and technical
+  details already filled in; review the draft, then add your browser's name
+  and version and a screenshot. Leave out anything private: no passwords, no
+  cookies, no signed-in addresses with tokens in them. You can also
+  [open an issue](https://github.com/lovasoa/dezoomify/issues) yourself with
+  the same details.
 
 Support is free and done by volunteers; a precise report gets answered much
 faster.
