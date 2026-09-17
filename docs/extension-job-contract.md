@@ -48,9 +48,11 @@ Extension-local outcomes categorize source-document loss, access required,
 redirect-policy limitations, cancellation, network and throttling failures,
 malformed responses, streaming limits, and native/channel disconnection.
 A failed source-context fetch falls back to the independent extension-origin
-transport; an `access-required` outcome from that retry pauses the job with
-host names and rationale, and only a visible job-tab action can invoke the
-browser permission prompt. Automatic redirects are not retrospectively
+transport; a missing-grant (`permission-denied`) outcome from that retry
+pauses the job with host names and rationale, and only a visible job-tab
+action can invoke the browser permission prompt. A granted-origin 401/403 is
+an upstream refusal, not a missing grant: it fails typed without pausing.
+Automatic redirects are not retrospectively
 accepted as validated.
 
 ## Job-tab engine hosting

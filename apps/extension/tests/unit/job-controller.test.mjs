@@ -92,7 +92,7 @@ test("an access grant re-drives the paused acquisition instead of failing the jo
     extensionTransport: {
       async fetchResource() {
         attempts += 1;
-        if (attempts === 1) throw Object.assign(new Error("grant required"), { category: "access-required", hosts: ["https://cdn.test"] });
+        if (attempts === 1) throw Object.assign(new Error("grant required"), { category: "access-required", code: "permission-denied", hosts: ["https://cdn.test"] });
         return { bytes: new Uint8Array([1]) };
       },
       cancel() {},
@@ -110,6 +110,36 @@ test("an access grant re-drives the paused acquisition instead of failing the jo
   await flush();
   assert.equal(attempts, 2);
   assert.ok(sent.some((message) => message.type === "engine.bytes"));
+});
+
+test("a granted-origin refusal fails the engine instead of pausing for permission", async () => {
+  // Regression: an upstream 403 under an existing grant re-prompted for the
+  // same host in a loop. It must surface as one engine failure instead.
+  const sent = [];
+  const retried = [];
+  const refused = createJobController({
+    worker: { postMessage: (message) => sent.push(message) },
+    binding: () => BINDING,
+    sourceTransport: { async fetchResource() { throw new Error("not used"); } },
+    extensionTransport: {
+      async fetchResource() {
+        throw Object.assign(new Error("forbidden; the site refused this file"), {
+          category: "forbidden", code: "forbidden", hosts: ["https://cdn.test"], status: 403,
+        });
+      },
+      cancel() {},
+    },
+    assembly: fakeAssembly(),
+    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.forbidden", retryable: false }),
+    onPermissionRequired: (detail) => retried.push(detail),
+    onPartialDecision() {}, onHostFailure() {}, onEvent() {}, onUnsupportedEffect() {},
+  });
+  refused.handleEngineMessages([TILE_EFFECT]);
+  await flush();
+  assert.equal(retried.length, 0, "an upstream refusal must never prompt for permission");
+  const failure = sent.find((message) => message.type === "engine.failure");
+  assert.ok(failure, "refusal was reported to the engine");
+  assert.equal(failure.requestId, 0);
 });
 
 test("metadata requests route through the source transport", async () => {

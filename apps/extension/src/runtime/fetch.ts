@@ -11,7 +11,7 @@
 export const PROXY_PATH = "/api/proxy";
 export const MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 30_000;
-type TransportCategory = "source-document-lost"|"access-required"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded";
+type TransportCategory = "source-document-lost"|"access-required"|"forbidden"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded";
 type Purpose = "metadata" | "tile" | "probe";
 type HeaderSource = Headers | Record<string, string> | Array<{ name?: unknown; value?: unknown }>;
 type FetchResponse = Response & { bytes?: Uint8Array; durationMs?: number };
@@ -23,7 +23,7 @@ type FetchDeps = {
   clearTimeoutFn?: typeof clearTimeout;
 };
 
-/** @typedef {"source-document-lost"|"access-required"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded"} TransportCategory */
+/** @typedef {"source-document-lost"|"access-required"|"forbidden"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded"} TransportCategory */
 
 /** Headers the core may safely ask a browser fetch to forward. */
 export const CORE_REQUEST_HEADERS = Object.freeze([
@@ -225,7 +225,10 @@ export function createExtensionFetcher(deps: FetchDeps) {
       if (response.url && response.url !== parsed.href) throw transportError("redirect-unavailable", "redirect permission cannot be validated automatically");
       if (response.status === 429) throw transportError("throttled", withSignal("site is throttling requests", await errorSignal(response)));
       if (response.status === 401 || response.status === 403) {
-        throw transportError("access-required", withSignal(response.status === 401 ? "unauthorized; access cannot be requested automatically" : "forbidden; access cannot be requested automatically", await errorSignal(response)), { hosts: [origin] });
+        // The host grant is already held (checked above): this is an upstream
+        // refusal by the site, not a missing browser permission. It must never
+        // pause for another grant, or the job re-prompts in a loop.
+        throw transportError("forbidden", withSignal(response.status === 401 ? "unauthorized; the site refused this file" : "forbidden; the site refused this file", await errorSignal(response)), { hosts: [origin], status: response.status });
       }
       if (response.status < 200 || response.status >= 300) throw transportError("network", withSignal(`request failed with HTTP ${response.status}`, await errorSignal(response)));
       const contentType = headerValue(response.headers);
