@@ -41,7 +41,6 @@ const MAX_HEADER_VALUE_LENGTH = 4096;
 const MAX_FETCH_CHUNK_BYTES = 32 * 1024;
 const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
 
-export const BACKGROUND_LOG_LEVELS = LOG_LEVELS;
 export const BACKGROUND_LOG_MAX_CHARS = LOG_MAX_CHARS;
 const backgroundLogger = createLogger("background");
 

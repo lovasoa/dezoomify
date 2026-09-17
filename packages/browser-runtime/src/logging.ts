@@ -17,7 +17,7 @@
 export const LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
 export type LogLevel = keyof typeof LOG_LEVELS;
 export const LOG_MAX_CHARS = 500;
-export const DEFAULT_LOG_CONTEXT = "background";
+const DEFAULT_LOG_CONTEXT = "background";
 
 export interface LogEntry {
   context: string;
@@ -29,7 +29,7 @@ export interface LogEntry {
 export type LogSink = (entry: LogEntry) => void;
 
 /** Bound a logged detail to one line-friendly string. */
-export function formatDetail(detail: unknown): string {
+function formatDetail(detail: unknown): string {
   if (detail === undefined || detail === null) return "";
   if (typeof detail === "string") return detail;
   try { if (typeof detail === "object") return JSON.stringify(detail) ?? ""; } catch { /* fall through */ }
@@ -55,7 +55,6 @@ export interface Logger {
   setSink(sink: unknown): void;
   /** Observe accepted entries without displacing the console sink. */
   addSink(sink: LogSink): void;
-  levels: typeof LOG_LEVELS;
 }
 
 export function createLogger(context: string, options: LoggerOptions = {}): Logger {
@@ -99,6 +98,5 @@ export function createLogger(context: string, options: LoggerOptions = {}): Logg
     setLevel,
     setSink,
     addSink,
-    levels: LOG_LEVELS,
   };
 }
