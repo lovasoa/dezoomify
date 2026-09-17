@@ -95,9 +95,9 @@ use, see [browser extension](user/browser-extension.md).
 ## Diagnostics
 
 Every extension context logs structured console lines
-(`[dezoomify:<context>] <level> <code> <detail>`): `background` (the
+(`[dezoomify:<context>] [<code> ]<detail>`): `background` (the
 coordinator/service worker), `job` (the dedicated job tab), and `worker` (the
-WASM session worker). The three contexts together trace each interaction with
+WASM session worker). The console method carries the level. The three contexts together trace each interaction with
 the active tab (`toolbar-click`, `active-tab-op-start`/`active-tab-op-result`
 for the finite `scripting.executeScript()` operations, `source-fetch-*`,
 `permission-check`, `source-invalidated`) and each interaction with the core

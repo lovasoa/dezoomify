@@ -65,7 +65,7 @@ test("logging is bounded and a throwing sink cannot interrupt coordinator work",
   const seen = [];
   mod.setBackgroundLogSink((entry) => seen.push(entry));
   mod.backgroundLog("info", "test", "x".repeat(5000));
-  assert.ok(seen[0].line.length <= "[dezoomify:background] info test ".length + mod.BACKGROUND_LOG_MAX_CHARS + 1);
+  assert.ok(seen[0].line.length <= "[dezoomify:background] test ".length + mod.BACKGROUND_LOG_MAX_CHARS + 1);
 });
 
 test("coordinator logs active-tab and job-bus interactions", async () => {
