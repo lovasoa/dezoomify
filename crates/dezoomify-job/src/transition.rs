@@ -78,8 +78,6 @@ pub enum JobCommand {
     SelectLevel {
         level: u32,
     },
-    DestinationGranted,
-    DestinationDenied,
     TileOutcome {
         tile: u32,
         ok: bool,
@@ -90,10 +88,14 @@ pub enum JobCommand {
         width: u64,
         height: u64,
     },
-    RetryReady,
-    PartialChoice {
+    RecoveryChoice {
         generation: u32,
-        keep: bool,
+        choice: RecoveryChoice,
+    },
+    FinalizationSucceeded,
+    FinalizationFailed {
+        code: String,
+        message: String,
     },
     Cancel,
     Pause,
@@ -101,9 +103,10 @@ pub enum JobCommand {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DecisionReason {
-    Destination,
-    Partial,
+pub enum RecoveryChoice {
+    Keep,
+    Retry,
+    Discard,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,59 +126,29 @@ pub enum JobEffect {
         canvas: Option<Vec2d>,
         probe: bool,
     },
-    RequestDestination {
-        format: String,
-    },
-    DecodePixels {
-        tile: u32,
-    },
-    OpenEncoder {
+    FinalizeOutput {
+        partial: bool,
         format: String,
         canvas: Option<Vec2d>,
     },
-    FinalizeEncoder,
-    PublishOutput,
-    ReleaseBytes,
     CancelWork,
     RequestDecision {
         generation: u32,
-        reason: DecisionReason,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JobEvent {
-    State {
-        state: crate::State,
-    },
-    Catalog {
-        catalog: CatalogDto,
-    },
-    Levels {
-        image: u32,
-        levels: Vec<u32>,
-    },
-    Progress {
-        acquired: u64,
-        total: u64,
-    },
-    Warning {
-        tile: u32,
-        attempt: u32,
-    },
-    MissingWork {
-        failed: Vec<u32>,
-    },
-    RecoveryRequested {
-        generation: u32,
-        reason: DecisionReason,
-    },
+    State { state: crate::State },
+    Catalog { catalog: CatalogDto },
+    Levels { image: u32, levels: Vec<u32> },
+    Progress { acquired: u64, total: u64 },
+    Warning { tile: u32, attempt: u32 },
+    MissingWork { failed: Vec<u32> },
+    RecoveryRequested { generation: u32 },
     Completed,
     PartialCompleted,
-    Failed {
-        code: String,
-        message: String,
-    },
+    Failed { code: String, message: String },
     Cancelled,
     Paused,
     Resumed,

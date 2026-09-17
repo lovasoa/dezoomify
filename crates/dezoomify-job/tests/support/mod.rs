@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use dezoomify_job::{
-    Config, DecisionReason, Job, JobCommand, JobEffect, JobError, JobEvent, JobMessageBody, Outcome,
+    Config, Job, JobCommand, JobEffect, JobError, JobEvent, JobMessageBody, Outcome,
 };
 
 /// Recognizable Deep Zoom input URL: the registry's deepzoom candidate
@@ -233,24 +233,16 @@ fn effect_json(seq: u32, effect: JobEffect) -> serde_json::Value {
             }
             value
         }
-        JobEffect::RequestDestination { format } => {
-            serde_json::json!({"kind":"request-destination","seq":seq,"format":format})
+        JobEffect::FinalizeOutput {
+            partial,
+            format,
+            canvas,
+        } => {
+            serde_json::json!({"kind":"finalize-output","seq":seq,"partial":partial,"format":format,"canvas":canvas.map(|v| serde_json::json!({"x":v.x,"y":v.y}))})
         }
-        JobEffect::DecodePixels { tile } => {
-            serde_json::json!({"kind":"decode-pixels","seq":seq,"tile":tile})
-        }
-        JobEffect::OpenEncoder { format, canvas } => {
-            serde_json::json!({"kind":"open-encoder","seq":seq,"format":format,"canvas":canvas.map(|v| serde_json::json!({"x":v.x,"y":v.y}))})
-        }
-        JobEffect::FinalizeEncoder => serde_json::json!({"kind":"finalize-encoder","seq":seq}),
-        JobEffect::PublishOutput => {
-            serde_json::json!({"kind":"publish-output","seq":seq,"output":"out:0"})
-        }
-        JobEffect::ReleaseBytes => serde_json::json!({"kind":"release-bytes","seq":seq}),
         JobEffect::CancelWork => serde_json::json!({"kind":"cancel-work","seq":seq}),
-        JobEffect::RequestDecision { generation, reason } => serde_json::json!({
+        JobEffect::RequestDecision { generation } => serde_json::json!({
             "kind":"request-decision","seq":seq,"generation":generation,
-            "reason": match reason { DecisionReason::Destination => "destination", DecisionReason::Partial => "partial" },
         }),
     }
 }
@@ -275,13 +267,12 @@ fn event_json(seq: u32, event: JobEvent) -> serde_json::Value {
         JobEvent::MissingWork { failed } => {
             serde_json::json!({"kind":"missing-work","seq":seq,"failed":failed})
         }
-        JobEvent::RecoveryRequested { generation, reason } => serde_json::json!({
+        JobEvent::RecoveryRequested { generation } => serde_json::json!({
             "kind":"recovery-requested","seq":seq,"generation":generation,
-            "reason":match reason { DecisionReason::Destination => "destination", DecisionReason::Partial => "partial" },
         }),
-        JobEvent::Completed => serde_json::json!({"kind":"completed","seq":seq,"output":"out:0"}),
+        JobEvent::Completed => serde_json::json!({"kind":"completed","seq":seq}),
         JobEvent::PartialCompleted => {
-            serde_json::json!({"kind":"partial-completed","seq":seq,"output":"out:0"})
+            serde_json::json!({"kind":"partial-completed","seq":seq})
         }
         JobEvent::Failed { code, message } => {
             serde_json::json!({"kind":"failed","seq":seq,"code":code,"message":message})
@@ -311,12 +302,10 @@ fn format_effect(value: &serde_json::Value) -> (u64, String) {
     let kind = str_field(value, "kind").unwrap_or_else(|| "-".to_string());
     let corr = match kind.as_str() {
         "acquire-resource" => str_field(value, "request"),
-        "acquire-tile" | "decode-pixels" => str_field(value, "tile"),
-        "publish-output" => str_field(value, "output"),
-        "request-decision" => str_field(value, "recovery"),
-        _ => str_field(value, "effect"),
+        "acquire-tile" => str_field(value, "tile"),
+        "request-decision" => str_field(value, "generation"),
+        _ => None,
     }
-    .or_else(|| str_field(value, "effect"))
     .unwrap_or_else(|| "-".to_string());
     (seq, format!("effect:{kind}:{corr}:seq:{seq}"))
 }

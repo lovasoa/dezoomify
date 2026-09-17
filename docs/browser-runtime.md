@@ -21,22 +21,20 @@ browser execution:
   request headers. Hosts decode during acquisition (the native model), so a
   tile that cannot decode fails its acquisition outcome and flows through
   the engine's retry and partial policy.
-- `decode-pixels` verifies the held decoded tile; tile bytes never cross
-  the effect (the wasm adapter releases its arena copy when the tile
-  outcome settles).
-- `open-encoder` carries the output format and declared canvas size; the
+- `finalize-output` carries the partial marker, output format, and declared
+  canvas size. Within that awaited operation the
   host validates actual dimensions and area before allocating the surface
   and fails typed (`PLAN_INVALID` with a desktop handoff) beyond the
   browser limits. Undeclared sizes are derived from the accumulated
   placements.
-- `finalize-encoder` draws every held tile at its planned placement and at
+- The host draws every held tile at its planned placement and at
   1:1 pixel scale. Decoded pixels beyond the planned extent are cropped from
   the right and bottom (as required by padded edge tiles); undersized tiles
   leave their uncovered region empty. It then closes the bitmaps
   deterministically and encodes the surface.
-- `publish-output` persists the encoded output exactly once (blob anchor
-  save; no `downloads` permission).
-- `release-bytes` closes every host-retained per-tile resource.
+- The host persists the encoded output exactly once (blob anchor save; no
+  `downloads` permission), releases resources, and replies with typed success
+  or failure. A tainted display-only canvas skips encoding.
 
 Processing recipes beyond `none` are not executable by the engine-host
 assembly yet and fail typed (`TILE_PROCESSING_UNAVAILABLE`) instead of

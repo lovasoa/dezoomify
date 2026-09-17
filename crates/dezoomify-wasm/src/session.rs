@@ -25,17 +25,12 @@
 //!   buffers forward a failed `TileOutcome` (the engine retries).
 //! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request) or a
 //!   failed `TileOutcome` (tile request).
-//! * Decisions: `SelectImage`, `SelectLevel`, `DestinationResponse`,
-//!   `RetryReady`, and `PartialChoice` map 1:1 onto engine responses.
-//!   `PartialChoice` must reference the outstanding numeric decision generation.
-//! * Codec outcome commands (`ProvideDecodeOutcome`, …) are accepted as
-//!   acknowledged no-ops: this engine does not await them.
-//! * `decode-pixels`/`open-encoder`/`finalize-encoder`/`publish-output`
-//!   carry the placement and output geometry the host needs to assemble
-//!   (the tile placement arrived with the acquisition effect; the encoder
-//!   effect carries the format and declared canvas). `release-bytes`
-//!   instructs the host to close its own retained per-tile resources
-//!   (decoded bitmaps, surfaces).
+//! * Decisions: `SelectImage`, `SelectLevel`, and `RecoveryChoice` map 1:1
+//!   onto engine responses. `RecoveryChoice` must reference the outstanding
+//!   numeric decision generation.
+//! * `FinalizationSucceeded` and `FinalizationFailed` complete the one
+//!   awaited `finalize-output` effect.
+//! * `CancelWork` instructs the host to close its own retained resources.
 //!
 //! Engine resources beyond this model are engine limitations, not adapter
 //! limits: byte lengths pass through, never fabricated. Probe-driven
@@ -50,13 +45,14 @@ use crate::codec::{decode_envelope, encode_envelope};
 use crate::error::{redact, AdapterError, AdapterErrorCode};
 use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_job::{
-    DecisionReason, Job as EngineJob, JobCommand as EngineCommand, JobEffect as EngineEffect,
+    Job as EngineJob, JobCommand as EngineCommand, JobEffect as EngineEffect,
     JobError as EngineJobError, JobEvent as EngineEvent, JobMessageBody, Outcome,
+    RecoveryChoice as EngineRecoveryChoice,
 };
 use dezoomify_protocol::dto::{
     negotiate_version, ControlBody, ControlEnvelope, ErrorDto, ErrorPhase, HeaderDto, HostEffect,
-    JobCommand, JobEvent, PointDto, RecoveryAction, RecoveryKind, RequestDto, RequestPurpose,
-    SizeDto, TilePlacementDto,
+    JobCommand, JobEvent, PointDto, RecoveryAction, RecoveryChoice, RecoveryKind, RequestDto,
+    RequestPurpose, SizeDto, TilePlacementDto,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -86,16 +82,10 @@ pub enum SessionState {
     Discovering,
     AwaitingImageSelection,
     AwaitingLevelSelection,
-    AwaitingDestination,
     Planning,
     AcquiringTiles,
-    ProcessingTiles,
     AwaitingPartialDecision,
-    AwaitingRecovery,
-    Encoding,
     Finalizing,
-    Publishing,
-    CleaningUp,
     Cancelling,
     Completed,
     PartiallyCompleted,
@@ -112,16 +102,10 @@ impl SessionState {
             Self::Discovering => "Discovering",
             Self::AwaitingImageSelection => "AwaitingImageSelection",
             Self::AwaitingLevelSelection => "AwaitingLevelSelection",
-            Self::AwaitingDestination => "AwaitingDestination",
             Self::Planning => "Planning",
             Self::AcquiringTiles => "AcquiringTiles",
-            Self::ProcessingTiles => "ProcessingTiles",
             Self::AwaitingPartialDecision => "AwaitingPartialDecision",
-            Self::AwaitingRecovery => "AwaitingRecovery",
-            Self::Encoding => "Encoding",
             Self::Finalizing => "Finalizing",
-            Self::Publishing => "Publishing",
-            Self::CleaningUp => "CleaningUp",
             Self::Cancelling => "Cancelling",
             Self::Completed => "Completed",
             Self::PartiallyCompleted => "PartiallyCompleted",
@@ -146,16 +130,10 @@ impl SessionState {
             S::Discovering => Self::Discovering,
             S::AwaitingImageSelection => Self::AwaitingImageSelection,
             S::AwaitingLevelSelection => Self::AwaitingLevelSelection,
-            S::AwaitingDestination => Self::AwaitingDestination,
             S::Planning => Self::Planning,
             S::AcquiringTiles => Self::AcquiringTiles,
-            S::ProcessingTiles => Self::ProcessingTiles,
             S::AwaitingPartialDecision => Self::AwaitingPartialDecision,
-            S::AwaitingRecovery => Self::AwaitingRecovery,
-            S::Encoding => Self::Encoding,
             S::Finalizing => Self::Finalizing,
-            S::Publishing => Self::Publishing,
-            S::CleaningUp => Self::CleaningUp,
             S::Cancelling => Self::Cancelling,
             S::Completed => Self::Completed,
             S::PartiallyCompleted => Self::PartiallyCompleted,
@@ -364,8 +342,8 @@ impl Session {
         self.disposed = true;
         if let Some(job) = self.job.as_mut() {
             if !job.is_terminal() {
-                // The engine owns the cancellation lifecycle (cancel-work,
-                // release-bytes, terminal events); collect it best-effort so
+                // The engine owns the cancellation lifecycle (cancel-work
+                // and terminal events); collect it best-effort so
                 // hosts always observe cancellation even on a full queue.
                 let _ = job.on_command(EngineCommand::Cancel);
                 let forced = self.absorb();
@@ -477,45 +455,28 @@ impl Session {
             }
             JobCommand::SelectImage { image } => self.forward(EngineCommand::SelectImage { image }),
             JobCommand::SelectLevel { level } => self.forward(EngineCommand::SelectLevel { level }),
-            JobCommand::DestinationResponse { granted } => {
-                let response = if granted {
-                    EngineCommand::DestinationGranted
-                } else {
-                    EngineCommand::DestinationDenied
-                };
-                self.forward(response)
-            }
-            JobCommand::RetryReady => self.forward(EngineCommand::RetryReady),
-            JobCommand::PartialChoice {
-                generation,
-                keep_partial,
-            } => {
+            JobCommand::RecoveryChoice { generation, choice } => {
                 if self.pending_recovery != Some(generation) {
                     return Err(AdapterError::new(
                         AdapterErrorCode::WrongState,
-                        "partial choice does not match the outstanding recovery",
+                        "recovery choice does not match the outstanding recovery",
                     ));
                 }
-                self.forward(EngineCommand::PartialChoice {
+                self.forward(EngineCommand::RecoveryChoice {
                     generation,
-                    keep: keep_partial,
+                    choice: match choice {
+                        RecoveryChoice::Keep => EngineRecoveryChoice::Keep,
+                        RecoveryChoice::Retry => EngineRecoveryChoice::Retry,
+                        RecoveryChoice::Discard => EngineRecoveryChoice::Discard,
+                    },
                 })
             }
-            // Codec outcomes: the lean engine does not await them; accept and
-            // acknowledge so richer replays do not diverge.
-            JobCommand::ProvideDecodeOutcome { .. }
-            | JobCommand::ProvideProcessOutcome { .. }
-            | JobCommand::ProvideWriteOutcome { .. }
-            | JobCommand::ProvideEncodeOutcome { .. }
-            | JobCommand::ProvideFinalizeOutcome { .. }
-            | JobCommand::ProvidePublicationOutcome { .. } => {
-                if self.state.is_terminal() {
-                    return Err(AdapterError::new(
-                        AdapterErrorCode::WrongState,
-                        format!("command not accepted in state {}", self.state.as_str()),
-                    ));
-                }
-                Ok(())
+            JobCommand::FinalizationSucceeded => self.forward(EngineCommand::FinalizationSucceeded),
+            JobCommand::FinalizationFailed { error } => {
+                self.forward(EngineCommand::FinalizationFailed {
+                    code: error.code,
+                    message: error.message,
+                })
             }
         }
     }
@@ -795,22 +756,20 @@ impl Session {
                     },
                 }
             }
-            EngineEffect::RequestDestination { format } => {
-                HostEffect::RequestDestination { format }
-            }
-            EngineEffect::DecodePixels { tile } => HostEffect::DecodePixels { tile },
-            EngineEffect::OpenEncoder { format, canvas } => HostEffect::OpenEncoder {
+            EngineEffect::FinalizeOutput {
+                partial,
+                format,
+                canvas,
+            } => HostEffect::FinalizeOutput {
+                partial,
                 format,
                 canvas: canvas.map(|size| SizeDto {
                     width: u64::from(size.x),
                     height: u64::from(size.y),
                 }),
             },
-            EngineEffect::FinalizeEncoder => HostEffect::FinalizeEncoder,
-            EngineEffect::PublishOutput => HostEffect::PublishOutput,
-            EngineEffect::ReleaseBytes => HostEffect::ReleaseBytes,
             EngineEffect::CancelWork => HostEffect::CancelWork,
-            EngineEffect::RequestDecision { generation, .. } => {
+            EngineEffect::RequestDecision { generation } => {
                 self.pending_recovery = Some(generation);
                 HostEffect::RequestDecision { generation }
             }
@@ -843,11 +802,8 @@ impl Session {
                 error.retryable = true;
                 JobEvent::Warning { error }
             }
-            EngineEvent::RecoveryRequested { generation, reason } => {
-                let scope = match reason {
-                    DecisionReason::Destination => "destination",
-                    DecisionReason::Partial => "partial",
-                };
+            EngineEvent::RecoveryRequested { generation } => {
+                let scope = "partial";
                 JobEvent::RecoveryRequest {
                     generation,
                     actions: vec![RecoveryAction {

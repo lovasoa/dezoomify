@@ -17,8 +17,8 @@
 //! * `levels` → legacy `choose_level` rule over declared sizes (exact index,
 //!   then largest, then the width+height filter, else the largest area),
 //!   replying `SelectedLevel`.
-//! * `request-destination` → [`validate_destination`] + overwrite policy,
-//!   replying `DestinationGranted`/`DestinationDenied`.
+//! * `finalize-output` → [`validate_destination`] + output writing,
+//!   replying with one typed success or failure.
 //! * `acquire-tile{probe:true}` → [`probe_tile_bytes`], replying
 //!   `ProbeOutcome` with observed geometry.
 //! * `acquire-tile` → [`fetch_and_decode_cached`] under the job's concurrency
@@ -30,19 +30,12 @@
 //!   fails the tile immediately with no refetch (first attempt only).
 //!   With `PipelineConfig::cache_dir` set, tile bodies persist under the job
 //!   namespace and later runs skip refetching tiles whose bytes still decode.
-//! * `decode-pixels`/`open-encoder`/`finalize-encoder` → acknowledged from
-//!   the tiles already decoded during acquisition (encoders run one-shot).
-//!   Encoded-tile passthrough is intentionally not ported: the engine plans
-//!   one level and reports decoded-tile outcomes only, so no encoded bytes
-//!   or source-pyramid levels ever reach the runtime and the protocol has
-//!   no encoded-tile effect. `.zif` output re-encodes the assembled canvas
-//!   at every pyramid resolution instead (see [`OutputFormat::Zif`]).
-//! * `publish-output` → canvas-limit check, assemble with [`blit_onto`],
+//! * `finalize-output` → canvas-limit check, assemble with [`blit_onto`],
 //!   encode per the inferred [`OutputFormat`] (PNG at the configured deflate
 //!   tier, JPEG at quality `100 - compression`, single-image TIFF or ZIF
 //!   pyramid deflate-compressed at the configured level, lossless WebP,
 //!   or an `iiif-dir` tile
-//! * `release-bytes`/`cancel-work` → drop decoded buffers; no output is
+//! * `cancel-work` → drop decoded buffers; no output is
 //!   written on the cancel path.
 //! * `request-decision{partial}` → [`PartialPolicy`]: fail (discard, honest
 //!   `tile.download-failed`) or keep (blank missing regions, marked
@@ -76,7 +69,7 @@ use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_core::core::model::{ProcessingRecipe, Request};
 use dezoomify_core::Vec2d;
 use dezoomify_job::{
-    Config as JobConfig, DecisionReason, Job, JobCommand, JobEffect, JobEvent, JobMessageBody,
+    Config as JobConfig, Job, JobCommand, JobEffect, JobEvent, JobMessageBody, RecoveryChoice,
     State as JobState,
 };
 
@@ -446,7 +439,7 @@ struct Attempt<'a> {
     overwrite: bool,
     format: OutputFormat,
     /// When present, derive the output file name from the selected catalog
-    /// title immediately before satisfying the engine destination effect.
+    /// title immediately before finalizing output.
     auto_output_dir: Option<PathBuf>,
     /// Resume cache as `(cache_dir, job_namespace)`; always set (the cache
     /// is on by default, see [`crate::pipeline::effective_cache_dir`]).
@@ -474,7 +467,6 @@ struct Attempt<'a> {
     throttle_last: Option<Instant>,
     failure: Option<(String, String)>,
     published: Option<Published>,
-    destination_error: Option<NativeError>,
     recovery_attempts: u32,
     cancel_sent: bool,
     /// Pause v1 demonstration ran once (`--pause-after`): prevents repeat
@@ -531,7 +523,6 @@ fn drive_job(
         throttle_last: None,
         failure: None,
         published: None,
-        destination_error: None,
         recovery_attempts: 0,
         cancel_sent: false,
         pause_demonstrated: false,
@@ -671,16 +662,10 @@ fn drive_job(
                 missing: published.missing,
             }))
         }
-        Some("cancelled") => {
-            if let Some(error) = attempt.destination_error {
-                Err(error)
-            } else {
-                Err(NativeError::new(
-                    "job.cancelled",
-                    "job cancelled before completion",
-                ))
-            }
-        }
+        Some("cancelled") => Err(NativeError::new(
+            "job.cancelled",
+            "job cancelled before completion",
+        )),
         Some("failed") => {
             let (code, message) = attempt.failure.unwrap_or_else(|| {
                 (
@@ -703,7 +688,12 @@ fn drive_job(
                     ));
                 }
             }
-            Err(NativeError::new(map_failure_code(&code), message))
+            let native_code = if code.starts_with("job.") {
+                map_failure_code(&code).to_string()
+            } else {
+                code
+            };
+            Err(NativeError::new(native_code, message))
         }
         _ => Err(NativeError::new(
             "native.internal",
@@ -892,7 +882,7 @@ fn execute_effects(
                     tiles.push(need);
                 }
             }
-            JobEffect::RequestDestination { .. } => {
+            JobEffect::FinalizeOutput { .. } => {
                 if let Some(output_dir) = attempt.auto_output_dir.as_deref() {
                     let title = attempt
                         .selected_image
@@ -903,72 +893,78 @@ fn execute_effects(
                 }
                 match validate_destination(&attempt.output_path, &attempt.format, attempt.overwrite)
                 {
-                    Ok(()) => reply(job, JobCommand::DestinationGranted)?,
+                    Ok(()) => match publish(attempt) {
+                        Ok(()) => reply(job, JobCommand::FinalizationSucceeded)?,
+                        Err(error) => reply(
+                            job,
+                            JobCommand::FinalizationFailed {
+                                code: error.code,
+                                message: error.message,
+                            },
+                        )?,
+                    },
                     Err(error) => {
-                        attempt.destination_error = Some(error);
-                        reply(job, JobCommand::DestinationDenied)?;
+                        reply(
+                            job,
+                            JobCommand::FinalizationFailed {
+                                code: error.code,
+                                message: error.message,
+                            },
+                        )?;
                     }
                 }
             }
-            JobEffect::RequestDecision { generation, reason } => {
-                if reason == DecisionReason::Partial {
-                    let Some(decision) = await_partial_choice(attempt, generation) else {
+            JobEffect::RequestDecision { generation } => {
+                let Some(decision) = await_partial_choice(attempt, generation) else {
+                    if let Some(gate) = attempt.partial_gate.clone() {
+                        gate.clear_pending();
+                    }
+                    let _ = job.on_command(JobCommand::Cancel);
+                    attempt.cancel_sent = true;
+                    continue;
+                };
+                match decision {
+                    PartialDecision::Retry => {
+                        attempt.pending_missing.clear();
                         if let Some(gate) = attempt.partial_gate.clone() {
                             gate.clear_pending();
                         }
-                        let _ = job.on_command(JobCommand::Cancel);
-                        attempt.cancel_sent = true;
-                        continue;
-                    };
-                    match decision {
-                        PartialDecision::Retry => {
-                            attempt.pending_missing.clear();
-                            if let Some(gate) = attempt.partial_gate.clone() {
-                                gate.clear_pending();
-                            }
-                            attempt.recovery_attempts = attempt.recovery_attempts.saturating_add(1);
-                            reply(job, JobCommand::RetryReady)?;
-                        }
-                        PartialDecision::Keep => {
-                            if let Some(gate) = attempt.partial_gate.clone() {
-                                gate.clear_pending();
-                            }
-                            reply(
-                                job,
-                                JobCommand::PartialChoice {
-                                    generation,
-                                    keep: true,
-                                },
-                            )?;
-                        }
-                        PartialDecision::Discard => {
-                            if let Some(gate) = attempt.partial_gate.clone() {
-                                gate.clear_pending();
-                            }
-                            reply(
-                                job,
-                                JobCommand::PartialChoice {
-                                    generation,
-                                    keep: false,
-                                },
-                            )?;
-                        }
+                        attempt.recovery_attempts = attempt.recovery_attempts.saturating_add(1);
+                        reply(
+                            job,
+                            JobCommand::RecoveryChoice {
+                                generation,
+                                choice: RecoveryChoice::Retry,
+                            },
+                        )?;
                     }
-                } else {
-                    attempt.recovery_attempts += 1;
-                    if attempt.recovery_attempts > 1 {
-                        let _ = job.on_command(JobCommand::Cancel);
-                        attempt.cancel_sent = true;
-                    } else {
-                        reply(job, JobCommand::RetryReady)?;
+                    PartialDecision::Keep => {
+                        if let Some(gate) = attempt.partial_gate.clone() {
+                            gate.clear_pending();
+                        }
+                        reply(
+                            job,
+                            JobCommand::RecoveryChoice {
+                                generation,
+                                choice: RecoveryChoice::Keep,
+                            },
+                        )?;
+                    }
+                    PartialDecision::Discard => {
+                        if let Some(gate) = attempt.partial_gate.clone() {
+                            gate.clear_pending();
+                        }
+                        reply(
+                            job,
+                            JobCommand::RecoveryChoice {
+                                generation,
+                                choice: RecoveryChoice::Discard,
+                            },
+                        )?;
                     }
                 }
             }
-            JobEffect::DecodePixels { .. }
-            | JobEffect::OpenEncoder { .. }
-            | JobEffect::FinalizeEncoder => {}
-            JobEffect::PublishOutput => publish(attempt)?,
-            JobEffect::ReleaseBytes | JobEffect::CancelWork => attempt.decoded.clear(),
+            JobEffect::CancelWork => attempt.decoded.clear(),
         }
     }
     if !tiles.is_empty() {

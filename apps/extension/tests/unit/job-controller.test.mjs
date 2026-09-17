@@ -237,22 +237,16 @@ test("coordinator source fetches name the engine request on the extension bus", 
 test("lifecycle effects and events run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
   controller.handleEngineMessages([
-    { kind: "effect", type: "request-destination", effect: "fx:1", format: "png" },
-    { kind: "event", type: "job-state", state: "AwaitingDestination" },
-    { kind: "effect", type: "decode-pixels", effect: "fx:6", tile: 0 },
-    { kind: "effect", type: "open-encoder", effect: "fx:10", format: "png", canvas: { width: 32, height: 32 } },
-    { kind: "effect", type: "finalize-encoder", effect: "fx:11" },
-    { kind: "effect", type: "publish-output", effect: "fx:12", output: "out:0" },
-    { kind: "effect", type: "release-bytes", effect: "fx:13" },
-    { kind: "event", type: "completed", output: "out:0" },
+    { kind: "effect", type: "finalize-output", partial: false, format: "png", canvas: { width: 32, height: 32 } },
+    { kind: "event", type: "completed" },
   ]);
   await flush();
   await flush();
   const kinds = assembly.calls.map(([kind]) => kind);
-  assert.deepEqual(kinds, ["decodePixels", "openEncoder", "finalizeEncoder", "publishOutput", "release"]);
-  assert.deepEqual(assembly.calls[1], ["openEncoder", "png", { width: 32, height: 32 }]);
-  const destination = sent.find((message) => message.type === "engine.command");
-  assert.deepEqual(destination.command, { type: "destination-response", granted: true });
+  assert.deepEqual(kinds, ["openEncoder", "finalizeEncoder", "publishOutput", "release"]);
+  assert.deepEqual(assembly.calls[0], ["openEncoder", "png", { width: 32, height: 32 }]);
+  const finalized = sent.find((message) => message.type === "engine.command");
+  assert.deepEqual(finalized.command, { type: "finalization-succeeded" });
 });
 
 test("partial decisions surface the engine decision generation", async () => {
@@ -269,16 +263,14 @@ test("host execution failures are terminal: render, cancel, skip the rest", asyn
   assembly.openEncoder = () => { throw Object.assign(new Error("too large"), { code: "PLAN_INVALID" }); };
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
-    { kind: "effect", type: "open-encoder", effect: "fx:10", format: "png", canvas: { width: 99999, height: 99999 } },
-    { kind: "effect", type: "finalize-encoder", effect: "fx:11" },
-    { kind: "event", type: "completed", output: "out:0" },
+    { kind: "effect", type: "finalize-output", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
   ]);
   await flush();
   await flush();
   const failure = seen.find(([kind]) => kind === "host-failure");
   assert.ok(failure, "host failure surfaced");
-  const cancel = sent.map((message) => message.command?.type).filter(Boolean);
-  assert.equal(cancel.includes("cancel"), true);
+  const commands = sent.map((message) => message.command?.type).filter(Boolean);
+  assert.deepEqual(commands, ["finalization-failed"]);
   // The failed chain never reaches finalize or the completed event.
   assert.equal(assembly.calls.some(([kind]) => kind === "finalizeEncoder"), false);
   assert.equal(seen.some(([kind]) => kind === "event"), false);
@@ -292,7 +284,7 @@ test("selection commands and partial choices use positional correlation", async 
   const commands = sent.map((message) => message.command);
   assert.deepEqual(commands[0], { type: "select-image", image: 1 });
   assert.deepEqual(commands[1], { type: "select-level", level: 2 });
-  assert.deepEqual(commands[2], { type: "partial-choice", generation: 0, keep_partial: true });
+  assert.deepEqual(commands[2], { type: "recovery-choice", generation: 0, choice: "keep" });
 });
 
 test("disposal releases assembly resources exactly once", async () => {

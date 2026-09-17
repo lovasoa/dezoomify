@@ -143,25 +143,23 @@ export function createJobController(deps: JobControllerDeps) {
    */
   async function runLifecycle(envelope: EngineEnvelope) {
     switch (envelope.type) {
-      case "request-destination":
-        // The browser destination (blob anchor save) is always grantable.
-        sendToEngine({ type: "engine.command", command: { type: "destination-response", granted: true } });
-        return;
-      case "decode-pixels":
-        if (typeof envelope.tile !== "number") throw new Error("decode-pixels is missing its tile ordinal");
-        deps.assembly.decodePixels(envelope.tile);
-        return;
-      case "open-encoder":
-        deps.assembly.openEncoder(String(envelope.format), envelope.canvas);
-        return;
-      case "finalize-encoder":
-        await deps.assembly.finalizeEncoder();
-        return;
-      case "publish-output":
-        deps.assembly.publishOutput();
-        return;
-      case "release-bytes":
-        deps.assembly.release();
+      case "finalize-output":
+        try {
+          deps.assembly.openEncoder(String(envelope.format), envelope.canvas);
+          await deps.assembly.finalizeEncoder();
+          deps.assembly.publishOutput();
+          deps.assembly.release();
+          sendToEngine({ type: "engine.command", command: { type: "finalization-succeeded" } });
+        } catch (error) {
+          const failure = deps.classifyFailure(error);
+          deps.onHostFailure(error);
+          sendToEngine({ type: "engine.command", command: { type: "finalization-failed", error: {
+            code: typeof failure.code === "string" ? failure.code : "output.failed",
+            phase: "output",
+            retryable: false,
+            message: typeof failure.message === "string" ? failure.message : "output finalization failed",
+          } } });
+        }
         return;
       case "request-decision":
         deps.onPartialDecision(Number(envelope.generation));
@@ -195,7 +193,10 @@ export function createJobController(deps: JobControllerDeps) {
       if (message.kind === "effect") {
         log("debug", "effect-received", `type=${message.type}${message.tile !== undefined ? ` tile=${message.tile}` : ""}`);
         if (message.type === "acquire-resource" || message.type === "acquire-tile") void acquire(message);
-        else if (message.type === "cancel-work") deps.extensionTransport.cancel();
+        else if (message.type === "cancel-work") {
+          deps.extensionTransport.cancel();
+          deps.assembly.release();
+        }
         else enqueue(() => runLifecycle(message));
       } else {
         // Events pass through the same chain so terminal events never
@@ -212,7 +213,7 @@ export function createJobController(deps: JobControllerDeps) {
     start(inputUrl: string) { sendToEngine({ type: "engine.start", jobId: deps.binding().jobId, inputUrl }); },
     selectImage(image: number) { sendToEngine({ type: "engine.command", command: { type: "select-image", image } }); },
     selectLevel(level: number) { sendToEngine({ type: "engine.command", command: { type: "select-level", level } }); },
-    choosePartial(generation: number, keepPartial: boolean) { sendToEngine({ type: "engine.command", command: { type: "partial-choice", generation, keep_partial: keepPartial } }); },
+    choosePartial(generation: number, keepPartial: boolean) { sendToEngine({ type: "engine.command", command: { type: "recovery-choice", generation, choice: keepPartial ? "keep" : "discard" } }); },
     resolvePermission(granted: boolean) {
       const pending = [...waitingForPermission.entries()];
       waitingForPermission.clear();

@@ -319,14 +319,6 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     session
         .dispatch(&command_bytes(JobCommand::SelectLevel { level: 9 }))
         .expect("select level");
-    assert_eq!(session.state().as_str(), "AwaitingDestination");
-    session.drain_messages();
-
-    session
-        .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            granted: true,
-        }))
-        .expect("grant destination");
     assert_eq!(session.state().as_str(), "AcquiringTiles");
     let acquisition = session.drain_messages();
     let mut tile_requests = Vec::new();
@@ -344,15 +336,18 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
             .dispatch(&provide_resource_bytes(&session, JOB_A, handle, request))
             .unwrap_or_else(|e| panic!("tile {index} bytes accepted: {e:?}"));
     }
-    assert_eq!(session.state().as_str(), "Completed");
-    let messages = session.drain_messages();
+    assert_eq!(session.state().as_str(), "Finalizing");
+    let mut messages = session.drain_messages();
+    session
+        .dispatch(&command_bytes(JobCommand::FinalizationSucceeded))
+        .expect("finalization succeeds");
+    messages.extend(session.drain_messages());
     let decoded = decode_all(&messages);
     match &decoded.last().expect("messages").body {
         ControlBody::Event(JobEvent::Completed) => {}
         other => panic!("expected completed, got {other:?}"),
     }
-    // The engine emitted progress and release effects; tile buffers were
-    // released by the adapter on release-bytes.
+    // The engine emitted progress and one finalization effect.
     assert!(messages
         .iter()
         .any(|m| String::from_utf8_lossy(m).contains("progress")));
@@ -598,11 +593,6 @@ fn late_sibling_discovery_response_is_ignored_after_job_advances() {
         .dispatch(&command_bytes(JobCommand::SelectLevel { level: 9 }))
         .expect("select level");
     session.drain_messages();
-    session
-        .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            granted: true,
-        }))
-        .expect("grant destination");
     assert_eq!(session.state().as_str(), "AcquiringTiles");
 
     let late_handle = seal(&mut session, b"late sibling response");
@@ -643,11 +633,6 @@ fn basic_success_transcript_matches_golden() {
     session
         .dispatch(&command_bytes(JobCommand::SelectLevel { level: 9 }))
         .expect("select level");
-    session
-        .dispatch(&command_bytes(JobCommand::DestinationResponse {
-            granted: true,
-        }))
-        .expect("grant destination");
     transcript.extend(session.drain_messages());
 
     let mut tile_requests = Vec::new();
@@ -664,6 +649,10 @@ fn basic_success_transcript_matches_golden() {
             .expect("tile bytes accepted");
         transcript.extend(session.drain_messages());
     }
+    session
+        .dispatch(&command_bytes(JobCommand::FinalizationSucceeded))
+        .expect("finalization succeeds");
+    transcript.extend(session.drain_messages());
 
     let actual: Vec<serde_json::Value> = transcript
         .iter()
