@@ -220,6 +220,7 @@ fn effect_json(seq: u32, effect: JobEffect) -> serde_json::Value {
             expected_size,
             canvas,
             probe,
+            probe_output,
         } => {
             let mut value = serde_json::json!({
                 "kind": "acquire-tile", "seq": seq, "tile": tile, "uri": uri,
@@ -230,6 +231,9 @@ fn effect_json(seq: u32, effect: JobEffect) -> serde_json::Value {
             });
             if probe {
                 value["probe"] = serde_json::Value::Bool(true);
+            }
+            if probe_output {
+                value["probe_output"] = serde_json::Value::Bool(true);
             }
             value
         }

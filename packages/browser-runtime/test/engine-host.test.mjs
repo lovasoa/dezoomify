@@ -73,6 +73,21 @@ test("probe effects report measurements without retaining tiles", async () => {
   assert.equal(assembly.calls.some(([kind]) => kind === "acquireTile"), false);
 });
 
+test("probe-and-output effects retain readable bytes for final assembly", async () => {
+  const bytes = new ArrayBuffer(8);
+  const { controller, sent, assembly } = harness({
+    probeSize: async () => ({ ok: true, width: 256, height: 128, bytes }),
+  });
+  controller.handleEngineMessages([{
+    ...TILE,
+    placement: { ...TILE.placement, probe_output: true },
+    request: { id: 8, uri: "https://cdn.test/p.jpg", headers: {}, purpose: "probe" },
+  }]);
+  await flush();
+  assert.deepEqual(assembly.calls[0], ["acquireTile", 0, { ...TILE.placement, probe_output: true }, bytes]);
+  assert.equal(sent.find((message) => message.type === "engine.probe")?.ok, true);
+});
+
 test("unreadable ordinary tiles fall back to display-only and memoize the origin", async () => {
   let fetches = 0;
   let loads = 0;

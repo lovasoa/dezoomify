@@ -125,6 +125,7 @@ pub enum JobEffect {
         expected_size: Option<Vec2d>,
         canvas: Option<Vec2d>,
         probe: bool,
+        probe_output: bool,
     },
     FinalizeOutput {
         partial: bool,

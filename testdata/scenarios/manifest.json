@@ -1502,6 +1502,18 @@
     },
     {
       "content_type": "application/json",
+      "id": "rs-core/formats/payloads/dezoomify-core/testdata/coverage/iiif/bruun-rasmussen-info.json",
+      "license_provenance": "GPL-3.0-only (Rust regression fixture)",
+      "path": "rs-core/formats/payloads/dezoomify-core/testdata/coverage/iiif/bruun-rasmussen-info.json",
+      "sensitive": false,
+      "served_urls": [],
+      "sha256": "3fb785cb5884c14e3f7c00d919417795de02be227f37a62d06293dbcf073074c",
+      "size": 562,
+      "source_path": "Bruun-Rasmussen IIIF metadata shape",
+      "source_snapshot": "https://bruun-rasmussen.dk/m/lots/B7651D2E4677/images/1"
+    },
+    {
+      "content_type": "application/json",
       "id": "rs-core/formats/payloads/dezoomify-core/testdata/coverage/iiif/cantaloupe-sizes-info.json",
       "license_provenance": "GPL-3.0-only (Rust source)",
       "path": "rs-core/formats/payloads/dezoomify-core/testdata/coverage/iiif/cantaloupe-sizes-info.json",

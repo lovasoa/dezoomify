@@ -138,6 +138,9 @@ pub struct TilePlacementDto {
     pub expected_size: Option<SizeDto>,
     pub canvas: Option<SizeDto>,
     pub processing: String,
+    /// Whether a successful probe is also part of the final output plan.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub probe_output: bool,
 }
 
 /// Out-of-band byte buffer: JSON references the handle, never base64 bytes.

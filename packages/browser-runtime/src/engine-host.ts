@@ -71,7 +71,13 @@ export interface EngineHostDeps {
   /** Optional job-budget overrides forwarded to the session at start. */
   quotas?: Record<string, unknown>;
   /** Measure one probe tile (shared probe helper). */
-  probeSize(url: string, headers: Record<string, string>): Promise<{ ok: boolean; width: number; height: number }>;
+  probeSize(url: string, headers: Record<string, string>): Promise<{
+    ok: boolean;
+    width: number;
+    height: number;
+    bytes?: ArrayBuffer;
+    image?: TileImageLike;
+  }>;
   /**
    * Load one tile as an ordinary image element for display-only fallback.
    * Absent: no display fallback (failed acquisitions fail the engine).
@@ -223,13 +229,27 @@ export function createEngineHost(deps: EngineHostDeps) {
     const request = effect.request;
     if (!request || !Number.isSafeInteger(request.id) || request.id < 0 || settled.has(request.id)) return;
     settled.add(request.id);
-    // Probe effects resolve planning geometry only: measure the tile and
-    // report the observation. They never retain bitmaps or placements.
+    // Probe effects resolve planning geometry. Probe-and-output effects also
+    // retain the successful tile so the resolved plan does not fetch it again.
     if (effect.type === "acquire-tile" && request.purpose === "probe") {
       log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=probe route=probe`);
       try {
         const size = await deps.probeSize(request.uri, headerRecord(request.headers));
         if (cancelled) return;
+        const probeOutput = (effect.placement as { probe_output?: unknown } | undefined)?.probe_output === true;
+        if (size.ok && probeOutput && typeof effect.tile === "number" && effect.placement) {
+          if (size.bytes) {
+            await deps.assembly.acquireTile(effect.tile, effect.placement, size.bytes);
+          } else if (size.image) {
+            deps.assembly.acquireDisplayTile(effect.tile, effect.placement, size.image);
+          } else {
+            // An available probe-and-output observation must be retainable;
+            // otherwise the core would correctly skip a tile the host lost.
+            size.ok = false;
+            size.width = 0;
+            size.height = 0;
+          }
+        }
         log("debug", "effect-outcome", `type=${effect.type} request=${request.id} probe-ok=${size.ok} size=${size.width}x${size.height}`);
         if (!cancelled) {
           sendToEngine({ type: "engine.probe", requestId: request.id, ok: size.ok, width: size.width, height: size.height });

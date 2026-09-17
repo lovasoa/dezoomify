@@ -602,6 +602,7 @@ pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> Stri
 
 pub(crate) struct ProbeRead {
     pub observation: ObservationResult,
+    pub decoded: Option<DecodedTile>,
 }
 
 pub(crate) fn probe_tile_bytes(
@@ -613,6 +614,7 @@ pub(crate) fn probe_tile_bytes(
 ) -> ProbeRead {
     let missing = || ProbeRead {
         observation: ObservationResult::Missing,
+        decoded: None,
     };
     let mut request = Request::new(uri);
     request.headers = headers.clone();
@@ -626,14 +628,19 @@ pub(crate) fn probe_tile_bytes(
     let Ok(bytes) = processing.apply(outcome.body) else {
         return missing();
     };
-    match image::load_from_memory(&bytes) {
-        Ok(decoded) => ProbeRead {
+    match load_image_with_metadata(&bytes) {
+        Ok(loaded) => ProbeRead {
             observation: ObservationResult::Available {
                 size: Vec2d {
-                    x: decoded.width(),
-                    y: decoded.height(),
+                    x: loaded.image.width(),
+                    y: loaded.image.height(),
                 },
             },
+            decoded: Some(DecodedTile {
+                image: loaded.image.to_rgba8(),
+                icc_profile: loaded.icc_profile,
+                exif_metadata: loaded.exif_metadata,
+            }),
         },
         Err(_) => missing(),
     }

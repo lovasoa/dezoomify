@@ -11,7 +11,7 @@ use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeC
 use dezoomify_core::core::discovery::{
     DiscoveryError, DiscoveryOperation, FetchCause, ResourceFailure, ResourceResponse,
 };
-use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe};
+use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe, TileRole};
 use dezoomify_core::core::registry::{default_registry, registry_for};
 use dezoomify_core::core::tile_plan::TileSource;
 use dezoomify_core::Vec2d;
@@ -74,6 +74,8 @@ pub struct Job {
     /// Pending probe continuation; exactly one probe is in flight.
     probe: Option<ProbeContinuation>,
     probe_tile: Option<u32>,
+    probe_output: bool,
+    retained_probe: Option<(u32, Vec2d)>,
     probes_emitted: u32,
     recovery_reason: Option<String>,
     pending_decision: Option<u32>,
@@ -150,6 +152,8 @@ impl Job {
             probe_tiles: HashSet::new(),
             probe: None,
             probe_tile: None,
+            probe_output: false,
+            retained_probe: None,
             probes_emitted: 0,
             recovery_reason: None,
             pending_decision: None,
@@ -648,9 +652,12 @@ impl Job {
     /// Advance the core probe step machine by one step.
     fn drive_probe(&mut self, step: DiscoverableStep) -> Result<(), JobError> {
         match step {
-            DiscoverableStep::Resolved { grid, .. } => {
+            DiscoverableStep::Resolved {
+                grid,
+                previously_output,
+            } => {
                 let canvas = Some(grid.image_size());
-                self.plan_from_tiles(grid.tiles_row_major(), canvas)
+                self.plan_from_tiles_reusing(grid.tiles_row_major(), canvas, &previously_output)
             }
             DiscoverableStep::Empty => self.fail_via_cleanup(
                 "job.plan-empty",
@@ -668,13 +675,20 @@ impl Job {
                         format!("probe count exceeds max_tiles {}", self.config.max_tiles),
                     );
                 }
-                let wire = self.next_probe;
-                self.next_probe = self
-                    .next_probe
-                    .checked_add(1)
-                    .ok_or_else(|| JobError::overflow("probe id"))?;
+                let probe_output = tile.role == TileRole::ProbeAndOutput;
+                let wire = if probe_output {
+                    tile.ordinal
+                } else {
+                    let wire = self.next_probe;
+                    self.next_probe = self
+                        .next_probe
+                        .checked_add(1)
+                        .ok_or_else(|| JobError::overflow("probe id"))?;
+                    wire
+                };
                 self.probe = Some(continuation);
                 self.probe_tile = Some(wire);
+                self.probe_output = probe_output;
                 self.probe_tiles.insert(wire);
                 self.tile_uris.insert(wire, tile.request.uri.clone());
                 self.tile_headers.insert(wire, tile.request.headers.clone());
@@ -683,10 +697,27 @@ impl Job {
                 self.tile_destinations.insert(wire, tile.destination);
                 self.tile_extents.insert(wire, tile.expected_size);
                 self.in_flight.insert(wire);
-                self.push_acquire_tile(wire, true)?;
+                self.push_acquire_tile(wire, true, probe_output)?;
                 Ok(())
             }
         }
+    }
+
+    fn plan_from_tiles_reusing(
+        &mut self,
+        tiles: impl Iterator<
+            Item = Result<
+                dezoomify_core::core::model::TileSpec,
+                dezoomify_core::core::tile_plan::TileSourceError,
+            >,
+        >,
+        canvas: Option<Vec2d>,
+        previously_output: &[Vec2d],
+    ) -> Result<(), JobError> {
+        self.retained_probe = self
+            .retained_probe
+            .filter(|(_, destination)| previously_output.contains(destination));
+        self.plan_from_tiles(tiles, canvas)
     }
 
     /// Shared transition from a complete plan into bounded acquisition.
@@ -699,12 +730,25 @@ impl Job {
         self.pending_tiles = self.planned_tiles.clone();
         self.in_flight.clear();
         self.acquired_tiles.clear();
+        if let Some((tile, destination)) = self.retained_probe.take() {
+            if self.planned_tiles.contains(&tile)
+                && self.tile_destinations.get(&tile) == Some(&destination)
+            {
+                self.pending_tiles.retain(|value| *value != tile);
+                self.acquired_tiles.insert(tile);
+            }
+        }
+        let acquired = self.acquired_tiles.len() as u64;
         self.set_state(State::AcquiringTiles)?;
-        self.push_event(JobEvent::Progress { acquired: 0, total })?;
+        self.push_event(JobEvent::Progress { acquired, total })?;
         self.push_event(JobEvent::State {
             state: State::AcquiringTiles,
         })?;
-        self.emit_pending_tiles()?;
+        if self.acquired_tiles.len() == self.planned_tiles.len() {
+            self.complete_remaining(false)?;
+        } else {
+            self.emit_pending_tiles()?;
+        }
         Ok(())
     }
 
@@ -815,7 +859,17 @@ impl Job {
         } else {
             ObservationResult::Missing
         };
+        if available && self.probe_output {
+            let destination = self
+                .tile_destinations
+                .get(&tile)
+                .copied()
+                .unwrap_or_default();
+            self.retained_probe = Some((tile, destination));
+        }
         self.probe_tile = None;
+        self.probe_output = false;
+        self.probe_tiles.remove(&tile);
         self.in_flight.remove(&tile);
         let Some(continuation) = self.probe.take() else {
             return Err(JobError::invalid_state("no probe continuation pending"));
@@ -1025,7 +1079,7 @@ impl Job {
             }
             self.pending_tiles.remove(0);
             self.in_flight.insert(next);
-            self.push_acquire_tile(next, false)?;
+            self.push_acquire_tile(next, false, false)?;
         }
         Ok(())
     }
@@ -1033,7 +1087,12 @@ impl Job {
     /// Stable byte-processing recipe name for the wire. Hosts that decode
     /// pixels (native) apply it before decoding; hosts that never decode
     /// (browser) ignore it.
-    fn push_acquire_tile(&mut self, wire: u32, probe: bool) -> Result<(), JobError> {
+    fn push_acquire_tile(
+        &mut self,
+        wire: u32,
+        probe: bool,
+        probe_output: bool,
+    ) -> Result<(), JobError> {
         let uri = self.tile_uris.get(&wire).cloned().unwrap_or_default();
         let headers = self.tile_headers.get(&wire).cloned().unwrap_or_default();
         let processing = self
@@ -1056,6 +1115,7 @@ impl Job {
             expected_size: extent,
             canvas: self.canvas_size,
             probe,
+            probe_output,
         })?;
         Ok(())
     }
