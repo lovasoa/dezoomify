@@ -76,7 +76,7 @@ impl std::error::Error for DeepLinkError {}
 
 /// Single shared credential-query vocabulary. Mirrors the canonical
 /// `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS` plus the shared vectors in
-/// `testdata/redaction-vectors.json` and `packages/protocol-ts/src/generated.ts`.
+/// `testdata/redaction-vectors.json` and the generated Rust bindings.
 /// Matching is case-insensitive exact (never substring) so `/cookie-recipe/`
 /// stays valid while `?token=secret` is rejected. This file stays std-only by
 /// design (lean shell); keep the list in sync with the protocol source.

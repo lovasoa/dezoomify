@@ -90,7 +90,7 @@ impl<F: Fn(GridTile) -> Request + Send + Sync> GridRequests for ClosureRequests<
     }
 
     fn processing(&self) -> ProcessingRecipe {
-        self.processing.clone()
+        self.processing
     }
 }
 

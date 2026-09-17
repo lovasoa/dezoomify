@@ -8,7 +8,7 @@
 // mirroring `pickLevel` in `./limits.ts`). Pure: no I/O, no clocks.
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
 import type { BrowserLimits } from "./types.ts";
-import type { CatalogDto, ImageDto, LevelDto } from "../../protocol-ts/src/generated.ts";
+import type { CatalogDto, ImageDto, LevelDto } from "@dezoomify/wasm-bindings";
 
 export interface EngineSelection {
   image: number;

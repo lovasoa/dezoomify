@@ -118,7 +118,7 @@ when a line comes from another context. The three contexts together trace each i
 the active tab (`toolbar-click`, `active-tab-op-start`/`active-tab-op-result`
 for the finite `scripting.executeScript()` operations, `source-fetch-*`,
 `permission-check`, `source-invalidated`) and each interaction with the core
-(`session-created`, `command-dispatched`, `messages-drained`, `effect-*`,
+(`session-created`, `command-dispatched`, `messages-returned`, `effect-*`,
 `engine-event`, `core-error`).
 
 The logger lives in `packages/browser-runtime/src/logging.ts`

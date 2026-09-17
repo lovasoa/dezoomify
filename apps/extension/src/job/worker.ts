@@ -1,6 +1,6 @@
 /**
  * Dedicated job-worker entrypoint. It is intentionally a thin host around
- * the Rust/WASM Session: commands and effects remain protocol envelopes, so
+ * the Rust/WASM Session. Commands and results cross the generated object ABI;
  * this file cannot grow a second JavaScript state machine.
  */
 

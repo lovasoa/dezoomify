@@ -7,13 +7,11 @@
 //!
 //! | code | meaning |
 //! |---|---|
-//! | `version-unsupported` | protocol version rejected before any work |
-//! | `malformed` | undecodable envelope/JSON/ID, wrong message kind, empty geometry |
-//! | `no-candidate` | discovery ended with no candidate accepting the input |
+//! | `malformed` | an object is missing required typed data or has invalid geometry |
 //! | `stale-buffer` | unknown/forged handle, generation mismatch, use after free or consume |
 //! | `limit-exceeded` | quota, oversized length, out-of-bounds access, capacity mismatch, arithmetic overflow |
 //! | `wrong-state` | valid handle/message in the wrong lifecycle phase (double commit, unsealed consume, dispatch vs job state, aliasing) |
-//! | `disposed` | any session use after [`Session::dispose`][crate::session::Session] (draining is still allowed) |
+//! | `disposed` | any session use after [`Session::dispose`][crate::session::Session] |
 //!
 //! [`AdapterError::to_error_dto`] maps these to protocol `ErrorDto` values
 //! with code `adapter.{code}` so they cannot collide with core/protocol
@@ -27,13 +25,8 @@ use dezoomify_protocol::dto::{redact_error_text, ErrorDto, ErrorPhase};
 /// Stable machine-readable adapter failure code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AdapterErrorCode {
-    /// Protocol version rejected before any work.
-    VersionUnsupported,
-    /// Undecodable input, wrong message kind, or empty geometry.
+    /// Missing typed data or invalid geometry.
     Malformed,
-    /// Discovery ended with no candidate accepting the input; the message
-    /// carries the engine's headline-free per-format bullet block.
-    NoCandidate,
     /// Unknown/forged handle, generation mismatch, use after free/consume.
     StaleBuffer,
     /// Quota, oversized length, out-of-bounds access, capacity mismatch, overflow.
@@ -45,13 +38,11 @@ pub enum AdapterErrorCode {
 }
 
 impl AdapterErrorCode {
-    /// Stable wire string for this code.
+    /// Stable contract string for this code.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::VersionUnsupported => "version-unsupported",
             Self::Malformed => "malformed",
-            Self::NoCandidate => "no-candidate",
             Self::StaleBuffer => "stale-buffer",
             Self::LimitExceeded => "limit-exceeded",
             Self::WrongState => "wrong-state",
@@ -83,7 +74,7 @@ impl AdapterError {
         self.code
     }
 
-    /// Stable code string (`version-unsupported`, `malformed`, ...).
+    /// Stable code string (`malformed`, `stale-buffer`, ...).
     #[must_use]
     pub fn code_str(&self) -> &'static str {
         self.code.as_str()
@@ -99,9 +90,7 @@ impl AdapterError {
     #[must_use]
     pub fn to_error_dto(&self) -> ErrorDto {
         let phase = match self.code {
-            AdapterErrorCode::VersionUnsupported => ErrorPhase::Handshake,
             AdapterErrorCode::Disposed => ErrorPhase::Cleanup,
-            AdapterErrorCode::NoCandidate => ErrorPhase::Discovery,
             AdapterErrorCode::Malformed
             | AdapterErrorCode::StaleBuffer
             | AdapterErrorCode::LimitExceeded
@@ -151,12 +140,7 @@ mod tests {
 
     #[test]
     fn codes_are_stable_strings() {
-        assert_eq!(
-            AdapterErrorCode::VersionUnsupported.as_str(),
-            "version-unsupported"
-        );
         assert_eq!(AdapterErrorCode::Malformed.as_str(), "malformed");
-        assert_eq!(AdapterErrorCode::NoCandidate.as_str(), "no-candidate");
         assert_eq!(AdapterErrorCode::StaleBuffer.as_str(), "stale-buffer");
         assert_eq!(AdapterErrorCode::LimitExceeded.as_str(), "limit-exceeded");
         assert_eq!(AdapterErrorCode::WrongState.as_str(), "wrong-state");

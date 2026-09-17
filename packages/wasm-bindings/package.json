@@ -1,0 +1,15 @@
+{
+  "name": "@dezoomify/wasm-bindings",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "types": "./src/generated.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/generated.d.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

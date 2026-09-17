@@ -6,6 +6,7 @@
 // unused second integration is gone; `src/webIntegration.ts` only
 // re-exports this module for existing imports. Pure, no I/O, no clocks.
 import { DIRECT_TRANSPORT_LABEL, PROXY_TRANSPORT_LABEL } from "./transport-labels.ts";
+import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
 export interface WebFetchRequest {
   url: string;
@@ -111,8 +112,8 @@ export function isProxyEligible(
  * require readable bytes, and a display fallback would silently drop the
  * processing. Branch on the stable recipe id, never on display text.
  */
-export function isOrdinaryImageTile(processing: unknown): boolean {
-  return processing === undefined || processing === null || processing === "" || processing === "none";
+export function isOrdinaryImageTile(processing: ProcessingRecipe): boolean {
+  return processing === "none";
 }
 
 /**

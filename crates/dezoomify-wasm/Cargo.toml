@@ -3,7 +3,7 @@ name = "dezoomify-wasm"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Narrow deterministic WASM adapter over dezoomify-core and dezoomify-protocol (phase 07)."
+description = "Generated typed WASM adapter over the Dezoomify job engine."
 repository = "https://github.com/lovasoa/dezoomify"
 
 [lib]
@@ -11,11 +11,12 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dezoomify-core = { path = "../dezoomify-core" }
-dezoomify-protocol = { path = "../dezoomify-protocol" }
+dezoomify-protocol = { path = "../dezoomify-protocol", features = ["typescript"] }
 dezoomify-job = { path = "../dezoomify-job" }
 serde.workspace = true
-serde_json.workspace = true
 wasm-bindgen.workspace = true
+serde-wasm-bindgen.workspace = true
+tsify.workspace = true
 
 [dev-dependencies]
 wasm-bindgen-test.workspace = true

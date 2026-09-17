@@ -1,12 +1,13 @@
 # dezoomify-wasm
 
-Runs the core/job engine inside browsers as WebAssembly, translating protocol
-messages across the JS boundary for `packages/browser-runtime`. It owns no
+Runs the core/job engine inside browsers through generated typed JavaScript
+objects for `packages/browser-runtime`. Each dispatch returns its effects and
+events directly. It owns no
 fetch, DOM, storage, or worker lifecycle: the JavaScript host does that.
 
 ```sh
 cargo xtask build wasm   # wasm32 build
-cargo xtask test wasm    # adapter + node harness + transcript parity
+cargo xtask test wasm    # adapter + generated object-ABI Node harness
 ```
 
 Bare `cargo xtask test` covers the crate's native Rust tests but does not

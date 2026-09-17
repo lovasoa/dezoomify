@@ -31,12 +31,15 @@ test("worker and generated WASM complete the first discovery round trip", async 
   const codes = logs.map((entry) => entry.code);
   assert.ok(codes.includes("session-created"));
   assert.ok(codes.includes("command-dispatched"));
-  assert.ok(codes.includes("messages-drained"));
+  assert.ok(codes.includes("messages-returned"));
 });
 
 test("worker disposal is repeat-safe and does not manufacture effects", async () => {
   const calls = [];
-  class Session { dispatch() {} drainMessages() { return "[]"; } dispose() { calls.push("dispose"); } }
+  class Session {
+    dispatch() { return { status: "ok", messages: [] }; }
+    dispose() { calls.push("dispose"); return { status: "ok", messages: [] }; }
+  }
   const host = createJobWorkerHost({ postMessage() {}, wasm: async () => ({ Session }) });
   await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://example.test/image.dzi" }] });
   await host.onMessage({ type: "engine.dispose" });
@@ -50,12 +53,13 @@ test("worker preserves typed WASM diagnostics", async () => {
   class Session {
     constructor() {}
     dispatch() {
-      throw JSON.stringify({
+      return { status: "error", error: {
         code: "adapter.wrong-state",
         phase: "validation",
         retryable: false,
         message: "command not accepted in state AcquiringTiles",
-      });
+        recovery: [],
+      } };
     }
   }
   const host = createJobWorkerHost({
@@ -72,8 +76,7 @@ test("worker preserves typed WASM diagnostics", async () => {
       phase: "validation",
       retryable: false,
       message: "command not accepted in state AcquiringTiles",
-      detail: "adapter.wrong-state: command not accepted in state AcquiringTiles",
-      transport: "browser-session",
+      recovery: [],
     },
   }]);
 });

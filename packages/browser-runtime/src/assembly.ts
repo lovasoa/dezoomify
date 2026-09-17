@@ -23,14 +23,14 @@ import { canvasTooLargeFailure } from "./plan-gates.ts";
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
 import type { BrowserLimits } from "./types.ts";
 import { failure } from "./failure.ts";
+import type {
+  OutputFormat,
+  ProcessingRecipe,
+  TilePlacementDto,
+} from "@dezoomify/wasm-bindings";
 
-/** Wire shape of one tile's output placement (see `TilePlacementDto`). */
-export interface AssemblyPlacement {
-  position: { x: number; y: number };
-  expected_size?: { width: number; height: number } | null;
-  canvas?: { width: number; height: number } | null;
-  processing: string;
-}
+/** Generated shape of one tile's output placement. */
+export type AssemblyPlacement = TilePlacementDto;
 
 /** Allocated output surface: geometry plus a 2D drawing context. */
 export interface AssemblyCanvas {
@@ -47,7 +47,7 @@ export interface CanvasAssemblyDeps {
    * tile bytes before decoding. Hosts route this through the WASM session's
    * pure `applyProcessing` op; calls are serialized by the assembly.
    */
-  processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
+  processTile?: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
   /** Allocate the output surface; called only after limit validation. */
   createCanvas(width: number, height: number): AssemblyCanvas;
   /** Encode the assembled surface (canvas-to-blob on the job tab). */
@@ -71,8 +71,6 @@ export interface CanvasAssemblyDeps {
 }
 
 export interface CanvasAssembly {
-  /** Record the engine-declared placement and validate its shape. */
-  recordPlacement(tile: number, placement: AssemblyPlacement): void;
   /** Decode-at-acquisition: hold the decoded bitmap for assembly. */
   acquireTile(tile: number, placement: AssemblyPlacement, bytes: ArrayBuffer): Promise<void>;
   /**
@@ -92,17 +90,11 @@ export interface CanvasAssembly {
    */
   finalizeOutput(
     partial: boolean,
-    format: string,
+    format: OutputFormat,
     canvas?: { width: number; height: number } | null,
   ): Promise<void>;
   /** Close every retained tile resource (idempotent). */
   release(): void;
-}
-
-function isPlainRecipe(processing: string | undefined): boolean {
-  return (
-    processing === undefined || processing === null || processing === "" || processing === "none"
-  );
 }
 
 function placementGeometry(
@@ -124,16 +116,6 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
   let tainted = false;
 
   function recordPlacement(tile: number, placement: AssemblyPlacement): void {
-    const { x, y } = placement?.position ?? { x: NaN, y: NaN };
-    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x < 0 || y < 0) {
-      throw failure(
-        "PLAN_INVALID",
-        "The image layout could not be determined.",
-        false,
-        undefined,
-        `tile ${tile} placement is not a non-negative integer position`,
-      );
-    }
     placements.set(tile, placement);
   }
 
@@ -144,7 +126,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
   ): Promise<void> {
     recordPlacement(tile, placement);
     let input = bytes;
-    if (!isPlainRecipe(placement.processing)) {
+    if (placement.processing !== "none") {
       if (!processQueue) {
         // No processing executor: fail typed instead of silently dropping
         // the recipe.
@@ -156,7 +138,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
           `tile ${tile} requires processing recipe ${placement.processing}`,
         );
       }
-      input = await processQueue(String(placement.processing), bytes);
+      input = await processQueue(placement.processing, bytes);
     }
     const bitmap = await deps.decode(input);
     bitmaps.set(tile, bitmap);
@@ -223,7 +205,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
 
   async function finalizeOutput(
     _partial: boolean,
-    format: string,
+    _format: OutputFormat,
     declared?: { width: number; height: number } | null,
   ): Promise<void> {
     if (canvas) {
@@ -233,15 +215,6 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
         false,
         undefined,
         "finalize-output arrived twice",
-      );
-    }
-    if (format !== "png") {
-      throw failure(
-        "OUTPUT_FORMAT_UNSUPPORTED",
-        "This app cannot save that image format yet.",
-        false,
-        undefined,
-        `finalize-output format ${format}`,
       );
     }
     const size = outputSize(declared);
@@ -320,7 +293,6 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
   }
 
   return {
-    recordPlacement,
     acquireTile,
     acquireDisplayTile,
     isTainted,

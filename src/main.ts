@@ -15,6 +15,7 @@ import {
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
 import type { ViewContext } from "../packages/shared-ui/src/view.tsx";
+import type { ErrorDto, HeaderDto, JobEvent, ProcessingRecipe } from "@dezoomify/wasm-bindings";
 import { DEFAULT_PAGE_TITLE, isActiveJobStatus, jobPageTitle } from "../packages/shared-ui/src/view-helpers.ts";
 import { describeFailure } from "../packages/shared-ui/src/failure.ts";
 import {
@@ -31,9 +32,17 @@ import {
   createCanvasAssembly,
   createEngineHost,
   createProbeSize,
+  dispatchTyped,
+  type DispatchTable,
   type EngineHost,
+  type WorkerHostOutput,
 } from "../packages/browser-runtime/src/index.ts";
-import { failure, stableErrorCode } from "../packages/browser-runtime/src/failure.ts";
+import {
+  blockedReason,
+  errorTransport,
+  failure,
+  stableErrorCode,
+} from "../packages/browser-runtime/src/failure.ts";
 import {
   BROWSER_LIMITS,
   BROWSER_MAX_CANVAS_AREA,
@@ -288,7 +297,6 @@ async function probeSizeFor(
         },
       });
       return {
-        ok: img.naturalWidth > 0 && img.naturalHeight > 0,
         width: img.naturalWidth,
         height: img.naturalHeight,
         image: img,
@@ -313,7 +321,7 @@ function disposeAttempt(): void {
 }
 
 /** Apply one core processing recipe through the worker session. */
-function processTile(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> {
+function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
   const worker = engineWorker;
   if (!worker) return Promise.reject(failure("WORKER_FAILED", "The image engine is not running.", false));
   const requestId = ++processSeq;
@@ -323,19 +331,9 @@ function processTile(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> {
   });
 }
 
-/** Normalize protocol headers (`HeaderDto[]` or a record) for `fetch`. */
-function headerRecord(headers: unknown): Record<string, string> {
-  if (Array.isArray(headers)) {
-    const out: Record<string, string> = {};
-    for (const header of headers) {
-      if (header && typeof header.name === "string" && typeof header.value === "string") {
-        out[header.name] = header.value;
-      }
-    }
-    return out;
-  }
-  if (headers && typeof headers === "object") return headers as Record<string, string>;
-  return {};
+/** Normalize generated request headers for `fetch`. */
+function headerRecord(headers: HeaderDto[] | undefined): Record<string, string> {
+  return Object.fromEntries((headers ?? []).map(({ name, value }) => [name, value]));
 }
 
 let activeAssembly: ReturnType<typeof createCanvasAssembly> | null = null;
@@ -385,13 +383,12 @@ function createAssembly(sourceUrl: string): ReturnType<typeof createCanvasAssemb
 }
 
 /** Shared presenter for engine failures: headline plus stable classification. */
-function presentEngineFailure(error: unknown, url: string, token: number): void {
+function presentEngineFailure(error: ErrorDto, url: string, token: number): void {
   if (token !== jobToken) return;
-  const structured = error as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown; url?: unknown; http?: unknown; preview?: unknown };
-  const code = typeof structured?.code === "string" ? structured.code : "job.failed";
+  const code = error.code;
   const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
   const lower = code.toLowerCase();
-  webLog.error("failed", `code=${code} message=${String(structured?.message ?? code)}`);
+  webLog.error("failed", `code=${code} message=${error.message}`);
   if (code === "PLAN_INVALID" || code === "job.resource-limit") {
     const link = desktopHandoffLink(url);
     if (link !== "") {
@@ -411,16 +408,17 @@ function presentEngineFailure(error: unknown, url: string, token: number): void 
     nextEvent("fail", {
       error: describeFailure({
         code,
-        engineDetail: typeof structured?.message === "string" ? structured.message : undefined,
+        engineDetail: error.detail ?? error.message,
         ...(discoveryCopy
-          ? { message: discoveryCopy.message, category: discoveryCopy.category, phase: "discovery" }
+          ? { message: discoveryCopy.message, category: discoveryCopy.category }
           : {}),
-        retryable: discoveryCopy ? discoveryCopy.retryable : (typeof structured?.retryable === "boolean" ? structured.retryable : undefined),
-        transport: errorTransportFor(code, webFetcher.getActiveTransport()),
+        phase: error.phase,
+        retryable: discoveryCopy ? discoveryCopy.retryable : error.retryable,
+        transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
         host: hostOf(url),
-        url: typeof structured?.url === "string" ? structured.url : undefined,
-        http: typeof structured?.http === "number" ? structured.http : undefined,
-        preview: typeof structured?.preview === "string" ? structured.preview : undefined,
+        url: error.request,
+        http: error.http,
+        preview: error.preview,
       }),
     }) as never,
   );
@@ -515,89 +513,77 @@ async function runJob(url: string): Promise<void> {
     settle();
   };
 
-  const onEngineEvent = (event: Record<string, unknown>): void => {
-    if (token !== jobToken) return;
-    switch (event.type) {
-      case "catalog": {
-        if (selected) return;
-        selected = true;
-        const catalog = event.catalog as { images?: Array<{ title?: string; levels?: Array<{ width?: number; height?: number }> }> } | undefined;
-        const images = Array.isArray(catalog?.images) ? catalog!.images! : [];
-        const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
-        if (images.length === 0) {
-          controller.dispatch(nextEvent("images-found", { imageCount: 0, transport: via }) as never);
-          onHostFailure(failure("NO_IMAGE_FOUND", noImageFoundError(via).message, false, "discovery returned an empty image catalog"));
-          return;
-        }
-        controller.dispatch(nextEvent("images-found", { imageCount: images.length, transport: via }) as never);
-        const selection = pickEngineSelection(catalog as Parameters<typeof pickEngineSelection>[0], BROWSER_LIMITS);
-        if (!selection) {
-          onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
-          return;
-        }
-        const image = images[selection.image];
-        resultTitle = typeof image?.title === "string" ? image.title : undefined;
-        const level = image?.levels?.[selection.level];
-        if (level && typeof level.width === "number" && typeof level.height === "number") {
-          viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
-        }
-        controller.dispatch(nextEvent("image-chosen") as never);
-        jobActivity.setStep("Choosing the highest resolution…");
-        controller.dispatch(nextEvent("level-chosen") as never);
-        controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
-        update();
-        engineHost?.selectImage(selection.image);
-        engineHost?.selectLevel(selection.level);
-        return;
-      }
-      case "progress": {
-        const acquired = typeof event.acquired === "number" ? event.acquired : 0;
-        const total = typeof event.total === "number" ? event.total : 0;
-        reportProgress(acquired, total, `Saving ${total} tiles…`);
-        update();
-        return;
-      }
-      case "warning": {
-        webLog.warn("engine-warning", JSON.stringify(event.error ?? {}));
-        return;
-      }
-      case "recovery-request":
-      case "output-ready":
-      case "job-state":
-      case "paused":
-      case "resumed":
-        return;
-      case "completed":
-      case "partial-completed": {
-        if (displayOnly || assembly.isTainted()) {
-          terminal = "display";
-          settle();
-          return;
-        }
-        controller.dispatch(nextEvent("save-start") as never);
-        recordWebHistory(url, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
-        controller.dispatch(nextEvent("save-done") as never);
-        terminal = "done";
-        update();
-        settle();
-        return;
-      }
-      case "failed": {
-        presentEngineFailure(event.error, url, token);
-        terminal = "failed";
-        settle();
-        return;
-      }
-      case "cancelled": {
-        controller.dispatch(nextEvent("cancel") as never);
-        terminal = "cancelled";
-        update();
-        settle();
-        return;
-      }
-      default:
-        return;
+  const complete = (): void => {
+    if (displayOnly || assembly.isTainted()) {
+      terminal = "display";
+      settle();
+      return;
     }
+    controller.dispatch(nextEvent("save-start") as never);
+    recordWebHistory(url, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
+    controller.dispatch(nextEvent("save-done") as never);
+    terminal = "done";
+    update();
+    settle();
+  };
+
+  const eventHandlers = {
+    catalog: (event) => {
+      if (selected) return;
+      selected = true;
+      const catalog = event.catalog;
+      const images = catalog.images;
+      const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
+      if (images.length === 0) {
+        controller.dispatch(nextEvent("images-found", { imageCount: 0, transport: via }) as never);
+        onHostFailure(failure("NO_IMAGE_FOUND", noImageFoundError(via).message, false, "discovery returned an empty image catalog"));
+        return;
+      }
+      controller.dispatch(nextEvent("images-found", { imageCount: images.length, transport: via }) as never);
+      const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
+      if (!selection) {
+        onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
+        return;
+      }
+      const image = images[selection.image];
+      resultTitle = image?.title;
+      const level = image?.levels?.[selection.level];
+      if (level) viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
+      controller.dispatch(nextEvent("image-chosen") as never);
+      jobActivity.setStep("Choosing the highest resolution…");
+      controller.dispatch(nextEvent("level-chosen") as never);
+      controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
+      update();
+      engineHost?.selectImage(selection.image);
+      engineHost?.selectLevel(selection.level);
+    },
+    progress: (event) => {
+      reportProgress(event.acquired, event.total, `Saving ${event.total} tiles…`);
+      update();
+    },
+    warning: (event) => webLog.warn("engine-warning", JSON.stringify(event.error)),
+    "recovery-request": () => {},
+    "job-state": () => {},
+    paused: () => {},
+    resumed: () => {},
+    completed: complete,
+    "partial-completed": complete,
+    failed: (event) => {
+      presentEngineFailure(event.error, url, token);
+      terminal = "failed";
+      settle();
+    },
+    cancelled: () => {
+      controller.dispatch(nextEvent("cancel") as never);
+      terminal = "cancelled";
+      update();
+      settle();
+    },
+  } satisfies DispatchTable<JobEvent, void>;
+
+  const onEngineEvent = (event: JobEvent): void => {
+    if (token !== jobToken) return;
+    dispatchTyped(eventHandlers, event);
   };
 
   const host = createEngineHost({
@@ -605,7 +591,6 @@ async function runJob(url: string): Promise<void> {
     jobId: () => sessionId,
     fetchResource: async (effect) => {
       const request = effect.request;
-      if (!request) throw failure("WORKER_FAILED", "The image engine sent an effect without a request.", false);
       if (request.purpose === "metadata") {
         const result = await webFetcher.fetchMetadataFor(request.uri, headerRecord(request.headers));
         return {
@@ -618,7 +603,6 @@ async function runJob(url: string): Promise<void> {
     },
     fetchResourceOnce: async (effect) => {
       const request = effect.request;
-      if (!request) throw failure("WORKER_FAILED", "The image engine sent an effect without a request.", false);
       const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), 0);
       return { bytes: new Uint8Array(result.bytes) };
     },
@@ -635,22 +619,36 @@ async function runJob(url: string): Promise<void> {
         },
       }),
     classifyFailure: (error) => {
-      const structured = error as { blocked_reason?: unknown; retryable?: unknown; message?: unknown };
+      const structured = error as {
+        blocked_reason?: unknown;
+        retryable?: unknown;
+        message?: unknown;
+        cause?: { reason?: unknown; transport?: unknown; http?: unknown };
+        transportKind?: unknown;
+        http?: unknown;
+        preview?: unknown;
+        detail?: unknown;
+      };
+      const reason = blockedReason(structured?.blocked_reason)
+        ?? blockedReason(structured?.cause?.reason);
+      const transport = errorTransport(structured?.transportKind)
+        ?? errorTransport(structured?.cause?.transport);
       return {
         code: stableErrorCode(error),
-        ...(typeof structured?.blocked_reason === "string" ? { blocked_reason: structured.blocked_reason } : {}),
-        retryable: structured?.retryable,
-        message: typeof structured?.message === "string" ? structured.message : undefined,
-      } as { blocked_reason?: string; [key: string]: unknown };
+        retryable: structured?.retryable === true,
+        message: typeof structured?.message === "string" ? structured.message : "The browser could not read this resource.",
+        ...(reason ? { blocked_reason: reason } : {}),
+        transport: transport ?? "direct",
+        ...(typeof structured?.http === "number" ? { http: structured.http } : {}),
+        ...(typeof structured?.cause?.http === "number" ? { http: structured.cause.http } : {}),
+        ...(typeof structured?.preview === "string" ? { preview: structured.preview } : {}),
+        ...(typeof structured?.detail === "string" ? { detail: structured.detail } : {}),
+      };
     },
     onPermissionRequired: () => { /* the website has no host grants */ },
     onRecoveryRequested: (generation) => { engineHost?.chooseRecovery(generation, "discard"); },
     onHostFailure,
-    onEvent: (event) => onEngineEvent(event as Record<string, unknown>),
-    onUnsupportedEffect: (effect) => {
-      const type = effect && typeof effect === "object" && "type" in effect ? String((effect as { type?: unknown }).type) : "unknown";
-      onHostFailure(failure("EFFECT_UNSUPPORTED", `This app cannot yet perform the ${type} step.`, false));
-    },
+    onEvent: onEngineEvent,
     log: (level, code, detail) => {
       if (level === "error") webLog.error(code, detail);
       else if (level === "warn") webLog.warn(code, detail);
@@ -659,11 +657,11 @@ async function runJob(url: string): Promise<void> {
   });
   engineHost = host;
 
-  worker.addEventListener("message", (event: MessageEvent<Record<string, unknown>>) => {
+  worker.addEventListener("message", (event: MessageEvent<WorkerHostOutput>) => {
     const data = event.data;
     if (!data || typeof data.type !== "string") return;
     if (data.type === "engine.messages") {
-      engineHost?.handleEngineMessages(Array.isArray(data.messages) ? data.messages : []);
+      engineHost?.handleEngineMessages(data.messages);
       return;
     }
     if (data.type === "engine.processed" || data.type === "engine.process-failed") {
@@ -690,7 +688,7 @@ async function runJob(url: string): Promise<void> {
     if (token !== jobToken) return;
   } catch (error) {
     if (token !== jobToken) return;
-    presentEngineFailure(error, url, token);
+    onHostFailure(error);
   } finally {
     if (token === jobToken) {
       jobActivity.stopHeartbeat();

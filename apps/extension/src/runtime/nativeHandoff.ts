@@ -25,6 +25,8 @@
  * injected for deterministic tests.
  */
 
+import type { NativeHostRequest } from "@dezoomify/wasm-bindings";
+
 export const NATIVE_HOST_NAME = "dev.ophir.dezoomify.native_host";
 export const CURRENT_NATIVE_PROTOCOL = 2;
 export const MIN_NATIVE_PROTOCOL = 2;
@@ -41,13 +43,13 @@ export const MAX_NATIVE_FRAME_BYTES = 1024 * 1024;
 export const JOB_BINDING_VERSION = 1;
 type NativeJobBinding = { jobId: string; tabId: number; frameId: number; documentGeneration: string };
 type NativeMessage = Record<string, unknown> & { requestId?: string; kind?: string; error?: { code?: string }; capabilities?: { handoff?: boolean }; negotiatedVersion?: number; challenge?: string; nonce?: string; job?: string };
-type LegacyArgs = { sourceUrl: string; origins: string[]; cookieNames: string[]; jobId: string; extensionId?: string; sendNativeMessage: (message: Record<string, unknown>) => Promise<NativeMessage>; getCookies: (origin: string) => Promise<Array<{ name: string; value: string }>>; showConsent: (details: ReturnType<typeof buildHandoffConsentDetails>) => Promise<boolean>; connectNative?: undefined };
+type LegacyArgs = { sourceUrl: string; origins: string[]; cookieNames: string[]; jobId: string; extensionId?: string; sendNativeMessage: (message: NativeHostRequest) => Promise<NativeMessage>; getCookies: (origin: string) => Promise<Array<{ name: string; value: string }>>; showConsent: (details: ReturnType<typeof buildHandoffConsentDetails>) => Promise<boolean>; connectNative?: undefined };
 type PortEvent<T> = { addListener?: (listener: T) => void; addEventListener?: (listener: T) => void };
 type PortArgs = Omit<LegacyArgs, "connectNative" | "jobId" | "sendNativeMessage"> & { job: NativeJobBinding; hostName?: string; connectNative: (host: string) => { postMessage: (message: NativeMessage) => void; disconnect?: () => void; onMessage?: PortEvent<(message: NativeMessage) => void>; onDisconnect?: PortEvent<() => void> }; jobId?: string; sendNativeMessage?: LegacyArgs["sendNativeMessage"] };
 
 /** Query keys that must never appear in a handoff source URL. Single shared
  * vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
- * `testdata/redaction-vectors.json`, and `packages/protocol-ts/src/generated.ts`.
+ * `testdata/redaction-vectors.json`, and the generated Rust bindings.
  * Matching is case-insensitive exact (never substring) so `/cookie-recipe/`
  * stays valid while `?token=secret` is rejected. */
 export const SECRET_QUERY_KEYS = Object.freeze([
@@ -317,7 +319,7 @@ async function requestNativeHandoffViaPort(args: PortArgs) {
   add(port.onMessage, onMessage);
   add(port.onDisconnect, rejectDisconnected);
   const close = () => { try { if (typeof port.disconnect === "function") port.disconnect(); } catch {} };
-  const request = (payload: Record<string, unknown>) => new Promise<NativeMessage>((resolve, reject) => {
+  const request = (payload: NativeHostRequest) => new Promise<NativeMessage>((resolve, reject) => {
     if (disconnected) { reject(Object.assign(new Error("native disconnected"), { code: "native-disconnected" })); return; }
     const requestId = `native-${Date.now().toString(16)}-${++sequence}`;
     const message = { ...payload, requestId, bindingVersion: JOB_BINDING_VERSION, job: args.job };
@@ -507,7 +509,7 @@ async function requestNativeHandoffLegacy(args: LegacyArgs) {
   }
 
   // 5. Single bounded credential message (values cross here, once).
-  const credential = {
+  const credential: NativeHostRequest = {
     kind: "credential",
     challenge,
     nonce,

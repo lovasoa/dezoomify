@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use dezoomify_core::core::discovery::FetchCause;
 use dezoomify_core::Vec2d;
-use dezoomify_protocol::dto::CatalogDto;
+use dezoomify_protocol::dto::{CatalogDto, OutputFormat, ProbeOutcome as ProbeObservation};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,9 +84,7 @@ pub enum JobCommand {
     },
     ProbeOutcome {
         tile: u32,
-        available: bool,
-        width: u64,
-        height: u64,
+        outcome: ProbeObservation,
     },
     RecoveryChoice {
         generation: u32,
@@ -120,7 +118,7 @@ pub enum JobEffect {
         tile: u32,
         uri: String,
         headers: BTreeMap<String, String>,
-        processing: String,
+        processing: dezoomify_core::core::model::ProcessingRecipe,
         destination: Vec2d,
         expected_size: Option<Vec2d>,
         canvas: Option<Vec2d>,
@@ -129,7 +127,7 @@ pub enum JobEffect {
     },
     FinalizeOutput {
         partial: bool,
-        format: String,
+        format: OutputFormat,
         canvas: Option<Vec2d>,
     },
     CancelWork,

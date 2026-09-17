@@ -36,9 +36,9 @@ sites and is never part of `all`, required CI, or release gates.
 Node 24 is the minimum supported Node version. Direct Cargo and pnpm commands
 are valid for focused debugging, but xtask remains the unified front door.
 
-`check`, all maintenance `check`/`verify` commands, and protocol golden checks
-are read-only. `protocol generate` is the explicit generated-source update;
-golden candidates require its explicit maintenance option. Builds write only to
+`check`, all maintenance `check`/`verify` commands, and generated binding checks
+are read-only. `protocol generate` is the explicit generated-source update.
+Builds write only to
 declared generated paths, `target/`, `dist/`, or `artifacts/` as appropriate.
 Release verification checks the frozen plan and expected artifacts.
 
@@ -80,7 +80,7 @@ installed version matches.
 
 ## Boundaries
 
-- Depend on workspace metadata, protocol/schema generators, and tooling
+- Depend on workspace metadata, binding generators, and tooling
   libraries; invoke app tools without linking app internals when a
   process boundary suffices.
 - Do not contain runtime app behavior, hide mutation in checks, contact the

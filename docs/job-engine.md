@@ -10,7 +10,7 @@ The engine accepts a typed `JobCommand` and appends typed `JobEffect` and
 `JobEvent` values to one FIFO `JobMessage` queue. Every message has a checked
 `u32` sequence. Requests, tiles, and decision generations are numeric and
 scoped to the job instance, so late, duplicate, and out-of-order replies can
-be rejected without parsing JSON or validating prefixed strings. The host
+be rejected before state mutation. The host
 supplies clock-derived retry wakeups explicitly, so replaying the same inputs
 produces the same state and messages.
 

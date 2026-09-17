@@ -38,9 +38,8 @@ The executor maps typed host effects onto browser execution:
   `downloads` permission), releases resources, and replies with typed success
   or failure. A tainted display-only canvas skips encoding.
 
-Processing recipes beyond `none` run through the WASM session's pure
-`applyProcessing` op, serialized by the assembly; an unavailable recipe
-fails typed instead of silently dropping the recipe. Ordinary unprocessed
+The generated `ProcessingRecipe` union selects the WASM session's pure
+`applyProcessing` operation, serialized by the assembly. Ordinary unprocessed
 tiles that cannot be read as bytes fall back to an ordinary `<img>`
 (display-only): the canvas taints, no bytes are produced, and the job
 completes as display-only. Per-origin classification means only the first
@@ -49,11 +48,25 @@ image. The deterministic catalog selection for engine hosts lives in
 `engine-selection.ts` (largest ready image, largest level that fits the
 browser canvas, smallest declared level as the fail-fast fallback).
 
+## Generated WASM boundary
+
+`worker-host.ts` imports `SessionConfig`, `JobCommand`, `DispatchResult`,
+`HostMessage`, and the handle types from `@dezoomify/wasm-bindings`. Every
+session transition returns its messages directly. The worker owns no parallel
+declaration of Rust contract types.
+
+`engine-host.ts` exhaustively handles generated effects through a typed handler
+table, and each product does the same for generated events. It is the single
+browser conversion from a closed `HostFailure` into `FetchFailureDto`.
+The Rust session combines those host facts with its correlated request to
+construct `ErrorDto`. Website and extension inject transport implementations
+but share this conversion and worker integration.
+
 ## Catalog boundary
 
-Browser hosts consume the ordered protocol `CatalogDto` without duplicated
+Browser hosts consume the ordered generated `CatalogDto` without duplicated
 identity fields. The job engine projects its normalized core catalog through
-one generated wire shape, and planning accepts zero-based image and level
+one generated type, and planning accepts zero-based image and level
 positions. Browser selection, declared-size preflight, and plan gates
 therefore use that shape; hosts do not define their own catalog
 or level DTOs.

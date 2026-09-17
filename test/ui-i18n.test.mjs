@@ -212,12 +212,12 @@ test("i18n: every desktop t() reference resolves in all four locales", () => {
   }
 });
 
-test("i18n: no orphan locale keys; the dictionary stays ready for the view/page migration", () => {
+test("i18n: no orphan locale keys; the dictionary covers future view/page integration", () => {
   // The desktop renderer is the only `t()` caller today; the shared view and
   // the extension modal still renders hardcoded English literals with this
-  // dictionary as the single source for their migration (see the module
+  // dictionary as their single translation source (see the module
   // header and `packages/shared-ui/AGENTS.md`). Every English key therefore
-  // ships in all four locales now, so the migration needs no retranslation.
+  // ships in all four locales now, so integration needs no retranslation.
   const viewRefs = tRefs(read("packages/shared-ui/src/view.tsx"));
   for (const key of viewRefs) {
     for (const [label, table] of Object.entries(LOCALES)) {
@@ -226,10 +226,10 @@ test("i18n: no orphan locale keys; the dictionary stays ready for the view/page 
   }
   const referenced = new Set([...viewRefs, ...tRefs(readDesktop())]);
   const pending = Object.keys(EN).filter((key) => !referenced.has(key));
-  assert.ok(pending.length > 0, "view/page migration keys are staged in the dictionary");
+  assert.ok(pending.length > 0, "future view/page keys are staged in the dictionary");
   for (const key of pending) {
     for (const [label, table] of Object.entries(LOCALES)) {
-      assert.ok(Object.hasOwn(table, key), `${label} stages migration key: ${key}`);
+      assert.ok(Object.hasOwn(table, key), `${label} stages future view/page key: ${key}`);
       assert.equal(
         placeholdersOf(table[key]),
         placeholdersOf(EN[key]),

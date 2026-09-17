@@ -1,9 +1,0 @@
-{
-  "name": "@dezoomify/protocol-ts",
-  "version": "2.0.0",
-  "type": "module",
-  "main": "src/generated.ts",
-  "scripts": {
-    "test": "node --test-reporter=dot --test \"test/*.test.mjs\""
-  }
-}

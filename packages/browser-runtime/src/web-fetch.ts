@@ -6,7 +6,7 @@
 // classifier live in the caller too (`src/discovery.ts`) and arrive as plain
 // data, so this module never imports app layers. Progress and log hooks
 // drive the caller's live job view. Keep erasable-syntax-only.
-import { fetchFailure, failure } from "./failure.ts";
+import { blockedReason, fetchFailure, failure } from "./failure.ts";
 import type { FetchCause, StructuredFailure } from "./failure.ts";
 import {
   DIRECT_METADATA_TIMEOUT_MS,
@@ -341,9 +341,8 @@ export function classifyProxyFailure(
   const status = proxied.status || 0;
   const cause: FetchCause = { code, transport: "metadata-proxy" };
   if (status > 0) cause.http = status;
-  if (typeof proxied.reason === "string" && proxied.reason !== "") {
-    cause.reason = proxied.reason;
-  }
+  const reason = blockedReason(proxied.reason);
+  if (reason) cause.reason = reason;
   if (code === "PROXY_POLICY_DENIED") {
     const hint = proxyPolicyReasonText(proxied.reason) ?? "Check the address and try again.";
     return {

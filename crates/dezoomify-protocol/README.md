@@ -1,12 +1,12 @@
 # dezoomify-protocol
 
-The single versioned contract between the engine and every app: commands,
-events, progress, stable error codes, and typed recovery actions. The Rust
-types here generate `packages/protocol-ts`, so both sides stay in lockstep
-(checked by golden round-trip tests).
+The authoritative Rust contract between the job engine and its hosts:
+commands, effects, events, stable errors, and Native Messaging requests.
+`Tsify` and `wasm-bindgen` emit the declaration tracked in
+`packages/wasm-bindings`.
 
 ```sh
-cargo xtask protocol generate   # regenerate TypeScript bindings
-cargo xtask protocol check      # goldens, generated bindings, WASM portability
+cargo xtask protocol generate   # regenerate the real WASM declaration
+cargo xtask protocol check      # drift, TypeScript, Rust, WASM portability
 cargo xtask test protocol
 ```

@@ -1,10 +1,10 @@
 //! Narrow deterministic adapter from portable core/job/protocol types to
-//! JavaScript (`crates/dezoomify-wasm`, phase 07).
+//! JavaScript (`crates/dezoomify-wasm`).
 //!
 //! This crate is adapter-only: it performs no network or filesystem I/O,
 //! decodes no images, touches no DOM/canvas/storage/workers/timers, encodes
 //! no output, and depends only on `dezoomify-core`, `dezoomify-protocol`,
-//! `serde`, `serde_json`, and `wasm-bindgen`. It must stay free of `web-sys`
+//! `serde`, `tsify`, `serde-wasm-bindgen`, and `wasm-bindgen`. It stays free of `web-sys`
 //! (Window/Document/fetch/Canvas/storage/worker features), `reqwest`,
 //! `tokio`, and image codecs; the future browser runtime owns all host
 //! effects, and the host supplies every byte the adapter reads.
@@ -13,39 +13,36 @@
 //!
 //! | JS export      | Rust entrypoint                                              |
 //! |---             |---                                                           |
-//! | protocolVersion | [`protocol_version`]                                        |
 //! | Session        | [`session::Session`] constructor (`Session::new`)            |
-//! | dispatch       | [`session::Session::dispatch`] (canonical control bytes)     |
-//! | drain          | [`session::Session::drain_messages`] (FIFO, exactly once)    |
+//! | dispatch       | [`session::Session::dispatch`] (typed command/result)        |
 //! | buffers        | `allocate_buffer` / `write_buffer` / `commit_buffer` /      |
-//! |                | `take_buffer` / `free_buffer` / `protocol_handle` on Session |
+//! |                | `take_buffer` / `free_buffer` / `buffer_handle` on Session   |
 //! | applyProcessing | [`session::Session::apply_processing`] (pure recipe op)     |
 //! | dispose        | [`session::Session::dispose`] (repeat-safe)                   |
 //!
 //! ## Ownership, reentrancy, disposal
 //!
 //! * Session: one Rust [`session::Session`] owns exactly one job, one byte
-//!   arena, and one message queue. It is never cloned and cannot be used
-//!   after [`dispose`][session::Session::dispose] except for draining.
-//! * Input control bytes: borrowed for the call only; the adapter copies
-//!   what it needs before returning.
+//!   arena. It is never cloned and cannot be used after
+//!   [`dispose`][session::Session::dispose].
+//! * Commands, messages, configuration, and handles cross as generated
+//!   JavaScript objects with fallible Rust deserialization.
 //! * Input binary buffers: host bytes live in the arena; `commit` seals them
 //!   immutable, `take` moves them exactly once. The host must not mutate a
 //!   committed view.
-//! * Output messages: canonical bytes owned by the host after `drain`; a
-//!   successful drain removes them, so each message is delivered once.
+//! * Output messages are returned directly by each state transition.
 //! * Output buffers: adapter-produced pixels move out via `take_buffer` with
 //!   explicit `free_buffer` release; nothing is silently base64-encoded.
 //! * Typed-array views: any call may grow WASM memory and invalidate views
 //!   obtained earlier; hosts must re-acquire views after each call and must
 //!   finish writing before `commit`.
 //! * Reentrancy: the adapter never calls back into the host while a Rust
-//!   borrow is active. Hosts poll with `drain` after `dispatch` returns;
-//!   nested or concurrent calls into one session are not supported.
+//!   borrow is active. Nested or concurrent calls into one session are not
+//!   supported.
 //! * Disposal: `dispose` cancels the job, releases buffers, marks the
 //!   session unusable (`disposed` on later dispatch/buffer/process calls),
-//!   and stays safe to repeat. A handwritten JS wrapper may add a finalizer
-//!   only as a leak fallback, never as semantic cancellation.
+//!   and stays safe to repeat. A JS finalizer is only a leak fallback, never
+//!   semantic cancellation.
 //! * Errors: every failure is a stable [`AdapterError`] code convertible to
 //!   a protocol `ErrorDto`; panics never cross the boundary (the crate
 //!   forbids `unsafe_code` and checks every index and length).
@@ -66,58 +63,50 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod buffer;
-pub mod codec;
 pub mod discovery;
 pub mod error;
 pub mod session;
 
 pub use buffer::{ArenaHandle, ByteArena, MAX_BUFFERS, MAX_BUFFER_BYTES, MAX_TOTAL_BYTES};
-pub use dezoomify_protocol::dto::{PROTOCOL_MAJOR, PROTOCOL_MINOR, PROTOCOL_VERSION};
 pub use error::{redact, AdapterError, AdapterErrorCode};
 pub use session::{
-    Session, SessionState, DEFAULT_MAX_BUFFERS, DEFAULT_MAX_BUFFER_BYTES, DEFAULT_MAX_MESSAGES,
-    DEFAULT_MAX_TOTAL_BYTES, HARD_MAX_BUFFERS, HARD_MAX_BUFFER_BYTES, HARD_MAX_MESSAGES,
-    HARD_MAX_TOTAL_BYTES,
+    Session, SessionState, DEFAULT_MAX_BUFFERS, DEFAULT_MAX_BUFFER_BYTES, DEFAULT_MAX_TOTAL_BYTES,
+    HARD_MAX_BUFFERS, HARD_MAX_BUFFER_BYTES, HARD_MAX_TOTAL_BYTES,
 };
-
-/// Protocol major/minor in lossless stable form (`"2.0"`), without creating
-/// a job. This is the `protocolVersion` export.
-#[must_use]
-pub fn protocol_version() -> &'static str {
-    PROTOCOL_VERSION
-}
 
 /// JavaScript (`wasm32`) bindings. Native targets and tests use the plain
 /// Rust API above, which exercises the same logic without a browser.
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_api {
     use super::{buffer::ArenaHandle, session::Session};
+    use dezoomify_protocol::dto::{
+        BufferHandle, ErrorDto, HostMessage, JobCommand, ProcessingRequest, SessionConfig,
+    };
+    use serde::Serialize;
+    use tsify::{Ts, Tsify};
     use wasm_bindgen::prelude::*;
 
-    fn js_error(error: super::AdapterError) -> JsValue {
-        let fallback = error.to_string();
-        match serde_json::to_string(&error.to_error_dto()) {
-            Ok(encoded) => JsValue::from_str(&encoded),
-            Err(_) => JsValue::from_str(&fallback),
+    #[derive(Serialize, Tsify)]
+    #[serde(tag = "status", rename_all = "kebab-case")]
+    pub enum DispatchResult {
+        Ok { messages: Vec<HostMessage> },
+        Error { error: ErrorDto },
+    }
+
+    fn result(value: Result<Vec<HostMessage>, super::AdapterError>) -> DispatchResult {
+        match value {
+            Ok(messages) => DispatchResult::Ok { messages },
+            Err(error) => DispatchResult::Error {
+                error: error.to_error_dto(),
+            },
         }
     }
 
-    /// Map a non-adapter failure (e.g. handle JSON parsing) to a redacted
-    /// `malformed` JS error.
-    fn js_malformed(detail: impl std::fmt::Display) -> JsValue {
-        js_error(super::AdapterError::new(
-            super::AdapterErrorCode::Malformed,
-            detail.to_string(),
-        ))
+    fn conversion_error(error: impl std::fmt::Display) -> JsError {
+        JsError::new(&format!("typed ABI conversion failed: {error}"))
     }
 
-    /// The `protocolVersion` export.
-    #[wasm_bindgen(js_name = "protocolVersion")]
-    pub fn js_protocol_version() -> String {
-        super::protocol_version().to_string()
-    }
-
-    /// The `Session` export: owns one job, one arena, one message queue.
+    /// The `Session` export: owns one job and one byte arena.
     #[wasm_bindgen(js_name = "Session")]
     pub struct JsSession {
         inner: Session,
@@ -125,113 +114,116 @@ pub mod wasm_api {
 
     #[wasm_bindgen(js_class = "Session")]
     impl JsSession {
-        /// Validate version/config; own exactly one job/session.
+        /// Validate typed configuration and own exactly one job session.
         #[wasm_bindgen(constructor)]
-        pub fn new(protocol_version: &str, config_json: &str) -> Result<JsSession, JsValue> {
-            Session::new(protocol_version, config_json)
+        pub fn new(config: Ts<SessionConfig>) -> Result<JsSession, JsError> {
+            let config = config.to_rust().map_err(conversion_error)?;
+            Session::new(config)
                 .map(|inner| JsSession { inner })
-                .map_err(js_error)
+                .map_err(|error| JsError::new(&error.to_string()))
         }
 
-        /// Decode one protocol command/response, run the transition
-        /// synchronously, and return status only (`dispatch`).
+        /// Run one typed command and return its ordered host messages.
         #[wasm_bindgen(js_name = "dispatch")]
-        pub fn dispatch(&mut self, control: &[u8]) -> Result<(), JsValue> {
-            self.inner.dispatch(control).map_err(js_error)
-        }
-
-        /// Return queued canonical messages as a JSON array string, FIFO,
-        /// exactly once (`drain`).
-        #[wasm_bindgen(js_name = "drainMessages")]
-        pub fn drain_messages(&mut self) -> Result<String, JsValue> {
-            let messages = self.inner.drain_messages();
-            super::codec::messages_to_json_array(&messages).map_err(js_error)
+        pub fn dispatch(&mut self, command: Ts<JobCommand>) -> Result<Ts<DispatchResult>, JsError> {
+            let command = command.to_rust().map_err(conversion_error)?;
+            result(self.inner.dispatch(command))
+                .into_ts()
+                .map_err(conversion_error)
         }
 
         /// Reserve `length` bytes for host-supplied data (`buffers`).
-        /// Returns the handle as JSON (`{"id":..,"generation":..}`).
         #[wasm_bindgen(js_name = "allocateBuffer")]
-        pub fn allocate_buffer(&mut self, length: u32) -> Result<String, JsValue> {
+        pub fn allocate_buffer(&mut self, length: u32) -> Result<Ts<ArenaHandle>, JsError> {
             let handle = self
                 .inner
                 .allocate_buffer(u64::from(length))
-                .map_err(js_error)?;
-            serde_json::to_string(&handle).map_err(js_malformed)
+                .map_err(|error| JsError::new(&error.to_string()))?;
+            handle.into_ts().map_err(conversion_error)
         }
 
         /// Copy host bytes into an uncommitted allocation (`buffers`).
         #[wasm_bindgen(js_name = "writeBuffer")]
         pub fn write_buffer(
             &mut self,
-            handle_json: &str,
+            handle: Ts<ArenaHandle>,
             offset: u32,
             data: &[u8],
-        ) -> Result<(), JsValue> {
-            let handle: ArenaHandle = serde_json::from_str(handle_json).map_err(js_malformed)?;
+        ) -> Result<(), JsError> {
+            let handle = handle.to_rust().map_err(conversion_error)?;
             self.inner
                 .write_buffer(handle, u64::from(offset), data)
-                .map_err(js_error)
+                .map_err(|error| JsError::new(&error.to_string()))
         }
 
         /// Seal one buffer for a subsequent correlated command (`buffers`).
         #[wasm_bindgen(js_name = "commitBuffer")]
-        pub fn commit_buffer(&mut self, handle_json: &str, actual: u32) -> Result<(), JsValue> {
-            let handle: ArenaHandle = serde_json::from_str(handle_json).map_err(js_malformed)?;
+        pub fn commit_buffer(
+            &mut self,
+            handle: Ts<ArenaHandle>,
+            actual: u32,
+        ) -> Result<(), JsError> {
+            let handle = handle.to_rust().map_err(conversion_error)?;
             self.inner
                 .commit_buffer(handle, u64::from(actual))
-                .map_err(js_error)
+                .map_err(|error| JsError::new(&error.to_string()))
         }
 
         /// Project an arena handle onto its canonical protocol reference
-        /// (`buffers`): the JSON form `provide-resource` commands carry
-        /// (`{"id":0,"generation":..,"length":..}`), distinct from the
+        /// (`buffers`): typed `provide-resource` commands carry a
+        /// `BufferHandle`, distinct from the
         /// arena form `allocateBuffer` returns.
-        #[wasm_bindgen(js_name = "protocolHandle")]
-        pub fn protocol_handle_js(&mut self, handle_json: &str) -> Result<String, JsValue> {
-            let handle: ArenaHandle = serde_json::from_str(handle_json).map_err(js_malformed)?;
-            let protocol = self.inner.protocol_handle(handle).map_err(js_error)?;
-            serde_json::to_string(&protocol).map_err(js_malformed)
+        #[wasm_bindgen(js_name = "bufferHandle")]
+        pub fn buffer_handle_js(
+            &mut self,
+            handle: Ts<ArenaHandle>,
+        ) -> Result<Ts<BufferHandle>, JsError> {
+            let handle = handle.to_rust().map_err(conversion_error)?;
+            let protocol = self
+                .inner
+                .buffer_handle(handle)
+                .map_err(|error| JsError::new(&error.to_string()))?;
+            protocol.into_ts().map_err(conversion_error)
         }
 
         /// Move adapter-held bytes out exactly once (`buffers`).
         #[wasm_bindgen(js_name = "takeBuffer")]
-        pub fn take_buffer(&mut self, handle_json: &str) -> Result<Vec<u8>, JsValue> {
-            let handle: ArenaHandle = serde_json::from_str(handle_json).map_err(js_malformed)?;
-            self.inner.take_buffer(handle).map_err(js_error)
+        pub fn take_buffer(&mut self, handle: Ts<ArenaHandle>) -> Result<Vec<u8>, JsError> {
+            let handle = handle.to_rust().map_err(conversion_error)?;
+            self.inner
+                .take_buffer(handle)
+                .map_err(|error| JsError::new(&error.to_string()))
         }
 
         /// Release a buffer handle; idempotent (`buffers`).
         #[wasm_bindgen(js_name = "freeBuffer")]
-        pub fn free_buffer(&mut self, handle_json: &str) -> Result<(), JsValue> {
-            let handle: ArenaHandle = serde_json::from_str(handle_json).map_err(js_malformed)?;
-            self.inner.free_buffer(handle).map_err(js_error)
+        pub fn free_buffer(&mut self, handle: Ts<ArenaHandle>) -> Result<(), JsError> {
+            let handle = handle.to_rust().map_err(conversion_error)?;
+            self.inner
+                .free_buffer(handle)
+                .map_err(|error| JsError::new(&error.to_string()))
         }
 
         /// Apply one core processing recipe to tile bytes (pure: no job
         /// state, same recipes as the discovery adapter).
         #[wasm_bindgen(js_name = "applyProcessing")]
-        pub fn apply_processing(&self, recipe: &str, bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+        pub fn apply_processing(
+            &self,
+            request: Ts<ProcessingRequest>,
+            bytes: &[u8],
+        ) -> Result<Vec<u8>, JsError> {
+            let request = request.to_rust().map_err(conversion_error)?;
             self.inner
-                .apply_processing(recipe, bytes.to_vec())
-                .map_err(js_error)
+                .apply_processing(request.recipe, bytes.to_vec())
+                .map_err(|error| JsError::new(&error.to_string()))
         }
 
         /// Cancel/release session resources; repeat-safe (`dispose`).
         #[wasm_bindgen(js_name = "dispose")]
-        pub fn dispose(&mut self) -> Result<(), JsValue> {
-            self.inner.dispose().map_err(js_error)
+        pub fn dispose(&mut self) -> Result<Ts<DispatchResult>, JsError> {
+            result(self.inner.dispose())
+                .into_ts()
+                .map_err(conversion_error)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn version_export_needs_no_session() {
-        assert_eq!(protocol_version(), "2.0");
-        assert_eq!(protocol_version(), PROTOCOL_VERSION);
-        assert_eq!((PROTOCOL_MAJOR, PROTOCOL_MINOR), (2, 0));
     }
 }

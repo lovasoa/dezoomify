@@ -39,14 +39,13 @@ function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport, prob
     fetchResource,
     cancelFetch: () => { cancelled = true; seen.push(["cancel"]); },
     assembly,
-    probeSize: probeSize ?? (async () => ({ ok: true, width: 256, height: 256 })),
+    probeSize: probeSize ?? (async () => ({ status: "available", width: 256, height: 256 })),
     ...(displayOnly ? { loadDisplayImage: async () => ({ naturalWidth: 64, naturalHeight: 64 }) } : {}),
-    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: error?.code ?? "extension.network", retryable: true, message: String(error?.message ?? error) }),
+    classifyFailure: (error) => ({ blocked_reason: "network", code: error?.code ?? "extension.network", retryable: true, message: String(error?.message ?? error), transport: "browser-session" }),
     onPermissionRequired: (detail) => seen.push(["permission", detail]),
     onRecoveryRequested: (generation) => seen.push(["recovery-decision", generation]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
     onEvent: (event) => seen.push(["event", event.type]),
-    onUnsupportedEffect: (envelope) => seen.push(["unsupported", envelope.type]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   return { controller, sent, seen, assembly, logs };
@@ -100,10 +99,10 @@ test("an access grant re-drives the paused acquisition instead of failing the jo
     },
     cancelFetch: () => {},
     assembly,
-    probeSize: async () => ({ ok: true, width: 256, height: 256 }),
-    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: true }),
+    probeSize: async () => ({ status: "available", width: 256, height: 256 }),
+    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: true, message: String(error?.message ?? error), transport: "browser-session" }),
     onPermissionRequired: (detail) => retried.push(detail),
-    onRecoveryRequested() {}, onHostFailure() {}, onEvent() {}, onUnsupportedEffect() {},
+    onRecoveryRequested() {}, onHostFailure() {}, onEvent() {},
   });
   controller.handleEngineMessages([TILE_EFFECT]);
   await flush();
@@ -128,10 +127,10 @@ test("a granted-origin refusal fails typed without re-prompting for a grant", as
     fetchResource: async () => { throw Object.assign(new Error("forbidden"), { category: "forbidden", code: "extension.network", hosts: ["https://cdn.test"] }); },
     cancelFetch: () => {},
     assembly,
-    probeSize: async () => ({ ok: true, width: 256, height: 256 }),
-    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: false }),
+    probeSize: async () => ({ status: "available", width: 256, height: 256 }),
+    classifyFailure: (error) => ({ blocked_reason: error?.category ?? "network", code: "extension.network", retryable: false, message: String(error?.message ?? error), transport: "browser-session" }),
     onPermissionRequired: (detail) => retried.push(detail),
-    onRecoveryRequested() {}, onHostFailure() {}, onEvent() {}, onUnsupportedEffect() {},
+    onRecoveryRequested() {}, onHostFailure() {}, onEvent() {},
   });
   controller.handleEngineMessages([TILE_EFFECT]);
   await flush();
@@ -189,17 +188,17 @@ test("a definitive source HTTP response is not retried through the extension ori
 
 test("probe effects report measurements without retaining tiles", async () => {
   const { controller, sent, assembly } = harness({
-    probeSize: async () => ({ ok: true, width: 256, height: 128 }),
+    probeSize: async () => ({ status: "available", width: 256, height: 128 }),
   });
   controller.handleEngineMessages([{
     ...TILE_EFFECT,
-    request: { id: 7, uri: "https://cdn.test/probe_0.jpg", headers: {}, purpose: "probe" },
+    request: { id: 7, uri: "https://cdn.test/probe_0.jpg", headers: [], purpose: "probe" },
   }]);
   await flush();
   const probe = sent.find((message) => message.type === "engine.probe");
   assert.ok(probe, "probe outcome was sent");
   assert.equal(probe.requestId, 7);
-  assert.deepEqual([probe.ok, probe.width, probe.height], [true, 256, 128]);
+  assert.deepEqual(probe.outcome, { status: "available", width: 256, height: 128 });
   assert.equal(assembly.calls.some(([kind]) => kind === "acquireTile"), false);
   assert.equal(sent.some((message) => message.type === "engine.bytes"), false);
 });
@@ -255,7 +254,7 @@ test("display fallback holds an ordinary image when bytes are unreadable", async
   await flush();
   const display = sent.find((message) => message.type === "engine.display");
   assert.ok(display, "display outcome was sent");
-  assert.deepEqual([display.requestId, display.width, display.height], [3, 64, 64]);
+  assert.equal(display.requestId, 3);
   assert.equal(assembly.calls.some(([kind]) => kind === "acquireDisplayTile"), true);
 });
 

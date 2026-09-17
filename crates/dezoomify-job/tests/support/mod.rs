@@ -231,6 +231,12 @@ fn effect_json(seq: u32, effect: JobEffect) -> serde_json::Value {
             probe,
             probe_output,
         } => {
+            let processing = match processing {
+                dezoomify_core::core::model::ProcessingRecipe::None => "none",
+                dezoomify_core::core::model::ProcessingRecipe::GoogleArtsDecrypt => {
+                    "google-arts-decrypt"
+                }
+            };
             let mut value = serde_json::json!({
                 "kind": "acquire-tile", "seq": seq, "tile": tile, "uri": uri,
                 "headers": headers, "processing": processing,

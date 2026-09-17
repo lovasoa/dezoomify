@@ -54,7 +54,7 @@ Numbers and lists live once; every other page links:
 ## System invariants
 
 - [`crates/dezoomify-core`](architecture.md#cratesdezoomify-core) and [`crates/dezoomify-job`](job-engine.md) are pure Rust libraries with no network, filesystem, clock, UI, or image-codec access.
-- [`crates/dezoomify-protocol`](protocol.md) is the Rust source for the generated TypeScript bindings and schema and is the only wire contract between the shared UI and a runtime.
+- [`crates/dezoomify-protocol`](protocol.md) is the Rust source for the generated TypeScript bindings used across the WASM boundary.
 - One shared [UI](architecture.md#packagesshared-ui) (vanilla TypeScript, no UI framework) serves the website, desktop app, and extension.
 - Browser and native runtimes implement the same capabilities honestly; unsupported operations are reported before a job starts.
 - The website tries credential-free direct browser fetch first, then automatically falls back to the metadata CORS proxy after a classified CORS or network failure (or a direct fetch that does not complete within the 1500 ms metadata window) for an eligible public, non-credential metadata request (never tiles); it shows the active transport.

@@ -39,9 +39,9 @@ including `build`, `dev`, `ci`, `release`, `protocol`, and `fixtures`. See
 - Repository root: the website, where you paste a URL and save the image.
 - [`apps/`](apps/): the extension, desktop app, and CLI.
 - [`crates/`](crates/): the Rust engine, with pure discovery core, job state
-  machine, versioned protocol, native runtime, WASM adapter, and test tooling.
+  machine, authoritative contracts, native runtime, WASM adapter, and test tooling.
 - [`packages/`](packages/): TypeScript shared UI, browser runtime, and generated
-  protocol bindings.
+  WASM bindings.
 - [`testdata/scenarios`](testdata/scenarios): deterministic test fixtures.
 - [`docs/`](docs/): architecture, privacy, security, and release contracts.
 

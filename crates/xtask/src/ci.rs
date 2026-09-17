@@ -41,7 +41,7 @@ fn ci_lane(lane: &str) -> Result<(), String> {
         "web" => super::browser::test_web(&["--e2e".to_string()]),
         "desktop" => super::command::node_test(&["apps/desktop/tests/*.test.mjs"], true),
         "extension" => super::extension::test_extension(&[]),
-        "protocol" => super::command::node_test(&["packages/protocol-ts/test/*.test.mjs"], false),
+        "protocol" => super::protocol::test_protocol(),
         "security" => {
             super::supply::audit_js()?;
             Ok(())

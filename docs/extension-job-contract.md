@@ -31,18 +31,11 @@ bounded, and deduplicated by the coordinator; there is no persistent observer
 or source-tab runtime listener. Overflow is returned as diagnostics, not
 silently discarded.
 
-Candidates and source fetch messages use extension-local envelopes and never
-claim to be a cross-version protocol. Cancellation aborts the source fetch
-before more chunks are retained.
-
-## Internal extension envelopes
-
-The current extension uses these host-internal envelope names while generated
-protocol bindings are consumed by the entrypoints: `dz.source.fetch-chunk`,
-`dz.source.fetch-complete`, `dz.job.ready`, `dz.job.binding`, `dz.job.candidates`,
-`dz.job.candidates-more`,
-`dz.job.fetch`, `dz.job.cancel`, `dz.job.permission-required`, and
-`dz.job.closed`. All are runtime messages; no webpage frame receives them.
+Candidates and source fetch messages use one closed TypeScript union shared by
+the sender and receiver. These messages are private to one installed extension
+build; they are not a cross-version interface. Cancellation aborts the source
+fetch before more chunks are retained. No webpage frame receives extension
+runtime messages.
 
 ## Transport outcomes
 

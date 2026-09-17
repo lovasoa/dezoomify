@@ -3,12 +3,16 @@ name = "dezoomify-protocol"
 version = "2.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Canonical versioned protocol DTOs for dezoomify hosts and shared logic."
+description = "Authoritative Rust contract types for Dezoomify hosts and bindings."
 repository = "https://github.com/lovasoa/dezoomify"
 
 [dependencies]
 serde.workspace = true
-serde_json.workspace = true
+tsify = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+
+[features]
+typescript = ["dep:tsify", "dep:wasm-bindgen"]
 
 # 6.1 debt (unblocked for cargo 1.98): DTO docs pending.
 [lints.rust]

@@ -381,9 +381,10 @@ fn probe_driven_generic_level_resolves_through_observations() {
         let (width, height) = if x < 2 && y < 2 { (256, 256) } else { (1, 1) };
         host.apply(JobCommand::ProbeOutcome {
             tile,
-            available: true,
-            width,
-            height,
+            outcome: dezoomify_protocol::dto::ProbeOutcome::Available {
+                width: std::num::NonZeroU64::new(width).unwrap(),
+                height: std::num::NonZeroU64::new(height).unwrap(),
+            },
         })
         .unwrap();
     }
@@ -421,9 +422,7 @@ fn iiif_caret_probe_is_reused_as_the_only_output_tile() {
     assert!(ordinary.1.ends_with("/256,256/0/default.jpg"));
     host.apply(JobCommand::ProbeOutcome {
         tile: ordinary.0,
-        available: false,
-        width: 0,
-        height: 0,
+        outcome: dezoomify_protocol::dto::ProbeOutcome::Missing,
     })
     .unwrap();
 
@@ -432,9 +431,10 @@ fn iiif_caret_probe_is_reused_as_the_only_output_tile() {
     assert!(caret.1.ends_with("/^256,/0/default.jpg"));
     host.apply(JobCommand::ProbeOutcome {
         tile: caret.0,
-        available: true,
-        width: 256,
-        height: 256,
+        outcome: dezoomify_protocol::dto::ProbeOutcome::Available {
+            width: std::num::NonZeroU64::new(256).unwrap(),
+            height: std::num::NonZeroU64::new(256).unwrap(),
+        },
     })
     .unwrap();
 

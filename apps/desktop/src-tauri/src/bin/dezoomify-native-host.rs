@@ -28,7 +28,7 @@ use dezoomify_desktop::native_host::redaction;
 
 pub const HOST_NAME: &str = "dev.ophir.dezoomify.native_host";
 pub const HOST_VERSION: &str = dezoomify_desktop::APP_VERSION;
-pub const HOST_PROTOCOL: &str = dezoomify_protocol::dto::PROTOCOL_VERSION;
+pub const HOST_PROTOCOL: &str = dezoomify_protocol::dto::NATIVE_PROTOCOL_VERSION_TEXT;
 
 fn now_ms() -> u64 {
     SystemTime::now()

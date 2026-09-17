@@ -24,3 +24,4 @@ export * from "./web-fetch.ts";
 export * from "./probe.ts";
 export * from "./engine-host.ts";
 export * from "./worker-host.ts";
+export * from "./typed-dispatch.ts";

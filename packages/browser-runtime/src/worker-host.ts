@@ -1,135 +1,109 @@
-// Shared job-worker entrypoint for browser products (website + extension).
-// A thin host around the Rust/WASM Session: commands and effects remain
-// protocol envelopes, so this module never grows a second JavaScript state
-// machine. Product workers wrap it with their bundler-specific glue import
-// and worker-scope bootstrap.
+// Shared worker entrypoint for the website and extension. Rust owns the job
+// state machine; this module transfers browser-owned bytes through the
+// generated typed WASM ABI.
+import type {
+  DispatchResult,
+  ErrorDto,
+  FetchFailureDto,
+  HostMessage,
+  JobCommand,
+  JobInputDto,
+  ProcessingRecipe,
+  ProbeOutcome,
+  Session as WasmSession,
+  SessionConfig,
+} from "@dezoomify/wasm-bindings";
+import { dispatchTyped } from "./typed-dispatch.ts";
+import type { DispatchTable } from "./typed-dispatch.ts";
 
-export type WorkerHostLog = (level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown) => void;
+export type WorkerHostLog = (
+  level: "debug" | "info" | "warn" | "error",
+  code: string,
+  detail?: unknown,
+) => void;
 
-function object(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
-function engineError(error: unknown) {
-  const raw = error instanceof Error ? error.message : String(error);
-  let parsed = error;
-  if (typeof parsed === "string") {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch {
-      /* legacy string error */
-    }
-  }
-  const candidate = object(parsed);
-  const code = typeof candidate.code === "string" ? candidate.code : "adapter.malformed";
-  const message = typeof candidate.message === "string" ? candidate.message : raw;
+function abiFault(error: unknown): ErrorDto {
+  const detail = error instanceof Error ? error.message : String(error);
   return {
-    code,
-    phase: typeof candidate.phase === "string" ? candidate.phase : "validation",
-    retryable: candidate.retryable === true,
-    message,
-    detail: `${code}: ${message}`,
+    code: "adapter.abi",
+    phase: "validation",
+    retryable: false,
+    message: "The browser and image engine could not exchange a typed message.",
+    recovery: [],
     transport: "browser-session",
+    detail,
   };
-}
-
-const encoder = new TextEncoder();
-
-function commandBytes(command: Record<string, unknown>): Uint8Array {
-  return encoder.encode(`${JSON.stringify({ protocol: "2.0", kind: "command", ...command })}\n`);
-}
-
-export interface WorkerHostSession {
-  drainMessages(): string;
-  dispatch(command: Uint8Array): void;
-  allocateBuffer(length: number): string;
-  writeBuffer(handle: string, offset: number, bytes: Uint8Array): void;
-  commitBuffer(handle: string, length: number): void;
-  protocolHandle(handle: string): string;
-  applyProcessing(recipe: string, bytes: Uint8Array): Uint8Array;
-  dispose(): void;
 }
 
 export interface WorkerHostWasm {
   default?: () => Promise<void>;
-  Session: new (protocol: string, quotas: string) => WorkerHostSession;
+  Session: typeof WasmSession;
 }
 
-export type WorkerHostMessage = Record<string, unknown> & {
-  type?: string;
-  jobId?: string;
-  inputs?: unknown;
-  requestId?: number;
-  bytes?: unknown;
-  command?: unknown;
-  error?: unknown;
-  quotas?: unknown;
-  recipe?: unknown;
-  ok?: unknown;
-  width?: unknown;
-  height?: unknown;
-  finalUri?: unknown;
-};
+export type WorkerHostMessage =
+  | { type: "engine.start"; jobId: string; inputs: JobInputDto[]; quotas?: SessionConfig }
+  | { type: "engine.bytes"; requestId: number; bytes: Uint8Array; finalUri?: string }
+  | { type: "engine.probe"; requestId: number; outcome: ProbeOutcome }
+  | { type: "engine.display"; requestId: number }
+  | { type: "engine.process"; requestId: number; recipe: ProcessingRecipe; bytes: Uint8Array | ArrayBuffer }
+  | { type: "engine.rank"; requestId: number; urls: string[] }
+  | { type: "engine.failure"; requestId: number; error: FetchFailureDto }
+  | { type: "engine.command"; command: JobCommand }
+  | { type: "engine.dispose" };
+
+export type WorkerHostOutput =
+  | { type: "engine.messages"; messages: HostMessage[] }
+  | { type: "engine.processed"; requestId: number; bytes: ArrayBuffer }
+  | { type: "engine.process-failed"; requestId: number; error: ErrorDto }
+  | { type: "engine.ranked"; requestId: number; urls: string[] }
+  | { type: "engine.error"; error: ErrorDto }
+  | { type: "engine.log"; line: string };
 
 export function createJobWorkerHost(deps: {
-  postMessage(message: unknown, transfer?: Transferable[]): void;
+  postMessage(message: WorkerHostOutput, transfer?: Transferable[]): void;
   wasm(): Promise<WorkerHostWasm>;
   log?: WorkerHostLog;
 }) {
   const log: WorkerHostLog = deps.log ?? (() => {});
-  let session: WorkerHostSession | null = null;
+  let session: WasmSession | null = null;
   let disposed = false;
 
-  function flush() {
-    if (!session) return;
-    let messages: unknown;
-    try {
-      messages = JSON.parse(session.drainMessages());
-    } catch (error) {
-      log("error", "core-error", `phase=drain message=${error instanceof Error ? error.message : String(error)}`);
-      deps.postMessage({ type: "engine.error", error: engineError(error) });
+  function publish(result: DispatchResult): void {
+    if (result.status === "error") {
+      log("error", "core-error", `code=${result.error.code} phase=${result.error.phase} message=${result.error.message}`);
+      deps.postMessage({ type: "engine.error", error: result.error });
       return;
     }
-    if (Array.isArray(messages) && messages.length) {
-      const effects = messages.filter((message) => (message as { kind?: unknown })?.kind === "effect").length;
-      const events = messages.filter((message) => (message as { kind?: unknown })?.kind === "event").length;
-      log("debug", "messages-drained", `effects=${effects} events=${events} total=${messages.length}`);
-      deps.postMessage({ type: "engine.messages", messages });
-    }
+    const messages: HostMessage[] = result.messages;
+    if (messages.length === 0) return;
+    const effects = messages.filter((message) => message.kind === "effect").length;
+    log("debug", "messages-returned", `effects=${effects} events=${messages.length - effects} total=${messages.length}`);
+    deps.postMessage({ type: "engine.messages", messages });
   }
 
-  function dispatch(command: Record<string, unknown>) {
+  function dispatch(command: JobCommand): void {
     if (!session || disposed) return;
-    const request = command.request;
-    log("debug", "command-dispatched", `command=${String(command.type)}${request !== undefined ? ` request=${String(request)}` : ""}`);
-    session.dispatch(commandBytes(command));
-    flush();
+    const request = "request" in command ? command.request : undefined;
+    log("debug", "command-dispatched", `command=${command.type}${request === undefined ? "" : ` request=${request}`}`);
+    publish(session.dispatch(command));
   }
 
-  async function start(message: WorkerHostMessage) {
+  async function start(message: Extract<WorkerHostMessage, { type: "engine.start" }>): Promise<void> {
     const wasm = await deps.wasm();
     if (disposed) return;
     await wasm.default?.();
-    session = new wasm.Session("2.0", JSON.stringify(message.quotas ?? {}));
-    log("info", "session-created", `jobId=${String(message.jobId)} protocol=2.0`);
-    const inputs = Array.isArray(message.inputs) ? message.inputs.flatMap((value: unknown) => {
-      const input = object(value);
-      if (typeof input.url !== "string") return [];
-      return [{ url: input.url, ...(typeof input.contents === "string" ? { contents: Array.from(encoder.encode(input.contents)) } : {}) }];
-    }) : [];
-    dispatch({ type: "start", inputs });
+    session = new wasm.Session(message.quotas ?? {});
+    log("info", "session-created", `jobId=${String(message.jobId)} typed-abi=true`);
+    dispatch({ type: "start", inputs: message.inputs });
   }
 
-  function provideBytes(message: WorkerHostMessage) {
-    if (!session || disposed || !(message.bytes instanceof Uint8Array)) return;
-    const handle = JSON.parse(session.allocateBuffer(message.bytes.byteLength));
-    const handleJson = JSON.stringify(handle);
-    session.writeBuffer(handleJson, 0, message.bytes);
-    session.commitBuffer(handleJson, message.bytes.byteLength);
-    // The command envelope carries the canonical protocol reference, not the
-    // arena form allocateBuffer returns.
-    const buffer = JSON.parse(session.protocolHandle(handleJson));
-    const finalUri = typeof message.finalUri === "string" && message.finalUri !== "" ? message.finalUri : undefined;
+  function provideBytes(message: Extract<WorkerHostMessage, { type: "engine.bytes" }>): void {
+    if (!session || disposed) return;
+    const handle = session.allocateBuffer(message.bytes.byteLength);
+    session.writeBuffer(handle, 0, message.bytes);
+    session.commitBuffer(handle, message.bytes.byteLength);
+    const buffer = session.bufferHandle(handle);
+    const finalUri = message.finalUri !== "" ? message.finalUri : undefined;
     dispatch({
       type: "provide-resource",
       request: message.requestId,
@@ -138,66 +112,59 @@ export function createJobWorkerHost(deps: {
     });
   }
 
-  function provideProbe(message: WorkerHostMessage) {
-    if (!session || disposed || !Number.isSafeInteger(message.requestId) || (message.requestId as number) < 0) return;
-    const ok = message.ok === true;
-    const width = typeof message.width === "number" && Number.isSafeInteger(message.width) && (message.width as number) > 0 ? message.width : 0;
-    const height = typeof message.height === "number" && Number.isSafeInteger(message.height) && (message.height as number) > 0 ? message.height : 0;
-    dispatch({ type: "provide-probe-outcome", request: message.requestId, ok, width, height });
+  function provideProbe(message: Extract<WorkerHostMessage, { type: "engine.probe" }>): void {
+    dispatch({ type: "provide-probe-outcome", request: message.requestId, outcome: message.outcome });
   }
 
-  function provideDisplay(message: WorkerHostMessage) {
-    if (!session || disposed || !Number.isSafeInteger(message.requestId) || (message.requestId as number) < 0) return;
-    const width = typeof message.width === "number" && Number.isSafeInteger(message.width) && (message.width as number) > 0 ? message.width : 0;
-    const height = typeof message.height === "number" && Number.isSafeInteger(message.height) && (message.height as number) > 0 ? message.height : 0;
-    dispatch({ type: "provide-display-outcome", request: message.requestId, width, height });
+  function provideDisplay(message: Extract<WorkerHostMessage, { type: "engine.display" }>): void {
+    dispatch({ type: "provide-display-outcome", request: message.requestId });
   }
 
-  function processTile(message: WorkerHostMessage) {
+  function processTile(message: Extract<WorkerHostMessage, { type: "engine.process" }>): void {
     if (!session || disposed) return;
-    const requestId = message.requestId;
-    const recipe = typeof message.recipe === "string" ? message.recipe : "none";
     const bytes = message.bytes instanceof Uint8Array
       ? message.bytes
-      : message.bytes instanceof ArrayBuffer
-        ? new Uint8Array(message.bytes)
-        : null;
-    if (!Number.isSafeInteger(requestId) || !bytes) return;
+      : new Uint8Array(message.bytes);
     try {
-      const processed = session.applyProcessing(recipe, bytes);
-      const out = new Uint8Array(processed).slice();
-      deps.postMessage({ type: "engine.processed", requestId, bytes: out.buffer }, [out.buffer]);
+      const out = new Uint8Array(session.applyProcessing({ recipe: message.recipe }, bytes)).slice();
+      deps.postMessage({ type: "engine.processed", requestId: message.requestId, bytes: out.buffer }, [out.buffer]);
     } catch (error) {
-      const failure = engineError(error);
-      log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message}`);
-      deps.postMessage({ type: "engine.process-failed", requestId, error: failure });
+      deps.postMessage({ type: "engine.process-failed", requestId: message.requestId, error: abiFault(error) });
     }
   }
+
+  const messageHandlers = {
+    "engine.start": start,
+    "engine.bytes": provideBytes,
+    "engine.probe": provideProbe,
+    "engine.display": provideDisplay,
+    "engine.process": processTile,
+    "engine.rank": (input) => {
+      deps.postMessage({ type: "engine.ranked", requestId: input.requestId, urls: input.urls });
+    },
+    "engine.failure": (input) => {
+      dispatch({ type: "provide-fetch-failure", request: input.requestId, error: input.error });
+    },
+    "engine.command": (input) => dispatch(input.command),
+    "engine.dispose": () => {
+      log("info", "session-disposed", "");
+      disposed = true;
+      try {
+        if (session) publish(session.dispose());
+      } finally {
+        session = null;
+      }
+    },
+  } satisfies DispatchTable<WorkerHostMessage, void | Promise<void>>;
 
   return {
     async onMessage(message: unknown) {
       if (!message || typeof message !== "object" || disposed) return;
-      const envelope = message as WorkerHostMessage;
+      const input = message as WorkerHostMessage;
       try {
-        if (envelope.type === "engine.start") await start(envelope);
-        else if (envelope.type === "engine.bytes") provideBytes(envelope);
-        else if (envelope.type === "engine.probe") provideProbe(envelope);
-        else if (envelope.type === "engine.display") provideDisplay(envelope);
-        else if (envelope.type === "engine.process") processTile(envelope);
-        else if (envelope.type === "engine.failure") {
-          dispatch({ type: "provide-fetch-failure", request: envelope.requestId, error: envelope.error });
-        } else if (envelope.type === "engine.command") dispatch(object(envelope.command));
-        else if (envelope.type === "engine.dispose") {
-          log("info", "session-disposed", "");
-          disposed = true;
-          try {
-            session?.dispose();
-          } finally {
-            session = null;
-          }
-        }
+        await dispatchTyped(messageHandlers, input);
       } catch (error) {
-        const failure = engineError(error);
+        const failure = abiFault(error);
         log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message}`);
         deps.postMessage({ type: "engine.error", error: failure });
       }

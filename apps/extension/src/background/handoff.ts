@@ -50,7 +50,7 @@ export function validateExtensionJobBinding(message: unknown, ctx: { sender?: Ex
 
 /** Keys that must never appear in a non-secret handoff envelope. Single shared
  * vocabulary: mirrors `dezoomify_protocol::dto::SENSITIVE_QUERY_KEYS`,
- * `testdata/redaction-vectors.json`, and `packages/protocol-ts/src/generated.ts`.
+ * `testdata/redaction-vectors.json`, and the generated Rust bindings.
  * Matching is case-insensitive exact (never substring). */
 export const SECRET_KEYS = Object.freeze([
   "access-token",

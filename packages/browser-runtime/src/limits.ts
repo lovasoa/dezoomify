@@ -9,7 +9,7 @@ export interface LimitDecision {
   area: number | null;
 }
 
-/** Largest canvas a browser tab can hold (16384 x 16384, legacy parity). */
+/** Largest canvas a browser tab can hold (16384 x 16384). */
 export const BROWSER_MAX_CANVAS_AREA = 268435456;
 
 /** Browser canvas side limit: 16384 px per side, no policy widening. */

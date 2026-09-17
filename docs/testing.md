@@ -31,8 +31,8 @@ Bare `cargo xtask test` is the fast aggregate. It performs exactly:
 1. One `cargo test --workspace` invocation, using quiet Cargo output and
    libtest's terse format.
 2. Help-page generation followed by one Node test process, using the dot
-   reporter, over the website, browser runtime, generated protocol TypeScript,
-   desktop Node, and pure extension unit suites.
+   reporter, over the website, browser runtime, desktop Node, and pure
+   extension unit suites.
 
 The native Rust and Node runners keep successful output compact and print
 detailed failing tests. The fast aggregate never runs `cargo xtask check`,
@@ -61,7 +61,7 @@ Focused aliases remain available for iteration:
 | `core [--purity\|--parity]` | core crate, with optional purity or format-parity focus |
 | `protocol` | generated-artifact comparison, Rust and TypeScript contracts, and WASM portability |
 | `job [--transcripts]` | job engine, with optional workflow/transcript focus |
-| `wasm [--transcripts\|--browser chromium]` | WASM adapter and generated Node harness; optional Chromium website E2E |
+| `wasm [--browser chromium]` | WASM adapter and generated Node harness; optional Chromium website E2E |
 | `browser [--build-only\|--browser chromium\|--scenario <id>]` | browser-runtime Node contracts; a browser selection adds website Chromium E2E |
 | `web [--e2e]` | website Node suite; `--e2e` adds Chromium Playwright |
 | `native` | native runtime and CLI Rust suites |
@@ -82,9 +82,11 @@ of silently changing coverage.
 sources directly (Node strips types natively); the TSX loader only
 transpiles `.tsx` React sources, and xtask generates ignored help pages
 before tests that consume them.
-- `packages/browser-runtime/test/`, `packages/protocol-ts/test/`,
-  `apps/desktop/tests/`, and `apps/extension/tests/unit/` are package-owned Node
-  suites.
+- `packages/browser-runtime/test/`, `apps/desktop/tests/`, and
+  `apps/extension/tests/unit/` are package-owned Node suites.
+- `packages/wasm-bindings` is checked by compiling TypeScript directly against
+  the tracked generated declaration; declaration spelling is not a runtime
+  test subject.
 - `packages/wasm-harness/` consumes freshly generated Node bindings only in its
   focused, `all`, and WASM CI lanes.
 - `crates/fixture-server/tests/webapp-e2e/` is the Chromium Playwright website
@@ -110,7 +112,7 @@ ownership:
 | `web` | website Node suite plus Chromium Playwright E2E |
 | `desktop` | desktop Node suite; the path-gated desktop workflow owns desktop testing when applicable |
 | `extension` | full generated-package extension unit and Chromium/Firefox E2E gate |
-| `protocol` | protocol TypeScript suite |
+| `protocol` | binding drift, generated declaration, Rust contract, and WASM portability |
 | `security` | JavaScript workspace audit; Cargo policy belongs to `check` |
 
 There are no separate native or scenario CI lanes: the Rust workspace lane

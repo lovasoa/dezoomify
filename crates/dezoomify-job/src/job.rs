@@ -84,9 +84,8 @@ pub struct Job {
     /// Core request headers by wire tile id (sent verbatim by native hosts;
     /// browser hosts ignore them).
     tile_headers: HashMap<u32, BTreeMap<String, String>>,
-    /// Stable byte-processing recipe names by wire tile id (`none`,
-    /// `google-arts-decrypt`).
-    tile_processing: HashMap<u32, String>,
+    /// Closed byte-processing recipe by wire tile id.
+    tile_processing: HashMap<u32, ProcessingRecipe>,
     /// Output destinations by wire tile id.
     tile_destinations: HashMap<u32, Vec2d>,
     /// Expected decoded extents by wire tile id (`None` while unknown).
@@ -377,12 +376,7 @@ impl Job {
             JobCommand::SelectImage { image } => self.apply_selected_image(image),
             JobCommand::SelectLevel { level } => self.apply_selected_level(level),
             JobCommand::TileOutcome { tile, ok } => self.apply_tile_outcome(tile, ok),
-            JobCommand::ProbeOutcome {
-                tile,
-                available,
-                width,
-                height,
-            } => self.apply_probe_outcome(tile, available, width, height),
+            JobCommand::ProbeOutcome { tile, outcome } => self.apply_probe_outcome(tile, outcome),
             JobCommand::RecoveryChoice { generation, choice } => {
                 self.apply_recovery_choice(generation, choice)
             }
@@ -700,8 +694,7 @@ impl Job {
             }
             self.tile_uris.insert(ordinal, spec.request.uri);
             self.tile_headers.insert(ordinal, spec.request.headers);
-            self.tile_processing
-                .insert(ordinal, processing_name(&spec.processing).to_string());
+            self.tile_processing.insert(ordinal, spec.processing);
             self.tile_destinations.insert(ordinal, spec.destination);
             self.tile_extents.insert(ordinal, spec.expected_size);
             planned.push(ordinal);
@@ -759,8 +752,7 @@ impl Job {
                 self.probe_tiles.insert(wire);
                 self.tile_uris.insert(wire, tile.request.uri.clone());
                 self.tile_headers.insert(wire, tile.request.headers.clone());
-                self.tile_processing
-                    .insert(wire, processing_name(&tile.processing).to_string());
+                self.tile_processing.insert(wire, tile.processing);
                 self.tile_destinations.insert(wire, tile.destination);
                 self.tile_extents.insert(wire, tile.expected_size);
                 self.in_flight.insert(wire);
@@ -900,9 +892,7 @@ impl Job {
     fn apply_probe_outcome(
         &mut self,
         tile: u32,
-        available: bool,
-        width: u64,
-        height: u64,
+        outcome: dezoomify_protocol::dto::ProbeOutcome,
     ) -> Result<Outcome, JobError> {
         if self.state != State::Planning || self.probe_tile != Some(tile) {
             return Err(JobError::invalid_state(
@@ -912,19 +902,21 @@ impl Job {
         if !self.probe_tiles.contains(&tile) {
             return Err(JobError::invalid_state("unknown probe tile id"));
         }
-        let observation = if available {
-            if width == 0 || height == 0 {
-                return Err(JobError::invalid_state(
-                    "available probe observations need positive width and height",
-                ));
+        let available = matches!(
+            outcome,
+            dezoomify_protocol::dto::ProbeOutcome::Available { .. }
+        );
+        let observation = match outcome {
+            dezoomify_protocol::dto::ProbeOutcome::Available { width, height } => {
+                let x =
+                    u32::try_from(width.get()).map_err(|_| JobError::overflow("probe width"))?;
+                let y =
+                    u32::try_from(height.get()).map_err(|_| JobError::overflow("probe height"))?;
+                ObservationResult::Available {
+                    size: dezoomify_core::Vec2d { x, y },
+                }
             }
-            let x = u32::try_from(width).map_err(|_| JobError::overflow("probe width"))?;
-            let y = u32::try_from(height).map_err(|_| JobError::overflow("probe height"))?;
-            ObservationResult::Available {
-                size: dezoomify_core::Vec2d { x, y },
-            }
-        } else {
-            ObservationResult::Missing
+            dezoomify_protocol::dto::ProbeOutcome::Missing => ObservationResult::Missing,
         };
         if available && self.probe_output {
             let destination = self
@@ -1049,7 +1041,7 @@ impl Job {
         self.set_state(State::Finalizing)?;
         self.push_effect(JobEffect::FinalizeOutput {
             partial,
-            format: "png".to_string(),
+            format: dezoomify_protocol::dto::OutputFormat::Png,
             canvas: self.canvas_size,
         })?;
         self.push_event(JobEvent::State {
@@ -1166,7 +1158,7 @@ impl Job {
             .tile_processing
             .get(&wire)
             .cloned()
-            .unwrap_or_else(|| "none".to_string());
+            .unwrap_or(ProcessingRecipe::None);
         let destination = self
             .tile_destinations
             .get(&wire)
@@ -1236,16 +1228,6 @@ impl Job {
         self.next_decision = next;
         self.pending_decision = Some(n);
         Ok(n)
-    }
-}
-
-/// Stable wire name for a core byte-processing recipe. The mapping is total
-/// over the closed recipe enum; unknown recipes cannot exist without a
-/// compile error here, so hosts never mis-decode.
-fn processing_name(recipe: &ProcessingRecipe) -> &'static str {
-    match recipe {
-        ProcessingRecipe::None => "none",
-        ProcessingRecipe::GoogleArtsDecrypt => "google-arts-decrypt",
     }
 }
 

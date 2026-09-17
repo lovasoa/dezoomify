@@ -35,15 +35,15 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         with:
-          install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' }}
+          install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'protocol+security' }}
       - name: Set up Rust toolchain (WASM target)
-        if: matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
+        if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'protocol+security'
         uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
           targets: wasm32-unknown-unknown
       - name: Set up Rust toolchain
-        if: matrix.lane-group == 'check' || matrix.lane-group == 'rust' || matrix.lane-group == 'protocol+security'
+        if: matrix.lane-group == 'rust'
         uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # pinned
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
@@ -52,7 +52,7 @@ jobs:
         # Version-coupled to Cargo.lock (see the action): every workflow that
         # consumes wasm-bindgen resolves the same CLI release, and the
         # installer caches it by that version, so consumers cannot drift.
-        if: matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
+        if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'protocol+security'
         uses: ./.github/actions/setup-wasm-bindgen
       - name: Install cargo-deny 0.20.2
         if: matrix.lane-group == 'check'

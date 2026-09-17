@@ -56,14 +56,15 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
   other; shared UI never touches host globals directly. Enforced by
   `cargo xtask check`; add an architecture test whenever a boundary can be
   enforced mechanically.
-- **Protocol:** wire types are defined once in `crates/dezoomify-protocol`;
-  `packages/protocol-ts` is generated via `cargo xtask protocol generate` and
-  never hand-edited. Errors carry stable codes and typed recovery actions;
+- **Contracts:** cross-language types are defined once in `crates/dezoomify-protocol`;
+  `packages/wasm-bindings` is emitted by the real WASM build via
+  `cargo xtask protocol generate` and never hand-edited. Browser boundary
+  modules import it and never redeclare Rust contract types. Errors carry stable codes and typed recovery actions;
   never branch on display strings.
 - **Generated artifacts:** nothing generated for the website is committed
   (wasm glue, `help/`, `dist/`); the website-deploy workflow builds
   everything via `scripts/build-site.mjs` (legacy site at `/`, Vite+React app
-  at `/beta`) and never serves repository files. `packages/protocol-ts`
+  at `/beta`) and never serves repository files. `packages/wasm-bindings`
   and `generated/*.json` are the only tracked generated trees.
 - **Website fetching:** direct browser fetch first; the metadata CORS proxy
   is an automatic fallback for eligible public metadata.

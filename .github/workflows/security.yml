@@ -20,13 +20,12 @@ jobs:
         with:
           toolchain: 1.98.0 # must match rust-toolchain.toml
           targets: wasm32-unknown-unknown
+      - uses: ./.github/actions/setup-wasm-bindgen
       - name: Install cargo-deny 0.20.2
         uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
         with:
           tool: cargo-deny@0.20.2
-      # The scheduled audit needs the complete policy, not only protocol
-      # generation: check carries Rust deny; security carries protocol and
-      # JavaScript lockfile audits. The install above is for the TypeScript
-      # compiler in `ci check`; the audits themselves read lockfiles.
+      # The scheduled audit runs the same generated-contract check as pull
+      # requests before the Rust and JavaScript lockfile audits.
       - run: cargo xtask ci check
       - run: cargo xtask ci security

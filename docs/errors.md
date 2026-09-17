@@ -12,11 +12,13 @@ Each error includes:
 - whether retry is valid;
 - a concise user message;
 - an ordered set of permitted recovery actions;
-- optional redacted request, transport, blocked-reason, and resource-kind context.
+- optional redacted request, transport, blocked-reason, resource-kind, HTTP status, bounded server signal, and diagnostic detail.
 
 Codes are durable protocol API. Messages may improve without changing behavior. Secrets, cookies, authorization headers, signed query values, and local path details are redacted before logging or serialization.
 
-Hosts may preserve host-specific error source chains internally, but only the typed shape crosses the protocol. Map errors to the typed model once at each boundary; never branch on display strings.
+Hosts may preserve host-specific error source chains internally, but only the typed shape crosses the contract. Browser products classify a fetch failure once into generated `FetchFailureDto`, containing only host-observed facts. The Rust session uses the outstanding request correlation to construct `ErrorDto`: metadata is `discovery`, tile/probe work is `acquisition`, and the original request and resource kind come from the emitted effect. Product code cannot supply contradictory context. Output completion uses a generated `ErrorDto` with phase `output`. Never branch on display strings.
+
+Adapter faults are not job failures. Invalid external objects or invalid session state return the error branch of `DispatchResult` and produce an internal contract-failure screen. They cannot replace a transport failure already accepted by the job engine.
 
 ## Recovery actions
 
@@ -41,4 +43,4 @@ Messages are written for the person seeing them, following the layered rules in 
 
 Transient transport and service errors follow the configured [retry policy](job-engine.md#retry-and-progress). Before the website exposes a classified direct CORS or network failure, or a direct fetch that does not complete within the 1500 ms metadata window, it applies the eligible automatic proxy policy once; proxy-ineligible, authentication, authorization, and ordinary HTTP failures do not take that route. Remaining access failures require user action. Invalid metadata and deterministic decode failures stop affected work immediately. A tile failure reaches the configured partial policy only after retries are exhausted.
 
-Internal errors expose a safe fallback action. Protocol incompatibility stops before job creation. Security-policy failures never offer a recovery that weakens the policy; see [Security](security.md).
+Internal errors expose a safe fallback action. Native Messaging incompatibility stops before job creation. Security-policy failures never offer a recovery that weakens the policy; see [Security](security.md).
