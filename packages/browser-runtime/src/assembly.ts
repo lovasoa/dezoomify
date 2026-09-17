@@ -140,6 +140,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       );
     }
     allocate(declared);
+    flushHeld();
   }
 
   function recordPlacement(tile: number, placement: AssemblyPlacement): void {
@@ -189,6 +190,35 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     if (tainted) return;
     tainted = true;
     deps.onDisplayOnly?.();
+  }
+
+  /** Paint probe tiles that arrived before the declared output surface. */
+  function flushHeld(): void {
+    if (!canvas) return;
+    for (const [tile, bitmap] of bitmaps) {
+      const placement = placements.get(tile);
+      if (!placement) continue;
+      try {
+        drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap), (line) =>
+          deps.log?.(line),
+        );
+      } finally {
+        bitmaps.delete(tile);
+        try {
+          bitmap.close();
+        } catch {
+          // Bitmap cleanup is best-effort.
+        }
+      }
+    }
+    for (const [tile, image] of displayImages) {
+      const placement = placements.get(tile);
+      if (!placement) continue;
+      drawPlacedTile(canvas.ctx2d, image, placementGeometry(placement, undefined), (line) =>
+        deps.log?.(line),
+      );
+      displayImages.delete(tile);
+    }
   }
 
   function acquireDisplayTile(
@@ -280,27 +310,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     }
     finalized = true;
 
-    for (const [tile, placement] of placements) {
-      const bitmap = bitmaps.get(tile);
-      const image = displayImages.get(tile);
-      const source = bitmap ?? image;
-      if (!source) continue; // missing tile: the partial region stays empty
-      try {
-        drawPlacedTile(surface.ctx2d, source, placementGeometry(placement, bitmap), (line) =>
-          deps.log?.(line),
-        );
-      } finally {
-        bitmaps.delete(tile);
-        displayImages.delete(tile);
-        if (bitmap) {
-          try {
-            bitmap.close();
-          } catch {
-            // Bitmap cleanup is best-effort.
-          }
-        }
-      }
-    }
+    flushHeld();
 
     if (tainted) {
       // A tainted canvas can never be read or encoded: the drawn picture

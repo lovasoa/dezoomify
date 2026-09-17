@@ -82,6 +82,17 @@ test("declared output paints progressively before finalization, then encodes and
   assert.equal(ctx2d.draws.every((draw) => draw.source.closed), true);
 });
 
+test("a probe held before canvas allocation is painted when the canvas appears", async () => {
+  const { assembly, events, ctx2d } = harness();
+  await assembly.acquireTile(0, placement(0, 0, { canvas: null }), bytes16(16));
+  assert.equal(ctx2d.draws.length, 0, "the probe waits for the resolved canvas");
+  assembly.prepare({ width: 32, height: 32 });
+  assert.deepEqual(events.created, [{ width: 32, height: 32 }]);
+  assert.equal(ctx2d.draws.length, 1, "the retained first tile becomes visible immediately");
+  await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  assert.equal(ctx2d.draws.length, 1, "the retained tile is not painted twice");
+});
+
 test("finalize-output rejects a second call and release is idempotent", async () => {
   const { assembly, events } = harness();
   await assembly.acquireTile(0, placement(0, 0), bytes16(16));
