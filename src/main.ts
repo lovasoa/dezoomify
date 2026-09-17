@@ -66,12 +66,12 @@ import {
   REQUEST_TIMEOUT_MS,
   createTileThrottle,
   hostOf,
-  shortUrl,
   websiteTileConcurrency,
 } from "../packages/browser-runtime/src/tile-policy.ts";
 import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.ts";
 import { createTilePainter, loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";
 import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
+import { createLogger } from "../packages/browser-runtime/src/logging.ts";
 import { createWebFetcher, type WebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
 import { PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/transport-labels.ts";
 import {
@@ -167,6 +167,12 @@ function webQueueEnabled(): boolean {
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
 const jobActivity = createJobActivity({ onUpdate: update });
+// Shared structured logger: console output plus the same lines mirrored into
+// the job view's technical-details log (and copied diagnostics). The `web`
+// context is the default here, so lines carry no bracket; runtime lines from
+// the shared fetchers/painters join under the `runtime` code.
+const webLog = createLogger("web", { defaultContext: "web" });
+webLog.addSink((entry) => jobActivity.pushLog(entry.line));
 let tileAttempts = 0;
 let tileRetries = 0;
 const metadataAttempts: Array<{ at: number; transport: string; target: string; outcome: string; durationMs: number; bytes?: number }> = [];
@@ -248,7 +254,7 @@ const webFetcher: WebFetcher = createWebFetcher({
   hooks: {
     onRequestStart: (label) => jobActivity.noteRequestStart(label),
     onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
-    onLog: (line) => jobActivity.pushLog(line),
+    onLog: (line) => webLog.info("runtime", line),
     onUpdate: update,
     onMetadataAttempt: ({ startedAt, transport, target, outcome, bytes }) =>
       recordMetadataAttempt(startedAt, transport, target, outcome, bytes),
@@ -364,7 +370,7 @@ async function runJob(url: string): Promise<void> {
   update();
   try {
     client = makeClient();
-    jobActivity.pushLog(`Starting discovery for ${shortUrl(url)}`);
+    webLog.info("discovery-start", `url=${url}`);
     const catalog: WebCatalog = await client.start(url);
     if (token !== jobToken) return;
     const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
@@ -376,7 +382,7 @@ async function runJob(url: string): Promise<void> {
         "discovery returned an empty image catalog",
       );
     }
-    jobActivity.pushLog(`Found ${catalog.images.length} image${catalog.images.length === 1 ? "" : "s"}`);
+    webLog.info("images-found", `count=${catalog.images.length} transport=${via}`);
     controller.dispatch(
       nextEvent("images-found", { imageCount: catalog.images.length, transport: via }) as never,
     );
@@ -413,7 +419,7 @@ async function runJob(url: string): Promise<void> {
       throw error;
     }
     if (token !== jobToken) return;
-    jobActivity.pushLog(`Image size determined; planning ${plan.tiles.length} tiles`);
+    webLog.info("plan", `tiles=${plan.tiles.length}`);
     const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
     if (!canvas) {
       throw failure(
@@ -456,7 +462,7 @@ async function runJob(url: string): Promise<void> {
       viewCtx.desktopHandoffUrl = desktopHandoffLink(url);
       jobActivity.setStep("Displaying the image…", "This site shows its pieces without letting the browser keep a copy.");
       reportProgress(total, total, `Displaying ${total} tiles…`);
-      jobActivity.pushLog(`Done: ${width}×${height} display-only (${total} tiles, tainted canvas)`);
+      webLog.info("display-only", `width=${width} height=${height} tiles=${total} tainted=true`);
       setCanvasVisible(document, true);
       preview.resetTransform(document);
       controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
@@ -473,7 +479,7 @@ async function runJob(url: string): Promise<void> {
       hooks: {
         onRequestStart: (label) => jobActivity.noteRequestStart(label),
         onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
-        onLog: (line) => jobActivity.pushLog(line),
+        onLog: (line) => webLog.info("runtime", line),
         onUpdate: update,
       },
     });
@@ -544,11 +550,11 @@ async function runJob(url: string): Promise<void> {
       blobUrl: resultBlobUrl,
     };
     viewCtx.originClean = true;
-    jobActivity.pushLog(`Done: ${width}×${height} PNG (${total} tiles)`);
+    webLog.info("save-complete", `width=${width} height=${height} tiles=${total} format=image/png`);
     // The browser canvas path (createImageBitmap -> drawImage -> toBlob) never
     // preserves the source ICC color profile or EXIF metadata (native keeps
     // the first tile's profile); warn so archived colors are not trusted blindly.
-    jobActivity.pushLog(BROWSER_SAVE_COLOR_WARNING);
+    webLog.info("save-color-warning", BROWSER_SAVE_COLOR_WARNING);
     controller.dispatch(nextEvent("save-done") as never);
     recordWebHistory(url, width, height, "png");
     update();
@@ -569,7 +575,7 @@ async function runJob(url: string): Promise<void> {
     const message = structured?.message || "Could not save this zoomable image.";
     const detail = structured?.detail ?? structured?.technical;
     // The activity log is technical: prefer the dense chain over UI copy.
-    jobActivity.pushLog(`Failed (${code}): ${structured?.technical || message}`);
+    webLog.error("failed", `code=${code} message=${structured?.technical || message}`);
     // One-click desktop handoff (todo 5.5): too-large plans fail with the
     // `dezoomify://` link in the view context, so the failed view offers the
     // Send button with the origin/scope consent summary. Only http(s)
@@ -627,8 +633,9 @@ async function runJob(url: string): Promise<void> {
             currentSeq = 0;
           }
           const summary = summarizeWebQueue(webQueue);
-          jobActivity.pushLog(
-            `Queue: ${summary.succeeded} done, ${summary.failed} failed, ${summary.pending} waiting`,
+          webLog.info(
+            "queue",
+            `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`,
           );
           void runJob(next.url);
         }
@@ -665,7 +672,7 @@ function submitQueuedUrl(url: string): void {
   // Queued behind the active job: no hash write, no cancel of the running
   // job. The hash stays owned by the active URL until it settles.
   const position = webQueue.entries.filter((e) => e.status === "queued").length;
-  jobActivity.pushLog(`Queued ${shortUrl(url)} (position ${position} in queue)`);
+  webLog.info("queued", `url=${url} position=${position}`);
   update();
 }
 
@@ -745,7 +752,7 @@ function update(): void {
         jobPaused = true;
         viewCtx.paused = true;
         jobActivity.pause();
-        jobActivity.pushLog("Paused: no new pieces are being fetched.");
+        webLog.info("paused", "no new pieces are being fetched");
         update();
       },
       onResume() {
@@ -753,7 +760,7 @@ function update(): void {
         jobPaused = false;
         viewCtx.paused = false;
         jobActivity.resume();
-        jobActivity.pushLog("Resumed: fetching queued pieces again.");
+        webLog.info("resumed", "fetching queued pieces again");
         update();
       },
       onCancel() {
