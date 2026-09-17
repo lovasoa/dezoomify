@@ -236,7 +236,11 @@ function handleEvent(event: JobEvent) {
     lastTileProgress = { current: event.acquired, total: event.total };
     render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
   }
-  else if (event.type === "failed") { jobLog.error("engine-event", `type=failed code=${event.error?.code ?? "unknown"}`); partialDecision = null; render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } }); }
+  else if (event.type === "failed") {
+    jobLog.error("engine-event", `type=failed error=${event.error ? JSON.stringify(event.error) : "unknown"}`);
+    partialDecision = null;
+    render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
+  }
   else if (event.type === "cancelled") { jobLog.info("engine-event", "type=cancelled"); partialDecision = null; render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } }); }
   else if (event.type === "completed" || event.type === "partial-completed") { jobLog.info("engine-event", `type=${event.type}`); partialDecision = null; render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } }); }
   else if (event.type === "catalog" && !selected) {
