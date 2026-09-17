@@ -4,11 +4,11 @@
 // shared worker host keeps commands and effects as protocol envelopes, so
 // the website and the extension run the same engine session.
 import { createJobWorkerHost } from "../packages/browser-runtime/src/worker-host.ts";
-import init, { Session, rankCandidates } from "../wasm/dezoomify-wasm.js";
+import init, { Session } from "../wasm/dezoomify-wasm.js";
 
 const host = createJobWorkerHost({
   postMessage: (message, transfer) => self.postMessage(message, transfer ?? []),
-  wasm: async () => ({ default: init, Session, rankCandidates }),
+  wasm: async () => ({ default: init, Session }),
 });
 
 self.addEventListener("message", (event) => {
