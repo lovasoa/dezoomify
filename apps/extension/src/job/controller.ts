@@ -117,7 +117,13 @@ export function createJobController(deps: JobControllerDeps) {
     } catch (error) {
       const failure = deps.classifyFailure(error);
       log("warn", "effect-failed", `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`);
-      if (failure.blocked_reason === "access-required") {
+      // Only a missing host grant pauses for a visible permission action.
+      // Upstream refusals (granted-origin 401/403) and programming errors
+      // (missing user intent) fail directly; re-prompting cannot fix them.
+      const grantable = failure.blocked_reason === "access-required"
+        && error !== null && typeof error === "object"
+        && (error as { code?: unknown }).code === "permission-denied";
+      if (grantable) {
         const hosts = error && typeof error === "object" && "hosts" in error && Array.isArray(error.hosts) ? error.hosts.filter((host): host is string => typeof host === "string") : [];
         // A visible, explicit user action may grant this host. Keep the
         // effect pending so the same acquisition can resume after a grant.

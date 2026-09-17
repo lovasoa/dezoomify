@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSessionFetcher, isProxyUrl, PROXY_PATH } from "../../src/runtime/fetch.ts";
+import { asFetchFailure, createSessionFetcher, isProxyUrl, PROXY_PATH } from "../../src/runtime/fetch.ts";
 
 function bytes(n, fill = 1) {
   return new Uint8Array(n).fill(fill);
@@ -159,7 +159,24 @@ test("401/403 classified without automatic handoff", async () => {
       redirectChain: [url],
     });
     const f = createSessionFetcher(h.deps);
-    await assert.rejects(() => f.fetchResource("https://a.example/protected.jpg", { userIntent: true }), /unauthorized|forbidden/);
+    // A granted-origin refusal is an upstream verdict, never a missing
+    // browser grant: it must not carry the grantable access-required shape,
+    // or the job re-prompts for permission in a loop.
+    await assert.rejects(
+      () => f.fetchResource("https://a.example/protected.jpg", { userIntent: true }),
+      (error) => {
+        assert.match(error.message, /unauthorized|forbidden/);
+        assert.equal(error.category, "forbidden");
+        assert.equal(error.code, "forbidden");
+        assert.equal(error.status, status);
+        assert.deepEqual(error.hosts, ["https://a.example"]);
+        const failure = asFetchFailure(error);
+        assert.equal(failure.code, "extension.forbidden");
+        assert.equal(failure.blocked_reason, "forbidden");
+        assert.equal(failure.retryable, false);
+        return true;
+      },
+    );
   }
 });
 

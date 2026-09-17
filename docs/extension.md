@@ -47,7 +47,9 @@ public cross-origin metadata server answering
 `Access-Control-Allow-Origin: *` stays readable. When the source-tab fetch
 fails, the job retries the request through the independent extension-origin
 transport, which uses the current browser session under an optional host grant
-and pauses for that grant when it is missing. Every operation validates its
+and pauses for that grant only when the grant is missing. A granted-origin
+401/403 refusal fails typed without another prompt; the grant is never
+re-requested for a refusal the grant cannot fix. Every operation validates its
 URL, method, declared headers, result shape, and byte cap.
 
 Readable metadata, processed tiles, and clean saves use the browser session's

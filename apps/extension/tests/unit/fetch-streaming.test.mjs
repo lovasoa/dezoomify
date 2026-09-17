@@ -62,8 +62,19 @@ test("only purpose-appropriate core headers are forwarded", async () => {
 test("missing grant pauses access instead of prompting", async () => {
   let requests = 0;
   const f = createExtensionFetcher({ fetchImpl: async () => { requests += 1; throw new Error("must not fetch"); }, hasPermission: async () => false });
-  await assert.rejects(() => f.fetchResource("https://cdn.example/a", { userIntent: true }), (error) => error.category === "access-required" && error.hosts[0] === "https://cdn.example");
+  await assert.rejects(() => f.fetchResource("https://cdn.example/a", { userIntent: true }), (error) => error.category === "access-required" && error.code === "permission-denied" && error.hosts[0] === "https://cdn.example");
   assert.equal(requests, 0);
+});
+
+test("granted-origin refusal never pauses for another grant", async () => {
+  const f = createExtensionFetcher({
+    fetchImpl: async (url) => ({ status: 403, url, headers: { "content-type": "text/html" }, bytes: new Uint8Array([1]) }),
+    hasPermission: async () => true,
+  });
+  await assert.rejects(
+    () => f.fetchResource("https://cdn.example/a", { userIntent: true, purpose: "metadata" }),
+    (error) => error.category === "forbidden" && error.category !== "access-required",
+  );
 });
 
 test("automatic redirects are unavailable, never retrospectively validated", async () => {
