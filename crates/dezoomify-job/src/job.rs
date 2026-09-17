@@ -23,9 +23,34 @@ use crate::transition::{
     JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome, RecoveryChoice,
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JobInput {
+    pub url: String,
+    pub contents: Option<Vec<u8>>,
+}
+
+impl JobInput {
+    #[must_use]
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            contents: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_contents(url: impl Into<String>, contents: impl Into<Vec<u8>>) -> Self {
+        Self {
+            url: url.into(),
+            contents: Some(contents.into()),
+        }
+    }
+}
+
 /// One end-to-end user request driven synchronously by explicit host inputs.
 pub struct Job {
-    input_url: String,
+    inputs: Vec<JobInput>,
+    input_index: usize,
     config: Config,
     /// Format selector: `None` auto-detects via `default_registry`;
     /// `Some(name)` selects the single named program via `registry_for`
@@ -111,10 +136,14 @@ impl Job {
     /// Returns a typed [`JobError`] when the input URL or config is
     /// invalid.
     pub fn new(input_url: &str, config: Config) -> Result<Self, JobError> {
-        if !is_valid_input_url(input_url) {
+        Self::new_with_inputs(vec![JobInput::new(input_url)], config)
+    }
+
+    pub fn new_with_inputs(inputs: Vec<JobInput>, config: Config) -> Result<Self, JobError> {
+        if inputs.is_empty() || inputs.iter().any(|input| !is_valid_input_url(&input.url)) {
             return Err(JobError::new(
                 "job.invalid-input",
-                "input_url must be an http(s) URL, file:// URI, or local path up to 2048 bytes"
+                "inputs must contain valid http(s) URLs, file:// URIs, or local paths up to 2048 bytes"
                     .to_string(),
             ));
         }
@@ -122,7 +151,8 @@ impl Job {
             return Err(JobError::new(&e.code, e.message));
         }
         Ok(Self {
-            input_url: input_url.to_string(),
+            inputs,
+            input_index: 0,
             config,
             format: None,
             state: State::Created,
@@ -248,22 +278,72 @@ impl Job {
         if self.state != State::Created {
             return Err(JobError::invalid_state("start is valid only in Created"));
         }
-        // Genuine core use: `None`/`auto` orders candidates by URL
-        // preference via `default_registry`; a named format selects the
-        // single program via `registry_for`. Unknown names fail typed.
-        let registry = match self.format.as_deref() {
-            None | Some("auto") => default_registry(&self.input_url),
-            Some(name) => registry_for(name).ok_or_else(|| {
-                JobError::new("job.unknown-dezoomer", format!("unknown dezoomer '{name}'"))
-            })?,
-        };
-        self.discovery = Some(registry.start(self.input_url.clone()));
+        if let Some(name) = self.format.as_deref() {
+            if name != "auto" && registry_for(name).is_none() {
+                return Err(JobError::new(
+                    "job.unknown-dezoomer",
+                    format!("unknown dezoomer '{name}'"),
+                ));
+            }
+        }
         self.set_state(State::Discovering)?;
         self.push_event(JobEvent::State {
             state: State::Discovering,
         })?;
-        self.drive_discovery()?;
+        self.start_current_input()?;
         Ok(Outcome::Applied)
+    }
+
+    fn start_current_input(&mut self) -> Result<(), JobError> {
+        let input = self.inputs[self.input_index].clone();
+        let registry = match self.format.as_deref() {
+            None | Some("auto") => default_registry(&input.url),
+            Some(name) => registry_for(name).expect("validated by start"),
+        };
+        self.discovery = Some(registry.start(input.url.clone()));
+        if let Some(contents) = input.contents {
+            let len = u64::try_from(contents.len()).unwrap_or(u64::MAX);
+            if contents.is_empty() || len > self.config.max_bytes {
+                return self.try_next_input(DiscoveryError::MetadataSizeLimitExceeded);
+            }
+            let need = match self
+                .discovery
+                .as_mut()
+                .expect("set above")
+                .next_priority_need()
+            {
+                Ok(Some(need)) => need,
+                Ok(None) => return self.drive_discovery(),
+                Err(error) => return self.try_next_input(error),
+            };
+            let response = ResourceResponse::new(need.id, contents).with_final_uri(input.url);
+            if let Err(error) = self
+                .discovery
+                .as_mut()
+                .expect("set above")
+                .provide(response)
+            {
+                return self.try_next_input(error);
+            }
+        }
+        self.drive_discovery()
+    }
+
+    fn try_next_input(&mut self, error: DiscoveryError) -> Result<(), JobError> {
+        self.pending_discovery.clear();
+        self.discovery = None;
+        self.input_index += 1;
+        if self.input_index < self.inputs.len() {
+            self.start_current_input()
+        } else {
+            let no_candidate = matches!(error, DiscoveryError::NoCandidateAccepted { .. });
+            let code = if no_candidate && self.format.is_none() {
+                "job.no-images"
+            } else {
+                "job.discovery-failed"
+            };
+            self.fail_via_cleanup(code, error.engine_detail())
+        }
     }
 
     /// Drive one deterministic transition from an explicit host response.
@@ -390,18 +470,7 @@ impl Job {
     }
 
     fn discovery_failed(&mut self, error: DiscoveryError) -> Result<(), JobError> {
-        // `engine_detail` keeps the headline out: the prominent message
-        // is the host's own copy, never the engine's aggregate. An automatic
-        // scan that accepts no candidate is its own code so hosts can show
-        // their "no image found" copy; a named format that did not match
-        // stays a discovery failure (the user asked for that format).
-        let no_candidate = matches!(error, DiscoveryError::NoCandidateAccepted { .. });
-        let code = if no_candidate && self.format.is_none() {
-            "job.no-images"
-        } else {
-            "job.discovery-failed"
-        };
-        self.fail_via_cleanup(code, error.engine_detail())
+        self.try_next_input(error)
     }
 
     fn apply_resource_bytes(
@@ -459,8 +528,7 @@ impl Job {
         };
         if let Err(e) = outcome {
             self.pending_discovery.remove(&request);
-            self.discovery = None;
-            self.discovery_failed(e)?;
+            self.try_next_input(e)?;
             return Ok(Outcome::Applied);
         }
         self.pending_discovery.remove(&request);
@@ -493,8 +561,7 @@ impl Job {
         };
         self.pending_discovery.remove(&request);
         if let Err(e) = outcome {
-            self.discovery = None;
-            self.discovery_failed(e)?;
+            self.try_next_input(e)?;
             return Ok(Outcome::Applied);
         }
         self.drive_discovery()?;

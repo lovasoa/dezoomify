@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use dezoomify_job::{
-    Config, Job, JobCommand, JobEffect, JobError, JobEvent, JobMessageBody, Outcome,
+    Config, Job, JobCommand, JobEffect, JobError, JobEvent, JobInput, JobMessageBody, Outcome,
 };
 
 /// Recognizable Deep Zoom input URL: the registry's deepzoom candidate
@@ -44,6 +44,15 @@ impl ScriptedHost {
     /// Returns [`JobError`] when the URL or config is invalid.
     pub fn new(_job_id: &str, input_url: &str, config: Config) -> Result<Self, JobError> {
         let job = Job::new(input_url, config)?;
+        Self::from_job(job)
+    }
+
+    pub fn new_with_inputs(inputs: Vec<JobInput>, config: Config) -> Result<Self, JobError> {
+        let job = Job::new_with_inputs(inputs, config)?;
+        Self::from_job(job)
+    }
+
+    fn from_job(job: Job) -> Result<Self, JobError> {
         let last_state = job.state().name().to_string();
         let mut host = Self {
             job,

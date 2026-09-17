@@ -27,7 +27,7 @@ type ExtensionApi = {
 };
 type ViewContext = SharedViewContext & { failure?: StructuredError };
 type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: unknown; catalog?: { images?: unknown[] } };
-type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[]; line?: string; requestId?: unknown; bytes?: unknown };
+type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; line?: string; requestId?: unknown; bytes?: unknown };
 
 const hostGlobal = globalThis as typeof globalThis & { browser?: ExtensionApi; chrome?: ExtensionApi };
 const api = hostGlobal.browser ?? hostGlobal.chrome;
@@ -489,7 +489,6 @@ function startAttempt() {
       jobLog.debug("worker-message", `type=engine.messages count=${messages.length}`);
       controller?.handleEngineMessages(messages);
     }
-    else if (event.data?.type === "engine.ranked") ranked(event.data);
     else if (event.data?.type === "engine.processed" || event.data?.type === "engine.process-failed") {
       const requestId = typeof event.data.requestId === "number" ? event.data.requestId : -1;
       const pending = pendingProcess.get(requestId);
@@ -539,27 +538,18 @@ function retryJob() {
 
 function candidates(message: Record<string, unknown>) {
   if (!binding || !message || message.jobId !== binding.jobId || started) return;
-  const values = Array.isArray(message.urls) ? message.urls.filter((candidate) => typeof candidate === "string") : [];
+  const values = Array.isArray(message.inputs) ? message.inputs.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || !("url" in candidate) || typeof candidate.url !== "string") return [];
+    return [{ url: candidate.url, ...("contents" in candidate && typeof candidate.contents === "string" ? { contents: candidate.contents } : {}) }];
+  }) : [];
   if (!values.length) return;
   started = true;
   jobLog.info("candidates-received", `jobId=${binding.jobId} count=${values.length} overflow=${typeof message.overflow === "number" ? message.overflow : 0}`);
   render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Finding the zoomable image" } });
-  // The document URL is an explicit candidate, so the first entry is not
-  // necessarily the zoomable source: rank with the core preference order
-  // (resource-timing viewer traffic first) before starting the engine.
-  jobWorker?.postMessage({ type: "engine.rank", urls: values });
-}
-
-function ranked(message: WorkerMessage) {
-  if (!binding || assembly) return;
-  const values = Array.isArray(message.urls) ? message.urls : [];
-  const first = values.find((candidate) => typeof candidate === "string");
-  if (!first) return;
-  jobLog.info("rank-completed", `jobId=${binding.jobId} count=${values.length} first=${first}`);
-  lastSource = first;
-  assembly = createAssembly(first);
+  lastSource = values[0].url;
+  assembly = createAssembly(lastSource);
   jobLog.info("engine-start", `jobId=${binding.jobId} url=${lastSource}`);
-  controller?.start(lastSource);
+  controller?.start(values);
 }
 
 api?.runtime?.onMessage?.addListener((message) => {

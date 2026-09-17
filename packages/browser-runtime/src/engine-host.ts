@@ -426,11 +426,11 @@ export function createEngineHost(deps: EngineHostDeps) {
 
   return {
     handleEngineMessages,
-    start(inputUrl: string) {
+    start(inputs: Array<{ url: string; contents?: string }>) {
       sendToEngine({
         type: "engine.start",
         jobId: deps.jobId(),
-        inputUrl,
+        inputs,
         ...(deps.quotas ? { quotas: deps.quotas } : {}),
       });
     },

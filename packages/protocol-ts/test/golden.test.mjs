@@ -87,7 +87,7 @@ function assertVectorSemantics(id, value) {
   if (id === 'handshake-ok') {
     assert.equal(value.kind, 'command', `${id} kind`);
     assert.equal(value.type, 'start', `${id} type`);
-    assert.equal(value.input_url, 'https://example.com/item/1', `${id} input_url`);
+    assert.equal(value.inputs?.[0]?.url, 'https://example.com/item/1', `${id} first input URL`);
   } else if (id === 'error-terminal') {
     assert.equal(value.kind, 'event', `${id} kind`);
     assert.equal(value.type, 'failed', `${id} type`);

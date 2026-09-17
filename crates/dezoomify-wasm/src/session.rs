@@ -488,7 +488,7 @@ impl Session {
 
     fn dispatch_command(&mut self, command: JobCommand) -> Result<(), AdapterError> {
         match command {
-            JobCommand::Start { input_url } => self.on_start(input_url),
+            JobCommand::Start { inputs } => self.on_start(inputs),
             JobCommand::Cancel => self.forward(EngineCommand::Cancel),
             JobCommand::Pause => self.forward(EngineCommand::Pause),
             JobCommand::Resume => self.forward(EngineCommand::Resume),
@@ -562,21 +562,36 @@ impl Session {
         self.absorb()
     }
 
-    fn on_start(&mut self, input_url: String) -> Result<(), AdapterError> {
+    fn on_start(
+        &mut self,
+        inputs: Vec<dezoomify_protocol::dto::JobInputDto>,
+    ) -> Result<(), AdapterError> {
         self.require_engine_state(SessionState::Created)?;
-        if input_url.is_empty()
-            || input_url.len() > 2048
-            || !(input_url.starts_with("https://") || input_url.starts_with("http://"))
+        if inputs.is_empty()
+            || inputs.iter().any(|input| {
+                input.url.is_empty()
+                    || input.url.len() > 2048
+                    || !(input.url.starts_with("https://") || input.url.starts_with("http://"))
+            })
         {
             return Err(AdapterError::new(
                 AdapterErrorCode::Malformed,
-                "start requires an http(s) input_url up to 2048 bytes",
+                "start requires a non-empty batch of http(s) inputs up to 2048 bytes each",
             ));
         }
         // Probe-driven levels plan through the engine probe step machine;
         // the host answers each probe effect with an observed size.
-        let engine =
-            EngineJob::new(&input_url, self.job_config.clone()).map_err(Self::engine_error)?;
+        let engine = EngineJob::new_with_inputs(
+            inputs
+                .into_iter()
+                .map(|input| dezoomify_job::JobInput {
+                    url: input.url,
+                    contents: input.contents,
+                })
+                .collect(),
+            self.job_config.clone(),
+        )
+        .map_err(Self::engine_error)?;
         self.job = Some(engine);
         // Start emits the Discovering state event plus one acquire-resource
         // effect per outstanding discovery request; nothing here echoes the
@@ -996,7 +1011,9 @@ mod tests {
 
     fn start_bytes(_job: &str) -> Vec<u8> {
         let command = JobCommand::Start {
-            input_url: "https://example.com/image.dzi".to_string(),
+            inputs: vec![dezoomify_protocol::dto::JobInputDto::new(
+                "https://example.com/image.dzi",
+            )],
         };
         let envelope = ControlEnvelope::new(ControlBody::Command(command)).unwrap();
         encode_envelope(&envelope).unwrap()
@@ -1135,7 +1152,9 @@ mod tests {
     fn probe_driven_generic_level_resolves_through_session() {
         let mut session = Session::new("2.0", "{}").unwrap();
         let command = JobCommand::Start {
-            input_url: "https://example.test/generic/placeholder.svg?x={{X}}&y={{Y}}".to_string(),
+            inputs: vec![dezoomify_protocol::dto::JobInputDto::new(
+                "https://example.test/generic/placeholder.svg?x={{X}}&y={{Y}}",
+            )],
         };
         let envelope = ControlEnvelope::new(ControlBody::Command(command)).unwrap();
         session

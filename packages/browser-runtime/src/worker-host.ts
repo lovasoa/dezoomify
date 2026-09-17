@@ -53,15 +53,13 @@ export interface WorkerHostSession {
 export interface WorkerHostWasm {
   default?: () => Promise<void>;
   Session: new (protocol: string, quotas: string) => WorkerHostSession;
-  rankCandidates?: (urls: string) => string;
 }
 
 export type WorkerHostMessage = Record<string, unknown> & {
   type?: string;
   jobId?: string;
-  inputUrl?: string;
+  inputs?: unknown;
   requestId?: number;
-  urls?: unknown;
   bytes?: unknown;
   command?: unknown;
   error?: unknown;
@@ -114,34 +112,12 @@ export function createJobWorkerHost(deps: {
     await wasm.default?.();
     session = new wasm.Session("2.0", JSON.stringify(message.quotas ?? {}));
     log("info", "session-created", `jobId=${String(message.jobId)} protocol=2.0`);
-    dispatch({ type: "start", input_url: message.inputUrl });
-  }
-
-  /**
-   * Rank candidate URLs with the core preference order. Runs before any
-   * session exists; the wasm module load is shared with engine.start.
-   * Unknown or failing rank calls fall back to the caller-supplied order.
-   */
-  async function rank(message: WorkerHostMessage) {
-    const urls = Array.isArray(message.urls) ? message.urls.filter((url): url is string => typeof url === "string") : [];
-    let ranked: string[] = [];
-    try {
-      const wasm = await deps.wasm();
-      // The glue must be initialized before any binding call, exactly like
-      // engine.start: an uninitialized call throws and would silently fall
-      // back to the unranked input order.
-      await wasm.default?.();
-      if (!disposed && typeof wasm.rankCandidates === "function") {
-        const parsed = JSON.parse(wasm.rankCandidates(JSON.stringify(urls)));
-        if (Array.isArray(parsed)) {
-          ranked = parsed.map((entry: unknown) => object(entry).url).filter((url): url is string => typeof url === "string");
-        }
-      }
-    } catch {
-      ranked = [];
-    }
-    log("info", "rank-completed", `in=${urls.length} out=${ranked.length}`);
-    deps.postMessage({ type: "engine.ranked", urls: ranked.length ? ranked : urls });
+    const inputs = Array.isArray(message.inputs) ? message.inputs.flatMap((value: unknown) => {
+      const input = object(value);
+      if (typeof input.url !== "string") return [];
+      return [{ url: input.url, ...(typeof input.contents === "string" ? { contents: Array.from(encoder.encode(input.contents)) } : {}) }];
+    }) : [];
+    dispatch({ type: "start", inputs });
   }
 
   function provideBytes(message: WorkerHostMessage) {
@@ -204,7 +180,6 @@ export function createJobWorkerHost(deps: {
       const envelope = message as WorkerHostMessage;
       try {
         if (envelope.type === "engine.start") await start(envelope);
-        else if (envelope.type === "engine.rank") await rank(envelope);
         else if (envelope.type === "engine.bytes") provideBytes(envelope);
         else if (envelope.type === "engine.probe") provideProbe(envelope);
         else if (envelope.type === "engine.display") provideDisplay(envelope);

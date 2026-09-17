@@ -59,7 +59,7 @@ describe("P07-EXPORTS: generated JS surface executes", () => {
       kind: "command",
       type: "start",
       job: "job:node-bindings-1",
-      input_url: "https://example.com/image.dzi",
+      inputs: [{ url: "https://example.com/image.dzi" }],
     }));
     session.dispatch(command);
     const messages = JSON.parse(session.drainMessages());

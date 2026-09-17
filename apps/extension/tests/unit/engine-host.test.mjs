@@ -172,6 +172,21 @@ test("a failed source fetch retries through the extension-origin transport", asy
   assert.equal(sent.some((message) => message.type === "engine.failure"), false);
 });
 
+test("a definitive source HTTP response is not retried through the extension origin", async () => {
+  const { controller, sent, seen } = harness({
+    sourceTransport: { async fetchResource() { throw Object.assign(new Error("not found"), { category: "network", sourceDefinitive: true }); } },
+  });
+  controller.handleEngineMessages([{
+    kind: "effect",
+    type: "acquire-resource",
+    effect: "fx:0",
+    request: { id: 0, uri: "https://source.test/missing.dzi", headers: [], purpose: "metadata" },
+  }]);
+  await flush();
+  assert.equal(seen.some(([kind]) => kind === "extension"), false);
+  assert.equal(sent.find((message) => message.type === "engine.failure")?.requestId, 0);
+});
+
 test("probe effects report measurements without retaining tiles", async () => {
   const { controller, sent, assembly } = harness({
     probeSize: async () => ({ ok: true, width: 256, height: 128 }),

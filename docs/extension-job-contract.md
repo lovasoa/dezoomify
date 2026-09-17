@@ -23,8 +23,10 @@ cancels the relevant in-flight work and releases the binding.
 ## Discovery and bytes
 
 The source operations begin only after a toolbar action and job-tab readiness.
-`collectCandidates` takes a bounded snapshot containing the document URL and
-retained resource-timing URLs in one batch. A later snapshot is optional,
+`collectCandidates` takes a bounded ordered snapshot containing rendered
+`outerHTML` for the document and readable same-origin iframes, followed by
+URL-only retained resource-timing entries. Cross-origin iframes are skipped.
+A later snapshot is optional,
 bounded, and deduplicated by the coordinator; there is no persistent observer
 or source-tab runtime listener. Overflow is returned as diagnostics, not
 silently discarded.
@@ -47,8 +49,10 @@ protocol bindings are consumed by the entrypoints: `dz.source.fetch-chunk`,
 Extension-local outcomes categorize source-document loss, access required,
 redirect-policy limitations, cancellation, network and throttling failures,
 malformed responses, streaming limits, and native/channel disconnection.
-A failed source-context fetch falls back to the independent extension-origin
-transport; a missing-grant (`permission-denied`) outcome from that retry
+A source-context transport failure falls back to the independent
+extension-origin transport; a definitive HTTP response is returned directly
+to discovery because repeating it cannot fix the response. A missing-grant
+(`permission-denied`) outcome from an extension-origin retry
 pauses the job with host names and rationale, and only a visible job-tab
 action can invoke the browser permission prompt. A granted-origin 401/403 is
 an upstream refusal, not a missing grant: it fails typed without pausing.

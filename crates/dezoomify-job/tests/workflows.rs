@@ -1,6 +1,6 @@
 mod support;
 
-use dezoomify_job::{Config, JobCommand};
+use dezoomify_job::{Config, JobCommand, JobInput};
 use support::ScriptedHost;
 
 fn job_id(n: u32) -> String {
@@ -112,6 +112,59 @@ fn discover_success_minimal() {
         );
     }
     assert!(seqs_are_sorted(transcript));
+}
+
+#[test]
+fn inline_zoomify_page_wins_before_tile_url_without_requesting_image_properties() {
+    const PAGE_URL: &str = "https://www.geographicus.com/P/AntiqueMap/example";
+    const TILE_URL: &str =
+        "https://www.geographicus.com/mm5/graphics/zoomify/example/TileGroup0/1-0-0.jpg";
+    const PAGE: &[u8] = br#"<script type="application/json">
+      {"type":"zoomifytileservice","width":7066,"height":9380,
+       "tilesUrl":"/mm5/graphics/zoomify/example/","tileSize":256}
+    </script>"#;
+    let mut host = ScriptedHost::new_with_inputs(
+        vec![
+            JobInput::with_contents(PAGE_URL, PAGE),
+            JobInput::new(TILE_URL),
+        ],
+        test_config(),
+    )
+    .unwrap();
+    host.start().unwrap();
+    assert_eq!(host.state(), "AwaitingImageSelection");
+    let requested: Vec<&str> = host
+        .effects
+        .iter()
+        .filter(|effect| effect["kind"] == "acquire-resource")
+        .filter_map(|effect| effect["uri"].as_str())
+        .collect();
+    assert!(
+        requested
+            .iter()
+            .all(|uri| !uri.ends_with("/ImageProperties.xml")),
+        "inline geometry must win before the tile URL fallback: {requested:?}"
+    );
+    assert!(requested.is_empty(), "supplied page bytes need no fetch");
+}
+
+#[test]
+fn ordered_inputs_fall_back_to_the_next_url_root() {
+    let fallback = "https://example.test/fallback.dzi";
+    let mut host = ScriptedHost::new_with_inputs(
+        vec![
+            JobInput::with_contents("https://example.test/page", b"<html>not a viewer</html>"),
+            JobInput::new(fallback),
+        ],
+        test_config(),
+    )
+    .unwrap();
+    host.start().unwrap();
+    assert_eq!(host.state(), "Discovering");
+    assert!(host
+        .effects
+        .iter()
+        .any(|effect| effect["kind"] == "acquire-resource" && effect["uri"] == fallback));
 }
 
 #[test]

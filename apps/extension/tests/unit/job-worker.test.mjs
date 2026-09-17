@@ -12,7 +12,7 @@ test("worker and generated WASM complete the first discovery round trip", async 
   const sent = [];
   const logs = [];
   const host = createJobWorkerHost({ postMessage: (message) => sent.push(message), wasm: async () => wasm, log: (level, code, detail) => logs.push({ level, code, detail }) });
-  await host.onMessage({ type: "engine.start", jobId: "job:one", inputUrl: "https://example.test/image.dzi" });
+  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://example.test/image.dzi" }] });
   const first = sent.flatMap((message) => message.messages ?? []);
   const acquire = first.find((message) => message.type === "acquire-resource");
   assert.ok(
@@ -38,7 +38,7 @@ test("worker disposal is repeat-safe and does not manufacture effects", async ()
   const calls = [];
   class Session { dispatch() {} drainMessages() { return "[]"; } dispose() { calls.push("dispose"); } }
   const host = createJobWorkerHost({ postMessage() {}, wasm: async () => ({ Session }) });
-  await host.onMessage({ type: "engine.start", jobId: "job:one", inputUrl: "https://example.test/image.dzi" });
+  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://example.test/image.dzi" }] });
   await host.onMessage({ type: "engine.dispose" });
   await host.onMessage({ type: "engine.dispose" });
   assert.deepEqual(calls, ["dispose"]);
@@ -63,7 +63,7 @@ test("worker preserves typed WASM diagnostics", async () => {
     wasm: async () => ({ Session }),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
-  await host.onMessage({ type: "engine.start", jobId: "job:one", inputUrl: "https://example.test/image.dzi" });
+  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://example.test/image.dzi" }] });
   assert.ok(logs.some((entry) => entry.code === "core-error" && entry.level === "error"));
   assert.deepEqual(sent, [{
     type: "engine.error",

@@ -27,7 +27,9 @@ fn session_lifecycle_via_js_surface() {
     let mut session = Session::new("2.0", "{}").expect("session constructs");
     session
         .dispatch(&envelope_bytes(ControlBody::Command(JobCommand::Start {
-            input_url: "https://example.com/image.dzi".to_string(),
+            inputs: vec![dezoomify_protocol::dto::JobInputDto::new(
+                "https://example.com/image.dzi",
+            )],
         })))
         .expect("start");
     let messages = session.drain_messages();
