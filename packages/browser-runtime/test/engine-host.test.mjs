@@ -6,6 +6,7 @@ function fakeAssembly() {
   const calls = [];
   return {
     calls,
+    prepare(canvas) { calls.push(["prepare", canvas]); },
     async acquireTile(tile, placement, bytes) { calls.push(["acquireTile", tile, placement, bytes]); },
     acquireDisplayTile(tile, placement, image) { calls.push(["acquireDisplayTile", tile, placement, image]); },
     async finalizeOutput(partial, format, canvas) { calls.push(["finalizeOutput", partial, format, canvas]); },
@@ -72,6 +73,20 @@ test("metadata carries the observed post-redirect URL", async () => {
   assert.equal(bytes?.finalUri, "https://final.test/info.json");
 });
 
+test("tile acquisition prepares the visible surface before fetching bytes", async () => {
+  const assembly = fakeAssembly();
+  const { controller } = harness({
+    assembly,
+    fetchResource: async () => {
+      assert.deepEqual(assembly.calls, [["prepare", { width: 32, height: 32 }]]);
+      return { bytes: new Uint8Array([1, 2, 3]) };
+    },
+  });
+  controller.handleEngineMessages([TILE]);
+  await flush();
+  assert.deepEqual(assembly.calls.map(([kind]) => kind), ["prepare", "acquireTile"]);
+});
+
 test("probe effects report measurements without retaining tiles", async () => {
   const { controller, sent, assembly } = harness({ probeSize: async () => ({ status: "available", width: 256, height: 128 }) });
   controller.handleEngineMessages([{ ...TILE, request: { id: 7, uri: "https://cdn.test/p.jpg", headers: [], purpose: "probe" } }]);
@@ -79,6 +94,7 @@ test("probe effects report measurements without retaining tiles", async () => {
   const probe = sent.find((message) => message.type === "engine.probe");
   assert.deepEqual([probe?.requestId, probe?.outcome], [7, { status: "available", width: 256, height: 128 }]);
   assert.equal(assembly.calls.some(([kind]) => kind === "acquireTile"), false);
+  assert.equal(assembly.calls.some(([kind]) => kind === "prepare"), false);
 });
 
 test("probe-and-output effects retain readable bytes for final assembly", async () => {
@@ -92,7 +108,8 @@ test("probe-and-output effects retain readable bytes for final assembly", async 
     request: { id: 8, uri: "https://cdn.test/p.jpg", headers: [], purpose: "probe" },
   }]);
   await flush();
-  assert.deepEqual(assembly.calls[0], ["acquireTile", 0, { ...TILE.placement, probe_output: true }, bytes]);
+  assert.deepEqual(assembly.calls.map(([kind]) => kind), ["prepare", "acquireTile"]);
+  assert.deepEqual(assembly.calls[1], ["acquireTile", 0, { ...TILE.placement, probe_output: true }, bytes]);
   assert.deepEqual(sent.find((message) => message.type === "engine.probe")?.outcome, { status: "available", width: 256, height: 128 });
 });
 

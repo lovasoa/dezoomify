@@ -9,6 +9,7 @@ function fakeAssembly() {
   const calls = [];
   return {
     calls,
+    prepare(canvas) { calls.push(["prepare", canvas]); },
     async acquireTile(tile, placement, bytes) { calls.push(["acquireTile", tile, placement, bytes]); },
     acquireDisplayTile(tile, placement, image) { calls.push(["acquireDisplayTile", tile, placement, image]); },
     async finalizeOutput(partial, format, canvas) { calls.push(["finalizeOutput", partial, format, canvas]); },

@@ -61,10 +61,14 @@ function bytes16(n) {
   return b;
 }
 
-test("finalize-output draws, encodes, and saves exactly once", async () => {
+test("declared output paints progressively before finalization, then encodes and saves once", async () => {
   const { assembly, events, ctx2d } = harness();
+  assembly.prepare({ width: 32, height: 32 });
+  assert.deepEqual(events.created, [{ width: 32, height: 32 }]);
   await assembly.acquireTile(0, placement(0, 0), bytes16(16));
+  assert.equal(ctx2d.draws.length, 1, "the first tile is visible while acquisition continues");
   await assembly.acquireTile(1, placement(16, 0), bytes16(16));
+  assert.equal(ctx2d.draws.length, 2, "each acquired tile paints immediately");
   await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
   assembly.release();
 
@@ -111,9 +115,8 @@ test("undeclared canvas derives the output size from placements", async () => {
 
 test("canvas limits are validated before allocation", async () => {
   const { assembly, events } = harness();
-  await assembly.acquireTile(0, placement(0, 0, { canvas: { width: 40000, height: 40000 } }), bytes16(16));
-  await assert.rejects(
-    assembly.finalizeOutput(false, "png", { width: 40000, height: 40000 }),
+  assert.throws(
+    () => assembly.prepare({ width: 40000, height: 40000 }),
     (error) => {
       assert.equal(error.code, "PLAN_INVALID");
       assert.equal(error.retryable, false);
@@ -163,6 +166,7 @@ test("an empty output plan fails before allocating a canvas", async () => {
 
 test("partial output leaves missing regions empty without failing assembly", async () => {
   const { assembly, ctx2d } = harness();
+  assembly.prepare({ width: 32, height: 32 });
   await assembly.acquireTile(0, placement(0, 0), bytes16(16));
   // tile:1 never arrived (failed acquisition): only tile:0 draws.
   await assembly.finalizeOutput(true, "png", { width: 32, height: 32 });
@@ -181,9 +185,11 @@ test("display-only output draws ordinary images and skips encoding", async () =>
     save: () => { saved.push(true); },
     onDisplayOnly: () => { displayOnly += 1; },
   });
+  local.prepare({ width: 32, height: 32 });
   local.acquireDisplayTile(0, placement(0, 0), { naturalWidth: 16, naturalHeight: 16 });
   assert.equal(local.isTainted(), true);
   assert.equal(displayOnly, 1);
+  assert.equal(ctx2d.draws.length, 1, "display-only tiles paint during acquisition");
   await local.finalizeOutput(false, "png", { width: 32, height: 32 });
   assert.equal(ctx2d.draws.length, 1);
   assert.equal(encoded.length, 0, "a tainted canvas is never encoded");

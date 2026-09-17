@@ -5,13 +5,12 @@
 // cancellation, recovery, and ordering; this module only executes what the
 // effects describe:
 //
-//   acquire-tile      -> recordPlacement + decode (decode-at-acquisition, the
-//                        native model: a tile that cannot decode reports its
-//                        acquisition failure through the tile outcome)
-//   finalize-output   -> validate the output size and format, allocate the
-//                        surface, draw every held tile at its planned
-//                        placement, encode and save; a tainted canvas stays
-//                        display-only and produces no bytes
+//   acquire-tile      -> prepare the declared surface, decode, and paint the
+//                        tile immediately at its planned placement
+//   finalize-output   -> allocate a derived-size surface when the plan had no
+//                        declared size, flush any held tiles, then encode and
+//                        save; a tainted canvas stays display-only and
+//                        produces no bytes
 //   cancel-work       -> close every retained tile resource
 //
 // All host constructors are injected so node tests drive the full path with
@@ -71,7 +70,9 @@ export interface CanvasAssemblyDeps {
 }
 
 export interface CanvasAssembly {
-  /** Decode-at-acquisition: hold the decoded bitmap for assembly. */
+  /** Validate and reveal the declared output surface before acquisition. */
+  prepare(canvas?: { width: number; height: number } | null): void;
+  /** Decode and paint immediately, or hold when the plan has no declared size. */
   acquireTile(tile: number, placement: AssemblyPlacement, bytes: ArrayBuffer): Promise<void>;
   /**
    * Display-only acquisition: hold an ordinary image element for assembly.
@@ -84,8 +85,8 @@ export interface CanvasAssembly {
   /** Output dimensions from the declared canvas or accumulated placements. */
   dimensions(): { width: number; height: number } | null;
   /**
-   * The one awaited output operation: validate the destination, draw the
-   * retained tiles, encode and save, or keep a tainted canvas display-only.
+   * The one awaited output operation: flush any retained tiles, encode and
+   * save, or keep a tainted canvas display-only.
    * Throws a typed failure when the output cannot be produced.
    */
   finalizeOutput(
@@ -114,6 +115,32 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
   let canvas: AssemblyCanvas | null = null;
   let canvasSize: { width: number; height: number } | null = null;
   let tainted = false;
+  let finalized = false;
+
+  function allocate(size: { width: number; height: number }): AssemblyCanvas {
+    const verdict = probeLimits(size, deps.limits ?? BROWSER_LIMITS);
+    if (verdict.verdict !== "ok") {
+      throw canvasTooLargeFailure(size.width, size.height, deps.sourceUrl ?? "", verdict.reason);
+    }
+    const surface = deps.createCanvas(size.width, size.height);
+    canvas = surface;
+    canvasSize = { ...size };
+    return surface;
+  }
+
+  function prepare(declared?: { width: number; height: number } | null): void {
+    if (!declared || canvas) return;
+    if (!(declared.width > 0 && declared.height > 0)) {
+      throw failure(
+        "PLAN_INVALID",
+        "The image size could not be determined.",
+        false,
+        undefined,
+        `declared an empty canvas ${declared.width}x${declared.height}`,
+      );
+    }
+    allocate(declared);
+  }
 
   function recordPlacement(tile: number, placement: AssemblyPlacement): void {
     placements.set(tile, placement);
@@ -141,7 +168,21 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       input = await processQueue(placement.processing, bytes);
     }
     const bitmap = await deps.decode(input);
-    bitmaps.set(tile, bitmap);
+    if (!canvas) {
+      bitmaps.set(tile, bitmap);
+      return;
+    }
+    try {
+      drawPlacedTile(canvas.ctx2d, bitmap, placementGeometry(placement, bitmap), (line) =>
+        deps.log?.(line),
+      );
+    } finally {
+      try {
+        bitmap.close();
+      } catch {
+        // Bitmap cleanup is best-effort.
+      }
+    }
   }
 
   function markDisplayOnly(): void {
@@ -156,7 +197,13 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     image: TileImageLike,
   ): void {
     recordPlacement(tile, placement);
-    displayImages.set(tile, image);
+    if (canvas) {
+      drawPlacedTile(canvas.ctx2d, image, placementGeometry(placement, undefined), (line) =>
+        deps.log?.(line),
+      );
+    } else {
+      displayImages.set(tile, image);
+    }
     markDisplayOnly();
   }
 
@@ -208,7 +255,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     _format: OutputFormat,
     declared?: { width: number; height: number } | null,
   ): Promise<void> {
-    if (canvas) {
+    if (finalized) {
       throw failure(
         "OUTPUT_STATE",
         "The output surface is already open.",
@@ -217,23 +264,21 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
         "finalize-output arrived twice",
       );
     }
-    const size = outputSize(declared);
-    if (!(size.width > 0 && size.height > 0)) {
-      throw failure(
-        "PLAN_INVALID",
-        "The image size could not be determined.",
-        false,
-        undefined,
-        `finalize-output derived an empty canvas ${size.width}x${size.height}`,
-      );
+    let surface = canvas;
+    if (!surface) {
+      const size = outputSize(declared);
+      if (!(size.width > 0 && size.height > 0)) {
+        throw failure(
+          "PLAN_INVALID",
+          "The image size could not be determined.",
+          false,
+          undefined,
+          `finalize-output derived an empty canvas ${size.width}x${size.height}`,
+        );
+      }
+      surface = allocate(size);
     }
-    const verdict = probeLimits(size, deps.limits ?? BROWSER_LIMITS);
-    if (verdict.verdict !== "ok") {
-      // Explicit dimension and area validation before allocation.
-      throw canvasTooLargeFailure(size.width, size.height, deps.sourceUrl ?? "", verdict.reason);
-    }
-    canvas = deps.createCanvas(size.width, size.height);
-    canvasSize = { width: size.width, height: size.height };
+    finalized = true;
 
     for (const [tile, placement] of placements) {
       const bitmap = bitmaps.get(tile);
@@ -241,7 +286,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       const source = bitmap ?? image;
       if (!source) continue; // missing tile: the partial region stays empty
       try {
-        drawPlacedTile(canvas.ctx2d, source, placementGeometry(placement, bitmap), (line) =>
+        drawPlacedTile(surface.ctx2d, source, placementGeometry(placement, bitmap), (line) =>
           deps.log?.(line),
         );
       } finally {
@@ -264,7 +309,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     }
     let encoded: unknown;
     try {
-      encoded = await deps.encode(canvas);
+      encoded = await deps.encode(surface);
     } catch (error) {
       // A browser may defer origin-clean enforcement until encoding. The
       // assembled picture stays visible as display-only instead of failing.
@@ -274,7 +319,7 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
       }
       throw error;
     }
-    deps.save(encoded, canvas.width, canvas.height);
+    deps.save(encoded, surface.width, surface.height);
   }
 
   function release(): void {
@@ -290,9 +335,11 @@ export function createCanvasAssembly(deps: CanvasAssemblyDeps): CanvasAssembly {
     canvas = null;
     canvasSize = null;
     tainted = false;
+    finalized = false;
   }
 
   return {
+    prepare,
     acquireTile,
     acquireDisplayTile,
     isTainted,

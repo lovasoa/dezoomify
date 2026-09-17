@@ -70,6 +70,13 @@ function decodePngPixels(bytes) {
 }
 
 test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", async ({ page }) => {
+  // Hold tile responses long enough to observe the acquisition state. The
+  // canvas must be the live output surface, visible before those responses
+  // complete, rather than an artifact allocated only during finalization.
+  await page.route((url) => url.href.includes("pyramid_files"), async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
   await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
   const input = page.locator("#dz-url-input");
   await expect(input).toBeVisible();
@@ -78,12 +85,20 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
 
   await page.getByRole("button", { name: /find image/i }).click();
 
+  const canvas = page.locator("#rendering-canvas");
+  await expect(canvas).toBeVisible({ timeout: 30000 });
+  await expect(page.locator(".dz-completed-section")).toHaveCount(0);
+  assert.deepEqual(
+    await canvas.evaluate((el) => ({ width: el.width, height: el.height })),
+    { width: 512, height: 512 },
+    "the declared preview surface is present while tiles are still in flight",
+  );
+
   // The pipeline must reach the completed state with real dimensions.
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
   await expect(page.getByText(/512/)).toBeVisible();
   // Tiles paint live during acquisition, so the assembled
   // picture stays visible next to the save button on the clean path too.
-  const canvas = page.locator("#rendering-canvas");
   await expect(canvas).toBeVisible();
   assert.deepEqual(
     await canvas.evaluate((el) => ({ width: el.width, height: el.height })),
