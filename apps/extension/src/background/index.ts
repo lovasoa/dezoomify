@@ -8,7 +8,7 @@
  */
 
 import { collectCandidates, fetchSource } from "./source-operations.js";
-import { LOG_LEVELS, LOG_MAX_CHARS, SENSITIVE_QUERY_KEYS, createLogger, redactUrl } from "../logging.js";
+import { LOG_LEVELS, LOG_MAX_CHARS, createLogger } from "../logging.js";
 
 type LogLevel = keyof typeof LOG_LEVELS;
 type Message = Record<string, unknown> & { type?: string; requestId?: string; jobId?: string; tabId?: number; frameId?: number; documentGeneration?: number; url?: string; method?: string; headers?: unknown; origins?: unknown };
@@ -43,10 +43,8 @@ const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
 
 export const BACKGROUND_LOG_LEVELS = LOG_LEVELS;
 export const BACKGROUND_LOG_MAX_CHARS = LOG_MAX_CHARS;
-export const BACKGROUND_SENSITIVE_QUERY_KEYS = SENSITIVE_QUERY_KEYS;
 const backgroundLogger = createLogger("background");
 
-export function redactBackgroundUrl(raw: unknown): string { return redactUrl(raw); }
 export function setBackgroundLogLevel(level: string | number) { backgroundLogger.setLevel(level); }
 export function setBackgroundLogSink(sink: unknown) { backgroundLogger.setSink(sink); }
 export function backgroundLog(level: LogLevel, code: string, detail: unknown = "") { backgroundLogger.log(level, code, detail); }
@@ -182,10 +180,10 @@ async function removeJob(entry: Entry, reason: string) {
 async function createJob(tab: BrowserTab) {
   const tabId = tab?.id;
   if (typeof tabId !== "number" || !isPublicHttpUrl(tab?.url)) {
-    backgroundLog("warn", "privileged-rejected", redactBackgroundUrl(tab?.url));
+    backgroundLog("warn", "privileged-rejected", String(tab?.url ?? ""));
     return;
   }
-  backgroundLog("info", "toolbar-click", `tab=${tabId} url=${redactBackgroundUrl(tab?.url)}`);
+  backgroundLog("info", "toolbar-click", `tab=${tabId} url=${String(tab?.url ?? "")}`);
   for (const entry of jobs.values()) {
     if (entry.tabId === tabId && entry.jobRunning && typeof entry.jobTabId === "number") {
       backgroundLog("info", "job-focus", `tab=${tabId} jobTab=${entry.jobTabId} reason=running`);
@@ -228,7 +226,7 @@ async function createJob(tab: BrowserTab) {
   sourceBindings.set(sourceBindingKey(entry), entry);
   setBadge(tabId, true);
   await persistBindings();
-  backgroundLog("info", "job-created", `jobId=${jobId} jobTab=${jobTab.id} sourceTab=${tabId} frame=${entry.frameId} url=${redactBackgroundUrl(tab.url)}`);
+  backgroundLog("info", "job-created", `jobId=${jobId} jobTab=${jobTab.id} sourceTab=${tabId} frame=${entry.frameId} url=${tab.url}`);
 }
 
 function validSourceHeaders(headers: unknown): Array<{ name: string; value: string }> | null {
@@ -340,7 +338,7 @@ async function requestCandidateSnapshot(entry: Entry) {
       invalidateSourceDocument(entry, "snapshot-document-mismatch");
       return;
     }
-    backgroundLog("info", "active-tab-op-result", `op=collect tab=${entry.tabId} candidates=${snapshot.urls.length} overflow=${snapshot.overflow} doc=${redactBackgroundUrl(snapshot.documentUrl)}`);
+    backgroundLog("info", "active-tab-op-result", `op=collect tab=${entry.tabId} candidates=${snapshot.urls.length} overflow=${snapshot.overflow} doc=${snapshot.documentUrl}`);
     forwardCandidates(entry, snapshot);
   } catch (error) {
     if (!sourceOperationAllowed(entry)) return;
@@ -354,7 +352,7 @@ async function requestCandidateSnapshot(entry: Entry) {
 async function dispatchSourceFetch(entry: Entry, message: Message) {
   const method = validSourceMethod(message.method);
   const headers = validSourceHeaders(message.headers);
-  backgroundLog("info", "source-fetch-request", `req=${message.requestId} tab=${entry.tabId} method=${method ?? String(message.method)} purpose=${String(message.purpose ?? "unknown")} url=${redactBackgroundUrl(message.url)}`);
+  backgroundLog("info", "source-fetch-request", `req=${message.requestId} tab=${entry.tabId} method=${method ?? String(message.method)} purpose=${String(message.purpose ?? "unknown")} url=${String(message.url ?? "")}`);
   const reject = (code: string, extra: Record<string, unknown> = {}) => {
     backgroundLog("warn", "source-fetch-rejected", `req=${message.requestId} code=${code}`);
     sendToJob(entry, "dz.job.fetch", message.requestId, {
@@ -395,7 +393,7 @@ async function dispatchSourceFetch(entry: Entry, message: Message) {
     reject("invalid-source-fetch-result");
     return;
   }
-  backgroundLog("info", "source-fetch-complete", `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} chunks=${result.chunks.length} url=${redactBackgroundUrl(result.url)}`);
+  backgroundLog("info", "source-fetch-complete", `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} chunks=${result.chunks.length} url=${result.url}`);
   for (const chunk of result.chunks) {
     backgroundLog("debug", "source-fetch-chunk", `req=${message.requestId} sequence=${chunk.sequence} bytes=${chunk.bytes.length}`);
     sendToJob(entry, "dz.job.fetch", message.requestId, {

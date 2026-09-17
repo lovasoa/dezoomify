@@ -8,9 +8,10 @@
  * - Length caps (URL) + count caps (store) with deterministic first-seen order.
  * - Deduplicates deterministically (first-seen wins).
  * - Never inspects response bodies or page DOM during scanning.
- * - Labels are redacted (userinfo + sensitive query). This module stays
- *   import-free for isolated tests and classic-script loading, so it mirrors
- *   the shared redaction vocabulary; candidate labels are always sanitized.
+ * - Labels are redacted (userinfo + sensitive query) for display only;
+ *   extension logs keep the full URL. This module stays import-free for
+ *   isolated tests and classic-script loading, so it carries its own
+ *   redaction vocabulary; candidate labels are always sanitized.
  *
  * Plain JavaScript + JSDoc (no TypeScript-only syntax).
  *
@@ -21,8 +22,7 @@ export const MAX_URL_LENGTH = 2048;
 export const MAX_CANDIDATES = 100;
 type Candidate = { url: string };
 
-/** Query keys whose values must never appear in UI labels.
- *  Must stay identical to the redaction vocabulary used by background logs. */
+/** Query keys whose values must never appear in UI labels. */
 export const SENSITIVE_QUERY_KEYS = Object.freeze([
   "token",
   "auth",

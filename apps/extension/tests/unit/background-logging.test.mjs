@@ -41,18 +41,18 @@ async function load(fake) {
   } finally { globalThis.chrome = previous; }
 }
 
-test("coordinator logs lifecycle without leaking source credentials", async () => {
+test("coordinator logs the full source URL on lifecycle entries", async () => {
   const fake = browser();
   const mod = await load(fake);
   const entries = [];
   mod.setBackgroundLogSink((entry) => entries.push(entry));
-  await fake.listeners.click[0]({ id: 7, url: "https://user:password@gallery.example/work?token=secret&view=1#fragment" });
+  const sourceUrl = "https://user:password@gallery.example/work?token=secret&view=1#fragment";
+  await fake.listeners.click[0]({ id: 7, url: sourceUrl });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.ok(entries.some((entry) => entry.code === "job-created"));
-  const redacted = mod.redactBackgroundUrl("https://user:password@gallery.example/work?token=secret&view=1#fragment");
-  assert.ok(!redacted.includes("password") && !redacted.includes("secret") && !redacted.includes("#"));
-  assert.ok(redacted.includes("view=1") && redacted.includes("***"));
+  const created = entries.find((entry) => entry.code === "job-created");
+  assert.ok(created);
+  assert.ok(created.detail.includes(sourceUrl));
 });
 
 test("logging is bounded and a throwing sink cannot interrupt coordinator work", async () => {

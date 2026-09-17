@@ -106,6 +106,6 @@ for the finite `scripting.executeScript()` operations, `source-fetch-*`,
 
 Interaction milestones log at info, high-frequency per-tile and per-chunk
 detail at debug, recoverable states at warn, and terminal failures at error.
-The default level is info. Logged URLs are redacted; details are bounded.
-User-visible failures travel through the dedicated job tab rather than
-disappearing with the toolbar state.
+The default level is info. Logged URLs are written in full for diagnosis;
+details are bounded. User-visible failures travel through the dedicated job
+tab rather than disappearing with the toolbar state.

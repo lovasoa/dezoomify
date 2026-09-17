@@ -5,8 +5,8 @@
  * Contexts are `background` (the coordinator/service worker), `job` (the
  * dedicated job tab), and `worker` (the WASM session worker). Interaction
  * milestones log at info, high-frequency per-tile/per-chunk detail at debug,
- * recoverable states at warn, and terminal failures at error. Every logged
- * URL passes through `redactUrl`, and details are bounded.
+ * recoverable states at warn, and terminal failures at error. Logged URLs are
+ * written in full; details are bounded.
  *
  * The module intentionally imports nothing so `background/index.ts` can inline
  * it into the classic Firefox artifact without resolving a module graph.
@@ -16,11 +16,6 @@ export const LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 
 export type LogLevel = keyof typeof LOG_LEVELS;
 export const LOG_MAX_CHARS = 500;
 
-/** Query keys whose values must never appear in a log line. */
-export const SENSITIVE_QUERY_KEYS = Object.freeze([
-  "token", "auth", "authorization", "session", "sessionid", "sid", "key", "apikey", "api_key", "secret", "password", "passwd", "code", "state", "sessiontoken",
-]);
-
 export interface LogEntry {
   context: string;
   level: LogLevel;
@@ -29,20 +24,6 @@ export interface LogEntry {
   line: string;
 }
 export type LogSink = (entry: LogEntry) => void;
-
-/** Strip userinfo, redact sensitive query keys, and drop the fragment. */
-export function redactUrl(raw: unknown): string {
-  if (typeof raw !== "string" || !raw) return "[empty-url]";
-  try {
-    const url = new URL(raw);
-    if (url.username || url.password) { url.username = "***"; url.password = ""; }
-    for (const key of [...url.searchParams.keys()]) {
-      if (SENSITIVE_QUERY_KEYS.includes(key.toLowerCase())) url.searchParams.set(key, "***");
-    }
-    url.hash = "";
-    return url.toString();
-  } catch { return "[invalid-url]"; }
-}
 
 /** Bound a logged detail to one line-friendly string. */
 export function formatDetail(detail: unknown): string {

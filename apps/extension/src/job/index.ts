@@ -10,7 +10,7 @@ import {
   saveBlobViaAnchor,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.js";
-import { createLogger, redactUrl } from "../logging.js";
+import { createLogger } from "../logging.js";
 import { createJobController } from "./controller.js";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
@@ -279,14 +279,14 @@ function setup(bound: unknown) {
   });
   const extensionTransport = {
     async fetchResource(url: string, opts?: unknown) {
-      jobLog.debug("extension-fetch-start", `url=${redactUrl(url)} purpose=${String((opts as { purpose?: unknown } | undefined)?.purpose ?? "unknown")}`);
+      jobLog.debug("extension-fetch-start", `url=${url} purpose=${String((opts as { purpose?: unknown } | undefined)?.purpose ?? "unknown")}`);
       try {
         const result = await fetcher.fetchResource(url, opts as Parameters<typeof fetcher.fetchResource>[1]);
-        jobLog.debug("extension-fetch-complete", `url=${redactUrl(url)} bytes=${result.bytes.byteLength}`);
+        jobLog.debug("extension-fetch-complete", `url=${url} bytes=${result.bytes.byteLength}`);
         return result;
       } catch (error) {
         const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "unknown";
-        jobLog.warn("extension-fetch-failed", `url=${redactUrl(url)} code=${code} message=${error instanceof Error ? error.message : String(error)}`);
+        jobLog.warn("extension-fetch-failed", `url=${url} code=${code} message=${error instanceof Error ? error.message : String(error)}`);
         throw error;
       }
     },
@@ -345,10 +345,10 @@ function ranked(message: WorkerMessage) {
   const values = Array.isArray(message.urls) ? message.urls : [];
   const first = values.find((candidate) => typeof candidate === "string");
   if (!first) return;
-  jobLog.info("rank-completed", `jobId=${binding.jobId} count=${values.length} first=${redactUrl(first)}`);
+  jobLog.info("rank-completed", `jobId=${binding.jobId} count=${values.length} first=${first}`);
   lastSource = first;
   assembly = createAssembly(first);
-  jobLog.info("engine-start", `jobId=${binding.jobId} url=${redactUrl(lastSource)}`);
+  jobLog.info("engine-start", `jobId=${binding.jobId} url=${lastSource}`);
   controller?.start(lastSource);
 }
 

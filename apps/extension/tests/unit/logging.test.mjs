@@ -2,15 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { importTypeScript } from "./ts-source-loader.mjs";
 
-const { createLogger, redactUrl, LOG_MAX_CHARS } = await importTypeScript(new URL("../../src/logging.ts", import.meta.url));
-
-test("redactUrl strips userinfo, sensitive query keys, and fragments", () => {
-  const redacted = redactUrl("https://user:password@gallery.example/work?token=secret&view=1#fragment");
-  assert.ok(!redacted.includes("password") && !redacted.includes("secret") && !redacted.includes("#"));
-  assert.ok(redacted.includes("view=1") && redacted.includes("***"));
-  assert.equal(redactUrl(""), "[empty-url]");
-  assert.equal(redactUrl("not a url"), "[invalid-url]");
-});
+const { createLogger, LOG_MAX_CHARS } = await importTypeScript(new URL("../../src/logging.ts", import.meta.url));
 
 test("logger prefixes its context and filters by level", () => {
   const entries = [];
