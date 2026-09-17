@@ -919,6 +919,63 @@ const DZI_256: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 "#;
 
 #[test]
+fn iiif_size_rounding_bug_falls_back_to_caret_width_without_refetching() {
+    // Reproduces the old IIPImage floating-point check seen at
+    // https://bruun-rasmussen.dk/m/lots/B7651D2E4677/images/1
+    // and fixed upstream by
+    // https://github.com/ruven/iipsrv/commit/28dbbe64e16caa226041f69a3135db2baaf0dd41
+    let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let base = serve_shared_map(Arc::clone(&shared));
+    let info = format!(
+        r#"{{
+          "@context":"http://iiif.io/api/image/3/context.json",
+          "id":"{base}/iiif",
+          "type":"ImageService3",
+          "profile":"level2",
+          "width":256,
+          "height":256,
+          "maxWidth":1024,
+          "tiles":[{{"width":256,"height":256,"scaleFactors":[1]}}],
+          "formats":["png"],
+          "extraFeatures":["sizeUpscaling"]
+        }}"#
+    );
+    {
+        let mut map = shared.lock().expect("lock");
+        map.insert(
+            "/iiif/info.json".to_string(),
+            http_response("200 OK", "application/ld+json", info.as_bytes()),
+        );
+        map.insert(
+            "/iiif/0,0,256,256/256,256/0/default.png".to_string(),
+            http_response(
+                "400 Bad Request",
+                "text/plain",
+                b"IIIF: upscaling should be prefixed with ^",
+            ),
+        );
+        map.insert(
+            "/iiif/0,0,256,256/^256,/0/default.png".to_string(),
+            http_response("200 OK", "image/png", &solid_png(256, 256, [90, 120, 150])),
+        );
+    }
+
+    let out_dir = temp_dir("iiif-size-rounding");
+    let output = out_dir.join("result.png");
+    let outcome = pipeline::run(
+        &format!("{base}/iiif/info.json"),
+        output.to_str().expect("utf8 output"),
+        false,
+        &PipelineConfig::default(),
+        &mut |_event| {},
+    )
+    .expect("caret-width fallback succeeds");
+    assert_eq!(outcome.tile_count, 1);
+    assert_eq!((outcome.image_size.x, outcome.image_size.y), (256, 256));
+    assert!(output.exists());
+}
+
+#[test]
 fn deferred_bulk_entry_resolves_to_identical_output() {
     // The list names one image by absolute URL; the driver follows it with a
     // fresh bounded job instead of failing the typed `job.no-images`.

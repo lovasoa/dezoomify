@@ -275,7 +275,7 @@ const webFetcher: WebFetcher = createWebFetcher({
 async function probeSizeFor(
   url: string,
   headers: Record<string, string>,
-): Promise<{ ok: boolean; width: number; height: number }> {
+) {
   const probe = createProbeSize({
     fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders),
     decode: (bytes) => tileDecoder.decode(bytes),
@@ -287,7 +287,12 @@ async function probeSizeFor(
           onUpdate: update,
         },
       });
-      return { ok: img.naturalWidth > 0 && img.naturalHeight > 0, width: img.naturalWidth, height: img.naturalHeight };
+      return {
+        ok: img.naturalWidth > 0 && img.naturalHeight > 0,
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        image: img,
+      };
     },
   });
   return probe(url, headers);

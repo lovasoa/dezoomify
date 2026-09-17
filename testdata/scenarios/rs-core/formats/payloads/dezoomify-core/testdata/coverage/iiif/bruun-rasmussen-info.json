@@ -1,0 +1,27 @@
+{
+  "@context": "http://iiif.io/api/image/3/context.json",
+  "protocol": "http://iiif.io/api/image",
+  "id": "https://fixtures.test/iiif/bruun-rasmussen",
+  "type": "ImageService3",
+  "profile": "level2",
+  "width": 2973,
+  "height": 4105,
+  "maxWidth": 2400,
+  "maxHeight": 2400,
+  "tiles": [
+    {
+      "width": 256,
+      "height": 256,
+      "scaleFactors": [1, 2, 4, 8, 16, 32, 64]
+    }
+  ],
+  "extraFeatures": [
+    "regionByPct",
+    "sizeByForcedWh",
+    "sizeByWh",
+    "sizeAboveFull",
+    "sizeUpscaling",
+    "rotationBy90s",
+    "mirroring"
+  ]
+}

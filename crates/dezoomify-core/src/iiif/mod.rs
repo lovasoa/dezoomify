@@ -7,9 +7,11 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DeferredImage, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, GridRequests, GridTile, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, resolve_relative,
+    AdaptiveProgram, AdaptiveSource, CatalogEntry, DeferredImage, DezoomerSpec, DiscoverableStep,
+    DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
+    DiscoveryStep, Grid, GridRequests, GridTile, ImageCatalog, ImageDescriptor, LevelDescriptor,
+    ObservationResult, ProbeContinuation, Request, TileRole, TileSourceError, TileSpec,
+    resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -358,6 +360,7 @@ fn levels_from_info(
             let quality = Arc::from(img.best_quality());
             let format = Arc::from(img.best_format());
             let size_format = img.preferred_size_format();
+            let supports_size_upscaling = img.supports_v3_size_upscaling();
             let page_info = Arc::clone(&img);
             let warnings = warnings.clone();
             tile_info.scale_factors.iter().map(move |&scale_factor| {
@@ -387,19 +390,33 @@ fn levels_from_info(
                         description: "scaled IIIF tile positions overflow u32".into(),
                     });
                 }
-                let source = IIIFLevel {
+                let requests = IIIFLevel {
                     scale_factor,
                     page_info: Arc::clone(&page_info),
                     base_url: Arc::clone(&base_url),
                     quality: Arc::clone(&quality),
                     format: Arc::clone(&format),
                     size_format,
+                    use_size_upscaling: supports_size_upscaling && scale_factor == 1,
+                    force_width_only: false,
                 };
-                let source = Grid::new(source.image_size(), tile_size, Vec2d::default(), source)
-                    .map_err(|error| IIIFError::GeometryError {
-                        description: error.to_string(),
-                    })?;
-                Ok(LevelDescriptor::new(source)
+                let source = Grid::new(
+                    requests.image_size(),
+                    tile_size,
+                    Vec2d::default(),
+                    requests.clone(),
+                )
+                .map_err(|error| IIIFError::GeometryError {
+                    description: error.to_string(),
+                })?;
+                let adaptive = AdaptiveSource::with_declared_grid(
+                    IIIFProbeProgram {
+                        declared: source.clone(),
+                        requests,
+                    },
+                    source,
+                );
+                Ok(LevelDescriptor::new(adaptive)
                     .with_title(Some(format!("IIIF level {tile_ordinal}")))
                     .with_scale_factor(Some(scale_factor))
                     .with_warnings(warnings.clone()))
@@ -410,6 +427,7 @@ fn levels_from_info(
     Ok(levels)
 }
 
+#[derive(Clone)]
 struct IIIFLevel {
     scale_factor: u32,
     page_info: Arc<ImageInfo>,
@@ -417,6 +435,8 @@ struct IIIFLevel {
     quality: Arc<str>,
     format: Arc<str>,
     size_format: TileSizeFormat,
+    use_size_upscaling: bool,
+    force_width_only: bool,
 }
 
 impl IIIFLevel {
@@ -451,13 +471,81 @@ impl GridRequests for IIIFLevel {
             tile_size = TileSizeFormatter {
                 w: tile_size.x,
                 h: tile_size.y,
-                format: self.size_format
+                format: self.size_format,
+                use_size_upscaling: self.use_size_upscaling,
+                force_width_only: self.force_width_only,
             },
             rotation = 0,
             quality = self.quality,
             format = self.format,
         );
         Request::new(append_tile_path(base, &path))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct IIIFProbeProgram {
+    declared: Grid,
+    requests: IIIFLevel,
+}
+
+impl AdaptiveProgram for IIIFProbeProgram {
+    fn start(&self) -> DiscoverableStep {
+        self.probe(&self.requests, true)
+    }
+}
+
+impl IIIFProbeProgram {
+    fn probe(&self, requests: &IIIFLevel, ordinary: bool) -> DiscoverableStep {
+        let Ok(tile) = Grid::new(
+            requests.image_size(),
+            self.declared.tile_size(),
+            Vec2d::default(),
+            requests.clone(),
+        )
+        .and_then(|grid| {
+            grid.tiles_row_major()
+                .next()
+                .expect("IIIF grids are non-empty")
+        }) else {
+            return DiscoverableStep::Error(TileSourceError::InvalidDimensions);
+        };
+        let program = self.clone();
+        DiscoverableStep::Probe {
+            tile: TileSpec {
+                role: TileRole::ProbeAndOutput,
+                ..tile
+            },
+            continuation: ProbeContinuation::new(move |result| program.resolve(result, ordinary)),
+        }
+    }
+
+    fn resolve(
+        self,
+        result: ObservationResult,
+        ordinary: bool,
+    ) -> Result<DiscoverableStep, TileSourceError> {
+        if let ObservationResult::Available { size } = result
+            && size.x > 0
+            && size.y > 0
+        {
+            let mut requests = self.requests.clone();
+            requests.force_width_only = !ordinary;
+            let grid = Grid::new(requests.image_size(), size, Vec2d::default(), requests)?;
+            return Ok(DiscoverableStep::Resolved {
+                grid,
+                previously_output: vec![Vec2d::default()],
+            });
+        }
+        if ordinary && self.requests.use_size_upscaling {
+            let mut fallback = self.requests.clone();
+            fallback.force_width_only = true;
+            return Ok(self.probe(&fallback, false));
+        }
+        Ok(DiscoverableStep::Resolved {
+            grid: self.declared,
+            previously_output: Vec::new(),
+        })
     }
 }
 
@@ -524,10 +612,18 @@ struct TileSizeFormatter {
     w: u32,
     h: u32,
     format: TileSizeFormat,
+    use_size_upscaling: bool,
+    force_width_only: bool,
 }
 
 impl std::fmt::Display for TileSizeFormatter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.use_size_upscaling && self.force_width_only {
+            write!(f, "^")?;
+        }
+        if self.force_width_only {
+            return write!(f, "{},", self.w);
+        }
         match self.format {
             TileSizeFormat::WidthHeight => write!(f, "{},{}", self.w, self.h),
             TileSizeFormat::Width => write!(f, "{},", self.w),
@@ -842,8 +938,12 @@ fn level_with_scale(levels: &[LevelDescriptor], scale_factor: u32) -> &LevelDesc
 
 #[cfg(test)]
 fn tile_urls(level: &LevelDescriptor) -> Vec<String> {
-    let crate::core::TileSource::Grid(plan) = &level.source else {
-        panic!("IIIF levels are grids");
+    let plan = match &level.source {
+        crate::core::TileSource::Grid(plan) => plan,
+        crate::core::TileSource::Adaptive(source) => source
+            .declared_grid()
+            .expect("IIIF adaptive levels retain declared grids"),
+        _ => panic!("IIIF levels have declared grids"),
     };
     plan.tiles_row_major()
         .map(Result::unwrap)
@@ -881,9 +981,10 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
                 <= pair[1].source.image_size().unwrap().area())
     );
     let level = level_with_scale(&image.levels, 1);
-    let crate::core::TileSource::Grid(plan) = &level.source else {
-        panic!("IIIF tile geometry is a grid");
+    let crate::core::TileSource::Adaptive(source) = &level.source else {
+        panic!("IIIF tile geometry is adaptive");
     };
+    let plan = source.declared_grid().expect("declared IIIF grid");
     let first = plan.tiles_row_major().next().unwrap().unwrap();
     assert_eq!(first.ordinal, 0);
     assert_eq!(

@@ -100,6 +100,12 @@ results to the core operation, which owns candidate ordering and fallback.
 Core discovery is a poll: the same request stays outstanding until its
 outcome is provided, so the engine never loops on unanswered fetches.
 
+Adaptive planning may mark a probe as `ProbeAndOutput`. Hosts retain a
+successfully decoded probe with its tile placement, and the resolved plan's
+`previously_output` positions let the engine count that tile as acquired
+without fetching it again. Missing or unselected probes remain advisory and
+never enter tile retry or partial-output recovery.
+
 | Input | Valid source state(s) | Validation | Transition | Effects | Events |
 |---|---|---|---|---|---|
 | `start()` | `Created` | Config valid (`max_retries` 0..=1024, 0 is first attempt only), `http(s)`/`file://`/local-path URL (≤2048B, `file://` only local absolute), known format (`None`/`auto` or registered name, else `Err(job.unknown-dezoomer)` with no transition) | `Created` -> `Discovering` | `acquire-resource` per outstanding discovery request (real URIs, metadata purpose, header names) | `job-state:Discovering` |

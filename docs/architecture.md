@@ -96,6 +96,11 @@ Shared UI or CLI
 
 Discovery first emits resource requests. The active host acquires each resource and returns bytes to the core. A selected catalog entry becomes a tile plan and processing recipe. The job engine schedules effects within host limits and turns their results into events.
 
+IIIF levels use the same pure adaptive-planning boundary as other probed
+formats: core describes an ordinary first-tile observation and any
+standards-advertised fallback, while hosts fetch and decode it. If probing
+cannot refine the plan, core returns the manifest-declared grid unchanged.
+
 ## Boundary rules
 
 - Core and job logic remain deterministic and testable without I/O.

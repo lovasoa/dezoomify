@@ -451,6 +451,7 @@ function startAttempt() {
         ok: img.naturalWidth > 0 && img.naturalHeight > 0,
         width: img.naturalWidth,
         height: img.naturalHeight,
+        image: img,
       });
       img.onerror = () => reject(new Error("probe image failed to load"));
       img.src = url;

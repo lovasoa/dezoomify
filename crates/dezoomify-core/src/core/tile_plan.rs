@@ -396,7 +396,8 @@ impl TileSource {
         match self {
             Self::Grid(grid) => Some(grid.image_size()),
             Self::Positioned(positioned) => positioned.image_size(),
-            Self::DiscoverableGrid(_) | Self::Adaptive(_) => None,
+            Self::Adaptive(adaptive) => adaptive.declared_grid().map(Grid::image_size),
+            Self::DiscoverableGrid(_) => None,
         }
     }
 
@@ -404,7 +405,8 @@ impl TileSource {
     pub fn tile_size(&self) -> Option<Vec2d> {
         match self {
             Self::Grid(grid) => Some(grid.tile_size()),
-            Self::Positioned(_) | Self::DiscoverableGrid(_) | Self::Adaptive(_) => None,
+            Self::Adaptive(adaptive) => adaptive.declared_grid().map(Grid::tile_size),
+            Self::Positioned(_) | Self::DiscoverableGrid(_) => None,
         }
     }
 
@@ -412,7 +414,8 @@ impl TileSource {
     pub fn overlap(&self) -> Option<Vec2d> {
         match self {
             Self::Grid(grid) => Some(grid.overlap()),
-            Self::Positioned(_) | Self::DiscoverableGrid(_) | Self::Adaptive(_) => None,
+            Self::Adaptive(adaptive) => adaptive.declared_grid().map(Grid::overlap),
+            Self::Positioned(_) | Self::DiscoverableGrid(_) => None,
         }
     }
 
@@ -421,7 +424,8 @@ impl TileSource {
         match self {
             Self::Grid(grid) => Some(grid.count()),
             Self::Positioned(positioned) => Some(positioned.count()),
-            Self::DiscoverableGrid(_) | Self::Adaptive(_) => None,
+            Self::Adaptive(adaptive) => adaptive.declared_grid().map(Grid::count),
+            Self::DiscoverableGrid(_) => None,
         }
     }
 }

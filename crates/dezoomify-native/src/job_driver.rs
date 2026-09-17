@@ -828,6 +828,7 @@ fn execute_effects(
                 expected_size,
                 canvas,
                 probe,
+                probe_output,
             } => {
                 let need = TileFetch {
                     ordinal: tile,
@@ -855,6 +856,24 @@ fn execute_effects(
                         }
                         ObservationResult::Missing => (false, 0, 0),
                     };
+                    if available && probe_output {
+                        let key = tile.to_string();
+                        attempt.canvas = attempt.canvas.or(canvas);
+                        if !attempt.order.contains(&key) {
+                            attempt.order.push(key.clone());
+                        }
+                        attempt.geoms.insert(
+                            key.clone(),
+                            TileGeom {
+                                destination,
+                                extent: expected_size,
+                            },
+                        );
+                        if let Some(decoded) = read.decoded {
+                            attempt.decoded.insert(key, decoded);
+                        }
+                        attempt.acquired = attempt.acquired.saturating_add(1);
+                    }
                     reply(
                         job,
                         JobCommand::ProbeOutcome {

@@ -10,6 +10,15 @@ export interface ProbeSize {
   ok: boolean;
   width: number;
   height: number;
+  /** Readable bytes retained when the probe can also satisfy output. */
+  bytes?: ArrayBuffer;
+  /** Plain image retained when probing succeeded through display fallback. */
+  image?: ProbeImage;
+}
+
+export interface ProbeImage {
+  naturalWidth: number;
+  naturalHeight: number;
 }
 
 export interface ProbeBitmap {
@@ -26,7 +35,7 @@ export interface ProbeSizeDeps {
   /** Measure dimensions without byte access (plain <img> fallback). */
   loadImage?: (
     url: string,
-  ) => Promise<{ ok: boolean; width: number; height: number }>;
+  ) => Promise<{ ok: boolean; width: number; height: number; image?: ProbeImage }>;
 }
 
 export function createProbeSize(deps: ProbeSizeDeps): (url: string, headers: Record<string, string>) => Promise<ProbeSize> {
@@ -58,6 +67,7 @@ export function createProbeSize(deps: ProbeSizeDeps): (url: string, headers: Rec
         ok: bitmap.width > 0 && bitmap.height > 0,
         width: bitmap.width,
         height: bitmap.height,
+        bytes,
       };
       try {
         bitmap.close();

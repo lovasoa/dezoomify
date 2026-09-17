@@ -216,6 +216,7 @@ fn second_canvas_museum_page_follows_its_embedded_viewer_configuration() {
 fn grid(level: &LevelDescriptor) -> &Grid {
     match &level.source {
         TileSource::Grid(grid) => grid,
+        TileSource::Adaptive(adaptive) => adaptive.declared_grid().expect("declared adaptive grid"),
         source => panic!("expected a rectangular grid, got {source:?}"),
     }
 }
@@ -556,6 +557,118 @@ fn dezoomer_iiif_image_service_cases() {
     );
     assert!(tile_urls(image.levels.last().unwrap()).iter().any(|url| url
         == "https://fixtures.test/iiif-v2/edge-dimensions/256,256,256,128/256,128/0/default.jpg"));
+}
+
+#[test]
+fn bruun_rasmussen_probes_the_server_bug_and_uses_width_only_upscaling() {
+    let input = "https://fixtures.test/iiif/bruun-rasmussen/info.json";
+    let image = ready_image(
+        discover(
+            input,
+            &[(input, coverage_fixture!("iiif/bruun-rasmussen-info.json"))],
+        )
+        .unwrap(),
+    );
+
+    // Bruun Rasmussen rejects the valid unscaled size `256,256` because its
+    // IIPImage build compares the integer request with a rounded-down floating
+    // region. `^256,` bypasses that check and preserves JPEG tile pass-through.
+    // Live reproduction: https://bruun-rasmussen.dk/m/lots/B7651D2E4677/images/1
+    // Upstream fix: https://github.com/ruven/iipsrv/commit/28dbbe64e16caa226041f69a3135db2baaf0dd41
+    let full_resolution = image
+        .levels
+        .iter()
+        .find(|level| level.scale_factor == Some(1))
+        .unwrap();
+    let TileSource::Adaptive(source) = &full_resolution.source else {
+        panic!("IIIF levels must probe adaptively")
+    };
+    let DiscoverableStep::Probe { tile, continuation } = source.start() else {
+        panic!("IIIF probing must start with the ordinary tile")
+    };
+    assert_eq!(
+        tile.request.uri,
+        "https://fixtures.test/iiif/bruun-rasmussen/0,0,256,256/256,256/0/default.jpg"
+    );
+    let DiscoverableStep::Probe { tile, continuation } =
+        continuation.submit(ObservationResult::Missing).unwrap()
+    else {
+        panic!("the rejected ordinary tile must trigger the caret probe")
+    };
+    assert_eq!(
+        tile.request.uri,
+        "https://fixtures.test/iiif/bruun-rasmussen/0,0,256,256/^256,/0/default.jpg"
+    );
+    let DiscoverableStep::Resolved {
+        grid,
+        previously_output,
+    } = continuation
+        .submit(ObservationResult::Available {
+            size: Vec2d::square(256),
+        })
+        .unwrap()
+    else {
+        panic!("the caret probe must resolve the grid")
+    };
+    assert_eq!(previously_output, [Vec2d::default()]);
+    assert_eq!(
+        grid.tiles_row_major().next().unwrap().unwrap().request.uri,
+        tile.request.uri
+    );
+
+    let DiscoverableStep::Probe { continuation, .. } = source.start() else {
+        unreachable!()
+    };
+    let DiscoverableStep::Resolved { grid, .. } = continuation
+        .submit(ObservationResult::Available {
+            size: Vec2d::square(128),
+        })
+        .unwrap()
+    else {
+        panic!("ordinary probe must correct the advertised tile geometry")
+    };
+    assert_eq!(grid.tile_size(), Vec2d::square(128));
+
+    let DiscoverableStep::Probe { continuation, .. } = source.start() else {
+        unreachable!()
+    };
+    let DiscoverableStep::Probe { continuation, .. } =
+        continuation.submit(ObservationResult::Missing).unwrap()
+    else {
+        unreachable!()
+    };
+    let DiscoverableStep::Resolved {
+        grid,
+        previously_output,
+    } = continuation.submit(ObservationResult::Missing).unwrap()
+    else {
+        panic!("failed probes must return the manifest-derived plan")
+    };
+    assert!(previously_output.is_empty());
+    assert_eq!(grid.tile_size(), Vec2d::square(256));
+    assert_eq!(
+        grid.tiles_row_major().next().unwrap().unwrap().request.uri,
+        "https://fixtures.test/iiif/bruun-rasmussen/0,0,256,256/256,256/0/default.jpg"
+    );
+    let reduced = image
+        .levels
+        .iter()
+        .find(|level| level.scale_factor == Some(2))
+        .unwrap();
+    let TileSource::Adaptive(reduced_source) = &reduced.source else {
+        unreachable!()
+    };
+    let DiscoverableStep::Probe { continuation, .. } = reduced_source.start() else {
+        unreachable!()
+    };
+    assert!(matches!(
+        continuation.submit(ObservationResult::Missing).unwrap(),
+        DiscoverableStep::Resolved { .. }
+    ));
+    assert_eq!(
+        tile_urls(reduced)[0],
+        "https://fixtures.test/iiif/bruun-rasmussen/0,0,512,512/256,256/0/default.jpg"
+    );
 }
 
 #[test]
@@ -1662,7 +1775,13 @@ mod scenario_parity {
             TileSource::Adaptive(source) => {
                 // Drive scripted probe observations (decoded size = oracle
                 // image dims) to the resolved grid, then enumerate it.
-                let (w, h) = (want_width.unwrap_or(512), want_height.unwrap_or(512));
+                let (w, h) = source.declared_grid().map_or_else(
+                    || (want_width.unwrap_or(512), want_height.unwrap_or(512)),
+                    |declared| {
+                        let size = declared.tile_size();
+                        (size.x, size.y)
+                    },
+                );
                 let mut step = source.start();
                 let mut grid = None;
                 for _ in 0..4096 {
@@ -1700,13 +1819,7 @@ mod scenario_parity {
     }
 
     fn level_size(level: &dezoomify_core::core::LevelDescriptor) -> Option<(u32, u32)> {
-        match &level.source {
-            TileSource::Grid(grid) => {
-                let size = grid.image_size();
-                Some((size.x, size.y))
-            }
-            _ => None,
-        }
+        level.source.image_size().map(|size| (size.x, size.y))
     }
 
     fn legacy_transcript(scenario: &str) -> serde_json::Value {

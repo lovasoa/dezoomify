@@ -865,6 +865,7 @@ impl Session {
                 expected_size,
                 canvas,
                 probe,
+                probe_output,
             } => {
                 let request = sequence;
                 self.outstanding_tile_requests.insert(request, tile);
@@ -900,6 +901,7 @@ impl Session {
                             height: u64::from(size.y),
                         }),
                         processing,
+                        probe_output,
                     },
                 }
             }

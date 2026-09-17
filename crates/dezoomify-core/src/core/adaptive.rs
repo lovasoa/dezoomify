@@ -89,6 +89,7 @@ pub struct DiscoverableGrid {
 #[derive(Clone)]
 pub struct AdaptiveSource {
     program: Arc<dyn AdaptiveProgram>,
+    declared_grid: Option<Grid>,
 }
 
 impl fmt::Debug for AdaptiveSource {
@@ -96,6 +97,7 @@ impl fmt::Debug for AdaptiveSource {
         formatter
             .debug_struct("AdaptiveSource")
             .field("program", &self.program)
+            .field("declared_grid", &self.declared_grid)
             .finish()
     }
 }
@@ -110,12 +112,28 @@ impl AdaptiveSource {
     pub fn new(program: impl AdaptiveProgram + 'static) -> Self {
         Self {
             program: Arc::new(program),
+            declared_grid: None,
+        }
+    }
+
+    /// Create a probe-driven source while retaining manifest-declared geometry
+    /// for level selection and as the program's fallback plan.
+    #[must_use]
+    pub fn with_declared_grid(program: impl AdaptiveProgram + 'static, grid: Grid) -> Self {
+        Self {
+            program: Arc::new(program),
+            declared_grid: Some(grid),
         }
     }
 
     #[must_use]
     pub fn start(&self) -> DiscoverableStep {
         self.program.start()
+    }
+
+    #[must_use]
+    pub const fn declared_grid(&self) -> Option<&Grid> {
+        self.declared_grid.as_ref()
     }
 }
 

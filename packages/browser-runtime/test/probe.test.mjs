@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { createProbeSize } from "../src/probe.ts";
 
 test("probe decodes fetched bytes to dimensions", async () => {
+  const bytes = new ArrayBuffer(8);
   const probe = createProbeSize({
-    fetchTile: async () => ({ bytes: new ArrayBuffer(8) }),
+    fetchTile: async () => ({ bytes }),
     decode: async () => ({ width: 256, height: 128, close: () => {} }),
   });
-  assert.deepEqual(await probe("https://cdn.test/0.jpg", {}), { ok: true, width: 256, height: 128 });
+  assert.deepEqual(await probe("https://cdn.test/0.jpg", {}), { ok: true, width: 256, height: 128, bytes });
 });
 
 test("probe falls back to image dimensions without readable bytes", async () => {

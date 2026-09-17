@@ -18,6 +18,18 @@ const DZI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 </Image>
 "#;
 
+const IIIF_SIZE_UPSCALING: &str = r#"{
+  "@context": "http://iiif.io/api/image/3/context.json",
+  "id": "https://example.test/iiif/image",
+  "type": "ImageService3",
+  "profile": "level2",
+  "width": 256,
+  "height": 256,
+  "maxWidth": 1024,
+  "tiles": [{"width": 256, "height": 256, "scaleFactors": [1]}],
+  "extraFeatures": ["sizeUpscaling"]
+}"#;
+
 fn test_config() -> Config {
     Config::default()
 }
@@ -335,6 +347,51 @@ fn probe_driven_generic_level_resolves_through_observations() {
             .all(|(_, uri, _)| uri.starts_with("https://example.test/generic/placeholder.svg?x=")),
         "planned URIs follow the template: {planned:?}"
     );
+}
+
+#[test]
+fn iiif_caret_probe_is_reused_as_the_only_output_tile() {
+    let input = "https://example.test/iiif/image/info.json";
+    let mut host = ScriptedHost::new(&job_id(41), input, test_config()).unwrap();
+    host.start().unwrap();
+    host.apply(JobCommand::ResourceBytes {
+        request: 0,
+        bytes: IIIF_SIZE_UPSCALING.as_bytes().to_vec(),
+        final_uri: None,
+    })
+    .unwrap();
+    host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
+    host.apply(JobCommand::SelectLevel { level: 0 }).unwrap();
+
+    let ordinary = host.tile_effects().into_iter().last().unwrap();
+    assert!(ordinary.2);
+    assert!(ordinary.1.ends_with("/256,256/0/default.jpg"));
+    host.apply(JobCommand::ProbeOutcome {
+        tile: ordinary.0,
+        available: false,
+        width: 0,
+        height: 0,
+    })
+    .unwrap();
+
+    let caret = host.tile_effects().into_iter().last().unwrap();
+    assert!(caret.2);
+    assert!(caret.1.ends_with("/^256,/0/default.jpg"));
+    host.apply(JobCommand::ProbeOutcome {
+        tile: caret.0,
+        available: true,
+        width: 256,
+        height: 256,
+    })
+    .unwrap();
+
+    assert_eq!(host.state(), "Finalizing");
+    assert_eq!(
+        host.tile_effects().len(),
+        2,
+        "the successful caret probe must not be acquired again"
+    );
+    assert!(host.tile_effects().iter().all(|(_, _, probe)| *probe));
 }
 
 /// Regression: core discovery is a poll - the same request stays
