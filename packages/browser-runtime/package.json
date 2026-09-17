@@ -5,6 +5,10 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./logging": "./src/logging.ts"
+  },
   "scripts": {
     "test": "node --test-reporter=dot --test \"test/*.test.mjs\"",
     "typecheck": "tsc --noEmit"

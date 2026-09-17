@@ -257,6 +257,34 @@ test("error layering: plain message prominent, engine diagnostics only in techni
   assert.ok(!diag2.includes("example.test"), "stale detail must be replaced");
 });
 
+test("failed technical details show the activity log below the error diagnostics", () => {
+  const el = container();
+  const state = {
+    status: "failed",
+    seq: 1,
+    sessionId: "s4",
+    imageCount: 0,
+    transport: "browser-session",
+    error: { code: "job.partial-discarded", category: "engine", retryable: false, message: "Discarded." },
+  };
+  const ctx = {
+    jobActivity: { log: ["[job] engine-start url=https://example.test/a.dzi", "[worker] session-created jobId=job:1"] },
+  };
+  render(el, state, callbacks, ctx);
+  const card = el.querySelector(".dz-card");
+  const log = card.querySelector("#dz-error-log");
+  assert.ok(log, "log block mounted in failure details");
+  assert.equal(
+    log.textContent,
+    "[job] engine-start url=https://example.test/a.dzi\n[worker] session-created jobId=job:1",
+  );
+  assert.ok(!card.querySelector("#dz-error-diagnostics").textContent.includes("engine-start"));
+
+  const empty = container();
+  render(empty, state, callbacks, {});
+  assert.equal(empty.querySelector(".dz-card").querySelector("#dz-error-log"), null, "no log block without logs");
+});
+
 test("job rail keeps integrated stop and diagnostics-copy controls, and header visibility tracks phase", () => {
   const el = container();
   render(el, { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 }, callbacks);

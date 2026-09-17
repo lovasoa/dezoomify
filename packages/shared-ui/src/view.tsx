@@ -99,6 +99,12 @@ function diagnosticsText(
   return lines.join("\n");
 }
 
+/** The most recent activity-log lines, literal English, shown in both the job and failed technical sections. */
+function activityLogText(ctx?: ViewContext): string {
+  const log = ctx?.jobActivity?.log;
+  return log && log.length > 0 ? log.slice(-20).join("\n") : "";
+}
+
 // ---------------------------------------------------------------------------
 // Presentational atoms.
 // ---------------------------------------------------------------------------
@@ -321,7 +327,7 @@ function deriveJob(state: ControllerState, ctx?: ViewContext): JobDerived {
     ? `${current} done${active > 0 ? ` + ${active} in progress` : ""} / ${total}`
     : "";
   const diagText = diagnosticsText(state, ctx, elapsedMs, timeoutMs);
-  const logText = activity.log && activity.log.length > 0 ? activity.log.slice(-20).join("\n") : "";
+  const logText = activityLogText(ctx);
   const copiedLog = activity.log && activity.log.length > 0 ? `\n\nEvents\n${activity.log.join("\n")}` : "";
   const copied = `${diagText}${activity.diagnostics ? `\n\n${activity.diagnostics}` : ""}${copiedLog}`;
   return {
@@ -741,6 +747,11 @@ function FailedView({
         <div className="dz-diagnostics" id="dz-error-diagnostics">
           {errorDiagnosticsText(error)}
         </div>
+        {activityLogText(ctx) ? (
+          <div className="dz-diagnostics dz-log" id="dz-error-log">
+            {activityLogText(ctx)}
+          </div>
+        ) : null}
         <div className="dz-diagnostics-report">
           <a
             href="https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md"

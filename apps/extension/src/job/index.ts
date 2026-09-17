@@ -10,6 +10,7 @@ import {
   saveBlobViaAnchor,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.js";
+import { createLogger } from "@dezoomify/browser-runtime/logging";
 import { createJobController } from "./controller.js";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
@@ -25,10 +26,20 @@ type ExtensionApi = {
 type Failure = { code: string; category: string; retryable: boolean; message: string };
 type ViewContext = SharedViewContext & { failure?: Failure };
 type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: Failure; catalog?: { images?: unknown[] } };
-type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[] };
+type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[]; line?: string };
 
 const hostGlobal = globalThis as typeof globalThis & { browser?: ExtensionApi; chrome?: ExtensionApi };
 const api = hostGlobal.browser ?? hostGlobal.chrome;
+const jobLog = createLogger("job");
+// Mirror accepted log lines into the job view's technical-details log (and the
+// copied diagnostics) so a failed job shows the interaction trace. Worker
+// lines arrive over `engine.log` and join the same buffer.
+const UI_LOG_MAX_LINES = 120;
+const uiLogLines: string[] = [];
+jobLog.addSink((entry) => {
+  uiLogLines.push(entry.line);
+  if (uiLogLines.length > UI_LOG_MAX_LINES) uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
+});
 
 /** @type {any | null} */
 let binding: JobBinding | null = null;
@@ -68,6 +79,7 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
   const target = root();
   if (!target) return;
   seq += 1;
+  const viewActivity = { ...(ctx.jobActivity ?? {}), ...(uiLogLines.length ? { log: uiLogLines.slice() } : {}) };
   renderView(target, { status, seq, sessionId: binding?.jobId ?? "job:pending", transport: "browser-session", imageCount: 0, ...(ctx.failure ? { error: ctx.failure } : {}) }, {
     onSubmitUrl: () => {},
     onCancel: closeJob,
@@ -77,6 +89,7 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
     onSave: () => {},
   }, {
     ...ctx,
+    ...(Object.keys(viewActivity).length ? { jobActivity: viewActivity } : {}),
   }, {
     ...(accessRequest ? { replace: createElement(AccessRequestView, {
       origin: accessRequest.hosts.length === 1 ? accessRequest.hosts[0] : "the required image host",
@@ -119,11 +132,14 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
 }
 
 function send(message: unknown): Promise<unknown> {
+  const type = message && typeof message === "object" && "type" in message ? String((message as { type?: unknown }).type) : "unknown";
+  jobLog.debug("background-message-sent", `type=${type}`);
   if (!api?.runtime?.sendMessage) return Promise.reject(new Error("extension runtime unavailable"));
   return api.runtime.sendMessage(message);
 }
 
 function closeJob() {
+  jobLog.info("job-close", `jobId=${binding?.jobId ?? "unknown"}`);
   controller?.cancel();
   if (binding) void send(boundEnvelope("dz.job.cancel")).catch(() => {});
   if (binding) void send(boundEnvelope("dz.job.closed")).catch(() => {});
@@ -131,12 +147,14 @@ function closeJob() {
 
 function showAccessRequired(detail: { hosts: string[] }) {
   const hosts = Array.isArray(detail.hosts) ? detail.hosts : [];
+  jobLog.info("permission-requested", `jobId=${binding?.jobId ?? "unknown"} hosts=${hosts.length}`);
   accessRequest = { hosts, requesting: false };
   render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for access" } });
 }
 
 function resolvePermission(message: Record<string, unknown>) {
   if (!binding || message.jobId !== binding.jobId || typeof message.granted !== "boolean") return;
+  jobLog.info("permission-resolved", `jobId=${binding.jobId} granted=${message.granted}`);
   accessRequest = null;
   if (__DEZOOMIFY_TEST_PERMISSION_MOCK__ && message.granted && Array.isArray(message.origins)) {
     for (const origin of message.origins) if (typeof origin === "string") testGrantedOrigins.add(origin);
@@ -166,6 +184,9 @@ function showPartialDecision(generation: number) {
 function onHostFailure(error: unknown) {
   if (hostFailed) return;
   hostFailed = true;
+  const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "unknown";
+  const phase = error && typeof error === "object" && "phase" in error ? String((error as { phase?: unknown }).phase) : "unknown";
+  jobLog.error("host-failure", `jobId=${binding?.jobId ?? "unknown"} code=${code} phase=${phase} message=${error instanceof Error ? error.message : String(error)}`);
   const candidate = error && typeof error === "object"
     ? error as { code?: unknown; message?: unknown; retryable?: unknown; detail?: unknown; phase?: unknown; transport?: unknown }
     : null;
@@ -222,13 +243,19 @@ function handleEvent(event: JobEvent) {
   if (hostFailed) return;
   if (event.type === "progress") {
     if (typeof event.acquired !== "number" || typeof event.total !== "number") return;
+    jobLog.debug("engine-progress", `acquired=${event.acquired} total=${event.total}`);
     lastTileProgress = { current: event.acquired, total: event.total };
     render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
   }
-  else if (event.type === "failed") { partialDecision = null; render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } }); }
-  else if (event.type === "cancelled") { partialDecision = null; render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } }); }
-  else if (event.type === "completed" || event.type === "partial-completed") { partialDecision = null; render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } }); }
+  else if (event.type === "failed") {
+    jobLog.error("engine-event", `type=failed error=${event.error ? JSON.stringify(event.error) : "unknown"}`);
+    partialDecision = null;
+    render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
+  }
+  else if (event.type === "cancelled") { jobLog.info("engine-event", "type=cancelled"); partialDecision = null; render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } }); }
+  else if (event.type === "completed" || event.type === "partial-completed") { jobLog.info("engine-event", `type=${event.type}`); partialDecision = null; render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } }); }
   else if (event.type === "catalog" && !selected) {
+    jobLog.info("engine-event", `type=catalog images=${Array.isArray(event.catalog?.images) ? event.catalog.images.length : 0}`);
     selected = true;
     const selection = pickEngineSelection(
       (event.catalog ?? {}) as Parameters<typeof pickEngineSelection>[0],
@@ -258,12 +285,28 @@ function setup(bound: unknown) {
   };
   lastTileProgress = null;
   const activeBinding = binding;
+  jobLog.info("binding-received", `jobId=${binding.jobId} tab=${binding.tabId} frame=${binding.frameId} gen=${binding.documentGeneration}`);
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   jobWorker = worker;
-  const extensionTransport = createExtensionFetcher({
+  const fetcher = createExtensionFetcher({
     hasPermission: async (origin) => testGrantedOrigins.has(origin) ||
       (!__DEZOOMIFY_TEST_PERMISSION_MOCK__ && !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] }))),
   });
+  const extensionTransport = {
+    async fetchResource(url: string, opts?: unknown) {
+      jobLog.debug("extension-fetch-start", `url=${url} purpose=${String((opts as { purpose?: unknown } | undefined)?.purpose ?? "unknown")}`);
+      try {
+        const result = await fetcher.fetchResource(url, opts as Parameters<typeof fetcher.fetchResource>[1]);
+        jobLog.debug("extension-fetch-complete", `url=${url} bytes=${result.bytes.byteLength}`);
+        return result;
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "unknown";
+        jobLog.warn("extension-fetch-failed", `url=${url} code=${code} message=${error instanceof Error ? error.message : String(error)}`);
+        throw error;
+      }
+    },
+    cancel: () => fetcher.cancel(),
+  };
   sourceTransport = createCoordinatorSourceTransport({ sendMessage: send });
   controller = createJobController({
     worker,
@@ -288,9 +331,17 @@ function setup(bound: unknown) {
     },
   });
   worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
-    if (event.data?.type === "engine.messages") controller?.handleEngineMessages(event.data.messages ?? []);
+    if (event.data?.type === "engine.messages") {
+      const messages = event.data.messages ?? [];
+      jobLog.debug("worker-message", `type=engine.messages count=${messages.length}`);
+      controller?.handleEngineMessages(messages);
+    }
     else if (event.data?.type === "engine.ranked") ranked(event.data);
-    else if (event.data?.type === "engine.error") onHostFailure(event.data.error);
+    else if (event.data?.type === "engine.log" && typeof event.data.line === "string") {
+      uiLogLines.push(event.data.line);
+      if (uiLogLines.length > UI_LOG_MAX_LINES) uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
+    }
+    else if (event.data?.type === "engine.error") { jobLog.error("worker-error", `jobId=${binding?.jobId ?? "unknown"} message=${JSON.stringify(event.data.error)}`); onHostFailure(event.data.error); }
   });
   render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });
 }
@@ -300,6 +351,7 @@ function candidates(message: Record<string, unknown>) {
   const values = Array.isArray(message.urls) ? message.urls.filter((candidate) => typeof candidate === "string") : [];
   if (!values.length) return;
   started = true;
+  jobLog.info("candidates-received", `jobId=${binding.jobId} count=${values.length} overflow=${typeof message.overflow === "number" ? message.overflow : 0}`);
   render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Finding the zoomable image" } });
   // The document URL is an explicit candidate, so the first entry is not
   // necessarily the zoomable source: rank with the core preference order
@@ -312,12 +364,15 @@ function ranked(message: WorkerMessage) {
   const values = Array.isArray(message.urls) ? message.urls : [];
   const first = values.find((candidate) => typeof candidate === "string");
   if (!first) return;
+  jobLog.info("rank-completed", `jobId=${binding.jobId} count=${values.length} first=${first}`);
   lastSource = first;
   assembly = createAssembly(first);
+  jobLog.info("engine-start", `jobId=${binding.jobId} url=${lastSource}`);
   controller?.start(lastSource);
 }
 
 api?.runtime?.onMessage?.addListener((message) => {
+  if (typeof message?.type === "string" && message.type.startsWith("dz.job.")) jobLog.debug("background-message-received", `type=${message.type}`);
   if (message?.type === "dz.job.binding") setup(message);
   else if (message?.type === "dz.job.candidates") candidates(message);
   else if (message?.type === "dz.job.fetch") sourceTransport?.handleMessage?.(message);
