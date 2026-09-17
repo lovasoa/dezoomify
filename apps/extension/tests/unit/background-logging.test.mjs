@@ -3,11 +3,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { transpileTypeScript } from "./ts-source-loader.mjs";
 
-const operations = readFileSync(new URL("../../src/background/source-operations.ts", import.meta.url), "utf8").replace(/^export\s+/gm, "");
-const text = transpileTypeScript(`${operations}\n${readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8").replace(/^import .*source-operations\.js";\s*$/m, "")}`, "background-combined.ts");
+function source(path) { return readFileSync(new URL(path, import.meta.url), "utf8"); }
+const logging = source("../../src/logging.ts").replace(/^export\s+/gm, "");
+const operations = source("../../src/background/source-operations.ts").replace(/^export\s+/gm, "");
+const index = source("../../src/background/index.ts")
+  .replace(/^import .*logging\.js";\s*$/m, "")
+  .replace(/^import .*source-operations\.js";\s*$/m, "");
+const text = transpileTypeScript(`${logging}\n${operations}\n${index}`, "background-combined.ts");
 
 function browser() {
-  const listeners = { click: [] };
+  const listeners = { click: [], message: [] };
   return {
     listeners,
     api: {
@@ -19,7 +24,7 @@ function browser() {
       scripting: { executeScript: () => Promise.resolve() },
       storage: { session: { get: async () => ({}), set: async () => {} } },
       permissions: { onRemoved: { addListener() {} } },
-      runtime: { getURL: (path) => `chrome-extension://test/${path}`, onMessage: { addListener() {} } },
+      runtime: { getURL: (path) => `chrome-extension://test/${path}`, onMessage: { addListener(fn) { listeners.message.push(fn); } } },
     },
   };
 }
@@ -61,6 +66,35 @@ test("logging is bounded and a throwing sink cannot interrupt coordinator work",
   mod.setBackgroundLogSink((entry) => seen.push(entry));
   mod.backgroundLog("info", "test", "x".repeat(5000));
   assert.ok(seen[0].line.length <= "[dezoomify:background] info test ".length + mod.BACKGROUND_LOG_MAX_CHARS + 1);
+});
+
+test("coordinator logs active-tab and job-bus interactions", async () => {
+  const fake = browser();
+  const mod = await load(fake);
+  const entries = [];
+  mod.setBackgroundLogSink((entry) => entries.push(entry));
+  mod.setBackgroundLogLevel("debug");
+  const executed = [];
+  fake.api.scripting.executeScript = async (details) => {
+    executed.push(details);
+    return [{ frameId: 0, result: { ok: true, documentUrl: "https://gallery.example/work", urls: ["https://gallery.example/tiles/a.jpg"], overflow: 0 } }];
+  };
+  await fake.listeners.click[0]({ id: 7, url: "https://gallery.example/work" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const created = entries.find((entry) => entry.code === "job-created");
+  assert.ok(created, "job was created");
+  const jobId = created.detail.match(/jobId=(\S+)/)[1];
+  fake.listeners.message[0]({ type: "dz.job.ready", jobId, requestId: "job-ready-test" }, { tab: { id: 2 }, frameId: 0 }, () => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  const codes = entries.map((entry) => entry.code);
+  assert.ok(codes.includes("toolbar-click"));
+  assert.ok(codes.includes("job-message-received"));
+  assert.ok(codes.includes("binding-ready"));
+  assert.ok(codes.includes("active-tab-op-start"));
+  assert.ok(codes.includes("active-tab-op-result"));
+  assert.equal(executed.length, 1);
+  assert.match(entries.find((entry) => entry.code === "active-tab-op-result").detail, /candidates=1/);
 });
 
 test("classic packaged copy remains parseable after export stripping", async () => {

@@ -8,8 +8,9 @@
  */
 
 import { collectCandidates, fetchSource } from "./source-operations.js";
+import { LOG_LEVELS, LOG_MAX_CHARS, SENSITIVE_QUERY_KEYS, createLogger, redactUrl } from "../logging.js";
 
-type LogLevel = keyof typeof BACKGROUND_LOG_LEVELS;
+type LogLevel = keyof typeof LOG_LEVELS;
 type Message = Record<string, unknown> & { type?: string; requestId?: string; jobId?: string; tabId?: number; frameId?: number; documentGeneration?: number; url?: string; method?: string; headers?: unknown; origins?: unknown };
 type CandidateSnapshot = { ok: true; documentUrl: string; urls: string[]; overflow: number };
 type CandidateBatch = { requestId: string; urls: string[]; overflow: number; documentUrl: string };
@@ -40,45 +41,15 @@ const MAX_HEADER_VALUE_LENGTH = 4096;
 const MAX_FETCH_CHUNK_BYTES = 32 * 1024;
 const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
 
-export const BACKGROUND_LOG_LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
-export const BACKGROUND_LOG_MAX_CHARS = 500;
-export const BACKGROUND_SENSITIVE_QUERY_KEYS = Object.freeze([
-  "token", "auth", "authorization", "session", "sessionid", "sid", "key", "apikey", "api_key", "secret", "password", "passwd", "code", "state", "sessiontoken",
-]);
-let backgroundLogLevel: number = BACKGROUND_LOG_LEVELS.info;
-let backgroundLogSink: ((entry: { level: LogLevel; code: string; line: string }) => void) | null = null;
+export const BACKGROUND_LOG_LEVELS = LOG_LEVELS;
+export const BACKGROUND_LOG_MAX_CHARS = LOG_MAX_CHARS;
+export const BACKGROUND_SENSITIVE_QUERY_KEYS = SENSITIVE_QUERY_KEYS;
+const backgroundLogger = createLogger("background");
 
-export function redactBackgroundUrl(raw: unknown): string {
-  if (typeof raw !== "string" || !raw) return "[empty-url]";
-  try {
-    const url = new URL(raw);
-    if (url.username || url.password) { url.username = "***"; url.password = ""; }
-    for (const key of [...url.searchParams.keys()]) {
-      if (BACKGROUND_SENSITIVE_QUERY_KEYS.includes(key.toLowerCase())) url.searchParams.set(key, "***");
-    }
-    url.hash = "";
-    return url.toString();
-  } catch { return "[invalid-url]"; }
-}
-
-export function setBackgroundLogLevel(level: string | number) {
-  if (typeof level === "string" && level in BACKGROUND_LOG_LEVELS) backgroundLogLevel = BACKGROUND_LOG_LEVELS[level as LogLevel];
-  else if (typeof level === "number" && Number.isFinite(level)) backgroundLogLevel = level;
-}
-
-export function setBackgroundLogSink(sink: unknown) { backgroundLogSink = typeof sink === "function" ? sink as typeof backgroundLogSink : null; }
-
-export function backgroundLog(level: LogLevel, code: string, detail: unknown = "") {
-  try {
-    if ((BACKGROUND_LOG_LEVELS[level] ?? BACKGROUND_LOG_LEVELS.info) < backgroundLogLevel) return;
-    const safeCode = typeof code === "string" && code ? code : "event";
-    let text = typeof detail === "string" ? detail : String(detail ?? "");
-    if (text.length > BACKGROUND_LOG_MAX_CHARS) text = text.slice(0, BACKGROUND_LOG_MAX_CHARS) + "…";
-    const entry = { level, code: safeCode, line: `[dezoomify:background] ${level} ${safeCode}${text ? ` ${text}` : ""}` };
-    if (backgroundLogSink) { try { backgroundLogSink(entry); } catch {} }
-    else { try { globalThis.console?.[level]?.(entry.line); } catch {} }
-  } catch {}
-}
+export function redactBackgroundUrl(raw: unknown): string { return redactUrl(raw); }
+export function setBackgroundLogLevel(level: string | number) { backgroundLogger.setLevel(level); }
+export function setBackgroundLogSink(sink: unknown) { backgroundLogger.setSink(sink); }
+export function backgroundLog(level: LogLevel, code: string, detail: unknown = "") { backgroundLogger.log(level, code, detail); }
 
 const jobs = new Map<string, Entry>();
 const sourceBindings = new Map<string, Entry>();
@@ -144,6 +115,7 @@ function sendToTab(tabId: number, message: unknown, frameId?: number) {
 function sendToJob(entry: Entry, type: string, requestIdValue: string | undefined, extra: Record<string, unknown> = {}) {
   if (!requestIdValue) return null;
   if (typeof entry.jobTabId !== "number") return null;
+  backgroundLog("debug", "job-message-sent", `type=${type} request=${requestIdValue} tab=${entry.jobTabId}`);
   return sendToTab(entry.jobTabId, { type, ...bindingOf(entry), requestId: requestIdValue, ...extra });
 }
 
@@ -213,20 +185,24 @@ async function createJob(tab: BrowserTab) {
     backgroundLog("warn", "privileged-rejected", redactBackgroundUrl(tab?.url));
     return;
   }
+  backgroundLog("info", "toolbar-click", `tab=${tabId} url=${redactBackgroundUrl(tab?.url)}`);
   for (const entry of jobs.values()) {
     if (entry.tabId === tabId && entry.jobRunning && typeof entry.jobTabId === "number") {
+      backgroundLog("info", "job-focus", `tab=${tabId} jobTab=${entry.jobTabId} reason=running`);
       try { await api?.tabs?.update?.(entry.jobTabId, { active: true }); } catch {}
       return;
     }
     if (entry.tabId === tabId && entry.jobActive) {
       entry.jobActive = false;
       entry.sourceValid = false;
+      backgroundLog("info", "job-cancel-requested", `tab=${tabId} jobId=${entry.jobId}`);
       sendToJob(entry, "dz.job.cancel", makeRequestId("toolbar-cancel"), { reason: "toolbar-cancel" });
       setBadge(tabId, false);
       await persistBindings();
       return;
     }
     if (entry.tabId === tabId && entry.jobReady && typeof entry.jobTabId === "number") {
+      backgroundLog("info", "job-focus", `tab=${tabId} jobTab=${entry.jobTabId} reason=ready`);
       try { await api?.tabs?.update?.(entry.jobTabId, { active: true }); } catch {}
       return;
     }
@@ -252,7 +228,7 @@ async function createJob(tab: BrowserTab) {
   sourceBindings.set(sourceBindingKey(entry), entry);
   setBadge(tabId, true);
   await persistBindings();
-  backgroundLog("info", "job-created", `source ${tabId}, job ${jobTab.id}`);
+  backgroundLog("info", "job-created", `jobId=${jobId} jobTab=${jobTab.id} sourceTab=${tabId} frame=${entry.frameId} url=${redactBackgroundUrl(tab.url)}`);
 }
 
 function validSourceHeaders(headers: unknown): Array<{ name: string; value: string }> | null {
@@ -279,15 +255,22 @@ function sourceOperationAllowed(entry: Entry) {
     sourceBindings.get(sourceBindingKey(entry)) === entry;
 }
 
-async function executeSourceOperation(entry: Entry, func: (...args: never[]) => unknown, args: unknown[] = []): Promise<unknown> {
-  if (!sourceOperationAllowed(entry)) return null;
+async function executeSourceOperation(entry: Entry, func: (...args: never[]) => unknown, args: unknown[] = [], op = "source"): Promise<unknown> {
+  if (!sourceOperationAllowed(entry)) {
+    backgroundLog("debug", "active-tab-op-skipped", `op=${op} tab=${entry.tabId} frame=${entry.frameId} reason=binding-invalid`);
+    return null;
+  }
   const generation = entry.documentGeneration;
+  backgroundLog("info", "active-tab-op-start", `op=${op} tab=${entry.tabId} frame=${entry.frameId} gen=${generation}`);
   const results = await api?.scripting?.executeScript?.({
     target: { tabId: entry.tabId, frameIds: [entry.frameId] },
     func,
     args,
   });
-  if (!sourceOperationAllowed(entry) || entry.documentGeneration !== generation) return null;
+  if (!sourceOperationAllowed(entry) || entry.documentGeneration !== generation) {
+    backgroundLog("debug", "active-tab-op-discarded", `op=${op} tab=${entry.tabId} reason=binding-lost`);
+    return null;
+  }
   if (!Array.isArray(results) || results.length !== 1 || results[0]?.frameId !== entry.frameId) throw new Error("invalid-source-operation-result");
   return results[0].result;
 }
@@ -301,6 +284,7 @@ function forwardCandidates(entry: Entry, snapshot: CandidateSnapshot) {
     urls.push(url);
   }
   const candidate = { requestId: makeRequestId("candidates"), urls, overflow: snapshot.overflow, documentUrl: snapshot.documentUrl };
+  backgroundLog("debug", "candidates-forwarded", `jobId=${entry.jobId} added=${urls.length} overflow=${snapshot.overflow} ready=${job.jobReady} held=${job.heldCandidates.length}`);
   if (!urls.length && !candidate.overflow) return;
   if (job.jobReady) sendToJob(entry, "dz.job.candidates", candidate.requestId, candidate);
   else if (job.heldCandidates.length < HELD_CANDIDATE_LIMIT) job.heldCandidates.push({ entry, candidate });
@@ -326,6 +310,7 @@ async function handlePermission(entry: Entry, message: Message) {
   else try { granted = Boolean(await api?.permissions?.contains?.({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
   if (granted) for (const origin of origins) entry.grantedOrigins.add(origin);
   await persistBindings();
+  backgroundLog("info", "permission-check", `req=${message.requestId} jobId=${entry.jobId} origins=${origins.length} granted=${granted}`);
   sendToJob(entry, "dz.job.permission-required", message.requestId, { granted, origins });
 }
 
@@ -343,7 +328,7 @@ async function requestCandidateSnapshot(entry: Entry) {
   if (!sourceOperationAllowed(entry) || entry.snapshotCount >= MAX_SNAPSHOTS) return;
   entry.snapshotCount += 1;
   try {
-    const snapshot = await executeSourceOperation(entry, collectCandidates) as CandidateSnapshot | null;
+    const snapshot = await executeSourceOperation(entry, collectCandidates, [], "collect") as CandidateSnapshot | null;
     if (!snapshot || snapshot.ok !== true || !Array.isArray(snapshot.urls) ||
       typeof snapshot.documentUrl !== "string" || !isPublicHttpUrl(snapshot.documentUrl) ||
       !Number.isSafeInteger(snapshot.overflow) || snapshot.overflow < 0 ||
@@ -355,51 +340,49 @@ async function requestCandidateSnapshot(entry: Entry) {
       invalidateSourceDocument(entry, "snapshot-document-mismatch");
       return;
     }
+    backgroundLog("info", "active-tab-op-result", `op=collect tab=${entry.tabId} candidates=${snapshot.urls.length} overflow=${snapshot.overflow} doc=${redactBackgroundUrl(snapshot.documentUrl)}`);
     forwardCandidates(entry, snapshot);
   } catch (error) {
     if (!sourceOperationAllowed(entry)) return;
     entry.sourceValid = false;
     setBadge(entry.tabId, true, true);
     sendToJob(entry, "dz.job.binding", makeRequestId("source-snapshot-failed"), { sourceValid: false, code: "source-snapshot-failed" });
-    backgroundLog("error", "source-snapshot-failed", "operation-rejected");
+    backgroundLog("error", "source-snapshot-failed", `tab=${entry.tabId} ${error instanceof Error ? error.message : "operation-rejected"}`);
   }
 }
 
 async function dispatchSourceFetch(entry: Entry, message: Message) {
   const method = validSourceMethod(message.method);
   const headers = validSourceHeaders(message.headers);
-  if (!isPublicHttpUrl(message.url) || !method || !headers) {
+  backgroundLog("info", "source-fetch-request", `req=${message.requestId} tab=${entry.tabId} method=${method ?? String(message.method)} purpose=${String(message.purpose ?? "unknown")} url=${redactBackgroundUrl(message.url)}`);
+  const reject = (code: string, extra: Record<string, unknown> = {}) => {
+    backgroundLog("warn", "source-fetch-rejected", `req=${message.requestId} code=${code}`);
     sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: false, code: "invalid-source-request",
+      sourceType: "dz.source.fetch-complete", ok: false, code, ...extra,
     });
+  };
+  if (!isPublicHttpUrl(message.url) || !method || !headers) {
+    reject("invalid-source-request");
     return;
   }
   let result: SourceFetchResult | null;
   try {
-    result = await executeSourceOperation(entry, fetchSource, [{ url: message.url, method, headers }]) as SourceFetchResult | null;
+    result = await executeSourceOperation(entry, fetchSource, [{ url: message.url, method, headers }], "fetch") as SourceFetchResult | null;
   } catch {
-    sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: false, code: "source-operation-failed",
-    });
+    reject("source-operation-failed");
     return;
   }
   if (!result) {
-    sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: false, code: "source-invalidated",
-    });
+    reject("source-invalidated");
     return;
   }
   if (!result || typeof result !== "object" || typeof result.ok !== "boolean") {
-    sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: false, code: "invalid-source-fetch-result",
-    });
+    reject("invalid-source-fetch-result");
     return;
   }
   if (!result.ok) {
     const code = typeof result.code === "string" && /^[a-z0-9-]{1,64}$/.test(result.code) ? result.code : "source-fetch-failed";
-    sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: false, code, ...(Number.isInteger(result.status) ? { status: result.status } : {}),
-    });
+    reject(code, Number.isInteger(result.status) ? { status: result.status } : {});
     return;
   }
   const chunkBytes = result.chunks?.reduce?.((sum, chunk) => sum + (Array.isArray(chunk?.bytes) ? chunk.bytes.length : MAX_SOURCE_FETCH_BYTES + 1), 0);
@@ -409,12 +392,12 @@ async function dispatchSourceFetch(entry: Entry, message: Message) {
     result.chunks.some((chunk) => !chunk || !Number.isSafeInteger(chunk.sequence) || chunk.sequence < 0 ||
       !Array.isArray(chunk.bytes) || chunk.bytes.length > MAX_FETCH_CHUNK_BYTES ||
       chunk.bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255))) {
-    sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: false, code: "invalid-source-fetch-result",
-    });
+    reject("invalid-source-fetch-result");
     return;
   }
+  backgroundLog("info", "source-fetch-complete", `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} chunks=${result.chunks.length} url=${redactBackgroundUrl(result.url)}`);
   for (const chunk of result.chunks) {
+    backgroundLog("debug", "source-fetch-chunk", `req=${message.requestId} sequence=${chunk.sequence} bytes=${chunk.bytes.length}`);
     sendToJob(entry, "dz.job.fetch", message.requestId, {
       sourceType: "dz.source.fetch-chunk", sequence: chunk.sequence, bytes: chunk.bytes,
     });
@@ -444,6 +427,7 @@ function wire() {
       const revoked = [...entry.grantedOrigins].filter((origin) => removedOrigins.has(origin));
       if (!revoked.length) continue;
       for (const origin of revoked) entry.grantedOrigins.delete(origin);
+      backgroundLog("info", "permission-revoked", `jobId=${entry.jobId} origins=${revoked.length}`);
       sendToJob(entry, "dz.job.permission-required", makeRequestId("permission-revoked"), { granted: false, revoked, code: "permission-revoked" });
     }
     void persistBindings();
@@ -462,20 +446,28 @@ function wire() {
       return true;
     }
     if (message.type.startsWith("dz.job.")) {
+      backgroundLog("debug", "job-message-received", `type=${message.type} request=${message.requestId} tab=${sender?.tab?.id} frame=${sender?.frameId}`);
       const entry = findJobSender(sender, message);
-      if (!entry) return;
+      if (!entry) {
+        backgroundLog("debug", "job-message-rejected", `type=${message.type} tab=${sender?.tab?.id} frame=${sender?.frameId} reason=unknown-sender`);
+        return;
+      }
       if (message.type === "dz.job.ready") {
         const job = jobs.get(entry.jobId) ?? entry;
         job.jobReady = true;
+        backgroundLog("info", "binding-ready", `jobId=${entry.jobId} sourceValid=${entry.sourceValid} tab=${entry.tabId} frame=${entry.frameId} gen=${entry.documentGeneration}`);
         sendToJob(entry, "dz.job.binding", message.requestId, { sourceValid: entry.sourceValid, documentUrl: entry.sourceUrl });
         flushHeldCandidates(job);
         void requestCandidateSnapshot(entry);
       } else if (message.type === "dz.job.fetch" && entry.sourceValid && entry.jobActive) {
         (jobs.get(entry.jobId) ?? entry).jobRunning = true;
         void dispatchSourceFetch(entry, message);
+      } else if (message.type === "dz.job.fetch") {
+        backgroundLog("debug", "job-message-rejected", `type=${message.type} request=${message.requestId} reason=inactive-source`);
       } else if (message.type === "dz.job.candidates-more" && entry.sourceValid && entry.jobActive) {
         void requestCandidateSnapshot(entry);
       } else if (message.type === "dz.job.cancel") {
+        backgroundLog("info", "job-cancelled", `jobId=${entry.jobId} tab=${entry.tabId}`);
         entry.jobRunning = false;
         entry.jobActive = false;
         entry.sourceValid = false;

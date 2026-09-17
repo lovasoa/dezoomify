@@ -60,10 +60,12 @@ interface JobControllerDeps {
   onHostFailure(error: unknown): void;
   onEvent(event: unknown): void;
   onUnsupportedEffect(envelope: unknown): void;
+  log?(level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown): void;
 }
 type EngineEnvelope = { kind: "effect" | "event"; type: string; request?: { id: number; purpose: string; uri: string; method?: string; headers?: Record<string, string> }; tile?: number; placement?: unknown; format?: string; canvas?: { width: number; height: number } | null; generation?: number; [key: string]: unknown };
 
 export function createJobController(deps: JobControllerDeps) {
+  const log: NonNullable<JobControllerDeps["log"]> = deps.log ?? (() => {});
   let cancelled = false;
   let disposed = false;
   /** @type {Set<number>} */
@@ -84,11 +86,13 @@ export function createJobController(deps: JobControllerDeps) {
     if (!request || !Number.isSafeInteger(request.id) || request.id < 0 || settled.has(request.id)) return;
     settled.add(request.id);
     const useSource = request.purpose === "metadata" || request.purpose === "probe";
+    log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=${request.purpose} route=${useSource ? "source" : "extension"}`);
     try {
       const result = useSource
         ? await deps.sourceTransport.fetchResource({ binding: deps.binding(), requestId: request.id, uri: request.uri, method: request.method, headers: request.headers, purpose: request.purpose })
         : await deps.extensionTransport.fetchResource(request.uri, { requestId: request.id, purpose: request.purpose, headers: request.headers, userIntent: true, cancelled: () => cancelled });
       if (cancelled) return;
+      log("debug", "effect-outcome", `type=${effect.type} request=${request.id} bytes=${result.bytes.byteLength}`);
       if (effect.type === "acquire-tile" && typeof effect.tile === "number" && effect.placement) {
         // Decode-at-acquisition: the placement is recorded and the bitmap is
         // held before the outcome settles, so assembly never depends on a
@@ -98,6 +102,7 @@ export function createJobController(deps: JobControllerDeps) {
       if (!cancelled) sendToEngine({ type: "engine.bytes", requestId: request.id, bytes: result.bytes });
     } catch (error) {
       const failure = deps.classifyFailure(error);
+      log("warn", "effect-failed", `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`);
       if (failure.blocked_reason === "access-required") {
         const hosts = error && typeof error === "object" && "hosts" in error && Array.isArray(error.hosts) ? error.hosts.filter((host): host is string => typeof host === "string") : [];
         // A visible, explicit user action may grant this host. Keep the
@@ -142,6 +147,7 @@ export function createJobController(deps: JobControllerDeps) {
         deps.onPartialDecision(Number(envelope.generation));
         return;
       default:
+        log("warn", "unsupported-effect", `type=${envelope.type}`);
         deps.onUnsupportedEffect(envelope);
         return;
     }
@@ -167,6 +173,7 @@ export function createJobController(deps: JobControllerDeps) {
       const message = envelope as EngineEnvelope;
       if (message.kind !== "effect" && message.kind !== "event") continue;
       if (message.kind === "effect") {
+        log("debug", "effect-received", `type=${message.type}${message.tile !== undefined ? ` tile=${message.tile}` : ""}`);
         if (message.type === "acquire-resource" || message.type === "acquire-tile") void acquire(message);
         else if (message.type === "cancel-work") deps.extensionTransport.cancel();
         else enqueue(() => runLifecycle(message));
@@ -174,6 +181,7 @@ export function createJobController(deps: JobControllerDeps) {
         // Events pass through the same chain so terminal events never
         // overtake the lifecycle work they describe.
         const event = message;
+        log("debug", "event-received", `type=${event.type}`);
         enqueue(() => { deps.onEvent(event); });
       }
     }
@@ -200,12 +208,14 @@ export function createJobController(deps: JobControllerDeps) {
     },
     cancel() {
       if (cancelled) return;
+      log("debug", "controller-cancel", "");
       cancelled = true;
       deps.extensionTransport.cancel();
       sendToEngine({ type: "engine.command", command: { type: "cancel" } });
     },
     dispose() {
       if (disposed) return;
+      log("debug", "controller-dispose", "");
       disposed = true;
       cancelled = true;
       deps.extensionTransport.cancel();

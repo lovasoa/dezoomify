@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { importTypeScript } from "./ts-source-loader.mjs";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
 async function importSource(url) {
-  if (url.pathname.endsWith(".ts")) return importTypeScript(url);
   return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(readFileSync(url, "utf8"))}`);
 }
 
@@ -14,16 +14,28 @@ await wasm.default({
 });
 
 async function loadWorker() {
-  // The production worker's generated-WASM dynamic import is unreachable in
-  // node (no WorkerGlobalScope), so the worker host stays directly testable.
-  return importSource(new URL("../../src/job/worker.ts", import.meta.url));
+  // worker.ts imports the shared logging module, so its data: URL form cannot
+  // resolve the relative import; bundle it (esbuild is already the suite's
+  // transpiler). The production worker's generated-WASM dynamic import stays
+  // unreachable in node (no WorkerGlobalScope), so the host is directly
+  // testable.
+  const bundled = await build({
+    entryPoints: [fileURLToPath(new URL("../../src/job/worker.ts", import.meta.url))],
+    bundle: true,
+    format: "esm",
+    platform: "neutral",
+    target: "es2022",
+    write: false,
+  });
+  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(bundled.outputFiles[0].text)}`);
 }
 
 const { createJobWorkerHost } = await loadWorker();
 
 test("worker and generated WASM complete the first discovery round trip", async () => {
   const sent = [];
-  const host = createJobWorkerHost({ postMessage: (message) => sent.push(message), wasm: async () => wasm });
+  const logs = [];
+  const host = createJobWorkerHost({ postMessage: (message) => sent.push(message), wasm: async () => wasm, log: (level, code, detail) => logs.push({ level, code, detail }) });
   await host.onMessage({ type: "engine.start", jobId: "job:one", inputUrl: "https://example.test/image.dzi" });
   const first = sent.flatMap((message) => message.messages ?? []);
   const acquire = first.find((message) => message.type === "acquire-resource");
@@ -40,6 +52,10 @@ test("worker and generated WASM complete the first discovery round trip", async 
     sent.flatMap((message) => message.messages ?? []).some((message) => message.type === "catalog"),
     JSON.stringify(sent),
   );
+  const codes = logs.map((entry) => entry.code);
+  assert.ok(codes.includes("session-created"));
+  assert.ok(codes.includes("command-dispatched"));
+  assert.ok(codes.includes("messages-drained"));
 });
 
 test("worker disposal is repeat-safe and does not manufacture effects", async () => {
@@ -54,6 +70,7 @@ test("worker disposal is repeat-safe and does not manufacture effects", async ()
 
 test("worker preserves typed WASM diagnostics", async () => {
   const sent = [];
+  const logs = [];
   class Session {
     constructor() {}
     dispatch() {
@@ -68,8 +85,10 @@ test("worker preserves typed WASM diagnostics", async () => {
   const host = createJobWorkerHost({
     postMessage: (message) => sent.push(message),
     wasm: async () => ({ Session }),
+    log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   await host.onMessage({ type: "engine.start", jobId: "job:one", inputUrl: "https://example.test/image.dzi" });
+  assert.ok(logs.some((entry) => entry.code === "core-error" && entry.level === "error"));
   assert.deepEqual(sent, [{
     type: "engine.error",
     error: {

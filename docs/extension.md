@@ -94,8 +94,18 @@ use, see [browser extension](user/browser-extension.md).
 
 ## Diagnostics
 
-The background logs structured console lines
-(`[dezoomify:background] <level> <code> <detail>`). Lifecycle milestones are
-logged at info, recoverable states at warn, and terminal failures at error.
-Logged URLs are redacted. User-visible failures travel through the dedicated
-job tab rather than disappearing with the toolbar state.
+Every extension context logs structured console lines
+(`[dezoomify:<context>] <level> <code> <detail>`): `background` (the
+coordinator/service worker), `job` (the dedicated job tab), and `worker` (the
+WASM session worker). The three contexts together trace each interaction with
+the active tab (`toolbar-click`, `active-tab-op-start`/`active-tab-op-result`
+for the finite `scripting.executeScript()` operations, `source-fetch-*`,
+`permission-check`, `source-invalidated`) and each interaction with the core
+(`session-created`, `command-dispatched`, `messages-drained`, `effect-*`,
+`engine-event`, `core-error`).
+
+Interaction milestones log at info, high-frequency per-tile and per-chunk
+detail at debug, recoverable states at warn, and terminal failures at error.
+The default level is info. Logged URLs are redacted; details are bounded.
+User-visible failures travel through the dedicated job tab rather than
+disappearing with the toolbar state.

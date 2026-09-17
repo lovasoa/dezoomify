@@ -4,7 +4,11 @@
  * this file cannot grow a second JavaScript state machine.
  */
 
+import { createLogger } from "../logging.js";
+
 const encoder = new TextEncoder();
+
+type WorkerLog = (level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown) => void;
 
 /** @param {unknown} value */
 function object(value: unknown): Record<string, unknown> {
@@ -45,7 +49,8 @@ interface WasmSession {
 interface WasmModule { default?: () => Promise<void>; Session: new (protocol: string, quotas: string) => WasmSession; rankCandidates?: (urls: string) => string }
 type WorkerMessage = Record<string, unknown> & { type?: string; jobId?: string; inputUrl?: string; requestId?: number; urls?: unknown; bytes?: unknown; command?: unknown; error?: unknown; quotas?: unknown };
 
-export function createJobWorkerHost(deps: { postMessage(message: unknown): void; wasm(): Promise<WasmModule> }) {
+export function createJobWorkerHost(deps: { postMessage(message: unknown): void; wasm(): Promise<WasmModule>; log?: WorkerLog }) {
+  const log: WorkerLog = deps.log ?? (() => {});
   /** @type {any | null} */
   let session: WasmSession | null = null;
   let disposed = false;
@@ -54,14 +59,22 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
     if (!session) return;
     let messages: unknown;
     try { messages = JSON.parse(session.drainMessages()); } catch (error) {
+      log("error", "core-error", `phase=drain message=${error instanceof Error ? error.message : String(error)}`);
       deps.postMessage({ type: "engine.error", error: engineError(error) });
       return;
     }
-    if (Array.isArray(messages) && messages.length) deps.postMessage({ type: "engine.messages", messages });
+    if (Array.isArray(messages) && messages.length) {
+      const effects = messages.filter((message) => (message as { kind?: unknown })?.kind === "effect").length;
+      const events = messages.filter((message) => (message as { kind?: unknown })?.kind === "event").length;
+      log("debug", "messages-drained", `effects=${effects} events=${events} total=${messages.length}`);
+      deps.postMessage({ type: "engine.messages", messages });
+    }
   }
 
   function dispatch(command: Record<string, unknown>) {
     if (!session || disposed) return;
+    const request = command.request;
+    log("debug", "command-dispatched", `command=${String(command.type)}${request !== undefined ? ` request=${String(request)}` : ""}`);
     session.dispatch(commandBytes(command));
     flush();
   }
@@ -71,6 +84,7 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
     if (disposed) return;
     await wasm.default?.();
     session = new wasm.Session("2.0", JSON.stringify(message.quotas ?? {}));
+    log("info", "session-created", `jobId=${String(message.jobId)} protocol=2.0`);
     dispatch({ type: "start", input_url: message.inputUrl });
   }
 
@@ -95,6 +109,7 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
     } catch {
       ranked = [];
     }
+    log("info", "rank-completed", `in=${urls.length} out=${ranked.length}`);
     deps.postMessage({ type: "engine.ranked", urls: ranked.length ? ranked : urls });
   }
 
@@ -123,11 +138,14 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
         else if (envelope.type === "engine.failure") dispatch({ type: "provide-fetch-failure", request: envelope.requestId, error: envelope.error });
         else if (envelope.type === "engine.command") dispatch(object(envelope.command));
         else if (envelope.type === "engine.dispose") {
+          log("info", "session-disposed", "");
           disposed = true;
           try { session?.dispose(); } finally { session = null; }
         }
       } catch (error) {
-        deps.postMessage({ type: "engine.error", error: engineError(error) });
+        const failure = engineError(error);
+        log("error", "core-error", `code=${failure.code} phase=${failure.phase} message=${failure.message}`);
+        deps.postMessage({ type: "engine.error", error: failure });
       }
     },
   };
@@ -136,9 +154,11 @@ export function createJobWorkerHost(deps: { postMessage(message: unknown): void;
 // The WXT worker bundle lives below assets/. Resolve the generated glue from
 // the extension root so it stays a generated public artifact, not JS source.
 if (typeof self !== "undefined" && "postMessage" in self && typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope) {
+  const workerLogger = createLogger("worker");
   const host = createJobWorkerHost({
     postMessage: (message) => self.postMessage(message),
     wasm: () => import(/* @vite-ignore */ new URL("../wasm/dezoomify-wasm.js", self.location.href).href),
+    log: (level, code, detail) => workerLogger.log(level, code, detail),
   });
   self.addEventListener("message", (event) => { void host.onMessage(event.data); });
 }
