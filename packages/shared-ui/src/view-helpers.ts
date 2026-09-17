@@ -67,7 +67,8 @@ export function defaultStepFor(status: string): string {
  * ```
  *
  * The prominent headline lives outside the details and is never repeated
- * here; the URL and server signal stay on the user's device.
+ * here. The text itself is inert; `reportIssueUrl` is the only path that
+ * puts it in a URL, and only when the user opens the prefilled report link.
  */
 export function errorDiagnosticsText(error: StructuredError): string {
   const hasHttp = typeof error.http === "number";
@@ -87,4 +88,75 @@ export function errorDiagnosticsText(error: StructuredError): string {
   lines.push(trailing);
   if (error.extras) lines.push(...error.extras);
   return lines.join("\n");
+}
+
+const REPORT_BASE_URL = "https://github.com/lovasoa/dezoomify/issues/new";
+const REPORT_LABELS = "new site support,unconfirmed";
+/**
+ * Pre-encoding ceiling for the prefilled body. GitHub answers `414 URI Too
+ * Long` past its server limit, so the activity log is dropped line by line
+ * before the diagnostics or the source URL are.
+ */
+const MAX_REPORT_BODY = 4000;
+
+function assembleReportBody(host: string, url: string, error: StructuredError, log: string): string {
+  const sourceLines = [`### Site name and description`, host, url !== "" ? url : "(address unavailable)"];
+  sourceLines.push("", "### Example URLs", url !== "" ? url : "(address unavailable)");
+  sourceLines.push("", "### Current error message", error.message);
+  sourceLines.push("", "### Technical details", errorDiagnosticsText(error));
+  if (log !== "") sourceLines.push("", "### Activity log", log);
+  sourceLines.push(
+    "",
+    "### Browser",
+    "- Browser:",
+    "- Version:",
+    "",
+    "### Additional context",
+    "<!-- Review the draft and remove sign-in details, tokens, or private addresses before submitting. -->",
+  );
+  return sourceLines.join("\n");
+}
+
+/**
+ * New-site-support issue URL prefilled from the failed view: the source
+ * address, the engine diagnostics, and the recent activity log all travel in
+ * the query string, so the user reviews them before the issue is submitted.
+ */
+export function reportIssueUrl({
+  source,
+  error,
+  activityLog,
+}: {
+  source?: string;
+  error: StructuredError;
+  activityLog?: string;
+}): string {
+  const url = String(source ?? "").trim();
+  const host = hostFromUrl(url);
+  const log = String(activityLog ?? "").trim();
+
+  let body = assembleReportBody(host, url, error, "");
+  if (log !== "") {
+    const full = assembleReportBody(host, url, error, log);
+    if (full.length <= MAX_REPORT_BODY) {
+      body = full;
+    } else {
+      const kept: string[] = [];
+      for (const line of log.split("\n")) {
+        kept.push(line);
+        if (assembleReportBody(host, url, error, kept.join("\n")).length > MAX_REPORT_BODY) {
+          kept.pop();
+          break;
+        }
+      }
+      body = assembleReportBody(host, url, error, kept.join("\n"));
+    }
+  }
+  if (body.length > MAX_REPORT_BODY) body = body.slice(0, MAX_REPORT_BODY);
+
+  const params = new URLSearchParams();
+  params.set("labels", REPORT_LABELS);
+  params.set("title", `[new site support] ${host}`);
+  params.set("body", body);
+  return `${REPORT_BASE_URL}?${params.toString()}`;
 }

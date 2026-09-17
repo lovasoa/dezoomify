@@ -267,7 +267,7 @@ const en = {
   "view.fail.reportBug": "Report a bug on GitHub",
   "view.fail.retry": "Try again",
   "view.fail.redactHint":
-    "Details below can include full addresses and the server's reply. They stay on this device; remove sign-in details and tokens before sharing.",
+    "Details below can include full addresses and the server's reply. The report link copies them into a GitHub draft; remove sign-in details and tokens before submitting.",
   // Cancelled section.
   "view.cancel.title": "Save cancelled",
   "view.cancel.message": "The image save was stopped.",
