@@ -15,6 +15,7 @@ import {
 import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
 import type { ViewContext } from "../packages/shared-ui/src/view.tsx";
+import { DEFAULT_PAGE_TITLE, isActiveJobStatus, jobPageTitle } from "../packages/shared-ui/src/view-helpers.ts";
 import { describeFailure } from "../packages/shared-ui/src/failure.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
@@ -685,6 +686,25 @@ let viewCtx: ViewContext = {
   history: [...webHistory],
 };
 
+/**
+ * Keep the tab title useful while a job runs: `Dezoomify <host>`.
+ * Hosts own the `document.title` assignment; shared UI stays pure.
+ */
+function syncPageTitle(status: string): void {
+  if (typeof document === "undefined") return;
+  try {
+    if (!isActiveJobStatus(status)) {
+      if (document.title !== DEFAULT_PAGE_TITLE) document.title = DEFAULT_PAGE_TITLE;
+      return;
+    }
+    const url = jobActivity.state.url ?? viewCtx.jobActivity?.url ?? viewCtx.initialUrl;
+    const next = jobPageTitle(url);
+    if (document.title !== next) document.title = next;
+  } catch {
+    // Title updates must never break the job.
+  }
+}
+
 function update(): void {
   if (!appContainer) return;
   const state = controller.getState();
@@ -700,6 +720,7 @@ function update(): void {
     state.transport = activeTransport;
   }
   if (viewCtx.jobActivity) jobActivity.refreshLongestPending();
+  syncPageTitle(state.status);
   renderView(
     appContainer,
     state,

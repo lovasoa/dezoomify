@@ -30,7 +30,7 @@ import {
 } from "./view-helpers.ts";
 
 export { getPhaseForStatus } from "./view-types.ts";
-export { handoffOriginFor, isFileHandoffSource } from "./view-helpers.ts";
+export { DEFAULT_PAGE_TITLE, handoffOriginFor, isActiveJobStatus, isFileHandoffSource, jobPageTitle } from "./view-helpers.ts";
 export type {
   ConfirmModalArgs, ImagePickerArgs, ImagePickerOption, JobActivity,
   LevelPickerArgs, LevelPickerOption, PlatformHints, ViewCallbacks,

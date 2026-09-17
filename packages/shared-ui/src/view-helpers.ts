@@ -18,6 +18,36 @@ export function hostFromUrl(url?: string): string {
   catch { return "the server"; }
 }
 
+/** Base document title for browser products when no job is active. */
+export const DEFAULT_PAGE_TITLE = "Dezoomify";
+
+/**
+ * Document title while a job runs: `Dezoomify <host>`. Pure and host-neutral
+ * so the website and the extension share one shape; hosts own the
+ * `document.title` assignment (shared UI never touches host globals).
+ * Returns the base title when the source URL is missing or unparseable.
+ */
+export function jobPageTitle(url?: string): string {
+  const host = hostFromUrl(url);
+  if (!url || host === "" || host === "the server") return DEFAULT_PAGE_TITLE;
+  return `${DEFAULT_PAGE_TITLE} ${host}`;
+}
+
+/**
+ * Whether a controller status counts as "while dezooming" for the tab title.
+ * Covers the shared job phase; terminal and idle phases restore the base.
+ */
+export function isActiveJobStatus(status: string): boolean {
+  return (
+    status === "discovering" ||
+    status === "choosing-image" ||
+    status === "choosing-level" ||
+    status === "preflighting" ||
+    status === "downloading" ||
+    status === "saving"
+  );
+}
+
 export function handoffOriginFor(handoffUrl?: string, sourceUrl?: string): string {
   const candidates = [sourceUrl];
   try {
