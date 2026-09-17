@@ -160,3 +160,38 @@ test("job-tab closure clears the binding without a source listener or stop hands
   assert.equal(fake.session["dezoomify.sourceBindings.v1"].length, 0);
   assert.equal(fake.calls.send.some((call) => call.message.type === "dz.source.stop"), false);
 });
+
+test("explicit retry takes a fresh snapshot and re-sends the already-seen candidate", async () => {
+  const fake = fakeBrowser();
+  await load(fake);
+  await fake.listeners.click[0](TAB);
+  await ready(fake);
+  const binding = sourceBinding(fake);
+  assert.equal(fake.calls.execute.length, 1, "ready triggers one discovery snapshot");
+  assert.equal(fake.calls.send.filter((call) => call.message.type === "dz.job.candidates").length, 1);
+
+  for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.retry" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  await tick();
+  await tick();
+  assert.equal(fake.calls.execute.length, 2, "retry takes a fresh bounded snapshot");
+  assert.equal(
+    fake.calls.send.filter((call) => call.message.type === "dz.job.candidates").length,
+    2,
+    "the candidate dedup is per attempt, so a retry re-sends the page's candidates",
+  );
+});
+
+test("retry is rejected once the source binding is invalidated", async () => {
+  const fake = fakeBrowser();
+  await load(fake);
+  await fake.listeners.click[0](TAB);
+  await ready(fake);
+  const binding = sourceBinding(fake);
+  for (const listener of fake.listeners.updated) listener(TAB.id, { url: "https://gallery.example/next" });
+  await tick();
+  const before = fake.calls.execute.length;
+  for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.retry" }, { tab: { id: 40 }, frameId: 0 }, () => {});
+  await tick();
+  assert.equal(fake.calls.execute.length, before, "an invalidated source is never rearmed");
+});
+

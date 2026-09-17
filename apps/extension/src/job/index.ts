@@ -83,8 +83,7 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
     onSubmitUrl: () => {},
     onCancel: closeJob,
     onCopyDiagnostics: copyDiagnostics,
-    onReset: () => {},
-    onRetrySameUrl: () => {},
+    onRetrySameUrl: retryJob,
     onSave: () => {},
   }, {
     ...ctx,
@@ -314,9 +313,51 @@ function setup(bound: unknown) {
     frameId: bound.frameId,
     documentGeneration: bound.documentGeneration,
   };
-  lastTileProgress = null;
-  const activeBinding = binding;
   jobLog.info("binding-received", `jobId=${binding.jobId} tab=${binding.tabId} frame=${binding.frameId} gen=${binding.documentGeneration}`);
+  startAttempt();
+}
+
+/**
+ * Tear down the current attempt. The durable source binding survives; the
+ * worker, WASM session, controller, output assembly, and pending fetch state
+ * do not. Called before every attempt so a retry can never reuse a terminal
+ * engine session or a stale request ledger.
+ */
+function stopAttempt() {
+  const activeController = controller;
+  controller = null;
+  try { activeController?.dispose(); } catch { /* teardown is best effort */ }
+  const worker = jobWorker;
+  jobWorker = null;
+  try { worker?.terminate(); } catch { /* already gone */ }
+  try { assembly?.release(); } catch { /* bitmap cleanup is best effort */ }
+  assembly = null;
+  sourceTransport = null;
+}
+
+/** Clear every per-attempt flag and buffer; the source binding is untouched. */
+function resetAttemptState() {
+  started = false;
+  selected = false;
+  hostFailed = false;
+  selectedTitle = undefined;
+  lastSource = "";
+  lastTileProgress = null;
+  accessRequest = null;
+  partialDecision = null;
+}
+
+/**
+ * Begin one discovery-and-fetch attempt. The first attempt follows the job
+ * tab's readiness announcement; a retry follows an explicit user action and a
+ * fresh coordinator snapshot. Either way the attempt gets a fresh worker,
+ * controller, and assembly so no state leaks between attempts.
+ */
+function startAttempt() {
+  if (!binding) return;
+  stopAttempt();
+  resetAttemptState();
+  const activeBinding = binding;
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   jobWorker = worker;
   const fetcher = createExtensionFetcher({
@@ -377,6 +418,35 @@ function setup(bound: unknown) {
   render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });
 }
 
+/**
+ * Announce this job tab to the coordinator. Used on first load and when a
+ * retry is pressed before the first binding ever arrived; the coordinator
+ * replies with the binding and a fresh candidate snapshot.
+ */
+function announceReady() {
+  jobLog.info("job-ready-sent", `jobId=${bootstrapJobId ?? "unknown"}`);
+  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Connecting to Dezoomify" } });
+  void send({ type: "dz.job.ready", jobId: bootstrapJobId, requestId: requestId("job-ready") }).catch(() =>
+    onHostFailure(Object.assign(new Error("Could not connect this job tab to the extension."), { code: "network", retryable: true })));
+}
+
+/**
+ * Explicit user retry. With a binding, start a fresh attempt and ask the
+ * coordinator for a new bounded snapshot of the bound page. Without one (the
+ * first readiness announcement never landed), re-announce the job tab.
+ */
+function retryJob() {
+  jobLog.info("retry-requested", `jobId=${binding?.jobId ?? bootstrapJobId ?? "unknown"}`);
+  if (!binding) {
+    resetAttemptState();
+    announceReady();
+    return;
+  }
+  startAttempt();
+  void send(boundEnvelope("dz.job.retry")).catch(() =>
+    onHostFailure(Object.assign(new Error("Could not ask the extension to retry this job."), { code: "network", retryable: true })));
+}
+
 function candidates(message: Record<string, unknown>) {
   if (!binding || !message || message.jobId !== binding.jobId || started) return;
   const values = Array.isArray(message.urls) ? message.urls.filter((candidate) => typeof candidate === "string") : [];
@@ -411,9 +481,8 @@ api?.runtime?.onMessage?.addListener((message) => {
 });
 
 window.addEventListener("beforeunload", () => {
-  controller?.dispose();
+  stopAttempt();
   if (binding) void send(boundEnvelope("dz.job.closed")).catch(() => {});
 });
 
-render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Connecting to Dezoomify" } });
-void send({ type: "dz.job.ready", jobId: bootstrapJobId, requestId: requestId("job-ready") }).catch(() => render("failed", { failure: { code: "network", category: "extension", retryable: true, message: "Could not connect this job tab to the extension." } }));
+announceReady();
