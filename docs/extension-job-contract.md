@@ -65,18 +65,15 @@ effects. The controller never grows a second state machine:
 - Catalog selection is deterministic (`engine-selection.ts`): largest ready
   image, largest level that fits the browser canvas. Selection commands
   (`select-image`, `select-level`) are correlated to the job.
-- `request-destination` is always granted: the browser destination is the
-  blob anchor save, which needs no permission.
 - Tile bytes are decoded during acquisition (the native model): a tile
   that cannot decode fails its acquisition outcome and flows through the
   engine's retry and partial policy. The wasm adapter releases its arena
   copy when the outcome settles.
-- `open-encoder` validates actual dimensions and area before canvas
-  allocation; a plan beyond the browser limits fails typed with a desktop
-  handoff and cancels the engine job (the engine does not yet await codec
-  outcomes).
+- `finalize-output` validates actual dimensions and area, assembles, encodes,
+  saves, releases resources, and replies once. The engine emits completion
+  only after that reply.
 - `request-decision` (partial) renders an explicit keep/discard choice in
-  the job tab; only the user's action sends `partial-choice`.
+  the job tab; only the user's action sends a typed `recovery-choice`.
 - Host execution failures are terminal: the failure is rendered, the
   engine job is cancelled, and later effects are never faked.
 - Processing recipes beyond `none` fail typed

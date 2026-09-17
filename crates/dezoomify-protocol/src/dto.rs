@@ -196,20 +196,31 @@ pub struct CatalogDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum JobCommand {
-    Start { input_url: String },
-    ProvideResource { request: u32, buffer: BufferHandle },
-    ProvideFetchFailure { request: u32, error: ErrorDto },
-    SelectImage { image: u32 },
-    SelectLevel { level: u32 },
-    ProvideDecodeOutcome { tile: u32, ok: bool },
-    ProvideProcessOutcome { tile: u32, ok: bool },
-    ProvideWriteOutcome { tile: u32, ok: bool },
-    ProvideEncodeOutcome { ok: bool },
-    ProvideFinalizeOutcome { ok: bool },
-    ProvidePublicationOutcome { ok: bool },
-    RetryReady,
-    PartialChoice { generation: u32, keep_partial: bool },
-    DestinationResponse { granted: bool },
+    Start {
+        input_url: String,
+    },
+    ProvideResource {
+        request: u32,
+        buffer: BufferHandle,
+    },
+    ProvideFetchFailure {
+        request: u32,
+        error: ErrorDto,
+    },
+    SelectImage {
+        image: u32,
+    },
+    SelectLevel {
+        level: u32,
+    },
+    RecoveryChoice {
+        generation: u32,
+        choice: RecoveryChoice,
+    },
+    FinalizationSucceeded,
+    FinalizationFailed {
+        error: ErrorDto,
+    },
     Cancel,
     Pause,
     Resume,
@@ -227,8 +238,7 @@ pub enum HostEffect {
     },
     AcquireTile {
         request: RequestDto,
-        /// Engine tile id correlating this acquisition with the later
-        /// `decode-pixels` effect for the same tile.
+        /// Engine tile id correlating this acquisition with the tile outcome.
         tile: u32,
         /// Complete output placement for the acquired bytes (see
         /// [`TilePlacementDto`]). Hosts that assemble images read the
@@ -236,36 +246,13 @@ pub enum HostEffect {
         /// decode failures surface through the same tile outcome.
         placement: TilePlacementDto,
     },
-    RequestDestination {
-        format: String,
-    },
-    /// Decode (or verify the earlier acquisition-time decode of) one tile's
-    /// pixels. Hosts that decode during acquisition (the native and browser
-    /// model) find their decoded tile already held and treat this effect as
-    /// the draw/hold checkpoint; tile bytes never cross the effect.
-    DecodePixels {
-        tile: u32,
-    },
-    ProcessPixels {
-        tile: u32,
-    },
-    /// Allocate the output surface. `canvas` declares the output size when
-    /// the plan knows it; hosts without a declared size derive it from the
-    /// accumulated placements. `format` is the output codec id.
-    OpenEncoder {
+    /// Awaited host-owned output operation. The host validates its destination,
+    /// assembles/encodes when readable, and replies exactly once.
+    FinalizeOutput {
+        partial: bool,
         format: String,
         canvas: Option<SizeDto>,
     },
-    WriteOutput {
-        tile: u32,
-    },
-    FinalizeEncoder,
-    PublishOutput,
-    /// Release every per-tile resource this host retained for the job
-    /// (decoded bitmaps, surfaces, buffers). The adapter frees its own
-    /// arena bytes when the tile outcome settles, so no buffer reference
-    /// accompanies this effect.
-    ReleaseBytes,
     CancelWork,
     RequestDecision {
         generation: u32,
@@ -305,7 +292,6 @@ pub enum JobEvent {
         generation: u32,
         actions: Vec<RecoveryAction>,
     },
-    OutputReady,
     Completed,
     PartialCompleted,
     Failed {
@@ -323,7 +309,6 @@ impl JobEvent {
             Self::JobState { .. }
             | Self::Catalog { .. }
             | Self::Progress { .. }
-            | Self::OutputReady
             | Self::Paused
             | Self::Resumed => EventKind::Replayable,
             Self::Warning { .. } => EventKind::Transient,
@@ -338,6 +323,14 @@ impl JobEvent {
     pub fn is_terminal(&self) -> bool {
         self.kind() == EventKind::Terminal
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecoveryChoice {
+    Keep,
+    Retry,
+    Discard,
 }
 
 // ---------------------------------------------------------------------------

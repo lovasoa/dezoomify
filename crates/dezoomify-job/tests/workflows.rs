@@ -103,11 +103,10 @@ fn discover_success_minimal() {
 }
 
 #[test]
-fn destination_grant_flow_completes() {
+fn successful_finalization_completes() {
     let mut host = ScriptedHost::new(&job_id(2), INPUT_URL, test_config()).unwrap();
     let _level_id = discover_and_select(&mut host, 2);
-    assert_eq!(host.state(), "AwaitingDestination");
-    host.apply(JobCommand::DestinationGranted).unwrap();
+    assert_eq!(host.state(), "AcquiringTiles");
 
     // The largest 512x512 level with 256px tiles is a real 2x2 grid.
     let tiles = host.tile_effects();
@@ -130,6 +129,9 @@ fn destination_grant_flow_completes() {
         .unwrap();
     }
 
+    assert_eq!(host.state(), "Finalizing");
+    assert_eq!(host.terminal_count(), 0);
+    host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
     assert_eq!(host.terminal_count(), 1);
     assert_eq!(host.job().terminal_kind(), Some("completed"));
@@ -137,16 +139,7 @@ fn destination_grant_flow_completes() {
     assert_eq!(host.job().pending_message_count(), 0);
 
     let transcript = host.transcript();
-    for phase in [
-        "Planning",
-        "AcquiringTiles",
-        "ProcessingTiles",
-        "Encoding",
-        "Finalizing",
-        "Publishing",
-        "CleaningUp",
-        "Completed",
-    ] {
+    for phase in ["Planning", "AcquiringTiles", "Finalizing", "Completed"] {
         let prefix = format!("event:job-state:{phase}:seq:");
         assert!(
             transcript.iter().any(|line| line.starts_with(&prefix)),
@@ -163,7 +156,7 @@ fn destination_grant_flow_completes() {
         1
     );
     assert!(seqs_are_sorted(transcript));
-    assert!(transcript.len() >= 30);
+    assert!(transcript.len() >= 20);
     // Progress reported the real plan size.
     assert!(host.events.iter().any(|event| {
         event.get("kind").and_then(serde_json::Value::as_str) == Some("progress")
@@ -173,12 +166,41 @@ fn destination_grant_flow_completes() {
 }
 
 #[test]
+fn finalization_failure_cleans_up_once_and_never_completes() {
+    let mut host = ScriptedHost::new(&job_id(21), INPUT_URL, test_config()).unwrap();
+    let _ = discover_and_select(&mut host, 21);
+    for (tile, _, _) in host.tile_effects() {
+        host.apply(JobCommand::TileOutcome { tile, ok: true })
+            .unwrap();
+    }
+    assert_eq!(host.state(), "Finalizing");
+    host.apply(JobCommand::FinalizationFailed {
+        code: "output.failed".to_string(),
+        message: "host could not save".to_string(),
+    })
+    .unwrap();
+    assert_eq!(host.state(), "Failed");
+    assert_eq!(host.terminal_count(), 1);
+    assert_eq!(
+        host.effects
+            .iter()
+            .filter(
+                |effect| effect.get("kind").and_then(serde_json::Value::as_str)
+                    == Some("cancel-work")
+            )
+            .count(),
+        1
+    );
+    assert!(host.apply(JobCommand::FinalizationSucceeded).is_err());
+    assert_eq!(host.terminal_count(), 1);
+}
+
+#[test]
 fn keeping_a_partial_result_decodes_only_acquired_tiles() {
     let mut config = test_config();
     config.max_retries = 0;
     let mut host = ScriptedHost::new(&job_id(20), INPUT_URL, config).unwrap();
     let _level_id = discover_and_select(&mut host, 20);
-    host.apply(JobCommand::DestinationGranted).unwrap();
     let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
@@ -197,21 +219,17 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
     .unwrap();
     assert_eq!(host.state(), "AwaitingPartialDecision");
 
-    host.apply(JobCommand::PartialChoice {
+    host.apply(JobCommand::RecoveryChoice {
         generation: 0,
-        keep: true,
+        choice: dezoomify_job::RecoveryChoice::Keep,
     })
     .unwrap();
 
-    let decoded: Vec<u64> = host
-        .effects
-        .iter()
-        .filter(|effect| {
-            effect.get("kind").and_then(serde_json::Value::as_str) == Some("decode-pixels")
-        })
-        .filter_map(|effect| effect.get("tile").and_then(serde_json::Value::as_u64))
-        .collect();
-    assert_eq!(decoded, vec![u64::from(planned[0])]);
+    assert!(host.effects.iter().any(|effect| {
+        effect.get("kind").and_then(serde_json::Value::as_str) == Some("finalize-output")
+            && effect.get("partial").and_then(serde_json::Value::as_bool) == Some(true)
+    }));
+    host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "PartiallyCompleted");
     assert_eq!(host.job().terminal_kind(), Some("partial-completed"));
 }
@@ -220,7 +238,6 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
 fn cancel_in_acquiring_tiles_ignores_late_response() {
     let mut host = ScriptedHost::new(&job_id(3), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 3);
-    host.apply(JobCommand::DestinationGranted).unwrap();
     let tiles: Vec<u32> = host
         .tile_effects()
         .into_iter()
@@ -248,7 +265,7 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
     assert_eq!(host.state(), "Cancelled");
     assert_eq!(host.transcript().len(), len_after_cancel);
     assert_eq!(host.terminal_count(), 1);
-    for phase in ["Cancelling", "CleaningUp", "Cancelled"] {
+    for phase in ["Cancelling", "Cancelled"] {
         let prefix = format!("event:job-state:{phase}:seq:");
         assert!(
             host.transcript()
@@ -275,7 +292,6 @@ fn probe_driven_generic_level_resolves_through_observations() {
     assert_eq!(levels, vec![0]);
     host.apply(JobCommand::SelectImage { image }).unwrap();
     host.apply(JobCommand::SelectLevel { level: 0 }).unwrap();
-    host.apply(JobCommand::DestinationGranted).unwrap();
 
     // Answer every probe according to its coordinates until the plan
     // resolves into ordinary tile acquisition.
@@ -378,7 +394,6 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     // The 19 states are unchanged; pause is an orthogonal overlay.
     let mut host = ScriptedHost::new(&job_id(6), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 6);
-    host.apply(JobCommand::DestinationGranted).unwrap();
     assert_eq!(host.state(), "AcquiringTiles");
     assert!(!host.job().is_paused());
     let planned: Vec<u32> = host
@@ -427,6 +442,7 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
         })
         .unwrap();
     }
+    host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
     assert_eq!(host.terminal_count(), 1);
     assert!(seqs_are_sorted(host.transcript()));
@@ -437,7 +453,6 @@ fn pause_defers_completion_until_resume() {
     // All tiles finish while paused: completion waits for resume.
     let mut host = ScriptedHost::new(&job_id(7), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 7);
-    host.apply(JobCommand::DestinationGranted).unwrap();
     let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()
@@ -455,6 +470,7 @@ fn pause_defers_completion_until_resume() {
     assert_eq!(host.state(), "AcquiringTiles");
     assert_eq!(host.terminal_count(), 0);
     host.apply(JobCommand::Resume).unwrap();
+    host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
     assert_eq!(host.terminal_count(), 1);
 }
@@ -463,7 +479,6 @@ fn pause_defers_completion_until_resume() {
 fn pause_preserves_retry_wakeup_and_rejects_post_terminal() {
     let mut host = ScriptedHost::new(&job_id(8), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 8);
-    host.apply(JobCommand::DestinationGranted).unwrap();
     let planned: Vec<u32> = host
         .tile_effects()
         .into_iter()

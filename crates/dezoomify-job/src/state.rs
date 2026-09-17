@@ -1,12 +1,11 @@
 //! Portable job states.
 //!
-//! The engine distinguishes every externally visible phase so hosts and UI
-//! observers never infer lifecycle policy from messages. Terminal states emit
-//! exactly one terminal event; all other states are non-terminal.
+//! The engine exposes only phases it can observe directly. Host-local codec
+//! and save progress is not represented here.
 
 use serde::{Deserialize, Serialize};
 
-/// All 19 externally distinguishable job states.
+/// Portable engine phases.
 ///
 /// Pause v1 (todo 5.7) is an orthogonal suspend-acquisition overlay
 /// (`Job::is_paused`), not new states: `paused` stops scheduling new
@@ -18,16 +17,10 @@ pub enum State {
     Discovering,
     AwaitingImageSelection,
     AwaitingLevelSelection,
-    AwaitingDestination,
     Planning,
     AcquiringTiles,
-    ProcessingTiles,
     AwaitingPartialDecision,
-    AwaitingRecovery,
-    Encoding,
     Finalizing,
-    Publishing,
-    CleaningUp,
     Cancelling,
     Completed,
     PartiallyCompleted,
@@ -44,16 +37,10 @@ impl State {
             Self::Discovering => "Discovering",
             Self::AwaitingImageSelection => "AwaitingImageSelection",
             Self::AwaitingLevelSelection => "AwaitingLevelSelection",
-            Self::AwaitingDestination => "AwaitingDestination",
             Self::Planning => "Planning",
             Self::AcquiringTiles => "AcquiringTiles",
-            Self::ProcessingTiles => "ProcessingTiles",
             Self::AwaitingPartialDecision => "AwaitingPartialDecision",
-            Self::AwaitingRecovery => "AwaitingRecovery",
-            Self::Encoding => "Encoding",
             Self::Finalizing => "Finalizing",
-            Self::Publishing => "Publishing",
-            Self::CleaningUp => "CleaningUp",
             Self::Cancelling => "Cancelling",
             Self::Completed => "Completed",
             Self::PartiallyCompleted => "PartiallyCompleted",

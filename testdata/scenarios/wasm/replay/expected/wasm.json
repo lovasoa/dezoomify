@@ -118,18 +118,6 @@
     "type": "job-state"
   },
   {
-    "format": "png",
-    "kind": "effect",
-    "protocol": "2.0",
-    "type": "request-destination"
-  },
-  {
-    "kind": "event",
-    "protocol": "2.0",
-    "state": "AwaitingDestination",
-    "type": "job-state"
-  },
-  {
     "kind": "event",
     "protocol": "2.0",
     "state": "Planning",
@@ -173,7 +161,7 @@
           "value": "https://example.com/image_files/9/0_0.jpg"
         }
       ],
-      "id": 12,
+      "id": 10,
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/0_0.jpg"
     },
@@ -205,7 +193,7 @@
           "value": "https://example.com/image_files/9/0_0.jpg"
         }
       ],
-      "id": 13,
+      "id": 11,
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/1_0.jpg"
     },
@@ -237,7 +225,7 @@
           "value": "https://example.com/image_files/9/0_0.jpg"
         }
       ],
-      "id": 14,
+      "id": 12,
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/0_1.jpg"
     },
@@ -269,7 +257,7 @@
           "value": "https://example.com/image_files/9/0_0.jpg"
         }
       ],
-      "id": 15,
+      "id": 13,
       "purpose": "tile",
       "uri": "https://example.com/image_files/9/1_1.jpg"
     },
@@ -305,36 +293,6 @@
     "type": "progress"
   },
   {
-    "kind": "effect",
-    "protocol": "2.0",
-    "tile": 0,
-    "type": "decode-pixels"
-  },
-  {
-    "kind": "effect",
-    "protocol": "2.0",
-    "tile": 1,
-    "type": "decode-pixels"
-  },
-  {
-    "kind": "effect",
-    "protocol": "2.0",
-    "tile": 2,
-    "type": "decode-pixels"
-  },
-  {
-    "kind": "effect",
-    "protocol": "2.0",
-    "tile": 3,
-    "type": "decode-pixels"
-  },
-  {
-    "kind": "event",
-    "protocol": "2.0",
-    "state": "ProcessingTiles",
-    "type": "job-state"
-  },
-  {
     "canvas": {
       "height": 512,
       "width": 512
@@ -342,45 +300,13 @@
     "format": "png",
     "kind": "effect",
     "protocol": "2.0",
-    "type": "open-encoder"
-  },
-  {
-    "kind": "event",
-    "protocol": "2.0",
-    "state": "Encoding",
-    "type": "job-state"
-  },
-  {
-    "kind": "effect",
-    "protocol": "2.0",
-    "type": "finalize-encoder"
+    "partial": false,
+    "type": "finalize-output"
   },
   {
     "kind": "event",
     "protocol": "2.0",
     "state": "Finalizing",
-    "type": "job-state"
-  },
-  {
-    "kind": "effect",
-    "protocol": "2.0",
-    "type": "publish-output"
-  },
-  {
-    "kind": "event",
-    "protocol": "2.0",
-    "state": "Publishing",
-    "type": "job-state"
-  },
-  {
-    "kind": "effect",
-    "protocol": "2.0",
-    "type": "release-bytes"
-  },
-  {
-    "kind": "event",
-    "protocol": "2.0",
-    "state": "CleaningUp",
     "type": "job-state"
   },
   {

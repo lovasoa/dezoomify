@@ -29,5 +29,5 @@ pub use job::Job;
 pub use projection::project_catalog;
 pub use state::State;
 pub use transition::{
-    DecisionReason, JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome,
+    JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome, RecoveryChoice,
 };

@@ -39,7 +39,6 @@ fn duplicate_response_is_ignored() {
     // level is a 2x2 grid, so one tile outcome leaves acquisition running.
     host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
     host.apply(JobCommand::SelectLevel { level: 9 }).unwrap();
-    host.apply(JobCommand::DestinationGranted).unwrap();
     host.apply(JobCommand::TileOutcome { tile: 0, ok: true })
         .unwrap();
     let len = host.transcript().len();
@@ -94,7 +93,6 @@ fn over_limit_tiles_become_typed_terminal_failure() {
     .unwrap();
     host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
     host.apply(JobCommand::SelectLevel { level: 9 }).unwrap();
-    host.apply(JobCommand::DestinationGranted).unwrap();
     // Planning the four-tile largest level against max_tiles=1 is a typed
     // resource-limit failure, never a panic or silent truncation.
     assert_eq!(host.state(), "Failed");

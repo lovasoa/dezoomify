@@ -135,18 +135,14 @@ fn all_commands() -> Vec<JobCommand> {
         },
         JobCommand::SelectImage { image: 1 },
         JobCommand::SelectLevel { level: 1 },
-        JobCommand::ProvideDecodeOutcome { tile: 1, ok: true },
-        JobCommand::ProvideProcessOutcome { tile: 1, ok: true },
-        JobCommand::ProvideWriteOutcome { tile: 1, ok: true },
-        JobCommand::ProvideEncodeOutcome { ok: true },
-        JobCommand::ProvideFinalizeOutcome { ok: true },
-        JobCommand::ProvidePublicationOutcome { ok: true },
-        JobCommand::RetryReady,
-        JobCommand::PartialChoice {
+        JobCommand::RecoveryChoice {
             generation: 1,
-            keep_partial: true,
+            choice: RecoveryChoice::Keep,
         },
-        JobCommand::DestinationResponse { granted: true },
+        JobCommand::FinalizationSucceeded,
+        JobCommand::FinalizationFailed {
+            error: ErrorDto::new("output.failed", ErrorPhase::Output, "save failed"),
+        },
         JobCommand::Cancel,
         JobCommand::Pause,
         JobCommand::Resume,
@@ -158,15 +154,9 @@ fn all_commands() -> Vec<JobCommand> {
             | JobCommand::ProvideFetchFailure { .. }
             | JobCommand::SelectImage { .. }
             | JobCommand::SelectLevel { .. }
-            | JobCommand::ProvideDecodeOutcome { .. }
-            | JobCommand::ProvideProcessOutcome { .. }
-            | JobCommand::ProvideWriteOutcome { .. }
-            | JobCommand::ProvideEncodeOutcome { .. }
-            | JobCommand::ProvideFinalizeOutcome { .. }
-            | JobCommand::ProvidePublicationOutcome { .. }
-            | JobCommand::RetryReady
-            | JobCommand::PartialChoice { .. }
-            | JobCommand::DestinationResponse { .. }
+            | JobCommand::RecoveryChoice { .. }
+            | JobCommand::FinalizationSucceeded
+            | JobCommand::FinalizationFailed { .. }
             | JobCommand::Cancel
             | JobCommand::Pause
             | JobCommand::Resume => {}
@@ -214,7 +204,6 @@ fn all_events() -> Vec<JobEvent> {
                 rationale: "transient".into(),
             }],
         },
-        JobEvent::OutputReady,
         JobEvent::Completed,
         JobEvent::PartialCompleted,
         JobEvent::Failed {
@@ -231,7 +220,6 @@ fn all_events() -> Vec<JobEvent> {
             | JobEvent::Progress { .. }
             | JobEvent::Warning { .. }
             | JobEvent::RecoveryRequest { .. }
-            | JobEvent::OutputReady
             | JobEvent::Completed
             | JobEvent::PartialCompleted
             | JobEvent::Failed { .. }

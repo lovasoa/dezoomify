@@ -20,7 +20,7 @@ use dezoomify_protocol::dto::{ImageDto, Readiness};
 use crate::config::Config;
 use crate::state::State;
 use crate::transition::{
-    DecisionReason, JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome,
+    JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome, RecoveryChoice,
 };
 
 /// One end-to-end user request driven synchronously by explicit host inputs.
@@ -47,6 +47,8 @@ pub struct Job {
     selected_image_index: Option<usize>,
     selected_level: Option<u32>,
     selected_level_index: Option<usize>,
+    finalizing_partial: Option<bool>,
+    cleanup_emitted: bool,
     planned_tiles: Vec<u32>,
     pending_tiles: Vec<u32>,
     in_flight: HashSet<u32>,
@@ -132,6 +134,8 @@ impl Job {
             selected_image_index: None,
             selected_level: None,
             selected_level_index: None,
+            finalizing_partial: None,
+            cleanup_emitted: false,
             planned_tiles: Vec::new(),
             pending_tiles: Vec::new(),
             in_flight: HashSet::new(),
@@ -288,8 +292,6 @@ impl Job {
             JobCommand::FetchFailure { request, cause } => self.apply_fetch_failure(request, cause),
             JobCommand::SelectImage { image } => self.apply_selected_image(image),
             JobCommand::SelectLevel { level } => self.apply_selected_level(level),
-            JobCommand::DestinationGranted => self.apply_destination_granted(),
-            JobCommand::DestinationDenied => self.apply_destination_denied(),
             JobCommand::TileOutcome { tile, ok } => self.apply_tile_outcome(tile, ok),
             JobCommand::ProbeOutcome {
                 tile,
@@ -297,9 +299,12 @@ impl Job {
                 width,
                 height,
             } => self.apply_probe_outcome(tile, available, width, height),
-            JobCommand::RetryReady => self.apply_retry_ready(),
-            JobCommand::PartialChoice { generation, keep } => {
-                self.apply_partial_keep(generation, keep)
+            JobCommand::RecoveryChoice { generation, choice } => {
+                self.apply_recovery_choice(generation, choice)
+            }
+            JobCommand::FinalizationSucceeded => self.apply_finalization_succeeded(),
+            JobCommand::FinalizationFailed { code, message } => {
+                self.apply_finalization_failed(code, message)
             }
         }
     }
@@ -540,22 +545,6 @@ impl Job {
         }
         self.selected_level = Some(level);
         self.selected_level_index = Some(level_index);
-        self.set_state(State::AwaitingDestination)?;
-        self.push_effect(JobEffect::RequestDestination {
-            format: "png".to_string(),
-        })?;
-        self.push_event(JobEvent::State {
-            state: State::AwaitingDestination,
-        })?;
-        Ok(Outcome::Applied)
-    }
-
-    fn apply_destination_granted(&mut self) -> Result<Outcome, JobError> {
-        if self.state != State::AwaitingDestination {
-            return Err(JobError::invalid_state(
-                "destination grant valid only in AwaitingDestination",
-            ));
-        }
         self.set_state(State::Planning)?;
         self.push_event(JobEvent::State {
             state: State::Planning,
@@ -726,29 +715,6 @@ impl Job {
         Ok(())
     }
 
-    fn apply_destination_denied(&mut self) -> Result<Outcome, JobError> {
-        if self.state != State::AwaitingDestination {
-            return Err(JobError::invalid_state(
-                "destination denial valid only in AwaitingDestination",
-            ));
-        }
-        self.recovery_reason = Some("destination".to_string());
-        let generation = self.alloc_decision_generation()?;
-        self.set_state(State::AwaitingRecovery)?;
-        self.push_effect(JobEffect::RequestDecision {
-            generation,
-            reason: DecisionReason::Destination,
-        })?;
-        self.push_event(JobEvent::RecoveryRequested {
-            generation,
-            reason: DecisionReason::Destination,
-        })?;
-        self.push_event(JobEvent::State {
-            state: State::AwaitingRecovery,
-        })?;
-        Ok(Outcome::Applied)
-    }
-
     fn apply_tile_outcome(&mut self, tile: u32, ok: bool) -> Result<Outcome, JobError> {
         if self.probe_tiles.contains(&tile) {
             return Err(JobError::invalid_state(
@@ -816,17 +782,11 @@ impl Job {
         self.recovery_reason = Some("tile".to_string());
         let generation = self.alloc_decision_generation()?;
         self.set_state(State::AwaitingPartialDecision)?;
-        self.push_effect(JobEffect::RequestDecision {
-            generation,
-            reason: DecisionReason::Partial,
-        })?;
+        self.push_effect(JobEffect::RequestDecision { generation })?;
         self.push_event(JobEvent::MissingWork {
             failed: self.failed_tiles.clone(),
         })?;
-        self.push_event(JobEvent::RecoveryRequested {
-            generation,
-            reason: DecisionReason::Partial,
-        })?;
+        self.push_event(JobEvent::RecoveryRequested { generation })?;
         self.push_event(JobEvent::State {
             state: State::AwaitingPartialDecision,
         })?;
@@ -874,45 +834,25 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    fn apply_retry_ready(&mut self) -> Result<Outcome, JobError> {
-        match self.state {
-            State::AwaitingRecovery => {
-                let reason = self
-                    .recovery_reason
-                    .clone()
-                    .ok_or_else(|| JobError::invalid_state("no recovery pending for retry"))?;
-                match reason.as_str() {
-                    "destination" => {
-                        self.recovery_reason = None;
-                        self.pending_decision = None;
-                        self.set_state(State::AwaitingDestination)?;
-                        self.push_effect(JobEffect::RequestDestination {
-                            format: "png".to_string(),
-                        })?;
-                        self.push_event(JobEvent::State {
-                            state: State::AwaitingDestination,
-                        })?;
-                        Ok(Outcome::Applied)
-                    }
-                    _ => {
-                        self.recovery_reason = None;
-                        self.pending_decision = None;
-                        self.set_state(State::AcquiringTiles)?;
-                        self.push_event(JobEvent::State {
-                            state: State::AcquiringTiles,
-                        })?;
-                        // Pause v1: retry wakeups are preserved; new tiles
-                        // wait for resume.
-                        if !self.paused {
-                            self.emit_pending_tiles()?;
-                        }
-                        Ok(Outcome::Applied)
-                    }
-                }
-            }
-            State::AwaitingPartialDecision => {
-                self.recovery_reason = None;
-                self.pending_decision = None;
+    fn apply_recovery_choice(
+        &mut self,
+        generation: u32,
+        choice: RecoveryChoice,
+    ) -> Result<Outcome, JobError> {
+        if self.state != State::AwaitingPartialDecision {
+            return Err(JobError::invalid_state(
+                "recovery choice valid only in AwaitingPartialDecision",
+            ));
+        }
+        if self.pending_decision != Some(generation) {
+            return Err(JobError::invalid_state(
+                "recovery choice generation is stale",
+            ));
+        }
+        self.recovery_reason = None;
+        self.pending_decision = None;
+        match choice {
+            RecoveryChoice::Retry => {
                 self.failed_tiles.clear();
                 self.set_state(State::AcquiringTiles)?;
                 self.push_event(JobEvent::State {
@@ -923,34 +863,18 @@ impl Job {
                 }
                 Ok(Outcome::Applied)
             }
-            _ => Err(JobError::invalid_state(
-                "retry-ready valid only in AwaitingRecovery or AwaitingPartialDecision",
-            )),
+            RecoveryChoice::Keep => {
+                self.complete_remaining(true)?;
+                Ok(Outcome::Applied)
+            }
+            RecoveryChoice::Discard => {
+                self.fail_via_cleanup(
+                    "job.partial-discarded",
+                    "partial result discarded by choice".to_string(),
+                )?;
+                Ok(Outcome::Applied)
+            }
         }
-    }
-
-    fn apply_partial_keep(&mut self, generation: u32, keep: bool) -> Result<Outcome, JobError> {
-        if self.state != State::AwaitingPartialDecision {
-            return Err(JobError::invalid_state(
-                "partial choice valid only in AwaitingPartialDecision",
-            ));
-        }
-        if self.pending_decision != Some(generation) {
-            return Err(JobError::invalid_state(
-                "partial choice generation is stale",
-            ));
-        }
-        self.recovery_reason = None;
-        self.pending_decision = None;
-        if keep {
-            self.complete_remaining(true)?;
-        } else {
-            self.fail_via_cleanup(
-                "job.partial-discarded",
-                "partial result discarded by choice".to_string(),
-            )?;
-        }
-        Ok(Outcome::Applied)
     }
 
     fn enter_cancelled(&mut self) -> Result<Outcome, JobError> {
@@ -960,11 +884,7 @@ impl Job {
         self.push_event(JobEvent::State {
             state: State::Cancelling,
         })?;
-        self.set_state(State::CleaningUp)?;
-        self.push_effect(JobEffect::ReleaseBytes)?;
-        self.push_event(JobEvent::State {
-            state: State::CleaningUp,
-        })?;
+        self.emit_cleanup_once()?;
         self.set_state(State::Cancelled)?;
         self.push_event(JobEvent::State {
             state: State::Cancelled,
@@ -1011,46 +931,29 @@ impl Job {
 
     fn complete_remaining(&mut self, partial: bool) -> Result<(), JobError> {
         self.paused = false;
-        self.set_state(State::ProcessingTiles)?;
-        // A partial result deliberately has holes: only successfully acquired
-        // tiles can be decoded. Emitting decode work for failed or still
-        // in-flight tiles makes every host treat an accepted partial result as
-        // an output-state failure before it can encode the retained pieces.
-        let tiles_to_decode: Vec<_> = self
-            .planned_tiles
-            .clone()
-            .into_iter()
-            .filter(|tile| !partial || self.acquired_tiles.contains(tile))
-            .collect();
-        for tile in tiles_to_decode {
-            self.push_effect(JobEffect::DecodePixels { tile })?;
-        }
-        self.push_event(JobEvent::State {
-            state: State::ProcessingTiles,
-        })?;
-        self.set_state(State::Encoding)?;
-        self.push_effect(JobEffect::OpenEncoder {
+        self.finalizing_partial = Some(partial);
+        self.set_state(State::Finalizing)?;
+        self.push_effect(JobEffect::FinalizeOutput {
+            partial,
             format: "png".to_string(),
             canvas: self.canvas_size,
         })?;
         self.push_event(JobEvent::State {
-            state: State::Encoding,
-        })?;
-        self.set_state(State::Finalizing)?;
-        self.push_effect(JobEffect::FinalizeEncoder)?;
-        self.push_event(JobEvent::State {
             state: State::Finalizing,
         })?;
-        self.set_state(State::Publishing)?;
-        self.push_effect(JobEffect::PublishOutput)?;
-        self.push_event(JobEvent::State {
-            state: State::Publishing,
-        })?;
-        self.set_state(State::CleaningUp)?;
-        self.push_effect(JobEffect::ReleaseBytes)?;
-        self.push_event(JobEvent::State {
-            state: State::CleaningUp,
-        })?;
+        Ok(())
+    }
+
+    fn apply_finalization_succeeded(&mut self) -> Result<Outcome, JobError> {
+        if self.state != State::Finalizing {
+            return Err(JobError::invalid_state(
+                "finalization response valid only in Finalizing",
+            ));
+        }
+        let partial = self
+            .finalizing_partial
+            .take()
+            .ok_or_else(|| JobError::invalid_state("no finalization pending"))?;
         if partial {
             self.set_state(State::PartiallyCompleted)?;
             self.push_event(JobEvent::State {
@@ -1066,16 +969,27 @@ impl Job {
             self.push_event(JobEvent::Completed)?;
             self.terminal = Some("completed".to_string());
         }
-        Ok(())
+        Ok(Outcome::Applied)
+    }
+
+    fn apply_finalization_failed(
+        &mut self,
+        code: String,
+        message: String,
+    ) -> Result<Outcome, JobError> {
+        if self.state != State::Finalizing {
+            return Err(JobError::invalid_state(
+                "finalization response valid only in Finalizing",
+            ));
+        }
+        self.finalizing_partial = None;
+        self.fail_via_cleanup(&code, message)?;
+        Ok(Outcome::Applied)
     }
 
     fn fail_via_cleanup(&mut self, code: &str, message: String) -> Result<(), JobError> {
         self.paused = false;
-        self.set_state(State::CleaningUp)?;
-        self.push_effect(JobEffect::ReleaseBytes)?;
-        self.push_event(JobEvent::State {
-            state: State::CleaningUp,
-        })?;
+        self.emit_cleanup_once()?;
         self.set_state(State::Failed)?;
         self.push_event(JobEvent::State {
             state: State::Failed,
@@ -1085,6 +999,14 @@ impl Job {
             message,
         })?;
         self.terminal = Some("failed".to_string());
+        Ok(())
+    }
+
+    fn emit_cleanup_once(&mut self) -> Result<(), JobError> {
+        if !self.cleanup_emitted {
+            self.cleanup_emitted = true;
+            self.push_effect(JobEffect::CancelWork)?;
+        }
         Ok(())
     }
 
