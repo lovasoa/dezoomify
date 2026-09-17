@@ -41,6 +41,8 @@ import type {
 } from "@dezoomify/wasm-bindings";
 
 export interface EngineHostAssembly {
+  /** Reveal the declared output surface before the first tile fetch. */
+  prepare(canvas?: SizeDto | null): void;
   acquireTile(tile: number, placement: TilePlacementDto, bytes: ArrayBuffer): Promise<void>;
   acquireDisplayTile(tile: number, placement: TilePlacementDto, image: TileImageLike): void;
   /** The one awaited output operation (draw, encode, save / display-only). */
@@ -241,6 +243,11 @@ export function createEngineHost(deps: EngineHostDeps) {
     if (effect.type === "acquire-tile" && request.purpose === "probe") {
       log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=probe route=probe`);
       try {
+        if (effect.placement.probe_output === true) {
+          // A probe retained as output participates in the visible assembly;
+          // a measurement-only probe must not reveal a provisional canvas.
+          deps.assembly.prepare(effect.placement.canvas);
+        }
         const size = await deps.probeSize(request.uri, headerRecord(request.headers));
         if (cancelled) return;
         const probeOutput = effect.placement.probe_output === true;
@@ -298,6 +305,10 @@ export function createEngineHost(deps: EngineHostDeps) {
       }
     }
     try {
+      if (effect.type === "acquire-tile") {
+        // Prepare before network I/O so tiles become visible as they arrive.
+        deps.assembly.prepare(effect.placement.canvas);
+      }
       const fetch = originOwner && deps.fetchResourceOnce ? deps.fetchResourceOnce : deps.fetchResource;
       const result = await fetch(effect);
       if (cancelled) return;

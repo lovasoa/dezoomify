@@ -17,23 +17,25 @@ The executor maps typed host effects onto browser execution:
 
 - `acquire-tile` carries the complete output placement (position, planned
   extent, declared canvas, processing recipe) plus the engine-declared
-  request headers. Hosts decode during acquisition (the native model), so a
-  tile that cannot decode fails its acquisition outcome and flows through
-  the engine's retry and partial policy. Probe acquisitions (`purpose:
-  probe`) carry no output placement obligation: the host measures the tile
-  with the shared `probe.ts` helper (readable-bytes decode, plain `<img>`
-  fallback) and answers `provide-probe-outcome`, never retaining a bitmap.
+  request headers. The website validates and reveals the declared canvas
+  before the first tile request, then decodes and paints each successful tile
+  immediately. The visible canvas is the output surface throughout
+  acquisition, including while paused; it is not a completion-only artifact.
+  A tile that cannot decode fails its acquisition outcome and flows through
+  the engine's retry and partial policy. Probe acquisitions (`purpose: probe`)
+  use the shared `probe.ts` helper (readable-bytes decode, plain `<img>`
+  fallback); a probe retained for output paints immediately too.
 - `finalize-output` carries the partial marker, output format, and declared
-  canvas size. Within that awaited operation the
-  host validates actual dimensions and area before allocating the surface
-  and fails typed (`PLAN_INVALID` with a desktop handoff) beyond the
-  browser limits. Undeclared sizes are derived from the accumulated
-  placements.
-- The host draws every held tile at its planned placement and at
+  canvas size. It encodes and saves the surface already shown to the user.
+  Plans without declared dimensions derive their surface size from accumulated
+  placements during this awaited operation. Dimension and area validation
+  always precedes allocation and fails typed (`PLAN_INVALID` with a desktop
+  handoff) beyond browser limits.
+- The host draws every tile at its planned placement and at
   1:1 pixel scale. Decoded pixels beyond the planned extent are cropped from
   the right and bottom (as required by padded edge tiles); undersized tiles
-  leave their uncovered region empty. It then closes the bitmaps
-  deterministically and encodes the surface.
+  leave their uncovered region empty. It closes each bitmap immediately after
+  painting it.
 - The host persists the encoded output exactly once (blob anchor save; no
   `downloads` permission), releases resources, and replies with typed success
   or failure. A tainted display-only canvas skips encoding.
