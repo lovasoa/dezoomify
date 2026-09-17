@@ -16,6 +16,7 @@ export * from "./assembly.ts";
 export * from "./engine-selection.ts";
 export * from "./failure.ts";
 export * from "./job-activity.ts";
+export * from "./logging.ts";
 export * from "./plan-gates.ts";
 export * from "./preview.ts";
 export * from "./tile-draw.ts";

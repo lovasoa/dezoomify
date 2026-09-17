@@ -33,7 +33,7 @@ import {
   toHistoryEntry,
 } from "@dezoomify/shared-ui";
 import type { HistoryEntry, ViewContext } from "@dezoomify/shared-ui";
-import { suggestedNameFor } from "@dezoomify/browser-runtime";
+import { createLogger, suggestedNameFor } from "@dezoomify/browser-runtime";
 import {
   asPayload,
   extractMissingTiles,
@@ -473,6 +473,11 @@ function setStep(label: string, detail?: string): void {
 }
 
 function pushLog(line: string): void {
+  appLog.info(undefined, line);
+}
+
+/** Append an accepted log line to the job view's technical-details buffer. */
+function appendActivityLog(line: string): void {
   const a = activity();
   if (!a.log) a.log = [];
   const elapsed = a.startedAt ? Math.round((Date.now() - a.startedAt) / 1000) : 0;
@@ -480,6 +485,10 @@ function pushLog(line: string): void {
   if (a.log.length > MAX_LOG_LINES) a.log.splice(0, a.log.length - MAX_LOG_LINES);
   a.now = Date.now();
 }
+
+// The shared logger owns formatting and level gating; the desktop sink feeds
+// the job view's log, so failed jobs show the same trace in technical details.
+const appLog = createLogger("app", { defaultContext: "app", sink: (entry) => appendActivityLog(entry.line) });
 
 function noteProgress(current: number, total: number): void {
   const a = activity();

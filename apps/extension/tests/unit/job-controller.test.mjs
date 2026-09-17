@@ -50,6 +50,7 @@ function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport } = {
   if (acquireTile) assembly.acquireTile = acquireTile;
   const sent = [];
   const seen = [];
+  const logs = [];
   const controller = createJobController({
     worker: { postMessage: (message) => sent.push(message) },
     binding: () => BINDING,
@@ -67,8 +68,9 @@ function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport } = {
     onHostFailure: (error) => seen.push(["host-failure", error]),
     onEvent: (event) => seen.push(["event", event.type]),
     onUnsupportedEffect: (envelope) => seen.push(["unsupported", envelope.type]),
+    log: (level, code, detail) => logs.push({ level, code, detail }),
   });
-  return { controller, sent, seen, assembly };
+  return { controller, sent, seen, assembly, logs };
 }
 
 const TILE_EFFECT = {
@@ -148,6 +150,31 @@ test("metadata requests route through the source transport", async () => {
   }]);
   await flush();
   assert.equal(seen[0][0], "source");
+});
+
+test("controller traces core effects, events, and fetch outcomes", async () => {
+  const { controller, sent, logs } = harness();
+  controller.handleEngineMessages([
+    { kind: "effect", type: "acquire-resource", effect: "fx:0", request: { id: 0, uri: "https://source.test/image.dzi", headers: [], purpose: "metadata" } },
+    { kind: "event", type: "catalog", images: [] },
+  ]);
+  await flush();
+  await flush();
+  const codes = logs.map((entry) => entry.code);
+  assert.ok(codes.includes("effect-received"));
+  assert.ok(codes.includes("effect-fetch"));
+  assert.ok(codes.includes("effect-outcome"));
+  assert.ok(codes.includes("event-received"));
+  assert.ok(sent.some((message) => message.type === "engine.bytes"));
+});
+
+test("controller traces a failed acquisition at warn", async () => {
+  const { controller, logs } = harness({ acquireTile: async () => { throw new Error("corrupt tile"); } });
+  controller.handleEngineMessages([TILE_EFFECT]);
+  await flush();
+  const failed = logs.find((entry) => entry.code === "effect-failed");
+  assert.ok(failed, "failed acquisition was logged");
+  assert.equal(failed.level, "warn");
 });
 
 test("coordinator source fetches name the engine request on the extension bus", async () => {
