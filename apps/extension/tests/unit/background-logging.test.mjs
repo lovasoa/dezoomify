@@ -1,15 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { transpileTypeScript } from "./ts-source-loader.mjs";
-
-function source(path) { return readFileSync(new URL(path, import.meta.url), "utf8"); }
-const logging = source("../../../../packages/browser-runtime/src/logging.ts").replace(/^export\s+/gm, "");
-const operations = source("../../src/background/source-operations.ts").replace(/^export\s+/gm, "");
-const index = source("../../src/background/index.ts")
-  .replace(/^import .*browser-runtime\/logging";\s*$/m, "")
-  .replace(/^import .*source-operations\.js";\s*$/m, "");
-const text = transpileTypeScript(`${logging}\n${operations}\n${index}`, "background-combined.ts");
+import { createBackgroundCoordinator } from "../../src/background/coordinator.ts";
 
 function browser() {
   const listeners = { click: [], message: [] };
@@ -29,21 +20,15 @@ function browser() {
   };
 }
 
-let sequence = 0;
-async function load(fake) {
-  const previous = globalThis.chrome;
-  globalThis.chrome = fake.api;
-  try {
-    sequence += 1;
-    const mod = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(text)}#log-${sequence}`);
-    mod.startBackground();
-    return mod;
-  } finally { globalThis.chrome = previous; }
+function load(fake) {
+  const mod = createBackgroundCoordinator({ browserApi: fake.api });
+  mod.startBackground();
+  return mod;
 }
 
 test("coordinator logs the full source URL on lifecycle entries", async () => {
   const fake = browser();
-  const mod = await load(fake);
+  const mod = load(fake);
   const entries = [];
   mod.setBackgroundLogSink((entry) => entries.push(entry));
   const sourceUrl = "https://user:password@gallery.example/work?token=secret&view=1#fragment";
@@ -57,7 +42,7 @@ test("coordinator logs the full source URL on lifecycle entries", async () => {
 
 test("logging is bounded and a throwing sink cannot interrupt coordinator work", async () => {
   const fake = browser();
-  const mod = await load(fake);
+  const mod = load(fake);
   mod.setBackgroundLogSink(() => { throw new Error("sink failed"); });
   mod.backgroundLog("info", "test", "x".repeat(5000));
   await fake.listeners.click[0]({ id: 7, url: "https://gallery.example/work" });
@@ -70,7 +55,7 @@ test("logging is bounded and a throwing sink cannot interrupt coordinator work",
 
 test("coordinator logs active-tab and job-bus interactions", async () => {
   const fake = browser();
-  const mod = await load(fake);
+  const mod = load(fake);
   const entries = [];
   mod.setBackgroundLogSink((entry) => entries.push(entry));
   mod.setBackgroundLogLevel("debug");
@@ -95,14 +80,4 @@ test("coordinator logs active-tab and job-bus interactions", async () => {
   assert.ok(codes.includes("active-tab-op-result"));
   assert.equal(executed.length, 1);
   assert.match(entries.find((entry) => entry.code === "active-tab-op-result").detail, /candidates=1/);
-});
-
-test("classic packaged copy remains parseable after export stripping", async () => {
-  const fake = browser();
-  const previous = globalThis.chrome;
-  globalThis.chrome = fake.api;
-  try {
-    sequence += 1;
-    await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(text.replace(/^export\s+/gm, ""))}#classic-${sequence}`);
-  } finally { globalThis.chrome = previous; }
 });

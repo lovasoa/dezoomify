@@ -1,23 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { handoffOriginFor, isFileHandoffSource } from "../packages/shared-ui/src/view.tsx";
 import { desktopHandoffLink } from "../src/main.ts";
 import { EN, t } from "../packages/shared-ui/src/i18n.ts";
-import { transform } from "esbuild";
-
-const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-function read(rel) {
-  return fs.readFileSync(path.join(rootDir, rel), "utf8");
-}
-
-async function loadTs(rel) {
-  const src = read(rel);
-  const compiled = await transform(src, { loader: "ts", format: "esm", target: "es2022" });
-  return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(compiled.code)}`);
-}
+import { act } from "./react-dom.mjs";
+import { renderView } from "../packages/shared-ui/src/view.tsx";
+import * as runtimeHandoff from "../apps/extension/src/runtime/nativeHandoff.ts";
+import * as backgroundHandoff from "../apps/extension/src/background/handoff.ts";
 
 test("handoff 5.5: one-click Send copy names origin/scope with memory-only note", () => {
   for (const key of [
@@ -36,12 +25,6 @@ test("handoff 5.5: one-click Send copy names origin/scope with memory-only note"
   assert.ok(summary.includes("memory"), "summary names memory-only");
   const label = t("view.handoff.sendOrigin", { origin: "https://example.com/" });
   assert.ok(label.includes("https://example.com/"), "button names the origin");
-  // The shared view renders the same copy as hardcoded literals (current
-  // view has no t() import after concurrent refactors); the dictionary stays
-  // the single source for the next locale.
-  const viewTsx = read("packages/shared-ui/src/view.tsx");
-  assert.ok(viewTsx.includes('t("view.handoff.summary"'), "view renders the summary copy");
-  assert.ok(viewTsx.includes('t("view.handoff.localNote"'), "view renders the local note copy");
 });
 
 test("handoff 5.5: origin helper is redacted origins-only, file-aware, exact-match", () => {
@@ -62,32 +45,76 @@ test("handoff 5.5: desktop link carries bounded http(s) only, never file or cred
   assert.equal(desktopHandoffLink("ftp://example.com/x"), "", "non-http(s) gets no link");
 });
 
-test("handoff 5.5: website failed + display-only views offer Send with consent summary", () => {
-  const viewTsx = read("packages/shared-ui/src/view.tsx");
-  assert.ok(viewTsx.includes('id="dz-handoff-consent"'), "consent summary element exists");
-  assert.ok(viewTsx.includes('id="dz-handoff-local"'), "local-only note exists");
-  assert.ok(viewTsx.includes('id="dz-btn-desktop-handoff"'), "one-click Send button exists");
-  const displaySection = viewTsx.slice(viewTsx.indexOf("function DisplayOnlyView"));
-  assert.ok(displaySection.includes("dz-btn-desktop-handoff"), "display-only (incl. tainted) offers Send");
-  assert.ok(displaySection.includes("handoffOriginFor"), "display-only names the origin");
-  const failedSection = viewTsx.slice(viewTsx.indexOf("function FailedView"));
-  assert.ok(failedSection.includes("dz-btn-desktop-handoff"), "failed (incl. too-large) offers Send");
-  assert.ok(failedSection.includes("isFileHandoffSource"), "failed distinguishes local files");
+function renderContainer() {
+  const el = globalThis.document.createElement("div");
+  globalThis.document.body.appendChild(el);
+  return el;
+}
+
+const viewCallbacks = {
+  onSubmitUrl: () => {},
+  onCancel: () => {},
+  onReset: () => {},
+  onSave: () => {},
+};
+
+const failedState = {
+  status: "failed",
+  seq: 1,
+  sessionId: "s-handoff",
+  imageCount: 0,
+  transport: "direct",
+  error: {
+    code: "PLAN_INVALID",
+    category: "engine",
+    retryable: false,
+    message: "This picture is too large for a browser tab.",
+  },
+};
+
+test("handoff 5.5: failed and display-only views offer Send with consent summary", () => {
+  const link = desktopHandoffLink("https://example.com/view?page=1");
+  assert.ok(link.startsWith("dezoomify://open?v=2&src="), "test precondition: http(s) source links");
+
+  const el = renderContainer();
+  act(() => renderView(el, failedState, viewCallbacks, {
+    sourceUrl: "https://example.com/view?page=1",
+    desktopHandoffUrl: link,
+  }));
+  const send = el.querySelector("#dz-btn-desktop-handoff");
+  assert.ok(send, "failed view offers Send");
+  assert.equal(send.getAttribute("href"), link);
+  assert.ok(send.textContent.includes("https://example.com/"), "Send button names the origin");
+  const consent = el.querySelector("#dz-handoff-consent");
+  assert.ok(consent, "consent summary element exists");
+  assert.ok(consent.textContent.includes("https://example.com/"), "consent summary names the origin");
+
+  const displayOnly = renderContainer();
+  act(() => renderView(displayOnly, {
+    status: "display-only",
+    seq: 2,
+    sessionId: "s-handoff",
+    imageCount: 1,
+    transport: "browser-session",
+  }, viewCallbacks, {
+    sourceUrl: "https://example.com/view?page=1",
+    desktopHandoffUrl: link,
+  }));
+  assert.ok(displayOnly.querySelector("#dz-btn-desktop-handoff"), "display-only (incl. tainted) offers Send");
 });
 
-test("handoff 5.5: website wires too-large plans to Send, file stays local-only", () => {
-  const mainTs = read("src/main.ts");
-  assert.ok(mainTs.includes("viewCtx.desktopHandoffUrl = link"), "PLAN_INVALID populates the failed Send link");
-  assert.ok(mainTs.includes("viewCtx.sourceUrl = url"), "PLAN_INVALID populates the origin source");
-  assert.ok(mainTs.includes("desktopHandoffLink(url)"), "link built from the job source");
-  assert.ok(mainTs.includes("isLocalFileUrl(url)"), "file URLs take the local-only path");
-  assert.ok(mainTs.includes("viewCtx.desktopHandoffUrl = undefined"), "local files emit no deep link");
-  assert.ok(mainTs.includes("nothing is sent"), "local detail stays credential-free");
-  assert.ok(!mainTs.includes("dezoomify://open?v=2&src=file"), "no broken file:// deep link is emitted");
+test("handoff 5.5: local files stay local-only, never a deep link", () => {
+  const el = renderContainer();
+  act(() => renderView(el, failedState, viewCallbacks, {
+    sourceUrl: "file:///tmp/a.dzi",
+    desktopHandoffUrl: "",
+  }));
+  assert.equal(el.querySelector("#dz-btn-desktop-handoff"), null, "local files get no Send button");
+  assert.ok(el.querySelector("#dz-handoff-local"), "local-only note exists");
 });
 
 test("handoff 5.5: extension validator uses URL parsing plus exact sensitive keys", async () => {
-  const handoff = await loadTs("apps/extension/src/runtime/nativeHandoff.ts");
+  const handoff = runtimeHandoff;
   assert.equal(handoff.validateHandoffSource("https://example.com/cookie-recipe/view?page=1").ok, true, "/cookie-recipe/ stays valid (no substring false positive)");
   assert.equal(handoff.validateHandoffSource("https://example.com/view?view=1&page=2").ok, true);
   assert.equal(handoff.validateHandoffSource("https://example.com/item?token=secret").ok, false);
@@ -100,7 +127,7 @@ test("handoff 5.5: extension validator uses URL parsing plus exact sensitive key
 });
 
 test("handoff 5.5: background envelope rejects secret-bearing source URLs", async () => {
-  const handoff = await loadTs("apps/extension/src/background/handoff.ts");
+  const handoff = backgroundHandoff;
   const allow = { senderOrigin: "https://site.example", isAllowedSender: (o) => o === "https://site.example" };
   const base = { protocolVersion: 2, sourceUrl: "https://a.example/ImageProperties.xml", requestId: "req-1" };
   assert.equal(handoff.validateHandoffEnvelope(base, allow).ok, true);

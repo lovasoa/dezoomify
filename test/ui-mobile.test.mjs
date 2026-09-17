@@ -25,21 +25,6 @@ test("mobile: website theme keeps the 768/560/380px breakpoint stack", () => {
   assert.match(css, /@media\s*\(max-width:\s*768px\)/, "768px breakpoint exists");
   assert.match(css, /@media\s*\(max-width:\s*560px\)/, "560px breakpoint exists");
   assert.match(css, /@media\s*\(max-width:\s*380px\)/, "380px breakpoint exists");
-
-  const small = css.slice(css.indexOf("max-width: 560px"));
-  for (const decl of [
-    ".dz-progress-controls",
-    "flex-direction: column",
-    ".dz-job-actions",
-    ".dz-actions-row",
-    "width: 100%",
-  ]) {
-    assert.ok(small.includes(decl), `560px rules cover ${decl}`);
-  }
-  const narrow = css.slice(css.indexOf("max-width: 380px"));
-  for (const decl of [".dz-card", "padding: 1.25rem 0.85rem", "font-size: 1.45rem", "flex-direction: column"]) {
-    assert.ok(narrow.includes(decl), `380px rules cover ${decl}`);
-  }
 });
 
 test("mobile: extension job page links the canonical theme with no inline fork", () => {

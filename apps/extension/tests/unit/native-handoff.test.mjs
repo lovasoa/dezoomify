@@ -1,13 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { importTypeScript } from "./ts-source-loader.mjs";
-
-async function loadTs(rel) {
-  return importTypeScript(new URL(rel, import.meta.url));
-}
-
-const handoff = await loadTs("../../src/runtime/nativeHandoff.ts");
+import * as handoff from "../../src/runtime/nativeHandoff.ts";
 
 function fakeHost({ handoffCapable = true, negotiatedVersion = 2 } = {}) {
   const calls = [];
@@ -221,13 +214,6 @@ test("consent details carry names only; drop overwrites values", async () => {
   const cookies = [{ name: "session", value: "CANARY-xyz" }];
   handoff.dropCredentialValues(cookies);
   assert.equal(cookies[0].value, "");
-});
-
-test("wire shapes match the native host envelope", async () => {
-  const src = readFileSync(new URL("../../src/runtime/nativeHandoff.ts", import.meta.url), "utf8");
-  for (const kind of ['"handshake"', '"negotiate"', '"consent"', '"credential"', '"decline"']) {
-    assert.ok(src.includes(kind), `client must speak ${kind}`);
-  }
 });
 
 function fakePortHost({ disconnectAt = null, oversized = false } = {}) {

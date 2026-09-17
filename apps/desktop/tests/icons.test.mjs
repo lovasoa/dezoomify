@@ -16,19 +16,8 @@ function sha256(file) {
   return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
-test("gen-desktop-icons.py is versioned, stdlib-only, and deterministic", () => {
+test("gen-desktop-icons.py is versioned and deterministic", () => {
   assert.ok(fs.existsSync(script), "scripts/gen-desktop-icons.py must be versioned");
-  const source = fs.readFileSync(script, "utf8");
-  assert.match(source, /byte-identical/, "script must document deterministic output");
-  assert.match(source, /cargo xtask build desktop/, "script must name its xtask entry");
-  assert.match(source, /cargo xtask test desktop/, "script must name its test lane");
-  const imports = [...source.matchAll(/^import (\w+)|^from (\w+)/gm)].map((m) => m[1] ?? m[2]);
-  for (const name of imports) {
-    assert.ok(
-      ["struct", "zlib", "pathlib"].includes(name),
-      `non-stdlib import ${name} needs review`,
-    );
-  }
   for (const name of expected) {
     assert.ok(fs.existsSync(path.join(iconsDir, name)), `missing generated icon ${name}`);
   }

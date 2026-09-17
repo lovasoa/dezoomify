@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { act } from "./react-dom.mjs";
+import { renderView } from "../packages/shared-ui/src/view.tsx";
 
 const webDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const srcDir = path.join(webDir, "docs", "user");
@@ -87,17 +89,26 @@ test("app pages link the in-app docs instead of legacy doc sites", () => {
       `${page} must not link the legacy wiki`,
     );
   }
-  for (const source of [
-    path.join(webDir, "packages", "shared-ui", "src", "view.tsx"),
-  ]) {
-    const code = readFileSync(source, "utf8");
-    assert.ok(
-      !code.includes("github.com/lovasoa/dezoomify/wiki"),
-      `${source} must not link the legacy wiki`,
-    );
-    assert.ok(
-      code.includes("./help/finding-the-image-address.html"),
-      `${source} points failures at the in-app image-address guide`,
-    );
-  }
+});
+
+test("failure guidance links the in-app image-address guide", () => {
+  const el = globalThis.document.createElement("div");
+  globalThis.document.body.appendChild(el);
+  act(() => renderView(el, {
+    status: "failed",
+    seq: 1,
+    sessionId: "s-help",
+    imageCount: 0,
+    transport: "direct",
+    error: {
+      code: "NO_IMAGE_FOUND",
+      category: "discovery",
+      retryable: false,
+      message: "No zoomable image could be found.",
+    },
+  }, { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {}, onSave: () => {} }));
+  assert.ok(
+    el.querySelector('a[href="./help/finding-the-image-address.html"]'),
+    "failures point at the in-app image-address guide",
+  );
 });

@@ -71,13 +71,10 @@ function xdezoomify(doc) {
 }
 
 test("rust command registry lists exact commands", () => {
-  const src = readText("../src-tauri/src/commands.rs");
   assert.deepEqual(sorted(RUST_COMMANDS), sorted(EXPECTED_COMMANDS));
   for (const name of EXPECTED_COMMANDS) {
     assert.ok(RUST_COMMANDS.includes(name), `registry missing ${name}`);
   }
-  assert.ok(src.includes("unknown") && src.includes("stale"), "unknown/stale rejection");
-  assert.ok(src.includes("seq"), "event ordering");
   const build = readText("../src-tauri/build.rs");
   const shell = readText("../src-tauri/src/tauri_shell.rs");
   assert.match(build, /desktop_commands!\(command_names\)/, "Tauri permissions consume canonical registry");

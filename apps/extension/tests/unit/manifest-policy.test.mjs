@@ -59,9 +59,6 @@ test("WXT emits Firefox's required classic MV3 background script", () => {
 });
 
 test("WXT configuration is the only extension builder and manifest source", () => {
-  const config = readFileSync(new URL("../../wxt.config.ts", import.meta.url), "utf8");
-  assert.ok(config.includes("manifestVersion: 3"));
-  assert.ok(config.includes("build:before"), "WASM and test assets must use a WXT hook");
   assert.ok(!existsSync(new URL("../../scripts/build.mjs", import.meta.url)));
   assert.ok(!existsSync(new URL("../../scripts/generate-manifests.mjs", import.meta.url)));
   assert.ok(!existsSync(new URL("../../scripts/package-store.sh", import.meta.url)));

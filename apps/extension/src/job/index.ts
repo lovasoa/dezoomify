@@ -9,12 +9,12 @@ import {
   pickEngineSelection,
   saveBlobViaAnchor,
 } from "@dezoomify/browser-runtime";
-import { createExtensionFetcher } from "../runtime/fetch.js";
+import { createExtensionFetcher } from "../runtime/fetch.ts";
 import { createLogger } from "@dezoomify/browser-runtime/logging";
-import { createJobController } from "./controller.js";
+import { createJobController } from "./controller.ts";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
-import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.js";
-import type { JobBinding } from "./transport.js";
+import { createCoordinatorSourceTransport, engineFailure, isJobBinding } from "./transport.ts";
+import type { JobBinding } from "./transport.ts";
 
 declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
 declare const __DEZOOMIFY_TEST_PERMISSION_MOCK__: boolean;

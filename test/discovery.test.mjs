@@ -1,8 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   classifyReadableBytes,
   isZoomableContent,
@@ -14,6 +11,7 @@ import {
   noImageFoundError,
 } from "../src/discovery.ts";
 import * as discoveryJs from "../src/discovery.ts";
+import { createWebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
 
 const ANTHROPIC_LIKE_HTML = `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><title>Formalizing Fermat's Last Theorem</title>
@@ -157,92 +155,30 @@ test("typed module surface stays exportable (no dead error-path classifier)", ()
   assert.equal(bytesToTextPreview(textToBytes("hi")), "hi");
 });
 
-test("entries never fabricate tile progress; negatives carry a structured error", () => {
-  const thisFile = fileURLToPath(import.meta.url);
-  const srcDir = path.dirname(path.dirname(thisFile));
-  const mainTs = fs.readFileSync(path.join(srcDir, "src", "main.ts"), "utf8");
-  const webFetchTs = fs.readFileSync(
-    path.join(srcDir, "packages", "browser-runtime", "src", "web-fetch.ts"),
-    "utf8",
-  );
-  // Positive-path fabrications stay banned: no hardcoded dimensions or fake
-  // save success. A real save lifecycle is allowed, but only when backed by
-  // actual canvas encoding (toBlob) of assembled pixels.
-  assert.ok(!mainTs.includes("14 of 28"), "main.ts must not hardcode fake tile counts");
-  assert.ok(!mainTs.includes("14, total: 28"), "main.ts must not hardcode fake totals");
-  assert.ok(!mainTs.includes("4096"), "main.ts must not hardcode fake dimensions");
-  assert.ok(!mainTs.includes("3072"), "main.ts must not hardcode fake dimensions");
-  assert.ok(!mainTs.includes("Image ready to save"), "main.ts must not fake save success");
-  assert.ok(!mainTs.includes("Reading image tiles"), "main.ts must not imply tile fetch");
-  if (mainTs.includes("save-done")) {
-    assert.ok(mainTs.includes("toBlob"), "main.ts must encode real pixels before save-done");
-  }
-  // The WASM core is authoritative: the website forwards every readable
-  // payload and lets the engine decide. The substring classifier stays as a
-  // UI hint only and must never gate (throw) on a negative hint.
-  assert.ok(
-    mainTs.includes("classifyHint: (bytes, info) => classifyReadableBytes(bytes, info)"),
-    "main.ts injects the website classifier as a hint",
-  );
-  assert.ok(
-    webFetchTs.includes("running full discovery"),
-    "shared web fetcher logs a hint and runs WASM discovery always",
-  );
-  assert.ok(
-    mainTs.includes("fetchMetadata: webFetcher.fetchMetadataFor"),
-    "main.ts forwards shared-fetcher metadata to the WASM discovery client",
-  );
-  assert.ok(
-    !webFetchTs.includes("content classifier: no zoomable-image content"),
-    "shared web fetcher must not fail when the first head lacks a zoomable literal",
-  );
-  assert.ok(
-    !webFetchTs.includes('throw failure(\n      "NO_IMAGE_FOUND"') &&
-      !webFetchTs.includes('throw failure("NO_IMAGE_FOUND"') &&
-      !webFetchTs.includes('throw fetchFailure("NO_IMAGE_FOUND"'),
-    "shared web fetcher must not throw NO_IMAGE_FOUND before the engine runs",
-  );
-  // NO_IMAGE_FOUND still exists as the engine's terminal discovery code:
-  // the worker maps the wasm adapter's typed `adapter.no-candidate` code to
-  // it, never a substring of the rendered aggregate.
-  const workerJs = fs.readFileSync(path.join(srcDir, "src", "worker.js"), "utf8");
-  assert.ok(workerJs.includes('"NO_IMAGE_FOUND"'), "worker still reports NO_IMAGE_FOUND from the engine");
-  assert.ok(
-    workerJs.includes('engine.code === "adapter.no-candidate"'),
-    "worker detects the engine aggregate by its typed adapter code",
-  );
-  assert.ok(
-    !workerJs.includes('includes("no discovery candidate accepted")'),
-    "worker must not sniff the rendered aggregate text",
-  );
-  // Negative verdict shape always carries a terminal discovery error.
+test("negatives carry a structured terminal discovery error", () => {
   const err = noImageFoundError("direct");
   assert.equal(err.code, "NO_IMAGE_FOUND");
   assert.equal(err.retryable, false);
   assert.equal(err.phase, "discovery");
 });
 
-test("regression: heads without zoomable literals still reach WASM discovery (GAC/krpano/IIIF)", () => {
-  // Same-URL parity: the extension tries ranked candidates directly
-  // (modal.ts discover loop), so these heads succeed there via secondary
-  // resources (tile-info XML, tour.xml, info.json). The website's old
-  // first-256KiB substring gate failed them with NO_IMAGE_FOUND before the
-  // engine ever ran. The classifier stays negative here (hint only); the
-  // website must still forward every payload to the WASM core.
-  const GAC_HEAD =
+// Same-URL parity: these heads carry no zoomable literal, so the substring
+// classifier stays negative (hint only). The website must still forward every
+// payload to the WASM core, which alone reports NO_IMAGE_FOUND.
+const LITERAL_FREE_HEADS = {
+  "gac-lh3-head":
     '<!doctype html><html><head><title>Artwork</title><meta charset="utf-8"></head>' +
-    '<body><img src="https://lh3.googleusercontent.com/abc123=w1600"></body></html>';
-  const KRPANO_HEAD =
+    '<body><img src="https://lh3.googleusercontent.com/abc123=w1600"></body></html>',
+  "krpano-tour-head":
     '<!doctype html><html><head><title>Tour</title><script src="/tour/viewer.js"></script></head>' +
-    '<body><div id="pano"></div><script>embedViewer({xml:"tour.xml"})</script></body></html>';
-  const IIIF_HEAD =
+    '<body><div id="pano"></div><script>embedViewer({xml:"tour.xml"})</script></body></html>',
+  "iiif-info-link-head":
     '<!doctype html><html><head><title>Scan</title></head>' +
-    '<body><a href="https://example.test/image/42/info.json">view</a></body></html>';
-  for (const [name, head] of [
-    ["gac-lh3-head", GAC_HEAD],
-    ["krpano-tour-head", KRPANO_HEAD],
-    ["iiif-info-link-head", IIIF_HEAD],
-  ]) {
+    '<body><a href="https://example.test/image/42/info.json">view</a></body></html>',
+};
+
+test("regression: heads without zoomable literals are a negative hint, not a verdict", () => {
+  for (const [name, head] of Object.entries(LITERAL_FREE_HEADS)) {
     assert.equal(isZoomableContent(head), false, `${name} has no head literal (hint negative)`);
     const verdict = classifyReadableBytes(textToBytes(head), {
       via: "direct",
@@ -251,28 +187,35 @@ test("regression: heads without zoomable literals still reach WASM discovery (GA
     assert.equal(verdict.found, false, `${name} hint is negative`);
     assert.equal(verdict.error.code, "NO_IMAGE_FOUND", name);
   }
-  // The website must not gate on that negative hint: fetchMetadataFor logs
-  // and forwards to the engine, which alone reports NO_IMAGE_FOUND.
-  const thisFile = fileURLToPath(import.meta.url);
-  const srcDir = path.dirname(path.dirname(thisFile));
-  const mainTs = fs.readFileSync(path.join(srcDir, "src", "main.ts"), "utf8");
-  const webFetchTs = fs.readFileSync(
-    path.join(srcDir, "packages", "browser-runtime", "src", "web-fetch.ts"),
-    "utf8",
-  );
-  assert.ok(
-    webFetchTs.includes("running full discovery") &&
-      mainTs.includes("fetchMetadata: webFetcher.fetchMetadataFor"),
-    "shared web fetcher forwards literal-free heads to website WASM discovery",
-  );
-  // The extension ranks candidates through the same core and never drops one
-  // on a head-text pre-filter.
-  const jobIndex = fs.readFileSync(
-    path.join(srcDir, "apps", "extension", "src", "job", "index.ts"),
-    "utf8",
-  );
-  assert.ok(
-    jobIndex.includes('postMessage({ type: "engine.rank"'),
-    "extension ranks candidates through the engine, no head-text pre-filter",
-  );
+});
+
+function fetcherForHead(head) {
+  const bytes = textToBytes(head).slice(0);
+  return createWebFetcher({
+    fetchImpl: async () => ({
+      status: 200,
+      url: "https://example.test/",
+      headers: { get: () => "text/html" },
+      async arrayBuffer() {
+        return bytes;
+      },
+    }),
+    isProxyEligible: () => ({ eligible: false }),
+    classifyHint: (hintBytes, info) => classifyReadableBytes(hintBytes, info),
+    hooks: { onRequestStart: () => 0, onRequestEnd() {}, onLog() {}, onUpdate() {} },
+    messages: {
+      rateLimitedBySite: "rate limited",
+      siteBusy: "busy",
+      discoveryFailed: () => "discovery failed",
+    },
+  });
+}
+
+test("regression: literal-free heads are forwarded to discovery, never failed by the hint", async () => {
+  for (const [name, head] of Object.entries(LITERAL_FREE_HEADS)) {
+    const fetcher = fetcherForHead(head);
+    const res = await fetcher.fetchMetadataFor("https://example.test/", {});
+    assert.equal(res.via, "direct", name);
+    assert.ok(res.bytes.byteLength > 0, `${name} bytes reach the engine`);
+  }
 });

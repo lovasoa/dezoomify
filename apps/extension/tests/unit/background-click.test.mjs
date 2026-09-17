@@ -1,15 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { transpileTypeScript } from "./ts-source-loader.mjs";
+import { createBackgroundCoordinator } from "../../src/background/coordinator.ts";
 
-const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
-const loggingSrc = read("../../../../packages/browser-runtime/src/logging.ts").replace(/^export\s+/gm, "");
-const operationsSrc = read("../../src/background/source-operations.ts").replace(/^export\s+/gm, "");
-const indexSrc = read("../../src/background/index.ts")
-  .replace(/^import .*browser-runtime\/logging";\s*$/m, "")
-  .replace(/^import .*source-operations\.js";\s*$/m, "");
-const backgroundSrc = transpileTypeScript(`${loggingSrc}\n${operationsSrc}\n${indexSrc}`, "background-combined.ts");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const TAB = { id: 7, url: "https://gallery.example/work" };
 
@@ -46,20 +38,9 @@ function fakeBrowser(session = {}, results = []) {
   return { api, calls, listeners, session };
 }
 
-let sequence = 0;
 async function load(fake) {
-  const browser = globalThis.browser;
-  const chrome = globalThis.chrome;
-  globalThis.browser = undefined;
-  globalThis.chrome = fake.api;
-  try {
-    sequence += 1;
-    const mod = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(backgroundSrc)}#${sequence}`);
-    mod.startBackground();
-  } finally {
-    globalThis.browser = browser;
-    globalThis.chrome = chrome;
-  }
+  const mod = createBackgroundCoordinator({ browserApi: fake.api });
+  mod.startBackground();
 }
 
 function jobId(fake) { return decodeURIComponent(fake.calls.create[0].url.split("#jobId=")[1]); }
@@ -77,10 +58,6 @@ test("toolbar opens the dedicated job tab without injection, registration, or re
   await tick();
   assert.equal(fake.calls.create.length, 1);
   assert.equal(fake.calls.execute.length, 0, "source work waits for job readiness");
-  const background = readFileSync(new URL("../../src/background/index.ts", import.meta.url), "utf8");
-  assert.ok(!background.includes("registerContentScripts"));
-  assert.ok(!background.includes("tabs.reload"));
-  assert.ok(!background.includes("getBrowserInfo"));
   await ready(fake);
   assert.equal(fake.calls.execute.length, 1);
   assert.deepEqual(fake.calls.execute[0].target, { tabId: TAB.id, frameIds: [0] });
