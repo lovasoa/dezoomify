@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createController, renderAppChoice } from "../packages/shared-ui/src/controller.ts";
 import {
+  categoryFor,
+  describeFailure,
+  phaseFor,
+} from "../packages/shared-ui/src/failure.ts";
+import {
   renderTransportLabel,
   renderSaveGuidance,
   renderErrorSummary,
@@ -111,6 +116,40 @@ test("components render transport/save/error/progress plainly", () => {
   const summary = renderErrorSummary({ code: "X", category: "c", retryable: true, message: "The picture could not be opened." });
   assert.ok(summary.includes("try again"));
   assert.ok(renderProgress(1, 4).includes("1 of 4"));
+});
+
+test("failure presenter keeps the engine block out of the headline", () => {
+  const engineBlock =
+    " - iiif: Invalid IIIF info.json file: expected value at line 1 column 1\n" +
+    " - zoomify: HTTP 404 fetching this address\n" +
+    " - 12 other format(s) did not match this page address";
+  const error = describeFailure({
+    code: "job.discovery-failed",
+    engineDetail: engineBlock,
+    retryable: false,
+    host: "example.test",
+  });
+  // Prominent message: plain headline naming the source, never the block.
+  assert.equal(error.category, "discovery");
+  assert.equal(error.phase, "discovery");
+  assert.ok(!error.message.includes("iiif"));
+  assert.ok(error.message.includes("example.test"));
+  // The engine block is the only thing in the technical detail.
+  assert.equal(error.detail, engineBlock);
+});
+
+test("failure classification derives from codes, never text", () => {
+  assert.equal(categoryFor("NO_IMAGE_FOUND"), "discovery");
+  assert.equal(categoryFor("INVALID_URL"), "validation");
+  assert.equal(categoryFor("OUTPUT_ENCODE_FAILED"), "output");
+  assert.equal(categoryFor("PLAN_INVALID"), "internal");
+  assert.equal(categoryFor("TILE_FAILED"), "transport");
+  assert.equal(categoryFor({ code: "OUTPUT_ENCODE_FAILED" }), "transport");
+  assert.equal(categoryFor(null), "transport");
+  assert.equal(phaseFor("NO_IMAGE_FOUND"), "discovery");
+  assert.equal(phaseFor("OUTPUT_DENIED"), "output");
+  assert.equal(phaseFor("TILE_FAILED"), "acquisition");
+  assert.equal(phaseFor({ code: "OUTPUT_DENIED" }), "acquisition");
 });
 
 test("website scenario transcripts have fixed shape", () => {

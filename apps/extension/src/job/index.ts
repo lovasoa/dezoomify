@@ -1,7 +1,7 @@
 /** Dedicated extension job-tab integration. No webpage postMessage bridge. */
-import { renderView } from "@dezoomify/shared-ui";
+import { describeFailure, renderView } from "@dezoomify/shared-ui";
 import { createElement } from "react";
-import type { UiStatus, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
+import type { StructuredError, UiStatus, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
 import {
   canvasToPngBlob,
   createCanvasAssembly,
@@ -22,9 +22,8 @@ type ExtensionApi = {
   runtime?: { sendMessage?(message: unknown): Promise<unknown>; onMessage?: { addListener(listener: (message: Record<string, unknown>) => void): void } };
   permissions?: { contains?(request: { origins: string[] }): Promise<boolean>; request?(request: { origins: string[] }): Promise<boolean> };
 };
-type Failure = { code: string; category: string; retryable: boolean; message: string };
-type ViewContext = SharedViewContext & { failure?: Failure };
-type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: Failure; catalog?: { images?: unknown[] } };
+type ViewContext = SharedViewContext & { failure?: StructuredError };
+type JobEvent = Record<string, unknown> & { type: string; acquired?: number; total?: number; error?: unknown; catalog?: { images?: unknown[] } };
 type WorkerMessage = { type?: string; messages?: unknown[]; error?: unknown; urls?: unknown[] };
 
 const hostGlobal = globalThis as typeof globalThis & { browser?: ExtensionApi; chrome?: ExtensionApi };
@@ -162,6 +161,38 @@ function showPartialDecision(generation: number) {
   render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Some tiles are missing" } });
 }
 
+/** Source host for shared copy interpolation; "" when the input is unparseable. */
+function sourceHost(): string {
+  try {
+    return new URL(lastSource).host;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * One shared presenter for engine failures: the plain headline goes in
+ * `message`, the engine's raw per-format aggregate moves to `detail`, and the
+ * stable category/phase/retryable are derived from the code. The extension
+ * never renders the raw engine block as the first message.
+ */
+function presentEngineFailure(raw: unknown): StructuredError {
+  const candidate = raw && typeof raw === "object"
+    ? raw as { code?: unknown; message?: unknown; retryable?: unknown; phase?: unknown; transport?: unknown }
+    : null;
+  return describeFailure({
+    code: typeof candidate?.code === "string" ? candidate.code : "job.failed",
+    engineDetail: typeof candidate?.message === "string" ? candidate.message : "",
+    retryable: typeof candidate?.retryable === "boolean" ? candidate.retryable : undefined,
+    phase: typeof candidate?.phase === "string" ? candidate.phase : undefined,
+    // The extension always fetches under the granted browser session; the
+    // engine's typed event carries no transport, so the details line would
+    // otherwise misreport `direct`.
+    transport: typeof candidate?.transport === "string" ? candidate.transport : "browser-session",
+    host: sourceHost(),
+  });
+}
+
 /** Host-side effect execution failed terminally: render it and stop. */
 function onHostFailure(error: unknown) {
   if (hostFailed) return;
@@ -169,19 +200,20 @@ function onHostFailure(error: unknown) {
   const candidate = error && typeof error === "object"
     ? error as { code?: unknown; message?: unknown; retryable?: unknown; detail?: unknown; phase?: unknown; transport?: unknown }
     : null;
-  const failure = candidate && typeof candidate.code === "string"
-    ? {
-      code: candidate.code,
-      category: "extension",
-      retryable: candidate.retryable === true,
-      message: candidate.code === "adapter.wrong-state"
-        ? "The extension lost sync while reading this image. Start the scan again."
-        : (typeof candidate.message === "string" ? candidate.message : "The image could not be assembled in this tab."),
-      ...(typeof candidate.detail === "string" ? { detail: candidate.detail } : {}),
-      ...(typeof candidate.phase === "string" ? { phase: candidate.phase } : {}),
-      ...(typeof candidate.transport === "string" ? { transport: candidate.transport } : {}),
-    }
-    : { code: "output-failed", category: "extension", retryable: false, message: "The image could not be assembled in this tab." };
+  const code = candidate && typeof candidate.code === "string" ? candidate.code : "output-failed";
+  const message = code === "adapter.wrong-state"
+    ? "The extension lost sync while reading this image. Start the scan again."
+    : (typeof candidate?.message === "string" ? candidate.message : "The image could not be assembled in this tab.");
+  const failure = describeFailure({
+    code,
+    message,
+    engineDetail: typeof candidate?.detail === "string" ? candidate.detail : undefined,
+    category: "extension",
+    retryable: candidate?.retryable === true,
+    phase: typeof candidate?.phase === "string" ? candidate.phase : undefined,
+    transport: typeof candidate?.transport === "string" ? candidate.transport : undefined,
+    host: sourceHost(),
+  });
   render("failed", { failure, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
 }
 
@@ -225,7 +257,7 @@ function handleEvent(event: JobEvent) {
     lastTileProgress = { current: event.acquired, total: event.total };
     render("downloading", { currentProgress: lastTileProgress, jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" } });
   }
-  else if (event.type === "failed") { partialDecision = null; render("failed", { failure: event.error, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } }); }
+  else if (event.type === "failed") { partialDecision = null; render("failed", { failure: presentEngineFailure(event.error), jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } }); }
   else if (event.type === "cancelled") { partialDecision = null; render("cancelled", { jobActivity: { startedAt: Date.now(), stepLabel: "Cancelled" } }); }
   else if (event.type === "completed" || event.type === "partial-completed") { partialDecision = null; render("completed", { jobActivity: { startedAt: Date.now(), stepLabel: event.type === "completed" ? "Completed" : "Completed (partial)" } }); }
   else if (event.type === "catalog" && !selected) {

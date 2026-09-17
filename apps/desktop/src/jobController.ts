@@ -2,12 +2,10 @@
 // Controller walks plus the failure/completion terminals. Job state arrives
 // through explicit env callbacks, so this module owns no globals.
 // File move, no behavior change.
-import { t } from "@dezoomify/shared-ui";
+import { describeFailure, t } from "@dezoomify/shared-ui";
 import {
-  categoryFor,
   formatMissingSummary,
   phaseFor,
-  plainMessageFor,
   trimTechnical,
 } from "./errorCopy.ts";
 
@@ -62,42 +60,34 @@ export interface FailOpts {
 
 export function dispatchFail(env: FailEnv, code: string, message: string, opts?: FailOpts): void {
   const transport = opts?.transport ?? env.nativeTransport;
-  const phase = opts?.phase ?? phaseFor(code);
-  // Prefer the backend's retryable verdict when present (stable codes);
-  // fall back to the legacy local heuristic only for payloads without it.
-  const retryable =
-    opts?.retryable ?? (code !== "INVALID_URL" && code !== "NO_IMAGE_FOUND" && code !== "OUTPUT_DENIED");
-  // Layered presentation: the first message stays a plain jargon-free
-  // sentence naming the step, picture source, and single best action.
-  // The shared renderer composes the technical details from the typed
-  // fields below (url line, engine block, trailing context line); the
-  // desktop provenance lines ride as `extras` after it.
-  const plain = plainMessageFor(code, message, env.host());
-  const engine = trimTechnical(message || "");
-  const extra = opts?.detail && opts?.detail !== message ? trimTechnical(opts.detail) : "";
-  const detail = [engine, extra].filter(Boolean).join("\n\n");
-  const url = env.sourceUrl();
+  // Layered presentation is shared with the other products: the plain
+  // headline, the stable category/phase, and the engine block moved to
+  // `detail` all come from one presenter, so no surface re-implements the
+  // split. Desktop-only provenance lines ride as `extras`.
+  const error = describeFailure({
+    code,
+    engineDetail: trimTechnical(message || ""),
+    extraDetail: opts?.detail && opts.detail !== message ? trimTechnical(opts.detail) : undefined,
+    // Prefer the backend's retryable verdict when present (stable codes);
+    // fall back to the legacy local heuristic only for payloads without it.
+    retryable:
+      opts?.retryable ?? (code !== "INVALID_URL" && code !== "NO_IMAGE_FOUND" && code !== "OUTPUT_DENIED"),
+    transport,
+    phase: opts?.phase ?? phaseFor(code),
+    url: env.sourceUrl() || undefined,
+    host: env.host(),
+    extras: [
+      `Status: ${env.getStatus()}`,
+      `Origin: ${env.origin() === "" ? "n/a" : env.origin()}`,
+      ...(opts?.resourceKind ? [`Resource: ${opts.resourceKind}`] : []),
+    ],
+  });
   env.dispatch({
     seq: env.next(),
     sessionId: env.sessionId(),
     kind: "fail",
     transport,
-    error: {
-      code,
-      category: categoryFor(code),
-      retryable,
-      message: plain,
-      transport,
-      phase,
-      ...(detail ? { detail } : {}),
-      // Full request URL, rendered verbatim in the on-device details only.
-      ...(url ? { url } : {}),
-      extras: [
-        `Status: ${env.getStatus()}`,
-        `Origin: ${env.origin() === "" ? "n/a" : env.origin()}`,
-        ...(opts?.resourceKind ? [`Resource: ${opts.resourceKind}`] : []),
-      ],
-    },
+    error,
   });
   env.pushLog(`Failed (${code}): ${trimTechnical(message, 160)}`);
   env.clearPending();
