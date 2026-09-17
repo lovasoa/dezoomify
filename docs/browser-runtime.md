@@ -9,18 +9,20 @@ core, job, and pure processing code.
 ## Engine-effect assembly
 
 The runtime is the shared effect executor for browser hosts of the Rust job
-engine. The extension job tab uses this executor; the website uses the same
-low-level browser effects with its discovery-session orchestration because
-processed-tile recipes are not yet supported by the engine-effect contract.
-It owns no job policy: retries, cancellation, partial-output decisions, and
-ordering belong to the engine. The executor maps typed host effects onto
-browser execution:
+engine. The website and the extension job tab both drive it through the same
+engine host (`engine-host.ts`) over the WASM session; only the injected
+transport and output surface differ. It owns no job policy: retries,
+cancellation, partial-output decisions, and ordering belong to the engine.
+The executor maps typed host effects onto browser execution:
 
 - `acquire-tile` carries the complete output placement (position, planned
   extent, declared canvas, processing recipe) plus the engine-declared
   request headers. Hosts decode during acquisition (the native model), so a
   tile that cannot decode fails its acquisition outcome and flows through
-  the engine's retry and partial policy.
+  the engine's retry and partial policy. Probe acquisitions (`purpose:
+  probe`) carry no output placement obligation: the host measures the tile
+  with the shared `probe.ts` helper (readable-bytes decode, plain `<img>`
+  fallback) and answers `provide-probe-outcome`, never retaining a bitmap.
 - `finalize-output` carries the partial marker, output format, and declared
   canvas size. Within that awaited operation the
   host validates actual dimensions and area before allocating the surface
@@ -36,21 +38,24 @@ browser execution:
   `downloads` permission), releases resources, and replies with typed success
   or failure. A tainted display-only canvas skips encoding.
 
-Processing recipes beyond `none` are not executable by the engine-host
-assembly yet and fail typed (`TILE_PROCESSING_UNAVAILABLE`) instead of
-silently dropping the recipe; the website's discovery-session path keeps
-full processing support until the engine contract grows it. The
-deterministic catalog selection for engine hosts lives in
+Processing recipes beyond `none` run through the WASM session's pure
+`applyProcessing` op, serialized by the assembly; an unavailable recipe
+fails typed instead of silently dropping the recipe. Ordinary unprocessed
+tiles that cannot be read as bytes fall back to an ordinary `<img>`
+(display-only): the canvas taints, no bytes are produced, and the job
+completes as display-only. Per-origin classification means only the first
+tile of an origin attempts readable bytes; later tiles go straight to the
+image. The deterministic catalog selection for engine hosts lives in
 `engine-selection.ts` (largest ready image, largest level that fits the
 browser canvas, smallest declared level as the fail-fast fallback).
 
 ## Catalog boundary
 
 Browser hosts consume the ordered protocol `CatalogDto` without duplicated
-identity fields. The WASM discovery session projects its normalized core
-catalog through the same `dezoomify-job` projection as the job engine, and
-planning accepts zero-based image and level positions. Browser selection, declared-size preflight, and plan gates
-therefore use one generated wire shape; hosts do not define their own catalog
+identity fields. The job engine projects its normalized core catalog through
+one generated wire shape, and planning accepts zero-based image and level
+positions. Browser selection, declared-size preflight, and plan gates
+therefore use that shape; hosts do not define their own catalog
 or level DTOs.
 
 ## Ordinary image display

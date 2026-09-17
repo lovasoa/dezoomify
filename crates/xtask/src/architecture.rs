@@ -91,7 +91,7 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
     for (contract, producer, produced, consumer, consumed) in [
         (
             "JobCommand",
-            "apps/extension/src/job/worker.ts",
+            "packages/browser-runtime/src/worker-host.ts",
             "kind: \"command\"",
             "crates/dezoomify-wasm/src/session.rs",
             "JobCommand",
@@ -100,7 +100,7 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
             "HostEffect",
             "crates/dezoomify-wasm/src/session.rs",
             "HostEffect",
-            "apps/extension/src/job/controller.ts",
+            "packages/browser-runtime/src/engine-host.ts",
             "message.type",
         ),
         (
@@ -141,7 +141,9 @@ fn check_website_runtime_usage(root: &Path) -> Result<(), String> {
     for required in [
         "createJobActivity",
         "createTileDecoder",
-        "createTilePainter",
+        "createEngineHost",
+        "createCanvasAssembly",
+        "createProbeSize",
         "createTileThrottle",
         "createWebFetcher",
         "canvasToPngBlob",

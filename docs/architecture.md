@@ -39,13 +39,12 @@ host-specific implementation details.
 
 The browser host owns workers, readable-byte fetching, request activity,
 active-transport reporting, image decode, tile painting, canvas and save
-surfaces, and an optional bounded browser cache. The extension job tab uses
-its engine-effect executor. The website keeps a discovery-session
-orchestrator for processed-tile support while using the same runtime fetch,
-decode, painting, activity, preview, and save implementations. The executor
-owns canvas execution and host limits, never job policy (retries,
-cancellation, partial output, and ordering stay in the engine). Hosts supply
-transport eligibility and fallback
+surfaces, and an optional bounded browser cache. The website and the
+extension job tab both run their jobs through the shared engine host
+(`engine-host.ts`) over `crates/dezoomify-wasm`, injecting only their own
+transport and output surface. The host owns canvas execution and host limits,
+never job policy (retries, cancellation, partial output, and ordering stay in
+the engine). Hosts supply transport eligibility and fallback
 policy: the web integration tries a direct browser fetch first, with browser
 credentials omitted, and may automatically use the metadata CORS proxy only
 after a classified CORS or network failure, or a direct fetch that does not

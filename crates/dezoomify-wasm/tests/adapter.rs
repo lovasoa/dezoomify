@@ -66,6 +66,7 @@ fn provide_resource_bytes(
     envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
         request: *request,
         buffer,
+        final_uri: None,
     }))
 }
 
@@ -356,6 +357,7 @@ fn delegated_lifecycle_completes_through_tile_bytes() {
     let replay = envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
         request,
         buffer: meta_reference,
+        final_uri: None,
     }));
     assert_eq!(
         session.dispatch(&replay).unwrap_err().code(),
@@ -386,7 +388,7 @@ fn discovery_failure_and_cancel_paths_follow_the_engine() {
     let messages = failing.drain_messages();
     match &decode_all(&messages).last().expect("messages").body {
         ControlBody::Event(JobEvent::Failed { error, .. }) => {
-            assert_eq!(error.code, "job.discovery-failed");
+            assert_eq!(error.code, "job.no-images");
             // Host message text never crosses into the engine, so the
             // canary cannot leak structurally (not merely by redaction).
             assert!(!error.message.contains("CANARY"));
@@ -705,6 +707,7 @@ fn empty_resource_fails_the_job_and_wrong_request_is_rejected() {
     let wrong = envelope_bytes(ControlBody::Command(JobCommand::ProvideResource {
         request: u32::MAX,
         buffer,
+        final_uri: None,
     }));
     assert_eq!(
         other.dispatch(&wrong).unwrap_err().code(),

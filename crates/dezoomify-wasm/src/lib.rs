@@ -19,6 +19,7 @@
 //! | drain          | [`session::Session::drain_messages`] (FIFO, exactly once)    |
 //! | buffers        | `allocate_buffer` / `write_buffer` / `commit_buffer` /      |
 //! |                | `take_buffer` / `free_buffer` / `protocol_handle` on Session |
+//! | applyProcessing | [`session::Session::apply_processing`] (pure recipe op)     |
 //! | dispose        | [`session::Session::dispose`] (repeat-safe)                   |
 //!
 //! ## Ownership, reentrancy, disposal
@@ -214,101 +215,19 @@ pub mod wasm_api {
             self.inner.free_buffer(handle).map_err(js_error)
         }
 
+        /// Apply one core processing recipe to tile bytes (pure: no job
+        /// state, same recipes as the discovery adapter).
+        #[wasm_bindgen(js_name = "applyProcessing")]
+        pub fn apply_processing(&self, recipe: &str, bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+            self.inner
+                .apply_processing(recipe, bytes.to_vec())
+                .map_err(js_error)
+        }
+
         /// Cancel/release session resources; repeat-safe (`dispose`).
         #[wasm_bindgen(js_name = "dispose")]
         pub fn dispose(&mut self) -> Result<(), JsValue> {
             self.inner.dispose().map_err(js_error)
-        }
-    }
-
-    /// The `DiscoverySession` export: real core discovery for browser hosts.
-    #[wasm_bindgen(js_name = "DiscoverySession")]
-    pub struct JsDiscoverySession {
-        inner: super::discovery::DiscoverySession,
-    }
-
-    #[wasm_bindgen(js_class = "DiscoverySession")]
-    impl JsDiscoverySession {
-        /// Start core discovery for one http(s) input URL.
-        #[wasm_bindgen(constructor)]
-        pub fn new(input_url: String) -> Result<JsDiscoverySession, JsValue> {
-            super::discovery::DiscoverySession::new(&input_url)
-                .map(|inner| JsDiscoverySession { inner })
-                .map_err(js_error)
-        }
-
-        /// Next resource the core needs as JSON, or the string `"null"` when
-        /// [`Self::finish`] may be called.
-        #[wasm_bindgen(js_name = "nextNeed")]
-        pub fn next_need(&mut self) -> String {
-            self.inner.next_need().unwrap_or_else(|| "null".to_string())
-        }
-
-        /// Provide fetched bytes for one outstanding need (`final_uri` may be
-        /// empty when no redirect happened; empty collapses to `None` so the
-        /// core falls back to the request URI for relative tile URLs).
-        #[wasm_bindgen(js_name = "provide")]
-        pub fn provide(
-            &mut self,
-            request_id: usize,
-            bytes: &[u8],
-            final_uri: String,
-        ) -> Result<(), JsValue> {
-            let final_uri = (!final_uri.is_empty()).then_some(final_uri);
-            self.inner
-                .provide(request_id, bytes.to_vec(), final_uri)
-                .map_err(js_error)
-        }
-
-        /// Report a failed host fetch for one outstanding need.
-        /// `cause_json` is the serialized core fetch cause
-        /// (`{code, http?, transport, reason?}`).
-        #[wasm_bindgen(js_name = "provideFailure")]
-        pub fn provide_failure(
-            &mut self,
-            request_id: usize,
-            cause_json: String,
-        ) -> Result<(), JsValue> {
-            self.inner
-                .provide_failure(request_id, &cause_json)
-                .map_err(js_error)
-        }
-
-        /// Complete discovery; returns the catalog JSON.
-        #[wasm_bindgen(js_name = "finish")]
-        pub fn finish(&mut self) -> Result<String, JsValue> {
-            self.inner.finish().map_err(js_error)
-        }
-
-        /// Project the tile plan of one level (or the next probe step).
-        #[wasm_bindgen(js_name = "levelTiles")]
-        pub fn level_tiles(&mut self, image: u32, level: u32) -> Result<String, JsValue> {
-            self.inner
-                .level_tiles(image as usize, level as usize)
-                .map_err(js_error)
-        }
-
-        /// Submit one probe observation; returns the next step or the plan.
-        #[wasm_bindgen(js_name = "probeSubmit")]
-        pub fn probe_submit(
-            &mut self,
-            image: u32,
-            level: u32,
-            ok: bool,
-            width: u32,
-            height: u32,
-        ) -> Result<String, JsValue> {
-            self.inner
-                .probe_submit(image as usize, level as usize, ok, width, height)
-                .map_err(js_error)
-        }
-
-        /// Apply one core processing recipe to tile bytes.
-        #[wasm_bindgen(js_name = "applyProcessing")]
-        pub fn apply_processing(&mut self, recipe: &str, bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
-            self.inner
-                .apply_processing(recipe, bytes.to_vec())
-                .map_err(js_error)
         }
     }
 }

@@ -84,3 +84,56 @@ export function createCoordinatorSourceTransport(deps: { sendMessage(message: un
 export function engineFailure(error: unknown) {
   return asFetchFailure(error);
 }
+
+export interface EngineResourceEffect {
+  request?: {
+    id: number;
+    purpose: string;
+    uri: string;
+    method?: string;
+    headers?: Record<string, string> | Array<{ name: string; value: string }>;
+  };
+}
+
+/**
+ * Route one engine effect fetch for the extension. Metadata prefers the
+ * monitored tab's origin context and falls back to the granted
+ * extension-origin session; tiles always use the extension origin. The
+ * source-tab fetch is CORS-bound and only credential-safe same-origin, so a
+ * source-context failure must not fail the job while the extension-origin
+ * transport can still answer it.
+ */
+export function createEngineResourceFetcher(deps: {
+  binding(): JobBinding;
+  sourceTransport: { fetchResource(request: unknown): Promise<{ bytes: Uint8Array }> };
+  extensionTransport: { fetchResource(url: string, opts?: unknown): Promise<{ bytes: Uint8Array }> };
+  cancelled(): boolean;
+  onSourceFailure?(cause: { code?: unknown; blocked_reason?: unknown }): void;
+}): (effect: EngineResourceEffect) => Promise<{ bytes: Uint8Array }> {
+  return async (effect: EngineResourceEffect): Promise<{ bytes: Uint8Array }> => {
+    const request = effect.request;
+    if (!request) throw Object.assign(new Error("effect has no request"), { code: "adapter.malformed" });
+    if (request.purpose === "metadata") {
+      try {
+        const result = await deps.sourceTransport.fetchResource({
+          binding: deps.binding(),
+          requestId: request.id,
+          uri: request.uri,
+          method: request.method,
+          headers: request.headers,
+          purpose: request.purpose,
+        });
+        return { bytes: result.bytes };
+      } catch (sourceError) {
+        deps.onSourceFailure?.(asFetchFailure(sourceError));
+      }
+    }
+    return deps.extensionTransport.fetchResource(request.uri, {
+      requestId: request.id,
+      purpose: request.purpose,
+      headers: request.headers,
+      userIntent: true,
+      cancelled: deps.cancelled,
+    });
+  };
+}

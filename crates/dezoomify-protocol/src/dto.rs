@@ -202,6 +202,10 @@ pub enum JobCommand {
     ProvideResource {
         request: u32,
         buffer: BufferHandle,
+        /// Post-redirect URL observed by the host, when it has one. Relative
+        /// tile URLs resolve against this instead of the request URI.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        final_uri: Option<String>,
     },
     ProvideFetchFailure {
         request: u32,
@@ -212,6 +216,28 @@ pub enum JobCommand {
     },
     SelectLevel {
         level: u32,
+    },
+    /// Probe observation for one outstanding `acquire-tile` with
+    /// `purpose: probe`. Correlated by the adapter-minted request id (like
+    /// `ProvideResource`); the adapter maps it to the engine tile ordinal
+    /// and forwards `ProbeOutcome`. `ok=false` (or zero width/height)
+    /// reports a missing probe.
+    ProvideProbeOutcome {
+        request: u32,
+        ok: bool,
+        width: u64,
+        height: u64,
+    },
+    /// Display-only observation for one outstanding `acquire-tile` in
+    /// `AcquiringTiles`. The host holds an ordinary image element (no
+    /// readable bytes, canvas taints on draw) and the adapter forwards a
+    /// successful `TileOutcome`; the tainted output completes as
+    /// display-only downstream. Width/height are the observed image
+    /// dimensions and must be positive.
+    ProvideDisplayOutcome {
+        request: u32,
+        width: u64,
+        height: u64,
     },
     RecoveryChoice {
         generation: u32,

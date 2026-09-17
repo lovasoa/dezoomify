@@ -25,14 +25,14 @@ import {
   noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
-import { errorTransportFor, isOrdinaryImageTile, isProxyEligible } from "./webIntegration.ts";
+import { errorTransportFor, isProxyEligible } from "./webIntegration.ts";
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 import {
-  createDiscoveryClient,
-  type DiscoveryClient,
-  type PlanTile,
-  type WebCatalog,
-} from "../packages/browser-runtime/src/session.ts";
+  createCanvasAssembly,
+  createEngineHost,
+  createProbeSize,
+  type EngineHost,
+} from "../packages/browser-runtime/src/index.ts";
 import { failure, stableErrorCode } from "../packages/browser-runtime/src/failure.ts";
 import {
   BROWSER_LIMITS,
@@ -41,12 +41,9 @@ import {
   BROWSER_MAX_PLAN_TILES,
 } from "../packages/browser-runtime/src/limits.ts";
 import {
-  assertDeclaredSizeFitsBrowser,
-  assertPlanFitsBrowser,
   desktopHandoffLink,
   isAllowedSourceUrl,
   isLocalFileUrl,
-  mapWorkerLimitExceeded,
 } from "../packages/browser-runtime/src/plan-gates.ts";
 import { pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
@@ -69,7 +66,7 @@ import {
   websiteTileConcurrency,
 } from "../packages/browser-runtime/src/tile-policy.ts";
 import { createTileDecoder } from "../packages/browser-runtime/src/tile-decode.ts";
-import { createTilePainter, loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";
+import { loadTileImage } from "../packages/browser-runtime/src/tile-draw.ts";
 import { createJobActivity } from "../packages/browser-runtime/src/job-activity.ts";
 import { createLogger } from "../packages/browser-runtime/src/logging.ts";
 import { createWebFetcher, type WebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
@@ -95,10 +92,14 @@ const preview = createPreviewControls();
 let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
 let currentSeq = 0;
-let client: DiscoveryClient | null = null;
+let engineHost: EngineHost | null = null;
+let engineWorker: Worker | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
 let resultTitle: string | undefined;
+// Cross-worker processing calls (session.applyProcessing) awaiting a reply.
+const pendingProcess = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }>();
+let processSeq = 0;
 // Pause v1 (todo 5.7, suspend-acquisition): the website stops scheduling new
 // tiles while paused, finishes in-flight work, retains the canvas, and
 // re-drives on resume. Integration-layer only; the engine pause lives in
@@ -275,17 +276,11 @@ async function probeSizeFor(
   url: string,
   headers: Record<string, string>,
 ): Promise<{ ok: boolean; width: number; height: number }> {
-  try {
-    const { bytes } = await webFetcher.fetchTileFor(url, headers);
-    const bitmap = await tileDecoder.decode(bytes);
-    const size = { ok: bitmap.width > 0 && bitmap.height > 0, width: bitmap.width, height: bitmap.height };
-    bitmap.close();
-    return size;
-  } catch {
-    // Readable bytes are unavailable (e.g. no CORS grant). Probing only
-    // needs dimensions, which a plain <img> reports without byte access.
-    try {
-      const img = await loadTileImage(url, {
+  const probe = createProbeSize({
+    fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders),
+    decode: (bytes) => tileDecoder.decode(bytes),
+    loadImage: async (probeUrl) => {
+      const img = await loadTileImage(probeUrl, {
         hooks: {
           onRequestStart: (label) => jobActivity.noteRequestStart(label),
           onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
@@ -293,15 +288,138 @@ async function probeSizeFor(
         },
       });
       return { ok: img.naturalWidth > 0 && img.naturalHeight > 0, width: img.naturalWidth, height: img.naturalHeight };
-    } catch {
-      return { ok: false, width: 0, height: 0 };
-    }
-  }
+    },
+  });
+  return probe(url, headers);
 }
 
-function disposeClient(): void {
-  client?.dispose();
-  client = null;
+/** Tear down the active engine attempt: worker, session, assembly, buffers. */
+function disposeAttempt(): void {
+  const host = engineHost;
+  engineHost = null;
+  try { host?.dispose(); } catch { /* teardown is best effort */ }
+  const worker = engineWorker;
+  engineWorker = null;
+  try { worker?.terminate(); } catch { /* already gone */ }
+  for (const { reject } of pendingProcess.values()) {
+    reject(failure("WORKER_FAILED", "The image engine stopped.", false));
+  }
+  pendingProcess.clear();
+}
+
+/** Apply one core processing recipe through the worker session. */
+function processTile(recipe: string, bytes: ArrayBuffer): Promise<ArrayBuffer> {
+  const worker = engineWorker;
+  if (!worker) return Promise.reject(failure("WORKER_FAILED", "The image engine is not running.", false));
+  const requestId = ++processSeq;
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    pendingProcess.set(requestId, { resolve, reject });
+    worker.postMessage({ type: "engine.process", requestId, recipe, bytes }, [bytes]);
+  });
+}
+
+/** Normalize protocol headers (`HeaderDto[]` or a record) for `fetch`. */
+function headerRecord(headers: unknown): Record<string, string> {
+  if (Array.isArray(headers)) {
+    const out: Record<string, string> = {};
+    for (const header of headers) {
+      if (header && typeof header.name === "string" && typeof header.value === "string") {
+        out[header.name] = header.value;
+      }
+    }
+    return out;
+  }
+  if (headers && typeof headers === "object") return headers as Record<string, string>;
+  return {};
+}
+
+let activeAssembly: ReturnType<typeof createCanvasAssembly> | null = null;
+
+function createAssembly(sourceUrl: string): ReturnType<typeof createCanvasAssembly> {
+  const decoder = createTileDecoder();
+  return createCanvasAssembly({
+    decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
+    processTile,
+    createCanvas: (width: number, height: number) => {
+      const element = (document.getElementById("rendering-canvas") as HTMLCanvasElement | null)
+        ?? document.createElement("canvas");
+      element.width = width;
+      element.height = height;
+      const ctx2d = element.getContext("2d");
+      if (!ctx2d) {
+        throw failure("OUTPUT_SURFACE_UNAVAILABLE", "This browser could not create the output surface.", false);
+      }
+      // Reveal the canvas before drawing (legacy parity): the picture stays
+      // visible and right-clickable while the job finishes.
+      setCanvasVisible(document, true);
+      preview.resetTransform(document);
+      return { width, height, ctx2d, toBlob: (cb: BlobCallback, mime?: string) => element.toBlob(cb, mime) };
+    },
+    encode: (canvas) =>
+      canvasToPngBlob(canvas as unknown as { toBlob(cb: BlobCallback, mime?: string): void }),
+    save: (blob, width, height) => {
+      if (resultBlobUrl) URL.revokeObjectURL(resultBlobUrl);
+      resultBlobUrl = URL.createObjectURL(blob as Blob);
+      viewCtx.completedInfo = { width, height, mime: "image/png", blobUrl: resultBlobUrl };
+      viewCtx.originClean = true;
+    },
+    sourceUrl,
+    onDisplayOnly: () => {
+      if (viewCtx.originClean === false) return;
+      viewCtx.originClean = false;
+      viewCtx.sourceUrl = sourceUrl;
+      viewCtx.desktopHandoffUrl = desktopHandoffLink(sourceUrl);
+      controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
+      const dims = activeAssembly?.dimensions();
+      recordWebHistory(sourceUrl, dims?.width ?? 0, dims?.height ?? 0, "display");
+      update();
+    },
+    isTaintError: (error) => isCanvasTaintError(error),
+    log: (line) => webLog.info("runtime", line),
+  });
+}
+
+/** Shared presenter for engine failures: headline plus stable classification. */
+function presentEngineFailure(error: unknown, url: string, token: number): void {
+  if (token !== jobToken) return;
+  const structured = error as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown; url?: unknown; http?: unknown; preview?: unknown };
+  const code = typeof structured?.code === "string" ? structured.code : "job.failed";
+  const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
+  const lower = code.toLowerCase();
+  webLog.error("failed", `code=${code} message=${String(structured?.message ?? code)}`);
+  if (code === "PLAN_INVALID" || code === "job.resource-limit") {
+    const link = desktopHandoffLink(url);
+    if (link !== "") {
+      viewCtx.sourceUrl = url;
+      viewCtx.desktopHandoffUrl = link;
+    }
+  }
+  const noImageFound =
+    code === "NO_IMAGE_FOUND" || lower.indexOf("no-images") >= 0 || lower.indexOf("catalog") >= 0 || lower.indexOf("empty-resource") >= 0;
+  const discoveryFailed = lower.indexOf("discovery") >= 0 || lower.indexOf("unknown-dezoomer") >= 0;
+  const discoveryCopy = noImageFound
+    ? noImageFoundError(via)
+    : discoveryFailed
+      ? discoveryFailedError(via)
+      : null;
+  controller.dispatch(
+    nextEvent("fail", {
+      error: describeFailure({
+        code,
+        engineDetail: typeof structured?.message === "string" ? structured.message : undefined,
+        ...(discoveryCopy
+          ? { message: discoveryCopy.message, category: discoveryCopy.category, phase: "discovery" }
+          : {}),
+        retryable: discoveryCopy ? discoveryCopy.retryable : (typeof structured?.retryable === "boolean" ? structured.retryable : undefined),
+        transport: errorTransportFor(code, webFetcher.getActiveTransport()),
+        host: hostOf(url),
+        url: typeof structured?.url === "string" ? structured.url : undefined,
+        http: typeof structured?.http === "number" ? structured.http : undefined,
+        preview: typeof structured?.preview === "string" ? structured.preview : undefined,
+      }),
+    }) as never,
+  );
+  update();
 }
 
 function reportProgress(current: number, total: number, message: string): void {
@@ -334,17 +452,6 @@ function clearHash(): void {
   }
 }
 
-function makeClient(): DiscoveryClient {
-  disposeClient();
-  const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-  return createDiscoveryClient({
-    worker,
-    fetchMetadata: webFetcher.fetchMetadataFor,
-    fetchTile: webFetcher.fetchTileFor,
-    probeSize: probeSizeFor,
-  });
-}
-
 async function runJob(url: string): Promise<void> {
   const token = ++jobToken;
   webFetcher.resetActiveTransport();
@@ -359,258 +466,234 @@ async function runJob(url: string): Promise<void> {
   viewCtx.completedInfo = undefined;
   viewCtx.sourceUrl = undefined;
   viewCtx.desktopHandoffUrl = undefined;
+  viewCtx.originClean = true;
   resultTitle = undefined;
   // Hash owns the active job only: queued URLs never touch the hash until
   // they become active and reach this point.
   writeHash(url);
-  let queueOutcome: "done" | "failed" | "cancelled" = "done";
   jobActivity.startHeartbeat();
   jobActivity.setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
   controller.dispatch(nextEvent("start-discovery", { transport: "direct" }) as never);
   update();
-  try {
-    client = makeClient();
-    webLog.info("discovery-start", `url=${url}`);
-    const catalog: WebCatalog = await client.start(url);
-    if (token !== jobToken) return;
-    const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
-    if (catalog.images.length === 0) {
-      throw failure(
-        "NO_IMAGE_FOUND",
-        noImageFoundError(via).message,
-        false,
-        "discovery returned an empty image catalog",
-      );
-    }
-    webLog.info("images-found", `count=${catalog.images.length} transport=${via}`);
-    controller.dispatch(
-      nextEvent("images-found", { imageCount: catalog.images.length, transport: via }) as never,
-    );
-    const foundNoun = catalog.images.length === 1 ? "1 image" : `${catalog.images.length} images`;
-    jobActivity.setStep(
-      `Found ${foundNoun}, saving largest that fits…`,
-      "The website saves the first image automatically; use the desktop app to choose another.",
-    );
-    controller.dispatch(nextEvent("image-chosen") as never);
-    const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
-    if (!selection) {
-      throw failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false);
-    }
-    const image = catalog.images[selection.image];
-    resultTitle = image?.title;
-    const level = image?.levels[selection.level];
-    const declared = level && level.width > 0 && level.height > 0
-      ? { x: level.width, y: level.height }
-      : undefined;
-    const declaredFailure = assertDeclaredSizeFitsBrowser(declared, url);
-    if (declaredFailure) throw declaredFailure;
-    jobActivity.setStep("Choosing the highest resolution…");
-    controller.dispatch(nextEvent("level-chosen") as never);
-    jobActivity.setStep("Checking the image size…");
-    controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
-    update();
 
-    let plan;
-    try {
-      plan = await client.plan(selection.image, selection.level);
-    } catch (error) {
-      const mapped = mapWorkerLimitExceeded(error, declared?.x ?? 0, declared?.y ?? 0, url);
-      if (mapped) throw mapped;
-      throw error;
-    }
-    if (token !== jobToken) return;
-    webLog.info("plan", `tiles=${plan.tiles.length}`);
-    const canvas = document.getElementById("rendering-canvas") as HTMLCanvasElement | null;
-    if (!canvas) {
-      throw failure(
-        "WORKER_FAILED",
-        "The picture could not be assembled in this browser. Try reloading the page.",
-        false,
-        undefined,
-        "no #rendering-canvas element in the document",
-      );
-    }
-    const width = plan.canvas ? plan.canvas.x : 0;
-    const height = plan.canvas ? plan.canvas.y : 0;
-    const planFailure = assertPlanFitsBrowser(width, height, plan.tiles.length, url);
-    if (planFailure) throw planFailure;
-    canvas.width = width;
-    canvas.height = height;
-    try {
-      preview.resetTransform(document);
-    } catch {
-      // Preview reset must never break the job.
-    }
-    const ctx2d = canvas.getContext("2d") as CanvasRenderingContext2D;
-    ctx2d.clearRect(0, 0, width, height);
-    // Reveal the canvas before the first tile paints (legacy parity): tiles
-    // assemble visibly as they arrive, and the picture stays right-clickable
-    // throughout acquisition, whichever finish follows.
-    setCanvasVisible(document, true);
-    preview.resetTransform(document);
+  let selected = false;
+  let displayOnly = false;
+  let terminal: "done" | "failed" | "cancelled" | "display" = "done";
+  let settle: () => void = () => {};
+  const finished = new Promise<void>((resolve) => { settle = resolve; });
 
-    const total = plan.tiles.length;
-    viewCtx.imageChoice = { width, height, tiles: total };
-    jobActivity.setStep("Fetching image tiles…", `${total} tiles at full resolution`);
-    reportProgress(0, total, `Saving ${total} tiles…`);
-    let done = 0;
-    let failed: unknown = null;
-    let tainted = false;
-    const finishDisplayOnly = (): void => {
-      viewCtx.originClean = false;
-      viewCtx.sourceUrl = url;
-      viewCtx.desktopHandoffUrl = desktopHandoffLink(url);
-      jobActivity.setStep("Displaying the image…", "This site shows its pieces without letting the browser keep a copy.");
-      reportProgress(total, total, `Displaying ${total} tiles…`);
-      webLog.info("display-only", `width=${width} height=${height} tiles=${total} tainted=true`);
-      setCanvasVisible(document, true);
-      preview.resetTransform(document);
-      controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
-      recordWebHistory(url, width, height, "display");
-      update();
-    };
-    const tilePainter = createTilePainter({
-      fetchTile: (uri, headers) => webFetcher.fetchTileFor(uri, headers),
-      fetchTileOnce: (uri, headers) => webFetcher.fetchTileFor(uri, headers, 0),
-      decode: (bytes) => tileDecoder.decode(bytes),
-      throttle: (uri) => tileThrottle.throttle(uri),
-      processTile: (recipe, bytes) => (client as DiscoveryClient).process(recipe, bytes),
-      isOrdinaryImageTile,
-      hooks: {
-        onRequestStart: (label) => jobActivity.noteRequestStart(label),
-        onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
-        onLog: (line) => webLog.info("runtime", line),
-        onUpdate: update,
-      },
-    });
-    const queue = [...plan.tiles];
-    const tileWorker = async (): Promise<void> => {
-      while (queue.length && !failed) {
-        // Pause v1: suspend scheduling new tiles while paused; in-flight
-        // `drawTile` calls finish, the canvas is retained, and resume
-        // re-drives the same FIFO queue.
-        while (jobPaused) {
-          if (token !== jobToken) return;
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          if (failed) return;
-        }
-        if (token !== jobToken) return;
-        const tile = queue.shift();
-        if (!tile) return;
-        try {
-          const tileTainted = await tilePainter.drawTile(ctx2d, tile);
-          if (tileTainted) tainted = true;
-        } catch (error) {
-          failed = error;
-          return;
-        }
-        if (token !== jobToken) return;
-        done += 1;
-        reportProgress(done, total, `Saving ${total} tiles…`);
-      }
-    };
-    const concurrency = Math.min(websiteTileConcurrency(), Math.max(1, total));
-    await Promise.all(Array.from({ length: concurrency }, tileWorker));
-    if (failed) throw failed;
-    if (token !== jobToken) return;
+  const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  engineWorker = worker;
+  const assembly = createAssembly(url);
+  activeAssembly = assembly;
 
-    if (tainted) {
-      // Tiles without a readable grant painted through ordinary <img>
-      // display: the canvas is tainted, so scripts can neither read nor
-      // save it. Show the assembled picture with its display-only guidance
-      // instead of failing; the user right-clicks where the browser
-      // supports it, or uses the extension/desktop app for a clean save.
-      // Tiles never use the metadata proxy; the handoff below is plain
-      // navigation to a `dezoomify://` link, not a proxied fetch.
-      finishDisplayOnly();
-      return;
-    }
-
-    controller.dispatch(nextEvent("save-start") as never);
-    jobActivity.setStep("Assembling the final picture…", "Encoding PNG in your browser");
-    reportProgress(total, total, "Encoding PNG…");
-    let blob: Blob;
-    try {
-      blob = await canvasToPngBlob(canvas) as Blob;
-    } catch (error) {
-      // A browser may defer origin-clean enforcement until toBlob. Keep the
-      // assembled canvas visible and never retry serialization in that case.
-      if (isCanvasTaintError(error)) {
-        finishDisplayOnly();
-        return;
-      }
-      throw error;
-    }
-    if (resultBlobUrl) URL.revokeObjectURL(resultBlobUrl);
-    resultBlobUrl = URL.createObjectURL(blob);
-    viewCtx.completedInfo = {
-      width,
-      height,
-      mime: "image/png",
-      blobUrl: resultBlobUrl,
-    };
-    viewCtx.originClean = true;
-    webLog.info("save-complete", `width=${width} height=${height} tiles=${total} format=image/png`);
-    // The browser canvas path (createImageBitmap -> drawImage -> toBlob) never
-    // preserves the source ICC color profile or EXIF metadata (native keeps
-    // the first tile's profile); warn so archived colors are not trusted blindly.
-    webLog.info("save-color-warning", BROWSER_SAVE_COLOR_WARNING);
-    controller.dispatch(nextEvent("save-done") as never);
-    recordWebHistory(url, width, height, "png");
-    update();
-  } catch (error) {
+  const onHostFailure = (error: unknown): void => {
     if (token !== jobToken) return;
-    queueOutcome = "failed";
-    const structured = error as {
-      code?: unknown;
-      message?: string;
-      detail?: string;
-      technical?: string;
-      retryable?: boolean;
-      url?: string;
-      http?: number;
-      preview?: string;
-    };
-    const code = stableErrorCode(error);
-    // The activity log is technical: prefer the dense chain over UI copy.
-    webLog.error("failed", `code=${code} message=${structured?.technical || structured?.message || code}`);
-    // One-click desktop handoff (todo 5.5): too-large plans fail with the
-    // `dezoomify://` link in the view context, so the failed view offers the
-    // Send button with the origin/scope consent summary. Only http(s)
-    // sources get a link; the deep link never carries credentials.
-    if (code === "PLAN_INVALID") {
-      const link = desktopHandoffLink(url);
-      if (link !== "") {
-        viewCtx.sourceUrl = url;
-        viewCtx.desktopHandoffUrl = link;
-      }
-    }
+    if (terminal !== "done") return;
+    const structured = error as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown };
+    const code = typeof structured?.code === "string" ? structured.code : "OUTPUT_FAILED";
+    webLog.error("host-failure", `code=${code} message=${String(structured?.message ?? code)}`);
     controller.dispatch(
       nextEvent("fail", {
-        // One shared presenter owns the headline/detail split and the stable
-        // classification; the website adds only its transport context.
         error: describeFailure({
           code,
-          engineDetail: structured?.detail ?? structured?.technical,
-          message: structured?.message,
-          retryable: structured?.retryable,
-          // Tiles never use the metadata CORS proxy: a tile failure always
-          // reports the direct browser fetch, even when the job's metadata
-          // arrived through the proxy.
-          transport: errorTransportFor(code, webFetcher.getActiveTransport()),
+          engineDetail: typeof structured?.detail === "string" ? structured.detail : undefined,
+          message: typeof structured?.message === "string" ? structured.message : undefined,
+          retryable: typeof structured?.retryable === "boolean" ? structured.retryable : undefined,
+          transport: "browser-session",
           host: hostOf(url),
-          url: structured?.url,
-          http: structured?.http,
-          preview: structured?.preview,
         }),
       }) as never,
     );
+    terminal = "failed";
     update();
+    settle();
+  };
+
+  const onEngineEvent = (event: Record<string, unknown>): void => {
+    if (token !== jobToken) return;
+    switch (event.type) {
+      case "catalog": {
+        if (selected) return;
+        selected = true;
+        const catalog = event.catalog as { images?: Array<{ title?: string; levels?: Array<{ width?: number; height?: number }> }> } | undefined;
+        const images = Array.isArray(catalog?.images) ? catalog!.images! : [];
+        const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
+        if (images.length === 0) {
+          controller.dispatch(nextEvent("images-found", { imageCount: 0, transport: via }) as never);
+          onHostFailure(failure("NO_IMAGE_FOUND", noImageFoundError(via).message, false, "discovery returned an empty image catalog"));
+          return;
+        }
+        controller.dispatch(nextEvent("images-found", { imageCount: images.length, transport: via }) as never);
+        const selection = pickEngineSelection(catalog as Parameters<typeof pickEngineSelection>[0], BROWSER_LIMITS);
+        if (!selection) {
+          onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
+          return;
+        }
+        const image = images[selection.image];
+        resultTitle = typeof image?.title === "string" ? image.title : undefined;
+        const level = image?.levels?.[selection.level];
+        if (level && typeof level.width === "number" && typeof level.height === "number") {
+          viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
+        }
+        controller.dispatch(nextEvent("image-chosen") as never);
+        jobActivity.setStep("Choosing the highest resolution…");
+        controller.dispatch(nextEvent("level-chosen") as never);
+        controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
+        update();
+        engineHost?.selectImage(selection.image);
+        engineHost?.selectLevel(selection.level);
+        return;
+      }
+      case "progress": {
+        const acquired = typeof event.acquired === "number" ? event.acquired : 0;
+        const total = typeof event.total === "number" ? event.total : 0;
+        reportProgress(acquired, total, `Saving ${total} tiles…`);
+        update();
+        return;
+      }
+      case "warning": {
+        webLog.warn("engine-warning", JSON.stringify(event.error ?? {}));
+        return;
+      }
+      case "recovery-request":
+      case "output-ready":
+      case "job-state":
+      case "paused":
+      case "resumed":
+        return;
+      case "completed":
+      case "partial-completed": {
+        if (displayOnly || assembly.isTainted()) {
+          terminal = "display";
+          settle();
+          return;
+        }
+        controller.dispatch(nextEvent("save-start") as never);
+        recordWebHistory(url, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
+        controller.dispatch(nextEvent("save-done") as never);
+        terminal = "done";
+        update();
+        settle();
+        return;
+      }
+      case "failed": {
+        presentEngineFailure(event.error, url, token);
+        terminal = "failed";
+        settle();
+        return;
+      }
+      case "cancelled": {
+        controller.dispatch(nextEvent("cancel") as never);
+        terminal = "cancelled";
+        update();
+        settle();
+        return;
+      }
+      default:
+        return;
+    }
+  };
+
+  const host = createEngineHost({
+    worker,
+    jobId: () => sessionId,
+    fetchResource: async (effect) => {
+      const request = effect.request;
+      if (!request) throw failure("WORKER_FAILED", "The image engine sent an effect without a request.", false);
+      if (request.purpose === "metadata") {
+        const result = await webFetcher.fetchMetadataFor(request.uri, headerRecord(request.headers));
+        return {
+          bytes: new Uint8Array(result.bytes),
+          ...(typeof result.finalUri === "string" && result.finalUri !== "" ? { finalUri: result.finalUri } : {}),
+        };
+      }
+      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers));
+      return { bytes: new Uint8Array(result.bytes) };
+    },
+    fetchResourceOnce: async (effect) => {
+      const request = effect.request;
+      if (!request) throw failure("WORKER_FAILED", "The image engine sent an effect without a request.", false);
+      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), 0);
+      return { bytes: new Uint8Array(result.bytes) };
+    },
+    cancelFetch: () => { /* fetches finish harmlessly after a token change */ },
+    assembly,
+    quotas: { max_concurrent_fetches: websiteTileConcurrency() },
+    probeSize: probeSizeFor,
+    loadDisplayImage: (tileUrl: string) =>
+      loadTileImage(tileUrl, {
+        hooks: {
+          onRequestStart: (label) => jobActivity.noteRequestStart(label),
+          onRequestEnd: (id, ok) => jobActivity.noteRequestEnd(id, ok),
+          onUpdate: update,
+        },
+      }),
+    classifyFailure: (error) => {
+      const structured = error as { blocked_reason?: unknown; retryable?: unknown; message?: unknown };
+      return {
+        code: stableErrorCode(error),
+        ...(typeof structured?.blocked_reason === "string" ? { blocked_reason: structured.blocked_reason } : {}),
+        retryable: structured?.retryable,
+        message: typeof structured?.message === "string" ? structured.message : undefined,
+      } as { blocked_reason?: string; [key: string]: unknown };
+    },
+    onPermissionRequired: () => { /* the website has no host grants */ },
+    onRecoveryRequested: (generation) => { engineHost?.chooseRecovery(generation, "discard"); },
+    onHostFailure,
+    onEvent: (event) => onEngineEvent(event as Record<string, unknown>),
+    onUnsupportedEffect: (effect) => {
+      const type = effect && typeof effect === "object" && "type" in effect ? String((effect as { type?: unknown }).type) : "unknown";
+      onHostFailure(failure("EFFECT_UNSUPPORTED", `This app cannot yet perform the ${type} step.`, false));
+    },
+    log: (level, code, detail) => {
+      if (level === "error") webLog.error(code, detail);
+      else if (level === "warn") webLog.warn(code, detail);
+      else webLog.info(code, detail);
+    },
+  });
+  engineHost = host;
+
+  worker.addEventListener("message", (event: MessageEvent<Record<string, unknown>>) => {
+    const data = event.data;
+    if (!data || typeof data.type !== "string") return;
+    if (data.type === "engine.messages") {
+      engineHost?.handleEngineMessages(Array.isArray(data.messages) ? data.messages : []);
+      return;
+    }
+    if (data.type === "engine.processed" || data.type === "engine.process-failed") {
+      const requestId = typeof data.requestId === "number" ? data.requestId : -1;
+      const pending = pendingProcess.get(requestId);
+      if (!pending) return;
+      pendingProcess.delete(requestId);
+      if (data.type === "engine.processed" && data.bytes instanceof ArrayBuffer) pending.resolve(data.bytes);
+      else pending.reject(failure("TILE_PROCESSING_FAILED", "A tile could not be processed.", false));
+      return;
+    }
+    if (data.type === "engine.log" && typeof data.line === "string") {
+      webLog.info("runtime", data.line);
+      return;
+    }
+    if (data.type === "engine.error") {
+      onHostFailure(data.error);
+    }
+  });
+
+  try {
+    host.start(url);
+    await finished;
+    if (token !== jobToken) return;
+  } catch (error) {
+    if (token !== jobToken) return;
+    presentEngineFailure(error, url, token);
   } finally {
     if (token === jobToken) {
       jobActivity.stopHeartbeat();
       jobActivity.refreshLongestPending();
-      disposeClient();
+      disposeAttempt();
+      activeAssembly = null;
+      const queueOutcome: "done" | "failed" | "cancelled" =
+        (terminal as string) === "failed" ? "failed" : (terminal as string) === "cancelled" ? "cancelled" : "done";
       // Sequential queue: the active entry settles, then the first waiting
       // entry (if any) becomes active and starts. A failed entry never stops
       // the rest. Engine stays single-job throughout.
@@ -620,20 +703,12 @@ async function runJob(url: string): Promise<void> {
         const next = settled.next;
         if (next) {
           const status = controller.getState().status;
-          if (
-            status === "completed" ||
-            status === "cancelled" ||
-            status === "failed" ||
-            status === "display-only"
-          ) {
+          if (status === "completed" || status === "cancelled" || status === "failed" || status === "display-only") {
             controller.reset(sessionId);
             currentSeq = 0;
           }
           const summary = summarizeWebQueue(webQueue);
-          webLog.info(
-            "queue",
-            `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`,
-          );
+          webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
           void runJob(next.url);
         }
       }
@@ -769,6 +844,7 @@ function update(): void {
         jobPaused = true;
         viewCtx.paused = true;
         jobActivity.pause();
+        engineHost?.pause();
         webLog.info("paused", "no new pieces are being fetched");
         update();
       },
@@ -777,6 +853,7 @@ function update(): void {
         jobPaused = false;
         viewCtx.paused = false;
         jobActivity.resume();
+        engineHost?.resume();
         webLog.info("resumed", "fetching queued pieces again");
         update();
       },
@@ -785,7 +862,7 @@ function update(): void {
         jobPaused = false;
         viewCtx.paused = false;
         jobActivity.stopHeartbeat();
-        disposeClient();
+        disposeAttempt();
         // Stop returns directly to the initial view. Effects from the retired
         // token finish harmlessly without mutating the replacement job.
         if (webQueueEnabled()) {
@@ -818,7 +895,7 @@ function update(): void {
         jobPaused = false;
         viewCtx.paused = false;
         jobActivity.stopHeartbeat();
-        disposeClient();
+        disposeAttempt();
         webFetcher.resetActiveTransport();
         tileThrottle.reset();
         setCanvasVisible(document, false);

@@ -128,6 +128,7 @@ fn all_commands() -> Vec<JobCommand> {
                 length: 16,
                 checksum: None,
             },
+            final_uri: Some("https://example.com/redirected".into()),
         },
         JobCommand::ProvideFetchFailure {
             request: 1,
@@ -135,6 +136,17 @@ fn all_commands() -> Vec<JobCommand> {
         },
         JobCommand::SelectImage { image: 1 },
         JobCommand::SelectLevel { level: 1 },
+        JobCommand::ProvideProbeOutcome {
+            request: 1,
+            ok: true,
+            width: 256,
+            height: 256,
+        },
+        JobCommand::ProvideDisplayOutcome {
+            request: 1,
+            width: 256,
+            height: 256,
+        },
         JobCommand::RecoveryChoice {
             generation: 1,
             choice: RecoveryChoice::Keep,
@@ -154,6 +166,8 @@ fn all_commands() -> Vec<JobCommand> {
             | JobCommand::ProvideFetchFailure { .. }
             | JobCommand::SelectImage { .. }
             | JobCommand::SelectLevel { .. }
+            | JobCommand::ProvideProbeOutcome { .. }
+            | JobCommand::ProvideDisplayOutcome { .. }
             | JobCommand::RecoveryChoice { .. }
             | JobCommand::FinalizationSucceeded
             | JobCommand::FinalizationFailed { .. }

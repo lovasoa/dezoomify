@@ -55,16 +55,17 @@ function placement(x, y, extra = {}) {
   };
 }
 
-test("acquire-decode-encode-publish executes in engine order and closes bitmaps", async () => {
+function bytes16(n) {
+  const b = new ArrayBuffer(2);
+  new DataView(b).setUint16(0, n, true);
+  return b;
+}
+
+test("finalize-output draws, encodes, and saves exactly once", async () => {
   const { assembly, events, ctx2d } = harness();
-  const bytes = (n) => { const b = new ArrayBuffer(2); new DataView(b).setUint16(0, n, true); return b; };
-  await assembly.acquireTile(0, placement(0, 0), bytes(16));
-  await assembly.acquireTile(1, placement(16, 0), bytes(16));
-  assembly.decodePixels(0);
-  assembly.decodePixels(1);
-  assembly.openEncoder("png", { width: 32, height: 32 });
-  await assembly.finalizeEncoder();
-  assembly.publishOutput();
+  await assembly.acquireTile(0, placement(0, 0), bytes16(16));
+  await assembly.acquireTile(1, placement(16, 0), bytes16(16));
+  await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
   assembly.release();
 
   assert.deepEqual(events.created, [{ width: 32, height: 32 }]);
@@ -77,15 +78,14 @@ test("acquire-decode-encode-publish executes in engine order and closes bitmaps"
   assert.equal(ctx2d.draws.every((draw) => draw.source.closed), true);
 });
 
-test("publish is exactly-once and release is idempotent", async () => {
+test("finalize-output rejects a second call and release is idempotent", async () => {
   const { assembly, events } = harness();
-  const bytes = new ArrayBuffer(2);
-  new DataView(bytes).setUint16(0, 16, true);
-  await assembly.acquireTile(0, placement(0, 0), bytes);
-  assembly.openEncoder("png", { width: 32, height: 32 });
-  await assembly.finalizeEncoder();
-  assembly.publishOutput();
-  assembly.publishOutput();
+  await assembly.acquireTile(0, placement(0, 0), bytes16(16));
+  await assembly.finalizeOutput(false, "png", { width: 32, height: 32 });
+  await assert.rejects(
+    assembly.finalizeOutput(false, "png", { width: 32, height: 32 }),
+    (error) => error.code === "OUTPUT_STATE",
+  );
   assembly.release();
   assembly.release();
   assert.equal(events.saved.length, 1);
@@ -93,11 +93,8 @@ test("publish is exactly-once and release is idempotent", async () => {
 
 test("a decoded padded edge tile is cropped to the planned extent and logs", async () => {
   const { assembly, ctx2d, events } = harness();
-  const bytes = new ArrayBuffer(2);
-  new DataView(bytes).setUint16(0, 512, true);
-  await assembly.acquireTile(0, placement(2560, 2048, { expected_size: { width: 428, height: 196 }, canvas: { width: 2988, height: 2244 } }), bytes);
-  assembly.openEncoder("png", { width: 2988, height: 2244 });
-  await assembly.finalizeEncoder();
+  await assembly.acquireTile(0, placement(2560, 2048, { expected_size: { width: 428, height: 196 }, canvas: { width: 2988, height: 2244 } }), bytes16(512));
+  await assembly.finalizeOutput(false, "png", { width: 2988, height: 2244 });
   assert.deepEqual(ctx2d.draws[0], { source: ctx2d.draws[0].source, sx: 0, sy: 0, sw: 428, sh: 196, dx: 2560, dy: 2048, dw: 428, dh: 196 });
   assert.equal(events.log.length, 1);
   assert.equal(events.log[0], "A tile size differed from the plan; only its planned pixel extent was drawn.");
@@ -105,34 +102,41 @@ test("a decoded padded edge tile is cropped to the planned extent and logs", asy
 
 test("undeclared canvas derives the output size from placements", async () => {
   const { assembly, events } = harness();
-  const bytes = (n) => { const b = new ArrayBuffer(2); new DataView(b).setUint16(0, n, true); return b; };
-  await assembly.acquireTile(0, placement(0, 0, { canvas: null }), bytes(16));
-  await assembly.acquireTile(1, placement(16, 16, { canvas: null, expected_size: null }), bytes(16));
-  assembly.openEncoder("png", null);
-  await assembly.finalizeEncoder();
+  await assembly.acquireTile(0, placement(0, 0, { canvas: null }), bytes16(16));
+  await assembly.acquireTile(1, placement(16, 16, { canvas: null, expected_size: null }), bytes16(16));
+  await assembly.finalizeOutput(false, "png", null);
   // tile:1 has no planned extent: its decoded 16x16 at (16,16) sets the size.
   assert.deepEqual(events.created, [{ width: 32, height: 32 }]);
 });
 
 test("canvas limits are validated before allocation", async () => {
   const { assembly, events } = harness();
-  const bytes = new ArrayBuffer(2);
-  new DataView(bytes).setUint16(0, 16, true);
-  await assembly.acquireTile(0, placement(0, 0, { canvas: { width: 40000, height: 40000 } }), bytes);
-  assert.throws(() => assembly.openEncoder("png", { width: 40000, height: 40000 }), (error) => {
-    assert.equal(error.code, "PLAN_INVALID");
-    assert.equal(error.retryable, false);
-    return true;
-  });
+  await assembly.acquireTile(0, placement(0, 0, { canvas: { width: 40000, height: 40000 } }), bytes16(16));
+  await assert.rejects(
+    assembly.finalizeOutput(false, "png", { width: 40000, height: 40000 }),
+    (error) => {
+      assert.equal(error.code, "PLAN_INVALID");
+      assert.equal(error.retryable, false);
+      return true;
+    },
+  );
   assert.deepEqual(events.created, []);
 });
 
-test("processing recipes beyond none fail typed instead of dropping the recipe", async () => {
+test("processing recipes run through the injected processor", async () => {
+  const processed = [];
+  const { assembly, events } = harness({
+    processTile: async (recipe, bytes) => { processed.push(recipe); return bytes; },
+  });
+  await assembly.acquireTile(0, placement(0, 0, { processing: "google-arts-decrypt" }), bytes16(16));
+  assert.deepEqual(processed, ["google-arts-decrypt"]);
+  assert.equal(events.decoded.length, 1);
+});
+
+test("processing recipes without an executor fail typed instead of dropping the recipe", async () => {
   const { assembly } = harness();
-  const bytes = new ArrayBuffer(2);
-  new DataView(bytes).setUint16(0, 16, true);
   await assert.rejects(
-    assembly.acquireTile(0, placement(0, 0, { processing: "gas-encryption" }), bytes),
+    assembly.acquireTile(0, placement(0, 0, { processing: "gas-encryption" }), bytes16(16)),
     (error) => {
       assert.equal(error.code, "TILE_PROCESSING_UNAVAILABLE");
       assert.equal(error.retryable, false);
@@ -145,49 +149,63 @@ test("decode failures propagate so acquisition outcomes stay honest", async () =
   const { assembly } = harness({
     decode: async () => { throw new Error("corrupt tile"); },
   });
-  const bytes = new ArrayBuffer(2);
-  new DataView(bytes).setUint16(0, 16, true);
-  await assert.rejects(assembly.acquireTile(0, placement(0, 0), bytes), /corrupt tile/);
+  await assert.rejects(assembly.acquireTile(0, placement(0, 0), bytes16(16)), /corrupt tile/);
 });
 
-test("invalid placements and state misuse fail typed", async () => {
+test("invalid placements and unsupported formats fail typed", async () => {
   const { assembly } = harness();
   assert.throws(() => assembly.recordPlacement(0, placement(-1, 0)), (error) => error.code === "PLAN_INVALID");
-  assert.throws(() => assembly.decodePixels(999), (error) => error.code === "OUTPUT_STATE");
-  assert.throws(() => assembly.publishOutput(), (error) => error.code === "OUTPUT_STATE");
-  await assert.rejects(assembly.finalizeEncoder(), (error) => error.code === "OUTPUT_STATE");
+  await assert.rejects(
+    assembly.finalizeOutput(false, "jpeg", { width: 32, height: 32 }),
+    (error) => error.code === "OUTPUT_FORMAT_UNSUPPORTED",
+  );
   const fresh = harness();
-  assert.throws(() => fresh.assembly.openEncoder("jpeg", { width: 32, height: 32 }), (error) => error.code === "OUTPUT_FORMAT_UNSUPPORTED");
+  await assert.rejects(
+    fresh.assembly.finalizeOutput(false, "png", { width: 0, height: 0 }),
+    (error) => error.code === "PLAN_INVALID",
+  );
   assert.deepEqual(fresh.events.created, []);
 });
 
 test("partial output leaves missing regions empty without failing assembly", async () => {
   const { assembly, ctx2d } = harness();
-  const bytes = new ArrayBuffer(2);
-  new DataView(bytes).setUint16(0, 16, true);
-  await assembly.acquireTile(0, placement(0, 0), bytes);
+  await assembly.acquireTile(0, placement(0, 0), bytes16(16));
   // tile:1 never arrived (failed acquisition): only tile:0 draws.
-  assembly.openEncoder("png", { width: 32, height: 32 });
-  await assembly.finalizeEncoder();
-  assembly.publishOutput();
+  await assembly.finalizeOutput(true, "png", { width: 32, height: 32 });
   assert.equal(ctx2d.draws.length, 1);
 });
 
+test("display-only output draws ordinary images and skips encoding", async () => {
+  let displayOnly = 0;
+  const ctx2d = fakeCtx();
+  const encoded = [];
+  const saved = [];
+  const local = createCanvasAssembly({
+    decode: async () => fakeBitmap(16, 16),
+    createCanvas: (w, h) => ({ width: w, height: h, ctx2d }),
+    encode: async (canvas) => { encoded.push(canvas); return {}; },
+    save: () => { saved.push(true); },
+    onDisplayOnly: () => { displayOnly += 1; },
+  });
+  local.acquireDisplayTile(0, placement(0, 0), { naturalWidth: 16, naturalHeight: 16 });
+  assert.equal(local.isTainted(), true);
+  assert.equal(displayOnly, 1);
+  await local.finalizeOutput(false, "png", { width: 32, height: 32 });
+  assert.equal(ctx2d.draws.length, 1);
+  assert.equal(encoded.length, 0, "a tainted canvas is never encoded");
+  assert.equal(saved.length, 0, "a tainted canvas is never saved");
+});
+
 test("release closes retained bitmaps deterministically", async () => {
-  const { assembly } = harness();
   const held = [];
-  const bytes = new ArrayBuffer(2);
-  new DataView(bytes).setUint16(0, 16, true);
-  const deps = {
+  const local = createCanvasAssembly({
     decode: async () => { const b = fakeBitmap(16, 16); held.push(b); return b; },
     createCanvas: (width, height) => ({ width, height, ctx2d: fakeCtx() }),
     encode: async () => ({}),
     save: () => {},
-  };
-  const local = createCanvasAssembly(deps);
-  await local.acquireTile(0, placement(0, 0), bytes);
-  await local.acquireTile(1, placement(16, 0), bytes);
+  });
+  await local.acquireTile(0, placement(0, 0), bytes16(16));
+  await local.acquireTile(1, placement(16, 0), bytes16(16));
   local.release();
   assert.equal(held.every((bitmap) => bitmap.closed), true);
-  void assembly;
 });

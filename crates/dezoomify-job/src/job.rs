@@ -387,8 +387,17 @@ impl Job {
 
     fn discovery_failed(&mut self, error: DiscoveryError) -> Result<(), JobError> {
         // `engine_detail` keeps the headline out: the prominent message
-        // is the host's own copy, never the engine's aggregate.
-        self.fail_via_cleanup("job.discovery-failed", error.engine_detail())
+        // is the host's own copy, never the engine's aggregate. An automatic
+        // scan that accepts no candidate is its own code so hosts can show
+        // their "no image found" copy; a named format that did not match
+        // stays a discovery failure (the user asked for that format).
+        let no_candidate = matches!(error, DiscoveryError::NoCandidateAccepted { .. });
+        let code = if no_candidate && self.format.is_none() {
+            "job.no-images"
+        } else {
+            "job.discovery-failed"
+        };
+        self.fail_via_cleanup(code, error.engine_detail())
     }
 
     fn apply_resource_bytes(
@@ -583,24 +592,8 @@ impl Job {
                 let canvas = positioned.image_size();
                 self.plan_from_tiles(positioned.tiles(), canvas)
             }
-            TileSource::DiscoverableGrid(discoverable) => {
-                if !self.config.plan_probes {
-                    return self.fail_via_cleanup(
-                        "job.probe-unsupported",
-                        "probe-driven planning is disabled for this host; use the interactive discovery adapter".to_string(),
-                    );
-                }
-                self.drive_probe(discoverable.start())
-            }
-            TileSource::Adaptive(adaptive) => {
-                if !self.config.plan_probes {
-                    return self.fail_via_cleanup(
-                        "job.probe-unsupported",
-                        "probe-driven planning is disabled for this host; use the interactive discovery adapter".to_string(),
-                    );
-                }
-                self.drive_probe(adaptive.start())
-            }
+            TileSource::DiscoverableGrid(discoverable) => self.drive_probe(discoverable.start()),
+            TileSource::Adaptive(adaptive) => self.drive_probe(adaptive.start()),
         }
     }
 

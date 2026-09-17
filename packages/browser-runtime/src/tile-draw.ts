@@ -5,7 +5,6 @@
 // can no longer read or save the canvas. Processed tiles rethrow:
 // decrypt/re-encode needs readable bytes. The host image constructor and
 // timers are injected so node tests drive the fallback with fakes.
-import type { PlanTile } from "./session.ts";
 import type { TileBitmap } from "./tile-decode.ts";
 
 export interface TileImageLike {
@@ -18,21 +17,6 @@ export interface TileDrawHooks {
   onRequestEnd(id: number, ok: boolean): void;
   onLog(line: string): void;
   onUpdate(): void;
-}
-
-export interface TileDrawDeps {
-  fetchTile(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
-  fetchTileOnce?(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
-  decode(bytes: ArrayBuffer): Promise<TileBitmap>;
-  throttle?: (url: string) => Promise<void>;
-  processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>;
-  loadImage?: (url: string, ms?: number) => Promise<TileImageLike>;
-  imageCtor?: new () => TileImageElementLike;
-  setTimeoutFn?: (cb: () => void, ms: number) => unknown;
-  clearTimeoutFn?: (t: unknown) => void;
-  requestTimeoutMs?: number;
-  isOrdinaryImageTile(processing: unknown): boolean;
-  hooks: TileDrawHooks;
 }
 
 export interface TileImageElementLike {
@@ -186,142 +170,4 @@ export function createProcessQueue(
     tail = run.catch(() => undefined);
     return run;
   };
-}
-
-export interface TilePainter {
-  drawTile(
-    ctx2d: Canvas2DLike,
-    tile: PlanTile,
-    opts?: { processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer> },
-  ): Promise<boolean>;
-}
-
-/**
- * Draw one planned tile. Returns true when the tile was painted through
- * ordinary image display (canvas now tainted, display-only); false when it
- * arrived as readable bytes (canvas stays clean). When the <img> also fails,
- * the original readable failure (with its technical chain) is what the job
- * reports.
- */
-export function createTilePainter(deps: TileDrawDeps): TilePainter {
-  const processQueue = deps.processTile ? createProcessQueue(deps.processTile) : null;
-  type TileTransport = "readable" | "ordinary-image";
-  type OriginState = { mode?: TileTransport; ready?: Promise<TileTransport> };
-  const origins = new Map<string, OriginState>();
-  const loadImage =
-    deps.loadImage ??
-    ((url: string, ms?: number) =>
-      loadTileImage(url, {
-        ...(deps.imageCtor ? { imageCtor: deps.imageCtor } : {}),
-        ...(deps.setTimeoutFn ? { setTimeoutFn: deps.setTimeoutFn } : {}),
-        ...(deps.clearTimeoutFn ? { clearTimeoutFn: deps.clearTimeoutFn } : {}),
-        ms: typeof ms === "number" ? ms : (deps.requestTimeoutMs ?? 30000),
-        hooks: deps.hooks,
-      }));
-
-  function tileOrigin(url: string): string {
-    try {
-      return new URL(url, typeof window === "undefined" ? undefined : window.location.href).origin;
-    } catch {
-      return url;
-    }
-  }
-
-  async function drawTile(
-    ctx2d: Canvas2DLike,
-    tile: PlanTile,
-    opts?: { processTile?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer> },
-  ): Promise<boolean> {
-    const drawBitmap = async (source: TileBitmap | TileImageLike): Promise<void> => {
-      drawPlacedTile(
-        ctx2d,
-        source,
-        { x: tile.x, y: tile.y, w: tile.w, h: tile.h },
-        (line) => deps.hooks.onLog(line),
-      );
-    };
-    const decodeAndDraw = async (
-      bytes: ArrayBuffer,
-      overrideProcess?: (recipe: string, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
-    ): Promise<void> => {
-      const processor =
-        overrideProcess ??
-        opts?.processTile ??
-        (processQueue
-          ? (recipe: string, input: ArrayBuffer) => processQueue(recipe, input)
-          : undefined);
-      if (tile.processing && tile.processing !== "none" && processor) {
-        bytes = await processor(tile.processing, bytes);
-      } else if (tile.processing && tile.processing !== "none") {
-        throw new Error(`tile processing unavailable for recipe: ${tile.processing}`);
-      }
-      const bitmap = await deps.decode(bytes);
-      try {
-        await drawBitmap(bitmap);
-      } finally {
-        try {
-          bitmap.close();
-        } catch {
-          // Bitmap cleanup is best-effort.
-        }
-      }
-    };
-    const drawOrdinaryImage = async (): Promise<void> => {
-      if (deps.throttle) {
-        try {
-          await deps.throttle(tile.uri);
-        } catch {
-          // Throttle waits must never fail a tile.
-        }
-      }
-      const img = await loadImage(tile.uri);
-      await drawBitmap(img);
-    };
-
-    if (deps.isOrdinaryImageTile(tile.processing)) {
-      const origin = tileOrigin(tile.uri);
-      let state = origins.get(origin);
-      if (state?.ready) await state.ready;
-      if (!state) {
-        let resolveTransport!: (mode: TileTransport) => void;
-        let rejectTransport!: (reason?: unknown) => void;
-        const ready = new Promise<TileTransport>((resolve, reject) => {
-          resolveTransport = resolve;
-          rejectTransport = reject;
-        });
-        void ready.catch(() => undefined);
-        state = { ready };
-        origins.set(origin, state);
-        try {
-          const fetchFirst = deps.fetchTileOnce ?? deps.fetchTile;
-          const { bytes } = await fetchFirst(tile.uri, tile.headers ?? {});
-          await decodeAndDraw(bytes);
-          state.mode = "readable";
-          resolveTransport("readable");
-          return false;
-        } catch (readableFailure) {
-          try {
-            await drawOrdinaryImage();
-            state.mode = "ordinary-image";
-            resolveTransport("ordinary-image");
-            return true;
-          } catch {
-            origins.delete(origin);
-            rejectTransport(readableFailure);
-            throw readableFailure;
-          }
-        }
-      }
-      if (state.mode === "ordinary-image") {
-        await drawOrdinaryImage();
-        return true;
-      }
-    }
-
-    const { bytes } = await deps.fetchTile(tile.uri, tile.headers ?? {});
-    await decodeAndDraw(bytes, opts?.processTile);
-    return false;
-  }
-
-  return { drawTile };
 }

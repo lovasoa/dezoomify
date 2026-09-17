@@ -23,8 +23,16 @@
 //!   `TileOutcome`, and the adapter takes the buffer out of the arena
 //!   immediately: tile bytes are never retained server-side. Empty tile
 //!   buffers forward a failed `TileOutcome` (the engine retries).
-//! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request) or a
-//!   failed `TileOutcome` (tile request).
+//! * Probe observations: each `acquire-tile` with `purpose: probe` is
+//!   answered with `ProvideProbeOutcome` (request id plus observed size, or
+//!   `ok:false` when missing) and forwarded as the engine `ProbeOutcome`.
+//!   Probe bytes are measured by the host and never retained.
+//! * Display-only tiles: `ProvideDisplayOutcome` answers a tile that the
+//!   host holds as an ordinary image (no readable bytes) with a successful
+//!   tile outcome; the tainted output completes as display-only downstream.
+//! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request), a
+//!   failed `TileOutcome` (tile request), or a missing `ProbeOutcome`
+//!   (probe request).
 //! * Decisions: `SelectImage`, `SelectLevel`, and `RecoveryChoice` map 1:1
 //!   onto engine responses. `RecoveryChoice` must reference the outstanding
 //!   numeric decision generation.
@@ -33,10 +41,9 @@
 //! * `CancelWork` instructs the host to close its own retained resources.
 //!
 //! Engine resources beyond this model are engine limitations, not adapter
-//! limits: byte lengths pass through, never fabricated. Probe-driven
-//! planning is disabled for the session (the host never observes tile
-//! geometry here; the interactive discovery adapter owns that flow), so
-//! probe-driven levels fail with a typed `job.probe-unsupported` error.
+//! limits: byte lengths pass through, never fabricated. Probe-driven levels
+//! plan through the same core probe step machine as native hosts; the host
+//! reports each probe observation and the engine resolves the plan.
 //! Empty discovery resources fail the job via the engine
 //! (`job.empty-resource`); nothing here can fake completion.
 
@@ -152,6 +159,10 @@ struct SessionConfigJson {
     max_total_bytes: Option<u64>,
     max_buffers: Option<usize>,
     max_messages: Option<usize>,
+    max_concurrent_fetches: Option<u32>,
+    max_concurrent_decodes: Option<u32>,
+    max_tiles: Option<u32>,
+    max_retries: Option<u32>,
 }
 
 /// One adapter session: exactly one engine job, one arena, one FIFO queue.
@@ -160,6 +171,7 @@ pub struct Session {
     arena: ByteArena,
     queue: VecDeque<Vec<u8>>,
     job: Option<EngineJob>,
+    job_config: dezoomify_job::Config,
     state: SessionState,
     disposed: bool,
     max_messages: usize,
@@ -167,6 +179,9 @@ pub struct Session {
     live_discovery_requests: HashSet<u32>,
     /// Adapter-minted tile request id -> engine tile id.
     outstanding_tile_requests: HashMap<u32, u32>,
+    /// Adapter-minted probe request ids (subset of tile requests emitted
+    /// while planning probe-driven levels).
+    probe_requests: HashSet<u32>,
     /// Recovery id from the latest request-decision effect.
     pending_recovery: Option<u32>,
 }
@@ -220,15 +235,32 @@ impl Session {
             HARD_MAX_MESSAGES,
             "max_messages",
         )?;
+        // Optional job-budget overrides; the engine validates them when the
+        // job is created, so zero/oversized values fail typed there.
+        let mut job_config = dezoomify_job::Config::default();
+        if let Some(value) = config.max_concurrent_fetches {
+            job_config.max_concurrent_fetches = value;
+        }
+        if let Some(value) = config.max_concurrent_decodes {
+            job_config.max_concurrent_decodes = value;
+        }
+        if let Some(value) = config.max_tiles {
+            job_config.max_tiles = value;
+        }
+        if let Some(value) = config.max_retries {
+            job_config.max_retries = value;
+        }
         Ok(Self {
             arena: ByteArena::with_limits(max_buffer_bytes, max_total_bytes, max_buffers),
             queue: VecDeque::new(),
             job: None,
+            job_config,
             state: SessionState::Created,
             disposed: false,
             max_messages,
             live_discovery_requests: HashSet::new(),
             outstanding_tile_requests: HashMap::new(),
+            probe_requests: HashSet::new(),
             pending_recovery: None,
         })
     }
@@ -437,6 +469,19 @@ impl Session {
         self.arena.to_protocol_handle(handle)
     }
 
+    /// Apply one core processing recipe to fetched tile bytes. Pure: it
+    /// touches no job state, so hosts may call it for any acquired tile
+    /// (the same recipes the discovery adapter exposes).
+    ///
+    /// # Errors
+    ///
+    /// `disposed` after disposal; `malformed` for unknown recipes or
+    /// processing failures.
+    pub fn apply_processing(&self, recipe: &str, bytes: Vec<u8>) -> Result<Vec<u8>, AdapterError> {
+        self.require_live()?;
+        crate::discovery::apply_processing_recipe(recipe, bytes)
+    }
+
     // -----------------------------------------------------------------------
     // Command dispatch (delegation to the engine)
     // -----------------------------------------------------------------------
@@ -447,12 +492,25 @@ impl Session {
             JobCommand::Cancel => self.forward(EngineCommand::Cancel),
             JobCommand::Pause => self.forward(EngineCommand::Pause),
             JobCommand::Resume => self.forward(EngineCommand::Resume),
-            JobCommand::ProvideResource { request, buffer } => {
-                self.on_provide_resource(request, &buffer)
-            }
+            JobCommand::ProvideResource {
+                request,
+                buffer,
+                final_uri,
+            } => self.on_provide_resource(request, &buffer, final_uri),
             JobCommand::ProvideFetchFailure { request, error } => {
                 self.on_fetch_failure(request, error)
             }
+            JobCommand::ProvideProbeOutcome {
+                request,
+                ok,
+                width,
+                height,
+            } => self.on_probe_outcome(request, ok, width, height),
+            JobCommand::ProvideDisplayOutcome {
+                request,
+                width,
+                height,
+            } => self.on_display_outcome(request, width, height),
             JobCommand::SelectImage { image } => self.forward(EngineCommand::SelectImage { image }),
             JobCommand::SelectLevel { level } => self.forward(EngineCommand::SelectLevel { level }),
             JobCommand::RecoveryChoice { generation, choice } => {
@@ -515,17 +573,10 @@ impl Session {
                 "start requires an http(s) input_url up to 2048 bytes",
             ));
         }
-        // Probe-driven planning stays disabled: the session host never
-        // observes tile geometry, so the engine must fail those levels with
-        // a typed `job.probe-unsupported` error instead of probing.
-        let engine = EngineJob::new(
-            &input_url,
-            dezoomify_job::Config {
-                plan_probes: false,
-                ..dezoomify_job::Config::default()
-            },
-        )
-        .map_err(Self::engine_error)?;
+        // Probe-driven levels plan through the engine probe step machine;
+        // the host answers each probe effect with an observed size.
+        let engine =
+            EngineJob::new(&input_url, self.job_config.clone()).map_err(Self::engine_error)?;
         self.job = Some(engine);
         // Start emits the Discovering state event plus one acquire-resource
         // effect per outstanding discovery request; nothing here echoes the
@@ -549,6 +600,7 @@ impl Session {
         &mut self,
         request: u32,
         buffer: &dezoomify_protocol::dto::BufferHandle,
+        final_uri: Option<String>,
     ) -> Result<(), AdapterError> {
         // Correlate before touching any state: unknown request ids are
         // atomic rejections.
@@ -567,6 +619,12 @@ impl Session {
         let handle = self.arena.resolve_protocol(buffer)?;
         match tile {
             Some(tile_id) => {
+                if self.probe_requests.contains(&request) {
+                    return Err(AdapterError::new(
+                        AdapterErrorCode::WrongState,
+                        "probe requests are answered with provide-probe-outcome, not provide-resource",
+                    ));
+                }
                 self.require_engine_state(SessionState::AcquiringTiles)?;
                 // Tile bytes are never retained: hosts decode during
                 // acquisition and hold their own decoded tile, so the arena
@@ -600,13 +658,88 @@ impl Session {
                 self.forward(EngineCommand::ResourceBytes {
                     request,
                     bytes,
-                    // The browser never reports the post-redirect URL, so the
-                    // engine keeps resolving against the request URI here.
-                    // Native hosts supply it; web behavior is unchanged.
-                    final_uri: None,
+                    // Native hosts report the post-redirect URL; browser
+                    // hosts supply it when their fetch exposes one, else the
+                    // engine resolves relative tile URLs against the request
+                    // URI.
+                    final_uri: final_uri.filter(|uri| !uri.is_empty()),
                 })
             }
         }
+    }
+
+    fn on_probe_outcome(
+        &mut self,
+        request: u32,
+        ok: bool,
+        width: u64,
+        height: u64,
+    ) -> Result<(), AdapterError> {
+        let tile_id = match self.outstanding_tile_requests.get(&request) {
+            Some(tile_id) => *tile_id,
+            None => {
+                return Err(AdapterError::new(
+                    AdapterErrorCode::WrongState,
+                    "probe outcome does not match an outstanding request",
+                ));
+            }
+        };
+        if !self.probe_requests.contains(&request) {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "probe outcome matches a tile request, not a probe request",
+            ));
+        }
+        self.require_engine_state(SessionState::Planning)?;
+        let available = ok && width > 0 && height > 0;
+        let (width, height) = if available { (width, height) } else { (0, 0) };
+        self.outstanding_tile_requests.remove(&request);
+        self.probe_requests.remove(&request);
+        self.forward(EngineCommand::ProbeOutcome {
+            tile: tile_id,
+            available,
+            width,
+            height,
+        })
+    }
+
+    /// Display-only answer for one outstanding tile request: the host holds
+    /// an ordinary image element (no readable bytes) and the engine records
+    /// a successful acquisition; the tainted canvas completes as
+    /// display-only downstream.
+    fn on_display_outcome(
+        &mut self,
+        request: u32,
+        width: u64,
+        height: u64,
+    ) -> Result<(), AdapterError> {
+        let tile_id = match self.outstanding_tile_requests.get(&request) {
+            Some(tile_id) => *tile_id,
+            None => {
+                return Err(AdapterError::new(
+                    AdapterErrorCode::WrongState,
+                    "display outcome does not match an outstanding request",
+                ));
+            }
+        };
+        if self.probe_requests.contains(&request) {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "probe requests are answered with provide-probe-outcome, not provide-display-outcome",
+            ));
+        }
+        if width == 0 || height == 0 {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "display outcomes need positive width and height",
+            ));
+        }
+        self.require_engine_state(SessionState::AcquiringTiles)?;
+        self.outstanding_tile_requests.remove(&request);
+        self.forward(EngineCommand::TileOutcome {
+            tile: tile_id,
+            ok: true,
+        })
     }
 
     fn on_fetch_failure(&mut self, request: u32, error: ErrorDto) -> Result<(), AdapterError> {
@@ -622,6 +755,17 @@ impl Session {
         };
         match tile {
             Some(tile_id) => {
+                if self.probe_requests.contains(&request) {
+                    self.require_engine_state(SessionState::Planning)?;
+                    self.outstanding_tile_requests.remove(&request);
+                    self.probe_requests.remove(&request);
+                    return self.forward(EngineCommand::ProbeOutcome {
+                        tile: tile_id,
+                        available: false,
+                        width: 0,
+                        height: 0,
+                    });
+                }
                 self.require_engine_state(SessionState::AcquiringTiles)?;
                 self.outstanding_tile_requests.remove(&request);
                 self.forward(EngineCommand::TileOutcome {
@@ -724,6 +868,9 @@ impl Session {
             } => {
                 let request = sequence;
                 self.outstanding_tile_requests.insert(request, tile);
+                if probe {
+                    self.probe_requests.insert(request);
+                }
                 HostEffect::AcquireTile {
                     request: RequestDto {
                         id: request,
@@ -882,5 +1029,159 @@ mod tests {
         assert!(transcript.contains("acquire-resource"));
         assert!(transcript.contains("Discovering"));
         assert!(session.drain_messages().is_empty());
+    }
+
+    fn dispatch_cmd(session: &mut Session, command: JobCommand) -> Result<(), AdapterError> {
+        let envelope = ControlEnvelope::new(ControlBody::Command(command)).unwrap();
+        let bytes = encode_envelope(&envelope).unwrap();
+        session.dispatch(&bytes)
+    }
+
+    fn probe_request(transcript: &str) -> Option<(u32, String)> {
+        #[derive(serde::Deserialize)]
+        struct Message {
+            kind: Option<String>,
+            #[serde(rename = "type")]
+            msg_type: Option<String>,
+            request: Option<ProbeRequest>,
+        }
+        #[derive(serde::Deserialize)]
+        struct ProbeRequest {
+            id: u32,
+            uri: String,
+            purpose: String,
+        }
+        let messages: Vec<Message> = serde_json::from_str(transcript).ok()?;
+        for message in messages {
+            if message.kind.as_deref() != Some("effect") {
+                continue;
+            }
+            if message.msg_type.as_deref() != Some("acquire-tile") {
+                continue;
+            }
+            let request = message.request?;
+            if request.purpose != "probe" {
+                continue;
+            }
+            return Some((request.id, request.uri));
+        }
+        None
+    }
+
+    #[test]
+    fn job_budget_overrides_validate_at_start() {
+        // A valid override is accepted; the browser baseline of 6 concurrent
+        // fetches travels through the quotas JSON into the engine config.
+        let mut session = Session::new("2.0", r#"{"max_concurrent_fetches":6}"#).unwrap();
+        session.dispatch(&start_bytes("job:budget-1")).unwrap();
+        assert_eq!(session.state(), SessionState::Discovering);
+
+        // A zero budget fails typed when the job is created, not silently.
+        let mut invalid = Session::new("2.0", r#"{"max_tiles":0}"#).unwrap();
+        assert!(invalid.dispatch(&start_bytes("job:budget-2")).is_err());
+    }
+
+    #[test]
+    fn apply_processing_is_pure_and_shared() {
+        let session = Session::new("2.0", "{}").unwrap();
+        assert_eq!(
+            session.apply_processing("none", vec![1, 2, 3]).unwrap(),
+            vec![1, 2, 3]
+        );
+        assert!(session.apply_processing("bogus-recipe", vec![1]).is_err());
+    }
+
+    #[test]
+    fn display_outcome_needs_an_outstanding_tile_request() {
+        let mut session = Session::new("2.0", "{}").unwrap();
+        dispatch_cmd(
+            &mut session,
+            JobCommand::ProvideDisplayOutcome {
+                request: 99,
+                width: 256,
+                height: 256,
+            },
+        )
+        .unwrap_err();
+        dispatch_cmd(
+            &mut session,
+            JobCommand::ProvideDisplayOutcome {
+                request: 99,
+                width: 0,
+                height: 0,
+            },
+        )
+        .unwrap_err();
+    }
+
+    #[test]
+    fn probe_outcome_needs_an_outstanding_probe_request() {
+        let mut session = Session::new("2.0", "{}").unwrap();
+        dispatch_cmd(
+            &mut session,
+            JobCommand::ProvideProbeOutcome {
+                request: 99,
+                ok: true,
+                width: 256,
+                height: 256,
+            },
+        )
+        .unwrap_err();
+    }
+
+    #[test]
+    fn probe_driven_generic_level_resolves_through_session() {
+        let mut session = Session::new("2.0", "{}").unwrap();
+        let command = JobCommand::Start {
+            input_url: "https://example.test/generic/placeholder.svg?x={{X}}&y={{Y}}".to_string(),
+        };
+        let envelope = ControlEnvelope::new(ControlBody::Command(command)).unwrap();
+        session
+            .dispatch(&encode_envelope(&envelope).unwrap())
+            .unwrap();
+        // Generic templates resolve discovery without metadata bytes.
+        let mut transcript = messages_to_json_array(&session.drain_messages()).unwrap();
+        assert!(
+            transcript.contains("catalog"),
+            "generic start emits a catalog"
+        );
+        dispatch_cmd(&mut session, JobCommand::SelectImage { image: 0 }).unwrap();
+        session.drain_messages();
+        dispatch_cmd(&mut session, JobCommand::SelectLevel { level: 0 }).unwrap();
+        transcript = messages_to_json_array(&session.drain_messages()).unwrap();
+
+        let mut rounds = 0;
+        while session.state() == SessionState::Planning {
+            rounds += 1;
+            assert!(rounds <= 256, "probe loop did not resolve");
+            let (request, uri) = probe_request(&transcript).expect("outstanding probe");
+            let query = uri.split_once('?').expect("probe uri query").1;
+            let mut coordinates = query
+                .split('&')
+                .map(|part| part.split_once('=').unwrap().1.parse::<u32>().unwrap());
+            let x = coordinates.next().unwrap();
+            let y = coordinates.next().unwrap();
+            let (ok, width, height) = if x < 2 && y < 2 {
+                (true, 256, 256)
+            } else {
+                (false, 0, 0)
+            };
+            dispatch_cmd(
+                &mut session,
+                JobCommand::ProvideProbeOutcome {
+                    request,
+                    ok,
+                    width,
+                    height,
+                },
+            )
+            .unwrap();
+            transcript = messages_to_json_array(&session.drain_messages()).unwrap();
+        }
+        assert_eq!(session.state(), SessionState::AcquiringTiles);
+        assert!(
+            transcript.contains("\"purpose\": \"tile\""),
+            "resolved plan emits tile acquisitions: {transcript}"
+        );
     }
 }
