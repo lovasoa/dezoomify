@@ -13,8 +13,9 @@ import { LOG_LEVELS, LOG_MAX_CHARS, createLogger } from "@dezoomify/browser-runt
 
 type LogLevel = keyof typeof LOG_LEVELS;
 type Message = Record<string, unknown> & { type?: string; requestId?: string; jobId?: string; tabId?: number; frameId?: number; documentGeneration?: number; url?: string; method?: string; headers?: unknown; origins?: unknown };
-type CandidateSnapshot = { ok: true; documentUrl: string; urls: string[]; overflow: number };
-type CandidateBatch = { requestId: string; urls: string[]; overflow: number; documentUrl: string };
+type CandidateInput = { url: string; contents?: string };
+type CandidateSnapshot = { ok: true; documentUrl: string; inputs: CandidateInput[]; overflow: number };
+type CandidateBatch = { requestId: string; inputs: CandidateInput[]; overflow: number; documentUrl: string };
 type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; chunks?: Array<{ sequence: number; bytes: number[] }> };
 type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string>; primary: boolean };
 export type BrowserApi = {
@@ -278,15 +279,15 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
 
   function forwardCandidates(entry: Entry, snapshot: CandidateSnapshot) {
     const job = jobs.get(entry.jobId) ?? entry;
-    const urls: string[] = [];
-    for (const url of snapshot.urls) {
-      if (entry.seenCandidates.has(url)) continue;
-      entry.seenCandidates.add(url);
-      urls.push(url);
+    const inputs: CandidateInput[] = [];
+    for (const input of snapshot.inputs) {
+      if (entry.seenCandidates.has(input.url)) continue;
+      entry.seenCandidates.add(input.url);
+      inputs.push(input);
     }
-    const candidate = { requestId: makeRequestId("candidates"), urls, overflow: snapshot.overflow, documentUrl: snapshot.documentUrl };
-    backgroundLog("debug", "candidates-forwarded", `jobId=${entry.jobId} added=${urls.length} overflow=${snapshot.overflow} ready=${job.jobReady} held=${job.heldCandidates.length}`);
-    if (!urls.length && !candidate.overflow) return;
+    const candidate = { requestId: makeRequestId("candidates"), inputs, overflow: snapshot.overflow, documentUrl: snapshot.documentUrl };
+    backgroundLog("debug", "candidates-forwarded", `jobId=${entry.jobId} added=${inputs.length} overflow=${snapshot.overflow} ready=${job.jobReady} held=${job.heldCandidates.length}`);
+    if (!inputs.length && !candidate.overflow) return;
     if (job.jobReady) sendToJob(entry, "dz.job.candidates", candidate.requestId, candidate);
     else if (job.heldCandidates.length < HELD_CANDIDATE_LIMIT) job.heldCandidates.push({ entry, candidate });
   }
@@ -348,18 +349,20 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
     try {
       const snapshot = await executeSourceOperation(entry, collectCandidates, [], "collect") as CandidateSnapshot | null;
       if (!sourceOperationAllowed(entry) || entry.attemptGeneration !== attempt) return;
-      if (!snapshot || snapshot.ok !== true || !Array.isArray(snapshot.urls) ||
+      if (!snapshot || snapshot.ok !== true || !Array.isArray(snapshot.inputs) ||
         typeof snapshot.documentUrl !== "string" || !isPublicHttpUrl(snapshot.documentUrl) ||
         !Number.isSafeInteger(snapshot.overflow) || snapshot.overflow < 0 ||
-        snapshot.urls.length > MAX_CANDIDATES ||
-        snapshot.urls.some((url) => typeof url !== "string" || url.length > MAX_URL_LENGTH || !isPublicHttpUrl(url))) {
+        snapshot.inputs.length > MAX_CANDIDATES ||
+        snapshot.inputs.some((input) => !input || typeof input !== "object" || typeof input.url !== "string" ||
+          input.url.length > MAX_URL_LENGTH || !isPublicHttpUrl(input.url) ||
+          (input.contents !== undefined && typeof input.contents !== "string"))) {
         throw new Error("invalid-candidate-snapshot");
       }
       if (!sameDocumentUrl(snapshot.documentUrl, entry.sourceUrl)) {
         invalidateSourceDocument(entry, "snapshot-document-mismatch");
         return;
       }
-      backgroundLog("info", "active-tab-op-result", `op=collect tab=${entry.tabId} candidates=${snapshot.urls.length} overflow=${snapshot.overflow} doc=${snapshot.documentUrl}`);
+      backgroundLog("info", "active-tab-op-result", `op=collect tab=${entry.tabId} candidates=${snapshot.inputs.length} overflow=${snapshot.overflow} doc=${snapshot.documentUrl}`);
       forwardCandidates(entry, snapshot);
     } catch (error) {
       if (!sourceOperationAllowed(entry) || entry.attemptGeneration !== attempt) return;

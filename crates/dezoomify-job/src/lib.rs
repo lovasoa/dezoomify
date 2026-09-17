@@ -24,7 +24,7 @@ pub mod state;
 pub mod transition;
 
 pub use config::{Config, ConfigError};
-pub use job::Job;
+pub use job::{Job, JobInput};
 pub use projection::project_catalog;
 pub use state::State;
 pub use transition::{

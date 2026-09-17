@@ -18,19 +18,21 @@ enumerates tabs. Each attempt, the first and every retry, takes exactly one
 bounded source snapshot; a retry discards any snapshot still in flight from the
 previous attempt and starts a new engine attempt.
 
-Candidates come from the monitored tab's own performance timeline. The
-background deliberately observes no traffic: a `webRequest` listener without
-host permissions is deaf, and `activeTab` does not enable observation. No
-permanent host permissions are declared.
+The initial ordered batch contains the rendered top-document `outerHTML`, then
+the rendered DOM of readable same-origin iframes, then URL-only references
+from the monitored tab's performance timeline. Cross-origin iframes are
+skipped. The background deliberately observes no traffic: a `webRequest`
+listener without host permissions is deaf, and `activeTab` does not enable
+observation. No permanent host permissions are declared.
 
 `crates/dezoomify-core` runs through WASM inside the dedicated extension job
-tab. It recognizes formats from fetched bytes, not URL text. The first
-candidate whose bytes produce an image confirms detection in the job tab.
+tab. It evaluates captured DOM bytes directly before fetching URL-only roots.
+The first root whose bytes produce an image confirms detection in the job tab.
 
 `apps/extension/src/background/source-operations.ts` contains the two
 self-contained functions passed to `scripting.executeScript()`. The first
-takes a bounded snapshot of the document URL and retained resource-timing
-entries when the job tab is ready. The second performs a tab-origin fetch and
+takes a bounded snapshot of rendered document roots and retained
+resource-timing entries when the job tab is ready. The second performs a tab-origin fetch and
 returns bounded structured-cloneable chunks. Neither operation registers a
 listener or observes resources after it returns. A later snapshot is bounded
 and deduplicated if discovery requests more candidates. If an operation cannot

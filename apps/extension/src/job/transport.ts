@@ -55,7 +55,7 @@ export function createCoordinatorSourceTransport(deps: { sendMessage(message: un
       return await new Promise<SourceReply>((resolve, reject) => pending.set(token, { resolve, reject, chunks: [], finalUrl: request.uri }));
     },
     /** Receive a coordinator-routed `dz.source.fetch-*` message. */
-    handleMessage(message: { requestId?: string; sourceType?: string; bytes?: unknown; ok?: boolean; status?: number; url?: string }): boolean {
+    handleMessage(message: { requestId?: string; sourceType?: string; bytes?: unknown; ok?: boolean; code?: string; status?: number; url?: string }): boolean {
       if (typeof message?.requestId !== "string") return false;
       const state = pending.get(message?.requestId);
       if (!state) return false;
@@ -67,7 +67,13 @@ export function createCoordinatorSourceTransport(deps: { sendMessage(message: un
       }
       if (message.sourceType === "dz.source.fetch-complete") {
         pending.delete(message.requestId);
-        if (!message.ok) { state.reject(Object.assign(new Error(`source request failed with HTTP ${message.status ?? 0}`), { category: "network" })); return true; }
+        if (!message.ok) {
+          state.reject(Object.assign(new Error(`source request failed with HTTP ${message.status ?? 0}`), {
+            category: "network",
+            sourceDefinitive: message.code === "http-error",
+          }));
+          return true;
+        }
         const length = state.chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
         const bytes = new Uint8Array(length);
         let offset = 0;
@@ -125,6 +131,7 @@ export function createEngineResourceFetcher(deps: {
         });
         return { bytes: result.bytes };
       } catch (sourceError) {
+        if (sourceError && typeof sourceError === "object" && (sourceError as { sourceDefinitive?: unknown }).sourceDefinitive === true) throw sourceError;
         deps.onSourceFailure?.(asFetchFailure(sourceError));
       }
     }

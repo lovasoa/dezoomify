@@ -27,10 +27,7 @@ pub use model::{
     Request, TileRole, TileSpec,
 };
 pub use processing::ProcessingError;
-pub use registry::{
-    RankedCandidate, Registry, builtin_names, classify_url, default_registry, rank_candidate_urls,
-    registry_for,
-};
+pub use registry::{Registry, builtin_names, default_registry, registry_for};
 pub use tile_plan::{
     Grid, GridCoord, GridRequests, GridTile, Positioned, PositionedTile, TileSource,
     TileSourceError,

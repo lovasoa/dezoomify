@@ -94,7 +94,10 @@ no host re-derives job policy or tile geometry.
 - `cancel-work` is idempotent and tells the host to cancel work and release
   retained resources after cancellation or failure.
 
-Discovery delegates to the core registry: the engine emits one
+Discovery consumes ordered roots and delegates each to the core registry. A
+root with supplied bytes is evaluated directly; a URL-only root begins with
+an `acquire-resource` effect. The first root that yields a catalog wins, and a
+failed root advances to the next one. The engine emits one
 `acquire-resource` effect per outstanding core request and forwards host
 results to the core operation, which owns candidate ordering and fallback.
 Core discovery is a poll: the same request stays outstanding until its
@@ -102,7 +105,7 @@ outcome is provided, so the engine never loops on unanswered fetches.
 
 | Input | Valid source state(s) | Validation | Transition | Effects | Events |
 |---|---|---|---|---|---|
-| `start()` | `Created` | Config valid (`max_retries` 0..=1024, 0 is first attempt only), `http(s)`/`file://`/local-path URL (≤2048B, `file://` only local absolute), known format (`None`/`auto` or registered name, else `Err(job.unknown-dezoomer)` with no transition) | `Created` -> `Discovering` | `acquire-resource` per outstanding discovery request (real URIs, metadata purpose, header names) | `job-state:Discovering` |
+| `start()` | `Created` | Config valid (`max_retries` 0..=1024, 0 is first attempt only), non-empty ordered inputs with `http(s)`/`file://`/local-path URLs (≤2048B, `file://` only local absolute), known format (`None`/`auto` or registered name, else `Err(job.unknown-dezoomer)` with no transition) | `Created` -> `Discovering` | supplied root bytes are evaluated directly; otherwise `acquire-resource` per outstanding discovery request | `job-state:Discovering` |
 | `ResourceBytes` | `Discovering` | outstanding request sequence, `bytes.len() <= max_bytes`, non-empty | Stay (core asks for more resources) or -> `AwaitingImageSelection` | further `acquire-resource` or none | `job-state`, then `catalog` (projected real catalog) |
 | `ResourceBytes` late (sibling fetch after a winner finished discovery) | Any non-`Discovering` with still-pending request sequence | request sequence still pending | No transition (winning catalog survives) | none | none (`Ok(Ignored)`) |
 | `ResourceBytes` over-limit/empty | `Discovering` | `bytes.len() > max_bytes` / empty | -> `Failed` | `cancel-work` | `failed:job.resource-limit` / `failed:job.empty-resource` (terminal once) |

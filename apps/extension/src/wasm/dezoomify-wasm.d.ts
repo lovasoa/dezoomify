@@ -11,5 +11,3 @@ export class Session {
   applyProcessing(recipe: string, bytes: Uint8Array): Uint8Array;
   dispose(): void;
 }
-
-export function rankCandidates(urlsJson: string): string;

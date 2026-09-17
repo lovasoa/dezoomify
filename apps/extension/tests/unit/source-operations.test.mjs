@@ -15,11 +15,46 @@ test("candidate snapshot includes the document and retained resources in one bat
     assert.deepEqual(collectCandidates(), {
       ok: true,
       documentUrl: "https://gallery.example/page",
-      urls: ["https://gallery.example/page", "https://cdn.example/viewer.js", "https://gallery.example/info.json"],
+      inputs: [
+        { url: "https://gallery.example/page" },
+        { url: "https://cdn.example/viewer.js" },
+        { url: "https://gallery.example/info.json" },
+      ],
       overflow: 0,
     });
   } finally {
     globalThis.location = oldLocation;
+    globalThis.performance = oldPerformance;
+  }
+});
+
+test("candidate snapshot orders rendered document and readable iframe DOM before URL-only resources", () => {
+  const oldLocation = globalThis.location;
+  const oldDocument = globalThis.document;
+  const oldPerformance = globalThis.performance;
+  const child = {
+    location: { href: "https://gallery.example/frame" },
+    documentElement: { outerHTML: "<html><script>dynamic viewer config</script></html>" },
+    querySelectorAll: () => [],
+  };
+  globalThis.location = { href: "https://gallery.example/page" };
+  globalThis.document = {
+    documentElement: { outerHTML: "<html><body>rendered page</body></html>" },
+    querySelectorAll: () => [
+      { contentDocument: child, src: child.location.href },
+      { get contentDocument() { throw new Error("cross-origin"); }, src: "https://other.example/frame" },
+    ],
+  };
+  globalThis.performance = { getEntriesByType: () => [{ name: "https://gallery.example/TileGroup0/1-0-0.jpg" }] };
+  try {
+    assert.deepEqual(collectCandidates().inputs, [
+      { url: "https://gallery.example/page", contents: "<html><body>rendered page</body></html>" },
+      { url: "https://gallery.example/frame", contents: "<html><script>dynamic viewer config</script></html>" },
+      { url: "https://gallery.example/TileGroup0/1-0-0.jpg" },
+    ]);
+  } finally {
+    globalThis.location = oldLocation;
+    globalThis.document = oldDocument;
     globalThis.performance = oldPerformance;
   }
 });
@@ -33,10 +68,10 @@ test("candidate snapshot applies URL and count caps with overflow diagnostics", 
   globalThis.performance = { getEntriesByType: () => entries };
   try {
     const result = collectCandidates();
-    assert.equal(result.urls.length, 100);
-    assert.equal(result.urls[0], "https://gallery.example/page");
+    assert.equal(result.inputs.length, 100);
+    assert.equal(result.inputs[0].url, "https://gallery.example/page");
     assert.equal(result.overflow, 6);
-    assert.ok(result.urls.every((url) => url.length <= 2048));
+    assert.ok(result.inputs.every((input) => input.url.length <= 2048));
   } finally {
     globalThis.location = oldLocation;
     globalThis.performance = oldPerformance;

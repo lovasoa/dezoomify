@@ -62,7 +62,7 @@ test("coordinator logs active-tab and job-bus interactions", async () => {
   const executed = [];
   fake.api.scripting.executeScript = async (details) => {
     executed.push(details);
-    return [{ frameId: 0, result: { ok: true, documentUrl: "https://gallery.example/work", urls: ["https://gallery.example/tiles/a.jpg"], overflow: 0 } }];
+    return [{ frameId: 0, result: { ok: true, documentUrl: "https://gallery.example/work", inputs: [{ url: "https://gallery.example/tiles/a.jpg" }], overflow: 0 } }];
   };
   await fake.listeners.click[0]({ id: 7, url: "https://gallery.example/work" });
   await new Promise((resolve) => setImmediate(resolve));

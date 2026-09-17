@@ -46,7 +46,7 @@ fn envelope_bytes(body: ControlBody) -> Vec<u8> {
 
 fn start_bytes(_job: &str) -> Vec<u8> {
     envelope_bytes(ControlBody::Command(JobCommand::Start {
-        input_url: INPUT_URL.to_string(),
+        inputs: vec![dezoomify_protocol::dto::JobInputDto::new(INPUT_URL)],
     }))
 }
 
@@ -532,7 +532,9 @@ fn late_sibling_discovery_response_is_ignored_after_job_advances() {
     let mut session = new_session();
     session
         .dispatch(&envelope_bytes(ControlBody::Command(JobCommand::Start {
-            input_url: "https://example.com/viewer/index.html".to_string(),
+            inputs: vec![dezoomify_protocol::dto::JobInputDto::new(
+                "https://example.com/viewer/index.html",
+            )],
         })))
         .expect("start");
     let root = discovery_request(&session.drain_messages());

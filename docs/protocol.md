@@ -18,7 +18,10 @@
 ## Commands
 
 Commands express user intent within one already-routed job session and do not
-repeat the product's outer job token. Resource requests use job-scoped `u32`
+repeat the product's outer job token. `Start` carries an ordered non-empty
+`inputs` batch of `{url, contents?}` discovery roots; supplied contents avoid
+fetching that root, while URL-only roots retain ordinary on-demand fetching.
+Resource requests use job-scoped `u32`
 sequences, image and level selections are zero-based `u32` positions into the
 authoritative immutable catalog, tiles carry a selected-level-scoped `u32`
 ordinal, and recovery choices carry a job-scoped `u32` decision generation.

@@ -190,6 +190,25 @@ pub struct CatalogDto {
     pub images: Vec<ImageDto>,
 }
 
+/// One ordered discovery root. `contents` is omitted when the host only has
+/// a reference and discovery should acquire it normally.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobInputDto {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contents: Option<Vec<u8>>,
+}
+
+impl JobInputDto {
+    #[must_use]
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            contents: None,
+        }
+    }
+}
+
 // Job commands (shared UI/CLI -> job)
 // ---------------------------------------------------------------------------
 
@@ -197,7 +216,7 @@ pub struct CatalogDto {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum JobCommand {
     Start {
-        input_url: String,
+        inputs: Vec<JobInputDto>,
     },
     ProvideResource {
         request: u32,

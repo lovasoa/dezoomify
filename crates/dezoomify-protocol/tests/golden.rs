@@ -118,7 +118,9 @@ fn every_variant_round_trips_canonically() {
 fn all_commands() -> Vec<JobCommand> {
     let commands = vec![
         JobCommand::Start {
-            input_url: "https://example.com/item".into(),
+            inputs: vec![dezoomify_protocol::dto::JobInputDto::new(
+                "https://example.com/item",
+            )],
         },
         JobCommand::ProvideResource {
             request: 1,
@@ -292,8 +294,8 @@ fn canonical_vectors_match_checked_in_files() {
 // content drifted (e.g. a corrupted handshake). Pin what each vector means.
 fn assert_vector_semantics(id: &str, envelope: &ControlEnvelope) {
     match (&envelope.body, id) {
-        (ControlBody::Command(JobCommand::Start { input_url }), "handshake-ok") => {
-            assert_eq!(input_url, "https://example.com/item/1");
+        (ControlBody::Command(JobCommand::Start { inputs }), "handshake-ok") => {
+            assert_eq!(inputs[0].url, "https://example.com/item/1");
         }
         (ControlBody::Event(event @ JobEvent::Failed { error }), "error-terminal") => {
             assert_eq!(error.code, "fetch.failed");

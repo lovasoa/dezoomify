@@ -680,7 +680,7 @@ async function runJob(url: string): Promise<void> {
   });
 
   try {
-    host.start(url);
+    host.start([{ url }]);
     await finished;
     if (token !== jobToken) return;
   } catch (error) {

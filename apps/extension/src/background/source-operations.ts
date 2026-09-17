@@ -9,43 +9,60 @@
  */
 
 /**
- * Take one bounded snapshot of the source document's retained resource
- * timeline. The document URL and resource entries are collected as one batch
- * so ranking can prefer viewer resources without committing to the document
- * URL merely because it was added first.
+ * Take one bounded snapshot of rendered document roots followed by retained
+ * resource URLs. Same-origin iframe DOM is readable here; cross-origin frames
+ * throw on access and are skipped.
  */
 type SourceRequest = { url: string; method?: string; headers: Array<{ name: string; value: string }> };
 type FetchFailure = { ok: false; code: string; status?: number };
 type SourceChunk = { sequence: number; bytes: number[] };
 
-export function collectCandidates(): { ok: true; documentUrl: string; urls: string[]; overflow: number } {
+export function collectCandidates(): { ok: true; documentUrl: string; inputs: Array<{ url: string; contents?: string }>; overflow: number } {
   const MAX_URL_LENGTH = 2048;
   const MAX_CANDIDATES = 100;
+  const MAX_DOM_BYTES = 8 * 1024 * 1024;
   const documentUrl = String(globalThis.location?.href ?? "");
-  const raw: unknown[] = [documentUrl];
-  try {
-    for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
-      raw.push(typeof entry === "string" ? entry : entry?.name);
-    }
-  } catch {}
-
-  const urls: string[] = [];
+  const inputs: Array<{ url: string; contents?: string }> = [];
   const seen = new Set<string>();
   let overflow = 0;
-  for (const value of raw) {
-    if (typeof value !== "string" || value.length === 0 || value.length > MAX_URL_LENGTH) continue;
+  const append = (value: unknown, contents?: unknown) => {
+    if (typeof value !== "string" || value.length === 0 || value.length > MAX_URL_LENGTH) return;
     let parsed;
-    try { parsed = new URL(value); } catch { continue; }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
-    if (seen.has(value)) continue;
+    try { parsed = new URL(value); } catch { return; }
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || seen.has(value)) return;
     seen.add(value);
-    if (urls.length >= MAX_CANDIDATES) {
-      overflow += 1;
-      continue;
+    if (inputs.length >= MAX_CANDIDATES) { overflow += 1; return; }
+    let readableContents: string | undefined;
+    if (typeof contents === "string" && contents.length > 0) {
+      try {
+        if (new TextEncoder().encode(contents).byteLength <= MAX_DOM_BYTES) readableContents = contents;
+      } catch {}
     }
-    urls.push(value);
-  }
-  return { ok: true, documentUrl, urls, overflow };
+    inputs.push({ url: value, ...(readableContents !== undefined ? { contents: readableContents } : {}) });
+  };
+
+  const visit = (doc: Document, url: string) => {
+    let html = "";
+    try { html = String(doc.documentElement?.outerHTML ?? ""); } catch {}
+    append(url, html);
+    let frames: Element[] = [];
+    try { frames = Array.from(doc.querySelectorAll?.("iframe") ?? []); } catch {}
+    for (const element of frames) {
+      try {
+        const frame = element as HTMLIFrameElement;
+        const child = frame.contentDocument;
+        if (child) visit(child, String(child.location?.href ?? frame.src ?? ""));
+      } catch {}
+    }
+  };
+  try { visit(globalThis.document, documentUrl); } catch { append(documentUrl); }
+
+  try {
+    for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
+      append(typeof entry === "string" ? entry : entry?.name);
+    }
+  } catch {}
+  return { ok: true, documentUrl, inputs, overflow };
 }
 
 /**

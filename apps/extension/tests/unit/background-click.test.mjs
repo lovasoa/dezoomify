@@ -25,7 +25,7 @@ function fakeBrowser(session = {}, results = []) {
     scripting: {
       executeScript(value) {
         calls.execute.push(value);
-        return Promise.resolve(results.shift() ?? [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, urls: ["https://gallery.example/info.json"], overflow: 0 } }]);
+        return Promise.resolve(results.shift() ?? [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }]);
       },
     },
     storage: { session: {
@@ -68,7 +68,7 @@ test("toolbar opens the dedicated job tab without injection, registration, or re
 
 test("source fetch returns chunks and completion through the job bridge", async () => {
   const fake = fakeBrowser({}, [
-    [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, urls: ["https://gallery.example/info.json"], overflow: 0 } }],
+    [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }],
     [{ frameId: 0, result: { ok: true, status: 200, url: "https://gallery.example/info.json", bytes: 3, chunks: [{ sequence: 0, bytes: [1, 2, 3] }] } }],
   ]);
   await load(fake);
@@ -85,7 +85,7 @@ test("source fetch returns chunks and completion through the job bridge", async 
 
 test("source fetch failure preserves a typed engine outcome", async () => {
   const fake = fakeBrowser({}, [
-    [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, urls: ["https://gallery.example/info.json"], overflow: 0 } }],
+    [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }],
     [{ frameId: 0, result: { ok: false, code: "http-error", status: 403 } }],
   ]);
   await load(fake);
