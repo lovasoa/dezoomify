@@ -2,6 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { collectCandidates, fetchSource } from "../../src/background/source-operations.ts";
 
+// Test-only polyfill: the pinned Node 24 toolchain predates
+// Uint8Array.prototype.toBase64 (Baseline 2025), while the extension
+// manifest requires browsers that ship it. This exercises fetchSource's
+// logic on old Node without touching shipped code.
+if (typeof Uint8Array.prototype.toBase64 !== "function") {
+  Uint8Array.prototype.toBase64 = function () {
+    return Buffer.from(this.buffer, this.byteOffset, this.byteLength).toString("base64");
+  };
+}
+
 test("candidate snapshot includes the document and retained resources in one batch", () => {
   const oldLocation = globalThis.location;
   const oldPerformance = globalThis.performance;
