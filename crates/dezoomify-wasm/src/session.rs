@@ -29,10 +29,15 @@
 //! * Display-only tiles: `ProvideDisplayOutcome` answers a tile that the
 //!   host holds as an ordinary image (no readable bytes) with a successful
 //!   tile outcome; the tainted output completes as display-only downstream.
-//! * Late acquisition answers: tile bytes, display outcomes, failures, and
-//!   probe-fetch failures that arrive after the engine has left their phase
-//!   are moot. The adapter consumes/releases the arena slot, drops the
-//!   correlation, and forwards nothing, exactly like late discovery replies.
+//! * Late host answers: a host fetch may settle after the engine left its
+//!   phase (a sibling's retry exhaustion can move it to
+//!   AwaitingPartialDecision, cancellation can end it, Keep can start
+//!   finalizing). The adapter only correlates: it consumes the arena slot
+//!   exactly once, drops the correlation, and forwards. The engine owns
+//!   acceptance: it processes outcomes for work it still awaits (its
+//!   in-flight bookkeeping spans phase transitions and it never re-emits
+//!   in-flight tiles) and ignores the rest, exactly as it ignores late
+//!   sibling discovery replies.
 //! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request), a
 //!   failed `TileOutcome` (tile request), or a missing `ProbeOutcome`
 //!   (probe request).
@@ -442,14 +447,17 @@ impl Session {
                         "recovery choice does not match the outstanding recovery",
                     ));
                 }
-                self.forward(EngineCommand::RecoveryChoice {
+                let messages = self.forward(EngineCommand::RecoveryChoice {
                     generation,
                     choice: match choice {
                         RecoveryChoice::Keep => EngineRecoveryChoice::Keep,
                         RecoveryChoice::Retry => EngineRecoveryChoice::Retry,
                         RecoveryChoice::Discard => EngineRecoveryChoice::Discard,
                     },
-                })
+                })?;
+                // The generation is consumed exactly once.
+                self.pending_recovery = None;
+                Ok(messages)
             }
             JobCommand::FinalizationSucceeded => self.forward(EngineCommand::FinalizationSucceeded),
             JobCommand::FinalizationFailed { error } => {
@@ -562,25 +570,13 @@ impl Session {
                         "probe requests are answered with provide-probe-outcome, not provide-resource",
                     ));
                 }
-                // A tile response is moot once the engine has left
-                // AcquiringTiles (retry exhaustion can move it to
-                // AwaitingPartialDecision, the last tile can move it to
-                // Finalizing, or cancellation can end acquisition). Other
-                // in-flight hosts can still answer afterwards, exactly as
-                // late sibling discovery responses are after a transition.
-                // Release the arena slot, drop this correlation, and forward
-                // nothing instead of failing the session.
-                if self.state != SessionState::AcquiringTiles {
-                    self.arena.free(handle)?;
-                    self.outstanding_tile_requests.remove(&request);
-                    self.request_context.remove(&request);
-                    return Ok(Vec::new());
-                }
                 // Tile bytes are never retained: hosts decode during
                 // acquisition and hold their own decoded tile, so the arena
                 // copy is released as soon as the outcome settles. Empty
                 // bytes forward a failed outcome so the engine can retry
-                // honestly.
+                // honestly. The engine owns acceptance: a response that
+                // outlived its phase is processed if the engine still
+                // awaits the tile, ignored if not.
                 let tile_bytes = self.arena.take_buffer(handle)?;
                 let ok = !tile_bytes.is_empty();
                 self.outstanding_tile_requests.remove(&request);
@@ -638,7 +634,9 @@ impl Session {
                 "probe outcome matches a tile request, not a probe request",
             ));
         }
-        self.require_engine_state(SessionState::Planning)?;
+        // The engine owns acceptance: the outstanding probe is processed,
+        // a duplicate or late answer for an already-answered probe is
+        // ignored, and an answer for a non-probe tile is a fault.
         self.outstanding_tile_requests.remove(&request);
         self.probe_requests.remove(&request);
         self.request_context.remove(&request);
@@ -668,14 +666,7 @@ impl Session {
                 "probe requests are answered with provide-probe-outcome, not provide-display-outcome",
             ));
         }
-        // A display outcome is moot once the engine has left
-        // AcquiringTiles: drop this correlation and forward nothing instead
-        // of failing the session.
-        if self.state != SessionState::AcquiringTiles {
-            self.outstanding_tile_requests.remove(&request);
-            self.request_context.remove(&request);
-            return Ok(Vec::new());
-        }
+        // The engine owns acceptance, exactly as for tile bytes.
         self.outstanding_tile_requests.remove(&request);
         self.request_context.remove(&request);
         self.forward(EngineCommand::TileOutcome {
@@ -708,15 +699,9 @@ impl Session {
         match tile {
             Some(tile_id) => {
                 if self.probe_requests.contains(&request) {
-                    // A probe-fetch failure is moot once the engine has left
-                    // Planning: drop this correlation and forward nothing
-                    // instead of failing the session.
-                    if self.state != SessionState::Planning {
-                        self.outstanding_tile_requests.remove(&request);
-                        self.probe_requests.remove(&request);
-                        self.request_context.remove(&request);
-                        return Ok(Vec::new());
-                    }
+                    // The engine owns acceptance: a failed probe fetch is a
+                    // missing observation for the outstanding probe, and
+                    // moot (ignored) once the probe is answered.
                     self.outstanding_tile_requests.remove(&request);
                     self.probe_requests.remove(&request);
                     self.request_context.remove(&request);
@@ -725,14 +710,7 @@ impl Session {
                         outcome: ProbeOutcome::Missing,
                     });
                 }
-                // A tile-fetch failure is moot once the engine has left
-                // AcquiringTiles: drop this correlation and forward nothing
-                // instead of failing the session.
-                if self.state != SessionState::AcquiringTiles {
-                    self.outstanding_tile_requests.remove(&request);
-                    self.request_context.remove(&request);
-                    return Ok(Vec::new());
-                }
+                // The engine owns acceptance, exactly as for tile bytes.
                 self.outstanding_tile_requests.remove(&request);
                 self.request_context.remove(&request);
                 self.forward(EngineCommand::TileOutcome {
@@ -744,7 +722,9 @@ impl Session {
                 self.live_discovery_requests.remove(&request);
                 self.request_context.remove(&request);
                 // A late sibling failure is also a normal consequence of
-                // concurrent discovery after another candidate has won.
+                // concurrent discovery after another candidate has won. The
+                // engine would ignore it, and forwarding must not stamp the
+                // adapter's terminal-error slot with a moot cause.
                 if self.state != SessionState::Discovering {
                     return Ok(Vec::new());
                 }

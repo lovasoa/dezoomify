@@ -182,7 +182,12 @@ fn start_four_tile_grid(session: &mut Session) -> Vec<u32> {
 }
 
 #[test]
-fn late_tile_responses_after_partial_decision_are_ignored() {
+fn late_tile_responses_after_partial_decision_are_processed() {
+    // A sibling's retry exhaustion can move the engine to
+    // AwaitingPartialDecision while other in-flight fetches are still out.
+    // The adapter forwards those late answers (the engine owns acceptance):
+    // successes are counted, an exhausted failure is recorded in the open
+    // decision without re-opening it, and the arena slot is released.
     let mut session = Session::new(SessionConfig {
         max_retries: Some(0),
         max_buffers: NonZeroUsize::new(1),
@@ -209,8 +214,15 @@ fn late_tile_responses_after_partial_decision_are_ignored() {
             buffer: late_buffer,
             final_uri: None,
         })
-        .expect("late tile bytes are moot");
-    assert!(late_resource.is_empty());
+        .expect("late tile bytes are forwarded");
+    assert!(late_resource.iter().any(|message| matches!(
+        message,
+        HostMessage::Event(JobEvent::Progress {
+            acquired: 1,
+            total: 4
+        })
+    )));
+    assert_eq!(session.state(), SessionState::AwaitingPartialDecision);
     let released = session
         .allocate_buffer(8)
         .expect("late tile bytes must be released");
@@ -223,15 +235,31 @@ fn late_tile_responses_after_partial_decision_are_ignored() {
             request: requests[2],
             error: tile_fetch_failure(),
         })
-        .expect("late tile failure is moot");
-    assert!(late_failure.is_empty());
+        .expect("late tile failure is forwarded");
+    assert!(late_failure
+        .iter()
+        .any(|message| matches!(message, HostMessage::Event(JobEvent::Warning { .. }))));
+    assert!(
+        !late_failure.iter().any(|message| matches!(
+            message,
+            HostMessage::Effect(HostEffect::RequestDecision { .. })
+        )),
+        "an open decision must not be re-opened"
+    );
+    assert_eq!(session.state(), SessionState::AwaitingPartialDecision);
 
     let late_display = session
         .dispatch(JobCommand::ProvideDisplayOutcome {
             request: requests[3],
         })
-        .expect("late display outcome is moot");
-    assert!(late_display.is_empty());
+        .expect("late display outcome is forwarded");
+    assert!(late_display.iter().any(|message| matches!(
+        message,
+        HostMessage::Event(JobEvent::Progress {
+            acquired: 2,
+            total: 4
+        })
+    )));
 
     let decision = session
         .dispatch(JobCommand::RecoveryChoice {
@@ -250,6 +278,97 @@ fn late_tile_responses_after_partial_decision_are_ignored() {
         .iter()
         .any(|message| matches!(message, HostMessage::Event(JobEvent::PartialCompleted))));
     assert_eq!(session.state(), SessionState::PartiallyCompleted);
+}
+
+#[test]
+fn late_tile_responses_do_not_deadlock_a_retry_choice() {
+    // The regression the phase-check workarounds caused: late in-flight
+    // answers were dropped while the engine kept them in its in-flight set,
+    // so a Retry choice could never re-emit them and the job stalled. With
+    // engine-owned acceptance the late answers are processed, Retry
+    // re-fetches the failed tiles, and the job completes in full.
+    let mut session = Session::new(SessionConfig {
+        max_retries: Some(0),
+        ..SessionConfig::default()
+    })
+    .expect("bounded retry session");
+    let requests = start_four_tile_grid(&mut session);
+
+    session
+        .dispatch(JobCommand::ProvideFetchFailure {
+            request: requests[0],
+            error: tile_fetch_failure(),
+        })
+        .expect("first-attempt tile failure");
+    let late_buffer = commit_host_bytes(&mut session, b"late-tile-bytes");
+    session
+        .dispatch(JobCommand::ProvideResource {
+            request: requests[1],
+            buffer: late_buffer,
+            final_uri: None,
+        })
+        .expect("late tile bytes are forwarded");
+    session
+        .dispatch(JobCommand::ProvideFetchFailure {
+            request: requests[2],
+            error: tile_fetch_failure(),
+        })
+        .expect("late tile failure is forwarded");
+    assert_eq!(session.state(), SessionState::AwaitingPartialDecision);
+
+    let retried = session
+        .dispatch(JobCommand::RecoveryChoice {
+            generation: 0,
+            choice: RecoveryChoice::Retry,
+        })
+        .expect("retry stays reachable");
+    assert_eq!(session.state(), SessionState::AcquiringTiles);
+    let retry_requests = acquire_tile_requests(&retried);
+    assert_eq!(retry_requests.len(), 2, "failed tiles are re-fetched");
+
+    for retry in retry_requests {
+        let buffer = commit_host_bytes(&mut session, b"retried-tile-bytes");
+        session
+            .dispatch(JobCommand::ProvideResource {
+                request: retry,
+                buffer,
+                final_uri: None,
+            })
+            .expect("retried tile settles");
+    }
+    let settled = session
+        .dispatch(JobCommand::ProvideDisplayOutcome {
+            request: requests[3],
+        })
+        .expect("last outstanding sibling settles");
+    assert!(settled.iter().any(|message| matches!(
+        message,
+        HostMessage::Effect(HostEffect::FinalizeOutput { partial: false, .. })
+    )));
+    let completed = session
+        .dispatch(JobCommand::FinalizationSucceeded)
+        .expect("finalize completed job");
+    assert!(completed
+        .iter()
+        .any(|message| matches!(message, HostMessage::Event(JobEvent::Completed))));
+    assert_eq!(session.state(), SessionState::Completed);
+}
+
+#[test]
+fn unknown_request_id_stays_a_typed_rejection() {
+    // The adapter's request ledger is the canary: ids it never minted are
+    // rejected, even after the job has left the phase the request named.
+    let mut session = session();
+    start(&mut session);
+    let buffer = commit_host_bytes(&mut session, b"unclaimed-bytes");
+    let err = session
+        .dispatch(JobCommand::ProvideResource {
+            request: 999,
+            buffer,
+            final_uri: None,
+        })
+        .expect_err("forged request id is rejected");
+    assert_eq!(err.code(), AdapterErrorCode::WrongState);
 }
 
 #[test]

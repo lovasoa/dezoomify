@@ -1156,12 +1156,12 @@ fn acquire_tiles(
         }
     });
     for (ordinal, tile, ok, image, failure) in outcomes {
-        if job.state() != JobState::AcquiringTiles {
-            // An earlier outcome in this batch already moved the job on
-            // (retry-exhausted tile → partial decision): later outcomes are
-            // moot, exactly as late host responses are after a transition.
-            break;
-        }
+        // The engine owns acceptance: an earlier outcome in this batch may
+        // have moved the job to AwaitingPartialDecision, and later outcomes
+        // are still processed: the engine never re-emits in-flight tiles,
+        // so a successful batch mate must not be dropped (dropping it
+        // strands the tile in the engine's in-flight set and stalls a
+        // Retry). Moot outcomes are ignored by the engine, not skipped here.
         if ok {
             attempt.acquired += 1;
             attempt.tile_failures.remove(&tile);

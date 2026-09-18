@@ -9,8 +9,12 @@ A job contains immutable input intent and evolving state. State records discover
 The engine accepts a typed `JobCommand` and appends typed `JobEffect` and
 `JobEvent` values to one FIFO `JobMessage` queue. Every message has a checked
 `u32` sequence. Requests, tiles, and decision generations are numeric and
-scoped to the job instance, so late, duplicate, and out-of-order replies can
-be rejected before state mutation. The host
+scoped to the job instance, so the engine, never the host, decides before
+state mutation whether a late, duplicate, or out-of-order reply is rejected
+(`Err`), processed, or ignored (`Ok(Ignored)`). Acceptance is by correlation
+with the engine's own outstanding-request bookkeeping, which spans phase
+transitions: a tile fetch that settles after a sibling exhausted its retries
+is still in flight for the engine and is still processed. The host
 supplies clock-derived retry wakeups explicitly, so replaying the same inputs
 produces the same state and messages.
 
@@ -120,12 +124,12 @@ never enter tile retry or partial-output recovery.
 | `SelectedImage` | `AwaitingImageSelection` | image position in range and ready (same position replays as `Ignored`) | -> `AwaitingLevelSelection` | none | `levels` (positions), `job-state` |
 | `SelectedLevel` | `AwaitingLevelSelection` | level position in range for the selected image | -> `Planning` -> `AcquiringTiles` | `acquire-tile` up to the concurrency limit, or one probe | `job-state`, `progress` |
 | `ProbeOutcome` | `Planning` | outstanding probe ordinal; available observations need positive width/height | One core probe step: next probe (stay `Planning`) or resolved plan -> `AcquiringTiles` | `acquire-tile` (next probe or first plan tiles) | `progress:0/total`, `job-state` |
-| `TileOutcome{ok:true}` on a probe tile | `AcquiringTiles` | probe tiles are answered with `ProbeOutcome` only | No transition | none | none (`Err(job.invalid-state)`) |
-| `TileOutcome{ok:true}` | `AcquiringTiles` | tile ordinal in plan | Stay or last tile -> `Finalizing` | next `acquire-tile` or one `finalize-output` | `progress`, `job-state:Finalizing` |
-| `TileOutcome{ok:false}` | `AcquiringTiles` | tile ordinal in plan | attempts `<= max_retries` (0..=1024, 0 fails immediately with no refetch): stay + retry `acquire-tile`; else -> `AwaitingPartialDecision` | `acquire-tile` (retry) or `request-decision` (`partial`) | `warning` + `progress`, or `missing-work` + `job-state` |
-| Tile response late (runtime `provide-resource` / `provide-fetch-failure` / `provide-display-outcome` after the job leaves `AcquiringTiles`) | Any non-`AcquiringTiles` with a still-outstanding tile request | runtime consumes/releases the arena buffer and drops correlation before forwarding | No transition | none | none (`Ok(Ignored)`) |
-| Probe-fetch failure late (runtime `provide-fetch-failure` for a probe after planning ends) | Any non-`Planning` with a still-outstanding probe request | runtime drops correlation before forwarding | No transition | none | none (`Ok(Ignored)`) |
-| `RecoveryChoice{generation,Retry}` | `AwaitingPartialDecision` | outstanding generation | -> `AcquiringTiles` | `acquire-tile` | `job-state` |
+| `ProbeOutcome` duplicate/late (answered probe replays or settles after planning) | Any non-terminal with that probe already answered | answer already consumed (`answered` ledger) | No transition | none | none (`Ok(Ignored)`) |
+| `TileOutcome{ok:true}` on a probe tile | any | probe tiles are answered with `ProbeOutcome` only | No transition | none | none (`Err(job.invalid-state)`) |
+| `TileOutcome{ok:true}` | `AcquiringTiles` / `AwaitingPartialDecision` | tile ordinal in plan, not yet acquired (in-flight bookkeeping spans the phases; the engine never re-emits in-flight tiles, so late answers for them are required, not stale) | Stay, or last tile -> `Finalizing` | next `acquire-tile` or one `finalize-output` | `progress`, `job-state:Finalizing` |
+| `TileOutcome{ok:false}` | `AcquiringTiles` / `AwaitingPartialDecision` | tile ordinal in plan, not yet acquired | attempts `<= max_retries` (0..=1024, 0 fails immediately with no refetch): stay + retry `acquire-tile`; else: -> `AwaitingPartialDecision` if no decision is open, else record in the open decision (no second `request-decision`) | `acquire-tile` (retry) or `request-decision` (`partial`) | `warning` + `progress`, or `missing-work` (plus `job-state` when the decision opens) |
+| Tile response late (settles after the job left `AcquiringTiles`: finalizing after a `Keep`, or terminal) | `Finalizing` / terminal with a correlated, not-yet-acquired tile | acceptance by correlation, never by phase: the engine still acts on answers while awaiting the decision, moot afterwards | No transition | none | none (`Ok(Ignored)`) |
+| `RecoveryChoice{generation,Retry}` | `AwaitingPartialDecision` | outstanding generation | -> `AcquiringTiles`; every exhausted tile is re-queued and re-fetched (clearing the ledger alone would strand it) | `acquire-tile` per re-queued tile | `job-state` |
 | `RecoveryChoice{generation,Keep}` | `AwaitingPartialDecision` | outstanding generation | -> `Finalizing` | `finalize-output{partial:true}` | `job-state` |
 | `RecoveryChoice{generation,Discard}` | `AwaitingPartialDecision` | outstanding generation | -> `Failed` | `cancel-work` | `failed:job.partial-discarded` |
 | `FinalizationSucceeded` | `Finalizing` | one output pending | -> `Completed` or `PartiallyCompleted` | none | exactly one terminal event |
@@ -135,4 +139,5 @@ never enter tile retry or partial-output recovery.
 | `Resume` | Paused only | paused | Overlay off, re-drive pending or complete | `acquire-tile` (pending) or `finalize-output` when all arrived paused | `resumed`, then `progress`/`job-state` chain |
 | `TileOutcome{ok:true}` while paused | `AcquiringTiles` + paused | `tile:*` in plan | Stay (no new scheduling, completion deferred) | none | `progress:a/total` only |
 | Duplicate/stale | Same state, already-consumed request sequence or acquired tile ordinal / same selection | Correlation already settled | No transition | none | none (`Ok(Ignored)`) |
-| Wrong-state / unknown correlation / post-terminal | Any | unknown numeric correlation, invalid state, resume-without-pause, or terminal set | No transition, no work | none | none (`Err(job.invalid-state | job.post-terminal)`) |
+| Wrong-state / unknown correlation / post-terminal | Any | unknown numeric correlation, invalid state, resume-without-pause, or a post-terminal control command | No transition, no work | none | none (`Err(job.invalid-state | job.post-terminal)`) |
+| Post-terminal host response (`ResourceBytes` / `FetchFailure` / `TileOutcome` / `ProbeOutcome`) | Terminal | in-flight fetches settle on the host's clock, after cancel/failure/completion; the request ledger already rejects unknown ids | No transition, no work | none | none (`Ok(Ignored)`) |
