@@ -48,7 +48,10 @@ completes as display-only. Per-origin classification means only the first
 tile of an origin attempts readable bytes; later tiles go straight to the
 image. The deterministic catalog selection for engine hosts lives in
 `engine-selection.ts` (largest ready image, largest level that fits the
-browser canvas, smallest declared level as the fail-fast fallback).
+browser canvas, smallest declared level as the fail-fast fallback). When no
+ready image is selectable, the same module surfaces the first still-deferred
+catalog entry's URI (`pickDeferredUri`), capped at `MAX_DEFERRED_FOLLOWS`,
+so a host follows a deferred entry with a fresh bounded attempt.
 
 ## Generated WASM boundary
 
@@ -69,8 +72,12 @@ but share this conversion and worker integration.
 Browser hosts consume the ordered generated `CatalogDto` without duplicated
 identity fields. The job engine projects its normalized core catalog through
 one generated type, and planning accepts zero-based image and level
-positions. Browser selection, declared-size preflight, and plan gates
-therefore use that shape; hosts do not define their own catalog
+positions. Every entry is a union: `Image` carries a resolved image's
+declared geometry and levels, and `ImageRequest` carries the follow-up `uri`
+of still-deferred metadata (a IIIF manifest's service, a bulk-list entry).
+When no `Image` entry is selectable, a host follows the first `ImageRequest`
+URI with a fresh bounded attempt. Browser selection, declared-size preflight,
+and plan gates therefore use that shape; hosts do not define their own catalog
 or level DTOs.
 
 ## Ordinary image display

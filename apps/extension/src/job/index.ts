@@ -9,6 +9,8 @@ import {
   createProbeSize,
   createTileDecoder,
   dispatchTyped,
+  MAX_DEFERRED_FOLLOWS,
+  pickDeferredUri,
   pickEngineSelection,
   saveBlobViaAnchor,
   type DispatchTable,
@@ -57,6 +59,9 @@ let selected = false;
 let hostFailed = false;
 let lastSource = "";
 let selectedTitle: string | undefined;
+// Deferred-follow depth for the current logical job: reset when a new binding
+// or explicit retry starts, incremented once per followed ImageRequest.
+let followDepth = 0;
 // The engine emits the initial 0/N tile snapshot before it dispatches tile
 // effects. Keep it while a permission view temporarily replaces the job view
 // so approval resumes the same determinate progress display immediately.
@@ -341,14 +346,34 @@ const eventHandlers = {
   },
   catalog: (event) => {
     if (selected) return;
-    jobLog.info("engine-event", `type=catalog images=${event.catalog.images.length}`);
-    selected = true;
+    const entries = event.catalog.entries;
+    jobLog.info("engine-event", `type=catalog entries=${entries.length}`);
     const selection = pickEngineSelection(event.catalog);
     if (!selection) {
-      onHostFailure(Object.assign(new Error("No downloadable image was found on this page."), { code: "NO_IMAGE_FOUND", retryable: false }));
+      // A still-deferred catalog (IIIF manifest, bulk list) resolves through
+      // its first request with a fresh, bounded attempt. The engine never
+      // follows deferred metadata silently.
+      const deferredUri = pickDeferredUri(event.catalog);
+      if (deferredUri && followDepth < MAX_DEFERRED_FOLLOWS) {
+        followDepth += 1;
+        jobLog.info("deferred-follow", `depth=${followDepth}`);
+        render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
+        // Defer the teardown out of this engine event chain so the current
+        // attempt settles before its worker and controller are replaced.
+        queueMicrotask(() => startAttempt(deferredUri));
+        return;
+      }
+      selected = true;
+      onHostFailure(Object.assign(
+        new Error(deferredUri
+          ? "The image metadata stayed deferred after the resolution limit."
+          : "No downloadable image was found on this page."),
+        { code: deferredUri ? "discovery.deferred" : "NO_IMAGE_FOUND", retryable: false },
+      ));
       controller?.cancel();
       return;
     }
+    selected = true;
     selectedTitle = selection.title;
     render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
     controller?.selectImage(selection.image);
@@ -380,6 +405,7 @@ function setup(bound: unknown) {
     documentGeneration: bound.documentGeneration,
   };
   jobLog.info("binding-received", `jobId=${binding.jobId} tab=${binding.tabId} frame=${binding.frameId} gen=${binding.documentGeneration}`);
+  followDepth = 0;
   startAttempt();
 }
 
@@ -422,8 +448,9 @@ function resetAttemptState() {
  * fresh coordinator snapshot. Either way the attempt gets a fresh worker,
  * controller, and assembly so no state leaks between attempts.
  */
-function startAttempt() {
+function startAttempt(followUrl?: string) {
   if (!binding) return;
+  const origin = lastSource;
   stopAttempt();
   resetAttemptState();
   const activeBinding = binding;
@@ -525,6 +552,17 @@ function startAttempt() {
     }
     else if (event.data?.type === "engine.error") { jobLog.error("worker-error", `jobId=${binding?.jobId ?? "unknown"} message=${JSON.stringify(event.data.error)}`); onHostFailure(event.data.error); }
   });
+  if (followUrl) {
+    // A deferred follow rides the same binding and source identity; the
+    // engine session is fresh and rooted at the resolved request URI.
+    started = true;
+    lastSource = origin;
+    assembly = createAssembly(followUrl);
+    jobLog.info("engine-start", `jobId=${activeBinding.jobId} url=${followUrl}`);
+    render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
+    controller?.start([{ url: followUrl }]);
+    return;
+  }
   render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });
 }
 
@@ -547,6 +585,7 @@ function announceReady() {
  */
 function retryJob() {
   jobLog.info("retry-requested", `jobId=${binding?.jobId ?? bootstrapJobId ?? "unknown"}`);
+  followDepth = 0;
   if (!binding) {
     resetAttemptState();
     announceReady();

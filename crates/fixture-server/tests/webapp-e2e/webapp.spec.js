@@ -282,3 +282,33 @@ test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ 
   assert.equal(readableRequests, 1, "one tile classifies the CORS policy for the origin");
   assert.ok(imageRequests > 1, "later tiles load directly as ordinary images");
 });
+
+// IIIF Presentation manifests name an image service rather than a plan. The
+// catalog surfaces that entry as an ImageRequest to the service info.json,
+// which the website follows with a fresh bounded attempt before it can plan
+// and download the tiles. Nothing here is stubbed beyond the fixtures.test
+// host being relayed to the deterministic fixture server.
+test("webapp follows a deferred IIIF manifest request to the info.json and tiles", async ({ page }) => {
+  await page.route(
+    (url) => url.host === "fixtures.test",
+    async (route) => {
+      const response = await route.fetch({
+        url: `${ADDR}/fetch?url=${encodeURIComponent(route.request().url())}`,
+        method: "GET",
+      });
+      await route.fulfill({ response });
+    },
+  );
+  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  const manifest = `${ADDR}/fetch?url=https://fixtures.test/iiif-presentation/manifest.json`;
+  await page.locator("#dz-url-input").fill(manifest);
+  await page.getByRole("button", { name: /find image/i }).click();
+
+  await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
+  const canvas = page.locator("#rendering-canvas");
+  assert.deepEqual(
+    await canvas.evaluate((el) => ({ width: el.width, height: el.height })),
+    { width: 512, height: 512 },
+    "the followed info.json plans the full 512x512 pyramid",
+  );
+});

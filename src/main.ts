@@ -54,7 +54,7 @@ import {
   isAllowedSourceUrl,
   isLocalFileUrl,
 } from "../packages/browser-runtime/src/plan-gates.ts";
-import { pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
+import { MAX_DEFERRED_FOLLOWS, pickDeferredUri, pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
   cancelAllWeb,
   createWebQueue,
@@ -455,11 +455,11 @@ function clearHash(): void {
   }
 }
 
-async function runJob(url: string): Promise<void> {
+async function runJob(url: string, followDepth = 0, origin = url): Promise<void> {
   const token = ++jobToken;
   webFetcher.resetActiveTransport();
   tileThrottle.reset();
-  resetActivity(url);
+  resetActivity(origin);
   setCanvasVisible(document, false);
   preview.resetTransform(document);
   jobPaused = false;
@@ -472,22 +472,24 @@ async function runJob(url: string): Promise<void> {
   viewCtx.originClean = true;
   resultTitle = undefined;
   // Hash owns the active job only: queued URLs never touch the hash until
-  // they become active and reach this point.
-  writeHash(url);
+  // they become active and reach this point. A deferred follow keeps the
+  // user's original address; the resolved request never rewrites it.
+  if (followDepth === 0) writeHash(origin);
   jobActivity.startHeartbeat();
-  jobActivity.setStep("Finding the zoomable image…", `Contacting ${hostOf(url)}…`);
+  jobActivity.setStep("Finding the zoomable image…", `Contacting ${hostOf(origin)}…`);
   controller.dispatch(nextEvent("start-discovery", { transport: "direct" }) as never);
   update();
 
   let selected = false;
   let displayOnly = false;
-  let terminal: "done" | "failed" | "cancelled" | "display" = "done";
+  let terminal: "done" | "failed" | "cancelled" | "display" | "deferred" = "done";
+  let deferredNext: string | null = null;
   let settle: () => void = () => {};
   const finished = new Promise<void>((resolve) => { settle = resolve; });
 
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   engineWorker = worker;
-  const assembly = createAssembly(url);
+  const assembly = createAssembly(origin);
   activeAssembly = assembly;
 
   const onHostFailure = (error: unknown): void => {
@@ -504,7 +506,7 @@ async function runJob(url: string): Promise<void> {
           message: typeof structured?.message === "string" ? structured.message : undefined,
           retryable: typeof structured?.retryable === "boolean" ? structured.retryable : undefined,
           transport: "browser-session",
-          host: hostOf(url),
+          host: hostOf(origin),
         }),
       }) as never,
     );
@@ -520,7 +522,7 @@ async function runJob(url: string): Promise<void> {
       return;
     }
     controller.dispatch(nextEvent("save-start") as never);
-    recordWebHistory(url, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
+    recordWebHistory(origin, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
     controller.dispatch(nextEvent("save-done") as never);
     terminal = "done";
     update();
@@ -532,20 +534,36 @@ async function runJob(url: string): Promise<void> {
       if (selected) return;
       selected = true;
       const catalog = event.catalog;
-      const images = catalog.images;
+      const entries = catalog.entries;
       const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
-      if (images.length === 0) {
+      if (entries.length === 0) {
         controller.dispatch(nextEvent("images-found", { imageCount: 0, transport: via }) as never);
         onHostFailure(failure("NO_IMAGE_FOUND", noImageFoundError(via).message, false, "discovery returned an empty image catalog"));
         return;
       }
-      controller.dispatch(nextEvent("images-found", { imageCount: images.length, transport: via }) as never);
       const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
       if (!selection) {
+        // No resolved image is selectable. A still-deferred catalog (IIIF
+        // manifest, bulk list) resolves through its first request with a
+        // fresh, bounded attempt; the engine never follows it silently.
+        const deferredUri = pickDeferredUri(catalog);
+        if (deferredUri) {
+          if (followDepth >= MAX_DEFERRED_FOLLOWS) {
+            controller.dispatch(nextEvent("images-found", { imageCount: entries.length, transport: via }) as never);
+            onHostFailure(failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false));
+            return;
+          }
+          deferredNext = deferredUri;
+          terminal = "deferred";
+          settle();
+          return;
+        }
         onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
         return;
       }
-      const image = images[selection.image];
+      controller.dispatch(nextEvent("images-found", { imageCount: entries.length, transport: via }) as never);
+      const entry = entries[selection.image];
+      const image = entry && entry.kind === "image" ? entry : null;
       resultTitle = image?.title;
       const level = image?.levels?.[selection.level];
       if (level) viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
@@ -569,7 +587,7 @@ async function runJob(url: string): Promise<void> {
     completed: complete,
     "partial-completed": complete,
     failed: (event) => {
-      presentEngineFailure(event.error, url, token);
+      presentEngineFailure(event.error, origin, token);
       terminal = "failed";
       settle();
     },
@@ -689,32 +707,41 @@ async function runJob(url: string): Promise<void> {
   } catch (error) {
     if (token !== jobToken) return;
     onHostFailure(error);
-  } finally {
-    if (token === jobToken) {
-      jobActivity.stopHeartbeat();
-      jobActivity.refreshLongestPending();
-      disposeAttempt();
-      activeAssembly = null;
-      const queueOutcome: "done" | "failed" | "cancelled" =
-        (terminal as string) === "failed" ? "failed" : (terminal as string) === "cancelled" ? "cancelled" : "done";
-      // Sequential queue: the active entry settles, then the first waiting
-      // entry (if any) becomes active and starts. A failed entry never stops
-      // the rest. Engine stays single-job throughout.
-      if (webQueueEnabled()) {
-        const settled = finishActiveWebEntry(webQueue, queueOutcome);
-        webQueue = settled.queue;
-        const next = settled.next;
-        if (next) {
-          const status = controller.getState().status;
-          if (status === "completed" || status === "cancelled" || status === "failed" || status === "display-only") {
-            controller.reset(sessionId);
-            currentSeq = 0;
-          }
-          const summary = summarizeWebQueue(webQueue);
-          webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
-          void runJob(next.url);
-        }
+  }
+  if (token !== jobToken) return;
+  jobActivity.stopHeartbeat();
+  jobActivity.refreshLongestPending();
+  disposeAttempt();
+  activeAssembly = null;
+  if ((terminal as string) === "deferred" && deferredNext) {
+    // The catalog asked for another resource: restart the whole attempt
+    // against it under the same logical job and original address. The bound
+    // is checked in the catalog handler; the engine never follows silently.
+    sessionId = `sess:web-${Date.now()}`;
+    controller.reset(sessionId);
+    currentSeq = 0;
+    webLog.info("deferred-follow", `depth=${followDepth + 1} host=${hostOf(deferredNext)}`);
+    void runJob(deferredNext, followDepth + 1, origin);
+    return;
+  }
+  const queueOutcome: "done" | "failed" | "cancelled" =
+    (terminal as string) === "failed" ? "failed" : (terminal as string) === "cancelled" ? "cancelled" : "done";
+  // Sequential queue: the active entry settles, then the first waiting
+  // entry (if any) becomes active and starts. A failed entry never stops
+  // the rest. Engine stays single-job throughout.
+  if (webQueueEnabled()) {
+    const settled = finishActiveWebEntry(webQueue, queueOutcome);
+    webQueue = settled.queue;
+    const next = settled.next;
+    if (next) {
+      const status = controller.getState().status;
+      if (status === "completed" || status === "cancelled" || status === "failed" || status === "display-only") {
+        controller.reset(sessionId);
+        currentSeq = 0;
       }
+      const summary = summarizeWebQueue(webQueue);
+      webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
+      void runJob(next.url);
     }
   }
 }

@@ -164,14 +164,6 @@ pub struct BufferHandle {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum Readiness {
-    Ready,
-    Deferred,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct LevelDto {
@@ -182,6 +174,7 @@ pub struct LevelDto {
     pub tile_height: u64,
 }
 
+/// A resolved image: declared geometry and selectable levels.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -191,16 +184,35 @@ pub struct ImageDto {
     pub format: String,
     pub width: u64,
     pub height: u64,
-    pub readiness: Readiness,
     pub source_kind: String,
     pub levels: Vec<LevelDto>,
+}
+
+/// A still-deferred catalog entry: the resource to acquire before an image
+/// can be planned. The host follows `uri` with a fresh bounded attempt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ImageRequestDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub uri: String,
+}
+
+/// One ordered catalog slot: a ready image or a request to resolve one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum CatalogEntryDto {
+    Image(ImageDto),
+    ImageRequest(ImageRequestDto),
 }
 
 /// Stable ordered catalog projection (never exposes private core enums).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct CatalogDto {
-    pub images: Vec<ImageDto>,
+    pub entries: Vec<CatalogEntryDto>,
 }
 
 /// One ordered discovery root. `contents` is omitted when the host only has

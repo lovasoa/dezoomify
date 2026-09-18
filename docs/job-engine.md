@@ -18,7 +18,7 @@ produces the same state and messages.
 
 Jobs move through discovery, selection, planning, tile acquisition, and one awaited finalization phase. The engine exposes only phases it can observe; hosts may report codec and save progress through product-local UI events.
 
-Selection is explicit when discovery returns multiple images or levels. Commands carry zero-based positions into the retained normalized catalog, so no catalog object or synthetic ID is copied back into Rust. Headless callers may provide a deterministic selection rule in the initial command; the engine never guesses silently.
+Selection is explicit when discovery returns multiple images or levels. Commands carry zero-based positions into the retained normalized catalog, so no catalog object or synthetic ID is copied back into Rust. Headless callers may provide a deterministic selection rule in the initial command; the engine never guesses silently. Discovery may also return still-deferred metadata (a IIIF service, a bulk-list entry); the projected catalog carries those as `ImageRequest` entries with their follow-up URI, and the host follows one with a fresh bounded job rather than selecting it.
 
 ## Retry and progress
 

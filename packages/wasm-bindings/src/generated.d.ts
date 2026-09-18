@@ -22,6 +22,27 @@ export interface PointDto {
 }
 
 /**
+ * A resolved image: declared geometry and selectable levels.
+ */
+export interface ImageDto {
+    title?: string;
+    format: string;
+    width: number;
+    height: number;
+    sourceKind: string;
+    levels: LevelDto[];
+}
+
+/**
+ * A still-deferred catalog entry: the resource to acquire before an image
+ * can be planned. The host follows `uri` with a fresh bounded attempt.
+ */
+export interface ImageRequestDto {
+    title?: string;
+    uri: string;
+}
+
+/**
  * Extension-to-native messages. Browser manifest enforcement authenticates
  * the sender; challenges and nonces provide session binding and replay defense.
  */
@@ -55,6 +76,11 @@ export interface NativeCookie {
     value: string;
     origin: string;
 }
+
+/**
+ * One ordered catalog slot: a ready image or a request to resolve one.
+ */
+export type CatalogEntryDto = ({ kind: "image" } & ImageDto) | ({ kind: "image-request" } & ImageRequestDto);
 
 /**
  * One ordered discovery root. `contents` is omitted when the host only has
@@ -102,7 +128,7 @@ export type RequestPurpose = "metadata" | "tile" | "probe";
  * Stable ordered catalog projection (never exposes private core enums).
  */
 export interface CatalogDto {
-    images: ImageDto[];
+    entries: CatalogEntryDto[];
 }
 
 /**
@@ -159,16 +185,6 @@ export interface HeaderDto {
     value: string;
 }
 
-export interface ImageDto {
-    title?: string;
-    format: string;
-    width: number;
-    height: number;
-    readiness: Readiness;
-    sourceKind: string;
-    levels: LevelDto[];
-}
-
 export interface LevelDto {
     label: string;
     width: number;
@@ -213,8 +229,6 @@ export type JobEvent = { type: "job-state"; state: JobState } | { type: "catalog
 export type JobState = "Created" | "Discovering" | "AwaitingImageSelection" | "AwaitingLevelSelection" | "Planning" | "AcquiringTiles" | "AwaitingPartialDecision" | "Finalizing" | "Cancelling" | "Completed" | "PartiallyCompleted" | "Failed" | "Cancelled";
 
 export type ProbeOutcome = { status: "missing" } | { status: "available"; width: number; height: number };
-
-export type Readiness = "ready" | "deferred";
 
 export type RecoveryChoice = "keep" | "retry" | "discard";
 

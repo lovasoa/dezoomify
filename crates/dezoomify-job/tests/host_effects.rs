@@ -167,21 +167,26 @@ fn deferred_entries_expose_their_follow_up_uri() {
         .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("catalog"))
         .expect("catalog event")
         .clone();
-    let images = catalog
-        .get("images")
+    let entries = catalog
+        .get("entries")
         .and_then(serde_json::Value::as_array)
-        .expect("images")
+        .expect("entries")
         .clone();
-    assert_eq!(images.len(), 2);
+    assert_eq!(entries.len(), 2);
     assert!(
-        images.iter().all(
-            |image| image.get("readiness").and_then(serde_json::Value::as_str) == Some("deferred")
-        ),
+        entries.iter().all(|entry| {
+            entry.get("kind").and_then(serde_json::Value::as_str) == Some("image-request")
+        }),
         "bulk entries stay deferred: {catalog}"
     );
     // Deferred entries cannot be selected; the host follows the URI instead.
     let selected = host.apply(JobCommand::SelectImage { image: 0 });
     assert!(selected.is_err(), "deferred images are not selectable");
+    assert_eq!(
+        entries[0].get("uri").and_then(serde_json::Value::as_str),
+        Some("https://example.test/a.dzi"),
+        "the projected request carries the first listed URL"
+    );
     assert_eq!(
         host.deferred_uri_for_test(0),
         Some("https://example.test/a.dzi".to_string()),

@@ -15,7 +15,7 @@ use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe, 
 use dezoomify_core::core::registry::{default_registry, registry_for};
 use dezoomify_core::core::tile_plan::TileSource;
 use dezoomify_core::Vec2d;
-use dezoomify_protocol::dto::{ImageDto, Readiness};
+use dezoomify_protocol::dto::CatalogEntryDto;
 
 use crate::config::Config;
 use crate::state::State;
@@ -67,7 +67,7 @@ pub struct Job {
     /// Finished core catalog.
     catalog: Option<ImageCatalog>,
     /// Projected wire catalog (same order as `catalog` entries).
-    catalog_images: Vec<ImageDto>,
+    catalog_images: Vec<CatalogEntryDto>,
     selected_image: Option<u32>,
     selected_image_index: Option<usize>,
     selected_level: Option<u32>,
@@ -226,9 +226,10 @@ impl Job {
     }
 
     /// Deferred follow-up URI for a catalog position, if that entry is
-    /// still-deferred metadata pointing at another resource. Native hosts
-    /// follow the first catalog entry's URI with a fresh job (bounded);
-    /// the projected catalog event carries readiness but never URIs.
+    /// still-deferred metadata pointing at another resource. The projected
+    /// catalog carries the same URI in its `ImageRequest` entries, so browser
+    /// hosts follow it without this accessor; native hosts call it directly.
+    /// Both follow the URI with a fresh bounded job.
     #[must_use]
     pub fn deferred_uri(&self, image: u32) -> Option<String> {
         let index = usize::try_from(image).ok()?;
@@ -445,7 +446,7 @@ impl Job {
             return self
                 .fail_via_cleanup("job.no-images", "discovery produced no images".to_string());
         }
-        let images = crate::projection::project_catalog(&catalog).images;
+        let images = crate::projection::project_catalog(&catalog).entries;
         self.catalog = Some(catalog);
         self.catalog_images = images;
         // Sibling discovery fetches still in flight are moot once the
@@ -454,7 +455,7 @@ impl Job {
         self.set_state(State::AwaitingImageSelection)?;
         self.push_event(JobEvent::Catalog {
             catalog: dezoomify_protocol::dto::CatalogDto {
-                images: self.catalog_images.clone(),
+                entries: self.catalog_images.clone(),
             },
         })?;
         self.push_event(JobEvent::State {
@@ -572,19 +573,22 @@ impl Job {
             ));
         }
         let index = usize::try_from(image).map_err(|_| JobError::overflow("image position"))?;
-        let selected = self
-            .catalog_images
-            .get(index)
-            .ok_or_else(|| JobError::invalid_state("image position is out of range"))?;
-        if selected.readiness != Readiness::Ready {
-            return Err(JobError::invalid_state(
-                "image metadata was not fetched; the image cannot be selected",
-            ));
-        }
+        let level_count = {
+            let selected = self
+                .catalog_images
+                .get(index)
+                .ok_or_else(|| JobError::invalid_state("image position is out of range"))?;
+            let CatalogEntryDto::Image(selected) = selected else {
+                return Err(JobError::invalid_state(
+                    "image metadata was not fetched; the image cannot be selected",
+                ));
+            };
+            selected.levels.len()
+        };
         self.selected_image = Some(image);
         self.selected_image_index = Some(index);
         self.set_state(State::AwaitingLevelSelection)?;
-        let levels: Vec<u32> = (0..self.catalog_images[index].levels.len())
+        let levels: Vec<u32> = (0..level_count)
             .map(|position| {
                 u32::try_from(position).map_err(|_| JobError::overflow("level position"))
             })
@@ -610,11 +614,11 @@ impl Job {
             .ok_or_else(|| JobError::invalid_state("no image selected"))?;
         let level_index =
             usize::try_from(level).map_err(|_| JobError::overflow("level position"))?;
-        if self.catalog_images[image_index]
-            .levels
-            .get(level_index)
-            .is_none()
-        {
+        let in_range = match &self.catalog_images[image_index] {
+            CatalogEntryDto::Image(image) => image.levels.get(level_index).is_some(),
+            CatalogEntryDto::ImageRequest(_) => false,
+        };
+        if !in_range {
             return Err(JobError::invalid_state("level position is out of range"));
         }
         self.selected_level = Some(level);

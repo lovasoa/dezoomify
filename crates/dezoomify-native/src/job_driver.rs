@@ -72,7 +72,7 @@ use dezoomify_job::{
     Config as JobConfig, Job, JobCommand, JobEffect, JobEvent, JobMessageBody, RecoveryChoice,
     State as JobState,
 };
-use dezoomify_protocol::dto::ProbeOutcome;
+use dezoomify_protocol::dto::{CatalogEntryDto, ProbeOutcome};
 
 use crate::error::NativeError;
 use crate::http::{fetch, FetchOutcome, UserHeaders};
@@ -716,17 +716,25 @@ fn handle_event(attempt: &mut Attempt<'_>, event: JobEvent) -> Result<(), Native
     match event {
         JobEvent::Catalog { catalog } => {
             attempt.catalog = catalog
-                .images
+                .entries
                 .into_iter()
-                .map(|image| CatalogImage {
-                    ready: image.readiness == dezoomify_protocol::dto::Readiness::Ready,
-                    format: image.format,
-                    title: image.title,
-                    levels: image
-                        .levels
-                        .into_iter()
-                        .map(|level| (level.width, level.height))
-                        .collect(),
+                .map(|entry| match entry {
+                    CatalogEntryDto::Image(image) => CatalogImage {
+                        ready: true,
+                        format: image.format,
+                        title: image.title,
+                        levels: image
+                            .levels
+                            .into_iter()
+                            .map(|level| (level.width, level.height))
+                            .collect(),
+                    },
+                    CatalogEntryDto::ImageRequest(request) => CatalogImage {
+                        ready: false,
+                        format: String::new(),
+                        title: request.title,
+                        levels: Vec::new(),
+                    },
                 })
                 .collect();
         }
