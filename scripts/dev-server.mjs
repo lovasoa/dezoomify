@@ -139,9 +139,7 @@ function main() {
   const { port, staticDir } = parseArgs(process.argv.slice(2));
   const handler = createDevServerHandler({ staticDir });
   const server = http.createServer(handler);
-  server.listen(port, "127.0.0.1", () => {
-    console.error(`dev server: http://127.0.0.1:${port}/ (Ctrl-C to stop)`);
-  });
+  server.listen(port, "127.0.0.1");
   for (const sig of ["SIGINT", "SIGTERM"]) {
     process.on(sig, () => server.close(() => process.exit(0)));
   }

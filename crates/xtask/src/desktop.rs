@@ -362,7 +362,7 @@ fn start_desktop_frontend() -> Result<DesktopFrontend, String> {
 /// An owned process is never an interactive terminal peer. A private process
 /// group lets deadline cleanup include descendants (Vite, Node, or a window
 /// driver), while closed stdin prevents a child from waiting on the terminal.
-fn configure_owned_process_tree(command: &mut Command) {
+pub(crate) fn configure_owned_process_tree(command: &mut Command) {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
@@ -422,7 +422,7 @@ impl Drop for DesktopFrontend {
 
 /// Stop an owned process tree. The leader is created in its own Unix process
 /// group; Windows requires taskkill's `/T` traversal instead.
-fn terminate_owned_process_tree(child: &mut Child) {
+pub(crate) fn terminate_owned_process_tree(child: &mut Child) {
     #[cfg(unix)]
     signal_process_group(child.id(), libc::SIGTERM);
 
