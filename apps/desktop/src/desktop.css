@@ -225,10 +225,10 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Desktop settings panel: same flat flow as the aux panel. Transparent, no
- * nested bordered box, only a top separator. Labels stack above their
- * controls; every control is a native input/textarea/button reachable by
- * Tab with a labelled name. */
+/* Desktop settings panel: flat flow inside the single status card. Transparent,
+ * no nested bordered box. The quick strip is always visible; every advanced
+ * control lives in the native dialog (see `.dz-settings-dialog` below) with a
+ * labelled name and a crisp focus ring. */
 #dz-desktop-settings {
   background: transparent;
   border: none;
@@ -241,101 +241,6 @@ body {
   flex-direction: column;
   gap: 0;
   text-align: left;
-}
-
-#dz-desktop-settings .dz-settings-disclosure {
-  width: 100%;
-}
-
-#dz-desktop-settings .dz-settings-disclosure > summary {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-  cursor: pointer;
-  list-style: none;
-  color: var(--dz-text-primary);
-  font-weight: 600;
-  padding: 0.55rem 0;
-}
-
-#dz-desktop-settings .dz-settings-summary-title::before {
-  content: "⚙";
-  margin-right: 0.6rem;
-  color: var(--dz-text-muted);
-  font-size: 0.9em;
-}
-
-#dz-desktop-settings .dz-settings-summary-value {
-  color: var(--dz-text-muted);
-  font-size: 0.82rem;
-  font-weight: 500;
-}
-
-#dz-desktop-settings .dz-settings-disclosure > summary::after {
-  content: "+";
-  color: var(--dz-text-muted);
-  font-size: 1.1rem;
-  font-weight: 400;
-}
-
-#dz-desktop-settings .dz-settings-disclosure[open] > summary::after { content: "−"; }
-
-#dz-desktop-settings .dz-settings-disclosure > summary::-webkit-details-marker {
-  display: none;
-}
-
-#dz-desktop-settings .dz-settings-disclosure[open] > summary {
-  margin-bottom: 1rem;
-}
-
-#dz-desktop-settings .dz-notice-title,
-#dz-desktop-settings .dz-notice-message {
-  text-align: left;
-}
-
-#dz-desktop-settings .dz-settings-form {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.85rem 1rem;
-  padding: 1.25rem 0 0.25rem;
-}
-
-#dz-desktop-settings .dz-settings-group-title {
-  grid-column: 1 / -1;
-  margin: 0.8rem 0 0;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--dz-surface-border) 70%, transparent);
-  color: var(--dz-text-primary);
-  font-size: 0.78rem;
-  font-weight: 750;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-#dz-desktop-settings .dz-settings-group-title:first-child { margin-top: 0; }
-
-#dz-desktop-settings .dz-settings-form > .dz-details,
-#dz-desktop-settings .dz-settings-form > .dz-actions-row {
-  grid-column: 1 / -1;
-}
-
-#dz-desktop-settings .dz-settings-form > .dz-btn-secondary {
-  align-self: end;
-  justify-self: start;
-}
-
-#dz-desktop-settings .dz-settings-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.92rem;
-  color: var(--dz-text-primary);
-  text-align: left;
-}
-
-#dz-desktop-settings .dz-settings-field > span {
-  color: var(--dz-text-secondary);
 }
 
 #dz-desktop-settings input,
@@ -362,13 +267,6 @@ body {
   margin-top: 0.5rem;
 }
 
-@media (max-width: 560px) {
-  #dz-desktop-settings .dz-settings-form {
-    grid-template-columns: 1fr;
-  }
-
-}
-
 #dz-settings-error {
   color: var(--dz-error-text);
   text-align: left;
@@ -379,6 +277,12 @@ body {
   margin-top: 1.1rem;
   padding-top: 0;
   border-top: 0;
+}
+
+/* Genuine breath between the quick options strip and Recent pictures: the
+ * history separator sits well below the strip that follows the URL input. */
+#dz-desktop-settings + .dz-history-section {
+  margin-top: 3.5rem;
 }
 
 #dz-desktop-settings .dz-quick-options {
@@ -485,7 +389,7 @@ body {
 #dz-desktop-settings .dz-settings-dialog {
   width: min(700px, calc(100vw - 2rem));
   max-width: none;
-  height: auto;
+  height: fit-content;
   max-height: min(720px, calc(100vh - 3rem));
   margin: auto;
   padding: 0;
@@ -503,6 +407,7 @@ body {
 }
 
 #dz-desktop-settings .dz-settings-sheet {
+  height: fit-content;
   max-height: min(720px, calc(100vh - 3rem));
   overflow-y: auto;
   padding: 0 1.5rem 1.25rem;

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
 import { act, click, document, makeContainer } from "./react-dom.mjs";
 import {
   renderView,
@@ -17,8 +18,8 @@ const callbacks = {
   onSave: () => {},
 };
 
-function render(el, state, cb, ctx) {
-  act(() => renderView(el, state, cb ?? callbacks, ctx));
+function render(el, state, cb, ctx, options) {
+  act(() => renderView(el, state, cb ?? callbacks, ctx, options));
 }
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */
@@ -133,6 +134,19 @@ test("history rows select a source without submitting it", () => {
   click(button);
   assert.equal(selected, entry);
   assert.equal(submitted, false);
+});
+
+test("idle product content renders between the URL input and recent pictures", () => {
+  const el = makeContainer();
+  render(
+    el,
+    { status: "idle", seq: 1, sessionId: "s1", imageCount: 0 },
+    callbacks,
+    { history: [{ url: "https://museum.example/image", origin: "https://museum.example", at: 1 }] },
+    { idleBeforeHistory: createElement("section", { id: "product-settings" }) },
+  );
+  assert.equal(el.querySelector("#product-settings").nextElementSibling.id, "dz-history");
+  assert.ok(el.querySelector("#product-settings").previousElementSibling.querySelector("#dz-url-input"));
 });
 
 test("completion treats saved filenames as text", () => {

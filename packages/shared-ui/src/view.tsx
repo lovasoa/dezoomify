@@ -260,7 +260,6 @@ function IdleView({ callbacks, ctx }: { callbacks: ViewCallbacks; ctx?: ViewCont
         <p>{t("view.input.description")}</p>
       </div>
       <UrlInput initialUrl={ctx?.initialUrl} onSubmit={callbacks.onSubmitUrl} />
-      <HistorySection callbacks={callbacks} ctx={ctx} />
     </div>
   );
 }
@@ -871,6 +870,8 @@ function SharedView({
         <Logo />
       </div>
       {phase === "idle" ? <IdleView callbacks={callbacks} ctx={ctx} /> : null}
+      {phase === "idle" ? options?.idleBeforeHistory : null}
+      {phase === "idle" ? <HistorySection callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "job" ? <JobView state={state} callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "display-only" ? <DisplayOnlyView callbacks={callbacks} ctx={ctx} /> : null}
       {phase === "completed" ? <CompletedView callbacks={callbacks} ctx={ctx} /> : null}
