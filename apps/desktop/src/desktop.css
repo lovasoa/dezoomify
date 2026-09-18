@@ -279,6 +279,12 @@ body {
   border-top: 0;
 }
 
+/* Genuine breath between the quick options strip and Recent pictures: the
+ * history separator sits well below the strip that follows the URL input. */
+#dz-desktop-settings + .dz-history-section {
+  margin-top: 3.5rem;
+}
+
 #dz-desktop-settings .dz-quick-options {
   display: grid;
   grid-template-columns: minmax(160px, 1.25fr) repeat(3, minmax(120px, 1fr)) 30px;

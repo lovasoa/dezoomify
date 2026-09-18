@@ -2287,7 +2287,7 @@ function update() {
       history: [...desktopHistory],
     },
     state.status === "idle" ? {
-      after: createElement(DesktopSettingsView, {
+      idleBeforeHistory: createElement(DesktopSettingsView, {
         settings: desktopSettings,
         error: settingsError,
         onChange: (settings: DesktopSettings) => {

@@ -42,6 +42,8 @@ export interface ViewContext {
 
 /** Host-owned React content rendered inside or instead of the generic card. */
 export interface ViewRenderOptions {
+  /** Rendered inside the idle card, between the URL input and the history list. */
+  idleBeforeHistory?: ReactNode;
   after?: ReactNode;
   replace?: ReactElement;
 }
