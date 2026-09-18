@@ -63,10 +63,10 @@ and press the Dezoomify toolbar button.
 ## What the extension does with your data
 
 - It only looks at the page you pointed it at, only after you pressed the
-  button. It does not watch your browsing in the background. Watching has
-  no time limit but stops by itself when it finds an image, when you press
-  the button again, or when you close the tab or leave the page; it never
-  restarts itself.
+  button. It does not watch your browsing in the background. Each press
+  takes one bounded snapshot and stops by itself when it finds an image,
+  when you press the button again, or when you close the tab or leave the
+  page; it never restarts itself.
 - It uses your existing browser session, so images behind a sign-in work.
   Your credentials stay in your browser; Dezoomify never stores or sends
   them anywhere else.

@@ -1,113 +1,90 @@
 # Job engine
 
-`crates/dezoomify-job` is the deterministic effect/state machine used by the browser runtime through the WASM adapter and by the native runtime through `crates/dezoomify-native/src/job_driver.rs`. It decides what must happen next; it never performs I/O, decodes pixels, reads time, or writes output. Both runtimes execute its effects and feed results back; shared scenarios assert equivalent behavior across both runtimes.
+`crates/dezoomify-job` is the deterministic state machine behind every job. It decides what happens next; hosts do it. It never touches I/O, pixels, time, or output files. The browser runtime drives it through the WASM bridge; the native runtime drives it directly. Shared scenarios assert both runtimes behave the same.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created
+    Created --> Discovering: start()
+    Discovering --> AwaitingImageSelection: catalog ready
+    Discovering --> Discovering: acquire-resource cycle
+    Discovering --> Failed: discovery failed
+    AwaitingImageSelection --> AwaitingLevelSelection: SelectedImage
+    AwaitingLevelSelection --> Planning: SelectedLevel
+    Planning --> Planning: ProbeOutcome next probe
+    Planning --> AcquiringTiles: plan resolved
+    AcquiringTiles --> Finalizing: last tile ok
+    AcquiringTiles --> AcquiringTiles: retry acquire-tile
+    AcquiringTiles --> AwaitingPartialDecision: retries exhausted
+    AwaitingPartialDecision --> AcquiringTiles: RecoveryChoice Retry
+    AwaitingPartialDecision --> Finalizing: RecoveryChoice Keep
+    AwaitingPartialDecision --> Failed: RecoveryChoice Discard
+    Finalizing --> Completed: FinalizationSucceeded
+    Finalizing --> PartiallyCompleted: FinalizationSucceeded partial
+    Finalizing --> Failed: FinalizationFailed
+    Created --> Cancelled: Cancel
+    Discovering --> Cancelled: Cancel
+    AcquiringTiles --> Cancelled: Cancel
+    Finalizing --> Cancelled: Cancel
+    AwaitingPartialDecision --> Cancelled: Cancel
+    Completed --> [*]
+    PartiallyCompleted --> [*]
+    Failed --> [*]
+    Cancelled --> [*]
+    note right of AcquiringTiles: Pause v1 is an overlay:\nno new acquire-tile effects\nwhile paused; resume re-drives
+```
 
 ## Model
 
-A job contains immutable input intent and evolving state. State records discovery, selection, planning, tile acquisition, outstanding numeric request and decision keys, finalization, failure, and cancellation. Output destinations and codec/save progress are host-owned. Product routing tokens remain outside the job.
+A job holds fixed input intent plus evolving state: discovery, selection, planning, tile acquisition, outstanding request/decision numbers, finalization, failure, cancellation. Destinations and save progress belong to the host, not the job. Routing tokens stay outside the job.
 
-The engine accepts a typed `JobCommand` and appends typed `JobEffect` and
-`JobEvent` values to one FIFO `JobMessage` queue. Every message has a checked
-`u32` sequence. Requests, tiles, and decision generations are numeric and
-scoped to the job instance, so late, duplicate, and out-of-order replies can
-be rejected before state mutation. The host
-supplies clock-derived retry wakeups explicitly, so replaying the same inputs
-produces the same state and messages.
+The engine takes a typed `JobCommand` and appends typed effects and events to one FIFO queue. Every message carries a checked `u32` sequence; requests, tiles, and decision generations are numbers scoped to the job, so late, duplicate, and out-of-order replies die before touching state. The host feeds retry wakeups explicitly, so replaying the same inputs replays the same state.
 
 ## Phases
 
-Jobs move through discovery, selection, planning, tile acquisition, and one awaited finalization phase. The engine exposes only phases it can observe; hosts may report codec and save progress through product-local UI events.
+Discovery, selection, planning, tile acquisition, then one awaited finalization. The engine exposes only phases it observes; codec and save progress are product-local UI events.
 
-Selection is explicit when discovery returns multiple images or levels. Commands carry zero-based positions into the retained normalized catalog, so no catalog object or synthetic ID is copied back into Rust. Headless callers may provide a deterministic selection rule in the initial command; the engine never guesses silently. Discovery may also return still-deferred metadata (a IIIF service, a bulk-list entry); the projected catalog carries those as `ImageRequest` entries with their follow-up URI, and the host follows one with a fresh bounded job rather than selecting it.
+Selection is explicit when discovery finds several images or levels. Commands carry zero-based positions into the kept catalog. Headless callers pass a deterministic selection rule up front; the engine never guesses. Discovery also returns still-deferred entries (a IIIF service, a bulk-list entry) as `ImageRequest` items carrying a follow-up URI; the host follows one with a fresh bounded job instead of selecting it.
 
 ## Retry and progress
 
-Retry policy defines attempts, backoff inputs, and retryable error classes. The
-engine schedules retries; the host implements the delay and request. The web
-integration evaluates the first classified direct CORS or network failure, or a
-direct fetch that does not complete within the 1500 ms metadata window, as an
-application-specific transport transition before ordinary same-transport retry:
-an eligible public, non-credential metadata request supplies a metadata CORS
-proxy effect, and the active-transport event makes
-that transition visible. Ineligibility prohibits that effect.
-Authentication failures, invalid metadata, unsupported formats, and
-deterministic decode failures are not retried automatically.
+The engine schedules retries; the host waits and re-requests. The website proxy transition (one proxy effect for eligible metadata after a classified direct failure or metadata-window expiry) runs before ordinary same-transport retry; see [Browser runtime](browser-runtime.md#request-order). Auth failures, bad metadata, unknown formats, and deterministic decode failures never retry.
 
-Progress is structured by phase and reports completed, active, queued, failed, and total units where known. Byte counts supplement work-unit counts but do not replace them. Monotonic progress survives retries and cache hits without claiming that unknown totals are complete.
+Progress counts work units per phase (completed, active, queued, failed, total where known). Byte counts supplement unit counts. Progress never moves backward and never claims unknown totals as complete.
 
 ## Cancel and partial output
 
-Cancellation is a command, not an abrupt state mutation. The engine stops issuing new work and emits one idempotent `cancel-work` instruction before reaching `cancelled`.
+Cancel is a command. The engine stops new work and emits one idempotent `cancel-work` instruction before reaching `cancelled`.
 
-The selected partial policy is one of:
+Partial policy, picked up front:
 
-- `fail`: no final output is published when required tiles are missing;
-- `keep`: a marked partial result is encoded with missing regions;
-- `prompt`: the job pauses and exposes typed choices before encoding.
+- `fail`: missing tiles mean no output;
+- `keep`: the gappy result is encoded with missing regions marked;
+- `prompt`: the job pauses and asks (typed keep/discard/retry).
 
-Partial results list every missing tile and preserve the errors that caused each omission. The engine publishes a kept partial only after successful encoding and finalization; otherwise it directs cleanup. The policy never converts metadata, permission, destination, encoding, or publication failures into partial success.
-
-See [Errors](errors.md) for recovery behavior and [Testing](testing.md) for deterministic state-machine scenarios.
+Partial results list every missing tile and keep the error behind each gap. A kept partial publishes only after successful encode and finalization. Metadata, permission, destination, encoding, and publication failures never become partial success.
 
 ## Pause v1 (suspend-acquisition)
 
-Pause is an orthogonal overlay, not a new state, and `Job::is_paused` reports it. `Pause` is valid in any
-non-terminal state (post-terminal inputs stay `job.post-terminal`);
-duplicate pause returns `Ignored`; `Resume` without pause is
-`job.invalid-state`. Cancel wins while paused.
+Pause is an overlay, not a state; `Job::is_paused` reports it. `Pause` works in any non-terminal state (post-terminal inputs stay `job.post-terminal`); double pause returns `Ignored`; `Resume` without pause is `job.invalid-state`. Cancel wins while paused.
 
-While paused the engine stops scheduling new `acquire-tile` effects,
-finishes in-flight work, retains decoded output, preserves FIFO
-effect/event queues, preserves retry wakeups (deferred in `pending_tiles`
-until resume), and still lets hosts own clocks. `TileOutcome{ok:true}` while
-paused records progress but defers completion; retry-eligible failures queue
-their retry without emitting; retry-exhausted failures still transition to
-`AwaitingPartialDecision`. Probe planning and discovery continue while
-paused (documented limit: only tile acquisition suspends). `Resume` clears
-the overlay, emits `resumed`, and re-drives: pending tiles up to the
-concurrency gate, or completion when every tile already arrived while
-paused.
+While paused the engine schedules no new `acquire-tile` effects, finishes in-flight work, keeps decoded output and queue order, and defers retry wakeups until resume. Tile arrivals still record progress but defer completion; exhausted retries still move to `AwaitingPartialDecision`. Probing and discovery continue (only tile acquisition suspends). `Resume` emits `resumed` and re-drives pending tiles, or completes when everything already arrived.
 
 ## Behavior table (implemented)
 
-`dezoomify-job` is synchronous with monotonic `seq` (checked
-arithmetic), one FIFO typed message queue, and exactly one terminal event.
-`Terminal` = `Completed` / `PartiallyCompleted` / `Failed` / `Cancelled`.
-Post-terminal inputs return stable `job.post-terminal` rejection with no work.
-Duplicates return `Outcome::Ignored` with no state change.
+`dezoomify-job` is synchronous with monotonic `seq` (checked arithmetic), one FIFO typed message queue, and exactly one terminal event. `Terminal` = `Completed` / `PartiallyCompleted` / `Failed` / `Cancelled`. Post-terminal inputs return stable `job.post-terminal` rejection with no work. Duplicates return `Outcome::Ignored` with no state change.
 
 ## Host-effect contract
 
-Effects are host-neutral and carry everything a host needs to execute them;
-no host re-derives job policy or tile geometry.
+Effects carry everything a host needs; hosts never re-derive job policy or tile geometry. Canonical here; [Browser runtime](browser-runtime.md#engine-effect-assembly) and [Native apps](native-apps.md#native-runtime) cover host-side execution only.
 
-- `acquire-tile` carries the request (URI, headers, purpose), the engine
-  tile id, and the complete output placement: top-left position, planned
-  extent when declared, the declared output canvas, and the processing
-  recipe id. Native assembly and browser canvas hosts consume the same
-  values. Hosts decode during acquisition (the native model), so decode
-  failures surface through the tile outcome.
-- `finalize-output` carries the partial marker, output format, and declared
-  canvas size. The host validates its destination, assembles and encodes the
-  retained tiles, saves or displays the result, and replies once with typed
-  success or failure. Completion is emitted only after success.
-- `cancel-work` is idempotent and tells the host to cancel work and release
-  retained resources after cancellation or failure.
+- `acquire-tile`: request (URI, headers, purpose), engine tile id, output placement (position, planned extent, declared canvas, processing recipe). Hosts decode during acquisition, so decode failures arrive as tile outcomes.
+- `finalize-output`: partial marker, output format, declared canvas size. The host validates its destination, assembles, encodes, saves or displays, and replies once. Completion follows success only.
+- `cancel-work`: idempotent; cancel work and release kept resources after cancellation or failure.
 
-Discovery consumes ordered roots and delegates each to the core registry. A
-root with supplied bytes is evaluated directly; a URL-only root begins with
-an `acquire-resource` effect. The first root that yields a catalog wins, and a
-failed root advances to the next one. The engine emits one
-`acquire-resource` effect per outstanding core request and forwards host
-results to the core operation, which owns candidate ordering and fallback.
-Core discovery is a poll: the same request stays outstanding until its
-outcome is provided, so the engine never loops on unanswered fetches.
+Discovery walks ordered roots in registry order. A root with bytes is evaluated directly; a URL-only root starts with an `acquire-resource` effect. The first root yielding a catalog wins; failures advance to the next root. One `acquire-resource` effect per outstanding core request; the same request stays outstanding until answered, so the engine never spins on silence.
 
-Adaptive planning may mark a probe as `ProbeAndOutput`. Hosts retain a
-successfully decoded probe with its tile placement, and the resolved plan's
-`previously_output` positions let the engine count that tile as acquired
-without fetching it again. Missing or unselected probes remain advisory and
-never enter tile retry or partial-output recovery.
+A probe marked `ProbeAndOutput` counts as already fetched when the resolved plan lists its position in `previously_output`; the host keeps the decoded probe. Other probes stay advisory and never enter retry or partial handling.
 
 | Input | Valid source state(s) | Validation | Transition | Effects | Events |
 |---|---|---|---|---|---|

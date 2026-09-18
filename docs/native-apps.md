@@ -1,162 +1,82 @@
 # Native apps
 
-The CLI and Tauri desktop application share `crates/dezoomify-native`. This runtime drives `crates/dezoomify-job` and executes its effects with native HTTP, filesystem, decoder, processor, and output encoder implementations (PNG, JPEG, TIFF, ZIF pyramid, WebP, and static IIIF tile trees).
+The CLI and Tauri desktop app share `crates/dezoomify-native`: native HTTP, filesystem, decoding, processing, and encoders driving `crates/dezoomify-job`. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract); native execution only below. User behavior: [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md).
 
 ## Native runtime
 
-`crates/dezoomify-native` provides:
+- HTTP with redirects, user headers, auth, 16 concurrent tile fetches (website 6, extension 6, native 16), per-host pacing 5/s (200 ms floor, `max(--min-interval, 200 ms)`), retry backoff (2 s base, doubling; `--retries 0` means none), 30 s request / 6 s connect timeouts, HTTP/1.1 keep-alive (32 idle per host, 15 s, 100 total), transport retries 1, persistent throttles fail closed, cancellation;
+- format selection (`PipelineConfig::format`: `None`/`auto` detects; a name picks one program; unknown names fail `discovery.unknown-dezoomer`);
+- remote fetch plus local reads (plain paths, `file://` absolute paths only; single local `tiles.yaml` and local tile URIs flow end to end; credentials stay scoped, errors redacted);
+- level selection (`--largest`, exact `--zoom-level`, width/height caps, `--image-index`; out-of-range picks the last);
+- fixed-pool fetch plus decode (16 workers, no async runtime), assembly bounded by available memory;
+- PNG (deflate tier from `--compression`), JPEG (quality `100 - compression`, default 95), TIFF (deflate, always lossless), ZIF (multi-level pyramid, per-level deflate), lossless WebP, `iiif-dir`, atomic publication, first-tile ICC preserved (JPEG, PNG, TIFF, ZIF, WebP) and EXIF (PNG);
+- tile resume cache on by default (`<cache-dir>/<job>/<key>`, custom `--tile-cache`); reruns skip tiles whose stored bytes still decode.
 
-- HTTP requests with redirects, user headers, authentication, bounded concurrency (16 tile fetches per the capability-negotiated policy: website 6, extension 6, native 16), per-host tile pacing at 5/s (200 ms spacing, `max(--min-interval, 200 ms)` so the floor applies even at the default 0), retry backoff (2s base delay with doubling, `--retries 0` means no retries), 30s request and 6s connect timeouts, HTTP/1.1 keep-alive with 32 idle connections per host for 15 s (100 total; ureq 3.4.1 is HTTP/1.1-only with no HTTP/2 path, so both the mainline and insecure paths negotiate `http/1.1` and reuse persistent connections), transport retries 1 with persistent throttles failing closed, and cancellation;
-- format selection via `PipelineConfig::format` (`None`/`auto` auto-detects through `default_registry`; a named format selects the single program through `registry_for`, unknown names fail with typed `discovery.unknown-dezoomer`);
-- remote metadata and tile fetch with local output file access, plus filesystem reads for plain local paths and `file://` URIs (single local `tiles.yaml` inputs and local tile URIs flow end-to-end; `file://` only names local absolute paths, credentials stay scoped and errors redacted);
-- level selection with `--largest`, exact `--zoom-level` (out-of-range uses the last level), width and height caps, and exact `--image-index` (out-of-range uses the last image);
-- fixed-pool tile fetch plus decode (16 std workers, no async runtime) with per-host start pacing, and tile decode plus canvas assembly bounded by currently available memory;
-- PNG (deflate tier from `--compression`), JPEG (quality `100 - compression`, default 95), TIFF (deflate level from `--compression`, lossless at every level), ZIF (TIFF-compatible multi-directory pyramid, each level deflate-compressed per `--compression`), WebP (lossless), and `iiif-dir` encode with atomic final publication, preserving the first tile ICC profile (JPEG, PNG, TIFF, ZIF, WebP) and EXIF metadata (PNG);
-- a tile resume cache on by default: each fetched tile body persists under `<cache-dir>/<job>/<key>` (custom `--tile-cache` or the default on-disk cache) and a later run of the same job skips fetching tiles whose stored bytes still decode;
+Temp files are job-scoped. Success moves output into place atomically where possible; cancellation and failure remove uncommitted output. Pause v1 (`--pause-after N` demo plus engine `Pause`/`Resume`) stops new `acquire-tile` scheduling, finishes in-flight work, keeps decoded output and queue order, and resumes the pending queue on resume. The cache keeps response bodies keyed by versioned URL digests under a per-job namespace from the input URL; never headers, cookies, or credentials. Corrupt entries fall back to fresh fetch.
 
-Temporary files are job-scoped. Successful output is moved into place atomically where the filesystem permits. Cancellation and failure remove uncommitted output. Pause v1 (`--pause-after N` demo, plus engine `Pause`/`Resume` commands) suspends acquisition instead: new `acquire-tile` scheduling stops, in-flight work finishes, decoded output is retained, FIFO order and retry wakeups are preserved, and resume re-drives the pending queue (or completes when everything arrived paused). Hosts still own clocks; the engine never sleeps. The resume cache holds tile response bodies only, keyed by versioned digests of their URLs under a per-job namespace derived from the input URL; request headers, cookies, and credentials never enter the cache, and a corrupt entry quietly falls back to a fresh fetch.
+The canvas costs 4 bytes per pixel. Before allocating, the runtime compares against `System::available_memory()` and fails `output.canvas-limit` when larger; no safety margin. `--max-width` fits a smaller level into memory. Tracked numbers: `cargo xtask test perf --smoke`, criterion `native_pipeline` benches.
 
-The canvas holds 4 bytes per pixel. Immediately before allocation, the runtime compares those bytes with `System::available_memory()` and fails with typed `output.canvas-limit` when the requested canvas is larger; there is no safety margin. Saving a smaller level with `--max-width` fits the available memory. See `cargo xtask test perf --smoke` and the criterion `native_pipeline` benches for the tracked numbers.
+### Output naming and encoders
 
-Native is the authoritative runtime for images larger than a browser tab and local sources, subject to currently available memory, with single-job file and `iiif-dir` output. The output file name selects the encoder: `.png` saves PNG, `.jpg`/`.jpeg` saves JPEG at quality `100 - compression`, `.tif`/`.tiff` saves a single deflate-compressed TIFF image, `.webp` saves lossless WebP, `.zif` saves a TIFF-compatible multi-directory pyramid (full resolution plus halved levels, each deflate-compressed per `--compression`; encoded-tile passthrough cannot cross the job-engine boundary, so the assembled canvas is re-encoded at every pyramid resolution instead), `.iiif` saves an `iiif-dir` tile tree at that path, and an extensionless path (or an existing directory) saves an `iiif-dir` tile tree. Any other extension fails with a typed error before any work starts. JPEG addresses at most 65535 px per side, WebP at most 16383 px per side, so larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. An `iiif-dir` destination holds an IIIF Image API v2 `info.json` plus JPEG tiles stored at their real IIIF request paths (`{x},{y},{w},{h}/{tw},/0/default.jpg`, size by width) with one `full/max/0/default.jpg` overview, so a plain static file server answers IIIF URLs; its output digest hashes `info.json` plus tile bytes in sorted path order. Tile failures after retries keep a partial output with blank regions published to a `.partial` sibling (`out.png` becomes `out.partial.png`) and `partial: true` by default; `--no-partial` fails with `tile.download-failed` and no output instead. The desktop shell never claims a complete save for partial bytes: the driver announces the redacted missing ledger via `recovery-requested`/`missing-work` and waits up to 60s for an explicit keep/discard/retry choice (fail-closed to the configured policy), the shell surfaces `AwaitingPartialDecision` with the ledger, and the terminal is `partial-completed` carrying the missing ids plus the sibling basename (never the granted path); discarding fails with `tile.download-failed` and no output. The native baseline reports encoders `[png, jpeg, tiff, zif, webp]`, destination modes `[file, iiif-dir]`, storage modes `[cache]`, `max_concurrency` 16, `bulk_supported` true, and `paused_supported` true (Pause v1 suspend-acquisition with `--pause-after` demo). Capability negotiation exposes actual codec and resource limits to callers; see [Protocol](protocol.md#capabilities).
+Native handles images beyond browser-tab size and local sources, within available memory, with single-job file and `iiif-dir` output. The output name picks the encoder:
+
+- `.png` PNG; `.jpg`/`.jpeg` JPEG at quality `100 - compression`;
+- `.tif`/`.tiff` single deflate TIFF; `.webp` lossless WebP;
+- `.zif` multi-level pyramid (full resolution plus halvings, each deflate-compressed; the canvas is re-encoded per level, never passed through as tiles);
+- `.iiif` an `iiif-dir` tree at that path; extensionless paths (or existing directories) also save `iiif-dir`.
+
+Other extensions fail typed before any work. JPEG caps at 65535 px per side, WebP at 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. An `iiif-dir` holds IIIF Image API v2 `info.json` plus JPEG tiles at real request paths (`{x},{y},{w},{h}/{tw},/0/default.jpg`) with one `full/max/0/default.jpg` overview, servable from a static file server; its digest hashes `info.json` plus tile bytes in sorted path order.
+
+### Partial output
+
+Post-retry tile failures keep a gappy output at a `.partial` sibling (`out.png` → `out.partial.png`), `partial: true` by default; `--no-partial` fails `tile.download-failed` with no output. The shell never presents partial bytes as complete: the driver announces the redacted missing ledger (`recovery-requested`/`missing-work`), waits up to 60 s for keep/discard/retry (fail-closed to policy), and ends `partial-completed` with missing ids plus sibling basename (never the granted path). Discarding fails `tile.download-failed` with no output.
+
+### Capability baseline
+
+### Capability baseline
+
+The native baseline reports encoders `[png, jpeg, tiff, zif, webp]`, destination modes `[file, iiif-dir]`, storage modes `[cache]`, `max_concurrency` 16, `bulk_supported` true, `paused_supported` true. Negotiation exposes real codec and resource limits; see [Protocol](protocol.md#product-capabilities).
 
 ## Desktop
 
-The Tauri application hosts the same shared UI used by the website and extension. Its integration maps generated protocol commands to Tauri invocations and maps native events back to the shared UI. A desktop start carries every output setting from the main screen; the native driver derives the output basename from the selected catalog title and saves directly in the configured folder, with no second save dialog.
+The Tauri app hosts the shared UI. Its integration maps protocol commands to Tauri invocations and native events back. A start carries every output setting from the main screen; the driver names output from the catalog title and saves straight into the configured folder, no second dialog.
 
-Desktop treats website and deep-link [handoffs](protocol.md#handoff) as bounded, non-secret, untrusted input. It validates them and asks the user to confirm the source and output; these handoffs use no client-side signing. Extension handoff uses allowlisted Native Messaging: browser enforcement of allowed extension IDs authenticates the extension sender to the native host, while a fresh challenge and one-use nonce bind one session and prevent replay rather than establish identity. Cookies transfer only after separate origin-scoped consent and are not intentionally persisted.
+Website and deep-link [handoffs](protocol.md#handoff) are bounded, secret-free, untrusted input: validated, then user-confirmed, never client-signed. Extension handoff uses allowlisted Native Messaging (browser-enforced extension IDs authenticate the sender); challenge plus one-use nonce bind one session against replay. Cookies transfer only after separate origin-scoped consent and persist nowhere.
 
 ### Desktop queue
 
-The desktop app runs a sequential multi-job queue in its integration layer
-(`apps/desktop/src/queue.ts`) over the single-job engine: an address
-submitted while a job runs waits in a table instead of replacing the running
-job. Each row shows its redacted origin, status, and progress; one entry can
-be cancelled without touching the rest, cancel-all stops new work, and failed
-or cancelled entries retry behind the line. A failed entry never stops the
-rest, and the totals mirror the CLI bulk contract
-(`bulk: X succeeded, Y failed, Z total`). The engine still validates each
-queued request on its own, so capability checks are never UI-only.
+Sequential multi-job queue in the integration layer (`apps/desktop/src/queue.ts`) over the single-job engine: submitted-while-running addresses wait in a table. Rows show redacted origin, status, progress; cancel one or cancel-all; failed/cancelled entries retry behind the line. Failures never stop the rest; totals mirror the CLI bulk contract (`bulk: X succeeded, Y failed, Z total`). The engine validates each entry itself, so checks are never UI-only.
 
 ### Desktop output and settings
 
-Each desktop job saves one output; the queue saves entries one at a time in
-submission order. The UI format picker offers `png`, `jpeg`, `tiff`, `zif`,
-`webp`, and `iiif-dir` (`NATIVE_FORMATS` plus the directory output in
-`apps/desktop/src/desktopIntegration.ts`), defaulting to `png`. The choice is
-first-class persisted state: `apps/desktop/src/settings.ts`
-stores `outputFormat` in localStorage (`dezoomify.desktop.settings.v1`),
-validates it fail-closed on load, and sends it with `start_job` alongside the
-configured output directory. The native driver uses the selected catalog
-title as the basename, adds the format extension, and appends a numeric suffix
-when needed rather than replacing an existing output. JPEG quality is `100 - compression` with the shipped default
-compression 5 pinning quality 95; the settings panel (output directory,
-compression, width/height caps, retries, cache directory, `-H` headers) plus
-the main-screen format selector persist across relaunches and fail closed to
-defaults on invalid drafts. Overwrite is always false: no overwrite
-confirmation UI exists, so automatic desktop output never replaces an
-existing destination.
-User-visible behavior lives in the [Desktop app guide](user/desktop-app.md);
-this section states the mechanism only.
+One output per job, saved in submission order. The format picker offers `png`, `jpeg`, `tiff`, `zif`, `webp`, `iiif-dir` (default `png`), persisted in localStorage (`dezoomify.desktop.settings.v1`, fail-closed on load) and sent with `start_job` alongside the output directory. Basename comes from the catalog title plus format extension, with numeric suffixes instead of overwrites (overwrite is always false; no confirmation UI exists). JPEG quality is `100 - compression` (default 5 → 95). Panel settings (output directory, compression, width/height caps, retries, cache directory, `-H` headers) persist across relaunches and fall back to defaults on invalid drafts. User behavior: [Desktop app guide](user/desktop-app.md).
 
-Settings render only while idle. Format radios appear only for destination
-recovery; the completion screen contains neither settings nor a queue.
-History selection prefills the input without starting work. Completion uses
-native saved-output copy and explicit open/reveal callbacks, without browser
-save or color-profile guidance. `open_saved_output` accepts a job id and a
-reveal flag; the job table retains the actual published path natively and
-permits these actions only for completed or partially completed jobs. The
-system launcher opens the image or its containing directory with the platform
-default handler. It runs on a blocking worker and checks the launcher exit
-status, trying supported launcher fallbacks; folder opening does not require
-a Linux FileManager1 or portal service. File existence errors remain distinct
-from launcher and IPC errors. Every failed file action updates the visible
-error and copyable diagnostics, including subsequent attempts. No
-caller-supplied path is accepted or returned over IPC. Encoding progress does
-not erase tile counts already received.
+Settings render only while idle. History selection prefills the input without starting. Completion uses native open/reveal on the published path (completed or partially completed only) via the platform launcher on a blocking worker with fallbacks; file-existence, launcher, and IPC errors stay distinct, and every failed file action updates the visible error plus diagnostics. No caller-supplied path crosses IPC. Encoding progress never erases tile counts.
 
-The native desktop path emits no catalog notice and no display-only branch.
-The driver folds the catalog internally (first image, largest fitting level;
-only an explicit `answer_choice` overrides them before the grant), the shell
-progress allowlist carries counts only (no `imageCount`), and only the browser
-tainted-canvas path produces display-only. The frontend `catalogNotice` is
-local-only aux geometry for the save-name suggestion, never a protocol notice;
-the shared view's choice-count and display-only sections stay for other apps.
-The window E2E pins both absences on the native save path.
+No catalog notice, no display-only branch on the native path. The driver folds the catalog internally (first image, largest fitting level; only pre-grant `answer_choice` overrides); the shell progress allowlist carries counts only. The frontend `catalogNotice` is local-only save-name geometry, never protocol; window E2E pins both absences.
 
 ### Desktop partial-output honesty
 
-Partial policy defaults to `Keep` (`PipelineConfig::default`; desktop
-`pipeline_config_for` does not override it). After retries, missing tiles stay
-blank and the kept output publishes to a `.partial` sibling
-(`out.png` becomes `out.partial.png` via `partial_path_for`); the granted
-destination is never touched, so a partial file never masquerades as the
-complete save, and `--no-partial`/`Fail` writes nothing with typed
-`tile.download-failed`. The native driver answers the engine's
-`request-decision{partial}` itself from the configured policy, so the shell
-never surfaces `AwaitingPartialDecision` and no interactive partial dialog is
-expected; `answer_choice` keep/discard markers still map onto the policy for
-the pre-grant window. The real-driver pump retains the partial flag, missing
-tile ledger, and actual published path. Kept partials end in
-`PartiallyCompleted` with a `partial-completed` event and a distinct completion
-label. Open and reveal actions resolve the partial sibling, never the
-untouched original destination.
+Default policy is `Keep`. Kept partials publish to the `.partial` sibling; the granted destination stays untouched, so partials never masquerade as complete; `--no-partial`/`Fail` writes nothing (`tile.download-failed`). The driver answers `request-decision{partial}` from policy itself, so the shell shows no partial dialog (`answer_choice` markers still map onto policy pre-grant). The pump retains partial flag, missing ledger, and published path. Kept partials end `PartiallyCompleted` with a distinct label; open/reveal resolve the sibling, never the untouched destination.
 
 ### Desktop updater
 
-The desktop updater is inert. `tauri.conf.json` ships empty
-`plugins.updater.endpoints` and an empty `pubkey`; `release/config.toml` sets
-`[updater] enabled = false` with empty endpoints and no key file;
-the updater plugin is not registered and the frontend issues no update calls.
-Users install new versions manually from GitHub Releases. Activating an updater
-requires a new implemented update design and deployed endpoints; none are
-invented for the shipped product. See [Releases](releases.md#desktop-updater).
+Inert. `tauri.conf.json` ships empty updater endpoints and pubkey; `release/config.toml` sets `[updater] enabled = false` with no key file; the plugin is unregistered and the frontend makes no update calls. New versions install manually from GitHub Releases. Enabling needs a new implemented update design plus deployed endpoints; none is invented. See [Releases](releases.md#desktop-updater).
 
 ### Desktop bundles
 
-`cargo xtask build desktop` compiles the lean shell first, then the frontend, then the Tauri window shell, then generates icons, then bundles. `--unsigned-test` stops before the bundler and produces no bundle. The bundle target follows the host: Linux produces `deb` via the prebuilt Tauri CLI (`pnpm --filter ./apps/desktop exec tauri build --bundles deb`); Windows produces `msi`/`nsis`; macOS produces `dmg`. Missing host tools fail closed naming the exact prerequisites.
+`cargo xtask build desktop` compiles lean shell, frontend, Tauri window shell, icons, then bundles. `--unsigned-test` stops before the bundler. Targets follow the host: Linux `deb` (prebuilt Tauri CLI), Windows `msi`/`nsis`, macOS `dmg`. Missing tools fail naming prerequisites.
 
-Linux needs the webview system packages `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` for the window shell plus `dpkg-deb` (package `dpkg-dev`) for the `deb` bundler; icons come from `scripts/gen-desktop-icons.py`, which runs before the bundler. macOS ships WebKit and needs the Xcode Command Line Tools plus `icons/icon.icns` for the `dmg` target. Windows ships WebView2 and needs WiX v3 for the `msi` target and NSIS for the `nsis` target, plus `icons/icon.ico`. Installers ship unsigned.
+Linux needs `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential` plus `dpkg-deb` (`dpkg-dev`); icons come from `scripts/gen-desktop-icons.py` before the bundler. macOS needs Xcode Command Line Tools plus `icons/icon.icns`. Windows needs WiX v3 (`msi`), NSIS (`nsis`), plus `icons/icon.ico`. Installers ship unsigned (Linux x86_64 `.deb`, Windows x86_64 `.msi`, Apple silicon `.dmg`); user note: [Desktop app guide](user/desktop-app.md#install).
 
-Install smoke runs per OS in the desktop CI `bundle-smoke` matrix (see
-[Testing](testing.md#desktop-real-window)): Linux installs the `deb` with
-`dpkg -i` (repairing deps from apt when reported missing) and proves launch
-with a timed stay-alive run under Xvfb; macOS mounts the `dmg` (answering the
-embedded license prompt from stdin) and execs the app binary directly from
-the image; Windows requires WiX and NSIS, installs the `msi` bundle silently,
-and fails if either tool or installer is missing. The window shell has no `--version` flag, so every smoke
-proves install plus launch by keeping the app alive for its window
-(15-20 s) and stopping it. Gatekeeper and SIP are never touched on macOS; the
-locally built unsigned Windows binary carries no Mark-of-the-Web, so
-SmartScreen does not intervene and no OS policy is bypassed anywhere. The
-Linux x86_64 `.deb`, Windows x86_64 `.msi`, and Apple silicon macOS `.dmg` ship
-as release artifacts; the user-facing install note lives in the [Desktop app guide](user/desktop-app.md#install).
+Per-OS install smoke runs in the desktop CI `bundle-smoke` matrix (see [Testing](testing.md#desktop-real-window)): Linux `dpkg -i` plus timed stay-alive launch under Xvfb; macOS mounts the `dmg` and execs the binary from the image; Windows silent `msi` install (WiX and NSIS required). No `--version` flag exists, so every smoke proves install plus launch by holding the window 15–20 s. Gatekeeper/SIP untouched; the unsigned Windows binary carries no Mark-of-the-Web, so SmartScreen stays out and no OS policy is bypassed.
 
 ### Real-window E2E hook
 
-Desktop starts automatically save the selected image using the configured
-output directory and format. The lane is
-`cargo xtask test desktop --e2e-window` (a display is required on headless
-Linux; macOS and Windows runners provide one). It builds the fixture server
-and the window shell with the test-only `testing-webdriver` cargo feature, then
-`selenium-webdriver` drives the real window against the embedded W3C WebDriver
-server (`tauri-plugin-wdio-webdriver`, which declares no IPC commands and so
-needs no capability entry). `specs/desktop.e2e.mjs` covers automatic
-submit-to-save, cancellation, confirmed deep-link save, and a kept partial
-published to a `.partial` sibling. No external tauri-driver or platform
-WebDriver is needed, so the same lane runs on Linux, macOS, and Windows.
-
-The harness configures a fail-closed temporary output directory through the
-existing desktop settings panel; no test-only application environment
-variable is involved. The harness lives in
-`apps/desktop/tests/window-e2e/`.
+`cargo xtask test desktop --e2e-window` (display required; headless Linux uses Xvfb) builds fixtures, frontend, and the shell with the test-only `testing-webdriver` feature, then drives the real window over its embedded W3C WebDriver server (`tauri-plugin-wdio-webdriver`, no IPC commands, no capability entry). `specs/desktop.e2e.mjs` covers auto submit-to-save, cancellation, confirmed deep-link save, and kept partials as `.partial` siblings. No external driver needed; same lane on Linux, macOS, Windows. Output directory is a fail-closed temp dir set through the settings panel. Harness: `apps/desktop/tests/window-e2e/`.
 
 ## CLI
 
-The CLI maps arguments to the same commands and prints the same typed events as human-readable progress or machine-readable records. It runs non-interactively: missing arguments print help, retries use a fixed budget of 3, and failures exit with the final typed error class. Flags include `--overwrite`, `--json`, `-d/--dezoomer`, `--largest`, `--max-width`, `--max-height`, `--zoom-level`, `--image-index`, `--retries`, `--keep-partial` (default) / `--no-partial`, `--tile-cache`, `--bulk`, `--pause-after <n>` (Pause v1 demo: pause after n tiles, verify no new work, resume and complete), and `-H "Name: value"` with two positionals (`<input-url> <output>`). Each run saves one job to one output file (`.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, or extensionless `iiif-dir`).
+Maps arguments to commands; prints typed events as human or machine records (`--json`). Non-interactive: missing arguments print help, fixed retry budget 3, failures exit with the typed error class. Flags: `--overwrite`, `--json`, `-d/--dezoomer`, `--largest`, `--max-width`, `--max-height`, `--zoom-level`, `--image-index`, `--retries`, `--keep-partial` (default) / `--no-partial`, `--tile-cache`, `--bulk`, `--pause-after <n>` (Pause v1 demo), `-H "Name: value"`, positionals `<input-url> <output>`. One job per run, one output (`.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`, `.webp`, `.iiif`, extensionless `iiif-dir`).
 
-Exit status reflects the final typed error class. A kept partial output remains distinguishable from complete success. See [Errors](errors.md) and [Job engine](job-engine.md).
-
-The CLI `--bulk` loop keeps its one-bounded-single-job-run-per-entry shape
-and shares the queue reporting: per-entry outcomes plus a totals summary, and
-exit 1 when any entry fails.
+`--bulk` runs one bounded single-job run per list entry with per-entry plus totals reporting; exit 1 when any entry fails. Options reference: [Command-line guide](user/command-line.md#useful-options). Errors: [Errors](errors.md). Engine: [Job engine](job-engine.md).

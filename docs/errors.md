@@ -1,6 +1,6 @@
 # Errors and recovery
 
-All runtimes expose the same typed error model. An error identifies what failed without coupling callers to a Rust, JavaScript, browser, HTTP, or operating-system exception.
+Every runtime reports failures the same way: a typed error naming what failed, never a raw Rust, JavaScript, browser, HTTP, or OS exception.
 
 ## Error shape
 
@@ -14,33 +14,45 @@ Each error includes:
 - an ordered set of permitted recovery actions;
 - optional redacted request, transport, blocked-reason, resource-kind, HTTP status, bounded server signal, and diagnostic detail.
 
-Codes are durable protocol API. Messages may improve without changing behavior. Secrets, cookies, authorization headers, signed query values, and local path details are redacted before logging or serialization.
+Codes are stable API; messages improve freely. Secrets, cookies, auth headers, signed query values, and local paths are redacted before logging or serialization.
 
-Hosts may preserve host-specific error source chains internally, but only the typed shape crosses the contract. Browser products classify a fetch failure once into generated `FetchFailureDto`, containing only host-observed facts. The Rust session uses the outstanding request correlation to construct `ErrorDto`: metadata is `discovery`, tile/probe work is `acquisition`, and the original request and resource kind come from the emitted effect. Product code cannot supply contradictory context. Output completion uses a generated `ErrorDto` with phase `output`. Never branch on display strings.
+Hosts keep their own error chains internally; only the typed shape crosses the contract. Browser code classifies a fetch failure once into `FetchFailureDto` (host-observed facts only). The Rust session adds the correlated request: metadata failures are `discovery`, tile/probe failures are `acquisition`, request URI and kind come from the emitted effect. Product code adds no context of its own. Output failures use phase `output`. Never branch on display strings.
 
-Adapter faults are not job failures. Invalid external objects or invalid session state return the error branch of `DispatchResult` and produce an internal contract-failure screen. They cannot replace a transport failure already accepted by the job engine.
+Adapter faults (bad external objects, bad session use) are not job failures. They return the `DispatchResult` error branch and a contract-failure screen, and replace no accepted transport failure.
 
 ## Recovery actions
 
-Recovery is typed data, not text that the UI must interpret. Each action carries an identifier, one coarse kind (`retry`, `edit-input`, `choose-output`, `grant-permission`, `change-transport`, `keep-partial`, `discard-partial`, `handoff-to-native`), a scope, and a rationale. Only the parameters valid for that error and current state are present. The job engine rejects stale or forged actions by job revision and action identifier.
+Recovery is data, not text for the UI to parse. Each action carries an id, one kind (`retry`, `edit-input`, `choose-output`, `grant-permission`, `change-transport`, `keep-partial`, `discard-partial`, `handoff-to-native`), a scope, and a rationale. The engine rejects stale or forged actions by job revision and action id.
 
-On the website, a classified direct CORS or network failure, or a direct fetch that does not complete within the 1500 ms metadata window, automatically selects the metadata CORS proxy only for an eligible public, non-credential metadata request (never tiles). This transport transition is reported in state and shown by the app; there is no per-attempt consent action.
+```mermaid
+flowchart TD
+    E[Typed error] --> K{Kind}
+    K -->|transient transport| R[retry same request]
+    K -->|address or input| EI[edit input]
+    K -->|output or destination| CO[choose output]
+    K -->|missing host grant| GP[grant permission]
+    K -->|no readable browser route| CT[change transport:\nhandoff to extension or native]
+    K -->|tiles missing after retries| PD{Partial policy}
+    PD -->|keep| KP[keep partial sibling]
+    PD -->|discard| DP[discard partial]
+    PD -->|prompt| UC[user keep / discard / retry choice]
+```
+
+The website transport transition is automatic for eligible metadata (no per-attempt consent action); see [Browser runtime](browser-runtime.md#request-order).
 
 ## User presentation
 
-Messages are written for the person seeing them, following the layered rules in [Product](product.md#progressive-disclosure):
+Messages follow the layered rules in [Product](product.md#progressive-disclosure):
 
-- Lead with what happened for this job, naming the step that failed, the image or resource involved, and the route that was attempted, then give the single best next action. Specific causes never share a generic template sentence.
-- The first message is jargon-free. Technical vocabulary appears only in expandable details or linked documentation.
-- The error's structured context (code, phase, transport, resource kind, blocked reason, redacted source origin) drives the wording, so identical causes read identically across apps.
-- A transport-level fetch failure is the job outcome itself: the host reports its plain message and stable code, and the engine's raw diagnostics (for discovery, the headline-free per-format bullet block) appear only in the expandable technical details (`detail`), never in the first message.
-- Technical and user wording never mix. Every fetch failure carries a plain actionable sentence for the user plus a typed cause (`FetchCause`: code, HTTP status, transport kind, policy reason) for the engine. The engine groups discovery diagnostics on the typed `(kind, cause)` key and never on rendered text; user copy never enters the engine. A metadata-proxy cause names the relay code, the HTTP status, and the policy reason when the relay denied the request, so our policy denial never reads as an upstream refusal and an upstream refusal never reads as retryable policy guidance.
-- Failure details stay on the user's device. The technical-details section has one shape across products: the full request URL rendered verbatim, the HTTP status when the failure is an HTTP refusal, an optional bounded server signal (at most 4 KiB read, 300 characters kept, markup-stripped, control characters stripped), the engine block, and one trailing context line (`code:… category:… retryable:… transport:… phase:…[ http:…]`). The `http` line and token are omitted entirely when there is no status. The prominent message never carries any of these, and a muted reminder in the error view asks the user to remove sign-in details and tokens before sharing. Copy diagnostics keeps the typed context, job and attempt identifiers, app and protocol versions, the request URL, and the bounded server signal; cookies and credentials never appear. Discovery diagnostics are typed: a format's URL-shape miss (`DidNotMatchUrl`, no fetch attempted) collapses to a count, fetch rejections group by their typed `(kind, cause)` key under their format names (distinct code, HTTP status, transport, or policy reason never merge), and other rejections group by `(kind, detail)`.
-- Every typed error has defined user wording. A code without user wording is a release defect. A genuinely unclassified internal failure may say the result is unexpected, but still names a next action and a diagnostics path. Only transient failures invite a retry ("try again shortly"); a policy denial or an upstream 4xx refusal is non-retryable and names the next app or address fix instead.
-- The error view offers a retry action only for a retryable error and only when the host can repeat the request, and that action re-runs the same request rather than falling through to a reset. Start over is offered only by products that accept a new address (the website and desktop app); the extension job tab is bound to the scanned page and never shows it.
+- First: one specific plain sentence (what failed for this job, which step and resource, which route) plus the single best next action. No shared generic template across causes.
+- Jargon waits for expandable details and linked docs. Wording is driven by structured context (code, phase, transport, kind, blocked reason, redacted origin), so identical causes read identically everywhere.
+- A fetch failure is the job outcome: plain message plus stable code up front; engine diagnostics (for discovery, the headline-free per-format bullets) only inside expandable details.
+- User and technical wording never mix. Each fetch failure carries a plain sentence for the user plus a typed `FetchCause` (code, HTTP status, transport kind, policy reason) for the engine. Discovery diagnostics group on the typed `(kind, cause)` key, never on rendered text. A proxy-denied cause names relay code, HTTP status, and policy reason, so policy denials never read as upstream refusals and vice versa.
+- Details stay on the device: full request URL verbatim, HTTP status only for HTTP refusals, an optional bounded server signal (4 KiB read, 300 chars kept, markup and control chars stripped), the engine block, one trailing context line. Copy-diagnostics keeps typed context, job/attempt ids, app and protocol versions, URL, and server signal; never cookies or credentials. Format URL-shape misses (`DidNotMatchUrl`, nothing fetched) collapse to a count; fetch rejections group by typed `(kind, cause)` under format names; other rejections group by `(kind, detail)`.
+- Every code has user wording; a code without wording is a release defect. Only transient failures invite retry; policy denials and upstream 4xx name the next app or address fix instead. Retry re-runs the same request, never a reset. Start over exists only where a new address is accepted (website, desktop); the extension job tab stays bound to the scanned page.
 
 ## Failure policy
 
-Transient transport and service errors follow the configured [retry policy](job-engine.md#retry-and-progress). Before the website exposes a classified direct CORS or network failure, or a direct fetch that does not complete within the 1500 ms metadata window, it applies the eligible automatic proxy policy once; proxy-ineligible, authentication, authorization, and ordinary HTTP failures do not take that route. Remaining access failures require user action. Invalid metadata and deterministic decode failures stop affected work immediately. A tile failure reaches the configured partial policy only after retries are exhausted.
+Transient transport and service errors follow the [retry policy](job-engine.md#retry-and-progress). Proxy-ineligible, auth, and ordinary HTTP failures never take the proxy route. Invalid metadata and deterministic decode failures stop at once. A tile failure reaches partial handling only after retries run out.
 
-Internal errors expose a safe fallback action. Native Messaging incompatibility stops before job creation. Security-policy failures never offer a recovery that weakens the policy; see [Security](security.md).
+Internal errors offer a safe fallback. Native Messaging mismatch stops before job creation. Security-policy failures never offer a recovery that weakens the policy; see [Security](security.md).

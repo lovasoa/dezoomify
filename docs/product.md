@@ -1,36 +1,42 @@
 # Product
 
-dezoomify turns tiled, zoomable images into portable image files. A user supplies a URL, chooses a discovered image and level, reviews output constraints, and runs a job with live progress, cancellation, retry, and an explicit partial-output policy.
+dezoomify turns tiled, zoomable images into portable files. A user supplies a URL, picks a discovered image and level, reviews output constraints, and runs a job with live progress, cancellation, retry, and an explicit partial-output choice.
 
 ## Apps
 
-- **Website** handles common public sources without installation. It fetches readable bytes with a direct browser fetch first (1500 ms window), then automatically uses the metadata CORS proxy only after a classified CORS or network failure or a direct fetch that does not complete in that window, and only for an eligible public, non-credential metadata request; tiles are never proxied. The website shows the active transport and never prompts for per-attempt proxy consent. Unprocessed ordinary tiles may remain visible through a tainted canvas without clean programmatic save.
-- **Browser extension** discovers viewers in the current page and performs browser-session requests under extension permissions.
-- **The desktop app** uses the native runtime for large images and local sources with single-job PNG, JPEG, TIFF, ZIF, and WebP output to a file or `iiif-dir`.
-- **CLI** exposes the same native discovery and job behavior for scripts.
+- **Website**: common public sources, no install. Uses the [browser transport policy](browser-runtime.md#request-order); shows the active transport; no per-attempt prompts. Ordinary tiles without readable bytes stay visible as a tainted canvas with no programmatic save.
+- **Browser extension**: finds viewers in the open page; fetches with the browser session under granted permissions; see [Extension](extension.md).
+- **Desktop app**: native runtime for large images and local sources, one file or `iiif-dir` per job; see [Native apps](native-apps.md).
+- **CLI**: same native behavior for scripts; see the [Command-line guide](user/command-line.md).
 
-The shared UI (vanilla TypeScript, no UI framework) presents the same job concepts in every app. Runtime capability negotiation changes available actions, not their meaning. See [Architecture](architecture.md) and [Protocol](protocol.md).
+One React TSX shared UI presents the same job concepts in every app. Capability negotiation changes available actions, never their meaning. See [Architecture](architecture.md) and [Protocol](protocol.md).
 
 ## Choosing an app
 
-Users pick between the website, the extension, the desktop app, and the CLI, often under time pressure and without background knowledge. Every app must explain that choice honestly:
+Users pick an app under time pressure and without background knowledge. Every app explains the choice honestly:
 
-- Speak in user actions and outcomes ("Use the desktop app for this very large image"), never in mechanism vocabulary. User-facing copy must not use technical terms such as network policies, headers, permissions APIs, or transport names.
-- State limits as facts about the app, not as faults of the site or the user. For example: "this website can show the image but cannot save a copy because the site only serves it to its own pages; the browser extension can save it with your approval for that site."
-- The comparison is rendered from the same negotiated capabilities the app uses at runtime. An app must never recommend an option it cannot verify as available, and must never rule one out that it cannot verify as unavailable.
-- The same guidance appears in product documentation and in every app; hosts may adjust phrasing for context but not substance.
+- Actions and outcomes, never mechanism words. User copy avoids network policies, headers, permission APIs, transport names.
+- Limits read as facts about the app, never as faults of site or user. Example: "this website shows the image but saves no copy because the site serves it only to its own pages; the browser extension saves it with your approval for that site."
+- The comparison renders from the same negotiated capabilities the app runs on. An app never recommends what it fails to verify as available, and never rules out what it fails to verify as unavailable.
+- The same guidance appears in docs and in every app; wording adapts to context, substance never changes.
 
-This document speaks to implementers; user-facing copy derived from it must follow the plain-language rules above.
+This page speaks to implementers; user copy derived from it keeps the plain-language rules above.
 
 ## Progressive disclosure
 
-Explanations are layered so users get the minimum they need first:
+Users get the minimum first:
 
-1. **First message:** one specific, plain sentence describing what happened for this job and a single best next action.
-2. **"What happened":** an expandable plain-language explanation of the cause and the honest alternatives, still without jargon.
-3. **Technical detail:** only behind copyable diagnostics and linked documentation, for users who choose to look.
+```mermaid
+flowchart TD
+    F[First message:<br/>one specific plain sentence<br/>+ single best next action] --> W[What happened:<br/>expandable plain-language cause<br/>+ honest alternatives, no jargon]
+    W --> T[Technical detail:<br/>copyable diagnostics + linked docs<br/>for users choosing to look]
+```
 
-Nothing important is locked behind a tier the user cannot reach, and every failure leaves at least one next action. Structured failure context is gathered automatically at error time (error code, phase, transport, resource kind, blocked reason, redacted source origin, and capability snapshot), so messages and support reports are specific without asking users to describe technology. See [Errors](errors.md#user-presentation).
+1. **First message:** one specific plain sentence (what happened in this job) plus the single best next action.
+2. **"What happened":** expandable plain-language cause plus honest alternatives, still no jargon.
+3. **Technical detail:** copyable diagnostics and linked docs, for users choosing to look.
+
+Nothing important hides in an unreachable tier, and every failure leaves at least one next action. Structured context is captured at error time (code, phase, transport, kind, blocked reason, redacted origin, capability snapshot), so messages and reports stay specific without interrogating the user. See [Errors](errors.md#user-presentation).
 
 ## Core workflow
 
@@ -40,10 +46,10 @@ Nothing important is locked behind a tier the user cannot reach, and every failu
 4. The runtime executes tile acquisition and processing effects while the engine records their outcomes and reports deterministic progress.
 5. The engine drives encoding, finalization, publication, and cleanup effects through the selected output destination.
 
-Discovery, selection, acquisition, processing, and saving remain distinct phases. This keeps failures and recovery choices specific; see [Job engine](job-engine.md) and [Errors](errors.md).
+Discovery, selection, acquisition, processing, and saving stay distinct, keeping failures and recovery choices specific; see [Job engine](job-engine.md) and [Errors](errors.md).
 
 ## App boundaries
 
-The browser is optimized for interactive jobs that fit browser memory and save limits. Native apps own huge images and local input with single-job PNG, JPEG, TIFF, ZIF, and WebP output to a file or `iiif-dir`. The website baseline reports encoders `[png, jpeg, tiff]`; the native baseline reports `[png, jpeg, tiff, zif, webp]`, with destination modes per app, storage modes `[cache]` on native, `bulk_supported` true, and `paused_supported` true (Pause v1 suspend-acquisition: the job stops scheduling new tiles, finishes in-flight work, retains decoded output, and resumes on command). Queues live in the integration layer over the single-job engine, never in the engine: the website runs a single-queue (an address submitted while a job runs waits its turn and saves next), and the desktop app runs a multi-job queue (several jobs wait in a table with progress per job, cancel one or all, and retry of failed jobs). The CLI `--bulk` loop runs one bounded single-job run per list entry and shares the same per-entry plus totals reporting. The website sends neither cookies, `Authorization`, nor browser credentials on direct browser fetches or through the metadata CORS proxy. The extension is a distinct runtime: it obtains readable bytes under granted host permissions and the current browser session, processes them, and creates clean saves without the metadata CORS proxy.
+Browsers handle interactive jobs fitting browser memory and save limits; budgets: [Compatibility](compatibility.md#canvas-and-save-limits). Native apps own huge images and local input (PNG, JPEG, TIFF, ZIF, WebP, file or `iiif-dir`). Website baseline: encoders `[png, jpeg, tiff]`; native baseline: [Native apps](native-apps.md#capability-baseline). Queues live in the integration layer, never the engine: website single-queue (submitted addresses wait their turn), desktop multi-job queue (table with per-job progress, cancel one/all, retry failed). CLI `--bulk` runs one bounded run per entry with shared per-entry plus totals reporting. Credentials: [Security](security.md).
 
-dezoomify does not bypass authentication or access controls. Users are responsible for permission to retrieve and reproduce source material. Credential handling follows [Security](security.md).
+dezoomify bypasses no authentication or access controls. Users are responsible for permission to retrieve and reproduce source material.

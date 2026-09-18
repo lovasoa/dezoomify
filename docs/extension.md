@@ -1,135 +1,94 @@
 # Browser Extension
 
-The extension is MV3 in both browsers with one shared manifest base:
-Chromium runs the background as a service worker and Firefox as an event page.
-The toolbar click starts one explicit-action job on exactly the clicked tab.
-The background opens the dedicated job tab and performs finite source
-operations in the clicked tab; it does not reload the source page or install a
-persistent source collector. There is no fallback extension page or unrelated
-tab monitoring.
+MV3 in both browsers from one manifest base: service-worker background on Chromium, event-page background on Firefox. The toolbar click starts one job on exactly the clicked tab. The background opens a dedicated job tab and runs finite operations in the clicked tab; it never reloads the source page, installs a collector, or watches other tabs.
 
 ## Discovery
 
-Scanning begins only after an explicit toolbar action or an explicit retry of
-a retryable failure in the job tab. The icon is grey while idle and blue with a
-dot while the job is active. The source binding is invalidated on navigation,
-tab close, cancellation, or worker restart. The background never polls or
-enumerates tabs. Each attempt, the first and every retry, takes exactly one
-bounded source snapshot; a retry discards any snapshot still in flight from the
-previous attempt and starts a new engine attempt.
+Scanning starts only on toolbar click or on retry of a retryable failure in the job tab. Grey icon while idle, blue with a dot while active. Navigation, tab close, cancellation, or worker restart invalidates the binding. The background never polls or lists tabs. Every attempt takes exactly one bounded snapshot; a retry drops any in-flight snapshot and starts a new engine attempt.
 
-The initial ordered batch contains the rendered top-document `outerHTML`, then
-the rendered DOM of readable same-origin iframes, then URL-only references
-from the monitored tab's performance timeline. Cross-origin iframes are
-skipped. The background deliberately observes no traffic: a `webRequest`
-listener without host permissions is deaf, and `activeTab` does not enable
-observation. No permanent host permissions are declared.
+The first batch holds the top document's rendered `outerHTML`, then rendered DOM of readable same-origin iframes, then URL-only references from the tab's performance timeline. Cross-origin iframes are skipped. The background observes no traffic (a permissionless `webRequest` listener hears nothing; `activeTab` grants no observation). No permanent host permissions are declared.
 
-`crates/dezoomify-core` runs through WASM inside the dedicated extension job
-tab. It evaluates captured DOM bytes directly before fetching URL-only roots.
-The first root whose bytes produce an image confirms detection in the job tab.
+Core runs as WASM inside the job tab. It evaluates captured DOM bytes before fetching URL-only roots; the first root yielding an image confirms detection.
 
-`apps/extension/src/background/source-operations.ts` contains the two
-self-contained functions passed to `scripting.executeScript()`. The first
-takes a bounded snapshot of rendered document roots and retained
-resource-timing entries when the job tab is ready. The second performs a tab-origin fetch and
-returns bounded structured-cloneable chunks. Neither operation registers a
-listener or observes resources after it returns. A later snapshot is bounded
-and deduplicated if discovery requests more candidates. If an operation cannot
-start or its binding is stale, the toolbar shows an error badge; the extension
-never silently opens another page.
+`apps/extension/src/background/source-operations.ts` holds the two functions passed to `scripting.executeScript()`: one snapshots rendered roots plus retained resource-timing entries once the job tab is ready; the other fetches in the tab's origin and returns bounded structured-cloneable chunks. Neither registers a listener. A follow-up snapshot is bounded and deduplicated when discovery asks for more candidates. A stale binding or failed start shows an error badge; the extension never silently opens another page.
 
 ## Fetching
 
-The extension fetches readable bytes with a tab-origin direct fetch under the
-narrowest grant: `activeTab` for the clicked tab, or an explicitly granted
-optional host permission for another origin or redirect target. Credentials
-default to same-origin, so the page's session applies to its own origin while a
-public cross-origin metadata server answering
-`Access-Control-Allow-Origin: *` stays readable. When the source-tab fetch
-fails, the job retries the request through the independent extension-origin
-transport, which uses the current browser session under an optional host grant
-and pauses for that grant only when the grant is missing. A granted-origin
-401/403 refusal fails typed without another prompt; the grant is never
-re-requested for a refusal the grant cannot fix. Every operation validates its
-URL, method, declared headers, result shape, and byte cap.
+Readable bytes come from a tab-origin fetch under the narrowest grant: `activeTab` for the clicked tab, or an explicitly granted host permission for another origin or redirect target. Same-origin credentials apply, so the page's own session covers its origin while a public metadata server answering `Access-Control-Allow-Origin: *` stays readable. On source-tab failure the job retries through the independent extension-origin transport, pausing for the grant only when missing. A granted-origin 401/403 fails typed with no re-prompt; grants fix no refusals. Every operation validates URL, method, headers, shape, and byte cap.
 
-Readable metadata, processed tiles, and clean saves use the browser session's
-readable bytes. The extension never uses the metadata CORS proxy. If readable
-fetching is unavailable for an ordinary unprocessed tile, the job may use an
-ordinary `<img>` display fallback; the result stays visible but tainted and
-cannot be read or programmatically saved.
+The extension never uses the metadata proxy. Ordinary unprocessed tiles without readable bytes fall back to `<img>` display: visible but tainted, no reads or saves. Transport labels live in `packages/browser-runtime/src/transport-labels.ts`.
 
 ## Job and save
 
-The job tab uses the WASM core to discover an image, select a level, plan
-tiles, apply processing, and assemble the result on a canvas. A clean canvas is
-saved through a Blob URL and anchor click, which needs no `downloads`
-permission. A tainted canvas finishes as display-only and never receives pixel
-reads or serialization calls afterward.
+The job tab discovers, selects, plans, processes, and assembles on a canvas through the shared [engine-effect assembly](browser-runtime.md#engine-effect-assembly). A clean canvas saves via Blob URL plus anchor click (no `downloads` permission). A tainted canvas ends display-only with no later pixel reads or serialization.
 
-User-visible job failures stay in the job tab. Background failures keep an
-error badge and action title until the user clicks again or the source tab
-leaves the bound page. A retryable failure offers Retry in the job tab: pressing
-it takes a fresh snapshot of the bound page and starts a new attempt. The
-extension never offers Start over, because a new job begins from the page's
-toolbar button, not from an address entered in the job tab.
+Job failures stay in the job tab. Background failures keep an error badge until the next click or until the source tab leaves the bound page. Retry takes a fresh snapshot and starts a new attempt. No Start over exists: a new job starts at the page's toolbar button.
 
 ## Native handoff
 
-The extension may offer native handoff for huge outputs or local destinations.
-It reaches native only through allowlisted Native Messaging. A fresh challenge
-and one-use nonce bind messages to one consent session and prevent replay; they
-do not establish identity. Cookies pass only after a prompt names the
-destination origins and scope, and are not intentionally persisted.
+Native is reachable only through allowlisted Native Messaging, for huge outputs or local destinations. Challenge plus one-use nonce bind one consent session and block replay; they prove no identity. Cookies pass only after a prompt naming destination origins and scope, and persist nowhere. Version negotiation: [Protocol](protocol.md#native-messaging-version-check). Credential rules: [Security](security.md).
 
 ## Packaging
 
-WXT generates both MV3 manifests from `apps/extension/wxt.config.ts`. Chromium
-uses the bundled `background.js` service worker. Firefox uses the same classic
-IIFE artifact through `background.scripts`; packaging parses it with `node --check`.
-The store package ships only the background finite-operation
-coordinator, the React dedicated job tab (bundling the workspace
-`@dezoomify/shared-ui` and `@dezoomify/browser-runtime` packages), icons, and
-WASM. No source content script or fallback extension-page entry is packaged
-or tested.
+WXT generates both MV3 manifests from `apps/extension/wxt.config.ts` (Chromium: bundled `background.js` service worker; Firefox: same classic IIFE via `background.scripts`, parsed with `node --check`). The store package ships only the background coordinator, the job tab (workspace shared UI plus browser runtime), icons, and WASM. No content scripts or fallback pages are packaged or tested.
 
-Extension build, development, test, and release entry points regenerate the
-WASM glue from the current Rust source before WXT builds. The extension test gate
-does so before its unit suite, whose worker contract runs a real generated WASM
-session through the first discovery round trip; an absent, stale, or
-incompatible binding is a blocking failure before browser E2E starts.
-WXT packaging requires the root workspace dependencies installed by
-`cargo xtask setup` or `pnpm install --frozen-lockfile`; it never invokes a
-second package manager.
+Build, dev, test, and release regenerate the WASM glue from current Rust before WXT builds. The test gate does so before units, whose worker contract runs a real generated WASM session through the first discovery round trip; a missing, stale, or incompatible binding blocks before browser E2E. Packaging needs root workspace dependencies (`cargo xtask setup` or `pnpm install --frozen-lockfile`) and invokes no second package manager.
 
-User-facing job behavior comes from the same protocol and scenarios as web and
-desktop. See [Testing](testing.md) and [Releases](releases.md). For user-facing
-use, see [browser extension](user/browser-extension.md).
+Same protocol and scenarios as web and desktop govern job behavior. See [Testing](testing.md) and [Releases](releases.md). User use: [browser extension](user/browser-extension.md).
 
 ## Diagnostics
 
-Every extension context logs structured console lines
-(`[<context>] [<code> ]<detail>`): `background` (the coordinator/service
-worker), `job` (the dedicated job tab), and `worker` (the WASM session
-worker). The console method carries the level; the `background` context is
-the default and omits its bracket entirely, so a context bracket appears only
-when a line comes from another context. The three contexts together trace each interaction with
-the active tab (`toolbar-click`, `active-tab-op-start`/`active-tab-op-result`
-for the finite `scripting.executeScript()` operations, `source-fetch-*`,
-`permission-check`, `source-invalidated`) and each interaction with the core
-(`session-created`, `command-dispatched`, `messages-returned`, `effect-*`,
-`engine-event`, `core-error`).
+Each context logs structured console lines (`[<context>] [<code> ]<detail>`): `background` (coordinator; the default, so its bracket is omitted), `job` (job tab), `worker` (WASM session worker). Together they trace tab interactions (`toolbar-click`, `active-tab-op-start`/`active-tab-op-result`, `source-fetch-*`, `permission-check`, `source-invalidated`) and core interactions (`session-created`, `command-dispatched`, `messages-returned`, `effect-*`, `engine-event`, `core-error`).
 
-The logger lives in `packages/browser-runtime/src/logging.ts`
-(`@dezoomify/browser-runtime/logging`) so every product shares one
-implementation; the extension imports the `./logging` subpath, never the
-barrel. The job tab mirrors its accepted lines plus the worker's forwarded
-`engine.log` lines into the job view's technical-details log, so both the job
-and failed views (and copied diagnostics) carry the interaction trace.
+The logger lives in `packages/browser-runtime/src/logging.ts`, imported via the `./logging` subpath, never the barrel. The job tab mirrors accepted lines plus forwarded `engine.log` lines into the technical-details log, so job views, failed views, and copied diagnostics carry the trace.
 
-Interaction milestones log at info, high-frequency per-tile and per-chunk
-detail at debug, recoverable states at warn, and terminal failures at error.
-The default level is info. Logged URLs are written in full for diagnosis;
-details are bounded. User-visible failures travel through the dedicated job
-tab rather than disappearing with the toolbar state.
+Milestones log at info, per-tile/chunk detail at debug, recoverable states at warn, terminal failures at error; default is info. URLs log in full; details are bounded.
+
+## Appendix: source binding and job-tab contract
+
+One background coordinator, finite operations in the clicked tab, one job tab per job. The coordinator owns the bindings. Webpage `postMessage` is no job-control channel.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as Background coordinator
+    participant S as Source tab (finite ops)
+    participant J as Job tab (engine host)
+    U->>B: toolbar click
+    B->>B: bind job + tab and frame IDs + document generation
+    B->>J: open dedicated job tab
+    J-->>B: ready
+    B->>S: scripting.executeScript collectCandidates (bounded snapshot)
+    S-->>B: ordered roots (outerHTML, same-origin iframes, timing URLs)
+    B->>J: candidate roots
+    J->>J: core discovery over WASM
+    alt source fetch needed
+        B->>S: tab-origin fetch (bounded chunks)
+        S-->>B: bytes
+        B->>J: bytes
+    else source-context failure
+        J->>B: extension-origin retry request
+        B->>B: pause for host grant only when missing
+        B->>J: extension-origin bytes or typed refusal
+    end
+    J-->>U: progress, save, or typed failure
+```
+
+Every source- or job-originated request carries a host-local binding (`job`, browser-verified tab and frame IDs, document generation) plus one request sequence. The coordinator checks sender tab and frame against the stored binding before routing. Navigation bumps `document_generation`; older-generation messages die. A source-tab navigation invalidates only source-context transport; extension-origin transport survives for the same job.
+
+Bindings stored in session storage hold no secrets. A worker restart restores a binding when owners reconnect but starts no new scan or reload. Closing source or job tab cancels in-flight work and releases the binding.
+
+`collectCandidates` snapshots rendered `outerHTML` for the document and readable same-origin iframes, then URL-only retained timing entries; cross-origin iframes are skipped. Follow-up snapshots are optional, bounded, and coordinator-deduplicated. No persistent observer exists. Overflow returns as diagnostics, never silent discard.
+
+Candidate and fetch messages use one closed TypeScript union private to the installed build; no cross-version interface. Cancellation stops the source fetch before more chunks are kept. No webpage frame receives extension runtime messages.
+
+Outcome classes cover document loss, access required, redirect limits, cancellation, network/throttling, malformed responses, streaming limits, and channel loss. Source-context failure falls back to extension-origin transport; a definitive HTTP response returns straight to discovery (repeating fixes nothing). Missing-grant (`permission-denied`) pauses with host names and rationale; only a visible job-tab action opens the permission prompt. Granted-origin 401/403 is an upstream refusal, not a missing grant: typed failure, no pause. Redirects are never accepted retrospectively.
+
+The job tab hosts the full engine (dedicated worker, one WASM `Session`, shared browser-runtime executor) with no second state machine:
+
+- Selection is deterministic (`engine-selection.ts`): largest ready image, largest level fitting the canvas; else the first deferred `ImageRequest` URI with a fresh bounded attempt (`MAX_DEFERRED_FOLLOWS`); else typed failure. `select-image`/`select-level` correlate to the job.
+- Tiles decode during acquisition: undecodable tiles fail the outcome into engine retry/partial handling. The WASM bridge releases its arena copy on settlement.
+- `finalize-output` validates dimensions and area, assembles, encodes, saves, releases, and replies once; completion follows the reply.
+- `request-decision` renders keep/discard in the job tab; only the user action sends `recovery-choice`.
+- Host execution failure is terminal: render, cancel the engine job, fake no later effects.
+- Recipes beyond `none` fail typed (`TILE_PROCESSING_UNAVAILABLE`); those sources need the native app until the engine contract grows processing effects.

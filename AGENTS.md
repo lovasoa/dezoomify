@@ -39,7 +39,7 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 | Architecture, crate boundaries, data flow | [`docs/architecture.md`](docs/architecture.md) |
 | Job engine (phases, retries, cancellation) | [`docs/job-engine.md`](docs/job-engine.md) |
 | Browser runtime, transports, tainted canvas | [`docs/browser-runtime.md`](docs/browser-runtime.md) |
-| Extension behavior and packaging | [`docs/extension.md`](docs/extension.md) |
+| Extension behavior, packaging, source binding | [`docs/extension.md`](docs/extension.md) |
 | CLI, desktop app, native messaging | [`docs/native-apps.md`](docs/native-apps.md) |
 | Protocol (commands, events, handoff) | [`docs/protocol.md`](docs/protocol.md) |
 | Errors and typed recovery | [`docs/errors.md`](docs/errors.md) |
@@ -47,7 +47,7 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 | Testing policy and fixtures | [`docs/testing.md`](docs/testing.md) |
 | UI visual language | [`packages/shared-ui/AGENTS.md`](packages/shared-ui/AGENTS.md) |
 | User-facing documentation | [`docs/user/README.md`](docs/user/README.md) |
-| Releases and operations | [`docs/releases.md`](docs/releases.md), [`docs/operations.md`](docs/operations.md) |
+| Releases, operations, rollback, incidents | [`docs/releases.md`](docs/releases.md), [`docs/operations.md`](docs/operations.md) |
 
 ## Hard rules
 

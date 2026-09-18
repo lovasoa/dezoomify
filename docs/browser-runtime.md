@@ -1,119 +1,67 @@
 # Browser runtime
 
-`packages/browser-runtime` hosts `crates/dezoomify-wasm` for browser-facing
-effects; it does not contain the shared UI. The runtime owns browser fetch
-orchestration, request activity, workers, image decode, tile painting, canvas
-and save surfaces, and an optional bounded browser cache. WASM only adapts
-core, job, and pure processing code.
+`packages/browser-runtime` runs `crates/dezoomify-wasm` in the browser. It owns fetching, workers, decoding, tile painting, canvases, save surfaces, and an optional bounded cache. It contains no UI.
 
 ## Engine-effect assembly
 
-The runtime is the shared effect executor for browser hosts of the Rust job
-engine. The website and the extension job tab both drive it through the same
-engine host (`engine-host.ts`) over the WASM session; only the injected
-transport and output surface differ. It owns no job policy: retries,
-cancellation, partial-output decisions, and ordering belong to the engine.
-The executor maps typed host effects onto browser execution:
+The website and the extension job tab share one engine host (`engine-host.ts`) over the WASM session and differ only in transport and output surface. The runtime owns no job policy (retries, cancellation, partials, ordering stay in the engine). Effect meanings are defined in the [host-effect contract](job-engine.md#host-effect-contract); browser execution only below.
 
-- `acquire-tile` carries the complete output placement (position, planned
-  extent, declared canvas, processing recipe) plus the engine-declared
-  request headers. The website validates and reveals the declared canvas
-  before the first tile request, then decodes and paints each successful tile
-  immediately. The visible canvas is the output surface throughout
-  acquisition, including while paused; it is not a completion-only artifact.
-  A tile that cannot decode fails its acquisition outcome and flows through
-  the engine's retry and partial policy. Probe acquisitions (`purpose: probe`)
-  use the shared `probe.ts` helper (readable-bytes decode, plain `<img>`
-  fallback); a probe retained for output paints immediately too.
-- `finalize-output` carries the partial marker, output format, and declared
-  canvas size. It encodes and saves the surface already shown to the user.
-  Plans without declared dimensions derive their surface size from accumulated
-  placements during this awaited operation. Dimension and area validation
-  always precedes allocation and fails typed (`PLAN_INVALID` with a desktop
-  handoff) beyond browser limits.
-- The host draws every tile at its planned placement and at
-  1:1 pixel scale. Decoded pixels beyond the planned extent are cropped from
-  the right and bottom (as required by padded edge tiles); undersized tiles
-  leave their uncovered region empty. It closes each bitmap immediately after
-  painting it.
-- The host persists the encoded output exactly once (blob anchor save; no
-  `downloads` permission), releases resources, and replies with typed success
-  or failure. A tainted display-only canvas skips encoding.
+- `acquire-tile`: the website checks and shows the declared canvas before the first tile, then decodes and paints each good tile at once. The visible canvas is the output throughout, including while paused. Bad tiles fail the acquisition and flow into engine retry/partial handling. Probes (`purpose: probe`) share the `probe.ts` helper; a probe kept for output also paints at once.
+- `finalize-output`: encodes and saves the surface already on screen. Plans lacking declared dimensions size the surface from accumulated placements here. Over-limit dimensions fail typed (`PLAN_INVALID` plus a desktop handoff) before allocation.
+- Tiles draw at planned placement, 1:1 scale. Pixels past the planned edge crop from right and bottom (padded edge tiles); short tiles leave the gap empty. Each bitmap closes right after painting.
+- Output persists exactly once (blob anchor save; no `downloads` permission); then resources release and one typed reply goes back. A tainted display-only canvas skips encoding.
 
-The generated `ProcessingRecipe` union selects the WASM session's pure
-`applyProcessing` operation, serialized by the assembly. Ordinary unprocessed
-tiles that cannot be read as bytes fall back to an ordinary `<img>`
-(display-only): the canvas taints, no bytes are produced, and the job
-completes as display-only. Per-origin classification means only the first
-tile of an origin attempts readable bytes; later tiles go straight to the
-image. The deterministic catalog selection for engine hosts lives in
-`engine-selection.ts` (largest ready image, largest level that fits the
-browser canvas, smallest declared level as the fail-fast fallback). When no
-ready image is selectable, the same module surfaces the first still-deferred
-catalog entry's URI (`pickDeferredUri`), capped at `MAX_DEFERRED_FOLLOWS`,
-so a host follows a deferred entry with a fresh bounded attempt.
+Tiles the browser reads as bytes take the WASM `applyProcessing` path per the core recipe. Ordinary unprocessed tiles without readable bytes fall back to plain `<img>` (display-only): the canvas taints, no bytes result, the job ends display-only. Only the first tile per origin tries readable bytes; later tiles go straight to `<img>`. Catalog selection lives in `engine-selection.ts` (largest ready image, largest level fitting the browser canvas, smallest declared level as fail-fast fallback). With nothing selectable, `pickDeferredUri` surfaces the first deferred entry's URI (capped at `MAX_DEFERRED_FOLLOWS`) for a fresh bounded attempt.
 
 ## Generated WASM boundary
 
-`worker-host.ts` imports `SessionConfig`, `JobCommand`, `DispatchResult`,
-`HostMessage`, and the handle types from `@dezoomify/wasm-bindings`. Every
-session transition returns its messages directly. The worker owns no parallel
-declaration of Rust contract types.
-
-`engine-host.ts` exhaustively handles generated effects through a typed handler
-table, and each product does the same for generated events. It is the single
-browser conversion from a closed `HostFailure` into `FetchFailureDto`.
-The Rust session combines those host facts with its correlated request to
-construct `ErrorDto`. Website and extension inject transport implementations
-but share this conversion and worker integration.
+`worker-host.ts` imports session and message types from `@dezoomify/wasm-bindings` and declares no Rust contract types in parallel. `engine-host.ts` handles generated effects through one exhaustive typed table; each product does the same for events. It is the single browser conversion from closed `HostFailure` to `FetchFailureDto`; the Rust session adds its correlated request to build `ErrorDto`. See [Protocol](protocol.md#wasm-session-abi).
 
 ## Catalog boundary
 
-Browser hosts consume the ordered generated `CatalogDto` without duplicated
-identity fields. The job engine projects its normalized core catalog through
-one generated type, and planning accepts zero-based image and level
-positions. Every entry is a union: `Image` carries a resolved image's
-declared geometry and levels, and `ImageRequest` carries the follow-up `uri`
-of still-deferred metadata (a IIIF manifest's service, a bulk-list entry).
-When no `Image` entry is selectable, a host follows the first `ImageRequest`
-URI with a fresh bounded attempt. Browser selection, declared-size preflight,
-and plan gates therefore use that shape; hosts do not define their own catalog
-or level DTOs.
+Hosts consume the ordered generated `CatalogDto` as is. `Image` entries carry selectable geometry and levels; `ImageRequest` entries carry the follow-up `uri` of deferred metadata (a IIIF service, a bulk-list entry) for a fresh bounded attempt. Hosts define no catalog DTOs of their own.
 
 ## Ordinary image display
 
-For ordinary website tiles with `ProcessingRecipe::None`, the runtime may load through `<img>` and draw into a canvas even when the source taints it. The canvas remains visible, and the user can use the browser's right-click or other user-agent save support where available.
+For ordinary website tiles with `ProcessingRecipe::None`, the runtime loads through `<img>` and draws into a canvas even when the source taints it. The picture stays visible (browser right-click save where available).
 
-Once a canvas is tainted, the runtime never invokes JavaScript pixel reads, hashing, processing, `toBlob`, or `toDataURL` on it and never promises a clean programmatic save. The website labels this limitation before rendering and offers a readable route when the user needs processing or clean save.
+Once tainted, the runtime never runs pixel reads, hashing, processing, `toBlob`, or `toDataURL` on that canvas and never promises a programmatic save. The website says so before rendering and points at a readable route (extension or desktop app) when the job needs processing or a clean save. Budgets are in [Compatibility](compatibility.md#canvas-and-save-limits).
 
 ## Readable-byte fetching
 
-Readable metadata, processed tiles, and clean saves use bytes obtained first by
-direct browser fetch. After a classified CORS or network failure, the website
-automatically retries only an eligible public, non-credential metadata request
-through the metadata CORS proxy; tiles are never proxied, so readable tile
-bytes on CORS-blocked sources require the extension or the desktop app.
-Readable responses are transferred to workers, decoded, processed according to
-the core recipe, and encoded or assembled for saving. Byte and pixel limits are
-checked before allocation.
+Readable metadata, processed tiles, and clean saves start with direct browser fetch. After a classified CORS or network failure, the website retries only an eligible public, non-credential metadata request through the metadata proxy; tiles never use the proxy, so readable tile bytes on CORS-blocked sources need the extension or desktop app. Bytes go to workers for decode, core-recipe processing, and save assembly. Size limits are checked before allocation.
 
-Object URLs are scoped to the job and revoked after use. The optional browser cache stores only non-sensitive reusable data within configured quotas; see [Security](security.md).
+Object URLs live for one job and are then revoked. The optional browser cache keeps only non-sensitive reusable data within quotas; see [Security](security.md).
 
 ## Request order
 
-The website uses this order:
+This order is canonical; all other pages link here instead of restating it.
+
+```mermaid
+flowchart TD
+    S[Website metadata request] --> D[1. Direct browser fetch<br/>no cookies, no Authorization,<br/>no browser credentials]
+    D -->|success| DONE[readable bytes]
+    D -->|classified CORS or network failure<br/>or 1500 ms metadata window expiry| E{Eligible public<br/>non-credential metadata?}
+    E -->|yes| P[2. Automatic metadata CORS proxy<br/>no per-attempt consent]
+    E -->|no| F[typed failure + recovery action]
+    P -->|success| DONE
+    P -->|failure| F
+    T[Unprocessed ordinary tile<br/>without readable bytes] --> IMG[3. Ordinary img fallback<br/>first readable attempt classifies origin]
+    IMG --> DISP[display-only tainted canvas]
+    F --> H[4. Typed recovery action:<br/>extension or native app]
+```
 
 1. Direct browser fetch with cookies, `Authorization`, and browser credentials omitted.
-2. After a classified CORS or network failure, or a direct fetch that does not complete within the 1500 ms metadata window, automatic metadata CORS proxy fallback when the metadata request is public and non-credential.
+2. After a classified CORS or network failure, or a direct fetch not completing within the 1500 ms metadata window, automatic metadata CORS proxy fallback when the metadata request is public and non-credential.
 3. For unprocessed ordinary tiles, one direct readable attempt classifies each origin. A successful ordinary `<img>` fallback marks that origin display-only for the job, so later ordinary tiles load directly through `<img>`.
-4. A typed recovery action offering the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route can supply readable bytes.
+4. A typed recovery action offering the [extension](extension.md) or [native app](native-apps.md) when no accepted browser route supplies readable bytes.
 
-The website always shows the active transport as direct browser fetch or the metadata CORS proxy, including an automatic transition after the classified direct failure. Proxy fallback requires no per-attempt consent.
+The website always shows the active transport, including the automatic switch after a classified direct failure. No per-attempt consent exists.
 
-The extension transport is tab-origin direct fetch followed by `<img>` tainted display-only. The extension fetches readable bytes in the monitored tab's origin context under activeTab or granted host permissions, and retries a failed source-context fetch through an extension-origin fetch under a granted host permission; the active transport stays visible in the modal. When readable bytes are unavailable (CORS-blocked without a grant), tiles render as ordinary `<img>` elements: visible but tainted, with no JavaScript pixel reads, hashing, processing, `toBlob`, or `toDataURL`. The extension never uses the metadata CORS proxy.
+The extension transport is tab-origin direct fetch plus `<img>` display-only fallback; see [Extension](extension.md#fetching). The extension never uses the metadata proxy.
 
-The proxy is not a general relay and serves metadata only, never tiles. Both the browser-to-proxy request and the proxy's upstream request omit cookies, `Authorization`, and browser credentials. The proxy accepts only validated metadata requests for eligible public resources, blocks private and local networks, follows bounded redirects, limits size and duration, strips headers outside its allowlist, and returns explicit CORS headers. The frontend holds metadata-proxy requests to a single global budget of at most 4 requests in flight and at most 4 request starts per second; direct tile requests never draw from that budget and keep their own per-host pacing. Details are in [Security](security.md).
+The proxy serves metadata only, never tiles. Both legs (browser-to-proxy, proxy-upstream) omit cookies, `Authorization`, and browser credentials. It accepts only validated public metadata requests, blocks private/local networks, bounds redirects/size/duration, strips non-allowlisted headers, and returns explicit CORS headers. The page holds at most 4 proxy requests in flight and starts at most 4 per second under one global budget; direct tile requests keep separate per-host pacing. Details are in [Security](security.md#proxy-controls).
 
 ## Limits and capabilities
 
-At startup the runtime reports codec support, worker and storage availability, maximum practical canvas and allocation sizes, proxy availability, and supported output modes. The job engine validates plans against these [capabilities](protocol.md#capabilities). A job that exceeds browser limits fails with a typed error that points to the native app.
+At startup the runtime reports codec support, worker and storage availability, maximum practical canvas and allocation sizes, proxy availability, and supported output modes. The job engine validates plans against these [capabilities](protocol.md#product-capabilities). A job exceeding browser limits fails with a typed error pointing to the native app.

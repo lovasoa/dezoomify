@@ -1,14 +1,8 @@
 # Testing
 
-Tests are deterministic unless their command explicitly says `live`. Shared
-scenarios in `testdata/scenarios` describe resources, capabilities, commands,
-effect results, expected transitions, protocol events, outputs, and errors.
-Every parity behavior has deterministic blocking coverage; live diagnostics
-never substitute for it.
+Tests are deterministic unless the command says `live`. Shared scenarios in `testdata/scenarios` describe resources, capabilities, commands, effect results, transitions, events, outputs, and errors. Parity behavior has blocking deterministic coverage; live diagnostics never substitute.
 
-Deterministic suites use fixed fixture bytes, stable ordering, explicit seeds,
-controlled time, and no public DNS or network. Platform-specific deterministic
-tests and manual release checks supplement, but do not weaken, that contract.
+Deterministic suites use fixed fixture bytes, stable ordering, explicit seeds, controlled time, no public DNS or network. Platform-specific deterministic tests and manual release checks supplement that contract, never weaken it. Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md).
 
 ## Main commands
 
@@ -22,35 +16,18 @@ cargo xtask test extension
 cargo xtask test all
 ```
 
-Node 24 is the minimum supported Node version. Direct Cargo and pnpm commands
-are valid for debugging an individual component, but `cargo xtask` remains the
-unified front door and defines repository coverage.
+Node 24 is the minimum supported Node version. Direct Cargo and pnpm commands are valid for debugging an individual component, but `cargo xtask` remains the unified front door and defines repository coverage.
 
-Bare `cargo xtask test` is the fast aggregate. It performs exactly:
+Bare `cargo xtask test` is the fast aggregate:
 
-1. One `cargo test --workspace` invocation, using quiet Cargo output and
-   libtest's terse format.
-2. Help-page generation followed by one Node test process, using the dot
-   reporter, over the website, browser runtime, desktop Node, and pure
-   extension unit suites.
+1. One `cargo test --workspace` run, quiet Cargo output, terse libtest format.
+2. Help-page generation, then one Node dot-reporter process over website, browser runtime, desktop Node, and pure extension unit suites.
 
-The native Rust and Node runners keep successful output compact and print
-detailed failing tests. The fast aggregate never runs `cargo xtask check`,
-generates WASM bindings, builds WXT packages, or launches a browser.
+It never runs `check`, generates bindings, builds WXT packages, or launches a browser.
 
-`cargo xtask test all` runs the fast aggregate once, then adds the freshly
-generated WASM Node harness, website Chromium Playwright E2E, and the remaining
-extension tests that require generated WASM/WXT packages, including Chromium
-and Firefox headless E2E. It does not invoke focused aliases again, so it does
-not repeat the fast Rust or Node matrix. It excludes public-network tests and
-the desktop real-window test.
+`cargo xtask test all` runs the fast aggregate once, then adds the fresh WASM Node harness, website Chromium Playwright E2E, and remaining extension tests needing generated WASM/WXT packages (Chromium plus Firefox headless E2E). It re-invokes no focused aliases, so it repeats neither the fast Rust nor the Node matrix. It excludes public-network tests and the desktop real-window test.
 
-`cargo xtask test web --e2e` runs the website Node suite and its Chromium
-Playwright E2E. `cargo xtask test extension` is the full extension integration
-gate: it generates current WASM bindings, builds WXT output for Chromium and
-Firefox, runs all extension units, and drives both browsers headlessly. By
-contrast, the extension package's `pnpm test` and `pnpm test:unit` scripts run
-only pure unit tests and require neither generated output nor browsers.
+`cargo xtask test web --e2e` adds Chromium Playwright to the website suite. `cargo xtask test extension` is the full extension gate: current WASM bindings, Chromium plus Firefox WXT output, all extension units, both browsers headless. The extension package's own `pnpm test` / `pnpm test:unit` run pure units only, needing neither generated output nor browsers.
 
 ## Focused targets
 
@@ -73,35 +50,22 @@ Focused aliases remain available for iteration:
 | `live` | explicit, advisory public compatibility checks |
 | `all` | fast aggregate plus build-dependent WASM, website, and extension integration |
 
-Use the narrowest owning target first. Targets reject unknown options instead
-of silently changing coverage.
+Use the narrowest owning target first. Targets reject unknown options instead of silently changing coverage.
 
 ## Test locations
 
-- `test/` is the website and shared UI Node suite. Tests import `.ts`
-sources directly (Node strips types natively); the TSX loader only
-transpiles `.tsx` React sources, and xtask generates ignored help pages
-before tests that consume them.
-- `packages/browser-runtime/test/`, `apps/desktop/tests/`, and
-  `apps/extension/tests/unit/` are package-owned Node suites.
-- `packages/wasm-bindings` is checked by compiling TypeScript directly against
-  the tracked generated declaration; declaration spelling is not a runtime
-  test subject.
-- `packages/wasm-harness/` consumes freshly generated Node bindings only in its
-  focused, `all`, and WASM CI lanes.
-- `crates/fixture-server/tests/webapp-e2e/` is the Chromium Playwright website
-  E2E harness. It builds and serves current website/WASM output over loopback.
-- `apps/extension/tests/browser/` drives store-shaped Chromium and Firefox
-  packages over loopback.
-- `crates/*/tests/` and `apps/*/tests/` contain Rust and app integration tests;
-  shared fixture data remains under `testdata/scenarios`.
-- `e2e-artifacts/` is untracked residue, not a suite, and never runs from xtask
-  or CI. Do not add canonical tests or fixture bytes there.
+- `test/`: website and shared UI Node suite. Tests import `.ts` directly (Node strips types); the TSX loader transpiles `.tsx` React sources only; xtask generates ignored help pages before tests needing them.
+- `packages/browser-runtime/test/`, `apps/desktop/tests/`, `apps/extension/tests/unit/`: package-owned Node suites.
+- `packages/wasm-bindings`: TypeScript compiled against the tracked declaration; spelling is no runtime test subject.
+- `packages/wasm-harness/`: fresh Node bindings, used in focused, `all`, and WASM CI lanes only.
+- `crates/fixture-server/tests/webapp-e2e/`: Chromium Playwright website E2E; serves current website/WASM output over loopback.
+- `apps/extension/tests/browser/`: store-shaped Chromium and Firefox packages over loopback.
+- `crates/*/tests/`, `apps/*/tests/`: Rust and app integration tests; shared data stays under `testdata/scenarios`.
+- `e2e-artifacts/`: untracked residue, never a suite, never run from xtask or CI.
 
 ## CI lanes
 
-`cargo xtask ci <lane>` is the fixed CI entry point. The lanes have disjoint
-ownership:
+`cargo xtask ci <lane>` is the fixed CI entry point. The lanes have disjoint ownership:
 
 | Lane | Scope |
 |---|---|
@@ -115,65 +79,28 @@ ownership:
 | `protocol` | binding drift, generated declaration, Rust contract, and WASM portability |
 | `security` | JavaScript workspace audit; Cargo policy belongs to `check` |
 
-There are no separate native or scenario CI lanes: the Rust workspace lane
-already owns those tests. The central CI workflow runs the applicable lanes in
-parallel groups; desktop JavaScript coverage stays with the path-gated desktop
-workflow. `cargo xtask ci local` runs every xtask CI lane serially. Required CI
-and `test all` remain deterministic; scheduled or manual live CI is separate.
+There are no separate native or scenario CI lanes: the Rust workspace lane already owns those tests. Central CI runs applicable lanes in parallel groups; desktop JavaScript coverage stays with the path-gated desktop workflow. `cargo xtask ci local` runs every lane serially. Required CI and `test all` stay deterministic; scheduled or manual live CI is separate.
 
 ## Fixture harness
 
-`crates/fixture-server` serves the scenario corpus on allocated loopback ports.
-A payload at `payloads/{host}{url-path}` maps to `{host}{url-path}` with its
-content type inferred from the extension. `routes.json` records only exceptions
-such as non-`200` statuses, extra headers, redirects, query or wildcard matches,
-generators, and non-mirrored payload names.
+`crates/fixture-server` serves the scenario corpus on allocated loopback ports. A payload at `payloads/{host}{url-path}` maps to `{host}{url-path}`, content type inferred from extension. `routes.json` records only exceptions: non-`200` statuses, extra headers, redirects, query/wildcard matches, generators, non-mirrored payload names.
 
 ```sh
 cargo xtask fixtures verify
 cargo xtask fixtures serve --port 0
 ```
 
-Review payload, route, manifest, hash, transcript, and pixel changes before
-accepting them. Tests use ephemeral ports and allocated addresses, never fixed
-shared ports. See `testdata/scenarios/README.md` for scenario maintenance.
+Review payload, route, manifest, hash, transcript, and pixel changes before accepting them. Tests use ephemeral ports and allocated addresses, never fixed shared ports. See `testdata/scenarios/README.md` for scenario maintenance.
 
 ## Network and security
 
-The fixture server covers redirects, ranges, compression, cache validation,
-CORS, cookies, authentication, throttling, truncation, malformed responses,
-cancellation, and proxy security. Deterministic tests bind only to loopback and
-never fall back to the public network.
+The fixture server covers redirects, ranges, compression, cache validation, CORS, cookies, auth, throttling, truncation, malformed responses, cancellation, and proxy security. Deterministic tests bind loopback only, never public network.
 
-Website transport tests enforce direct browser fetch first: success makes no
-proxy request. Only classified CORS/network failure or the 1500 ms metadata
-window can activate automatic metadata CORS proxy fallback, with no per-attempt
-consent prompt; tests also pin the reported transport states and transitions.
-Authentication, authorization, ordinary HTTP, parse, and decode failures do not
-activate it. Private, local, signed, token-bearing, or otherwise
-credential-requiring metadata is ineligible, and tiles never use the proxy.
-Proxy tests verify credential stripping and the narrow header allowlist on both
-legs, plus manual redirect handling that revalidates every hop.
+Website transport tests pin direct-first: success makes no proxy request. Only classified CORS/network failure or the 1500 ms window activates proxy fallback, with no per-attempt consent; transport states and transitions are pinned too. Auth, ordinary HTTP, parse, and decode failures never activate it. Private, local, signed, token-bearing, or credential-requiring metadata is ineligible; tiles never use the proxy. Proxy tests pin credential stripping and the narrow header allowlist on both legs, plus manual redirect handling revalidating every hop. Canonical policy: [Browser runtime](browser-runtime.md#request-order). Proxy controls: [Security](security.md#proxy-controls).
 
-Extension tests enforce narrow grants, no remote code, the required CSP,
-explicit-action scans, finite and capped source operations, browser-session
-fetch scope, lifecycle cleanup, and zero side effects after handoff
-replay/expiry/origin rejection. Chromium covers optional-host, authenticated
-fetch, and partial-output flows; Chromium and Firefox both run the packaged
-end-to-end job flow. Tainted-display tests keep ordinary image display visible
-while guarding pixel reads, hashing, `toBlob`, and `toDataURL` when readable
-bytes are absent.
+Extension tests pin narrow grants, no remote code, required CSP, explicit-action scans, finite capped operations, session fetch scope, lifecycle cleanup, and zero side effects after handoff replay/expiry/origin rejection. Chromium covers optional-host, authenticated fetch, and partial flows; both browsers run the packaged end-to-end job. Tainted-display tests keep `<img>` display visible while guarding pixel reads, hashing, `toBlob`, and `toDataURL` without readable bytes. Contract: [Extension](extension.md).
 
-Live checks use no private source credentials, bound request counts and rates,
-and redact reports. The Memorix demo key comes from
-`DEZOOMIFY_MEMORIX_API_KEY`; fixture demo keys require `review:*` sensitivity.
-Run public checks only through `cargo xtask test live --public`. The no-network
-`cargo xtask test live --dry-run --fixtures` validates the target inventory.
-Quarantined targets remain visible in `crates/xtask/live-quarantine.json` and
-[Compatibility](compatibility.md), never as silent failures or pull-request
-blockers. Failure-prone live shapes have deterministic recordings in the
-scenario corpus. A target leaves the inventory only when the site is gone or
-the format is redesigned, with the reason recorded in the commit.
+Live checks use no private credentials, bounded counts and rates, redacted reports. Memorix demo key: `DEZOOMIFY_MEMORIX_API_KEY`; fixture demo keys need `review:*` sensitivity. Public checks run only via `cargo xtask test live --public`; `cargo xtask test live --dry-run --fixtures` validates the inventory with no network. Quarantined targets stay visible in `crates/xtask/live-quarantine.json` and [Compatibility](compatibility.md), never silent failures or PR blockers. Failure-prone live shapes have deterministic recordings in the corpus. A target leaves only when the site is gone or the format is redesigned, reason in the commit.
 
 ## Desktop window
 
@@ -181,18 +108,8 @@ the format is redesigned, with the reason recorded in the commit.
 cargo xtask test desktop --e2e-window
 ```
 
-This explicit lane builds the current frontend, fixture server, and Tauri shell
-with its embedded W3C WebDriver server, then verifies real save, cancellation,
-confirmed handoff, and partial-output journeys. It is excluded from bare
-`test`, `test all`, and `cargo xtask ci local`. Linux requires
-`xvfb-run -a`; macOS and Windows use their GUI sessions. The path-gated desktop
-workflow runs it on all three operating systems and separately performs bundle
-install/launch smoke tests.
+This explicit lane builds current frontend, fixture server, and Tauri shell with its embedded W3C WebDriver server, then verifies real save, cancellation, confirmed handoff, and partial journeys. Excluded from bare `test`, `test all`, and `cargo xtask ci local`. Linux needs `xvfb-run -a`; macOS and Windows use GUI sessions. The path-gated desktop workflow runs it on all three OSes plus bundle smoke. Native mechanism: [Native apps](native-apps.md#real-window-e2e-hook).
 
 ## Cross-runtime guarantees
 
-Scenario traces normalize runtime-specific details. Capabilities may choose
-different branches, but equivalent commands and effect results produce
-equivalent job states, error codes, and recovery actions. Release candidates
-pass the matrix in [Releases](releases.md), and security-sensitive scenarios
-follow [Security](security.md).
+Scenario traces normalize runtime-specific details. Capabilities choose branches, but equal commands and effect results give equal job states, error codes, and recovery actions. Release candidates pass the matrix in [Releases](releases.md); security-sensitive scenarios follow [Security](security.md).
