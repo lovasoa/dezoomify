@@ -1,4 +1,4 @@
-//! Deterministic portable job state machine (Phase 06 lean scope).
+//! Deterministic portable job state machine.
 //!
 //! The engine decides what must happen next and emits host effects; it never
 //! performs I/O, decodes pixels, reads clocks, or writes output. See

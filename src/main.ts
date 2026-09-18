@@ -107,13 +107,13 @@ let jobHandle: BrowserJobHandle | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
 let resultTitle: string | undefined;
-// Pause v1 (todo 5.7, suspend-acquisition): the website stops scheduling new
+// Pause (suspend-acquisition): the website stops scheduling new
 // tiles while paused, finishes in-flight work, retains the canvas, and
 // re-drives on resume. Integration-layer only; the engine pause lives in
 // `dezoomify-job` for native hosts.
 let jobPaused = false;
 
-// Recent-jobs history (todo 5.2): local-only ledger, newest first, at most
+// Recent-jobs history: local-only ledger, newest first, at most
 // 20 entries. Each entry keeps its full source address.
 const memoryHistoryFallback = new Map<string, string>();
 const webHistoryStore = {
@@ -159,7 +159,7 @@ function recordWebHistory(url: string, width: number, height: number, format: st
   viewCtx.history = [...webHistory];
 }
 
-// Website single-queue (todo 5.3): enqueue while a job runs, sequential. The
+// Website single-queue: enqueue while a job runs, sequential. The
 // engine stays single-job; this queue lives in the integration layer (here),
 // never in the engine. One active job at a time; further submits wait FIFO.
 // A failed entry never stops the rest. Hash writes stay active-only: only the

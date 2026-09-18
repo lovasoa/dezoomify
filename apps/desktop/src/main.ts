@@ -20,6 +20,10 @@
 // surface typed choices (retry / choose-output / keep-partial /
 // discard-partial / handoff-to-native) wired to answer_choice (RetryReady /
 // PartialKeep), request_destination, and requestHandoff.
+//
+// The controller walk below is the shipped desktop path.
+// apps/desktop/src/jobService.ts provides the typed JobService over the
+// public Tauri API and shares the same commands, choices, and channels.
 import {
   HISTORY_KEY_DESKTOP,
   clearHistory as clearHistoryStore,

@@ -21,8 +21,8 @@ export const REQUEST_TIMEOUT_MS = 30000;
 export const DIRECT_METADATA_TIMEOUT_MS = 1500;
 
 /**
- * Tile politeness + resilience plus capability-negotiated concurrency
- * (todo 3.2). At most 5 tile request starts per second per host (legacy
+ * Tile politeness + resilience plus capability-negotiated concurrency.
+ * At most 5 tile request starts per second per host (legacy
  * ZoomManager.MAX_REQUESTS_PER_SECOND parity: 1000/5 ms spacing between
  * starts). Each tile retries twice (3 attempts) with exponential backoff +
  * jitter; the exhausted failure still maps to TILE_FAILED (never a display
@@ -191,7 +191,7 @@ export function tileRetryDelayMs(retryIndex: number, random: () => number = Math
 }
 
 /**
- * Delay before a single retry after PROXY_RATE_LIMITED (todo 5.1). Honors
+ * Delay before a single retry after PROXY_RATE_LIMITED. Honors
  * the relay's Retry-After hint when present, otherwise backs off 1 s.
  * Returns null when the hint exceeds the UX budget: fail fast with
  * extension/desktop guidance instead of stalling the job on a long throttle.

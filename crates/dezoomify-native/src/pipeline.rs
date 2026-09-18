@@ -40,11 +40,11 @@ pub const WEBP_MAX_SIDE: u32 = 16_383;
 /// `iiif-dir` tile width: one entry of the `tiles` block in `info.json`.
 pub const IIIF_TILE_WIDTH: u32 = 512;
 
-/// Fixed tile-worker pool width (todo 3.1): every scheduler, pipeline batch,
+/// Fixed tile-worker pool width: every scheduler, pipeline batch,
 /// and perf smoke uses 16 workers on scoped std threads with backpressure.
 pub const MAX_CONCURRENT: usize = 16;
 
-/// Spill decision threshold (todo 3.1): canvases beyond 512 MiB spill decoded
+/// Spill decision threshold: canvases beyond 512 MiB spill decoded
 /// tiles to a temp dir one at a time and stream the encode, so peak memory
 /// stays near one canvas plus one tile.
 pub const SPILL_THRESHOLD_BYTES: u64 = 512 << 20;
@@ -290,8 +290,7 @@ pub struct PipelineConfig {
     /// Legacy delay before the first tile retry. No longer consulted: retry
     /// timing is engine-owned (explicit `WaitForRetry` timer effects with
     /// exponential backoff plus observed `retry-after`). Retained so CLI
-    /// `--retry-delay` keeps parsing; removal rides with the B5 CLI
-    /// thinning plus its user-doc update.
+    /// `--retry-delay` keeps parsing with no behavior change.
     pub retry_delay: Duration,
     /// Minimum interval between tile request starts (per-tile throttle).
     /// `ZERO` disables the sleep (the CLI default); the reference default
@@ -353,7 +352,7 @@ pub struct PipelineConfig {
     /// work at the next effect boundary, cleans up, and reports
     /// `job.cancelled` without writing output. Clones share the flag.
     pub cancel_flag: Arc<AtomicBool>,
-    /// Pause v1 demonstration (todo 5.7 `--pause-after`): when `Some(n)`,
+    /// Pause v1 demonstration (`--pause-after`): when `Some(n)`,
     /// the driver pauses the engine after `n` tiles are acquired (suspending
     /// new `acquire-tile` scheduling, finishing in-flight, retaining
     /// decoded output), verifies no new work while paused, then resumes and

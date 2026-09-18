@@ -1,9 +1,7 @@
 //! Typed tile-failure classification and deterministic retry budgets.
 //!
-//! The acquisition path used to report tile results as one boolean, so the
-//! engine retried every failure (including permanent HTTP 403s) up to
-//! `max_retries` and discarded the facts behind each outcome. This module
-//! owns the closed classification instead:
+//! Tile results carry structured failures, and this module owns the closed
+//! classification:
 //!
 //! * [`classify_tile_failure`] maps one structured failure (stable code plus
 //!   an optional HTTP status) onto [`FailureCategory`]. Permanent failures

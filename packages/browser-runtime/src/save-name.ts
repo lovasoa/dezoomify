@@ -10,8 +10,7 @@
 // them, so browser-runtime save code imports downward only. The extension
 // job tab imports the workspace package directly; the CLI mirrors the
 // `dezoomify` base in Rust (titles and collision
-// suffixes stay Rust-side). Todo 5.1: desktop GUI parity exposes ZIF, WebP,
-// and `iiif-dir` (`.iiif`) alongside PNG/JPEG/TIFF.
+// suffixes stay Rust-side). Formats cover PNG/JPEG/TIFF/ZIF/WebP/IIIF.
 export type SaveNameFormat =
   | "png"
   | "jpeg"

@@ -47,14 +47,14 @@
 //!   a protocol `ErrorDto`; panics never cross the boundary (the crate
 //!   forbids `unsafe_code` and checks every index and length).
 //!
-//! ## Deviations recorded by this phase
+//! ## Adapter scope
 //!
 //! * [`session`] delegates its whole lifecycle to `dezoomify-job`; the
 //!   adapter projects engine effects/events onto typed protocol messages.
-//!   Engine resources beyond the lean model (real format parsing, real tile
-//!   plans) remain engine limitations recorded in the job crate docs.//! * Real `wasm-pack` Node/browser tests need pinned `wasm-pack` plus
-//!   browsers, neither installed here; `packages/wasm-harness` records that
-//!   exception and runs native conformance instead.
+//!   Discovery and planning are format-aware through `dezoomify-core`:
+//!   metadata bytes parse into real catalogs and real per-level tile plans.
+//! * Node conformance runs against the generated bindings:
+//!   `packages/wasm-harness` drives the emitted JavaScript surface.
 
 #![forbid(unsafe_code)]
 // Shipped adapter code maps failures to typed `AdapterError`s instead of

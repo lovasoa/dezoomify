@@ -1,6 +1,6 @@
 //! WMTS capabilities XML parsing.
 //!
-//! Split from `wmts/mod.rs` (todo 4.1): this module owns the namespace-blind
+//! This module owns the namespace-blind
 //! XML tree (`XmlElement`) plus small text helpers. Tile-matrix math lives in
 //! `tilematrix`, layer selection and level planning in `layer`.
 
