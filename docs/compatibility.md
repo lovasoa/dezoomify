@@ -2,13 +2,7 @@
 
 ## Installed extension and desktop versions
 
-The extension and desktop app can be installed independently. Their Native
-Messaging channel starts with an explicit version check and rejects an
-unsupported peer before consent or credential transfer. The request and reply
-shapes are generated from the Rust contract; neither product translates an
-unsupported schema. Handoff input remains untrusted and requires confirmation
-before effects. Release automation verifies the supported Native Messaging
-range and this matrix (see [Releases](releases.md)).
+Extension and desktop install independently. Their Messaging channel opens with an explicit version check, rejecting unsupported peers before consent or credentials. Request/reply shapes generate from the Rust contract; neither side translates unsupported schemas. Handoff input stays untrusted and needs confirmation before effects. Release automation verifies the Messaging range and this matrix (see [Releases](releases.md)).
 
 ## Browsers and operating systems
 
@@ -20,143 +14,57 @@ range and this matrix (see [Releases](releases.md)).
 | Desktop app | Windows x86_64, Apple silicon macOS, and Linux x86_64 through the Tauri shell (WebView2 on Windows, WebKit on macOS, webkit2gtk on Linux) | Display-free `cargo xtask test desktop` plus explicit `test desktop --e2e-window`; each installer builds and launches on its matching host |
 | CLI | Native binary (Linux `cli-linux-x86_64` target; the same native runtime as the desktop app) | `cargo xtask test native` plus scenario parity |
 
-Desktop installers ship unsigned (no paid Apple or Azure signing) for Linux
-x86_64, Windows x86_64, and Apple silicon macOS (see [Releases](releases.md)). Automatic in-app updates are disabled: there
-is no update host or key, so users check GitHub Releases manually. The
-user-facing install note lives in the [Desktop app
-guide](user/desktop-app.md#install).
+Desktop installers ship unsigned (no paid Apple or Azure signing): Linux x86_64, Windows x86_64, Apple silicon macOS (see [Releases](releases.md)). No in-app updates: no update host or key exists, so users check GitHub Releases by hand. User install note: [Desktop app guide](user/desktop-app.md#install).
 
 ## Canvas and save limits
 
+This table is canonical; user pages state the user-facing facts and link back.
+
 | Surface | Budget | Past the budget |
 |---|---|---|
-| Browser tab (website, extension) | Browser memory and save limits; the browser promises no fixed size | The job stops with a typed error that names the desktop app as the next step |
-| Desktop app | In-memory canvas: 4 bytes per pixel, subject to the memory currently available to the process | Typed `output.canvas-limit` before allocation; nothing is written; a smaller level fits the available memory |
-| CLI | In-memory canvas subject to the memory currently available to the process | Same `output.canvas-limit` behavior as the desktop app |
+| Browser tab (website, extension) | Browser memory and save limits; no fixed size promised | Job stops typed, naming the desktop app as next step |
+| Desktop app | In-memory canvas, 4 bytes per pixel, within memory available to the process | Typed `output.canvas-limit` before allocation; nothing written; a smaller level fits |
+| CLI | Same in-memory canvas rule as desktop | Same `output.canvas-limit` behavior |
 
-Encoder side caps apply on top of the available-memory check: JPEG addresses at most
-65535 pixels per side and WebP at most 16383 pixels per side, so larger canvases
-save as PNG, TIFF, ZIF, or an `iiif-dir` tile tree. The native baseline reports
-encoders `[png, jpeg, tiff, zif, webp]`, destination modes `[file, iiif-dir]`,
-storage modes `[cache]`, and `bulk_supported` true.
+Encoder side caps add to the memory check: JPEG 65535 px per side max, WebP 16383; larger canvases save as PNG, TIFF, ZIF, or `iiif-dir`. Encoder behavior: [Native apps](native-apps.md#output-naming-and-encoders).
 
 ## Ordinary display without readable bytes
 
-For unprocessed ordinary tiles, browser apps may render through plain `<img>`
-elements and draw into a canvas even when the source taints it. The picture
-stays visible (with browser right-click save where available), but the canvas
-is not origin-clean: the runtime never runs pixel reads, hashing, processing,
-`toBlob`, or `toDataURL` on it and never promises a clean programmatic save.
-The website labels this limitation before rendering and points at a readable
-route (the extension or the desktop app) when the job needs processing or a
-clean save.
+Unprocessed ordinary tiles render through plain `<img>` and draw into a canvas even when tainted. The picture stays visible (browser right-click save where available), but the canvas is not origin-clean: no pixel reads, hashing, processing, `toBlob`, or `toDataURL`, and no promised programmatic save. The website says so before rendering and points at the extension or desktop app when the job needs processing or a clean save. Full behavior: [Browser runtime](browser-runtime.md#ordinary-image-display).
 
-## Format support by app
+## Format support
 
-Discovery is one shared core (`crates/dezoomify-core`): every app recognizes
-the same formats in the same precedence order and selects automatically. Apps
-differ in reach (authentication), saving (tainted display or clean bytes), and
-bulk behavior, as detailed below the table. See [Supported
-formats](user/supported-formats.md) for what to paste per format.
-
-| Format | Website | Extension | Desktop app | CLI |
-|---|---|---|---|---|
-| Zoomify | Yes | Yes | Yes | Yes |
-| Deep Zoom (Seadragon) | Yes | Yes | Yes | Yes |
-| Second Canvas | Yes | Yes | Yes | Yes |
-| IIIF | Yes | Yes | Yes | Yes |
-| Arts and Culture | Yes | Yes | Yes | Yes |
-| IIPImage | Yes | Yes | Yes | Yes |
-| TopViewer (Memorix) | Yes | Yes | Yes | Yes |
-| krpano | Yes | Yes | Yes | Yes |
-| FSI Viewer | Yes | Yes | Yes | Yes |
-| LizardTech ImageServer | Yes | Yes | Yes | Yes |
-| Visual Library Server (VLS) | Yes | Yes | Yes | Yes |
-| XLimage | Yes | Yes | Yes | Yes |
-| Hungaricana | Yes | Yes | Yes | Yes |
-| ArcGIS MapServer | Yes | Yes | Yes | Yes |
-| WMTS | Yes | Yes | Yes | Yes |
-| pnav | Yes | Yes | Yes | Yes |
-| Generic tile pattern | Yes | Yes | Yes | Yes |
-| Custom tiles (`tiles.yaml`) | Yes, over http(s) tile URLs | Yes, over http(s) tile URLs | Yes, plus local files | Yes, plus local files |
-| Bulk text (URL list) | Single-queue, one at a time | Deferred entries, one at a time | Multi-job queue, one at a time | `--bulk` loop, one bounded run per entry |
+One shared core (`crates/dezoomify-core`): every app recognizes the same formats in the same precedence order, automatically. Apps differ in reach (auth), saving (tainted display vs clean bytes), and bulk (below). Paste guide: [Supported formats](user/supported-formats.md); no matrix duplicated here.
 
 ### Authentication
 
-- The website never signs in anywhere: direct browser fetch and
-  browser-to-proxy requests omit cookies, `Authorization`, and browser
-  credentials. Only eligible public, non-credential metadata requests fall back
-  to the metadata CORS proxy (never tiles); signed or token-bearing URLs are
-  ineligible. Members-only collections need the extension.
-- The extension works inside the user browser session, but only for origins
-  covered by granted host permissions (activeTab on the scanned tab, or
-  explicitly granted hosts). Cookies pass to native only after explicit consent
-  that names the destination origins, scope, recipient, and job; they stay in
-  memory only and consent never carries over to later jobs.
-- The desktop app and CLI accept user-supplied headers such as `Referer` for
-  sites that only serve their own viewer pages, and read local paths and
-  `file://` URIs. The resume cache stores tile response bytes only, never
-  headers, cookies, or credentials.
+- Website: never signs in. Direct and proxy requests omit cookies, `Authorization`, credentials. Only eligible public, non-credential metadata falls back to the proxy (never tiles); signed/token URLs are ineligible. Members-only collections need the extension. Order: [Browser runtime](browser-runtime.md#request-order).
+- Extension: works inside the browser session, only for origins under granted host permissions (activeTab on the scanned tab, or explicit host grants). Cookies pass to native only after consent naming destinations, scope, recipient, job; memory-only, never carried over. See [Extension](extension.md), [Security](security.md).
+- Desktop/CLI: accept user-supplied headers such as `Referer` for self-viewer-only sites; read local paths and `file://` URIs. Resume cache keeps tile bytes only, never headers, cookies, credentials. See [Native apps](native-apps.md).
 
 ### Tainted canvas
 
-Browser apps show tainted tiles but cannot produce clean saves from them (see
-[Ordinary display without readable bytes](#ordinary-display-without-readable-bytes)
-above). The extension assembles on an origin-clean canvas under its own fetch
-grant, so its saves are clean. Native apps decode bytes directly and have no
-canvas taint.
+Browser apps show tainted tiles but save nothing clean from them (above). The extension assembles on an origin-clean canvas under its fetch grant, so its saves are clean. Native apps decode bytes directly; no taint exists.
 
 ### Bulk
 
-Queues run sequential single-job runs in the integration layer over the
-single-job engine, never in the engine: `bulk_supported` is true on the
-website (single-queue: an address submitted while a job runs waits its turn)
-and native (multi-job queue with progress per job, cancel one or all, and
-retry of failed jobs) baselines. Each job still saves one output, and a
-failed entry never stops the rest. The CLI `--bulk` loop runs one bounded
-single-job run per list entry (a failed entry never stops the rest; a
-per-image summary plus totals print at the end and the exit is 1 when any
-entry fails). Bulk text discovery yields deferred entries that resolve one
-at a time.
+Queues run sequential single-job runs in the integration layer, never the engine: website single-queue (submitted addresses wait their turn), native multi-job queue (per-job progress, cancel one/all, retry failed). Each job still saves one output; failures never stop the rest. CLI `--bulk` runs one bounded run per entry (per-image plus totals summary; exit 1 when any entry fails). Bulk text discovery yields deferred entries resolving one at a time. User behavior: [Website guide](user/website.md#saving-several-images), [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md#saving-many-images).
 
 ## Reporting a problem
 
-One template covers every app. Copy the diagnostics block from the error
-details in the app (it stays on your device and never carries credentials)
-and open an issue at
-<https://github.com/lovasoa/dezoomify/issues> with:
+Copy the diagnostics block from the app's error details (stays on your device, never credentials) and open an issue at <https://github.com/lovasoa/dezoomify/issues> with:
 
-- the page or manifest address, with tokens removed;
-- the exact error message plus error code, phase, transport, resource kind,
-  and blocked reason;
-- the diagnostics copy, whose failure details may name the full request URL
-  and quote the server reply (remove sign-in details and tokens first);
+- page or manifest address, tokens removed;
+- exact message plus code, phase, transport, resource kind, blocked reason;
+- diagnostics copy (failure details name the full request URL and quote the server reply; strip sign-in details and tokens first);
 - app and protocol versions, browser name and version;
 - what was tried already (retry later, extension, desktop app);
 - a screenshot where it helps.
 
-Never include passwords, cookies, session contents, `Authorization` headers,
-signed query values, or local path details. Failure details stay on the
-device; the app reminds you to strip tokens before sharing. Before reporting,
-check the [troubleshooting
-guide](user/troubleshooting.md): a site that limits request rates needs a later
-retry or a personal connection through the extension or desktop app; a busy
-site needs a few minutes; a picture that shows but cannot save needs the
-extension; an approval step when sending a signed-in image to another app is
-expected. Support is free and done by volunteers; a precise report gets
-answered faster. Owners triage per [Incident response](incident-response.md).
+Never include passwords, cookies, session contents, `Authorization` headers, signed query values, or local paths. Check the [troubleshooting guide](user/troubleshooting.md) first. Support is volunteer-run; precise reports get answered faster. Triage: [Operations](operations.md#incident-response).
 
 ## Live canary
 
-The deterministic suites never contact public source sites. Public
-compatibility checks run only through the explicit `cargo xtask test live`
-target: `cargo xtask test live --dry-run --fixtures` validates the target list
-with no network, while `cargo xtask test live --public [--limit <n>] [--site
-<name>]` runs the real CLI against real sites with bounded sequential requests.
+Deterministic suites never touch public source sites. Public checks run only via explicit `cargo xtask test live`: `cargo xtask test live --dry-run --fixtures` validates the target list with no network; `cargo xtask test live --public [--limit <n>] [--site <name>]` runs the real CLI against real sites with bounded sequential requests.
 
-`.github/workflows/live-compat.yml` schedules a weekly canary
-(`--public --limit 2`, every Monday plus manual dispatch). The canary is
-advisory: it never blocks pull requests or releases. A failing target is fixed
-or removed from `crates/xtask/src/live.rs` with the reason in the commit
-message; failures are never tolerated silently and never replace deterministic
-coverage (see [Testing](testing.md)).
+`.github/workflows/live-compat.yml` schedules a weekly canary (`--public --limit 2`, Mondays plus manual dispatch). Advisory only: it never blocks PRs or releases. A failing target is fixed or removed from `crates/xtask/src/live.rs` with the reason in the commit message; failures are never silently tolerated and never replace deterministic coverage (see [Testing](testing.md)).

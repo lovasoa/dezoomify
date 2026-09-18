@@ -1,47 +1,34 @@
 # Security
 
-dezoomify treats source websites, image metadata, tiles, handoff payloads, and output names as untrusted input. Each runtime grants only the access needed for the active user-requested job.
+Source sites, metadata, tiles, handoff payloads, and output names are all untrusted input. Each runtime takes only the access its active user-started job needs.
 
 ## Trust boundaries
 
 - The website runs under normal browser origin rules.
-- The website page policy permits cross-origin images for ordinary tile
-  display; displayed cross-origin tiles taint the canvas, which stays
-  unreadable to scripts, so no pixel data leaves the page that way.
-- The metadata CORS proxy is a restricted metadata fetcher for eligible public, non-credential metadata requests, not a trusted credential endpoint and never a tile relay.
-- The extension background worker has elevated browser access but accepts requests only from its own authenticated extension contexts.
-- Native apps can access the network and filesystem, so they validate protocol input and require user-selected local destinations.
-- Core and job crates parse data and decide behavior without performing effects.
+- Page policy allows cross-origin images for plain tile display; shown tiles taint the canvas, keeping it unreadable to scripts, so no pixels leak that way.
+- The metadata proxy is a restricted fetcher for eligible public, non-credential metadata, never a credential endpoint or tile relay.
+- The extension background accepts requests only from its own authenticated contexts.
+- Native apps reach network and filesystem, so they validate protocol input and require user-picked local destinations.
+- Core and job parse and decide without performing effects.
 
-All parsers and decoders enforce input, dimension, tile-count, allocation, recursion, and decompression limits. URLs are normalized before policy checks. Redirects are revalidated at every hop.
+Parsers and decoders cap input, dimensions, tile counts, allocation, recursion, and decompression. URLs normalize before policy checks. Redirects revalidate every hop.
 
 ## Credentials
 
-Authorization headers, cookies, signed URLs, and tokens stay within the runtime that receives them. They are omitted from analytics, cache keys visible to users, and ordinary handoff payloads. Error details may name the full request URL with a bounded server signal. They stay inert on the user's device until the user opens the prefilled report link on the failure view, which carries that address and the engine diagnostics into a GitHub issue draft and warns the user to remove sign-in details and tokens before submitting; credentials never enter the prominent message.
+Auth headers, cookies, signed URLs, and tokens stay in the runtime that received them. They appear in no analytics, user-visible cache keys, or ordinary handoffs. Error details name the full request URL with a bounded server signal; they sit inert on the device until the user opens the prefilled report link, which warns to strip sign-in details and tokens before submitting. Credentials never enter the prominent message.
 
-The website's direct browser fetch and browser-to-proxy request use credential omission and do not attach cookies or `Authorization`. The proxy also never forwards cookies, `Authorization`, browser credentials, or other caller credentials upstream and never fetches authenticated or otherwise credential-bearing resources. Signed or token-bearing URLs and requests requiring credentials are ineligible for proxy fallback. The extension may use the current browser session only for origins covered by active host permissions. Cookies pass only from extension to native after explicit consent identifies origins, scope, recipient, and job; consent is not reusable for later jobs.
+Website direct and proxy requests omit cookies and `Authorization`. The proxy also forwards no caller credentials upstream and never fetches credential-bearing resources. Signed or token-bearing URLs are proxy-ineligible. The extension uses the browser session only for origins under active host permissions. Cookies pass extension-to-native only after consent naming origins, scope, recipient, and job; consent never covers later jobs.
 
-Transferred cookies are not intentionally persisted. Implementations drop references and temporary containers when the consent session ends, but do not claim cryptographic zeroization in JavaScript or managed browser memory.
+Transferred cookies persist nowhere. Implementations drop references and temp containers at session end, but claim no cryptographic erasure in JavaScript or managed browser memory.
 
 ## Proxy controls
 
-The website attempts a direct browser fetch first with a short (1500 ms) completion window. A classified CORS or network failure, or a direct fetch that does not complete within that window, triggers automatic metadata CORS proxy fallback, and only when the metadata request is an eligible public, non-credential `http` or `https` destination. There is no per-attempt proxy consent. The website shows the active transport.
+Direct browser fetch goes first with a short 1500 ms completion window. A classified CORS or network failure, or an unfinished direct fetch inside that window, triggers automatic proxy fallback, and only for an eligible public, non-credential `http(s)` metadata request. No per-attempt consent. The website shows the active transport. Full order: [Browser runtime](browser-runtime.md#request-order).
 
-The proxy permits only supported HTTP methods and serves metadata only, never tiles. It resolves and rejects loopback, private, link-local, reserved, and cloud-metadata addresses before connecting and after redirects. It rechecks public-resource and credential eligibility across redirects; bounds redirects, response bytes, duration, and concurrency; validates expected metadata content (structured metadata formats and viewer HTML pages; image bodies are rejected); omits credentials; strips request and response headers outside an allowlist; and applies abuse controls without recording sensitive URLs. The frontend never holds more than 4 proxy requests in flight and never starts more than 4 per second against the proxy, under one page-global budget shared by metadata and any tile images fetched through it; direct tile requests keep their own more generous pacing outside that budget. A busy site's transient rate-limit response is retried at most once, after a bounded delay; persistent throttles fail closed. Authentication failures and ordinary HTTP application errors do not qualify as CORS or network failures and do not activate the fallback.
+The proxy allows only supported methods and serves metadata only, never tiles. It resolves and rejects loopback, private, link-local, reserved, and cloud-metadata addresses before connecting and after redirects. It rechecks eligibility across redirects; bounds redirects, bytes, duration, and concurrency; accepts only expected metadata content (structured metadata, viewer HTML; image bodies rejected); omits credentials; strips non-allowlisted headers; and applies abuse controls without logging sensitive URLs. The page holds at most 4 proxy requests in flight and starts at most 4 per second under one global budget; direct tile requests pace separately. A transient rate-limit response retries at most once after a bounded delay; persistent throttles fail closed. Auth failures and ordinary HTTP errors never qualify as CORS/network failures and never trigger fallback.
 
 ## Extension and desktop
 
-Extension scans begin only with an explicit action: the toolbar click starts a
-job on exactly the clicked tab (grey idle, blue with a dot while active), and
-the background takes finite source snapshots and performs tab-origin fetches
-through `scripting.executeScript`. It never reloads the source page, installs a
-persistent collector, enumerates tabs, or monitors unrelated tabs. A worker
-restart or source navigation fails closed; see [Extension](extension.md).
-The extension never enumerates tabs and its toolbar icon always reports idle
-versus active (grey idle action icon, blue brand icons). The source origin
-uses activeTab plus explicitly granted host permissions where needed. There
-are no declared content scripts or `<all_urls>` grants, and the metadata CORS
-proxy is never used. Source operations accept only validated engine headers,
-return bounded chunks, and never return cookies or authorization values. Tauri exposes an allowlisted command surface and passes opaque file handles instead of unrestricted paths where practical. The desktop app declares only the permissions its shipped code uses: the capability documents grant exactly the commands, event channels, and updater check the shipped shell and frontend exercise. The frontend invokes `query_capabilities` once at boot so the grant always maps to a live negotiation, and external links leave only through the single granted `opener:allow-open-url` command for valid `https` URLs with no fallback attempted.
+Extension behavior is defined once in [Extension](extension.md): explicit-action scans on the clicked tab, finite snapshots and tab-origin fetches, no content scripts, no `<all_urls>`, no metadata proxy. Source operations accept only validated engine headers, return bounded chunks, never cookies or auth values. Tauri exposes an allowlisted command surface and opaque file handles instead of raw paths where practical. The desktop declares only permissions its shipped code uses; the frontend calls `query_capabilities` once at boot so grants track live negotiation, and external links leave only through `opener:allow-open-url` for valid `https` URLs.
 
-Website and deep-link handoffs are bounded, non-secret, untrusted input that native validates and the user confirms; they use no client-side signing. For Native Messaging, browser enforcement of the native host's allowed extension IDs authenticates the extension sender to the native host. A fresh challenge and one-use nonce bind messages to one session and prevent replay; they do not establish identity. Security regressions are covered by shared and host-specific tests in [Testing](testing.md).
+Website and deep-link handoffs are bounded, secret-free, untrusted input for native validation plus user confirmation; no client-side signing. In Native Messaging, browser enforcement of allowed extension IDs authenticates the sender. Challenge plus one-use nonce bind one session against replay; they prove no identity. Security regressions are covered in [Testing](testing.md).

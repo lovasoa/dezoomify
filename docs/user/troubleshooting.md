@@ -70,11 +70,13 @@ enter the address again to restart it.
 ## The output name is rejected
 
 The output name selects the format: `.png` saves PNG, `.jpg` or `.jpeg`
-saves JPEG, `.tif` or `.tiff` saves TIFF, and a name with no extension
+saves JPEG, `.tif` or `.tiff` saves TIFF, `.zif` saves a multi-resolution
+pyramid, `.webp` saves WebP, and `.iiif` or a name with no extension
 saves a IIIF tile folder. Any other extension stops the job before
 anything is saved. Rename the output to one of the supported forms and run
 again. A JPEG save of an image larger than 65535 pixels per side also
-stops with a typed error; save such images as PNG, TIFF, or a IIIF tile
+stops with a typed error, as does a WebP save larger than 16383 pixels
+per side; save such images as PNG, TIFF, ZIF, or a IIIF tile
 folder instead.
 
 ## The site only works without encryption
@@ -84,10 +86,14 @@ not allowed by your browser to load those. The desktop app can still fetch
 them: it is an ordinary program on your computer and follows the site's own
 setup.
 
-## The site limited requests from our server
+## The site limited requests for that image
 
-The page could not be opened because the image site limited how often our
-server may ask. Try again later, or save from your own connection with the
+The image site is receiving too many requests right now, or it limited
+repeated fetching. Dezoomify itself fetches from your own device and
+browser session (the website reads directly, with a small public-metadata
+helper as fallback); nothing changes when you switch devices or networks
+except the request rate. Wait a few minutes and try the same address
+again, or save from your own connection with the
 [browser extension](./browser-extension.md) or the [desktop app](./desktop-app.md).
 
 ## The site asks you to wait a few minutes

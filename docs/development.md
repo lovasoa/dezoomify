@@ -1,27 +1,18 @@
 # Development
 
-The repository is one monorepo. Rust crates, generated WASM bindings, the
-shared UI, hosts, extension packaging, and release tooling change together.
-Run repository tasks from the root through `cargo xtask`. Direct Cargo and pnpm
-commands are valid for component-level debugging, but xtask remains the unified
-front door. Node 24 is the minimum supported Node version.
+One monorepo: Rust crates, generated WASM bindings, shared UI, hosts, extension packaging, and release tooling change together. Run tasks from the root through `cargo xtask`; direct Cargo/pnpm commands serve component debugging only. Node 24 minimum.
 
 ## Working areas
 
-- `crates/dezoomify-core` contains pure discovery, catalogs, tile plans, and
-  processing recipes.
-- `crates/dezoomify-job` contains the pure effect/state machine through output
-  finalization and cleanup.
-- `crates/dezoomify-protocol` is the authoritative Rust contract source;
-  `packages/wasm-bindings` tracks the declaration emitted by `wasm-bindgen`.
-- `crates/dezoomify-native` contains native effects used by CLI and Tauri.
-- `crates/dezoomify-wasm` adapts core and job behavior for browser hosts.
-- `packages/shared-ui` is the shared UI; `packages/browser-runtime` owns
-  browser workers, decoding, canvases, and bounded caching.
-- `crates/fixture-server` serves controlled origins, `testdata/scenarios`
-  contains shared scenarios, and `crates/xtask` owns repository tasks.
+- `crates/dezoomify-core`: pure discovery, catalogs, tile plans, processing recipes.
+- `crates/dezoomify-job`: pure state machine through finalization and cleanup.
+- `crates/dezoomify-protocol`: contract source; `packages/wasm-bindings` tracks the emitted declaration.
+- `crates/dezoomify-native`: native effects for CLI and Tauri.
+- `crates/dezoomify-wasm`: core and job behavior for browser hosts.
+- `packages/shared-ui`: shared React UI; `packages/browser-runtime`: browser workers, decoding, canvases, bounded caching.
+- `crates/fixture-server`: controlled origins; `testdata/scenarios`: shared scenarios; `crates/xtask`: repository tasks.
 
-The exact dependency direction is in [Architecture](architecture.md).
+Dependency direction: [Architecture](architecture.md). Task grammar: [`crates/xtask/README.md`](../crates/xtask/README.md). Test matrix: [Testing](testing.md).
 
 ## Task grammar
 
@@ -36,26 +27,11 @@ cargo xtask build web
 cargo xtask dev web
 ```
 
-`setup` verifies the configured Rust, Node, WASM, and wasm-bindgen tools,
-bootstraps the pinned pnpm when needed, installs the frozen workspace
-dependencies, and reports browser status.
-It never installs browser binaries or Rust toolchains. `check` runs formatting,
-lint, type checking, dependency boundaries, generated-file checks, and manifest
-validation without rewriting source files.
+`setup` checks Rust, Node, WASM, and wasm-bindgen tools, bootstraps pinned pnpm when needed, installs frozen workspace dependencies, and reports browser status. It installs no browser binaries or Rust toolchains. `check` runs format, lint, type checking, boundaries, generated-file checks, and manifest validation without rewriting sources.
 
-Bare `test` runs `cargo test --workspace` exactly once, then one Node
-dot-reporter process over the website, browser runtime, generated declaration,
-desktop Node, and pure extension unit suites. It does not run `check`, generate
-WASM bindings, build WXT output, or launch browsers. `test all` runs that matrix
-once and adds the generated WASM Node harness, website Chromium E2E, and
-build-dependent Chromium/Firefox extension integration. The desktop real-window
-test remains explicit and excluded from `all`. Focused targets are documented
-in [Testing](testing.md). No test other than `test live` contacts public source
-sites.
+Bare `test` is the fast aggregate (one Rust workspace run plus one combined Node unit run; no `check`, no generated bindings, no WXT output, no browsers). `test all` adds the generated WASM Node harness, website Chromium E2E, and build-dependent Chromium/Firefox extension integration. The desktop real-window test stays explicit, outside `all`. Only `test live` touches public sites.
 
-`cargo xtask setup` configures this checkout to use the versioned hooks.
-`.githooks/pre-commit` checks Rust formatting; `.githooks/pre-push` runs
-`cargo xtask ci check` and prints its log only on failure.
+`setup` also installs the versioned hooks: pre-commit checks Rust formatting; pre-push runs `cargo xtask ci check`, printing its log only on failure.
 
 ## Builds
 
@@ -64,10 +40,10 @@ sites.
 | Target | Output |
 |---|---|
 | `wasm` | real WASM artifact under `target/wasm32-unknown-unknown/` |
-| `web` | full site build via `scripts/build-site.mjs`: wasm adapter plus browser glue under `wasm/`, the Vite production bundle, help pages, and the deployable `dist/` tree (requires `wasm-bindgen-cli` matching the version in `Cargo.lock`; see below) |
+| `web` | full site via `scripts/build-site.mjs`: wasm adapter plus browser glue under `wasm/`, Vite bundle, help pages, deployable `dist/` tree (needs `wasm-bindgen-cli` matching `Cargo.lock`) |
 | `cli` | real `dezoomify-cli` binary under `target/debug/` |
-| `desktop` | the lean shell always compiles; the Tauri window shell (feature `tauri`) additionally compiles when the platform webview system packages are present; without `--unsigned-test` and with the bundler prerequisites installed, a real bundle for the matching host is produced (Linux `deb`, Windows `msi`/`nsis`, macOS `dmg`; see [Native apps](native-apps.md#desktop-bundles)) |
-| `extension` | real store-shaped ZIPs for chromium and firefox under `target/extension/`, packaged by the same script the store-submission workflow uses |
+| `desktop` | lean shell always compiles; Tauri window shell (feature `tauri`) compiles with platform webview packages present; with bundler prerequisites and without `--unsigned-test`, a real bundle for the matching host (Linux `deb`, Windows `msi`/`nsis`, macOS `dmg`; see [Native apps](native-apps.md#desktop-bundles)) |
+| `extension` | store-shaped Chromium and Firefox ZIPs under `target/extension/`, packed by the store-submission script |
 
 Examples:
 
@@ -77,87 +53,30 @@ cargo xtask build extension
 cargo xtask build cli
 ```
 
-The browser-runtime build is `cargo xtask test browser --build-only`. Shared UI
-artifacts are built by `build web`, `build desktop`, and `build extension`; there
-are no separate `build browser`, `build ui`, `build native`, or `build all`
-aliases.
+The browser-runtime build is `cargo xtask test browser --build-only`. Shared UI artifacts come from `build web`, `build desktop`, `build extension`; no `build browser`, `build ui`, `build native`, or `build all` aliases exist.
 
-The website ships a Vite production bundle. The TypeScript/TSX sources
-(`src/*.ts`, the shared-UI and browser-runtime sources they import) are the
-single source of truth: type-checked, unit-tested, and bundled by Vite with
-`vite.config.ts` (`base: "/beta/"`). The wasm glue under `wasm/`, the Vite
-build output under `dist/`, and the pages under `help/` are generated
-artifacts and are never committed: the `website-deploy` workflow builds them
-on every push to `master` (see the deployment contract below), and
-`cargo xtask build web` builds them locally.
-
-## Website deployment contract
-
-One Cloudflare Pages project (the original `dezoomify`) receives builds from
-GitHub Actions through `.github/workflows/website-deploy.yml`:
-
-1. `scripts/build-site.mjs` builds the Vite+React app, help pages, and wasm
-   glue, then assembles `dist/`: the legacy site (vendored under `legacy/`,
-   from `master` before the merge, kept verbatim) serves `/`, the new app
-   serves `/beta`, and `_routes.json` limits Function invocation to
-   `/api/proxy` (new app) and `/proxy` (legacy, re-exported from
-   `legacy/functions/proxy.js`).
-2. A push to `master` is uploaded as the production deployment. A pull request
-   targeting `master` from this repository is uploaded as a preview on the
-   stable branch alias `pr-<number>.dezoomify.pages.dev`. The preview job uses
-   the pull request merge ref, so it verifies the exact result that reviewers
-   would merge. The project's automatic git deployments are disabled, so this
-   workflow is the only publisher; a push can never clobber production with a
-   repository tree.
-3. GitHub records each deployment in the `production` or `preview` environment
-   and exposes its environment URL as the PR's **View deployment** link. The
-   preview URL remains stable as the PR receives new commits.
-4. The workflow verifies the live deployment (production or preview): both
-   apps, both proxy routes, wasm content types, the generated help section,
-   and that no repository files are served.
-
-`master` is the single production branch. Fork pull requests intentionally do
-not receive previews: the workflow uses the normal `pull_request` event and
-only same-repository PRs can run the credentialed deployment job. This avoids
-checking out untrusted code in a privileged `pull_request_target` workflow.
-Cloudflare preview deployments are public by default and carry `noindex`; the
-preview uses the same restricted metadata proxy and repository-file exposure
-gates as production. The deployment never serves repository files, so
-internal docs and plans stay private.
+The TypeScript/TSX sources (`src/*.ts` plus imported shared-UI and browser-runtime sources) are the single source of truth: type-checked, unit-tested, bundled by Vite (`base: "/beta/"`). Wasm glue (`wasm/`), Vite output (`dist/`), and help pages (`help/`) are generated, never committed: `website-deploy` builds them on every `master` push (see [Operations](operations.md#website-deployment-contract)); `cargo xtask build web` builds them locally.
 
 ## Development servers
 
-`cargo xtask dev <target>` runs the named app's development environment and
-prints its URLs and cleanup instructions:
+`cargo xtask dev <target>` prints URLs and cleanup instructions:
 
 | Target | Environment |
 |---|---|
-| `ui` | full site build served at `http://127.0.0.1:8081/` (the shared UI runs inside the beta app at `/beta`) |
-| `web` | full site build served at `http://127.0.0.1:8080/`, exactly as deployed |
-| `desktop` | the real Tauri development application; fails closed with the webview system package list when they are missing |
-| `extension` | an unpacked load staged from the sources and a Chromium launch with an isolated throwaway profile; chromium engine only, other engines fail closed |
+| `ui` | beta app at `/beta` on `http://127.0.0.1:8081/`, for shared-UI iteration |
+| `web` | full site on `http://127.0.0.1:8080/`, exactly as deployed |
+| `desktop` | real Tauri dev app; fails closed naming missing webview packages |
+| `extension` | unpacked load from sources plus Chromium with a throwaway profile; chromium only |
 
-`dev web` and `dev ui` serve the assembled `dist/` tree through
-`scripts/dev-server.mjs`: a loopback static server plus the same `POST`/`OPTIONS
-/api/proxy` metadata relay that Cloudflare runs from `functions/api/proxy.ts`
-(the relay core lives once in `src/server/proxy.ts`). Nothing extra is
-installed; the app is fully functional from `cargo xtask dev web` alone.
+Both serve the assembled `dist/` tree through `scripts/dev-server.mjs` (loopback static server plus the same `POST`/`OPTIONS /api/proxy` relay Cloudflare runs; relay core lives once in `src/server/proxy.ts`). `dev web` mirrors the deployed site; `dev ui` opens the beta surface. Nothing extra installs; `cargo xtask dev web` alone gives a working app.
 
-`dev desktop` starts the Vite server on `http://localhost:1420/`, waits for it
-to accept connections, and then launches the Tauri window shell. The frontend
-server is non-interactive and its complete process tree is stopped when the
-shell exits, including a second launch forwarded to an existing desktop app.
+`dev desktop` starts the Vite server on `http://localhost:1420/`, waits for it, then launches the Tauri shell. The server is non-interactive; its whole process tree stops with the shell, including second launches forwarded to a running app.
 
-For example, use `cargo xtask dev extension --browser chromium` or
-`cargo xtask dev web`. Start standalone deterministic origins with
-`cargo xtask fixtures serve --port 0`. Development commands bind local services
-to loopback and never fall back to public resources.
+Example: `cargo xtask dev extension --browser chromium`. Standalone deterministic origins: `cargo xtask fixtures serve --port 0`. Dev commands bind loopback only, never public resources.
 
 ## Maintenance
 
-Generated protocol files are derived from Rust and are never edited by hand.
-Fixture and protocol commands are deterministic unless their name explicitly
-says `live`.
+Protocol files derive from Rust; never hand-edit. Fixture and protocol commands are deterministic unless named `live`.
 
 ```sh
 cargo xtask protocol generate
@@ -167,22 +86,13 @@ cargo xtask fixtures verify
 cargo xtask fixtures serve --port 0 --write-address target/fixture-server.addr
 ```
 
-`protocol generate` refreshes the checked-in TypeScript bindings. Its `--check`
-form compares against a declaration emitted by the real WASM build, while
-`protocol check` compiles the Rust contract, runs the generated-package tests,
-and checks WASM portability. `fixtures verify`
-validates manifests, provenance, licenses, routes, and hashes.
+`protocol generate` refreshes the checked-in bindings. `--check` compares against a declaration from a real WASM build in a temp dir; `protocol check` compiles the Rust contract, runs generated-package tests, and checks WASM portability. `fixtures verify` validates manifests, provenance, licenses, routes, and hashes.
 
-Playwright resolves to exactly one version repository-wide through the
-`pnpm.overrides` pin in the root `package.json`: every Playwright browser
-build is version-coupled, so the website E2E and the extension headless gate
-cannot consume different engines. A Playwright bump moves the override together
-with the workspace specs.
+One Playwright version rules repo-wide via the `pnpm.overrides` pin in root `package.json`; website E2E and the extension gate share the engine. A Playwright bump moves override plus workspace specs together.
 
 ## Releases
 
-Release tasks consume an immutable plan. Building does not sign or publish, and
-verification uses public keys only.
+Release tasks consume an immutable plan; building signs and publishes nothing, verification uses public keys only. Operator steps: [Operations](operations.md#release-runbook). Versioning and gates: [Releases](releases.md).
 
 ```sh
 export DEZOOMIFY_VERSION="$(cargo xtask release version)"
@@ -191,8 +101,7 @@ cargo xtask release build --plan target/release-dist/<version>/plan.json --targe
 cargo xtask release verify --plan target/release-dist/<version>/plan.json --artifacts target/release-dist/<version>
 ```
 
-Signing, notarization, deployment, store submission, and publication run as
-separate protected CI operations against the verified artifact digests.
+Signing, notarization, deployment, store submission, and publication run as separate protected CI operations against the verified artifact digests.
 
 ## Common workflows
 
@@ -200,38 +109,31 @@ separate protected CI operations against the verified artifact digests.
 
 Follow [Contributing a format](CONTRIBUTING-format.md). In short:
 
-1. Add core parser/plan coverage and scenario-local payloads.
+1. Add core parser/plan coverage plus scenario-local payloads.
 2. Run `cargo xtask fixtures verify` and `cargo xtask test core --parity`.
 3. Run `cargo xtask test scenario`.
 
 ### Change the shared UI
 
-1. Run `cargo xtask dev ui` while changing host-neutral components.
-2. Run `cargo xtask test web`, then the affected `test desktop` or
-   `test extension` integration target.
+1. Iterate under `cargo xtask dev ui`.
+2. Run `cargo xtask test web`, then affected `test desktop` / `test extension`.
 3. Run `cargo xtask build web` to catch integration and bundle-policy failures.
 
 ### Change the protocol
 
-1. Edit only the Rust source and protocol fixtures.
+1. Edit Rust source and protocol fixtures only.
 2. Run `cargo xtask protocol generate` and `cargo xtask test protocol`.
-3. Run `cargo xtask protocol check` and the affected host test targets.
+3. Run `cargo xtask protocol check` plus affected host targets.
 
 ### Before a pull request
 
-Run `cargo xtask check` and the fast `cargo xtask test` during development, then
-`cargo xtask test all` and `cargo xtask ci local`. Run `cargo xtask test live`
-only when the change needs an explicit advisory compatibility sample.
+`cargo xtask check` plus fast `cargo xtask test` during development, then `cargo xtask test all` and `cargo xtask ci local`. `cargo xtask test live` only for an explicit advisory compatibility sample.
 
 ## Change rules
 
-- Domain decisions belong in core or job code, not UI and transport code.
-- Effectful code implements protocol effects; it does not reproduce job policy.
-- Runtime differences use capabilities and shared error codes.
-- Add a shared scenario whenever more than one runtime exercises behavior.
-- Keep generic lifecycle, retry, and transport-effect policy in the job engine;
-  keep the website's direct-first, classified automatic metadata proxy
-  eligibility policy in the web app at the repository root. App integrations execute supplied
-  transport effects and report results; they never invent a hidden fallback or
-  per-attempt proxy consent flow.
+- Domain decisions live in core/job code, never in UI or transport code.
+- Effect code implements protocol effects; it never replays job policy.
+- Runtime differences travel as capabilities and shared error codes.
+- Behavior exercised by more than one runtime gets a shared scenario.
+- Lifecycle, retry, and transport-effect policy stay in the job engine; the website's direct-first proxy eligibility stays in the web app at the root. Integrations execute supplied transport effects and report results; no hidden fallbacks, no per-attempt proxy consent flows.
 - Redact credentials and sensitive URLs at every diagnostic boundary.
