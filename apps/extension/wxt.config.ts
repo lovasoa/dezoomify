@@ -96,6 +96,10 @@ export default defineConfig({
   },
   vite: () => ({
     plugins: [react()],
+    // External maps ship in prod: the project is open source and the
+    // packaged extension must stay one-click debuggable. Maps are fetched
+    // lazily by devtools only. The Rust/wasm core stays lean (no DWARF).
+    build: { sourcemap: true },
     define: {
       __DEZOOMIFY_TEST_DRIVER__: JSON.stringify(isTestPackage),
       __DEZOOMIFY_TEST_PERMISSION_MOCK__: JSON.stringify(isTestPackage && testScenario === "permission"),

@@ -12,6 +12,10 @@ export default defineConfig({
     target: "es2022",
     outDir: "dist/beta",
     emptyOutDir: true,
+    // External maps ship in prod: the project is open source and prod
+    // bundles must stay one-click debuggable. Maps are fetched lazily by
+    // devtools only, so page loads are unaffected.
+    sourcemap: true,
     // No inline module-preload polyfill: the deployed CSP is script-src 'self'.
     modulePreload: { polyfill: false },
     rollupOptions: {

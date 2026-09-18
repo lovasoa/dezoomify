@@ -2,8 +2,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // Desktop Vite shell for the Tauri app.
-// Tauri development uses a fixed local origin. Production bundles disable
-// source maps unless release policy explicitly permits sanitized maps.
+// Tauri development uses a fixed local origin. Production bundles ship
+// external source maps: the project is open source and prod bundles must
+// stay one-click debuggable. Maps are fetched lazily by devtools only.
+// The Rust/wasm core stays lean (no DWARF) so the downloaded bytes stay
+// small; only the TypeScript bundles map back to sources.
 export default defineConfig({
   plugins: [react()],
   define: {
@@ -15,7 +18,7 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    sourcemap: false,
+    sourcemap: true,
     target: "es2022",
     outDir: "dist",
   },
