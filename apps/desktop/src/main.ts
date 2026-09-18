@@ -81,7 +81,6 @@ import {
   NATIVE_FORMATS,
   PROTOCOL_MAX,
   PROTOCOL_MIN,
-  PROTOCOL_VERSION,
 } from "./desktopIntegration.ts";
 import type { NativeFormat } from "./desktopIntegration.ts";
 import { DESKTOP_EVENT_CHANNELS, assertNoTileBytes, redactForEvent } from "./events.ts";
@@ -102,11 +101,8 @@ import {
   defaultOutputDirectory,
   describeSettingsForLog,
   loadSettings,
-  parseHeadersText,
-  pickDirectory,
   saveSettings,
   settingsToInvokeArgs,
-  validateSettings,
 } from "./settings.ts";
 import type { DesktopSettings } from "./settings.ts";
 import { listen as tauriApiListen } from "@tauri-apps/api/event";

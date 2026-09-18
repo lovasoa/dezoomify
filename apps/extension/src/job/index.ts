@@ -4,8 +4,8 @@ import { createElement } from "react";
 import type { StructuredError, UiStatus, ViewContext as SharedViewContext } from "@dezoomify/shared-ui";
 import {
   canvasToPngBlob,
+  createBrowserRunner,
   createCanvasAssembly,
-  createEngineHost,
   createProbeSize,
   createTileDecoder,
   dispatchTyped,
@@ -13,13 +13,12 @@ import {
   pickDeferredUri,
   pickEngineSelection,
   saveBlobViaAnchor,
+  type BrowserJobHandle,
   type DispatchTable,
-  type WorkerHostOutput,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
 import { originOfUrl } from "@dezoomify/browser-runtime";
 import { createLogger } from "@dezoomify/browser-runtime/logging";
-import type { EngineHost } from "@dezoomify/browser-runtime";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
 import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFailure, isJobBinding } from "./transport.ts";
 import type { JobBinding } from "./transport.ts";
@@ -53,11 +52,16 @@ let binding: JobBinding | null = null;
 let siteOrigin = "";
 /** Fallback request ids for probes that arrive without an engine request id. Start clear of the engine's small sequential ids. */
 let probeSeq = 1 << 30;
-let controller: EngineHost | null = null;
+// One shared browser runner attempt. The runner owns the worker, the WASM
+// session, cross-worker processing calls, the abort scope, and disposal;
+// this tab keeps binding, transport, selection, recovery, and view wiring.
+let jobHandle: BrowserJobHandle | null = null;
 let sourceTransport: ReturnType<typeof createCoordinatorSourceTransport> | null = null;
-let jobWorker: Worker | null = null;
+/** Runner abort signal of the live attempt (drives the cancelled() transport view). */
+let attemptSignal: AbortSignal | null = null;
 /** @type {ReturnType<typeof createCanvasAssembly> | null} */
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
+let saveCompleted = false;
 let seq = 0;
 let started = false;
 let selected = false;
@@ -73,9 +77,6 @@ let followDepth = 0;
 let lastTileProgress: { current: number; total: number } | null = null;
 let accessRequest: { hosts: string[]; requesting: boolean } | null = null;
 let partialDecision: number | null = null;
-// Cross-worker processing calls (session.applyProcessing) awaiting a reply.
-const pendingProcess = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }>();
-let processSeq = 0;
 const testGrantedOrigins = new Set<string>();
 const bootstrapJobId = new URLSearchParams(location.hash.slice(1)).get("jobId");
 
@@ -157,7 +158,7 @@ function render(status: UiStatus, ctx: ViewContext = {}) {
       const generation = partialDecision;
       if (generation === null) return;
       partialDecision = null;
-      controller?.chooseRecovery(generation, keep ? "keep" : "discard");
+      void jobHandle?.command({ type: "recovery-choice", generation, choice: keep ? "keep" : "discard" });
       render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Finishing the image" } });
     } }) } : {}),
   });
@@ -173,7 +174,12 @@ function send(message: unknown): Promise<unknown> {
 
 function closeJob() {
   jobLog.info("job-close", `jobId=${binding?.jobId ?? "unknown"}`);
-  controller?.cancel();
+  const handle = jobHandle;
+  jobHandle = null;
+  if (handle) {
+    void handle.command({ type: "cancel" }).catch(() => {});
+    void handle.dispose().catch(() => {});
+  }
   if (binding) void send(boundEnvelope("dz.job.cancel")).catch(() => {});
   if (binding) void send(boundEnvelope("dz.job.closed")).catch(() => {});
 }
@@ -199,7 +205,7 @@ function resolvePermission(message: Record<string, unknown>) {
       jobActivity: { startedAt: Date.now(), stepLabel: "Acquiring image tiles" },
     });
   }
-  controller?.resolvePermission(message.granted);
+  jobHandle?.resolvePermission(message.granted);
 }
 
 /**
@@ -276,17 +282,10 @@ function onHostFailure(error: unknown) {
   render("failed", { failure, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
 }
 
-/** Apply one core processing recipe through the worker session. */
-function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
-  if (!jobWorker) return Promise.reject(Object.assign(new Error("worker unavailable"), { code: "WORKER_FAILED" }));
-  const requestId = ++processSeq;
-  return new Promise((resolve, reject) => {
-    pendingProcess.set(requestId, { resolve, reject });
-    jobWorker?.postMessage({ type: "engine.process", requestId, recipe, bytes }, [bytes]);
-  });
-}
-
-function createAssembly(sourceUrl: string) {
+function createAssembly(
+  sourceUrl: string,
+  processTile: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
+) {
   const decoder = createTileDecoder();
   return createCanvasAssembly({
     decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
@@ -310,6 +309,7 @@ function createAssembly(sourceUrl: string) {
       const url = URL.createObjectURL(blob);
       try {
         saveBlobViaAnchor(document, url, width, height, selectedTitle);
+        saveCompleted = true;
       } finally {
         // The anchor save reads the URL synchronously; revoke lazily so the
         // browser never races a slow download start.
@@ -361,8 +361,16 @@ const eventHandlers = {
         jobLog.info("deferred-follow", `depth=${followDepth}`);
         render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
         // Defer the teardown out of this engine event chain so the current
-        // attempt settles before its worker and controller are replaced.
-        queueMicrotask(() => startAttempt(deferredUri));
+        // attempt settles before its runner is replaced by a fresh attempt
+        // rooted at the resolved request URI (same binding, same identity).
+        queueMicrotask(() => {
+          stopAttempt();
+          resetAttemptState();
+          started = true;
+          jobLog.info("engine-start", `jobId=${binding?.jobId ?? "unknown"} url=${deferredUri}`);
+          render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
+          void beginAttempt([{ url: deferredUri }]);
+        });
         return;
       }
       selected = true;
@@ -372,14 +380,14 @@ const eventHandlers = {
           : "No downloadable image was found on this page."),
         { code: deferredUri ? "discovery.deferred" : "NO_IMAGE_FOUND", retryable: false },
       ));
-      controller?.cancel();
+      void jobHandle?.command({ type: "cancel" }).catch(() => {});
       return;
     }
     selected = true;
     selectedTitle = selection.title;
     render("downloading", { jobActivity: { startedAt: Date.now(), stepLabel: "Preparing the image" } });
-    controller?.selectImage(selection.image);
-    controller?.selectLevel(selection.level);
+    void jobHandle?.command({ type: "select-image", image: selection.image }).catch(() => {});
+    void jobHandle?.command({ type: "select-level", level: selection.level }).catch(() => {});
   },
   warning: (event) => {
     jobLog.warn("engine-warning", JSON.stringify(event.error));
@@ -417,22 +425,23 @@ function setup(bound: unknown) {
 
 /**
  * Tear down the current attempt. The durable source binding survives; the
- * worker, WASM session, controller, output assembly, and pending fetch state
- * do not. Called before every attempt so a retry can never reuse a terminal
+ * runner attempt (worker, WASM session, output assembly, fetch state) does
+ * not. Called before every attempt so a retry can never reuse a terminal
  * engine session or a stale request ledger.
  */
 function stopAttempt() {
-  const activeController = controller;
-  controller = null;
-  try { activeController?.dispose(); } catch { /* teardown is best effort */ }
-  const worker = jobWorker;
-  jobWorker = null;
-  try { worker?.terminate(); } catch { /* already gone */ }
+  const handle = jobHandle;
+  jobHandle = null;
+  attemptSignal = null;
+  if (handle) {
+    try {
+      void handle.dispose().catch(() => {});
+    } catch { /* teardown is best effort */ }
+  }
   try { assembly?.release(); } catch { /* bitmap cleanup is best effort */ }
   assembly = null;
+  saveCompleted = false;
   sourceTransport = null;
-  for (const { reject } of pendingProcess.values()) reject(Object.assign(new Error("attempt stopped"), { code: "WORKER_FAILED" }));
-  pendingProcess.clear();
 }
 
 /** Clear every per-attempt flag and buffer; the source binding is untouched. */
@@ -448,19 +457,16 @@ function resetAttemptState() {
 }
 
 /**
- * Begin one discovery-and-fetch attempt. The first attempt follows the job
- * tab's readiness announcement; a retry follows an explicit user action and a
- * fresh coordinator snapshot. Either way the attempt gets a fresh worker,
- * controller, and assembly so no state leaks between attempts.
+ * Begin one discovery-and-fetch attempt behind the shared browser runner.
+ * The extension injects its source-bound transport (tab-origin fetch under
+ * the narrowest grant plus extension-origin fallback), its output assembly
+ * (page canvas, anchor save), and its product actions (explicit permission
+ * prompt, keep/discard recovery). Retries, partials, and ordering stay in
+ * the engine; the abort scope and disposal live in the runner attempt.
  */
-function startAttempt(followUrl?: string) {
+async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   if (!binding) return;
-  const origin = lastSource;
-  stopAttempt();
-  resetAttemptState();
   const activeBinding = binding;
-  const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-  jobWorker = worker;
   const fetcher = createExtensionFetcher({
     hasPermission: async (origin) => testGrantedOrigins.has(origin) ||
       (!__DEZOOMIFY_TEST_PERMISSION_MOCK__ && !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] }))),
@@ -480,101 +486,98 @@ function startAttempt(followUrl?: string) {
     },
     cancel: () => fetcher.cancel(),
   };
-  sourceTransport = createCoordinatorSourceTransport({ sendMessage: send });
+  const coordinator = createCoordinatorSourceTransport({ sendMessage: send });
+  sourceTransport = coordinator;
   let attemptCancelled = false;
-  const cancelFetch = () => { attemptCancelled = true; fetcher.cancel(); };
   // Metadata and the bound site's own tiles and probes prefer the source
   // tab's origin context and fall back to the granted extension-origin
   // session; cross-origin tiles always use the extension origin.
   const fetchResource = createEngineResourceFetcher({
     binding: () => activeBinding,
     siteOrigin: () => siteOrigin,
-    sourceTransport,
+    sourceTransport: coordinator,
     extensionTransport,
-    cancelled: () => attemptCancelled,
+    cancelled: () => attemptCancelled || attemptSignal?.aborted === true,
     onSourceFailure: (cause) => jobLog.warn("source-fetch-failed", `code=${String(cause.code ?? cause.blocked_reason ?? "network")} retrying=extension-origin`),
   });
   const probeDecoder = createTileDecoder();
-  const probeSize = createProbeSize({
-    fetchTile: async (url: string, headers: Record<string, string>, requestId?: number) => {
-      const id = typeof requestId === "number" && Number.isSafeInteger(requestId) && requestId >= 0 ? requestId : (probeSeq += 1);
-      const result = await fetchResource({
-        request: {
-          id,
-          uri: url,
-          headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
-          purpose: "probe",
-        },
-      });
-      const bytes = result.bytes instanceof Uint8Array
-        ? new Uint8Array(result.bytes).slice().buffer as ArrayBuffer
-        : result.bytes as unknown as ArrayBuffer;
-      return { bytes };
+  const runner = createBrowserRunner({
+    createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
+    fetchResource: (effect, signal) => {
+      attemptSignal = signal;
+      if (signal.aborted || attemptCancelled) {
+        return Promise.reject(Object.assign(new Error("request cancelled"), { category: "cancelled" }));
+      }
+      return fetchResource(effect);
     },
-    decode: (bytes: ArrayBuffer) => probeDecoder.decode(bytes),
-    loadImage: (url: string) => new Promise((resolve, reject) => {
+    probeSize: createProbeSize({
+      fetchTile: async (url: string, headers: Record<string, string>, requestId?: number) => {
+        const id = typeof requestId === "number" && Number.isSafeInteger(requestId) && requestId >= 0 ? requestId : (probeSeq += 1);
+        const result = await fetchResource({
+          request: {
+            id,
+            uri: url,
+            headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
+            purpose: "probe",
+          },
+        });
+        const bytes = result.bytes instanceof Uint8Array
+          ? new Uint8Array(result.bytes).slice().buffer as ArrayBuffer
+          : result.bytes as unknown as ArrayBuffer;
+        return { bytes };
+      },
+      decode: (bytes: ArrayBuffer) => probeDecoder.decode(bytes),
+      loadImage: (url: string) => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+          image: img,
+        });
+        img.onerror = () => reject(new Error("probe image failed to load"));
+        img.src = url;
+      }),
+    }),
+    loadDisplayImage: (url: string) => new Promise((resolve, reject) => {
       const img = new Image();
-      img.onload = () => resolve({
-        width: img.naturalWidth,
-        height: img.naturalHeight,
-        image: img,
-      });
-      img.onerror = () => reject(new Error("probe image failed to load"));
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("display image failed to load"));
       img.src = url;
     }),
-  });
-  controller = createEngineHost({
-    worker,
-    jobId: () => activeBinding.jobId,
-    fetchResource,
-    cancelFetch,
-    get assembly() {
-      if (!assembly) throw new Error("output assembly is not initialized");
-      return assembly;
+    classifyFailure: engineFailure,
+    createAssembly: ({ sourceUrl, processTile }) => {
+      const asm = createAssembly(sourceUrl, processTile);
+      assembly = asm;
+      return asm;
     },
     // Browser session baseline: 6 concurrent tile fetches (matches the
     // website). The engine validates the budget at job creation.
     quotas: { max_concurrent_fetches: 6 },
-    probeSize,
-    classifyFailure: engineFailure,
-    onPermissionRequired: showAccessRequired,
+    sessionId: () => activeBinding.jobId,
+    getTransport: () => "browser-session",
+    isPermissionPending: () => accessRequest !== null,
+    getOutputState: () => (saveCompleted ? "writable" : "pending"),
+    onPermissionRequired: (detail) => {
+      showAccessRequired(detail);
+    },
     onRecoveryRequested: showPartialDecision,
-    onHostFailure,
-    onEvent: handleEvent,
+    log: (level, code, detail) => jobLog.log(level, code, detail),
+    onAbort: () => {
+      attemptCancelled = true;
+      try {
+        fetcher.cancel();
+      } catch { /* abort must never break teardown */ }
+    },
   });
-  worker.addEventListener("message", (event: MessageEvent<WorkerHostOutput>) => {
-    if (event.data?.type === "engine.messages") {
-      const messages = event.data.messages;
-      jobLog.debug("worker-message", `type=engine.messages count=${messages.length}`);
-      controller?.handleEngineMessages(messages);
-    }
-    else if (event.data?.type === "engine.processed" || event.data?.type === "engine.process-failed") {
-      const requestId = typeof event.data.requestId === "number" ? event.data.requestId : -1;
-      const pending = pendingProcess.get(requestId);
-      if (pending) {
-        pendingProcess.delete(requestId);
-        if (event.data.type === "engine.processed" && event.data.bytes instanceof ArrayBuffer) pending.resolve(event.data.bytes);
-        else pending.reject(Object.assign(new Error("tile processing failed"), { code: "tile.processing-failed" }));
-      }
-    }
-    else if (event.data?.type === "engine.log" && typeof event.data.line === "string") {
-      uiLogLines.push(event.data.line);
-      if (uiLogLines.length > UI_LOG_MAX_LINES) uiLogLines.splice(0, uiLogLines.length - UI_LOG_MAX_LINES);
-    }
-    else if (event.data?.type === "engine.error") { jobLog.error("worker-error", `jobId=${binding?.jobId ?? "unknown"} message=${JSON.stringify(event.data.error)}`); onHostFailure(event.data.error); }
-  });
-  if (followUrl) {
-    // A deferred follow rides the same binding and source identity; the
-    // engine session is fresh and rooted at the resolved request URI.
-    started = true;
-    lastSource = origin;
-    assembly = createAssembly(followUrl);
-    jobLog.info("engine-start", `jobId=${activeBinding.jobId} url=${followUrl}`);
-    render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Resolving the image metadata" } });
-    controller?.start([{ url: followUrl }]);
-    return;
+  try {
+    const handle = await runner.start(
+      { inputs, engine: {}, exec: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" } },
+      (event) => handleEvent(event),
+    );
+    jobHandle = handle;
+  } catch (error) {
+    onHostFailure(error);
   }
-  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });
 }
 
 /**
@@ -607,6 +610,20 @@ function retryJob() {
     onHostFailure(Object.assign(new Error("Could not ask the extension to retry this job."), { code: "network", retryable: true })));
 }
 
+/**
+ * Prepare one attempt slot. The first attempt follows the job tab's
+ * readiness announcement; a retry follows an explicit user action and a
+ * fresh coordinator snapshot. The runner starts once image candidates
+ * arrive (`beginAttempt`); either way the attempt gets a fresh runner so no
+ * state leaks between attempts.
+ */
+function startAttempt() {
+  if (!binding) return;
+  stopAttempt();
+  resetAttemptState();
+  render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Waiting for image candidates" } });
+}
+
 function candidates(message: Record<string, unknown>) {
   if (!binding || !message || message.jobId !== binding.jobId || started) return;
   const values = Array.isArray(message.inputs) ? message.inputs.flatMap((candidate) => {
@@ -618,9 +635,8 @@ function candidates(message: Record<string, unknown>) {
   jobLog.info("candidates-received", `jobId=${binding.jobId} count=${values.length} overflow=${typeof message.overflow === "number" ? message.overflow : 0}`);
   render("discovering", { jobActivity: { startedAt: Date.now(), stepLabel: "Finding the zoomable image" } });
   lastSource = values[0].url;
-  assembly = createAssembly(lastSource);
   jobLog.info("engine-start", `jobId=${binding.jobId} url=${lastSource}`);
-  controller?.start(values);
+  void beginAttempt(values);
 }
 
 api?.runtime?.onMessage?.addListener((message) => {

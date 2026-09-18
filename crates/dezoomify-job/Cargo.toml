@@ -14,9 +14,9 @@ serde.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 
-# 6.1 (unblocked for cargo 1.98: workspace+override does not parse; manual
-# tables preserve the allows without inheritance; the deferred `job.rs`
-# module split rides after the in-flight Pause v1 overlay lands).
+# Manual lint tables (cargo 1.98 cannot combine `[lints] workspace = true`
+# with per-lint overrides in one manifest); the tables mirror the workspace
+# policy plus allows until legacy debt clears.
 [lints.rust]
 missing_docs = "allow"
 

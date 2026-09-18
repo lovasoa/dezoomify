@@ -11,21 +11,26 @@
 //! directly; probe-driven sources through the core probe step machine).
 
 #![forbid(unsafe_code)]
-// 6.1 unwrap policy: shipped engine code maps failures to typed `JobError`s
-// instead of panicking. Unit tests are exempt via `allow-unwrap-in-tests`
-// in the workspace `clippy.toml`; integration `tests/` targets never inherit
-// this crate-root attribute.
+// Shipped engine code maps failures to typed `JobError`s instead of
+// panicking. Unit tests are exempt via `allow-unwrap-in-tests` in the
+// workspace `clippy.toml`; integration `tests/` targets never inherit this
+// crate-root attribute.
 #![deny(clippy::unwrap_used)]
 
 pub mod config;
+pub mod engine_api;
 pub mod job;
 pub mod projection;
+pub mod retry;
 pub mod state;
 pub mod transition;
 
 pub use config::{Config, ConfigError};
+pub use engine_api::project_engine_snapshot;
+pub use engine_api::EngineJob;
 pub use job::{Job, JobInput};
 pub use projection::project_catalog;
+pub use retry::{classify_tile_failure, retry_delay_ms, FailureCategory, TileFailure};
 pub use state::State;
 pub use transition::{
     JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome, RecoveryChoice,

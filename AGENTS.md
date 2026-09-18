@@ -37,6 +37,8 @@ compilation. Use `--profile dev-debug` only when a diagnosis needs symbols.
 | Area | Contract |
 |---|---|
 | Architecture, crate boundaries, data flow | [`docs/architecture.md`](docs/architecture.md) |
+| Application model (service, snapshots, queue, history) | [`docs/app-model.md`](docs/app-model.md) |
+| Acceptance matrix (behavior → corpus → lane) | [`docs/acceptance-matrix.md`](docs/acceptance-matrix.md) |
 | Job engine (phases, retries, cancellation) | [`docs/job-engine.md`](docs/job-engine.md) |
 | Browser runtime, transports, tainted canvas | [`docs/browser-runtime.md`](docs/browser-runtime.md) |
 | Extension behavior, packaging, source binding | [`docs/extension.md`](docs/extension.md) |

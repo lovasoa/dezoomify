@@ -41,18 +41,22 @@ The typed WASM bridge to core, job, and pure processing code. A session takes co
 
 ### `packages/shared-ui`
 
-One React view (`.tsx`) for discovery, selection, progress, recovery, and output in every graphical app. Hosts mount it with `renderView(container, state, callbacks, ctx)` and keep their own effect layers. Sources are bundled directly by Vite/WXT; no hand-maintained `.js` mirrors exist.
+One React view (`.tsx`) for discovery, selection, progress, recovery, and output in every graphical app. Hosts mount it with `renderView(container, state, callbacks, ctx)` and keep their own effect layers. Sources are bundled directly by Vite/WXT; no hand-maintained `.js` mirrors exist. Snapshot presentation (`snapshot-view.ts`) derives one renderable view from the latest authoritative `JobSnapshot`; the controller transition table is a non-authoritative view.
+
+### `packages/app-model`
+
+The host-neutral application model: the `JobService` contract, the deterministic snapshot fold, the latest-snapshot store with identity and revision guards, the sequential queue, shared history, and the canonical transport labels and save-name helpers. React-free with no host globals; hosts inject effects, storage, and clocks. See [Application model](app-model.md).
 
 ### `packages/browser-runtime`
 
-The browser effect layer: workers, fetching, decoding, tile painting, canvases, save surfaces, and an optional bounded cache. The website and the extension job tab share one engine host (`engine-host.ts`) over WASM and differ only in transport and output surface. It owns no job policy. See [Browser runtime](browser-runtime.md).
+The browser effect layer: workers, fetching, decoding, tile painting, canvases, save surfaces, and an optional bounded cache. The website and the extension job tab share one browser runner (`browser-runner.ts`, `createBrowserRunner`) over the engine host (`engine-host.ts`) and WASM, and differ only in transport and output surface. It owns no job policy. See [Browser runtime](browser-runtime.md).
 
 ```mermaid
 flowchart LR
     subgraph PAGE[Host page]
         SITE[Website]
         EXT[Extension job tab]
-        EH[engine-host.ts]
+        EH[browser-runner.ts<br/>over engine-host.ts]
         T1[Website transport:<br/>direct fetch + metadata proxy]
         T2[Extension transport:<br/>tab-origin fetch + img fallback]
     end
@@ -90,6 +94,7 @@ Each adapter translates its host transport to the same relay call, so tests, loc
 ## Boundary rules
 
 - Core and job stay deterministic and testable without I/O.
+- App-model and shared UI stay host-neutral; app-model is also React-free. Dependencies point inward (products → shared UI → app-model → generated bindings); runtimes never import UI packages.
 - URLs, headers, credentials, bytes, and output destinations cross boundaries only as typed values. Browser code never redeclares Rust contract types.
 - Generated unions are consumed through exhaustive typed handler tables. Rust state supplies context such as error phase and request identity; hosts never resupply it.
 - Runtime differences appear as negotiated [capabilities](protocol.md#product-capabilities); automatic fallback shows through active-transport state, never silently.

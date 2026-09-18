@@ -26,6 +26,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Some("wasm") => return super::wasm::run(&args[1..]),
             Some("browser") => return super::browser::test_browser(&args[1..]),
             Some("web") => return super::browser::test_web(&args[1..]),
+            Some("ui") => return test_ui(&args[1..]),
+            Some("app-model") => return test_app_model(&args[1..]),
             Some("native") => return super::native::test_native(&args[1..]),
             Some("scenario") => return super::native::test_scenario(&args[1..]),
             Some("desktop") => return super::desktop::test_desktop(&args[1..]),
@@ -38,7 +40,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             _ => {}
         }
         return Err(format!(
-            "unknown test arguments (targets: core, protocol, job, wasm, browser, web, native, scenario, desktop, extension, perf, native-messaging, all, live): {}",
+            "unknown test arguments (targets: core, protocol, job, wasm, browser, ui, app-model, web, native, scenario, desktop, extension, perf, native-messaging, all, live): {}",
             args.join(" ")
         ));
     }
@@ -49,6 +51,44 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 fn cargo_test() -> Result<(), String> {
     super::command::cargo_test(&["--workspace"])
+}
+
+/// `test ui`: shared-UI snapshot presentation plus the product-agnostic view
+/// contract (controller, rendering, a11y, i18n, history, handoff copy).
+/// No engine, no network, no browsers.
+pub(crate) fn test_ui(args: &[String]) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err(format!(
+            "unknown test ui arguments: {}; usage: cargo xtask test ui",
+            args.join(" ")
+        ));
+    }
+    super::command::node_test(
+        &[
+            "test/snapshot-view.test.mjs",
+            "test/controller.test.mjs",
+            "test/view-rendering.test.mjs",
+            "test/ui-a11y.test.mjs",
+            "test/ui-i18n.test.mjs",
+            "test/ui-mobile.test.mjs",
+            "test/history.test.mjs",
+            "test/handoff.test.mjs",
+            "test/hash.test.mjs",
+        ],
+        true,
+    )
+}
+
+/// `test app-model`: host-neutral service, snapshot fold, store, queue,
+/// history, and labels. Pure Node, no hosts.
+pub(crate) fn test_app_model(args: &[String]) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err(format!(
+            "unknown test app-model arguments: {}; usage: cargo xtask test app-model",
+            args.join(" ")
+        ));
+    }
+    super::command::node_test(&["test/app-model.test.mjs"], true)
 }
 
 fn node_test() -> Result<(), String> {

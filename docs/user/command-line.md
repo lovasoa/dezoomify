@@ -43,7 +43,7 @@ ignores caps).
 | Keep a partial image when some tiles fail | `--keep-partial` (default; missing regions stay blank, saved to a `.partial` sibling: `out.png` becomes `out.partial.png`) |
 | Discard partial output on tile failure | `--no-partial` (fails with `tile.download-failed` and no output) |
 | Retry more often on an unreliable server | `-r, --retries 5` (default 3; 0 means no retries) |
-| Wait before retrying | `--retry-delay 2s` (delay before first retry, then doubling, plus per-tile jitter) |
+| Wait before retrying | `--retry-delay 2s` (accepted but currently unused; retry timing is engine-driven: 1 s base doubling to 30 s max, `Retry-After` honored) |
 | Tune output compression | `--compression 5` (JPEG quality `100 - compression`, default 95; PNG fast/balanced/best tiers) |
 | Tune the connection pool | `--max-idle-per-host 32` (max idle connections per host) |
 | Go slower to stay gentle with the server | `-i, --min-interval 200ms` (bulk paces images; per-tile requests are staggered) |

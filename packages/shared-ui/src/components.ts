@@ -1,24 +1,24 @@
 // Minimal host-neutral shared-ui helpers (no React, no browser globals).
 import type { StructuredError } from "./controller.ts";
 
-// Canonical transport labels (todo 2.2 single source): the implementation
-// lives one layer down in `packages/browser-runtime/src/transport-labels.ts`
-// (dependency-free); this module only re-exports them for rendering, so the
-// dependency points inward. Codes ("direct", "proxy", "display",
-// "browser-session", "native") map to these display strings; raw labels pass
-// through for back-compat.
+// Canonical transport labels (single source): the implementation lives in
+// `@dezoomify/app-model` (host-neutral, dependency-free); this module only
+// re-exports it for rendering. Codes ("direct", "metadata-proxy",
+// "display-only", "browser-session", "native") map to these display strings;
+// raw labels pass through for back-compat.
 //
 // The namespace-destructure shape below keeps the same single source and
 // export surface while giving the bundler plain local bindings (a bare
 // import-plus-re-export of the same names miscompiles the local references
 // in the desktop bundle, throwing `DIRECT_TRANSPORT_LABEL` at runtime).
-import * as TransportLabels from "../../browser-runtime/src/transport-labels.ts";
+import * as TransportLabels from "@dezoomify/app-model";
 const {
   DIRECT_TRANSPORT_LABEL,
   PROXY_TRANSPORT_LABEL,
   DISPLAY_TRANSPORT_LABEL,
   BROWSER_SESSION_TRANSPORT_LABEL,
   NATIVE_TRANSPORT_LABEL,
+  renderTransportLabel,
 } = TransportLabels;
 export {
   DIRECT_TRANSPORT_LABEL,
@@ -26,18 +26,8 @@ export {
   DISPLAY_TRANSPORT_LABEL,
   BROWSER_SESSION_TRANSPORT_LABEL,
   NATIVE_TRANSPORT_LABEL,
+  renderTransportLabel,
 };
-
-export function renderTransportLabel(transport: string): string {
-  if (transport === "direct" || transport === DIRECT_TRANSPORT_LABEL) return DIRECT_TRANSPORT_LABEL;
-  if (transport === "proxy" || transport === PROXY_TRANSPORT_LABEL) return PROXY_TRANSPORT_LABEL;
-  if (transport === "display" || transport === DISPLAY_TRANSPORT_LABEL) return DISPLAY_TRANSPORT_LABEL;
-  if (transport === "browser-session" || transport === BROWSER_SESSION_TRANSPORT_LABEL) {
-    return BROWSER_SESSION_TRANSPORT_LABEL;
-  }
-  if (transport === "native" || transport === NATIVE_TRANSPORT_LABEL) return NATIVE_TRANSPORT_LABEL;
-  return transport;
-}
 
 export function renderSaveGuidance(originClean: boolean): string {
   if (originClean) {

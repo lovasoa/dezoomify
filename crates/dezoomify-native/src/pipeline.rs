@@ -2,8 +2,10 @@
 //! selection, planning, retry, and lifecycle policy; this module executes its
 //! effects with real HTTP, decode, assemble, encode, and atomic-write fns.
 //!
-//! All network I/O goes through [`crate::http`]; all format logic stays in
-//! `dezoomify-core`; all lifecycle policy stays in `dezoomify-job`.
+//! All network I/O goes through [`crate::transport::NativeTransport`] (one
+//! reusable reqwest client per job scope, single-attempt fetches); all format
+//! logic stays in `dezoomify-core`; all lifecycle policy stays in
+//! `dezoomify-job`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -13,12 +15,12 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use dezoomify_core::core::model::{ProcessingRecipe, Request};
-use dezoomify_core::core::{adaptive::ObservationResult, redact_uri};
+use dezoomify_core::core::model::Request;
+use dezoomify_core::core::redact_uri;
 use dezoomify_core::Vec2d;
 
 use crate::error::NativeError;
-use crate::http::{fetch, FetchLimits, UserHeaders};
+use crate::http::{FetchLimits, UserHeaders};
 use crate::output::{validate_destination, OutputFormat};
 
 /// Default JPEG quality for `.jpg` output and `iiif-dir` tiles: `100`
@@ -261,6 +263,16 @@ pub fn partial_decision_from_choice(choice: &str) -> Option<PartialDecision> {
     }
 }
 
+/// Host-side external commands into a running job (Pause/Resume only).
+/// Cancel travels on the shared flag, partial answers on the gate. The
+/// pump drains these at every effect boundary; commands never supply bytes
+/// and never claim publication.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecCommand {
+    Pause,
+    Resume,
+}
+
 /// Pipeline configuration: fetch limits, tile bounds, concurrency.
 #[derive(Clone, Debug)]
 pub struct PipelineConfig {
@@ -275,9 +287,11 @@ pub struct PipelineConfig {
     /// Tile retry budget owned by the job engine. `0` means no retries:
     /// the first failure fails the tile (generic-probing parity).
     pub max_retries: u32,
-    /// Delay before the first tile retry; each subsequent retry doubles
-    /// (`retry_delay`, `2*retry_delay`, ...) plus deterministic per-tile
-    /// jitter from the tile position, mirroring `network.rs`. Default 2s.
+    /// Legacy delay before the first tile retry. No longer consulted: retry
+    /// timing is engine-owned (explicit `WaitForRetry` timer effects with
+    /// exponential backoff plus observed `retry-after`). Retained so CLI
+    /// `--retry-delay` keeps parsing; removal rides with the B5 CLI
+    /// thinning plus its user-doc update.
     pub retry_delay: Duration,
     /// Minimum interval between tile request starts (per-tile throttle).
     /// `ZERO` disables the sleep (the CLI default); the reference default
@@ -345,6 +359,18 @@ pub struct PipelineConfig {
     /// decoded output), verifies no new work while paused, then resumes and
     /// completes. `None` disables the demonstration. Never set by default.
     pub pause_after: Option<usize>,
+    /// Bound on retained (overlapping, unpainted) tile bytes in the output
+    /// sink. Beyond it the job fails `output.canvas-limit` instead of
+    /// growing without bound.
+    pub output_retain_cap: u64,
+    /// Bound on job-owned temp spool bytes for unknown-dimension assembly.
+    /// Beyond it the job fails `output.canvas-limit`; the spool directory
+    /// is removed on commit/rollback, never the destination.
+    pub output_spool_cap: u64,
+    /// External Pause/Resume commands for hosts with a live handle (the
+    /// typed runner). `None` disables remote pause; the engine overlay
+    /// itself stays available through the `--pause-after` demonstration.
+    pub exec_command_rx: Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<ExecCommand>>>>,
 }
 
 impl Default for PipelineConfig {
@@ -369,6 +395,9 @@ impl Default for PipelineConfig {
             partial_gate: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             pause_after: None,
+            output_retain_cap: 512 << 20,
+            output_spool_cap: 1 << 30,
+            exec_command_rx: None,
         }
     }
 }
@@ -398,15 +427,6 @@ impl PipelineConfig {
     #[must_use]
     pub fn jpeg_quality(&self) -> u8 {
         100u8.saturating_sub(self.compression)
-    }
-
-    /// PNG deflate tier from `--compression` (reference
-    /// `png_encoder.rs:30-34`): 0-19 fast, 20-60 balanced, above high.
-    /// The default compression 5 selects fast, matching the previous
-    /// fixed encoder byte for byte.
-    #[must_use]
-    pub(crate) fn png_compression(&self) -> image::codecs::png::CompressionType {
-        png_compression_for(self.compression)
     }
 }
 
@@ -456,6 +476,10 @@ pub struct PipelineOutcome {
     /// Tile ids left blank in a kept partial (empty for complete saves).
     /// Redacted ids only, never URLs or paths.
     pub missing: Vec<String>,
+    /// Honest execution accounting for the shipped pipeline: attempts,
+    /// retries, bytes fetched, retained/encoded/spool peaks, and the
+    /// accounted peak (canvas plus peak retained plus encoded).
+    pub instrumentation: crate::exec::Instrumentation,
 }
 
 fn user_headers_for(input_url: &str, config: &PipelineConfig) -> UserHeaders {
@@ -476,7 +500,27 @@ pub fn run(
     validate_destination(std::path::Path::new(output_path), &format, overwrite)?;
 
     let user = user_headers_for(input_url, config);
-    crate::job_driver::drive(input_url, output_path, overwrite, config, &user, on_event)
+    let result = crate::exec::execute(
+        input_url,
+        &crate::exec::OutputSpec {
+            output_path: PathBuf::from(output_path),
+            overwrite,
+            format,
+            auto_output_dir: None,
+        },
+        config,
+        &user,
+        on_event,
+    )?;
+    Ok(PipelineOutcome {
+        output_path: result.output_path,
+        tile_count: result.tile_count,
+        image_size: result.image_size,
+        format: result.format,
+        partial: result.partial,
+        missing: result.missing,
+        instrumentation: result.instrumentation,
+    })
 }
 
 /// Run a desktop-style job that saves directly to a configured directory.
@@ -490,7 +534,38 @@ pub fn run_auto_named(
     on_event: &mut dyn FnMut(PipelineEvent),
 ) -> Result<PipelineOutcome, NativeError> {
     let user = user_headers_for(input_url, config);
-    crate::job_driver::drive_auto_named(input_url, output_dir, format, config, &user, on_event)
+    let result = crate::exec::execute(
+        input_url,
+        &crate::exec::OutputSpec {
+            output_path: output_dir.join(format!("dezoomify.{}", output_dir_extension(format))),
+            overwrite: false,
+            format,
+            auto_output_dir: Some(output_dir.to_path_buf()),
+        },
+        config,
+        &user,
+        on_event,
+    )?;
+    Ok(PipelineOutcome {
+        output_path: result.output_path,
+        tile_count: result.tile_count,
+        image_size: result.image_size,
+        format: result.format,
+        partial: result.partial,
+        missing: result.missing,
+        instrumentation: result.instrumentation,
+    })
+}
+
+fn output_dir_extension(format: OutputFormat) -> &'static str {
+    match format {
+        OutputFormat::Png => "png",
+        OutputFormat::Jpeg => "jpg",
+        OutputFormat::Tiff => "tif",
+        OutputFormat::Zif => "zif",
+        OutputFormat::Webp => "webp",
+        OutputFormat::IiifDir => "iiif",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +593,9 @@ pub(crate) fn merge_headers(request: &Request) -> BTreeMap<String, String> {
 /// The decoded tile carries the first-seen ICC profile and EXIF metadata
 /// alongside the pixels (reference `tile.rs:186-219`); metadata extraction
 /// failures fall back to `None` while decode failures fail the tile.
-pub(crate) struct DecodedTile {
+/// Decoded tile pixels plus first-seen ICC/EXIF metadata. Pub for the
+/// output sink, which owns painting order and deterministic metadata.
+pub struct DecodedTile {
     pub image: image::RgbaImage,
     pub icc_profile: Option<Vec<u8>>,
     pub exif_metadata: Option<Vec<u8>>,
@@ -548,48 +625,6 @@ pub(crate) fn load_image_with_metadata(
     })
 }
 
-pub(crate) fn fetch_and_decode_cached(
-    uri: &str,
-    headers: &BTreeMap<String, String>,
-    processing: &ProcessingRecipe,
-    config: &PipelineConfig,
-    user: &UserHeaders,
-    cache: Option<(&std::path::Path, &str)>,
-) -> Result<DecodedTile, NativeError> {
-    if let Some((dir, namespace)) = cache {
-        if let Some(bytes) = crate::cache::load(dir, namespace, uri) {
-            if let Ok(loaded) = load_image_with_metadata(&bytes) {
-                return Ok(DecodedTile {
-                    image: loaded.image.to_rgba8(),
-                    icc_profile: loaded.icc_profile,
-                    exif_metadata: loaded.exif_metadata,
-                });
-            }
-        }
-    }
-    let mut request = Request::new(uri);
-    request.headers = headers.clone();
-    let merged = merge_headers(&request);
-    let outcome = fetch(uri, &merged, Some(user), None, &config.fetch)?;
-    if !outcome.ok() {
-        return Err(NativeError::new(
-            "tile.http-error",
-            describe_http_failure(&outcome),
-        ));
-    }
-    let bytes = processing.apply(outcome.body).map_err(NativeError::from)?;
-    if let Some((dir, namespace)) = cache {
-        let _ = crate::cache::store(dir, namespace, uri, &bytes);
-    }
-    let loaded = load_image_with_metadata(&bytes)
-        .map_err(|e| NativeError::new("tile.decode-failed", format!("tile decode failed: {e}")))?;
-    Ok(DecodedTile {
-        image: loaded.image.to_rgba8(),
-        icc_profile: loaded.icc_profile,
-        exif_metadata: loaded.exif_metadata,
-    })
-}
-
 /// Provide actionable, redacted HTTP diagnostics for host logs.
 pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> String {
     let mut requested = redact_uri(&outcome.final_uri);
@@ -598,52 +633,6 @@ pub(crate) fn describe_http_failure(outcome: &crate::http::FetchOutcome) -> Stri
         requested.push_str("...");
     }
     format!("request to {requested} returned HTTP {}", outcome.status)
-}
-
-pub(crate) struct ProbeRead {
-    pub observation: ObservationResult,
-    pub decoded: Option<DecodedTile>,
-}
-
-pub(crate) fn probe_tile_bytes(
-    uri: &str,
-    headers: &BTreeMap<String, String>,
-    processing: &ProcessingRecipe,
-    config: &PipelineConfig,
-    user: &UserHeaders,
-) -> ProbeRead {
-    let missing = || ProbeRead {
-        observation: ObservationResult::Missing,
-        decoded: None,
-    };
-    let mut request = Request::new(uri);
-    request.headers = headers.clone();
-    let merged = merge_headers(&request);
-    let Ok(outcome) = fetch(uri, &merged, Some(user), None, &config.fetch) else {
-        return missing();
-    };
-    if !outcome.ok() || outcome.body.is_empty() {
-        return missing();
-    }
-    let Ok(bytes) = processing.apply(outcome.body) else {
-        return missing();
-    };
-    match load_image_with_metadata(&bytes) {
-        Ok(loaded) => ProbeRead {
-            observation: ObservationResult::Available {
-                size: Vec2d {
-                    x: loaded.image.width(),
-                    y: loaded.image.height(),
-                },
-            },
-            decoded: Some(DecodedTile {
-                image: loaded.image.to_rgba8(),
-                icc_profile: loaded.icc_profile,
-                exif_metadata: loaded.exif_metadata,
-            }),
-        },
-        Err(_) => missing(),
-    }
 }
 
 pub(crate) fn blit_onto(
@@ -1002,70 +991,9 @@ pub(crate) fn render_iiif_dir(
     Ok((iiif_info_json(id, width, height), files))
 }
 
-/// Retry wait for a tile with `failures` prior failures: the base
-/// `retry_delay` plus deterministic position jitter (`idx = (x + y) % 100`
-/// of one hundredth each), doubled per retry. Mirrors `network.rs`:
-/// the first retry waits the base delay, the next twice that, and so on.
-/// `failures == 0` (first attempt) waits nothing.
-pub(crate) fn retry_wait(
-    retry_delay: Duration,
-    destination_x: u32,
-    destination_y: u32,
-    failures: u32,
-) -> Duration {
-    if failures == 0 {
-        return Duration::ZERO;
-    }
-    let idx = destination_x.wrapping_add(destination_y) % 100;
-    let jitter = retry_delay
-        .checked_div(100)
-        .and_then(|unit| unit.checked_mul(idx))
-        .unwrap_or(Duration::ZERO);
-    let mut wait = retry_delay + jitter;
-    for _ in 1..failures {
-        wait = wait.checked_mul(2).unwrap_or(Duration::MAX);
-    }
-    wait
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn first_attempt_never_waits() {
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 10, 20, 0),
-            Duration::ZERO
-        );
-    }
-
-    #[test]
-    fn first_retry_waits_base_plus_position_jitter() {
-        // idx = (10 + 20) % 100 = 30 → 2s + 30 * 20ms = 2.6s.
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 10, 20, 1),
-            Duration::from_millis(2600)
-        );
-        // Origin tiles carry no jitter.
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 0, 0, 1),
-            Duration::from_secs(2)
-        );
-    }
-
-    #[test]
-    fn retries_double_each_time() {
-        let first = retry_wait(Duration::from_secs(2), 10, 20, 1);
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 10, 20, 2),
-            first.checked_mul(2).unwrap()
-        );
-        assert_eq!(
-            retry_wait(Duration::from_secs(2), 10, 20, 3),
-            first.checked_mul(4).unwrap()
-        );
-    }
 
     #[test]
     fn compression_maps_to_jpeg_quality_and_png_tiers() {

@@ -25,173 +25,6 @@ import {
 } from "./transport-labels.ts";
 import { extractErrorSignal } from "./transport.ts";
 
-/**
- * Frontend guard for the Cloudflare metadata CORS proxy: at most 4 proxy
- * requests in flight at a time and at most 4 proxy request starts per
- * second, shared globally across every fetcher on the page (metadata
- * discovery fan-out plus any tile-image fetches that also use the proxy).
- * Direct tile requests never go through this gate and keep their own more
- * generous politeness policy. Mirrors the gate in
- * `src/proxyTransport.ts`, which stays authoritative for the actual POST;
- * this wrapper keeps standalone runtime users within the same budget even
- * when the injected transport is unlimited.
- */
-export const PROXY_MAX_INFLIGHT = 4;
-export const PROXY_MAX_REQUESTS_PER_SECOND = 4;
-export const PROXY_RATE_WINDOW_MS = 1000;
-
-let proxyInflight = 0;
-let proxyStarts: number[] = [];
-let proxyMutex: Promise<void> = Promise.resolve();
-const proxyInflightWaiters = new Set<() => void>();
-
-function proxyWithMutex<T>(fn: () => T): Promise<T> {
-  const prev = proxyMutex;
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  proxyMutex = current;
-  const run = (async () => {
-    await prev;
-    try {
-      return fn();
-    } finally {
-      release();
-    }
-  })();
-  return run;
-}
-
-function proxyNotifyInflight(): void {
-  for (const w of Array.from(proxyInflightWaiters)) {
-    try {
-      w();
-    } catch {
-      // A broken waiter must never stall the gate.
-    }
-  }
-}
-
-function proxyAbortableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
-  if (signal?.aborted) return Promise.resolve(true);
-  if (ms <= 0) return Promise.resolve(signal?.aborted ?? false);
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (aborted: boolean) => {
-      if (settled) return;
-      settled = true;
-      try {
-        signal?.removeEventListener("abort", onAbort);
-      } catch {
-        // Detach is best-effort.
-      }
-      resolve(aborted);
-    };
-    const onAbort = () => done(true);
-    try {
-      signal?.addEventListener("abort", onAbort, { once: true });
-    } catch {
-      // Signals without addEventListener stay non-abortable here.
-    }
-    try {
-      Promise.resolve(sleep(ms)).then(
-        () => done(signal?.aborted ?? false),
-        () => done(signal?.aborted ?? false),
-      );
-    } catch {
-      done(signal?.aborted ?? false);
-    }
-  });
-}
-
-function proxyWaitForInflight(signal?: AbortSignal): Promise<boolean> {
-  if (signal?.aborted) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    const onNotify = () => {
-      cleanup();
-      resolve(false);
-    };
-    const onAbort = () => {
-      cleanup();
-      resolve(true);
-    };
-    const cleanup = () => {
-      proxyInflightWaiters.delete(onNotify);
-      try {
-        signal?.removeEventListener("abort", onAbort);
-      } catch {
-        // Detach is best-effort.
-      }
-    };
-    proxyInflightWaiters.add(onNotify);
-    try {
-      signal?.addEventListener("abort", onAbort, { once: true });
-    } catch {
-      // Signals without addEventListener stay non-abortable here.
-    }
-  });
-}
-
-async function acquireProxySlot(signal?: AbortSignal): Promise<(() => void) | null> {
-  if (signal?.aborted) return null;
-  for (;;) {
-    const step = await proxyWithMutex((): { kind: string; ms?: number } => {
-      if (signal?.aborted) return { kind: "abort" };
-      const now = Date.now();
-      while (proxyStarts.length > 0 && (proxyStarts[0] as number) <= now - PROXY_RATE_WINDOW_MS) {
-        proxyStarts.shift();
-      }
-      if (proxyInflight >= PROXY_MAX_INFLIGHT) return { kind: "wait-inflight" };
-      if (proxyStarts.length >= PROXY_MAX_REQUESTS_PER_SECOND) {
-        const waitMs = (proxyStarts[0] as number) + PROXY_RATE_WINDOW_MS - Date.now();
-        return { kind: "wait-rate", ms: waitMs > 0 ? waitMs : 0 };
-      }
-      proxyStarts.push(Date.now());
-      proxyInflight += 1;
-      return { kind: "admit" };
-    });
-    if (step.kind === "admit") {
-      if (signal?.aborted) {
-        await proxyWithMutex(() => {
-          proxyInflight = Math.max(0, proxyInflight - 1);
-        });
-        proxyNotifyInflight();
-        return null;
-      }
-      let done = false;
-      return () => {
-        if (done) return;
-        done = true;
-        proxyInflight = Math.max(0, proxyInflight - 1);
-        proxyNotifyInflight();
-      };
-    }
-    if (step.kind === "abort") return null;
-    if (step.kind === "wait-rate") {
-      const aborted = await proxyAbortableSleep(step.ms ?? 0, signal);
-      if (aborted || signal?.aborted) return null;
-      continue;
-    }
-    const aborted = await proxyWaitForInflight(signal);
-    if (aborted || signal?.aborted) return null;
-  }
-}
-
-/** Test seam: drop global proxy rate state between isolated checks. */
-export function resetProxyRateLimit(): void {
-  proxyInflight = 0;
-  proxyStarts = [];
-  for (const w of Array.from(proxyInflightWaiters)) {
-    try {
-      w();
-    } catch {
-      // Reset must never throw.
-    }
-  }
-  proxyInflightWaiters.clear();
-}
-
 export interface DirectOutcome {
   outcome: "readable" | "http-error" | "network-error" | "cancelled";
   finalUrl?: string;
@@ -279,8 +112,8 @@ export interface WebFetcher {
     finalUrl?: string;
     retryAfterMs?: number;
   }>;
-  fetchMetadataFor(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }>;
-  fetchTileFor(url: string, headers: Record<string, string>, maxRetries?: number): Promise<{ bytes: ArrayBuffer }>;
+  fetchMetadataFor(url: string, headers: Record<string, string>, signal?: AbortSignal): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }>;
+  fetchTileFor(url: string, headers: Record<string, string>, maxRetries?: number, signal?: AbortSignal): Promise<{ bytes: ArrayBuffer }>;
   getActiveTransport(): string | null;
   resetActiveTransport(): void;
 }
@@ -433,6 +266,48 @@ async function readErrorPreview(res: {
   }
 }
 
+function cancelledFailure(url: string): StructuredFailure {
+  return fetchFailure("TRANSPORT_CANCELLED", "The request was cancelled.", false, {
+    cause: { code: "TRANSPORT_CANCELLED", transport: "direct" },
+    url,
+    transportKind: "direct",
+  });
+}
+
+/**
+ * Wait out a retry backoff unless the job is cancelled first. Returns true
+ * when the wait was abandoned so the caller stops without another attempt.
+ */
+async function sleepUnlessAborted(
+  ms: number,
+  sleepFn: (ms: number) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (signal?.aborted) return true;
+  if (!signal || typeof signal.addEventListener !== "function") {
+    await sleepFn(ms);
+    return signal?.aborted ?? false;
+  }
+  let onAbort: (() => void) | null = null;
+  const aborted = new Promise<boolean>((resolve) => {
+    onAbort = () => resolve(true);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  const elapsed = (async () => {
+    await sleepFn(ms);
+    return signal.aborted ?? false;
+  })();
+  const result = await Promise.race([elapsed, aborted]);
+  if (onAbort) {
+    try {
+      signal.removeEventListener("abort", onAbort);
+    } catch {
+      // Detach is best-effort.
+    }
+  }
+  return result;
+}
+
 function defaultFetchImpl(): FetchImplLike | null {
   try {
     const impl = (globalThis as unknown as { fetch?: unknown }).fetch;
@@ -520,8 +395,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   ): Promise<{ ok: boolean; status: number; bytes?: ArrayBuffer; code?: string; reason?: string; finalUrl?: string; retryAfterMs?: number }> {
     if (!deps.proxyTransport) return { ok: false, status: 502, code: "PROXY_ERROR" };
     if (signal?.aborted) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
-    const slot = await acquireProxySlot(signal);
-    if (!slot) return { ok: false, status: 0, code: "TRANSPORT_CANCELLED" };
+    // Proxy admission budget lives in exactly one owner: the injected
+    // product transport (`src/proxyTransport.ts`, server limits
+    // authoritative). This orchestration never re-gates it.
     const reqId = hooks.onRequestStart("proxy");
     const combined = combineTimeout(signal, requestMs);
     try {
@@ -554,7 +430,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
       return { ok: false, status: 502, code: "PROXY_NETWORK_ERROR" };
     } finally {
-      slot();
       combined.cleanup();
       hooks.onUpdate();
     }
@@ -563,8 +438,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   /**
    * Fetch one metadata resource for discovery: direct first with a 1500 ms
    * head start, then the eligible metadata proxy after a classified network
-   * failure (first-wins: the loser is aborted via AbortController so direct
-   * and proxy bytes never overlap). Every readable payload reaches the WASM
+   * failure. Direct settles before the proxy starts, so the two transports
+   * never overlap on the same resource; a caller abort before or during the
+   * fetch rejects as cancelled with no proxy fallback. Every readable payload reaches the WASM
    * core, which is the single authority for discovery. The substring
    * classifier is a UI hint only and never gates.
    *
@@ -583,14 +459,14 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   async function fetchMetadataFor(
     url: string,
     headers: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }> {
+    // A retired job performs no fetch and never falls back to the proxy.
+    if (signal?.aborted) throw cancelledFailure(url);
     const target = shortUrl(url);
     activeTransport = DIRECT_TRANSPORT_LABEL;
-    // AbortController dedupe: the direct loser is aborted before the proxy
-    // starts so the two transports never overlap on the same resource.
-    const directCtrl = new AbortController();
     const directStartedAt = now();
-    const direct = await fetchDirect(url, headers, directCtrl.signal, metadataMs);
+    const direct = await fetchDirect(url, headers, signal, metadataMs);
     hooks.onMetadataAttempt?.({
       startedAt: directStartedAt,
       transport: "direct",
@@ -611,18 +487,13 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (typeof direct.contentType === "string" && direct.contentType !== "") contentType = direct.contentType;
     } else if (
       direct.outcome === "network-error" &&
+      !signal?.aborted &&
       deps.isProxyEligible({ url, kind: "metadata", headers }).eligible
     ) {
-      try {
-        directCtrl.abort();
-      } catch {
-        // Abort is idempotent when the head-start timeout already fired; it
-        // must never break the automatic proxy fallback.
-      }
       activeTransport = PROXY_TRANSPORT_LABEL;
       via = "proxy";
       let proxyStartedAt = now();
-      let proxied = await fetchViaProxy(url);
+      let proxied = await fetchViaProxy(url, signal);
       hooks.onMetadataAttempt?.({
         startedAt: proxyStartedAt,
         transport: "metadata proxy",
@@ -638,9 +509,9 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         const delay = proxyRateLimitDelayMs(proxied.retryAfterMs);
         if (delay !== null) {
           hooks.onLog(`Metadata proxy rate-limited; retrying once after ${delay} ms.`);
-          await sleepFn(delay);
+          if (await sleepUnlessAborted(delay, sleepFn, signal)) throw cancelledFailure(url);
           proxyStartedAt = now();
-          proxied = await fetchViaProxy(url);
+          proxied = await fetchViaProxy(url, signal);
           hooks.onMetadataAttempt?.({
             startedAt: proxyStartedAt,
             transport: "metadata proxy",
@@ -651,6 +522,7 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
         }
       }
       if (!proxied.ok || !proxied.bytes) {
+        if (signal?.aborted || proxied.code === "TRANSPORT_CANCELLED") throw cancelledFailure(url);
         if (proxied.code === "PROXY_RATE_LIMITED") {
           throw fetchFailure("UPSTREAM_RATE_LIMITED", deps.messages.rateLimitedBySite, true, {
             cause: { code: "UPSTREAM_RATE_LIMITED", http: 429, transport: "metadata-proxy" },
@@ -666,6 +538,10 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       }
       bytes = proxied.bytes;
       if (typeof proxied.finalUrl === "string" && proxied.finalUrl !== "") finalUri = proxied.finalUrl;
+    } else if (direct.outcome === "cancelled" || signal?.aborted) {
+      // A retired job never falls back to the proxy and never reports a
+      // retryable discovery failure for its own cancellation.
+      throw cancelledFailure(url);
     } else if (direct.outcome === "http-error") {
       // The typed cause carries the HTTP status and the bounded server
       // signal; both stay in local-only diagnostics (see the redact hint
@@ -723,10 +599,12 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     url: string,
     headers: Record<string, string>,
     maxRetries: number = TILE_MAX_RETRIES,
+    signal?: AbortSignal,
   ): Promise<{ bytes: ArrayBuffer }> {
     let lastOutcome = "network-error";
     let lastStatus: number | undefined;
     for (let attempt = 0; ; attempt++) {
+      if (signal?.aborted) throw cancelledFailure(url);
       hooks.onTileAttempt?.(attempt > 0);
       if (deps.throttle) {
         try {
@@ -735,17 +613,24 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
           // Throttle waits must never fail a tile.
         }
       }
-      const direct = await fetchDirect(url, headers, undefined, requestMs, false);
+      if (signal?.aborted) throw cancelledFailure(url);
+      const direct = await fetchDirect(url, headers, signal, requestMs, false);
       if (direct.outcome === "readable" && direct.bytes) {
         return { bytes: direct.bytes };
       }
       lastOutcome = direct.outcome;
       lastStatus = direct.status;
-      if (direct.outcome === "cancelled" || attempt >= maxRetries) {
+      // HTTP refusals are permanent at the route (a 403 stays refused): only
+      // transient network failures retry here. The engine owns the one retry
+      // budget across routes, so a repeated refusal costs one attempt each.
+      if (direct.outcome === "http-error" || direct.outcome === "cancelled" || attempt >= maxRetries) {
         break;
       }
-      await sleepFn(tileRetryDelayMs(attempt, deps.randomFn));
+      if (await sleepUnlessAborted(tileRetryDelayMs(attempt, deps.randomFn), sleepFn, signal)) {
+        throw cancelledFailure(url);
+      }
     }
+    if (signal?.aborted || lastOutcome === "cancelled") throw cancelledFailure(url);
     const error: StructuredFailure = maxRetries === TILE_MAX_RETRIES
       ? tileFailedError(lastOutcome, lastStatus, url)
       : failure(

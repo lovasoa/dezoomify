@@ -30,8 +30,15 @@
 //!   host holds as an ordinary image (no readable bytes) with a successful
 //!   tile outcome; the tainted output completes as display-only downstream.
 //! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request), a
-//!   failed `TileOutcome` (tile request), or a missing `ProbeOutcome`
+//!   typed `TileFailed` carrying the observed HTTP status and `retry-after`
+//!   hint for tile refusals (permanent failures such as HTTP 403 settle
+//!   after exactly one attempt; transient failures retry on the exact
+//!   budget with explicit timer effects), or a missing `ProbeOutcome`
 //!   (probe request).
+//! * `RetryTimerElapsed` answers one outstanding `wait-retry-timer` effect
+//!   with the same tile and attempt after the host waited `delay_ms` on
+//!   its own clock. While paused the host parks the completion and answers
+//!   on resume; stale completions are ignored.
 //! * Decisions: `SelectImage`, `SelectLevel`, and `RecoveryChoice` map 1:1
 //!   onto engine responses. `RecoveryChoice` must reference the outstanding
 //!   numeric decision generation.
@@ -52,7 +59,7 @@ use dezoomify_core::core::discovery::{FetchCause, FetchCode, PolicyReason, Trans
 use dezoomify_job::{
     Job as EngineJob, JobCommand as EngineCommand, JobEffect as EngineEffect,
     JobError as EngineJobError, JobEvent as EngineEvent, JobMessageBody, Outcome,
-    RecoveryChoice as EngineRecoveryChoice,
+    RecoveryChoice as EngineRecoveryChoice, TileFailure as EngineTileFailure,
 };
 use dezoomify_protocol::dto::{
     ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostEffect, HostMessage,
@@ -270,6 +277,21 @@ impl Session {
         self.disposed
     }
 
+    /// Project the canonical engine snapshot for the active job: absolute
+    /// lifecycle, pause flag, progress, selection/decision payload,
+    /// terminal result, and output summary. No new work is issued.
+    ///
+    /// # Errors
+    ///
+    /// `disposed` after disposal; `wrong-state` before `Start` creates the job.
+    pub fn snapshot(&self) -> Result<dezoomify_protocol::dto::EngineSnapshotDto, AdapterError> {
+        self.require_live()?;
+        let job = self.job.as_ref().ok_or_else(|| {
+            AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
+        })?;
+        Ok(dezoomify_job::project_engine_snapshot(job))
+    }
+
     fn require_live(&self) -> Result<(), AdapterError> {
         if self.disposed {
             return Err(AdapterError::new(
@@ -377,6 +399,14 @@ impl Session {
         self.arena.free(handle)
     }
 
+    /// Currently retained arena bytes (live allocations only). Hosts use
+    /// it to observe quota pressure; it never exposes contents, paths, or
+    /// handles. Ordinary tile acknowledgements retain zero bytes.
+    #[must_use]
+    pub fn retained_bytes(&self) -> u64 {
+        self.arena.total_retained()
+    }
+
     /// Project a live arena handle onto the generated buffer reference.
     ///
     /// # Errors
@@ -429,6 +459,9 @@ impl Session {
                 self.on_probe_outcome(request, outcome)
             }
             JobCommand::ProvideDisplayOutcome { request } => self.on_display_outcome(request),
+            JobCommand::RetryTimerElapsed { tile, attempt } => {
+                self.forward(EngineCommand::RetryTimerElapsed { tile, attempt })
+            }
             JobCommand::SelectImage { image } => self.forward(EngineCommand::SelectImage { image }),
             JobCommand::SelectLevel { level } => self.forward(EngineCommand::SelectLevel { level }),
             JobCommand::RecoveryChoice { generation, choice } => {
@@ -698,9 +731,20 @@ impl Session {
                 self.require_engine_state(SessionState::AcquiringTiles)?;
                 self.outstanding_tile_requests.remove(&request);
                 self.request_context.remove(&request);
-                self.forward(EngineCommand::TileOutcome {
+                // The bridge forwards the observed facts into a typed engine
+                // failure: the HTTP status decides retryability (permanent
+                // refusals such as HTTP 403 settle after exactly one
+                // attempt), and an observed `retry-after` hint sets the
+                // explicit wait before a transient retry. The engine emits
+                // one `wait-retry-timer` effect per remaining attempt.
+                self.forward(EngineCommand::TileFailed {
                     tile: tile_id,
-                    ok: false,
+                    failure: EngineTileFailure::new(
+                        failure.code,
+                        failure.http,
+                        failure.retry_after_ms,
+                        failure.detail,
+                    ),
                 })
             }
             None => {
@@ -880,6 +924,18 @@ impl Session {
                 }),
             },
             EngineEffect::CancelWork => HostEffect::CancelWork,
+            // One explicit retry wait per remaining transient attempt: the
+            // host waits `delay_ms` on its own clock and answers with
+            // `RetryTimerElapsed` carrying the same tile and attempt.
+            EngineEffect::WaitForRetry {
+                tile,
+                attempt,
+                delay_ms,
+            } => HostEffect::WaitRetryTimer {
+                tile,
+                attempt,
+                delay_ms,
+            },
             EngineEffect::RequestDecision { generation } => {
                 self.pending_recovery = Some(generation);
                 HostEffect::RequestDecision { generation }

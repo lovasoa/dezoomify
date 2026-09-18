@@ -4,11 +4,11 @@ The CLI and Tauri desktop app share `crates/dezoomify-native`: native HTTP, file
 
 ## Native runtime
 
-- HTTP with redirects, user headers, auth, 16 concurrent tile fetches (website 6, extension 6, native 16), per-host pacing 5/s (200 ms floor, `max(--min-interval, 200 ms)`), retry backoff (2 s base, doubling; `--retries 0` means none), 30 s request / 6 s connect timeouts, HTTP/1.1 keep-alive (32 idle per host, 15 s, 100 total), transport retries 1, persistent throttles fail closed, cancellation;
+- HTTP with redirects, user headers, auth, 16 concurrent tile fetches (website 6, extension 6, native 16), per-host pacing 5/s (200 ms floor, `max(--min-interval, 200 ms)`), engine-driven retry timing (1 s base doubling to 30 s max, `Retry-After` honored to 300 s; `--retries 0` means none; `--retry-delay` is accepted but currently unused), 30 s request / 6 s connect timeouts, HTTP/1.1 keep-alive through one reqwest transport (32 idle per host, 15 s idle), single-attempt fetches with manual redirect handling, persistent throttles fail closed, cancellation;
 - format selection (`PipelineConfig::format`: `None`/`auto` detects; a name picks one program; unknown names fail `discovery.unknown-dezoomer`);
 - remote fetch plus local reads (plain paths, `file://` absolute paths only; single local `tiles.yaml` and local tile URIs flow end to end; credentials stay scoped, errors redacted);
 - level selection (`--largest`, exact `--zoom-level`, width/height caps, `--image-index`; out-of-range picks the last);
-- fixed-pool fetch plus decode (16 workers, no async runtime), assembly bounded by available memory;
+- fixed-pool fetch plus decode (16 tile workers on scoped threads over one reqwest transport with a 2-worker Tokio I/O runtime), assembly bounded by available memory;
 - PNG (deflate tier from `--compression`), JPEG (quality `100 - compression`, default 95), TIFF (deflate, always lossless), ZIF (multi-level pyramid, per-level deflate), lossless WebP, `iiif-dir`, atomic publication, first-tile ICC preserved (JPEG, PNG, TIFF, ZIF, WebP) and EXIF (PNG);
 - tile resume cache on by default (`<cache-dir>/<job>/<key>`, custom `--tile-cache`); reruns skip tiles whose stored bytes still decode.
 

@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "dependencies": {
+    "@dezoomify/app-model": "workspace:*"
+  },
   "scripts": {
     "test": "node --test-reporter=dot --test ../../test/controller.test.mjs",
     "typecheck": "tsc --noEmit"

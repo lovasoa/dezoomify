@@ -57,6 +57,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@dezoomify/app-model':
+        specifier: workspace:*
+        version: link:../../packages/app-model
       '@dezoomify/browser-runtime':
         specifier: workspace:*
         version: link:../../packages/browser-runtime
@@ -159,13 +162,26 @@ importers:
         specifier: 1.63.0
         version: 1.63.0
 
-  packages/browser-runtime:
+  packages/app-model:
     dependencies:
       '@dezoomify/wasm-bindings':
         specifier: workspace:*
         version: link:../wasm-bindings
 
+  packages/browser-runtime:
+    dependencies:
+      '@dezoomify/app-model':
+        specifier: workspace:*
+        version: link:../app-model
+      '@dezoomify/wasm-bindings':
+        specifier: workspace:*
+        version: link:../wasm-bindings
+
   packages/shared-ui:
+    dependencies:
+      '@dezoomify/app-model':
+        specifier: workspace:*
+        version: link:../app-model
     devDependencies:
       '@types/react':
         specifier: ^19.0.0

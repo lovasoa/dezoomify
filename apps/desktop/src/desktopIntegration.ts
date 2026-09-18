@@ -4,6 +4,7 @@
 // No imports from apps/web, apps/extension, browser-session fetch, or the
 // metadata CORS proxy. The desktop app uses native effects only.
 
+import { invoke as publicInvoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 // Keep erasable syntax only so node type-stripping can read this file.
@@ -140,20 +141,10 @@ function extensionFor(format: NativeFormat): string {
   return ".webp";
 }
 
-// Minimal Tauri IPC access. The Tauri runtime always injects
-// __TAURI_INTERNALS__; non-Tauri hosts (node tests) leave it absent and the
-// integration falls back to validation-only grants. No other host global is
-// ever touched.
-interface TauriInternals {
-  invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
-}
-
-function tauriInvoke(): TauriInternals["invoke"] | null {
-  const internals = (globalThis as Record<string, unknown>)["__TAURI_INTERNALS__"] as
-    | TauriInternals
-    | undefined;
-  return internals ? internals.invoke : null;
-}
+// Tauri IPC access goes through the public guest binding only. Tests inject
+// an explicit `invoke` double; the default calls the real host and reports
+// typed denials when the host is unreachable. No host globals are read here.
+export type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 interface DestinationCommandResult {
   readonly outcome: SaveOutcome;
@@ -163,8 +154,11 @@ interface DestinationCommandResult {
 
 export function createDesktopIntegration(opts?: {
   extensionAvailable?: boolean;
+  invoke?: DesktopInvoke;
 }): AppIntegration {
   const extensionAvailable = opts?.extensionAvailable ?? false;
+  const invoke: DesktopInvoke =
+    opts?.invoke ?? ((cmd, args) => publicInvoke(cmd, args));
 
   function getCapabilities(): DesktopCapabilities {
     return {
@@ -186,8 +180,8 @@ export function createDesktopIntegration(opts?: {
   // Native save path: validate the request, then route through the real
   // Tauri command, which shows the native save dialog, grants the
   // destination through the validated dispatch, and reports completion only
-  // after atomic output finalization. Non-Tauri hosts (unit tests) get the
-  // validation-only grant.
+  // after atomic output finalization. Unreachable hosts report a typed
+  // denial; validation runs before any IPC.
   async function requestSaveDestination(req: SaveRequest): Promise<SaveResult> {
     if (!isValidJobId(req.jobId)) {
       return { outcome: "denied", reason: "invalid-job-id" };
@@ -201,10 +195,6 @@ export function createDesktopIntegration(opts?: {
     }
     if (req.suggestedName.includes("\0") || req.suggestedName.includes("..")) {
       return { outcome: "denied", reason: "invalid-path" };
-    }
-    const invoke = tauriInvoke();
-    if (!invoke) {
-      return { outcome: "granted" };
     }
     try {
       const raw = (await invoke("request_destination", {
@@ -291,13 +281,10 @@ export function createDesktopIntegration(opts?: {
     if (u.username !== "" || u.password !== "") {
       return { opened: false, reason: "userinfo-denied" };
     }
-    const invoke = tauriInvoke();
-    if (!invoke) {
-      return { opened: true, reason: "external" };
-    }
     // Use the official guest binding rather than hand-written plugin IPC.
     // It targets the registered opener plugin while the capability document
-    // grants `opener:allow-open-url` for this window.
+    // grants `opener:allow-open-url` for this window. Failures (including an
+    // unreachable host) report a typed denial.
     try {
       await openUrl(url);
       return { opened: true, reason: "external" };

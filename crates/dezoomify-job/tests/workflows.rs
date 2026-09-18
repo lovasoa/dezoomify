@@ -282,6 +282,19 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
         ok: false,
     })
     .unwrap();
+    // Acquisition settles before the partial decision: with two tiles
+    // still in flight the failure is stashed, not decided.
+    assert_eq!(host.state(), "AcquiringTiles");
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[2],
+        ok: true,
+    })
+    .unwrap();
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[3],
+        ok: true,
+    })
+    .unwrap();
     assert_eq!(host.state(), "AwaitingPartialDecision");
 
     host.apply(JobCommand::RecoveryChoice {
@@ -499,7 +512,7 @@ fn seqs_are_sorted(transcript: &[String]) -> bool {
 
 #[test]
 fn pause_suspends_new_tiles_and_resume_redrives() {
-    // Pause v1 (suspend-acquisition): pause stops scheduling new tiles,
+    // Pause (suspend-acquisition): pause stops scheduling new tiles,
     // in-flight finishes, decoded output is retained, resume re-drives.
     // The 19 states are unchanged; pause is an orthogonal overlay.
     let mut host = ScriptedHost::new(&job_id(6), INPUT_URL, test_config()).unwrap();

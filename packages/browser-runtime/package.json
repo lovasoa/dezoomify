@@ -12,6 +12,7 @@
     "./engine-host": "./src/engine-host.ts"
   },
   "dependencies": {
+    "@dezoomify/app-model": "workspace:*",
     "@dezoomify/wasm-bindings": "workspace:*"
   },
   "scripts": {

@@ -57,9 +57,9 @@
 //!   exception and runs native conformance instead.
 
 #![forbid(unsafe_code)]
-// 6.1 unwrap policy: shipped adapter code maps failures to typed
-// `AdapterError`s instead of panicking (see the crate-root comment in
-// `dezoomify-protocol` for how tests stay exempt).
+// Shipped adapter code maps failures to typed `AdapterError`s instead of
+// panicking (see the crate-root comment in `dezoomify-protocol` for how
+// tests stay exempt).
 #![deny(clippy::unwrap_used)]
 
 pub mod buffer;
@@ -80,7 +80,8 @@ pub use session::{
 pub mod wasm_api {
     use super::{buffer::ArenaHandle, session::Session};
     use dezoomify_protocol::dto::{
-        BufferHandle, ErrorDto, HostMessage, JobCommand, ProcessingRequest, SessionConfig,
+        BufferHandle, EngineSnapshotDto, ErrorDto, HostMessage, JobCommand, ProcessingRequest,
+        SessionConfig,
     };
     use serde::Serialize;
     use tsify::{Ts, Tsify};
@@ -216,6 +217,25 @@ pub mod wasm_api {
             self.inner
                 .apply_processing(request.recipe, bytes.to_vec())
                 .map_err(|error| JsError::new(&error.to_string()))
+        }
+
+        /// Project the canonical engine snapshot for the active job.
+        /// Absolute state for UI rendering; issues no work.
+        #[wasm_bindgen(js_name = "snapshot")]
+        pub fn snapshot(&self) -> Result<Ts<EngineSnapshotDto>, JsError> {
+            self.inner
+                .snapshot()
+                .map_err(|error| JsError::new(&error.to_string()))?
+                .into_ts()
+                .map_err(conversion_error)
+        }
+
+        /// Currently retained arena bytes (live allocations only). Hosts
+        /// use it to observe quota pressure; ordinary tile
+        /// acknowledgements retain zero bytes.
+        #[wasm_bindgen(js_name = "retainedBytes")]
+        pub fn retained_bytes(&self) -> u64 {
+            self.inner.retained_bytes()
         }
 
         /// Cancel/release session resources; repeat-safe (`dispose`).

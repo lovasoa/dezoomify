@@ -15,6 +15,8 @@ pub const MAX_DECODES: u32 = 64;
 pub const MAX_TILES_LIMIT: u32 = 16_777_216;
 /// Maximum retries allowed by validation.
 pub const MAX_RETRIES_LIMIT: u32 = 1_024;
+/// Maximum same-job deferred follows allowed by validation.
+pub const MAX_DEFERRED_FOLLOWS_LIMIT: u32 = 64;
 /// Maximum retained buffers allowed by validation.
 pub const MAX_BUFFERS_LIMIT: u32 = 65_536;
 /// Minimum metadata bytes accepted (smaller is a configuration error).
@@ -55,6 +57,8 @@ pub struct Config {
     pub max_retries: u32,
     pub max_buffers: u32,
     pub max_bytes: u64,
+    /// Maximum same-job deferred catalog follows (0 disables following).
+    pub max_deferred_follows: u32,
 }
 
 impl Default for Config {
@@ -66,6 +70,7 @@ impl Default for Config {
             max_retries: 3,
             max_buffers: 16,
             max_bytes: 67_108_864,
+            max_deferred_follows: 8,
         }
     }
 }
@@ -121,6 +126,15 @@ impl Config {
                 format!(
                     "max_retries {} exceeds {MAX_RETRIES_LIMIT}",
                     self.max_retries
+                ),
+            ));
+        }
+        if self.max_deferred_follows > MAX_DEFERRED_FOLLOWS_LIMIT {
+            return Err(ConfigError::new(
+                "job.resource-limit",
+                format!(
+                    "max_deferred_follows {} exceeds {MAX_DEFERRED_FOLLOWS_LIMIT}",
+                    self.max_deferred_follows
                 ),
             ));
         }
