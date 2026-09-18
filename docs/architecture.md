@@ -49,16 +49,25 @@ The browser effect layer: workers, fetching, decoding, tile painting, canvases, 
 
 ```mermaid
 flowchart LR
-    subgraph Web[Browser hosts]
+    subgraph PAGE[Host page]
         SITE[Website]
         EXT[Extension job tab]
+        EH[engine-host.ts]
+        T1[Website transport:<br/>direct fetch + metadata proxy]
+        T2[Extension transport:<br/>tab-origin fetch + img fallback]
     end
-    SITE --> EH[engine-host.ts]
+    subgraph WASM[WASM module]
+        SES[Session<br/>job + byte arena]
+        JOB[crates/dezoomify-job]
+        CORE[crates/dezoomify-core]
+    end
+    SITE --> EH
     EXT --> EH
-    EH --> WASM[crates/dezoomify-wasm]
-    WASM --> JOB[crates/dezoomify-job]
-    EH --> T1[Website transport:<br/>direct fetch + metadata proxy]
-    EH --> T2[Extension transport:<br/>tab-origin fetch + img fallback]
+    EH --> T1
+    EH --> T2
+    EH <-->|commands<br/>results| SES
+    SES <--> JOB
+    JOB <-->|bytes and results| CORE
 ```
 
 ### Metadata CORS proxy

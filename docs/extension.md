@@ -10,11 +10,11 @@ The first batch holds the top document's rendered `outerHTML`, then rendered DOM
 
 Core runs as WASM inside the job tab. It evaluates captured DOM bytes before fetching URL-only roots; the first root yielding an image confirms detection.
 
-`apps/extension/src/background/source-operations.ts` holds the two functions passed to `scripting.executeScript()`: one snapshots rendered roots plus retained resource-timing entries once the job tab is ready; the other fetches in the tab's origin and returns bounded structured-cloneable chunks. Neither registers a listener. A follow-up snapshot is bounded and deduplicated when discovery asks for more candidates. A stale binding or failed start shows an error badge; the extension never silently opens another page.
+`apps/extension/src/background/source-operations.ts` holds the two functions passed to `scripting.executeScript()`: one snapshots rendered roots plus retained resource-timing entries once the job tab is ready; the other fetches in the tab's origin and returns one bounded base64 payload. Neither registers a listener. A follow-up snapshot is bounded and deduplicated when discovery asks for more candidates. A stale binding or failed start shows an error badge; the extension never silently opens another page.
 
 ## Fetching
 
-Readable bytes come from a tab-origin fetch under the narrowest grant: `activeTab` for the clicked tab, or an explicitly granted host permission for another origin or redirect target. Same-origin credentials apply, so the page's own session covers its origin while a public metadata server answering `Access-Control-Allow-Origin: *` stays readable. On source-tab failure the job retries through the independent extension-origin transport, pausing for the grant only when missing. A granted-origin 401/403 fails typed with no re-prompt; grants fix no refusals. Every operation validates URL, method, headers, shape, and byte cap.
+Readable bytes come from a tab-origin fetch under the narrowest grant: `activeTab` for the clicked tab, or an explicitly granted host permission for another origin or redirect target. Same-origin credentials apply, so the page's own session covers its origin while a public metadata server answering `Access-Control-Allow-Origin: *` stays readable. Metadata and requests for the bound source document's own origin try the tab origin first, so referrer- and cookie-protected same-origin tiles look like the viewer; a source-tab failure retries through the independent extension-origin transport, pausing for the grant only when missing. Cross-origin tiles always use the extension origin under a granted host permission. A granted-origin 401/403 fails typed with no re-prompt; grants fix no refusals. Every operation validates URL, method, headers, shape, and byte cap.
 
 The extension never uses the metadata proxy. Ordinary unprocessed tiles without readable bytes fall back to `<img>` display: visible but tainted, no reads or saves. Transport labels live in `packages/browser-runtime/src/transport-labels.ts`.
 
@@ -42,7 +42,7 @@ Each context logs structured console lines (`[<context>] [<code> ]<detail>`): `b
 
 The logger lives in `packages/browser-runtime/src/logging.ts`, imported via the `./logging` subpath, never the barrel. The job tab mirrors accepted lines plus forwarded `engine.log` lines into the technical-details log, so job views, failed views, and copied diagnostics carry the trace.
 
-Milestones log at info, per-tile/chunk detail at debug, recoverable states at warn, terminal failures at error; default is info. URLs log in full; details are bounded.
+Milestones log at info, per-tile detail at debug, recoverable states at warn, terminal failures at error; default is info. URLs log in full; details are bounded.
 
 ## Appendix: source binding and job-tab contract
 
@@ -54,6 +54,7 @@ sequenceDiagram
     participant B as Background coordinator
     participant S as Source tab (finite ops)
     participant J as Job tab (engine host)
+    participant W as WASM Session
     U->>B: toolbar click
     B->>B: bind job + tab and frame IDs + document generation
     B->>J: open dedicated job tab
@@ -61,16 +62,25 @@ sequenceDiagram
     B->>S: scripting.executeScript collectCandidates (bounded snapshot)
     S-->>B: ordered roots (outerHTML, same-origin iframes, timing URLs)
     B->>J: candidate roots
-    J->>J: core discovery over WASM
+    J->>W: dispatch Start
+    W-->>J: acquire-resource effects
     alt source fetch needed
         B->>S: tab-origin fetch (bounded chunks)
         S-->>B: bytes
         B->>J: bytes
+        J->>W: resource bytes
+        W-->>J: catalog event
     else source-context failure
         J->>B: extension-origin retry request
         B->>B: pause for host grant only when missing
         B->>J: extension-origin bytes or typed refusal
+        J->>W: resource bytes or fetch failure
+        W-->>J: catalog event or typed failure
     end
+    J->>W: dispatch select and plan commands
+    W-->>J: tile effects
+    J->>W: tile outcomes
+    W-->>J: finalization effect
     J-->>U: progress, save, or typed failure
 ```
 
@@ -80,7 +90,7 @@ Bindings stored in session storage hold no secrets. A worker restart restores a 
 
 `collectCandidates` snapshots rendered `outerHTML` for the document and readable same-origin iframes, then URL-only retained timing entries; cross-origin iframes are skipped. Follow-up snapshots are optional, bounded, and coordinator-deduplicated. No persistent observer exists. Overflow returns as diagnostics, never silent discard.
 
-Candidate and fetch messages use one closed TypeScript union private to the installed build; no cross-version interface. Cancellation stops the source fetch before more chunks are kept. No webpage frame receives extension runtime messages.
+Candidate and fetch messages use one closed TypeScript union private to the installed build; no cross-version interface. Cancellation stops the source fetch before more bytes are kept. No webpage frame receives extension runtime messages.
 
 Outcome classes cover document loss, access required, redirect limits, cancellation, network/throttling, malformed responses, streaming limits, and channel loss. Source-context failure falls back to extension-origin transport; a definitive HTTP response returns straight to discovery (repeating fixes nothing). Missing-grant (`permission-denied`) pauses with host names and rationale; only a visible job-tab action opens the permission prompt. Granted-origin 401/403 is an upstream refusal, not a missing grant: typed failure, no pause. Redirects are never accepted retrospectively.
 
