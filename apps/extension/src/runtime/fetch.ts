@@ -7,7 +7,7 @@
  * Source-document requests are owned by the coordinator/source script; this
  * transport is only for extension-origin requests with an existing host grant.
  */
-import { blockedReason } from "@dezoomify/browser-runtime";
+import { blockedReason, forwardCoreHeaders, isPublicHttpUrl, normalizeErrorPreviewText, originOfUrl } from "@dezoomify/browser-runtime";
 import type { HostFailure } from "@dezoomify/browser-runtime";
 
 export const PROXY_PATH = "/api/proxy";
@@ -27,11 +27,6 @@ type FetchDeps = {
 
 /** @typedef {"source-document-lost"|"access-required"|"forbidden"|"redirect-unavailable"|"cancelled"|"network"|"throttled"|"malformed"|"limit-exceeded"} TransportCategory */
 
-/** Headers the core may safely ask a browser fetch to forward. */
-export const CORE_REQUEST_HEADERS = Object.freeze([
-  "accept", "accept-language", "if-modified-since", "if-none-match", "range",
-]);
-
 /** MIME families accepted for bytes intended for an image or metadata parser. */
 export const ALLOWED_MIME_PREFIXES = Object.freeze([
   "image/", "application/xml", "text/xml", "application/json", "application/ld+json",
@@ -41,12 +36,6 @@ export const ALLOWED_MIME_PREFIXES = Object.freeze([
 /** @param {string} url */
 export function isProxyUrl(url: string): boolean {
   return typeof url === "string" && url.includes(PROXY_PATH);
-}
-
-/** @param {string} url */
-export function originOf(url: string): string {
-  const u = new URL(url);
-  return `${u.protocol}//${u.hostname.toLowerCase()}${u.port ? `:${u.port}` : ""}`;
 }
 
 /** @param {TransportCategory} category @param {string} message @param {Record<string, unknown>} [extra] */
@@ -65,23 +54,6 @@ export function asFetchFailure(error: unknown): HostFailure {
     blocked_reason: category,
     transport: "browser-session",
   };
-}
-
-/** @param {unknown} headers @param {"metadata"|"tile"|"probe"} purpose */
-export function forwardCoreHeaders(headers: unknown, purpose: Purpose): Record<string, string> {
-  /** @type {Record<string, string>} */
-  const out: Record<string, string> = {};
-  const pairs = Array.isArray(headers)
-    ? headers.map((header) => [header?.name, header?.value])
-    : Object.entries(headers && typeof headers === "object" ? headers : {});
-  for (const [rawName, rawValue] of pairs) {
-    if (typeof rawName !== "string" || typeof rawValue !== "string") continue;
-    const name = rawName.toLowerCase();
-    if (!CORE_REQUEST_HEADERS.includes(name) || /\r|\n/.test(rawName) || /\r|\n/.test(rawValue)) continue;
-    if ((name === "if-modified-since" || name === "if-none-match") && purpose !== "metadata") continue;
-    out[name] = rawValue;
-  }
-  return out;
 }
 
 /** @param {unknown} value */
@@ -168,9 +140,7 @@ async function errorSignal(response: FetchResponse): Promise<string> {
     const text = typeof (response as { text?: unknown }).text === "function"
       ? await (response as unknown as { text(): Promise<string> }).text()
       : "";
-    if (!text || text.includes("\0")) return "";
-    const flat = text.replace(/<[^>]{0,512}>/g, " ").replace(/[\x00-\x1F\x7F]+/g, " ").replace(/\s+/g, " ").trim();
-    return flat.length > ERROR_SNIPPET_MAX_CHARS ? flat.slice(0, ERROR_SNIPPET_MAX_CHARS) : flat;
+    return normalizeErrorPreviewText(text, ERROR_SNIPPET_MAX_CHARS);
   } catch {
     return "";
   }
@@ -186,7 +156,7 @@ function checkedUrl(url: string): URL {
   if (isProxyUrl(url)) throw transportError("malformed", "proxy transport is forbidden in the extension");
   let parsed;
   try { parsed = new URL(url); } catch { throw transportError("malformed", "invalid URL"); }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw transportError("malformed", "unsupported URL scheme");
+  if (!isPublicHttpUrl(parsed.href)) throw transportError("malformed", "unsupported URL scheme");
   return parsed;
 }
 
@@ -201,7 +171,7 @@ export function createExtensionFetcher(deps: FetchDeps) {
   /** @param {string} url @param {{ requestId?: number, purpose?: "metadata"|"tile"|"probe", headers?: unknown, maxBytes?: number, timeoutMs?: number, cancelled?: () => boolean }} [opts] */
   async function fetchResource(url: string, opts: FetchOptions = {}) {
     const parsed = checkedUrl(url);
-    const origin = originOf(parsed.href);
+    const origin = originOfUrl(parsed.href);
     if (!opts.userIntent) throw transportError("access-required", "explicit user intent is required", { code: "intent-required" });
     if (!(await deps.hasPermission(origin))) {
       throw transportError("access-required", `Access to ${origin} requires an explicit action`, { hosts: [origin], code: "permission-denied" });

@@ -30,8 +30,8 @@ export interface ProbeBitmap {
 }
 
 export interface ProbeSizeDeps {
-  /** Fetch one tile as readable bytes. */
-  fetchTile(url: string, headers: Record<string, string>): Promise<{ bytes: ArrayBuffer }>;
+  /** Fetch one tile as readable bytes. The engine request id lets a host route the probe without colliding with tile requests. */
+  fetchTile(url: string, headers: Record<string, string>, requestId?: number): Promise<{ bytes: ArrayBuffer }>;
   /** Decode fetched bytes far enough to report dimensions. */
   decode(bytes: ArrayBuffer): Promise<ProbeBitmap>;
   /** Measure dimensions without byte access (plain <img> fallback). */
@@ -50,11 +50,11 @@ function observedSize(
     : { status: "missing" };
 }
 
-export function createProbeSize(deps: ProbeSizeDeps): (url: string, headers: Record<string, string>) => Promise<ProbeSize> {
-  return async (url: string, headers: Record<string, string>): Promise<ProbeSize> => {
+export function createProbeSize(deps: ProbeSizeDeps): (url: string, headers: Record<string, string>, requestId?: number) => Promise<ProbeSize> {
+  return async (url: string, headers: Record<string, string>, requestId?: number): Promise<ProbeSize> => {
     let bytes: ArrayBuffer;
     try {
-      ({ bytes } = await deps.fetchTile(url, headers));
+      ({ bytes } = await deps.fetchTile(url, headers, requestId));
     } catch (error) {
       // A missing host grant is actionable (the host pauses for permission),
       // never a silent missing probe. Only other fetch failures fall through

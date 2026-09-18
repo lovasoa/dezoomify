@@ -10,13 +10,21 @@
 
 import { collectCandidates, fetchSource } from "./source-operations.ts";
 import { LOG_LEVELS, LOG_MAX_CHARS, createLogger } from "@dezoomify/browser-runtime/logging";
+import {
+  SOURCE_FETCH_BYTE_LIMIT,
+  decodeBase64Payload,
+  isPublicHttpUrl,
+  normalizeFetchMethod,
+  originOfPublicUrl,
+  validateEngineHeaders,
+} from "@dezoomify/browser-runtime";
 
 type LogLevel = keyof typeof LOG_LEVELS;
 type Message = Record<string, unknown> & { type?: string; requestId?: string; jobId?: string; tabId?: number; frameId?: number; documentGeneration?: number; url?: string; method?: string; headers?: unknown; origins?: unknown };
 type CandidateInput = { url: string; contents?: string };
 type CandidateSnapshot = { ok: true; documentUrl: string; inputs: CandidateInput[]; overflow: number };
 type CandidateBatch = { requestId: string; inputs: CandidateInput[]; overflow: number; documentUrl: string };
-type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; chunks?: Array<{ sequence: number; bytes: number[] }> };
+type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; data?: string };
 type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string>; primary: boolean };
 export type BrowserApi = {
   action?: { setIcon?: (details: unknown) => Promise<void>; setBadgeText?: (details: unknown) => Promise<void>; onClicked?: { addListener?: (listener: (tab: BrowserTab) => void) => void } };
@@ -36,25 +44,12 @@ const HELD_CANDIDATE_LIMIT = 64;
 const MAX_SNAPSHOTS = 4;
 const MAX_URL_LENGTH = 2048;
 const MAX_CANDIDATES = 100;
-const MAX_HEADER_COUNT = 64;
-const MAX_HEADER_NAME_LENGTH = 256;
-const MAX_HEADER_VALUE_LENGTH = 4096;
-const MAX_FETCH_CHUNK_BYTES = 32 * 1024;
-const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
+// Base64 ceiling for one SOURCE_FETCH_BYTE_LIMIT body. The length bound
+// rejects oversized payloads before decoding; the decoded byte count is
+// cross-checked too.
+const MAX_SOURCE_DATA_CHARS = 11184812;
 
 export const BACKGROUND_LOG_MAX_CHARS = LOG_MAX_CHARS;
-
-function isPublicHttpUrl(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  try { const url = new URL(value); return url.protocol === "http:" || url.protocol === "https:"; } catch { return false; }
-}
-function permissionOrigin(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : null;
-  } catch { return null; }
-}
 
 function sameDocumentUrl(a: string, b: string): boolean {
   try {
@@ -233,25 +228,6 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
     backgroundLog("info", "job-created", `jobId=${jobId} jobTab=${jobTab.id} sourceTab=${tabId} frame=${entry.frameId} url=${tab.url}`);
   }
 
-  function validSourceHeaders(headers: unknown): Array<{ name: string; value: string }> | null {
-    if (!Array.isArray(headers) || headers.length > MAX_HEADER_COUNT) return null;
-    const result: Array<{ name: string; value: string }> = [];
-    for (const header of headers) {
-      if (!header || typeof header.name !== "string" || typeof header.value !== "string" ||
-        header.name.length === 0 || header.name.length > MAX_HEADER_NAME_LENGTH || header.value.length > MAX_HEADER_VALUE_LENGTH ||
-        /[\r\n]/.test(header.name) || /[\r\n]/.test(header.value)) return null;
-      result.push({ name: header.name, value: header.value });
-    }
-    return result;
-  }
-
-  function validSourceMethod(method: unknown): string | null {
-    if (method === undefined) return "GET";
-    if (typeof method !== "string" || method.length === 0 || method.length > 16 || !/^[A-Za-z]+$/.test(method)) return null;
-    const normalized = method.toUpperCase();
-    return ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(normalized) ? normalized : null;
-  }
-
   function sourceOperationAllowed(entry: Entry) {
     return entry?.jobActive === true && entry.sourceValid === true && isPublicHttpUrl(entry.sourceUrl) &&
       sourceBindings.get(sourceBindingKey(entry)) === entry;
@@ -301,7 +277,7 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
 
   async function handlePermission(entry: Entry, message: Message) {
     const origins = Array.isArray(message.origins)
-      ? [...new Set(message.origins.map(permissionOrigin).filter((origin): origin is string => origin !== null))]
+      ? [...new Set(message.origins.map(originOfPublicUrl).filter((origin): origin is string => origin !== null))]
       : [];
     if (!origins.length) return sendToJob(entry, "dz.job.permission-required", message.requestId, { granted: false, code: "invalid-origins" });
     let granted = false;
@@ -374,8 +350,8 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
   }
 
   async function dispatchSourceFetch(entry: Entry, message: Message) {
-    const method = validSourceMethod(message.method);
-    const headers = validSourceHeaders(message.headers);
+    const method = normalizeFetchMethod(message.method);
+    const headers = validateEngineHeaders(message.headers);
     backgroundLog("info", "source-fetch-request", `req=${message.requestId} tab=${entry.tabId} method=${method ?? String(message.method)} purpose=${String(message.purpose ?? "unknown")} url=${String(message.url ?? "")}`);
     const reject = (code: string, extra: Record<string, unknown> = {}) => {
       backgroundLog("warn", "source-fetch-rejected", `req=${message.requestId} code=${code}`);
@@ -383,7 +359,7 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
         sourceType: "dz.source.fetch-complete", ok: false, code, ...extra,
       });
     };
-    if (!isPublicHttpUrl(message.url) || !method || !headers) {
+    if (!isPublicHttpUrl(message.url) || message.url.length > MAX_URL_LENGTH || !method || !headers) {
       reject("invalid-source-request");
       return;
     }
@@ -407,25 +383,20 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
       reject(code, Number.isInteger(result.status) ? { status: result.status } : {});
       return;
     }
-    const chunkBytes = result.chunks?.reduce?.((sum, chunk) => sum + (Array.isArray(chunk?.bytes) ? chunk.bytes.length : MAX_SOURCE_FETCH_BYTES + 1), 0);
-    if (!Array.isArray(result.chunks) || typeof result.bytes !== "number" || !Number.isSafeInteger(result.bytes) || result.bytes < 0 || result.bytes > MAX_SOURCE_FETCH_BYTES ||
-      typeof result.status !== "number" || !Number.isInteger(result.status) || result.status < 200 || result.status >= 300 || !isPublicHttpUrl(result.url) ||
-      chunkBytes !== result.bytes || typeof chunkBytes !== "number" || chunkBytes > MAX_SOURCE_FETCH_BYTES ||
-      result.chunks.some((chunk) => !chunk || !Number.isSafeInteger(chunk.sequence) || chunk.sequence < 0 ||
-        !Array.isArray(chunk.bytes) || chunk.bytes.length > MAX_FETCH_CHUNK_BYTES ||
-        chunk.bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255))) {
+    if (typeof result.data !== "string" || result.data.length === 0 || result.data.length > MAX_SOURCE_DATA_CHARS ||
+      typeof result.bytes !== "number" || !Number.isSafeInteger(result.bytes) || result.bytes < 0 || result.bytes > SOURCE_FETCH_BYTE_LIMIT ||
+      typeof result.status !== "number" || !Number.isInteger(result.status) || result.status < 200 || result.status >= 300 || !isPublicHttpUrl(result.url)) {
       reject("invalid-source-fetch-result");
       return;
     }
-    backgroundLog("info", "source-fetch-complete", `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} chunks=${result.chunks.length} url=${result.url}`);
-    for (const chunk of result.chunks) {
-      backgroundLog("debug", "source-fetch-chunk", `req=${message.requestId} sequence=${chunk.sequence} bytes=${chunk.bytes.length}`);
-      sendToJob(entry, "dz.job.fetch", message.requestId, {
-        sourceType: "dz.source.fetch-chunk", sequence: chunk.sequence, bytes: chunk.bytes,
-      });
+    const decoded = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
+    if (!decoded || decoded.byteLength !== result.bytes) {
+      reject("invalid-source-fetch-result");
+      return;
     }
+    backgroundLog("info", "source-fetch-complete", `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} url=${result.url}`);
     sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: true, status: result.status, url: result.url, bytes: result.bytes,
+      sourceType: "dz.source.fetch-complete", ok: true, status: result.status, url: result.url, bytes: result.bytes, data: result.data,
     });
   }
 

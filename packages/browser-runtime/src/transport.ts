@@ -5,6 +5,7 @@ import type {
   TileResponse,
 } from "./types.ts";
 import { ERROR_CODES } from "./types.ts";
+import { normalizeErrorPreviewText } from "./fetch-primitives.ts";
 
 export interface DirectTransportOptions {
   headers?: Record<string, string>;
@@ -93,12 +94,7 @@ export function extractErrorSignal(bytes: Uint8Array): string {
   }
   // Early binary guard: error pages are text.
   if (text.includes("\0")) return "";
-  const flat = text
-    .replace(/<[^>]{0,512}>/g, " ")
-    .replace(/[\x00-\x1F\x7F]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return flat.length > ERROR_PREVIEW_MAX_CHARS ? flat.slice(0, ERROR_PREVIEW_MAX_CHARS) : flat;
+  return normalizeErrorPreviewText(text, ERROR_PREVIEW_MAX_CHARS);
 }
 
 async function errorPreview(response: {

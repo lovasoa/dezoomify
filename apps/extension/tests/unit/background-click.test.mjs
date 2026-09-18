@@ -66,10 +66,10 @@ test("toolbar opens the dedicated job tab without injection, registration, or re
   assert.ok(fake.calls.send.some((call) => call.message.type === "dz.job.candidates"));
 });
 
-test("source fetch returns chunks and completion through the job bridge", async () => {
+test("source fetch returns one payload through the job bridge", async () => {
   const fake = fakeBrowser({}, [
     [{ frameId: 0, result: { ok: true, documentUrl: TAB.url, inputs: [{ url: "https://gallery.example/info.json" }], overflow: 0 } }],
-    [{ frameId: 0, result: { ok: true, status: 200, url: "https://gallery.example/info.json", bytes: 3, chunks: [{ sequence: 0, bytes: [1, 2, 3] }] } }],
+    [{ frameId: 0, result: { ok: true, status: 200, url: "https://gallery.example/info.json", bytes: 3, data: "AQID" } }],
   ]);
   await load(fake);
   await fake.listeners.click[0](TAB);
@@ -78,9 +78,10 @@ test("source fetch returns chunks and completion through the job bridge", async 
   for (const listener of fake.listeners.message) listener({ ...binding, type: "dz.job.fetch", requestId: "req:source", url: "https://gallery.example/info.json", method: "GET", headers: [] }, { tab: { id: 40 }, frameId: 0 }, () => {});
   await tick();
   const forwarded = fake.calls.send.filter((call) => call.message.type === "dz.job.fetch").map((call) => call.message);
-  assert.deepEqual(forwarded.map((message) => message.sourceType), ["dz.source.fetch-chunk", "dz.source.fetch-complete"]);
-  assert.deepEqual(forwarded[0].bytes, [1, 2, 3]);
-  assert.equal(forwarded[1].ok, true);
+  assert.deepEqual(forwarded.map((message) => message.sourceType), ["dz.source.fetch-complete"]);
+  assert.equal(forwarded[0].ok, true);
+  assert.equal(forwarded[0].data, "AQID");
+  assert.equal(forwarded[0].bytes, 3);
 });
 
 test("source fetch failure preserves a typed engine outcome", async () => {

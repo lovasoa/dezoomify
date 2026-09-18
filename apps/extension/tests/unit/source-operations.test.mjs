@@ -2,6 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { collectCandidates, fetchSource } from "../../src/background/source-operations.ts";
 
+// Test-only polyfill: the pinned Node 24 toolchain predates
+// Uint8Array.prototype.toBase64 (Baseline 2025), while the extension
+// manifest requires browsers that ship it. This exercises fetchSource's
+// logic on old Node without touching shipped code.
+if (typeof Uint8Array.prototype.toBase64 !== "function") {
+  Uint8Array.prototype.toBase64 = function () {
+    return Buffer.from(this.buffer, this.byteOffset, this.byteLength).toString("base64");
+  };
+}
+
 test("candidate snapshot includes the document and retained resources in one batch", () => {
   const oldLocation = globalThis.location;
   const oldPerformance = globalThis.performance;
@@ -78,7 +88,7 @@ test("candidate snapshot applies URL and count caps with overflow diagnostics", 
   }
 });
 
-test("source fetch returns bounded chunks and a completion result", async () => {
+test("source fetch returns one bounded base64 payload", async () => {
   const oldFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
@@ -96,7 +106,7 @@ test("source fetch returns bounded chunks and a completion result", async () => 
   };
   try {
     const result = await fetchSource({ url: "https://gallery.example/info.json", method: "GET", headers: [{ name: "Accept", value: "application/json" }] });
-    assert.deepEqual(result.chunks, [{ sequence: 0, bytes: [1, 2, 3] }]);
+    assert.deepEqual([...Buffer.from(result.data, "base64")], [1, 2, 3]);
     assert.equal(result.bytes, 3);
     assert.equal(result.status, 200);
     // Credentials stay unset so the default same-origin policy applies: a

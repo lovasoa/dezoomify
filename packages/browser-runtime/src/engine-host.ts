@@ -84,8 +84,8 @@ export interface EngineHostDeps {
   assembly: EngineHostAssembly;
   /** Optional job-budget overrides forwarded to the session at start. */
   quotas?: SessionConfig;
-  /** Measure one probe tile (shared probe helper). */
-  probeSize(url: string, headers: Record<string, string>): Promise<ProbeSize>;
+  /** Measure one probe tile (shared probe helper). The engine request id lets a host route the probe like any effect fetch. */
+  probeSize(url: string, headers: Record<string, string>, requestId?: number): Promise<ProbeSize>;
   /**
    * Load one tile as an ordinary image element for display-only fallback.
    * Absent: no display fallback (failed acquisitions fail the engine).
@@ -248,7 +248,7 @@ export function createEngineHost(deps: EngineHostDeps) {
           // a measurement-only probe must not reveal a provisional canvas.
           deps.assembly.prepare(effect.placement.canvas);
         }
-        const size = await deps.probeSize(request.uri, headerRecord(request.headers));
+        const size = await deps.probeSize(request.uri, headerRecord(request.headers), request.id);
         if (cancelled) return;
         const probeOutput = effect.placement.probe_output === true;
         let outcome = size.status === "available"

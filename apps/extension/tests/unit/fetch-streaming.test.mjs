@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createExtensionFetcher, forwardCoreHeaders } from "../../src/runtime/fetch.ts";
+import { createExtensionFetcher } from "../../src/runtime/fetch.ts";
+import { forwardCoreHeaders } from "@dezoomify/browser-runtime";
 
 function stream(chunks, { stall = false } = {}) {
   let index = 0;

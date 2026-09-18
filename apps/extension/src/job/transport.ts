@@ -1,12 +1,13 @@
 import { asFetchFailure } from "../runtime/fetch.ts";
+import { decodeBase64Payload, originOfUrl, SOURCE_FETCH_BYTE_LIMIT } from "@dezoomify/browser-runtime";
 import type { AcquireEffect } from "@dezoomify/browser-runtime";
 
 /** @typedef {{ jobId: string, tabId: number, frameId: number, documentGeneration: number }} JobBinding */
 
 /** @param {unknown} value @returns {value is JobBinding} */
 export interface JobBinding { jobId: string; tabId: number; frameId: number; documentGeneration: number }
-interface SourceReply { bytes: Uint8Array; finalUrl: string }
-interface PendingSource { resolve(value: SourceReply): void; reject(reason: unknown): void; chunks: Uint8Array[]; finalUrl: string }
+interface SourceReply { bytes: Uint8Array }
+interface PendingSource { resolve(value: SourceReply): void; reject(reason: unknown): void }
 
 export function isJobBinding(value: unknown): value is JobBinding {
   const binding = value as Partial<JobBinding> | null;
@@ -15,25 +16,14 @@ export function isJobBinding(value: unknown): value is JobBinding {
     typeof binding.documentGeneration === "number" && Number.isInteger(binding.documentGeneration) && binding.documentGeneration >= 0;
 }
 
-/** @param {unknown} value */
-function responseBytes(value: unknown): Uint8Array | null {
-  if (value instanceof Uint8Array) return value;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  if (Array.isArray(value)) return new Uint8Array(value);
-  return null;
-}
-
 /**
  * Route a source-bound request through the browser-owned coordinator. The
- * engine's numeric request sequence is mandatory: it binds a future chunk
- * sequence to one WASM effect, not merely to the current job tab. The
- * coordinator bus speaks its own `req:*` string tokens, so this adapter names
- * the sequence once on the way out and matches the echoed token back to the
- * pending engine request.
- *
- * The coordinator owns this extension-local chunk/ack sequence.
- * This small bridge accepts its final assembled reply for now, preserving the
- * request correlation until the generated chunk bindings land.
+ * engine's numeric request sequence is mandatory: it binds one reply to one
+ * WASM effect, not merely to the current job tab. The coordinator bus speaks
+ * its own `req:*` string tokens, so this adapter names the sequence once on
+ * the way out and matches the echoed token back to the pending engine
+ * request. The reply carries one base64 payload; the coordinator owns the
+ * request lifecycle.
  */
 export function createCoordinatorSourceTransport(deps: { sendMessage(message: unknown): Promise<unknown> }) {
   const pending = new Map<string, PendingSource>();
@@ -53,36 +43,28 @@ export function createCoordinatorSourceTransport(deps: { sendMessage(message: un
         headers: request.headers,
         purpose: request.purpose,
       });
-      return await new Promise<SourceReply>((resolve, reject) => pending.set(token, { resolve, reject, chunks: [], finalUrl: request.uri }));
+      return await new Promise<SourceReply>((resolve, reject) => pending.set(token, { resolve, reject }));
     },
-    /** Receive a coordinator-routed `dz.source.fetch-*` message. */
-    handleMessage(message: { requestId?: string; sourceType?: string; bytes?: unknown; ok?: boolean; code?: string; status?: number; url?: string }): boolean {
+    /** Receive a coordinator-routed `dz.source.fetch-complete` message. */
+    handleMessage(message: { requestId?: string; sourceType?: string; ok?: boolean; code?: string; status?: number; data?: unknown }): boolean {
       if (typeof message?.requestId !== "string") return false;
       const state = pending.get(message?.requestId);
-      if (!state) return false;
-      if (message.sourceType === "dz.source.fetch-chunk") {
-        const bytes = responseBytes(message.bytes);
-        if (!bytes) { pending.delete(message.requestId); state.reject(Object.assign(new Error("malformed source chunk"), { category: "malformed" })); return true; }
-        state.chunks.push(bytes);
+      if (!state || message.sourceType !== "dz.source.fetch-complete") return false;
+      pending.delete(message.requestId);
+      if (!message.ok) {
+        state.reject(Object.assign(new Error(`source request failed with HTTP ${message.status ?? 0}`), {
+          category: "network",
+          sourceDefinitive: message.code === "http-error",
+        }));
         return true;
       }
-      if (message.sourceType === "dz.source.fetch-complete") {
-        pending.delete(message.requestId);
-        if (!message.ok) {
-          state.reject(Object.assign(new Error(`source request failed with HTTP ${message.status ?? 0}`), {
-            category: "network",
-            sourceDefinitive: message.code === "http-error",
-          }));
-          return true;
-        }
-        const length = state.chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-        const bytes = new Uint8Array(length);
-        let offset = 0;
-        for (const chunk of state.chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-        state.resolve({ bytes, finalUrl: typeof message.url === "string" ? message.url : state.finalUrl });
+      const bytes = decodeBase64Payload(message.data, SOURCE_FETCH_BYTE_LIMIT);
+      if (!bytes) {
+        state.reject(Object.assign(new Error("malformed source payload"), { category: "malformed" }));
         return true;
       }
-      return false;
+      state.resolve({ bytes });
+      return true;
     },
   };
 }
@@ -92,24 +74,31 @@ export function engineFailure(error: unknown) {
   return asFetchFailure(error);
 }
 
+/** @param {unknown} uri */
+function requestOrigin(uri: unknown): string {
+  return typeof uri === "string" ? originOfUrl(uri) : "";
+}
+
 /**
- * Route one engine effect fetch for the extension. Metadata prefers the
- * monitored tab's origin context and falls back to the granted
- * extension-origin session; tiles always use the extension origin. The
- * source-tab fetch is CORS-bound and only credential-safe same-origin, so a
- * source-context failure must not fail the job while the extension-origin
- * transport can still answer it.
+ * Route one engine effect fetch for the extension. Metadata and requests for
+ * the bound source document's own origin prefer the monitored tab's origin
+ * context (which carries the page's Referer and same-origin session) and
+ * fall back to the granted extension-origin session. Cross-origin tiles
+ * always use the extension origin. A source-context failure must not fail
+ * the job while the extension-origin transport can still answer it.
  */
 export function createEngineResourceFetcher(deps: {
   binding(): JobBinding;
+  siteOrigin(): string;
   sourceTransport: { fetchResource(request: unknown): Promise<{ bytes: Uint8Array }> };
   extensionTransport: { fetchResource(url: string, opts?: unknown): Promise<{ bytes: Uint8Array }> };
   cancelled(): boolean;
   onSourceFailure?(cause: { code?: unknown; blocked_reason?: unknown }): void;
-}): (effect: AcquireEffect) => Promise<{ bytes: Uint8Array }> {
-  return async (effect: AcquireEffect): Promise<{ bytes: Uint8Array }> => {
+}): (effect: Pick<AcquireEffect, "request">) => Promise<{ bytes: Uint8Array }> {
+  return async (effect: Pick<AcquireEffect, "request">): Promise<{ bytes: Uint8Array }> => {
     const request = effect.request;
-    if (request.purpose === "metadata") {
+    const site = deps.siteOrigin();
+    if (request.purpose === "metadata" || (site !== "" && requestOrigin(request.uri) === site)) {
       try {
         const result = await deps.sourceTransport.fetchResource({
           binding: deps.binding(),

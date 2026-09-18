@@ -65,7 +65,7 @@ sequenceDiagram
     J->>W: dispatch Start
     W-->>J: acquire-resource effects
     alt source fetch needed
-        B->>S: tab-origin fetch (bounded chunks)
+        B->>S: tab-origin fetch (single bounded payload)
         S-->>B: bytes
         B->>J: bytes
         J->>W: resource bytes

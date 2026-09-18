@@ -47,7 +47,7 @@ export default defineConfig({
     browser_specific_settings: browser === "firefox" ? {
       gecko: {
         id: "{14074c89-8a5f-4813-98df-a7117f062871}",
-        strict_min_version: "128.0",
+        strict_min_version: "133.0",
       },
     } : undefined,
     content_security_policy: {
@@ -64,7 +64,7 @@ export default defineConfig({
     optional_host_permissions: ["http://*/*", "https://*/*"],
     optional_permissions: ["cookies"],
     permissions: ["activeTab", "scripting", "nativeMessaging"],
-    minimum_chrome_version: browser === "chrome" ? "121" : undefined,
+    minimum_chrome_version: browser === "chrome" ? "140" : undefined,
   }),
   hooks: {
     async "build:before"() {
