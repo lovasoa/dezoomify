@@ -31,13 +31,7 @@
 //!
 //! Correlation uses the engine's own tile/request ordinals with no
 //! remapping: late, duplicate, and out-of-order completions die inside the
-//! engine exactly like late host responses. (The canonical
-//! `EngineJob` facade is the planned driver surface, but its effects are
-//! lossy for native execution today -- no tile placement, processing
-//! recipe, headers, or canvas, and no catalog counts for headless
-//! selection fallback. This loop is shaped to map onto it 1:1 once those
-//! cross the facade: acquire→complete/provide_metadata, timer→complete,
-//! finalize→complete. See R-B1/R-B2 in the workstream report.)
+//! engine exactly like late host responses.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};

@@ -19,8 +19,7 @@ macro_rules! command_names {
 pub const COMMANDS: &[&str] = desktop_commands!(command_names);
 
 /// Supported output formats for request_destination: the five single-file
-/// native encoders plus the `iiif-dir` tile-tree destination (todo 5.1
-/// desktop GUI encoder parity with the CLI/native output layer).
+/// native encoders plus the `iiif-dir` tile-tree destination.
 pub const SUPPORTED_FORMATS: &[&str] = &["png", "jpeg", "tiff", "zif", "webp", "iiif-dir"];
 
 /// Typed command failure with a stable machine-readable code.

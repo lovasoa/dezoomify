@@ -485,9 +485,8 @@ pub struct Selection {
     /// Selectable level positions for the chosen image.
     pub level_count: u32,
     /// Still-deferred catalog entries: position plus follow-up URI. The
-    /// host follows one within the same job (bounded follow/cycle lands
-    /// in A3; until then the entries are reported, never silently
-    /// replaced by host-side recursion).
+    /// host follows one within the same job; the entries are reported,
+    /// never silently replaced by host-side recursion.
     pub deferred: Vec<DeferredEntry>,
 }
 
@@ -1217,8 +1216,8 @@ impl EngineJob {
 }
 
 /// Attribute an engine failure code to its protocol phase. Codes are
-/// stable API (never display text); A3 replaces this derivation with a
-/// tracked phase in the phase-specific state.
+/// stable API (never display text); the phase is derived from the code
+/// and whether tiles settled as missing.
 fn failure_phase_for(code: &str, has_missing_tiles: bool) -> ProtocolErrorPhase {
     if has_missing_tiles || code == "job.partial-discarded" {
         ProtocolErrorPhase::Acquisition

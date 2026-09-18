@@ -33,8 +33,6 @@ Post-retry tile failures keep a gappy output at a `.partial` sibling (`out.png` 
 
 ### Capability baseline
 
-### Capability baseline
-
 The native baseline reports encoders `[png, jpeg, tiff, zif, webp]`, destination modes `[file, iiif-dir]`, storage modes `[cache]`, `max_concurrency` 16, `bulk_supported` true, `paused_supported` true. Negotiation exposes real codec and resource limits; see [Protocol](protocol.md#product-capabilities).
 
 ## Desktop

@@ -1,6 +1,6 @@
 //! WMTS tile-matrix sets, bounds, and CRS math.
 //!
-//! Split from `wmts/mod.rs` (todo 4.1): this module owns `TileMatrixSet`
+//! This module owns `TileMatrixSet`
 //! parsing plus Web Mercator projection. Layer wiring lives in `layer`,
 //! XML tree parsing in `capabilities`.
 

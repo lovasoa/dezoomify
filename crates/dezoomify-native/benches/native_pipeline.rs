@@ -1,4 +1,4 @@
-//! Native pipeline benchmarks (todo 3.1): tile throughput on the fixed pool,
+//! Native pipeline benchmarks: tile throughput on the fixed pool,
 //! encode time per format, and peak-RSS model for the 20k by 20k fixture.
 //!
 //! The 20k fixture itself (about 1.5 GiB of RGBA) is modeled, not allocated:

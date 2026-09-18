@@ -1,4 +1,4 @@
-//! Perf smoke for todo 3.1: fixed pool and streaming memory model. Fast and
+//! Perf smoke for the fixed pool and streaming memory model. Fast and
 //! deterministic: no
 //! gigapixel allocation, no public network. Wall-time numbers print for CI
 //! tracking; the hard gate is the deterministic memory model plus a 20

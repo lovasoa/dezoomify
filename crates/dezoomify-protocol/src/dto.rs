@@ -832,9 +832,7 @@ pub enum HostMessage {
 // The engine projects one absolute snapshot per transition: lifecycle,
 // pause flag, progress, selection/decision payload, terminal result, and
 // output summary. Snapshots carry no secrets, pixels, paths, or handles,
-// and no routing identifiers (job IDs stay host-side). UI folds (such as
-// the app-model snapshot fold) switch their alias to `EngineSnapshotDto`
-// once their hosts consume it.
+// and no routing identifiers (job IDs stay host-side).
 
 /// Closed retry category for one classified tile failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

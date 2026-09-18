@@ -1,7 +1,7 @@
 //! Validated job configuration and resource limits.
 //!
 //! Bounds are explicit, target-safe, and checked before any work starts.
-//! The lean engine enforces tile, byte, retry, and sequence bounds during
+//! The engine enforces tile, byte, retry, and sequence bounds during
 //! transitions; concurrency bounds gate how many tile fetches are in flight
 //! at once.
 

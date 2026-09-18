@@ -25,8 +25,8 @@
 //!
 //! The canonical state machine lives in `dezoomify_job` and is re-exported
 //! here unchanged, so every host compiles against the `dezoomify_engine`
-//! paths above. `crates/dezoomify-job` keeps the same items at its
-//! long-standing paths while native and bridge hosts migrate.
+//! paths above. `crates/dezoomify-job` exposes the same items at its
+//! own paths; the `dezoomify_engine` paths are canonical for all hosts.
 
 pub use dezoomify_job::engine_api::{
     DecisionPayload, DeferredEntry, DiscoveryInput, Effect, EffectId, EffectResult, EngineError,

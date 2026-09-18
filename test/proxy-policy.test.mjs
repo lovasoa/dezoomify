@@ -1,8 +1,7 @@
-// Single proxy policy vector (todo 2.4): pins the metadata-only policy that
-// lives once in src/server/security.ts and serves POST /api/proxy through
+// Single proxy policy vector: pins the metadata-only policy that lives once
+// in src/server/security.ts and serves POST /api/proxy through
 // src/server/proxy.ts plus functions/api/proxy.ts, while GET /proxy keeps the
-// legacy policy via the functions/proxy.js shim re-exporting
-// legacy/functions/proxy.js. Legacy behavior at / stays byte-identical.
+// legacy policy served from legacy/. Legacy behavior at / stays byte-identical.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -12,7 +11,6 @@ import {
 } from "../src/server/security.ts";
 import { handleProxyRequest } from "../src/server/proxy.ts";
 import * as shim from "../functions/proxy.js";
-import * as legacy from "../legacy/functions/proxy.js";
 
 function hdr(obj) {
   const lower = {};
@@ -20,7 +18,7 @@ function hdr(obj) {
   return { get: (n) => lower[n.toLowerCase()] ?? null };
 }
 
-test("proxy policy vector: 2MB, 5 redirects, header allowlist, manual revalidation, legacy shim", async () => {
+test("proxy policy vector: 2MB, 5 redirects, header allowlist, manual revalidation, legacy route", async () => {
   assert.equal(PROXY_MAX_BYTES, 2 * 1024 * 1024, "metadata budget is 2MB");
   assert.equal(PROXY_MAX_REDIRECTS, 5, "redirect budget is 5 hops");
 
@@ -41,9 +39,17 @@ test("proxy policy vector: 2MB, 5 redirects, header allowlist, manual revalidati
     "only the narrow safe set flows upstream",
   );
 
-  assert.equal(shim.onRequestGet, legacy.onRequestGet, "shim re-exports legacy GET");
-  assert.equal(shim.onRequestHead, legacy.onRequestHead, "shim re-exports legacy HEAD");
-  assert.equal(shim.onRequestOptions, legacy.onRequestOptions, "shim re-exports legacy OPTIONS");
+  // Dependency gate: the legacy route module exposes its handlers.
+  assert.equal(typeof shim.onRequestGet, "function", "GET /proxy handler exists");
+  assert.equal(typeof shim.onRequestHead, "function", "HEAD /proxy handler exists");
+  assert.equal(typeof shim.onRequestOptions, "function", "OPTIONS /proxy handler exists");
+
+  // Round trip on the real legacy path: OPTIONS preflight answers locally,
+  // and a GET without url fails closed before any upstream fetch.
+  const preflight = await shim.onRequestOptions();
+  assert.equal(preflight.status, 204, "legacy OPTIONS answers 204");
+  const missing = await shim.onRequestGet({ request: new Request("https://site.test/proxy") });
+  assert.equal(missing.status, 400, "legacy GET without url fails closed");
 
   const base = { websiteOrigin: "https://site.test" };
   const chain = (redirectsBeforeSuccess) => {

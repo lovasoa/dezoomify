@@ -1106,7 +1106,7 @@ fn first_catalog_entry_wins_with_two_deferred_images() {
 
 #[test]
 fn pause_after_one_tile_still_assembles_the_full_image() {
-    // Pause v1 e2e (todo 5.7 suspend-acquisition): pause after one tile,
+    // Pause v1 e2e (suspend-acquisition): pause after one tile,
     // verify no new work while paused, resume, and complete byte-identical
     // to the uninterrupted run. FIFO order, retry wakeups, and decoded
     // output are preserved; hosts still own clocks.

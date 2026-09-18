@@ -1,4 +1,4 @@
-// Website single-queue (todo 5.3): enqueue while a job runs, sequential.
+// Website single-queue: enqueue while a job runs, sequential.
 //
 // The engine stays single-job; this queue lives in the integration layer
 // (the website orchestrator). One active job at a time, further submits wait

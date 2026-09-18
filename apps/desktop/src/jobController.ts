@@ -103,6 +103,9 @@ export function ensureChosenThroughPreflight(
   nativeTransport: string,
   imageCount?: number,
 ): void {
+  // The native driver selects images[0] at the largest fitting level, so the
+  // shipped desktop path walks the shared controller from discovering through
+  // selection into downloading on each grant and completion signal.
   dispatch({
     seq: next(),
     sessionId,
