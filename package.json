@@ -1,6 +1,7 @@
 {
   "name": "dezoomify",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@9.12.0",
   "dependencies": {
     "@dezoomify/wasm-bindings": "workspace:*",

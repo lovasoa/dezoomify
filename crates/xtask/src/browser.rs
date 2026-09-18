@@ -364,7 +364,10 @@ fn serve_dist(port: u16, label: &str) -> Result<(), String> {
     if !dist.exists() {
         return Err("dist/ missing after the site build".to_string());
     }
-    let mut child = Command::new("node")
+    #[cfg(unix)]
+    interrupts::install();
+    let mut command = Command::new("node");
+    command
         .args([
             "scripts/dev-server.mjs",
             "--port",
@@ -372,12 +375,18 @@ fn serve_dist(port: u16, label: &str) -> Result<(), String> {
             "--static-dir",
             &dist.display().to_string(),
         ])
-        .current_dir(&root)
+        .current_dir(&root);
+    super::desktop::configure_owned_process_tree(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|e| format!("failed to start the dev server: {e}"))?;
     println!(
         "{label}: serving http://127.0.0.1:{port}/ (Ctrl-C to stop; the server exits with the task)"
     );
+    if interrupted_while_running(&mut child)? {
+        super::desktop::terminate_owned_process_tree(&mut child);
+        return Ok(());
+    }
     let status = child
         .wait()
         .map_err(|e| format!("server wait failed: {e}"))?;
@@ -385,6 +394,62 @@ fn serve_dist(port: u16, label: &str) -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| format!("{label}: dev server exited with {status}"))
+}
+
+/// Wait for the owned dev-server child while staying responsive to an
+/// interactive Ctrl-C. The child runs in its own process group (see
+/// [`super::desktop::configure_owned_process_tree`]), so the terminal's
+/// `SIGINT` never reaches it; the parent records the interrupt and tears the
+/// tree down itself. Returns `true` when the caller should run that cleanup.
+#[cfg(unix)]
+fn interrupted_while_running(child: &mut std::process::Child) -> Result<bool, String> {
+    loop {
+        if child
+            .try_wait()
+            .map_err(|e| format!("cannot inspect the dev server: {e}"))?
+            .is_some()
+        {
+            return Ok(false);
+        }
+        if interrupts::take() {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
+#[cfg(not(unix))]
+fn interrupted_while_running(child: &mut std::process::Child) -> Result<bool, String> {
+    child
+        .wait()
+        .map_err(|e| format!("server wait failed: {e}"))?;
+    Ok(false)
+}
+
+/// Interrupt bookkeeping for the owned dev server. The handler only records the
+/// signal; the wait loop performs the cleanup, so nothing runs in signal
+/// context beyond a flag store.
+#[cfg(unix)]
+mod interrupts {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+    extern "C" fn record(_signal: libc::c_int) {
+        INTERRUPTED.store(true, Ordering::Relaxed);
+    }
+
+    pub(super) fn install() {
+        // SAFETY: `record` only stores to an atomic flag.
+        unsafe {
+            libc::signal(libc::SIGINT, record as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGTERM, record as *const () as libc::sighandler_t);
+        }
+    }
+
+    pub(super) fn take() -> bool {
+        INTERRUPTED.swap(false, Ordering::Relaxed)
+    }
 }
 
 /// Extension development: regenerate the canonical JS mirrors, build WXT's
