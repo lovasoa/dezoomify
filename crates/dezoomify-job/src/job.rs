@@ -95,6 +95,10 @@ pub struct Job {
     canvas_size: Option<Vec2d>,
     /// Wire tile ids emitted as probes (answered via `ProbeOutcome`).
     probe_tiles: HashSet<u32>,
+    /// Probes that have already been answered, kept so a duplicate or late
+    /// answer is recognized as moot (`Ignored`) rather than a protocol
+    /// fault. Bounded by `max_tiles` like `probe_tiles`.
+    answered_probes: HashSet<u32>,
     /// Pending probe continuation; exactly one probe is in flight.
     probe: Option<ProbeContinuation>,
     probe_tile: Option<u32>,
@@ -179,6 +183,7 @@ impl Job {
             tile_extents: HashMap::new(),
             canvas_size: None,
             probe_tiles: HashSet::new(),
+            answered_probes: HashSet::new(),
             probe: None,
             probe_tile: None,
             probe_output: false,
@@ -347,9 +352,11 @@ impl Job {
 
     /// Drive one deterministic transition from an explicit host response.
     ///
-    /// Post-terminal inputs are stably rejected with no new work. Duplicates
-    /// are ignored. Valid inputs advance state and queue
-    /// effects/events with monotonic `seq`.
+    /// Post-terminal control inputs are stably rejected with no new work.
+    /// Post-terminal host *responses* are ignored: in-flight fetches settle
+    /// on the host's own clock, after cancellation, failure, or completion,
+    /// and the engine no longer acts on them. Duplicates are ignored. Valid
+    /// inputs advance state and queue effects/events with monotonic `seq`.
     ///
     /// # Errors
     ///
@@ -357,7 +364,17 @@ impl Job {
     /// counter-overflow rejections.
     pub fn on_command(&mut self, response: JobCommand) -> Result<Outcome, JobError> {
         if self.terminal.is_some() {
-            return Err(JobError::post_terminal());
+            return match response {
+                // Late correlated answers are the one input that can
+                // legitimately outlive the job. The host-side request ledger
+                // already rejects unknown ids; whatever arrives correlated
+                // is moot here.
+                JobCommand::ResourceBytes { .. }
+                | JobCommand::FetchFailure { .. }
+                | JobCommand::TileOutcome { .. }
+                | JobCommand::ProbeOutcome { .. } => Ok(Outcome::Ignored),
+                _ => Err(JobError::post_terminal()),
+            };
         }
         // Cancellation is valid in every non-terminal state.
         if matches!(response, JobCommand::Cancel) {
@@ -817,13 +834,26 @@ impl Job {
                 "probe tiles are answered with a probe outcome, not a tile outcome",
             ));
         }
-        if self.state != State::AcquiringTiles {
-            return Err(JobError::invalid_state(
-                "tile outcome valid only in AcquiringTiles",
-            ));
-        }
+        // Acceptance is by correlation, not by phase: the engine settles
+        // only tiles it actually requested, and `planned_tiles` is the set
+        // of requested ordinals. During discovery and planning no tile
+        // ordinal is outstanding at all, so an outcome for one is a
+        // protocol fault in every phase, not a late answer.
         if !self.planned_tiles.contains(&tile) {
             return Err(JobError::invalid_state("tile ordinal is out of range"));
+        }
+        // The plan spans the acquisition phases: `in_flight` is kept across
+        // them and in-flight tiles are never re-emitted, so a host fetch
+        // that settles after a sibling exhausted its retries
+        // (AwaitingPartialDecision) is still required, not stale. Once the
+        // job is finalizing (the output decision is made), correlated
+        // answers are moot and ignored; terminal states are gated in
+        // `on_command`.
+        if !matches!(
+            self.state,
+            State::AcquiringTiles | State::AwaitingPartialDecision
+        ) {
+            return Ok(Outcome::Ignored);
         }
         if self.acquired_tiles.contains(&tile) {
             return Ok(Outcome::Ignored);
@@ -842,6 +872,10 @@ impl Job {
             if self.paused {
                 return Ok(Outcome::Applied);
             }
+            // While a partial decision is pending the missing set can
+            // never become empty (an exhausted tile is re-fetched only by
+            // the Retry choice), so full completion always happens with
+            // no decision pending.
             if self.acquired_tiles.len() == self.planned_tiles.len() {
                 self.complete_remaining(false)?;
             } else {
@@ -876,6 +910,16 @@ impl Job {
             self.failed_tiles.push(tile);
         }
         self.recovery_reason = Some("tile".to_string());
+        if self.pending_decision.is_some() {
+            // A choice is already outstanding for this failure: record the
+            // updated set without opening a second decision. In-flight
+            // siblings that still settle keep being counted; the missing
+            // set itself can only shrink through the Retry choice.
+            self.push_event(JobEvent::MissingWork {
+                failed: self.failed_tiles.clone(),
+            })?;
+            return Ok(Outcome::Applied);
+        }
         let generation = self.alloc_decision_generation()?;
         self.set_state(State::AwaitingPartialDecision)?;
         self.push_effect(JobEffect::RequestDecision { generation })?;
@@ -894,9 +938,23 @@ impl Job {
         tile: u32,
         outcome: dezoomify_protocol::dto::ProbeOutcome,
     ) -> Result<Outcome, JobError> {
-        if self.state != State::Planning || self.probe_tile != Some(tile) {
+        // A probe is answered exactly once. A duplicate or late answer for
+        // an already-answered probe (planning already resolved, or the job
+        // left Planning) is moot and ignored, mirroring late sibling
+        // discovery replies; an answer for a tile that was never a probe is
+        // a protocol fault.
+        if self.probe_tile != Some(tile) {
+            return if self.answered_probes.contains(&tile) {
+                Ok(Outcome::Ignored)
+            } else {
+                Err(JobError::invalid_state(
+                    "probe outcome does not match an outstanding probe",
+                ))
+            };
+        }
+        if self.state != State::Planning {
             return Err(JobError::invalid_state(
-                "probe outcome valid only for the outstanding probe while Planning",
+                "probe outcome valid only while Planning",
             ));
         }
         if !self.probe_tiles.contains(&tile) {
@@ -929,6 +987,7 @@ impl Job {
         self.probe_tile = None;
         self.probe_output = false;
         self.probe_tiles.remove(&tile);
+        self.answered_probes.insert(tile);
         self.in_flight.remove(&tile);
         let Some(continuation) = self.probe.take() else {
             return Err(JobError::invalid_state("no probe continuation pending"));
@@ -959,6 +1018,14 @@ impl Job {
         self.pending_decision = None;
         match choice {
             RecoveryChoice::Retry => {
+                // Re-queue every exhausted tile: the failure path removed
+                // it from `pending_tiles`, so clearing the ledger alone
+                // would never refetch it and the plan could never complete.
+                for tile in &self.failed_tiles {
+                    if !self.acquired_tiles.contains(tile) && !self.in_flight.contains(tile) {
+                        self.pending_tiles.insert(0, *tile);
+                    }
+                }
                 self.failed_tiles.clear();
                 self.set_state(State::AcquiringTiles)?;
                 self.push_event(JobEvent::State {

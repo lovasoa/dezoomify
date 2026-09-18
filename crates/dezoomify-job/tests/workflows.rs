@@ -320,13 +320,16 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
     assert_eq!(host.terminal_count(), 1);
 
     let len_after_cancel = host.transcript().len();
-    // Late tile outcome after cancellation is stably rejected with no work.
-    let late = host.apply(JobCommand::TileOutcome {
-        tile: tiles[1],
-        ok: true,
-    });
-    assert!(late.is_err());
-    assert_eq!(late.unwrap_err().code, "job.post-terminal");
+    // Late tile outcome after cancellation is the one input that can
+    // legitimately outlive the job: the engine ignores it with no work,
+    // no error, and no second terminal (control inputs stay rejected).
+    let late = host
+        .apply(JobCommand::TileOutcome {
+            tile: tiles[1],
+            ok: true,
+        })
+        .expect("late host response is ignored, not rejected");
+    assert_eq!(late, dezoomify_job::Outcome::Ignored);
     assert_eq!(host.state(), "Cancelled");
     assert_eq!(host.transcript().len(), len_after_cancel);
     assert_eq!(host.terminal_count(), 1);
@@ -340,6 +343,235 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
         );
     }
     assert!(host.transcript().contains(&"state:Cancelled".to_string()));
+}
+
+#[test]
+fn late_tile_outcomes_during_partial_decision_are_processed_and_retry_refetches() {
+    // A sibling's retry exhaustion can move the job to
+    // AwaitingPartialDecision while other in-flight fetches are still out:
+    // those outcomes are processed (not dropped), a late exhausted failure
+    // records without opening a second decision, and Retry re-fetches the
+    // failed tiles so the plan still completes.
+    let mut config = test_config();
+    config.max_retries = 0;
+    let mut host = ScriptedHost::new(&job_id(30), INPUT_URL, config).unwrap();
+    let _ = discover_and_select(&mut host, 30);
+    let planned: Vec<u32> = host
+        .tile_effects()
+        .into_iter()
+        .map(|(tile, _, _)| tile)
+        .collect();
+    assert_eq!(planned.len(), 4);
+
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[0],
+        ok: false,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AwaitingPartialDecision");
+    assert_eq!(
+        host.effects
+            .iter()
+            .filter(|effect| effect["kind"] == "request-decision")
+            .count(),
+        1
+    );
+
+    // Late success for an in-flight sibling: counted, job still deciding.
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[1],
+        ok: true,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AwaitingPartialDecision");
+    assert!(host
+        .transcript()
+        .iter()
+        .any(|line| line.starts_with("event:progress:1/4:seq:")));
+
+    // Late exhausted failure: recorded in the open decision. The decision
+    // must not be re-opened, so the effect count is unchanged.
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[2],
+        ok: false,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AwaitingPartialDecision");
+    assert_eq!(
+        host.effects
+            .iter()
+            .filter(|effect| effect["kind"] == "request-decision")
+            .count(),
+        1
+    );
+
+    // Retry re-fetches both failed tiles (the old code cleared the ledger
+    // without re-queueing them, stalling the plan forever).
+    host.apply(JobCommand::RecoveryChoice {
+        generation: 0,
+        choice: dezoomify_job::RecoveryChoice::Retry,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AcquiringTiles");
+    let all = host.tile_effects();
+    assert_eq!(all.len(), 6, "two retry effects appended: {all:?}");
+    // Exhausted tiles are re-queued at the front of the FIFO in failure
+    // order, so the later failure is re-fetched first.
+    let retried: Vec<u32> = all.iter().skip(4).map(|(tile, _, _)| *tile).collect();
+    assert_eq!(retried, vec![planned[2], planned[0]]);
+
+    // The retried tiles and the still-outstanding sibling all arrive: the
+    // plan completes in full.
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[0],
+        ok: true,
+    })
+    .unwrap();
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[2],
+        ok: true,
+    })
+    .unwrap();
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[3],
+        ok: true,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "Finalizing");
+    let finalize = host
+        .effects
+        .iter()
+        .find(|effect| effect["kind"] == "finalize-output")
+        .expect("finalize-output effect");
+    assert_eq!(
+        finalize.get("partial").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    host.apply(JobCommand::FinalizationSucceeded).unwrap();
+    assert_eq!(host.state(), "Completed");
+    assert_eq!(host.job().terminal_kind(), Some("completed"));
+}
+
+#[test]
+fn late_tile_outcome_after_keep_is_ignored_while_finalizing() {
+    // Once the user chose Keep the output decision is made: correlated
+    // answers that still settle are moot and ignored, never errors.
+    let mut config = test_config();
+    config.max_retries = 0;
+    let mut host = ScriptedHost::new(&job_id(31), INPUT_URL, config).unwrap();
+    let _ = discover_and_select(&mut host, 31);
+    let planned: Vec<u32> = host
+        .tile_effects()
+        .into_iter()
+        .map(|(tile, _, _)| tile)
+        .collect();
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[0],
+        ok: false,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "AwaitingPartialDecision");
+    // One in-flight sibling settles while the decision is open.
+    host.apply(JobCommand::TileOutcome {
+        tile: planned[1],
+        ok: true,
+    })
+    .unwrap();
+    host.apply(JobCommand::RecoveryChoice {
+        generation: 0,
+        choice: dezoomify_job::RecoveryChoice::Keep,
+    })
+    .unwrap();
+    assert_eq!(host.state(), "Finalizing");
+    let effects_before = host.effects.len();
+    // The remaining in-flight sibling settles after Keep: ignored, no work.
+    let late = host
+        .apply(JobCommand::TileOutcome {
+            tile: planned[2],
+            ok: true,
+        })
+        .expect("late outcome is ignored, not rejected");
+    assert_eq!(late, dezoomify_job::Outcome::Ignored);
+    assert_eq!(host.state(), "Finalizing");
+    assert_eq!(
+        host.effects.len(),
+        effects_before,
+        "ignored outcome emits no work"
+    );
+    host.apply(JobCommand::FinalizationSucceeded).unwrap();
+    assert_eq!(host.state(), "PartiallyCompleted");
+    assert_eq!(host.job().terminal_kind(), Some("partial-completed"));
+}
+
+#[test]
+fn duplicate_probe_answer_is_ignored_and_forged_probe_answer_is_rejected() {
+    // A probe is answered exactly once: once planning resolved, a repeated
+    // answer for an already-answered probe is moot and ignored (a host
+    // cannot unsend it), while an answer for a tile that was never a probe
+    // stays a protocol fault.
+    const TEMPLATE: &str = "https://example.test/generic/placeholder.svg?x={{X}}&y={{Y}}";
+    let mut host = ScriptedHost::new(&job_id(32), TEMPLATE, test_config()).unwrap();
+    host.start().unwrap();
+    let (image, levels) = host.catalog().expect("catalog event");
+    host.apply(JobCommand::SelectImage { image }).unwrap();
+    let level = levels[0];
+    host.apply(JobCommand::SelectLevel { level }).unwrap();
+    assert_eq!(host.state(), "Planning");
+    // Drive the probe step machine to a resolved plan, answering each probe
+    // from its coordinates: in-area probes return real tiles, the 1x1
+    // placeholder shape marks a missing tile.
+    let mut last_probe = None;
+    let mut rounds = 0;
+    while host.state() == "Planning" {
+        rounds += 1;
+        assert!(rounds <= 256, "probe loop did not resolve");
+        let probe = host
+            .tile_effects()
+            .into_iter()
+            .rfind(|(_, _, probe)| *probe)
+            .expect("outstanding probe");
+        last_probe = Some(probe.0);
+        let query = probe.1.split_once('?').expect("probe uri query").1;
+        let mut coordinates = query
+            .split('&')
+            .map(|part| part.split_once('=').unwrap().1.parse::<u32>().unwrap());
+        let x = coordinates.next().unwrap();
+        let y = coordinates.next().unwrap();
+        let (width, height) = if x < 2 && y < 2 { (256, 256) } else { (1, 1) };
+        host.apply(JobCommand::ProbeOutcome {
+            tile: probe.0,
+            outcome: dezoomify_protocol::dto::ProbeOutcome::Available {
+                width: std::num::NonZeroU64::new(width).unwrap(),
+                height: std::num::NonZeroU64::new(height).unwrap(),
+            },
+        })
+        .unwrap();
+    }
+    assert_eq!(host.state(), "AcquiringTiles");
+    let effects = host.effects.len();
+    // Planning is over, so no probe is outstanding: a repeat answer for one
+    // that was already answered is ignored, not rejected.
+    let duplicate = host
+        .apply(JobCommand::ProbeOutcome {
+            tile: last_probe.expect("a probe was answered"),
+            outcome: dezoomify_protocol::dto::ProbeOutcome::Missing,
+        })
+        .expect("late probe answer is ignored, not rejected");
+    assert_eq!(duplicate, dezoomify_job::Outcome::Ignored);
+    assert_eq!(host.state(), "AcquiringTiles");
+    assert_eq!(
+        host.effects.len(),
+        effects,
+        "an ignored answer emits no work"
+    );
+    // An answer for a tile that was never a probe stays a protocol fault.
+    let forged = host
+        .apply(JobCommand::ProbeOutcome {
+            tile: 99,
+            outcome: dezoomify_protocol::dto::ProbeOutcome::Missing,
+        })
+        .unwrap_err();
+    assert_eq!(forged.code, "job.invalid-state");
 }
 
 #[test]

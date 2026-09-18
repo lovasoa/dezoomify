@@ -64,6 +64,13 @@ The Rust session combines those host facts with its correlated request to
 construct `ErrorDto`. Website and extension inject transport implementations
 but share this conversion and worker integration.
 
+A browser fetch may settle after the engine left its phase (a sibling's retry
+exhaustion can open the partial decision, a cancel can end the job). The
+session only correlates: it consumes the arena slot once, drops the
+correlation, and forwards. The engine owns acceptance: answers for work it
+still awaits are processed, the rest are ignored, so no host guesses at
+phases and a late answer can never fail a settled session.
+
 ## Catalog boundary
 
 Browser hosts consume the ordered generated `CatalogDto` without duplicated
