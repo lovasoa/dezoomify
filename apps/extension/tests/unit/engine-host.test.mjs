@@ -17,7 +17,7 @@ function fakeAssembly() {
   };
 }
 
-function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport, probeSize, displayOnly = false } = {}) {
+function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport, probeSize, displayOnly = false, siteOrigin = () => "" } = {}) {
   if (acquireTile) assembly.acquireTile = acquireTile;
   const sent = [];
   const seen = [];
@@ -25,6 +25,7 @@ function harness({ assembly = fakeAssembly(), acquireTile, sourceTransport, prob
   let cancelled = false;
   const fetchResource = createEngineResourceFetcher({
     binding: () => BINDING,
+    siteOrigin,
     sourceTransport: sourceTransport ?? {
       async fetchResource(request) { seen.push(["source", request]); return { bytes: new Uint8Array([9]) }; },
     },
@@ -278,10 +279,60 @@ test("coordinator source fetches name the engine request on the extension bus", 
   );
   assert.equal(sent.some((message) => message.type === "engine.failure"), false, "a routed fetch must not fail the engine");
 
-  sourceTransport.handleMessage({ requestId: "req:4", sourceType: "dz.source.fetch-chunk", bytes: new Uint8Array([1, 2]) });
-  sourceTransport.handleMessage({ requestId: "req:4", sourceType: "dz.source.fetch-complete", ok: true, status: 200, url: "https://source.test/image.dzi" });
+  sourceTransport.handleMessage({ requestId: "req:4", sourceType: "dz.source.fetch-complete", ok: true, status: 200, url: "https://source.test/image.dzi", bytes: 2, data: "AQI=" });
   await flush();
   const bytes = sent.find((message) => message.type === "engine.bytes");
   assert.equal(bytes?.requestId, 4);
   assert.deepEqual([...bytes.bytes], [1, 2]);
+});
+
+test("a site-origin tile routes through the source transport first", async () => {
+  const { controller, seen } = harness({ siteOrigin: () => "https://cdn.test" });
+  controller.handleEngineMessages([TILE_EFFECT]);
+  await flush();
+  assert.equal(seen[0][0], "source");
+  assert.equal(seen[0][1].uri, "https://cdn.test/tile_0.jpg");
+});
+
+test("a failed site-origin source fetch falls back to the extension origin", async () => {
+  let sourceAttempts = 0;
+  const { controller, sent, seen, logs } = harness({
+    siteOrigin: () => "https://cdn.test",
+    sourceTransport: { async fetchResource() { sourceAttempts += 1; throw Object.assign(new Error("cors"), { category: "network" }); } },
+  });
+  controller.handleEngineMessages([TILE_EFFECT]);
+  await flush();
+  assert.equal(sourceAttempts, 1, "the site-origin tile tries the source transport first");
+  assert.deepEqual(seen.map(([kind]) => kind), ["extension"]);
+  const bytes = sent.find((message) => message.type === "engine.bytes");
+  assert.equal(bytes?.requestId, 0);
+  assert.deepEqual([...bytes.bytes], [1, 2, 3]);
+  assert.ok(logs.some((log) => log.code === "source-fetch-failed"), "the source failure is logged before the fallback");
+});
+
+test("a cross-origin tile never touches the source transport", async () => {
+  const { controller, seen } = harness({ siteOrigin: () => "https://source.test" });
+  controller.handleEngineMessages([TILE_EFFECT]);
+  await flush();
+  assert.deepEqual(seen.map(([kind]) => kind), ["extension"]);
+});
+
+test("a probe request routes through the same fetcher as effects", async () => {
+  const seen = [];
+  const fetchResource = createEngineResourceFetcher({
+    binding: () => BINDING,
+    siteOrigin: () => "https://cdn.test",
+    sourceTransport: {
+      async fetchResource(request) { seen.push(["source", request]); return { bytes: new Uint8Array([7, 8]) }; },
+    },
+    extensionTransport: {
+      async fetchResource(url, opts) { seen.push(["extension", url, opts]); return { bytes: new Uint8Array([1, 2, 3]) }; },
+    },
+    cancelled: () => false,
+  });
+  const result = await fetchResource({
+    request: { id: 9, uri: "https://cdn.test/probe_0.jpg", headers: [], purpose: "probe" },
+  });
+  assert.deepEqual([...result.bytes], [7, 8]);
+  assert.deepEqual(seen.map(([kind]) => kind), ["source"]);
 });

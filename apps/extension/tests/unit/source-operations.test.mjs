@@ -78,7 +78,7 @@ test("candidate snapshot applies URL and count caps with overflow diagnostics", 
   }
 });
 
-test("source fetch returns bounded chunks and a completion result", async () => {
+test("source fetch returns one bounded base64 payload", async () => {
   const oldFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
@@ -96,7 +96,7 @@ test("source fetch returns bounded chunks and a completion result", async () => 
   };
   try {
     const result = await fetchSource({ url: "https://gallery.example/info.json", method: "GET", headers: [{ name: "Accept", value: "application/json" }] });
-    assert.deepEqual(result.chunks, [{ sequence: 0, bytes: [1, 2, 3] }]);
+    assert.deepEqual([...Buffer.from(result.data, "base64")], [1, 2, 3]);
     assert.equal(result.bytes, 3);
     assert.equal(result.status, 200);
     // Credentials stay unset so the default same-origin policy applies: a

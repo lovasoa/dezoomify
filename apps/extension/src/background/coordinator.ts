@@ -16,7 +16,7 @@ type Message = Record<string, unknown> & { type?: string; requestId?: string; jo
 type CandidateInput = { url: string; contents?: string };
 type CandidateSnapshot = { ok: true; documentUrl: string; inputs: CandidateInput[]; overflow: number };
 type CandidateBatch = { requestId: string; inputs: CandidateInput[]; overflow: number; documentUrl: string };
-type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; chunks?: Array<{ sequence: number; bytes: number[] }> };
+type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; data?: string };
 type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string>; primary: boolean };
 export type BrowserApi = {
   action?: { setIcon?: (details: unknown) => Promise<void>; setBadgeText?: (details: unknown) => Promise<void>; onClicked?: { addListener?: (listener: (tab: BrowserTab) => void) => void } };
@@ -39,8 +39,10 @@ const MAX_CANDIDATES = 100;
 const MAX_HEADER_COUNT = 64;
 const MAX_HEADER_NAME_LENGTH = 256;
 const MAX_HEADER_VALUE_LENGTH = 4096;
-const MAX_FETCH_CHUNK_BYTES = 32 * 1024;
 const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
+// Base64 ceiling for an 8 MiB body. The length bound rejects oversized
+// payloads before decoding; the decoded byte count is cross-checked too.
+const MAX_SOURCE_DATA_CHARS = 11184812;
 
 export const BACKGROUND_LOG_MAX_CHARS = LOG_MAX_CHARS;
 
@@ -373,6 +375,15 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
     }
   }
 
+  function decodeSourceData(data: string): Uint8Array | null {
+    try {
+      const binary = atob(data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    } catch { return null; }
+  }
+
   async function dispatchSourceFetch(entry: Entry, message: Message) {
     const method = validSourceMethod(message.method);
     const headers = validSourceHeaders(message.headers);
@@ -407,25 +418,21 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
       reject(code, Number.isInteger(result.status) ? { status: result.status } : {});
       return;
     }
-    const chunkBytes = result.chunks?.reduce?.((sum, chunk) => sum + (Array.isArray(chunk?.bytes) ? chunk.bytes.length : MAX_SOURCE_FETCH_BYTES + 1), 0);
-    if (!Array.isArray(result.chunks) || typeof result.bytes !== "number" || !Number.isSafeInteger(result.bytes) || result.bytes < 0 || result.bytes > MAX_SOURCE_FETCH_BYTES ||
+    if (typeof result.data !== "string" || result.data.length === 0 || result.data.length > MAX_SOURCE_DATA_CHARS ||
+      typeof result.bytes !== "number" || !Number.isSafeInteger(result.bytes) || result.bytes < 0 || result.bytes > MAX_SOURCE_FETCH_BYTES ||
       typeof result.status !== "number" || !Number.isInteger(result.status) || result.status < 200 || result.status >= 300 || !isPublicHttpUrl(result.url) ||
-      chunkBytes !== result.bytes || typeof chunkBytes !== "number" || chunkBytes > MAX_SOURCE_FETCH_BYTES ||
-      result.chunks.some((chunk) => !chunk || !Number.isSafeInteger(chunk.sequence) || chunk.sequence < 0 ||
-        !Array.isArray(chunk.bytes) || chunk.bytes.length > MAX_FETCH_CHUNK_BYTES ||
-        chunk.bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255))) {
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(result.data)) {
       reject("invalid-source-fetch-result");
       return;
     }
-    backgroundLog("info", "source-fetch-complete", `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} chunks=${result.chunks.length} url=${result.url}`);
-    for (const chunk of result.chunks) {
-      backgroundLog("debug", "source-fetch-chunk", `req=${message.requestId} sequence=${chunk.sequence} bytes=${chunk.bytes.length}`);
-      sendToJob(entry, "dz.job.fetch", message.requestId, {
-        sourceType: "dz.source.fetch-chunk", sequence: chunk.sequence, bytes: chunk.bytes,
-      });
+    const decoded = decodeSourceData(result.data);
+    if (!decoded || decoded.byteLength !== result.bytes) {
+      reject("invalid-source-fetch-result");
+      return;
     }
+    backgroundLog("info", "source-fetch-complete", `req=${message.requestId} tab=${entry.tabId} status=${result.status} bytes=${result.bytes} url=${result.url}`);
     sendToJob(entry, "dz.job.fetch", message.requestId, {
-      sourceType: "dz.source.fetch-complete", ok: true, status: result.status, url: result.url, bytes: result.bytes,
+      sourceType: "dz.source.fetch-complete", ok: true, status: result.status, url: result.url, bytes: result.bytes, data: result.data,
     });
   }
 

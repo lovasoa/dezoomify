@@ -16,7 +16,7 @@ import {
   type DispatchTable,
   type WorkerHostOutput,
 } from "@dezoomify/browser-runtime";
-import { createExtensionFetcher } from "../runtime/fetch.ts";
+import { createExtensionFetcher, originOf } from "../runtime/fetch.ts";
 import { createLogger } from "@dezoomify/browser-runtime/logging";
 import type { EngineHost } from "@dezoomify/browser-runtime";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
@@ -48,6 +48,10 @@ jobLog.addSink((entry) => {
 
 /** @type {any | null} */
 let binding: JobBinding | null = null;
+/** Origin of the bound source document; "" until the binding arrives. Same-origin tiles and probes prefer the tab-origin transport. */
+let siteOrigin = "";
+/** Fallback request ids for probes that arrive without an engine request id. Start clear of the engine's small sequential ids. */
+let probeSeq = 1 << 30;
 let controller: EngineHost | null = null;
 let sourceTransport: ReturnType<typeof createCoordinatorSourceTransport> | null = null;
 let jobWorker: Worker | null = null;
@@ -68,9 +72,6 @@ let followDepth = 0;
 let lastTileProgress: { current: number; total: number } | null = null;
 let accessRequest: { hosts: string[]; requesting: boolean } | null = null;
 let partialDecision: number | null = null;
-// Display-only origins for this attempt: an ordinary image succeeded there,
-// so later tiles of the same origin skip the failing readable fetch.
-const displayOnlyOrigins = new Set<string>();
 // Cross-worker processing calls (session.applyProcessing) awaiting a reply.
 const pendingProcess = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }>();
 let processSeq = 0;
@@ -404,6 +405,10 @@ function setup(bound: unknown) {
     frameId: bound.frameId,
     documentGeneration: bound.documentGeneration,
   };
+  try {
+    const documentUrl = (bound as { documentUrl?: unknown }).documentUrl;
+    siteOrigin = typeof documentUrl === "string" ? originOf(documentUrl) : "";
+  } catch { siteOrigin = ""; }
   jobLog.info("binding-received", `jobId=${binding.jobId} tab=${binding.tabId} frame=${binding.frameId} gen=${binding.documentGeneration}`);
   followDepth = 0;
   startAttempt();
@@ -439,7 +444,6 @@ function resetAttemptState() {
   lastTileProgress = null;
   accessRequest = null;
   partialDecision = null;
-  displayOnlyOrigins.clear();
 }
 
 /**
@@ -478,10 +482,12 @@ function startAttempt(followUrl?: string) {
   sourceTransport = createCoordinatorSourceTransport({ sendMessage: send });
   let attemptCancelled = false;
   const cancelFetch = () => { attemptCancelled = true; fetcher.cancel(); };
-  // Metadata prefers the source tab's origin context and falls back to the
-  // granted extension-origin session; tiles always use the extension origin.
+  // Metadata and the bound site's own tiles and probes prefer the source
+  // tab's origin context and fall back to the granted extension-origin
+  // session; cross-origin tiles always use the extension origin.
   const fetchResource = createEngineResourceFetcher({
     binding: () => activeBinding,
+    siteOrigin: () => siteOrigin,
     sourceTransport,
     extensionTransport,
     cancelled: () => attemptCancelled,
@@ -489,11 +495,15 @@ function startAttempt(followUrl?: string) {
   });
   const probeDecoder = createTileDecoder();
   const probeSize = createProbeSize({
-    fetchTile: async (url: string, headers: Record<string, string>) => {
-      const result = await extensionTransport.fetchResource(url, {
-        headers,
-        purpose: "probe",
-        userIntent: true,
+    fetchTile: async (url: string, headers: Record<string, string>, requestId?: number) => {
+      const id = typeof requestId === "number" && Number.isSafeInteger(requestId) && requestId >= 0 ? requestId : (probeSeq += 1);
+      const result = await fetchResource({
+        request: {
+          id,
+          uri: url,
+          headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
+          purpose: "probe",
+        },
       });
       const bytes = result.bytes instanceof Uint8Array
         ? new Uint8Array(result.bytes).slice().buffer as ArrayBuffer
