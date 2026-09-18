@@ -39,7 +39,7 @@ pub(crate) fn node_test(patterns: &[&str], tsx: bool) -> Result<(), String> {
     if tsx {
         args.extend(["--import", "./test/tsx-loader.mjs"]);
     }
-    args.extend(["--test", "--test-reporter=dot"]);
+    args.extend(["--test"]);
     args.extend_from_slice(patterns);
     super::desktop::run_node_with_deadline(
         std::time::Duration::from_secs(10 * 60),
