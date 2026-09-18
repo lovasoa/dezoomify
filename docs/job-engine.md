@@ -31,7 +31,7 @@ stateDiagram-v2
     PartiallyCompleted --> [*]
     Failed --> [*]
     Cancelled --> [*]
-    note right of AcquiringTiles: Pause v1 is an overlay:\nno new acquire-tile effects\nwhile paused; resume re-drives
+    note right of AcquiringTiles: Pause v1 is an overlay, not a state
 ```
 
 ## Model

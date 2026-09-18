@@ -31,7 +31,7 @@ flowchart TD
     K -->|address or input| EI[edit input]
     K -->|output or destination| CO[choose output]
     K -->|missing host grant| GP[grant permission]
-    K -->|no readable browser route| CT[change transport:\nhandoff to extension or native]
+    K -->|no readable browser route| CT[change transport:<br/>handoff to extension or native]
     K -->|tiles missing after retries| PD{Partial policy}
     PD -->|keep| KP[keep partial sibling]
     PD -->|discard| DP[discard partial]

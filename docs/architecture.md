@@ -6,9 +6,9 @@ dezoomify is one monorepo containing Rust crates, generated WASM bindings, the s
 flowchart TD
     UI[Shared UI or CLI] -->|typed command| JOB[crates/dezoomify-job]
     JOB <-->|supplied bytes and results| CORE[crates/dezoomify-core]
-    JOB -->|typed effects| RT[Host runtime]
-    RT -->|typed events| UI
-    subgraph RT[Host runtime]
+    JOB -->|typed effects| HOST
+    HOST -->|typed events| UI
+    subgraph HOST[Host runtime]
         BR[packages/browser-runtime<br/>via crates/dezoomify-wasm]
         NR[crates/dezoomify-native]
     end
@@ -49,7 +49,7 @@ The browser effect layer: workers, fetching, decoding, tile painting, canvases, 
 
 ```mermaid
 flowchart LR
-    subgraph Web["Browser hosts"]
+    subgraph Web[Browser hosts]
         SITE[Website]
         EXT[Extension job tab]
     end
@@ -69,7 +69,7 @@ One relay module, `src/server/proxy.ts` (`handleProxyRequest`), with three thin 
 flowchart TD
     CORE[src/server/proxy.ts<br/>single relay policy] --> CF[functions/api/proxy.ts<br/>Cloudflare Pages Function]
     CORE --> NODE[src/server/proxy-node.ts<br/>local dev server]
-    CORE --> TEST[test/proxy-*.test.mjs<br/>node:test seam]
+    CORE --> TEST[proxy unit tests<br/>node:test seam]
 ```
 
 Each adapter translates its host transport to the same relay call, so tests, local development, and production share one SSRF, credential, redirect, size, content-type, and CORS policy.
