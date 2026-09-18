@@ -29,6 +29,10 @@
 //! * Display-only tiles: `ProvideDisplayOutcome` answers a tile that the
 //!   host holds as an ordinary image (no readable bytes) with a successful
 //!   tile outcome; the tainted output completes as display-only downstream.
+//! * Late acquisition answers: tile bytes, display outcomes, failures, and
+//!   probe-fetch failures that arrive after the engine has left their phase
+//!   are moot. The adapter consumes/releases the arena slot, drops the
+//!   correlation, and forwards nothing, exactly like late discovery replies.
 //! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request), a
 //!   failed `TileOutcome` (tile request), or a missing `ProbeOutcome`
 //!   (probe request).
@@ -558,16 +562,27 @@ impl Session {
                         "probe requests are answered with provide-probe-outcome, not provide-resource",
                     ));
                 }
-                self.require_engine_state(SessionState::AcquiringTiles)?;
+                // A tile response is moot once the engine has left
+                // AcquiringTiles (retry exhaustion can move it to
+                // AwaitingPartialDecision, the last tile can move it to
+                // Finalizing, or cancellation can end acquisition). Other
+                // in-flight hosts can still answer afterwards, exactly as
+                // late sibling discovery responses are after a transition.
+                // Release the arena slot, drop this correlation, and forward
+                // nothing instead of failing the session.
+                if self.state != SessionState::AcquiringTiles {
+                    self.arena.free(handle)?;
+                    self.outstanding_tile_requests.remove(&request);
+                    self.request_context.remove(&request);
+                    return Ok(Vec::new());
+                }
                 // Tile bytes are never retained: hosts decode during
                 // acquisition and hold their own decoded tile, so the arena
                 // copy is released as soon as the outcome settles. Empty
                 // bytes forward a failed outcome so the engine can retry
                 // honestly.
-                let ok = buffer.length > 0;
-                if ok {
-                    self.arena.take_buffer(handle)?;
-                }
+                let tile_bytes = self.arena.take_buffer(handle)?;
+                let ok = !tile_bytes.is_empty();
                 self.outstanding_tile_requests.remove(&request);
                 self.request_context.remove(&request);
                 self.forward(EngineCommand::TileOutcome { tile: tile_id, ok })
@@ -653,7 +668,14 @@ impl Session {
                 "probe requests are answered with provide-probe-outcome, not provide-display-outcome",
             ));
         }
-        self.require_engine_state(SessionState::AcquiringTiles)?;
+        // A display outcome is moot once the engine has left
+        // AcquiringTiles: drop this correlation and forward nothing instead
+        // of failing the session.
+        if self.state != SessionState::AcquiringTiles {
+            self.outstanding_tile_requests.remove(&request);
+            self.request_context.remove(&request);
+            return Ok(Vec::new());
+        }
         self.outstanding_tile_requests.remove(&request);
         self.request_context.remove(&request);
         self.forward(EngineCommand::TileOutcome {
@@ -686,7 +708,15 @@ impl Session {
         match tile {
             Some(tile_id) => {
                 if self.probe_requests.contains(&request) {
-                    self.require_engine_state(SessionState::Planning)?;
+                    // A probe-fetch failure is moot once the engine has left
+                    // Planning: drop this correlation and forward nothing
+                    // instead of failing the session.
+                    if self.state != SessionState::Planning {
+                        self.outstanding_tile_requests.remove(&request);
+                        self.probe_requests.remove(&request);
+                        self.request_context.remove(&request);
+                        return Ok(Vec::new());
+                    }
                     self.outstanding_tile_requests.remove(&request);
                     self.probe_requests.remove(&request);
                     self.request_context.remove(&request);
@@ -695,7 +725,14 @@ impl Session {
                         outcome: ProbeOutcome::Missing,
                     });
                 }
-                self.require_engine_state(SessionState::AcquiringTiles)?;
+                // A tile-fetch failure is moot once the engine has left
+                // AcquiringTiles: drop this correlation and forward nothing
+                // instead of failing the session.
+                if self.state != SessionState::AcquiringTiles {
+                    self.outstanding_tile_requests.remove(&request);
+                    self.request_context.remove(&request);
+                    return Ok(Vec::new());
+                }
                 self.outstanding_tile_requests.remove(&request);
                 self.request_context.remove(&request);
                 self.forward(EngineCommand::TileOutcome {

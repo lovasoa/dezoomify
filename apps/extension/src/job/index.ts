@@ -270,7 +270,10 @@ function onHostFailure(error: unknown) {
     category: "extension",
     retryable: candidate?.retryable === true,
     phase,
-    transport: typeof candidate?.transport === "string" ? candidate.transport : undefined,
+    // The extension always runs under the browser session; an adapter or other
+    // host error carries no fetch transport, so do not leave diagnostics to
+    // default to `direct`.
+    transport: typeof candidate?.transport === "string" ? candidate.transport : "browser-session",
     host: sourceHost(),
   });
   render("failed", { failure, jobActivity: { startedAt: Date.now(), stepLabel: "Job failed" } });
