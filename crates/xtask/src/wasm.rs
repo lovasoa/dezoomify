@@ -96,5 +96,13 @@ fn generate_node_bindings() -> Result<(), String> {
         })?;
     status.success().then_some(()).ok_or_else(|| {
         "wasm-bindgen failed while generating the Node conformance bindings".to_string()
-    })
+    })?;
+    // The `nodejs` target emits CommonJS, but the generated tree lives under
+    // the repository's `target/`, which would inherit the root package's
+    // `"type": "module"`. Pin the directory so Node never reparses the
+    // bindings as ESM (which fails on `exports`/`__dirname`).
+    let package_json = output.join("package.json");
+    std::fs::write(&package_json, "{\"type\":\"commonjs\"}\n")
+        .map_err(|e| format!("cannot write {}: {e}", package_json.display()))?;
+    Ok(())
 }
