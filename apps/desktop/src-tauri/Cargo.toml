@@ -25,7 +25,7 @@ path = "src/main.rs"
 name = "dezoomify-native-host"
 path = "src/bin/dezoomify-native-host.rs"
 
-# 6.1 debt (unblocked for cargo 1.98): shell docs pending.
+# Known debt: shell docs pending.
 [lints.rust]
 missing_docs = "allow"
 
@@ -33,11 +33,11 @@ missing_docs = "allow"
 pedantic = "allow"
 
 [dependencies]
-# Engine deps (inward only: core -> job -> native runtime + protocol DTOs).
+# Engine deps (inward only: core -> engine -> native runtime + protocol DTOs).
 # All pure Rust via dezoomify-native (reqwest/rustls/image/url/sha2); no webview
 # system packages, so the lean offline default still builds anywhere.
 dezoomify-core = { path = "../../../crates/dezoomify-core" }
-dezoomify-job = { path = "../../../crates/dezoomify-job" }
+dezoomify-engine = { path = "../../../crates/dezoomify-engine" }
 dezoomify-native = { path = "../../../crates/dezoomify-native" }
 dezoomify-protocol = { path = "../../../crates/dezoomify-protocol" }
 # Lean offline shell: pure Rust only (no webview system packages).

@@ -3,7 +3,6 @@
 use dezoomify_native::auth::{AuthorizationScope, EphemeralAuthorization};
 use dezoomify_native::cache;
 use dezoomify_native::client;
-use dezoomify_native::download::{Scheduler, SchedulerConfig};
 use dezoomify_native::output::{self, OutputFormat};
 use std::collections::{BTreeMap, HashMap};
 
@@ -46,42 +45,6 @@ fn public_headers_reject_cookie_and_authorization() {
     let mut extra = BTreeMap::new();
     extra.insert("Cookie".to_string(), "x=1".to_string());
     assert!(client::build_request("https://fixtures.test/x", &extra, None).is_err());
-}
-
-#[test]
-fn scheduler_bounds_concurrency_and_tiles() {
-    let mut scheduler = Scheduler::new(SchedulerConfig {
-        max_concurrent: 2,
-        max_tiles: 3,
-        max_retries: 1,
-    });
-    assert!(scheduler.push("a".into()).is_ok());
-    assert!(scheduler.push("b".into()).is_ok());
-    assert!(scheduler.push("c".into()).is_ok());
-    assert!(scheduler.push("d".into()).is_err());
-    let batch = scheduler.next_batch();
-    assert_eq!(batch.len(), 2);
-    assert_eq!(scheduler.peak_in_flight(), 2);
-}
-
-#[test]
-fn scheduler_retries_failures_then_gives_up() {
-    let mut scheduler = Scheduler::new(SchedulerConfig {
-        max_concurrent: 2,
-        max_tiles: 3,
-        max_retries: 1,
-    });
-    scheduler.push("a".into()).unwrap();
-    let batch = scheduler.next_batch();
-    assert_eq!(batch, vec!["a".to_string()]);
-    // First failure is retryable (attempts 1 <= max_retries 1).
-    assert!(scheduler.fail("a").unwrap());
-    assert_eq!(scheduler.next_batch(), vec!["a".to_string()]);
-    // Second failure exhausts the retry budget.
-    assert!(!scheduler.fail("a").unwrap());
-    // No retry is scheduled after exhaustion.
-    assert_eq!(scheduler.next_batch(), Vec::<String>::new());
-    assert_eq!(scheduler.done_count(), 0);
 }
 
 #[test]

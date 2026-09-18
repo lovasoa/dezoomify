@@ -11,8 +11,8 @@ import {
   pushHistory,
   saveHistory as saveHistoryStore,
   toHistoryEntry,
-} from "../packages/shared-ui/src/history.ts";
-import type { HistoryEntry } from "../packages/shared-ui/src/history.ts";
+} from "../packages/app-model/src/history.ts";
+import type { HistoryEntry } from "../packages/app-model/src/history.ts";
 import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
 import type { ViewContext } from "../packages/shared-ui/src/view.tsx";
 import type { ErrorDto, HeaderDto, JobEvent, ProcessingRecipe } from "@dezoomify/wasm-bindings";
@@ -26,7 +26,7 @@ import {
   noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
-import { errorTransportFor, isProxyEligible } from "./webIntegration.ts";
+import { errorTransportFor, isProxyEligible } from "../packages/browser-runtime/src/web-integration.ts";
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 import {
   createBrowserRunner,
@@ -110,7 +110,7 @@ let resultTitle: string | undefined;
 // Pause (suspend-acquisition): the website stops scheduling new
 // tiles while paused, finishes in-flight work, retains the canvas, and
 // re-drives on resume. Integration-layer only; the engine pause lives in
-// `dezoomify-job` for native hosts.
+// `dezoomify-engine` for native hosts.
 let jobPaused = false;
 
 // Recent-jobs history: local-only ledger, newest first, at most

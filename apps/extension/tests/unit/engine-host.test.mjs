@@ -70,8 +70,9 @@ test("tile acquisition decodes with the placement before the outcome settles", a
   await flush();
   const acquire = seen.find(([kind]) => kind === "extension");
   assert.equal(acquire[1], "https://cdn.test/tile_0.jpg");
-  const decoded = sent.find((message) => message.type === "engine.bytes");
-  assert.ok(decoded, "bytes outcome was sent");
+  const acquired = sent.find((message) => message.type === "engine.acquired");
+  assert.ok(acquired, "body-free acquired outcome was sent");
+  assert.equal(acquired.requestId, 0);
 });
 
 test("a tile that cannot decode reports a failed acquisition, not a broken output", async () => {
@@ -113,7 +114,7 @@ test("an access grant re-drives the paused acquisition instead of failing the jo
   controller.resolvePermission(true);
   await flush();
   assert.equal(attempts, 2);
-  assert.ok(sent.some((message) => message.type === "engine.bytes"));
+  assert.ok(sent.some((message) => message.type === "engine.acquired"));
 });
 
 test("a granted-origin refusal fails typed without re-prompting for a grant", async () => {
@@ -304,9 +305,8 @@ test("a failed site-origin source fetch falls back to the extension origin", asy
   await flush();
   assert.equal(sourceAttempts, 1, "the site-origin tile tries the source transport first");
   assert.deepEqual(seen.map(([kind]) => kind), ["extension"]);
-  const bytes = sent.find((message) => message.type === "engine.bytes");
-  assert.equal(bytes?.requestId, 0);
-  assert.deepEqual([...bytes.bytes], [1, 2, 3]);
+  const acquired = sent.find((message) => message.type === "engine.acquired");
+  assert.equal(acquired?.requestId, 0);
   assert.ok(logs.some((log) => log.code === "source-fetch-failed"), "the source failure is logged before the fallback");
 });
 

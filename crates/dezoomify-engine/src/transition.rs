@@ -86,17 +86,26 @@ pub enum JobCommand {
     SelectLevel {
         level: u32,
     },
-    TileOutcome {
+    /// Successful tile acquisition: the host holds the decoded tile and the
+    /// engine records progress. Native hosts decode during acquisition;
+    /// browser hosts report an ordinary image element through
+    /// `TileDisplayed`. Both settle the tile identically; the host-side
+    /// observation (readable bytes vs display-only) is reported through the
+    /// output disposition, never through this command.
+    TileAcquired {
         tile: u32,
-        ok: bool,
+    },
+    /// Display-only success for one tile: the host holds an ordinary image
+    /// element with no readable bytes. Records progress exactly like
+    /// `TileAcquired`; the tainted output completes as display-only
+    /// downstream.
+    TileDisplayed {
+        tile: u32,
     },
     /// Typed tile result carrying structured failure facts (code, HTTP
-    /// status, retry-after hint, bounded diagnostics). Unlike the legacy
-    /// boolean outcome, permanent failures (e.g. HTTP 403) are never
-    /// retried and transient failures retry on the exact budget with
-    /// explicit timer effects. New hosts must send this; the boolean form
-    /// stays for already-shipped hosts and treats `ok: false` as a
-    /// transient failure with immediate retry.
+    /// status, retry-after hint, bounded diagnostics). Permanent failures
+    /// (e.g. HTTP 403) are never retried and transient failures retry on
+    /// the exact budget with explicit timer effects.
     TileFailed {
         tile: u32,
         failure: crate::retry::TileFailure,

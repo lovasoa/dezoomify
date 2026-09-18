@@ -3,6 +3,7 @@
 // Pure: the host string and controller status arrive as parameters, so this
 // module owns no job state. File move, no behavior change.
 import { categoryFor, phaseFor, plainMessageFor, t } from "@dezoomify/shared-ui";
+import { eventJobId, eventSeq } from "./events.ts";
 
 // Failure classification and plain-language headlines live once in the shared
 // UI (`packages/shared-ui/src/failure.ts`); desktop re-exports them so its
@@ -186,23 +187,11 @@ export function payloadText(payload: PayloadTable): string {
 }
 
 export function payloadJob(payload: PayloadTable): string | null {
-  for (const key of ["job", "jobId", "job_id"]) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
+  return eventJobId(payload);
 }
 
 export function payloadSeq(payload: PayloadTable): number | null {
-  for (const key of ["seq", "seqNo", "sequence", "eventSeq"]) {
-    const v = payload[key];
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
-    if (typeof v === "string" && v.trim() !== "") {
-      const n = Number(v.trim());
-      if (Number.isFinite(n) && n >= 0) return Math.floor(n);
-    }
-  }
-  return null;
+  return eventSeq(payload);
 }
 
 export function strField(payload: PayloadTable, keys: Array<string>): string | undefined {

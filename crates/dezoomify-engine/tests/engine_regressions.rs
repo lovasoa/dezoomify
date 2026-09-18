@@ -13,7 +13,7 @@
 
 mod support;
 
-use dezoomify_job::{Config, JobCommand, RecoveryChoice, TileFailure};
+use dezoomify_engine::{Config, JobCommand, RecoveryChoice, TileFailure};
 use support::ScriptedHost;
 
 const INPUT_URL: &str = "https://example.test/image.dzi";
@@ -109,11 +109,8 @@ fn permanent_403_settles_after_single_attempt() {
     assert_eq!(host.state(), "AcquiringTiles");
 
     for tile in planned.iter().skip(1) {
-        host.apply(JobCommand::TileOutcome {
-            tile: *tile,
-            ok: true,
-        })
-        .unwrap();
+        host.apply(JobCommand::TileAcquired { tile: *tile })
+            .unwrap();
     }
     assert_eq!(host.state(), "AwaitingPartialDecision");
     // The missing detail keeps the structured facts, not a boolean.
@@ -144,11 +141,8 @@ fn transient_failure_retries_exact_budget_with_explicit_waits() {
     let planned = discover_and_acquire(&mut host);
     // Settle siblings first so the budget accounting is isolated.
     for tile in planned.iter().skip(1) {
-        host.apply(JobCommand::TileOutcome {
-            tile: *tile,
-            ok: true,
-        })
-        .unwrap();
+        host.apply(JobCommand::TileAcquired { tile: *tile })
+            .unwrap();
     }
 
     // Attempt 1 fails transiently: one explicit wait, no re-acquisition yet.
@@ -212,7 +206,7 @@ fn stale_timer_completions_are_ignored_without_new_work() {
             attempt: 7,
         })
         .unwrap();
-    assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
+    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
 
     // Real timer, then a duplicate completion for the same attempt.
@@ -233,7 +227,7 @@ fn stale_timer_completions_are_ignored_without_new_work() {
             attempt: 1,
         })
         .unwrap();
-    assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
+    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
     assert_eq!(acquire_count(&host, planned[0]), 2);
 
@@ -252,7 +246,7 @@ fn stale_timer_completions_are_ignored_without_new_work() {
             failure: transient_failure(),
         })
         .unwrap();
-    assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
+    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
     assert_eq!(host.job().tile_attempts_of(planned[1]), attempts);
     assert_eq!(host.transcript().len(), len);
 }
@@ -313,11 +307,8 @@ fn late_inflight_completions_settle_before_partial_decision() {
     assert_eq!(host.state(), "AcquiringTiles");
 
     // A late success still counts toward progress.
-    host.apply(JobCommand::TileOutcome {
-        tile: planned[1],
-        ok: true,
-    })
-    .unwrap();
+    host.apply(JobCommand::TileAcquired { tile: planned[1] })
+        .unwrap();
     assert_eq!(host.state(), "AcquiringTiles");
 
     // A second failure joins the stash; the last success settles the round
@@ -328,11 +319,8 @@ fn late_inflight_completions_settle_before_partial_decision() {
     })
     .unwrap();
     assert_eq!(host.state(), "AcquiringTiles");
-    host.apply(JobCommand::TileOutcome {
-        tile: planned[3],
-        ok: true,
-    })
-    .unwrap();
+    host.apply(JobCommand::TileAcquired { tile: planned[3] })
+        .unwrap();
     assert_eq!(host.state(), "AwaitingPartialDecision");
     let mut missing: Vec<u32> = host
         .job()
@@ -357,11 +345,8 @@ fn partial_retry_requeues_only_failed_with_fresh_budget() {
     })
     .unwrap();
     for tile in planned.iter().skip(1) {
-        host.apply(JobCommand::TileOutcome {
-            tile: *tile,
-            ok: true,
-        })
-        .unwrap();
+        host.apply(JobCommand::TileAcquired { tile: *tile })
+            .unwrap();
     }
     assert_eq!(host.state(), "AwaitingPartialDecision");
 
@@ -415,11 +400,8 @@ fn success_after_finalization_and_cancel_after_quiescence_stay_rejected() {
     let mut host = ScriptedHost::new("job:order", INPUT_URL, Config::default()).unwrap();
     let planned = discover_and_acquire(&mut host);
     for tile in &planned {
-        host.apply(JobCommand::TileOutcome {
-            tile: *tile,
-            ok: true,
-        })
-        .unwrap();
+        host.apply(JobCommand::TileAcquired { tile: *tile })
+            .unwrap();
     }
     assert_eq!(host.state(), "Finalizing");
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
@@ -427,10 +409,7 @@ fn success_after_finalization_and_cancel_after_quiescence_stay_rejected() {
 
     // Success after finalization: stably rejected, exactly one terminal.
     for late in [
-        JobCommand::TileOutcome {
-            tile: planned[0],
-            ok: true,
-        },
+        JobCommand::TileAcquired { tile: planned[0] },
         JobCommand::TileFailed {
             tile: planned[1],
             failure: transient_failure(),
@@ -448,11 +427,8 @@ fn success_after_finalization_and_cancel_after_quiescence_stay_rejected() {
 fn cancel_before_commit_releases_once_and_rejects_late_work() {
     let mut host = ScriptedHost::new("job:cancel", INPUT_URL, Config::default()).unwrap();
     let planned = discover_and_acquire(&mut host);
-    host.apply(JobCommand::TileOutcome {
-        tile: planned[0],
-        ok: true,
-    })
-    .unwrap();
+    host.apply(JobCommand::TileAcquired { tile: planned[0] })
+        .unwrap();
     host.apply(JobCommand::Cancel).unwrap();
     assert_eq!(host.state(), "Cancelled");
     assert_eq!(
@@ -468,10 +444,7 @@ fn cancel_before_commit_releases_once_and_rejects_late_work() {
     assert_eq!(host.terminal_count(), 1);
 
     let len = host.transcript().len();
-    let late = host.apply(JobCommand::TileOutcome {
-        tile: planned[1],
-        ok: true,
-    });
+    let late = host.apply(JobCommand::TileAcquired { tile: planned[1] });
     assert!(late.is_err());
     assert_eq!(late.unwrap_err().code, "job.post-terminal");
     assert_eq!(host.transcript().len(), len);
@@ -520,8 +493,7 @@ fn large_grid_schedules_linearly_with_bounded_active_tiles() {
             break;
         };
         answered.insert(tile);
-        host.apply(JobCommand::TileOutcome { tile, ok: true })
-            .unwrap();
+        host.apply(JobCommand::TileAcquired { tile }).unwrap();
         max_active = max_active.max(host.job().in_flight_count());
     }
     assert_eq!(host.state(), "Finalizing");
@@ -607,8 +579,7 @@ fn deferred_follow_continues_same_job_without_new_id() {
     })
     .unwrap();
     for (tile, _, _) in host.tile_effects() {
-        host.apply(JobCommand::TileOutcome { tile, ok: true })
-            .unwrap();
+        host.apply(JobCommand::TileAcquired { tile }).unwrap();
     }
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
@@ -736,7 +707,9 @@ fn deferred_follow_budget_is_bounded() {
 
 #[test]
 fn canonical_api_deferred_trace_keeps_one_job_id() {
-    use dezoomify_job::engine_api::{DiscoveryInput, Effect, EngineJob, JobOptions, UserCommand};
+    use dezoomify_engine::engine_api::{
+        DiscoveryInput, Effect, EngineJob, JobOptions, UserCommand,
+    };
     // The deferred example on the canonical surface: list input,
     // same-job follow, selection, tiles, terminal -- one EngineJob throughout.
     let options = JobOptions::new(vec![DiscoveryInput::with_contents(
@@ -766,7 +739,7 @@ fn canonical_api_deferred_trace_keeps_one_job_id() {
     let update = job
         .provide_metadata(
             id,
-            dezoomify_job::engine_api::ResponseMetadata::new(),
+            dezoomify_engine::engine_api::ResponseMetadata::new(),
             DZI.as_bytes(),
         )
         .expect("followed bytes");
@@ -788,7 +761,7 @@ fn canonical_api_deferred_trace_keeps_one_job_id() {
     let mut update = update;
     for id in tile_ids {
         update = job
-            .complete(id, dezoomify_job::engine_api::EffectResult::TileAcquired)
+            .complete(id, dezoomify_engine::engine_api::EffectResult::TileAcquired)
             .expect("tile done");
     }
     let finalize = update.finalize_effects();
@@ -796,8 +769,8 @@ fn canonical_api_deferred_trace_keeps_one_job_id() {
     let update = job
         .complete(
             finalize[0].id(),
-            dezoomify_job::engine_api::EffectResult::OutputCommitted {
-                disposition: dezoomify_job::engine_api::OutputDisposition::NativePublication,
+            dezoomify_engine::engine_api::EffectResult::OutputCommitted {
+                disposition: dezoomify_engine::engine_api::OutputDisposition::NativePublication,
             },
         )
         .expect("output committed");
@@ -811,11 +784,8 @@ fn cancel_during_finalizing_wins_over_commit() {
     let mut host = ScriptedHost::new("job:cancel-final", INPUT_URL, Config::default()).unwrap();
     let planned = discover_and_acquire(&mut host);
     for tile in &planned {
-        host.apply(JobCommand::TileOutcome {
-            tile: *tile,
-            ok: true,
-        })
-        .unwrap();
+        host.apply(JobCommand::TileAcquired { tile: *tile })
+            .unwrap();
     }
     assert_eq!(host.state(), "Finalizing");
     host.apply(JobCommand::Cancel).unwrap();

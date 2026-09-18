@@ -1,6 +1,6 @@
 # Job engine
 
-`crates/dezoomify-job` is the deterministic state machine behind every job. It decides what happens next; hosts do it. It never touches I/O, pixels, time, or output files. The browser runtime drives it through the WASM bridge; the native runtime drives it directly. Shared scenarios assert both runtimes behave the same.
+`crates/dezoomify-engine` is the deterministic state machine behind every job. It decides what happens next; hosts do it. It never touches I/O, pixels, time, or output files. The browser runtime drives it through the WASM bridge; the native runtime drives it directly. Shared scenarios assert both runtimes behave the same.
 
 ```mermaid
 stateDiagram-v2
@@ -76,7 +76,7 @@ While paused the engine schedules no new `acquire-tile` effects, finishes in-fli
 
 ## Behavior table (implemented)
 
-`dezoomify-job` is synchronous with monotonic `seq` (checked arithmetic), one FIFO typed message queue, and exactly one terminal event. `Terminal` = `Completed` / `PartiallyCompleted` / `Failed` / `Cancelled`. Post-terminal inputs return stable `job.post-terminal` rejection with no work. Duplicates return `Outcome::Ignored` with no state change.
+`dezoomify-engine` is synchronous with monotonic `seq` (checked arithmetic), one FIFO typed message queue, and exactly one terminal event. `Terminal` = `Completed` / `PartiallyCompleted` / `Failed` / `Cancelled`. Post-terminal inputs return stable `job.post-terminal` rejection with no work. Duplicates return `Outcome::Ignored` with no state change.
 
 ## Host-effect contract
 

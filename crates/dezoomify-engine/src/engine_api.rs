@@ -4,15 +4,15 @@
 //! This module publishes the job interface every product drives:
 //!
 //! ```text
-//! dezoomify_job::engine_api::EngineJob
-//! dezoomify_job::engine_api::JobOptions
-//! dezoomify_job::engine_api::UserCommand
-//! dezoomify_job::engine_api::Effect
-//! dezoomify_job::engine_api::EffectId
-//! dezoomify_job::engine_api::EffectResult
-//! dezoomify_job::engine_api::Failure
-//! dezoomify_job::engine_api::JobSnapshot
-//! dezoomify_job::engine_api::Update
+//! dezoomify_engine::engine_api::EngineJob
+//! dezoomify_engine::engine_api::JobOptions
+//! dezoomify_engine::engine_api::UserCommand
+//! dezoomify_engine::engine_api::Effect
+//! dezoomify_engine::engine_api::EffectId
+//! dezoomify_engine::engine_api::EffectResult
+//! dezoomify_engine::engine_api::Failure
+//! dezoomify_engine::engine_api::JobSnapshot
+//! dezoomify_engine::engine_api::Update
 //! ```
 //!
 //! Surface:
@@ -45,7 +45,7 @@
 //!   state.
 //!
 //! ```rust
-//! use dezoomify_job::engine_api::*;
+//! use dezoomify_engine::engine_api::*;
 //!
 //! const DZI: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 //! <Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
@@ -867,9 +867,11 @@ impl EngineJob {
             )
         };
         match (outstanding, result) {
-            (Outstanding::Tile { tile }, EffectResult::TileAcquired)
-            | (Outstanding::Tile { tile }, EffectResult::TileDisplayed) => {
-                Ok(InnerCommand::TileOutcome { tile, ok: true })
+            (Outstanding::Tile { tile }, EffectResult::TileAcquired) => {
+                Ok(InnerCommand::TileAcquired { tile })
+            }
+            (Outstanding::Tile { tile }, EffectResult::TileDisplayed) => {
+                Ok(InnerCommand::TileDisplayed { tile })
             }
             (Outstanding::Tile { tile }, EffectResult::TileFailed(failure)) => {
                 Ok(InnerCommand::TileFailed {

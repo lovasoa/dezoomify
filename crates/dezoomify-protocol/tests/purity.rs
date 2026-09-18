@@ -16,7 +16,7 @@ const BANNED: &[&str] = &[
     "web-sys",
     "js-sys",
     "dezoomify-core",
-    "dezoomify-job",
+    "dezoomify-engine",
 ];
 
 #[test]

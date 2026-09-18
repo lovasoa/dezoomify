@@ -12,16 +12,13 @@
 pub mod auth;
 pub mod cache;
 pub mod client;
-pub mod download;
 pub mod error;
 pub mod exec;
 pub mod http;
 pub mod output;
 pub mod pipeline;
-pub mod pool;
 pub mod progress;
 pub mod runner;
-pub mod runtime;
 pub mod sink;
 pub mod transport;
 
@@ -30,4 +27,3 @@ pub use runner::{
     CommandRejected, JobCommandAck, JobOptions, JobSnapshot, Lifecycle, NativeRunner,
     OutputSummary, OutputTarget, RunningJob, Terminal, UserCommand,
 };
-pub use runtime::{JobEvent, JobEventKind, JobHandle, JobRequest, JobResult, NativeRuntime};

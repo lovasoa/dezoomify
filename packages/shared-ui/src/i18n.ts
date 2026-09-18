@@ -419,8 +419,6 @@ const en = {
   "desktop.rec.destTitle": "Save destination needs attention",
   "desktop.rec.destDesc":
     "The save destination was not accepted. Choose an output file, try again, or use another app.",
-  "desktop.rec.chooseTitle": "Choose where to save",
-  "desktop.rec.chooseDesc": "Pick the output file to continue saving this image.",
   "desktop.rec.keep": "Keep partial image",
   "desktop.rec.discard": "Discard partial",
   "desktop.rec.retryTiles": "Retry failed tiles",

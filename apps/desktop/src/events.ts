@@ -122,6 +122,25 @@ export function isDesktopEventChannel(value: string): value is DesktopEventChann
   return (DESKTOP_EVENT_CHANNELS as readonly string[]).includes(value);
 }
 
+// Canonical IPC identity: the Rust shell emits every job payload with both
+// `job` and `jobId` aliases plus a numeric `seq` (jobs.rs projection,
+// asserted in the shell tests). Readers take `job` first and accept `jobId`;
+// anything else (job_id, seqNo, string seqs) is rejected, so speculative
+// spellings fail closed instead of matching unrelated fields.
+export function eventJobId(payload: Record<string, unknown>): string | null {
+  for (const key of ["job", "jobId"]) {
+    const value = payload[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
+export function eventSeq(payload: Record<string, unknown>): number | null {
+  const value = payload["seq"];
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  return null;
+}
+
 function containsForbiddenKey(value: unknown, seen: Set<unknown>): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value === "string") return false;

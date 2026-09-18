@@ -49,7 +49,7 @@ Each fact lives once; every other page links to it:
 
 ## System invariants
 
-- [`crates/dezoomify-core`](architecture.md#cratesdezoomify-core) and [`crates/dezoomify-job`](job-engine.md) are pure Rust libraries with no network, filesystem, clock, UI, or image-codec access.
+- [`crates/dezoomify-core`](architecture.md#cratesdezoomify-core) and [`crates/dezoomify-engine`](job-engine.md) are pure Rust libraries with no network, filesystem, clock, UI, or image-codec access.
 - [`crates/dezoomify-protocol`](protocol.md) is the Rust source for the generated TypeScript bindings used across the WASM boundary.
 - One shared [UI](architecture.md#packagesshared-ui) (React TSX) serves the website, desktop app, and extension.
 - Browser and native runtimes implement the same capabilities honestly; unsupported operations are reported before a job starts.

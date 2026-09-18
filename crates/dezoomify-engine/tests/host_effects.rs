@@ -5,7 +5,7 @@
 
 mod support;
 
-use dezoomify_job::{Config, JobCommand};
+use dezoomify_engine::{Config, JobCommand};
 use support::{ScriptedHost, DZI, DZI_INPUT_URL};
 
 fn host_with_id(job: &str) -> ScriptedHost {

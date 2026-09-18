@@ -1,11 +1,11 @@
-//! Native download pipeline: one [`dezoomify_job::Job`] owns discovery,
+//! Native download pipeline: one [`dezoomify_engine::Job`] owns discovery,
 //! selection, planning, retry, and lifecycle policy; this module executes its
 //! effects with real HTTP, decode, assemble, encode, and atomic-write fns.
 //!
 //! All network I/O goes through [`crate::transport::NativeTransport`] (one
 //! reusable reqwest client per job scope, single-attempt fetches); all format
 //! logic stays in `dezoomify-core`; all lifecycle policy stays in
-//! `dezoomify-job`.
+//! `dezoomify-engine`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -246,23 +246,6 @@ impl PartialGate {
     }
 }
 
-/// Map an opaque shell choice onto an interactive partial decision.
-/// Stable markers only, never display strings: `discard`/`fail` discards,
-/// `keep`/`partial` keeps, `att:`/`retry` retries.
-#[must_use]
-pub fn partial_decision_from_choice(choice: &str) -> Option<PartialDecision> {
-    let lower = choice.to_ascii_lowercase();
-    if lower.contains("discard") || lower.contains("fail") {
-        Some(PartialDecision::Discard)
-    } else if lower.starts_with("att:") || lower.contains("retry") {
-        Some(PartialDecision::Retry)
-    } else if lower.contains("keep") || lower.contains("partial") {
-        Some(PartialDecision::Keep)
-    } else {
-        None
-    }
-}
-
 /// Host-side external commands into a running job (Pause/Resume only).
 /// Cancel travels on the shared flag, partial answers on the gate. The
 /// pump drains these at every effect boundary; commands never supply bytes
@@ -454,12 +437,38 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
     }
 }
 
-/// Progress event emitted by the pipeline. Kinds: `discovery`, `downloading`,
-/// `encoding`. Details carry counts; nothing is fabricated.
+/// Typed progress event emitted by the pipeline. Counts, byte sizes, and
+/// redacted ledgers travel as typed fields: nothing is string-encoded into a
+/// `k=v` map and nothing is parsed back. Hosts match variants directly.
 #[derive(Clone, Debug)]
-pub struct PipelineEvent {
-    pub kind: String,
-    pub detail: BTreeMap<String, String>,
+pub enum PipelineEvent {
+    /// Discovery issued another metadata fetch (`resources` total attempts).
+    Discovery { resources: u64 },
+    /// Tile acquisition progress (monotonic per job).
+    Downloading { acquired: u64, total: u64 },
+    /// Output encode finished (`bytes` encoded, `files` only for `iiif-dir`).
+    Encoding { bytes: u64, files: Option<u64> },
+    /// One tile attempt failed (redacted tile id plus diagnostics, never a
+    /// URL). Informational: the engine owns the retry budget.
+    TileFailed { tile: String, error: String },
+    /// The driver waits for an interactive partial decision on this
+    /// generation. Tile ids and counts only, never URLs or paths.
+    RecoveryRequested {
+        missing: Vec<String>,
+        failed: u64,
+        total: u64,
+        generation: u32,
+    },
+    /// Missing-work ledger accompanying a partial decision (same redaction).
+    MissingWork {
+        missing: Vec<String>,
+        failed: u64,
+        total: u64,
+    },
+    /// Engine paused after `acquired` tiles (pause demonstration overlay).
+    Paused { acquired: u64 },
+    /// Engine resumed after `acquired` tiles.
+    Resumed { acquired: u64 },
 }
 
 /// Successful pipeline result for the bytes actually written.
@@ -1244,22 +1253,5 @@ mod tests {
             None,
             "cancellation never blocks the driver"
         );
-    }
-
-    #[test]
-    fn partial_choice_markers_map_without_display_strings() {
-        assert_eq!(
-            partial_decision_from_choice("partial:keep"),
-            Some(PartialDecision::Keep)
-        );
-        assert_eq!(
-            partial_decision_from_choice("partial:discard"),
-            Some(PartialDecision::Discard)
-        );
-        assert_eq!(
-            partial_decision_from_choice("att:0:ready"),
-            Some(PartialDecision::Retry)
-        );
-        assert_eq!(partial_decision_from_choice("img:0"), None);
     }
 }

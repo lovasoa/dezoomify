@@ -52,20 +52,17 @@ function tileError(code, http) {
 }
 
 /// Drive one session through discovery and selection of the largest level.
-/// Returns the live session plus `(tile, request)` pairs in effect order and
-/// an arena-bytes observer (zero unless tile bodies were retained).
+/// Returns the live session plus `(tile, request)` pairs in effect order.
+/// Discovery bodies cross directly in the command; nothing is retained.
 function acquireTiles(session) {
   const started = start(session);
   const request = discoveryRequest(started);
   assert.ok(request);
-  const bytes = Buffer.from(DZI, "utf8");
-  const handle = session.allocateBuffer(bytes.length);
-  session.writeBuffer(handle, 0, bytes);
-  session.commitBuffer(handle, bytes.length);
+  const bytes = Array.from(Buffer.from(DZI, "utf8"));
   const provided = session.dispatch({
     type: "provide-resource",
     request: request.id,
-    buffer: session.bufferHandle(handle),
+    bytes,
   });
   assert.equal(provided.status, "ok");
   const catalog = provided.messages.find((message) =>
@@ -81,14 +78,7 @@ function acquireTiles(session) {
     .filter((message) => message.kind === "effect" && message.type === "acquire-tile")
     .map((message) => ({ tile: message.tile, request: message.request.id }));
   assert.equal(tiles.length, 4, "largest DZI level is a 2x2 grid");
-  return {
-    tiles,
-    acquire: {
-      arenaBytes() {
-        return Number(session.retainedBytes());
-      },
-    },
-  };
+  return { tiles };
 }
 
 describe("generated typed WASM surface", () => {
@@ -106,18 +96,33 @@ describe("generated typed WASM surface", () => {
     assert.deepEqual(session.dispose(), { status: "ok", messages: [] });
   });
 
-  it("moves typed handles and bytes directly", () => {
+  it("carries discovery bodies directly in provide-resource", () => {
     const session = new wasm.Session({});
-    const handle = session.allocateBuffer(4);
-    assert.deepEqual(Object.keys(handle).sort(), ["generation", "id"]);
-    session.writeBuffer(handle, 0, Uint8Array.from([3, 1, 4, 1]));
-    session.commitBuffer(handle, 4);
-    const buffer = session.bufferHandle(handle);
-    assert.deepEqual(
-      { id: buffer.id, generation: buffer.generation, length: buffer.length },
-      { id: handle.id, generation: handle.generation, length: 4 },
+    const request = discoveryRequest(start(session));
+    assert.ok(request);
+    const bytes = Array.from(Buffer.from(DZI, "utf8"));
+    const provided = session.dispatch({
+      type: "provide-resource",
+      request: request.id,
+      bytes,
+    });
+    assert.equal(provided.status, "ok");
+    assert.ok(
+      provided.messages.some((message) => message.kind === "event" && message.type === "catalog"),
+      "direct bytes yield a catalog",
     );
-    assert.deepEqual(Array.from(session.takeBuffer(handle)), [3, 1, 4, 1]);
+    session.dispose();
+  });
+
+  it("rejects tile bytes through provide-resource", () => {
+    const session = new wasm.Session({});
+    const { tiles } = acquireTiles(session);
+    const rejected = session.dispatch({
+      type: "provide-resource",
+      request: tiles[0].request,
+      bytes: [1, 2, 3, 4],
+    });
+    assert.equal(rejected.status, "error", "tile bytes never enter the adapter");
     session.dispose();
   });
 
@@ -157,7 +162,7 @@ describe("generated typed WASM surface", () => {
 
   it("drives tiles to completion through display-only acknowledgements", () => {
     const session = new wasm.Session({});
-    const { tiles, acquire } = acquireTiles(session);
+    const { tiles } = acquireTiles(session);
     let messageCount = 0;
     let finalized = false;
     for (const { request } of tiles) {
@@ -169,9 +174,8 @@ describe("generated typed WASM surface", () => {
       );
     }
     assert.ok(finalized, "display-only acquisition still finalizes");
-    assert.equal(acquire.arenaBytes(), 0, "ordinary tile acks retain zero body bytes");
     // eslint-disable-next-line no-console
-    console.log(`display-only completion: ${messageCount} host messages, 0 retained body bytes`);
+    console.log(`display-only completion: ${messageCount} host messages, body-free acks`);
     session.dispose();
   });
 

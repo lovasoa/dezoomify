@@ -7,7 +7,7 @@
 //
 // Command routing against the shipped shell (DESKTOP_COMMANDS):
 // cancel -> cancel_job; image/level/recovery choices -> answer_choice with
-// the shell's opaque choice strings (single source in jobController.ts);
+// the shell's typed choice shapes (single source in jobController.ts);
 // pause/resume and engine-internal commands have no shell command yet and
 // reject with desktop.unsupported-command until the typed native IPC lands.
 //
@@ -37,14 +37,12 @@ import {
 } from "@dezoomify/app-model";
 import {
   DESKTOP_EVENT_CHANNELS,
+  eventJobId,
+  eventSeq,
   type DesktopEventChannel,
 } from "./events.ts";
 import { DESKTOP_COMMANDS, NATIVE_FORMATS } from "./desktopIntegration.ts";
-import {
-  DISCARD_PARTIAL_CHOICE,
-  KEEP_PARTIAL_CHOICE,
-  RETRY_CHOICE,
-} from "./jobController.ts";
+import type { AnswerChoice } from "./jobController.ts";
 
 // Keep erasable syntax only so node type-stripping can read this file.
 
@@ -110,16 +108,6 @@ function numField(record: Record<string, unknown>, keys: string[]): number | und
     if (typeof value === "number" && Number.isFinite(value)) return value;
   }
   return undefined;
-}
-
-function jobIdOf(payload: Record<string, unknown>): string | null {
-  const job = strField(payload, ["job", "jobId"]);
-  return job && job !== "" ? job : null;
-}
-
-function seqOf(payload: Record<string, unknown>): number | null {
-  const seq = numField(payload, ["seq"]);
-  return typeof seq === "number" && Number.isInteger(seq) && seq >= 0 ? seq : null;
 }
 
 const VALID_PHASES = new Set([
@@ -240,7 +228,7 @@ export function projectDesktopEvent(
     kind === "awaitingdestination" ||
     kind === "destination"
   ) {
-    const generation = seqOf(payload) ?? 0;
+    const generation = eventSeq(payload) ?? 0;
     return { type: "recovery-request", generation, actions: [] };
   }
 
@@ -326,11 +314,11 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
     const payload = raw as Record<string, unknown>;
-    const id = jobIdOf(payload);
+    const id = eventJobId(payload);
     if (!id) return;
     const tracked = jobs.get(id);
     if (!tracked || tracked.settled) return;
-    const remoteSeq = seqOf(payload);
+    const remoteSeq = eventSeq(payload);
     if (remoteSeq !== null) {
       if (remoteSeq <= tracked.seenSeq) return;
       tracked.seenSeq = remoteSeq;
@@ -441,20 +429,20 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
         return;
       }
       if (command.type === "select-image") {
-        await ipc.invoke("answer_choice", { job: id, choice: `img:${command.image}` });
+        const choice: AnswerChoice = { kind: "image", index: command.image };
+        await ipc.invoke("answer_choice", { job: id, choice });
         return;
       }
       if (command.type === "select-level") {
-        await ipc.invoke("answer_choice", { job: id, choice: `level:${command.level}` });
+        const choice: AnswerChoice = { kind: "level", index: command.level };
+        await ipc.invoke("answer_choice", { job: id, choice });
         return;
       }
       if (command.type === "recovery-choice") {
-        const choice =
+        const choice: AnswerChoice =
           command.choice === "retry"
-            ? RETRY_CHOICE
-            : command.choice === "keep"
-              ? KEEP_PARTIAL_CHOICE
-              : DISCARD_PARTIAL_CHOICE;
+            ? { kind: "retry" }
+            : { kind: "partial", keep: command.choice === "keep" };
         await ipc.invoke("answer_choice", { job: id, choice });
         return;
       }

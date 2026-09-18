@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 dezoomify-core = { path = "../dezoomify-core" }
 dezoomify-protocol = { path = "../dezoomify-protocol", features = ["typescript"] }
-dezoomify-job = { path = "../dezoomify-job" }
+dezoomify-engine = { path = "../dezoomify-engine" }
 serde.workspace = true
 wasm-bindgen.workspace = true
 serde-wasm-bindgen.workspace = true

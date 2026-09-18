@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub const MAX_FETCHES: u32 = 64;
 /// Maximum concurrent decodes allowed by validation.
 pub const MAX_DECODES: u32 = 64;
-/// Maximum tiles allowed by validation (matches protocol `MAX_COUNT` scale).
+/// Maximum tiles allowed by validation (16M scale).
 pub const MAX_TILES_LIMIT: u32 = 16_777_216;
 /// Maximum retries allowed by validation.
 pub const MAX_RETRIES_LIMIT: u32 = 1_024;

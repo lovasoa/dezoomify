@@ -409,14 +409,20 @@ export function createEngineHost(deps: EngineHostDeps) {
         await deps.assembly.acquireTile(effect.tile, effect.placement, asArrayBuffer(result.bytes));
       }
       settleOrigin(originState, "readable");
-      if (!cancelled) {
-        sendToEngine({
-          type: "engine.bytes",
-          requestId: request.id,
-          bytes: result.bytes,
-          ...(result.finalUri ? { finalUri: result.finalUri } : {}),
-        });
+      if (cancelled) return;
+      if (effect.type === "acquire-tile") {
+        // Body-free tile acknowledgment: the tile was decoded and placed
+        // above, so only the typed outcome crosses into the engine. Only
+        // metadata (`acquire-resource`) carries bytes.
+        sendToEngine({ type: "engine.acquired", requestId: request.id });
+        return;
       }
+      sendToEngine({
+        type: "engine.bytes",
+        requestId: request.id,
+        bytes: result.bytes,
+        ...(result.finalUri ? { finalUri: result.finalUri } : {}),
+      });
     } catch (error) {
       const failure = deps.classifyFailure(error);
       log("warn", "effect-failed", `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`);

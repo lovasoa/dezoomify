@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use dezoomify_fixture_server::{router, AppState, RouteTable};
-use dezoomify_native::pipeline::{self, PartialPolicy, PipelineConfig};
+use dezoomify_native::pipeline::{self, PartialPolicy, PipelineConfig, PipelineEvent};
 
 fn start_fixture_server() -> String {
     let scenarios_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios");
@@ -1114,7 +1114,7 @@ fn pause_after_one_tile_still_assembles_the_full_image() {
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
     let out_dir = temp_dir("pause");
     let output = out_dir.join("pause.png");
-    let mut kinds: Vec<String> = Vec::new();
+    let mut kinds: Vec<&str> = Vec::new();
     let config = PipelineConfig {
         pause_after: Some(1),
         // Single-flight acquisition so pause lands mid-plan (multi-batch),
@@ -1127,17 +1127,21 @@ fn pause_after_one_tile_still_assembles_the_full_image() {
         output.to_str().expect("utf8 output"),
         false,
         &config,
-        &mut |event| kinds.push(event.kind.clone()),
+        &mut |event| match event {
+            PipelineEvent::Paused { .. } => kinds.push("paused"),
+            PipelineEvent::Resumed { .. } => kinds.push("resumed"),
+            _ => {}
+        },
     )
     .expect("paused pipeline completes");
     assert_eq!(outcome.tile_count, 4);
     assert_eq!((outcome.image_size.x, outcome.image_size.y), (512, 512));
     assert!(
-        kinds.contains(&"paused".to_string()),
+        kinds.contains(&"paused"),
         "driver emitted paused: {kinds:?}"
     );
     assert!(
-        kinds.contains(&"resumed".to_string()),
+        kinds.contains(&"resumed"),
         "driver emitted resumed: {kinds:?}"
     );
 }

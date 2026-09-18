@@ -61,8 +61,8 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
         return Err("core catalogs must use immutable positions, not StableId".to_string());
     }
     for path in [
-        "crates/dezoomify-job/src/job.rs",
-        "crates/dezoomify-job/src/transition.rs",
+        "crates/dezoomify-engine/src/job.rs",
+        "crates/dezoomify-engine/src/transition.rs",
         "crates/dezoomify-native/src/runner.rs",
         "crates/dezoomify-wasm/src/session.rs",
     ] {
@@ -141,17 +141,12 @@ fn check_website_runtime_usage(root: &Path) -> Result<(), String> {
 }
 
 fn check_browser_single_sources(root: &Path) -> Result<(), String> {
+    // The old `src/webIntegration.ts` re-export shim is deleted: the website
+    // imports the shared browser runtime directly. The shim must not return.
     let shim_path = root.join("src/webIntegration.ts");
-    let shim = std::fs::read_to_string(&shim_path)
-        .map_err(|e| format!("read {}: {e}", shim_path.display()))?;
-    let code: String = shim
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    if code.trim() != "export * from \"../packages/browser-runtime/src/web-integration.ts\";" {
+    if shim_path.exists() {
         return Err(format!(
-            "website integration duplicate: {} must remain a re-export-only compatibility shim",
+            "website integration duplicate: {} must not exist; import ../packages/browser-runtime/src/web-integration.ts directly",
             shim_path.display()
         ));
     }

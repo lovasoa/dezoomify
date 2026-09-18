@@ -156,22 +156,6 @@ export interface MissingTileDto {
 }
 
 /**
- * Opaque handle to one arena generation. Serialize-safe for JS transfer.
- */
-export interface ArenaHandle {
-    /**
-     * Slot index. Never reused for a different live allocation without a
-     * generation bump.
-     */
-    id: number;
-    /**
-     * Allocation generation of this slot. Mismatches are stale, never
-     * use-after-free.
-     */
-    generation: number;
-}
-
-/**
  * Output summary: geometry, completeness, and the honest disposition.
  */
 export interface SnapshotOutputDto {
@@ -228,16 +212,6 @@ export type OutputFormat = "png";
  */
 export interface ProcessingRequest {
     recipe: ProcessingRecipe;
-}
-
-/**
- * Typed reference to bytes owned by the WASM arena.
- */
-export interface BufferHandle {
-    id: number;
-    generation: number;
-    length: number;
-    checksum?: string;
 }
 
 /**
@@ -302,9 +276,6 @@ export interface RecoveryAction {
 }
 
 export interface SessionConfig {
-    max_buffer_bytes?: number;
-    max_total_bytes?: number;
-    max_buffers?: number;
     max_concurrent_fetches?: number;
     max_concurrent_decodes?: number;
     max_tiles?: number;
@@ -323,7 +294,7 @@ export type HostEffect = { type: "acquire-resource"; request: RequestDto } | { t
 
 export type HostMessage = ({ kind: "effect" } & HostEffect) | ({ kind: "event" } & JobEvent);
 
-export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "provide-resource"; request: number; buffer: BufferHandle; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "select-image"; image: number } | { type: "select-level"; level: number } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "retry-timer-elapsed"; tile: number; attempt: number } | { type: "recovery-choice"; generation: number; choice: RecoveryChoice } | { type: "finalization-succeeded" } | { type: "finalization-failed"; error: ErrorDto } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
+export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "provide-resource"; request: number; bytes: number[]; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "select-image"; image: number } | { type: "select-level"; level: number } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "tile-acquired"; request: number } | { type: "retry-timer-elapsed"; tile: number; attempt: number } | { type: "recovery-choice"; generation: number; choice: RecoveryChoice } | { type: "finalization-succeeded" } | { type: "finalization-failed"; error: ErrorDto } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
 
 export type JobEvent = { type: "job-state"; state: JobState } | { type: "catalog"; catalog: CatalogDto } | { type: "progress"; acquired: number; total: number } | { type: "warning"; error: ErrorDto } | { type: "recovery-request"; generation: number; actions: RecoveryAction[] } | { type: "completed" } | { type: "partial-completed" } | { type: "failed"; error: ErrorDto } | { type: "cancelled" } | { type: "paused" } | { type: "resumed" };
 
@@ -339,31 +310,16 @@ export type ResourceKind = "metadata" | "tile" | "probe" | "output";
 
 
 /**
- * The `Session` export: owns one job and one byte arena.
+ * The `Session` export: owns one job.
  */
 export class Session {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Reserve `length` bytes for host-supplied data (`buffers`).
-     */
-    allocateBuffer(length: number): ArenaHandle;
-    /**
      * Apply one core processing recipe to tile bytes (pure: no job
      * state, same recipes as the discovery adapter).
      */
     applyProcessing(request: ProcessingRequest, bytes: Uint8Array): Uint8Array;
-    /**
-     * Project an arena handle onto its canonical protocol reference
-     * (`buffers`): typed `provide-resource` commands carry a
-     * `BufferHandle`, distinct from the
-     * arena form `allocateBuffer` returns.
-     */
-    bufferHandle(handle: ArenaHandle): BufferHandle;
-    /**
-     * Seal one buffer for a subsequent correlated command (`buffers`).
-     */
-    commitBuffer(handle: ArenaHandle, actual: number): void;
     /**
      * Run one typed command and return its ordered host messages.
      */
@@ -373,32 +329,14 @@ export class Session {
      */
     dispose(): DispatchResult;
     /**
-     * Release a buffer handle; idempotent (`buffers`).
-     */
-    freeBuffer(handle: ArenaHandle): void;
-    /**
      * Validate typed configuration and own exactly one job session.
      */
     constructor(config: SessionConfig);
-    /**
-     * Currently retained arena bytes (live allocations only). Hosts
-     * use it to observe quota pressure; ordinary tile
-     * acknowledgements retain zero bytes.
-     */
-    retainedBytes(): bigint;
     /**
      * Project the canonical engine snapshot for the active job.
      * Absolute state for UI rendering; issues no work.
      */
     snapshot(): EngineSnapshotDto;
-    /**
-     * Move adapter-held bytes out exactly once (`buffers`).
-     */
-    takeBuffer(handle: ArenaHandle): Uint8Array;
-    /**
-     * Copy host bytes into an uncommitted allocation (`buffers`).
-     */
-    writeBuffer(handle: ArenaHandle, offset: number, data: Uint8Array): void;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -406,18 +344,11 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_session_free: (a: number, b: number) => void;
-    readonly session_allocateBuffer: (a: number, b: number) => [number, number, number];
     readonly session_applyProcessing: (a: number, b: any, c: number, d: number) => [number, number, number, number];
-    readonly session_bufferHandle: (a: number, b: any) => [number, number, number];
-    readonly session_commitBuffer: (a: number, b: any, c: number) => [number, number];
     readonly session_dispatch: (a: number, b: any) => [number, number, number];
     readonly session_dispose: (a: number) => [number, number, number];
-    readonly session_freeBuffer: (a: number, b: any) => [number, number];
     readonly session_new: (a: any) => [number, number, number];
-    readonly session_retainedBytes: (a: number) => bigint;
     readonly session_snapshot: (a: number) => [number, number, number];
-    readonly session_takeBuffer: (a: number, b: any) => [number, number, number, number];
-    readonly session_writeBuffer: (a: number, b: any, c: number, d: number, e: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

@@ -1,34 +1,27 @@
-//! One-session job owner: typed configuration and dispatch, buffer lifecycle,
-//! one pure processing operation, and disposal.
+//! One-session job owner: typed configuration and dispatch, one pure
+//! processing operation, and disposal.
 //!
 //! ## Real job-engine delegation
 //!
-//! [`Session`] owns a [`dezoomify_job::Job`] and delegates the whole
+//! [`Session`] owns a [`dezoomify_engine::Job`] and delegates the whole
 //! lifecycle to it. The adapter projects the engine's single typed FIFO
 //! queue directly onto generated ABI contract values.
 //!
 //! Host interaction map (every path is explicit and correlated):
 //!
 //! * `Start` creates the engine job and emits its first effects/events.
-//! * Discovery bytes: `ProvideResource` whose `request` matches one of the
-//!   outstanding `acquire-resource` effects (the engine may ask for several
-//!   metadata resources). The buffer is consumed exactly once (taken out of
-//!   the arena) and forwarded as `ResourceBytes` with its bytes.
-//! * Tile bytes: each `acquire-tile` effect carries an adapter-minted
-//!   numeric request sequence plus the tile's complete output placement
-//!   (position, planned extent, declared canvas, processing recipe) and the
-//!   engine-declared request headers. Hosts decode during acquisition (the
-//!   native model): `ProvideResource` with that id forwards a successful
-//!   `TileOutcome`, and the adapter takes the buffer out of the arena
-//!   immediately: tile bytes are never retained server-side. Empty tile
-//!   buffers forward a failed `TileOutcome` (the engine retries).
+//! * Discovery bytes: `ProvideResource` carries the resource body directly
+//!   (`bytes`) for one outstanding `acquire-resource` effect (the engine
+//!   may ask for several metadata resources). Bytes cross in the command;
+//!   nothing is retained adapter-side.
+//! * Tile success is body-free: `ProvideDisplayOutcome` answers one
+//!   outstanding `acquire-tile` effect and forwards a typed `TileDisplayed`
+//!   (the host holds an ordinary image element with no readable bytes; the
+//!   tainted output completes as display-only downstream).
 //! * Probe observations: each `acquire-tile` with `purpose: probe` is
 //!   answered with `ProvideProbeOutcome` (request id plus a discriminated
 //!   available/missing observation) and forwarded as the engine `ProbeOutcome`.
 //!   Probe bytes are measured by the host and never retained.
-//! * Display-only tiles: `ProvideDisplayOutcome` answers a tile that the
-//!   host holds as an ordinary image (no readable bytes) with a successful
-//!   tile outcome; the tainted output completes as display-only downstream.
 //! * `ProvideFetchFailure` maps to `FetchFailure` (discovery request), a
 //!   typed `TileFailed` carrying the observed HTTP status and `retry-after`
 //!   hint for tile refusals (permanent failures such as HTTP 403 settle
@@ -53,10 +46,9 @@
 //! Empty discovery resources fail the job via the engine
 //! (`job.empty-resource`); nothing here can fake completion.
 
-use crate::buffer::{ArenaHandle, ByteArena, MAX_BUFFERS, MAX_BUFFER_BYTES, MAX_TOTAL_BYTES};
 use crate::error::{AdapterError, AdapterErrorCode};
 use dezoomify_core::core::discovery::{FetchCause, FetchCode, PolicyReason, TransportKind};
-use dezoomify_job::{
+use dezoomify_engine::{
     Job as EngineJob, JobCommand as EngineCommand, JobEffect as EngineEffect,
     JobError as EngineJobError, JobEvent as EngineEvent, JobMessageBody, Outcome,
     RecoveryChoice as EngineRecoveryChoice, TileFailure as EngineTileFailure,
@@ -68,20 +60,6 @@ use dezoomify_protocol::dto::{
     SessionConfig, SizeDto, TilePlacementDto,
 };
 use std::collections::{HashMap, HashSet};
-
-/// Hard per-buffer ceiling (32 MiB); requested caps above this are rejected.
-pub const HARD_MAX_BUFFER_BYTES: u64 = 32 << 20;
-/// Hard session-total ceiling (256 MiB).
-pub const HARD_MAX_TOTAL_BYTES: u64 = 256 << 20;
-/// Hard live-buffer ceiling.
-pub const HARD_MAX_BUFFERS: usize = 4096;
-
-/// Default per-buffer cap (browser baseline `max_tile_bytes`, 8 MiB).
-pub const DEFAULT_MAX_BUFFER_BYTES: u64 = MAX_BUFFER_BYTES;
-/// Default session-total cap (64 MiB).
-pub const DEFAULT_MAX_TOTAL_BYTES: u64 = MAX_TOTAL_BYTES;
-/// Default live-buffer cap.
-pub const DEFAULT_MAX_BUFFERS: usize = MAX_BUFFERS;
 
 /// Session lifecycle state, projected 1:1 from the engine state machine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -131,8 +109,8 @@ impl SessionState {
         )
     }
 
-    fn from_engine(state: dezoomify_job::State) -> Self {
-        use dezoomify_job::State as S;
+    fn from_engine(state: dezoomify_engine::State) -> Self {
+        use dezoomify_engine::State as S;
         match state {
             S::Created => Self::Created,
             S::Discovering => Self::Discovering,
@@ -151,12 +129,11 @@ impl SessionState {
     }
 }
 
-/// One adapter session: exactly one engine job and one byte arena.
+/// One adapter session: exactly one engine job plus its request correlation.
 #[derive(Debug)]
 pub struct Session {
-    arena: ByteArena,
     job: Option<EngineJob>,
-    job_config: dezoomify_job::Config,
+    job_config: dezoomify_engine::Config,
     state: SessionState,
     disposed: bool,
     /// Outstanding discovery request ids from acquire-resource effects.
@@ -177,35 +154,15 @@ pub struct Session {
 }
 
 impl Session {
-    /// Validate the typed quota config, then construct an empty session. No large allocation happens
-    /// here; quotas are enforced before any later large allocation.
+    /// Validate the typed job-budget config, then construct an empty session.
     ///
     /// # Errors
     ///
-    /// `limit-exceeded` for quotas above the hard ceilings. Zero-valued
-    /// positive quotas cannot deserialize into [`SessionConfig`].
+    /// Returns the engine validation failure for invalid job budgets.
     pub fn new(config: SessionConfig) -> Result<Self, AdapterError> {
-        let max_buffer_bytes = Self::quota(
-            config.max_buffer_bytes,
-            DEFAULT_MAX_BUFFER_BYTES,
-            HARD_MAX_BUFFER_BYTES,
-            "max_buffer_bytes",
-        )?;
-        let max_total_bytes = Self::quota(
-            config.max_total_bytes,
-            DEFAULT_MAX_TOTAL_BYTES,
-            HARD_MAX_TOTAL_BYTES,
-            "max_total_bytes",
-        )?;
-        let max_buffers = Self::quota_usize(
-            config.max_buffers,
-            DEFAULT_MAX_BUFFERS,
-            HARD_MAX_BUFFERS,
-            "max_buffers",
-        )?;
         // Optional job-budget overrides; the engine validates them when the
         // job is created, so zero/oversized values fail typed there.
-        let mut job_config = dezoomify_job::Config::default();
+        let mut job_config = dezoomify_engine::Config::default();
         if let Some(value) = config.max_concurrent_fetches {
             job_config.max_concurrent_fetches = value.get();
         }
@@ -219,7 +176,6 @@ impl Session {
             job_config.max_retries = value;
         }
         Ok(Self {
-            arena: ByteArena::with_limits(max_buffer_bytes, max_total_bytes, max_buffers),
             job: None,
             job_config,
             state: SessionState::Created,
@@ -231,38 +187,6 @@ impl Session {
             pending_recovery: None,
             terminal_discovery_error: None,
         })
-    }
-
-    fn quota(
-        requested: Option<std::num::NonZeroU64>,
-        default: u64,
-        hard: u64,
-        name: &str,
-    ) -> Result<u64, AdapterError> {
-        match requested {
-            None => Ok(default),
-            Some(value) if value.get() > hard => Err(AdapterError::new(
-                AdapterErrorCode::LimitExceeded,
-                format!("session quota {name} of {value} exceeds hard ceiling {hard}"),
-            )),
-            Some(value) => Ok(value.get()),
-        }
-    }
-
-    fn quota_usize(
-        requested: Option<std::num::NonZeroUsize>,
-        default: usize,
-        hard: usize,
-        name: &str,
-    ) -> Result<usize, AdapterError> {
-        match requested {
-            None => Ok(default),
-            Some(value) if value.get() > hard => Err(AdapterError::new(
-                AdapterErrorCode::LimitExceeded,
-                format!("session quota {name} of {value} exceeds hard ceiling {hard}"),
-            )),
-            Some(value) => Ok(value.get()),
-        }
     }
 
     /// Current lifecycle state (engine projection).
@@ -289,7 +213,7 @@ impl Session {
         let job = self.job.as_ref().ok_or_else(|| {
             AdapterError::new(AdapterErrorCode::WrongState, "session has no active job")
         })?;
-        Ok(dezoomify_job::project_engine_snapshot(job))
+        Ok(dezoomify_engine::project_engine_snapshot(job))
     }
 
     fn require_live(&self) -> Result<(), AdapterError> {
@@ -303,12 +227,11 @@ impl Session {
     }
 
     /// Run one typed command synchronously and return every resulting host
-    /// message in engine order. Rejected input changes no state or buffer.
+    /// message in engine order.
     ///
     /// # Errors
     ///
-    /// `disposed` after disposal; `wrong-state`/`stale-buffer`/
-    /// `limit-exceeded` per transition.
+    /// `disposed` after disposal; `wrong-state`/`limit-exceeded` per transition.
     pub fn dispatch(&mut self, command: JobCommand) -> Result<Vec<HostMessage>, AdapterError> {
         self.require_live()?;
         self.dispatch_command(command)
@@ -335,89 +258,12 @@ impl Session {
             self.force_cancelled_event()
         };
         self.job = None;
-        self.arena.clear();
         Ok(messages)
     }
 
     fn force_cancelled_event(&mut self) -> Vec<HostMessage> {
         self.state = SessionState::Cancelled;
         vec![HostMessage::Event(JobEvent::Cancelled)]
-    }
-
-    /// Reserve `length` zeroed bytes for host-supplied data.
-    ///
-    /// # Errors
-    ///
-    /// `disposed` after disposal, else arena quotas (see [`ByteArena`]).
-    pub fn allocate_buffer(&mut self, length: u64) -> Result<ArenaHandle, AdapterError> {
-        self.require_live()?;
-        self.arena.allocate(length)
-    }
-
-    /// Copy host bytes into an uncommitted allocation.
-    ///
-    /// # Errors
-    ///
-    /// `disposed` after disposal, else arena errors (see [`ByteArena`]).
-    pub fn write_buffer(
-        &mut self,
-        handle: ArenaHandle,
-        offset: u64,
-        data: &[u8],
-    ) -> Result<(), AdapterError> {
-        self.require_live()?;
-        self.arena.write_bytes(handle, offset, data)
-    }
-
-    /// Seal an allocation at `actual` bytes.
-    ///
-    /// # Errors
-    ///
-    /// `disposed` after disposal, else arena errors (see [`ByteArena`]).
-    pub fn commit_buffer(&mut self, handle: ArenaHandle, actual: u64) -> Result<(), AdapterError> {
-        self.require_live()?;
-        self.arena.commit(handle, actual)
-    }
-
-    /// Move committed bytes out exactly once.
-    ///
-    /// # Errors
-    ///
-    /// `disposed` after disposal, else arena errors (see [`ByteArena`]).
-    pub fn take_buffer(&mut self, handle: ArenaHandle) -> Result<Vec<u8>, AdapterError> {
-        self.require_live()?;
-        self.arena.take_buffer(handle)
-    }
-
-    /// Release a buffer handle (idempotent).
-    ///
-    /// # Errors
-    ///
-    /// `disposed` after disposal; `stale-buffer` for forged/stale handles.
-    pub fn free_buffer(&mut self, handle: ArenaHandle) -> Result<(), AdapterError> {
-        self.require_live()?;
-        self.arena.free(handle)
-    }
-
-    /// Currently retained arena bytes (live allocations only). Hosts use
-    /// it to observe quota pressure; it never exposes contents, paths, or
-    /// handles. Ordinary tile acknowledgements retain zero bytes.
-    #[must_use]
-    pub fn retained_bytes(&self) -> u64 {
-        self.arena.total_retained()
-    }
-
-    /// Project a live arena handle onto the generated buffer reference.
-    ///
-    /// # Errors
-    ///
-    /// `disposed` after disposal, else arena errors (see [`ByteArena`]).
-    pub fn buffer_handle(
-        &self,
-        handle: ArenaHandle,
-    ) -> Result<dezoomify_protocol::dto::BufferHandle, AdapterError> {
-        self.require_live()?;
-        self.arena.to_buffer_handle(handle)
     }
 
     /// Apply one core processing recipe to fetched tile bytes. Pure: it
@@ -449,9 +295,9 @@ impl Session {
             JobCommand::Resume => self.forward(EngineCommand::Resume),
             JobCommand::ProvideResource {
                 request,
-                buffer,
+                bytes,
                 final_uri,
-            } => self.on_provide_resource(request, &buffer, final_uri),
+            } => self.on_provide_resource(request, bytes, final_uri),
             JobCommand::ProvideFetchFailure { request, error } => {
                 self.on_fetch_failure(request, error)
             }
@@ -459,6 +305,7 @@ impl Session {
                 self.on_probe_outcome(request, outcome)
             }
             JobCommand::ProvideDisplayOutcome { request } => self.on_display_outcome(request),
+            JobCommand::TileAcquired { request } => self.on_tile_acquired(request),
             JobCommand::RetryTimerElapsed { tile, attempt } => {
                 self.forward(EngineCommand::RetryTimerElapsed { tile, attempt })
             }
@@ -535,7 +382,7 @@ impl Session {
         let engine = EngineJob::new_with_inputs(
             inputs
                 .into_iter()
-                .map(|input| dezoomify_job::JobInput {
+                .map(|input| dezoomify_engine::JobInput {
                     url: input.url,
                     contents: input.contents.map(String::into_bytes),
                 })
@@ -565,75 +412,44 @@ impl Session {
     fn on_provide_resource(
         &mut self,
         request: u32,
-        buffer: &dezoomify_protocol::dto::BufferHandle,
+        bytes: Vec<u8>,
         final_uri: Option<String>,
     ) -> Result<Vec<HostMessage>, AdapterError> {
         // Correlate before touching any state: unknown request ids are
         // atomic rejections.
-        let tile = if self.outstanding_tile_requests.contains_key(&request) {
-            Some(self.outstanding_tile_requests[&request])
-        } else if self.live_discovery_requests.contains(&request) {
-            None
-        } else {
+        if self.outstanding_tile_requests.contains_key(&request) {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "tile requests are answered with provide-display-outcome or provide-fetch-failure, not provide-resource",
+            ));
+        }
+        if !self.live_discovery_requests.contains(&request) {
             return Err(AdapterError::new(
                 AdapterErrorCode::WrongState,
                 "resource does not match an outstanding request",
             ));
-        };
-        // Resolve before mutating anything: stale or unsealed references are
-        // atomic rejections.
-        let handle = self.arena.resolve_buffer_handle(buffer)?;
-        match tile {
-            Some(tile_id) => {
-                if self.probe_requests.contains(&request) {
-                    return Err(AdapterError::new(
-                        AdapterErrorCode::WrongState,
-                        "probe requests are answered with provide-probe-outcome, not provide-resource",
-                    ));
-                }
-                self.require_engine_state(SessionState::AcquiringTiles)?;
-                // Tile bytes are never retained: hosts decode during
-                // acquisition and hold their own decoded tile, so the arena
-                // copy is released as soon as the outcome settles. Empty
-                // bytes forward a failed outcome so the engine can retry
-                // honestly.
-                let ok = buffer.length > 0;
-                if ok {
-                    self.arena.take_buffer(handle)?;
-                }
-                self.outstanding_tile_requests.remove(&request);
-                self.request_context.remove(&request);
-                self.forward(EngineCommand::TileOutcome { tile: tile_id, ok })
-            }
-            None => {
-                // Exactly-once consumption: a replayed reference is stale
-                // afterwards. The engine takes the real bytes; a zero-length
-                // resource fails the job (job.empty-resource) and empty
-                // metadata can never yield a fake success.
-                let bytes = self.arena.take_buffer(handle)?;
-                self.live_discovery_requests.remove(&request);
-                self.request_context.remove(&request);
-                // Discovery is intentionally concurrent. A sibling metadata
-                // fetch may finish after another candidate has already
-                // produced the catalog and advanced the job into selection,
-                // planning, or tile acquisition. The job engine treats that
-                // response as ignored; the adapter must consume the buffer
-                // and preserve that same stale-response behavior instead of
-                // turning normal fetch reordering into a session failure.
-                if self.state != SessionState::Discovering {
-                    return Ok(Vec::new());
-                }
-                self.forward(EngineCommand::ResourceBytes {
-                    request,
-                    bytes,
-                    // Native hosts report the post-redirect URL; browser
-                    // hosts supply it when their fetch exposes one, else the
-                    // engine resolves relative tile URLs against the request
-                    // URI.
-                    final_uri: final_uri.filter(|uri| !uri.is_empty()),
-                })
-            }
         }
+        self.live_discovery_requests.remove(&request);
+        self.request_context.remove(&request);
+        // Discovery is intentionally concurrent. A sibling metadata
+        // fetch may finish after another candidate has already
+        // produced the catalog and advanced the job into selection,
+        // planning, or tile acquisition. The job engine treats that
+        // response as ignored; the adapter preserves that same
+        // stale-response behavior instead of turning normal fetch
+        // reordering into a session failure.
+        if self.state != SessionState::Discovering {
+            return Ok(Vec::new());
+        }
+        self.forward(EngineCommand::ResourceBytes {
+            request,
+            bytes,
+            // Native hosts report the post-redirect URL; browser
+            // hosts supply it when their fetch exposes one, else the
+            // engine resolves relative tile URLs against the request
+            // URI.
+            final_uri: final_uri.filter(|uri| !uri.is_empty()),
+        })
     }
 
     fn on_probe_outcome(
@@ -668,7 +484,7 @@ impl Session {
 
     /// Display-only answer for one outstanding tile request: the host holds
     /// an ordinary image element (no readable bytes) and the engine records
-    /// a successful acquisition; the tainted canvas completes as
+    /// a typed display success; the tainted canvas completes as
     /// display-only downstream.
     fn on_display_outcome(&mut self, request: u32) -> Result<Vec<HostMessage>, AdapterError> {
         let tile_id = match self.outstanding_tile_requests.get(&request) {
@@ -689,10 +505,32 @@ impl Session {
         self.require_engine_state(SessionState::AcquiringTiles)?;
         self.outstanding_tile_requests.remove(&request);
         self.request_context.remove(&request);
-        self.forward(EngineCommand::TileOutcome {
-            tile: tile_id,
-            ok: true,
-        })
+        self.forward(EngineCommand::TileDisplayed { tile: tile_id })
+    }
+
+    /// Successful acquisition of one outstanding tile request: the host has
+    /// already fetched, decoded, and placed the tile, so the outcome carries
+    /// no body. Mirrors `on_display_outcome` correlation exactly.
+    fn on_tile_acquired(&mut self, request: u32) -> Result<Vec<HostMessage>, AdapterError> {
+        let tile_id = match self.outstanding_tile_requests.get(&request) {
+            Some(tile_id) => *tile_id,
+            None => {
+                return Err(AdapterError::new(
+                    AdapterErrorCode::WrongState,
+                    "tile acquisition does not match an outstanding request",
+                ));
+            }
+        };
+        if self.probe_requests.contains(&request) {
+            return Err(AdapterError::new(
+                AdapterErrorCode::WrongState,
+                "probe requests are answered with provide-probe-outcome, not tile-acquired",
+            ));
+        }
+        self.require_engine_state(SessionState::AcquiringTiles)?;
+        self.outstanding_tile_requests.remove(&request);
+        self.request_context.remove(&request);
+        self.forward(EngineCommand::TileAcquired { tile: tile_id })
     }
 
     fn on_fetch_failure(
@@ -947,27 +785,27 @@ impl Session {
         Some(match event {
             EngineEvent::State { state } => JobEvent::JobState {
                 state: match state {
-                    dezoomify_job::State::Created => ProtocolJobState::Created,
-                    dezoomify_job::State::Discovering => ProtocolJobState::Discovering,
-                    dezoomify_job::State::AwaitingImageSelection => {
+                    dezoomify_engine::State::Created => ProtocolJobState::Created,
+                    dezoomify_engine::State::Discovering => ProtocolJobState::Discovering,
+                    dezoomify_engine::State::AwaitingImageSelection => {
                         ProtocolJobState::AwaitingImageSelection
                     }
-                    dezoomify_job::State::AwaitingLevelSelection => {
+                    dezoomify_engine::State::AwaitingLevelSelection => {
                         ProtocolJobState::AwaitingLevelSelection
                     }
-                    dezoomify_job::State::Planning => ProtocolJobState::Planning,
-                    dezoomify_job::State::AcquiringTiles => ProtocolJobState::AcquiringTiles,
-                    dezoomify_job::State::AwaitingPartialDecision => {
+                    dezoomify_engine::State::Planning => ProtocolJobState::Planning,
+                    dezoomify_engine::State::AcquiringTiles => ProtocolJobState::AcquiringTiles,
+                    dezoomify_engine::State::AwaitingPartialDecision => {
                         ProtocolJobState::AwaitingPartialDecision
                     }
-                    dezoomify_job::State::Finalizing => ProtocolJobState::Finalizing,
-                    dezoomify_job::State::Cancelling => ProtocolJobState::Cancelling,
-                    dezoomify_job::State::Completed => ProtocolJobState::Completed,
-                    dezoomify_job::State::PartiallyCompleted => {
+                    dezoomify_engine::State::Finalizing => ProtocolJobState::Finalizing,
+                    dezoomify_engine::State::Cancelling => ProtocolJobState::Cancelling,
+                    dezoomify_engine::State::Completed => ProtocolJobState::Completed,
+                    dezoomify_engine::State::PartiallyCompleted => {
                         ProtocolJobState::PartiallyCompleted
                     }
-                    dezoomify_job::State::Failed => ProtocolJobState::Failed,
-                    dezoomify_job::State::Cancelled => ProtocolJobState::Cancelled,
+                    dezoomify_engine::State::Failed => ProtocolJobState::Failed,
+                    dezoomify_engine::State::Cancelled => ProtocolJobState::Cancelled,
                 },
             },
             EngineEvent::Catalog { catalog } => {

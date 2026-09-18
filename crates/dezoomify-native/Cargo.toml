@@ -8,7 +8,7 @@ repository = "https://github.com/lovasoa/dezoomify"
 
 [dependencies]
 dezoomify-core = { path = "../dezoomify-core" }
-dezoomify-job = { path = "../dezoomify-job" }
+dezoomify-engine = { path = "../dezoomify-engine" }
 dezoomify-protocol = { path = "../dezoomify-protocol" }
 serde.workspace = true
 serde_json.workspace = true
@@ -32,8 +32,7 @@ criterion = "0.8"
 name = "native_pipeline"
 harness = false
 
-# 6.1 debt (unblocked for cargo 1.98): runtime docs and pedantic cleanups
-# pending.
+# Known debt: runtime docs and pedantic cleanups pending.
 [lints.rust]
 missing_docs = "allow"
 

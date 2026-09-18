@@ -1,7 +1,7 @@
 mod support;
 
 use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
-use dezoomify_job::{Config, JobCommand};
+use dezoomify_engine::{Config, JobCommand};
 use support::{ScriptedHost, DZI, DZI_INPUT_URL};
 
 fn host_with_id(job: &str) -> ScriptedHost {
@@ -31,7 +31,7 @@ fn duplicate_response_is_ignored() {
             final_uri: None,
         })
         .unwrap();
-    assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
+    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.state(), "AwaitingImageSelection");
 
@@ -39,13 +39,10 @@ fn duplicate_response_is_ignored() {
     // level is a 2x2 grid, so one tile outcome leaves acquisition running.
     host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
     host.apply(JobCommand::SelectLevel { level: 9 }).unwrap();
-    host.apply(JobCommand::TileOutcome { tile: 0, ok: true })
-        .unwrap();
+    host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
     let len = host.transcript().len();
-    let outcome = host
-        .apply(JobCommand::TileOutcome { tile: 0, ok: true })
-        .unwrap();
-    assert_eq!(outcome, dezoomify_job::Outcome::Ignored);
+    let outcome = host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
+    assert_eq!(outcome, dezoomify_engine::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
 }
 
@@ -61,7 +58,7 @@ fn unknown_request_is_ignored_without_corruption() {
             final_uri: None,
         })
         .unwrap();
-    assert_eq!(err, dezoomify_job::Outcome::Ignored);
+    assert_eq!(err, dezoomify_engine::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.state(), "Discovering");
     // The outstanding request still proceeds normally afterwards.
@@ -188,14 +185,14 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
             final_uri: None,
         })
         .unwrap();
-    assert_eq!(late, dezoomify_job::Outcome::Ignored);
+    assert_eq!(late, dezoomify_engine::Outcome::Ignored);
     let late_failure = host
         .apply(JobCommand::FetchFailure {
             request: requests[1],
             cause: FetchCause::new(FetchCode::DiscoveryFailed, TransportKind::Direct),
         })
         .unwrap();
-    assert_eq!(late_failure, dezoomify_job::Outcome::Ignored);
+    assert_eq!(late_failure, dezoomify_engine::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
     assert_eq!(host.state(), "AwaitingImageSelection");
 }

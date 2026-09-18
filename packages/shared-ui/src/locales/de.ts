@@ -318,8 +318,6 @@ export const de = {
   "desktop.rec.destTitle": "Speicherziel braucht Aufmerksamkeit",
   "desktop.rec.destDesc":
     "Das Speicherziel wurde nicht angenommen. Wahlen Sie eine Ausgabedatei, versuchen Sie es erneut oder nutzen Sie eine andere App.",
-  "desktop.rec.chooseTitle": "Wahlen Sie, wo gespeichert wird",
-  "desktop.rec.chooseDesc": "Wahlen Sie die Ausgabedatei, um dieses Bild weiter zu speichern.",
   "desktop.rec.keep": "Teilbild behalten",
   "desktop.rec.discard": "Teilbild verwerfen",
   "desktop.rec.retryTiles": "Fehlende Kacheln erneut versuchen",
