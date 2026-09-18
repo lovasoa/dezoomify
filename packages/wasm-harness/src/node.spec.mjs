@@ -34,6 +34,63 @@ function discoveryRequest(result) {
   )?.request;
 }
 
+const DZI = `<?xml version="1.0" encoding="UTF-8"?>
+<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
+  <Size Width="512" Height="512"/>
+</Image>
+`;
+
+function tileError(code, http) {
+  return {
+    code,
+    retryable: false,
+    message: `tile refused: ${code}`,
+    recovery: [],
+    transport: "direct",
+    http: http ?? null,
+  };
+}
+
+/// Drive one session through discovery and selection of the largest level.
+/// Returns the live session plus `(tile, request)` pairs in effect order and
+/// an arena-bytes observer (zero unless tile bodies were retained).
+function acquireTiles(session) {
+  const started = start(session);
+  const request = discoveryRequest(started);
+  assert.ok(request);
+  const bytes = Buffer.from(DZI, "utf8");
+  const handle = session.allocateBuffer(bytes.length);
+  session.writeBuffer(handle, 0, bytes);
+  session.commitBuffer(handle, bytes.length);
+  const provided = session.dispatch({
+    type: "provide-resource",
+    request: request.id,
+    buffer: session.bufferHandle(handle),
+  });
+  assert.equal(provided.status, "ok");
+  const catalog = provided.messages.find((message) =>
+    message.kind === "event" && message.type === "catalog"
+  );
+  assert.ok(catalog, "metadata yields a catalog");
+  const selected = session.dispatch({ type: "select-image", image: 0 });
+  assert.equal(selected.status, "ok");
+  const levels = catalog.catalog.entries[0].levels.length;
+  const leveled = session.dispatch({ type: "select-level", level: levels - 1 });
+  assert.equal(leveled.status, "ok");
+  const tiles = leveled.messages
+    .filter((message) => message.kind === "effect" && message.type === "acquire-tile")
+    .map((message) => ({ tile: message.tile, request: message.request.id }));
+  assert.equal(tiles.length, 4, "largest DZI level is a 2x2 grid");
+  return {
+    tiles,
+    acquire: {
+      arenaBytes() {
+        return Number(session.retainedBytes());
+      },
+    },
+  };
+}
+
 describe("generated typed WASM surface", () => {
   it("returns effects and events directly from dispatch", () => {
     assert.equal(typeof wasm.Session, "function");
@@ -95,6 +152,100 @@ describe("generated typed WASM surface", () => {
   it("rejects malformed external objects at the generated conversion boundary", () => {
     const session = new wasm.Session({});
     assert.throws(() => session.dispatch({ type: "provide-fetch-failure" }), /typed ABI conversion failed/);
+    session.dispose();
+  });
+
+  it("drives tiles to completion through display-only acknowledgements", () => {
+    const session = new wasm.Session({});
+    const { tiles, acquire } = acquireTiles(session);
+    let messageCount = 0;
+    let finalized = false;
+    for (const { request } of tiles) {
+      const result = session.dispatch({ type: "provide-display-outcome", request });
+      assert.equal(result.status, "ok");
+      messageCount += result.messages.length;
+      finalized ||= result.messages.some((message) =>
+        message.kind === "effect" && message.type === "finalize-output"
+      );
+    }
+    assert.ok(finalized, "display-only acquisition still finalizes");
+    assert.equal(acquire.arenaBytes(), 0, "ordinary tile acks retain zero body bytes");
+    // eslint-disable-next-line no-console
+    console.log(`display-only completion: ${messageCount} host messages, 0 retained body bytes`);
+    session.dispose();
+  });
+
+  it("settles an HTTP 403 tile after exactly one attempt", () => {
+    const session = new wasm.Session({});
+    const { tiles } = acquireTiles(session);
+    const result = session.dispatch({
+      type: "provide-fetch-failure",
+      request: tiles[0].request,
+      error: tileError("TRANSPORT_HTTP_ERROR", 403),
+    });
+    assert.equal(result.status, "ok");
+    assert.ok(
+      !result.messages.some((message) =>
+        message.kind === "effect" && message.type === "wait-retry-timer"
+      ),
+      "a permanent 403 refusal schedules no wait",
+    );
+    assert.ok(
+      !result.messages.some((message) =>
+        message.kind === "effect" && message.type === "acquire-tile" && message.tile === tiles[0].tile
+      ),
+      "a permanent 403 refusal is never re-acquired",
+    );
+    session.dispose();
+  });
+
+  it("retries a transient failure after the explicit host wait", () => {
+    const session = new wasm.Session({});
+    const { tiles } = acquireTiles(session);
+    const failed = session.dispatch({
+      type: "provide-fetch-failure",
+      request: tiles[0].request,
+      error: tileError("TRANSPORT_TIMEOUT"),
+    });
+    assert.equal(failed.status, "ok");
+    const wait = failed.messages.find((message) =>
+      message.kind === "effect" && message.type === "wait-retry-timer"
+    );
+    assert.deepEqual(
+      { tile: wait.tile, attempt: wait.attempt, delay_ms: wait.delay_ms },
+      { tile: tiles[0].tile, attempt: 1, delay_ms: 1000 },
+    );
+    const elapsed = session.dispatch({
+      type: "retry-timer-elapsed",
+      tile: wait.tile,
+      attempt: wait.attempt,
+    });
+    assert.equal(elapsed.status, "ok");
+    const reacquired = elapsed.messages.filter((message) =>
+      message.kind === "effect" && message.type === "acquire-tile" && message.tile === wait.tile
+    );
+    assert.equal(reacquired.length, 1, "the timer completion issues exactly one re-acquisition");
+    const stale = session.dispatch({ type: "retry-timer-elapsed", tile: wait.tile, attempt: 9 });
+    assert.equal(stale.status, "ok");
+    assert.deepEqual(stale.messages, [], "stale timer completions settle nothing");
+    session.dispose();
+  });
+
+  it("honors the observed retry-after hint in the explicit wait", () => {
+    const session = new wasm.Session({});
+    const { tiles } = acquireTiles(session);
+    const error = tileError("TRANSPORT_HTTP_ERROR", 503);
+    error.retry_after_ms = 5000;
+    const result = session.dispatch({
+      type: "provide-fetch-failure",
+      request: tiles[0].request,
+      error,
+    });
+    assert.equal(result.status, "ok");
+    const wait = result.messages.find((message) =>
+      message.kind === "effect" && message.type === "wait-retry-timer"
+    );
+    assert.equal(wait.delay_ms, 5000, "the host waits at least the observed retry-after");
     session.dispose();
   });
 });

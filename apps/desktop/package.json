@@ -10,6 +10,7 @@
     "test": "node --import ../../test/tsx-loader.mjs --test-reporter=dot --test \"tests/*.test.mjs\""
   },
   "dependencies": {
+    "@dezoomify/app-model": "workspace:*",
     "@dezoomify/browser-runtime": "workspace:*",
     "@dezoomify/shared-ui": "workspace:*",
     "@tauri-apps/api": "2.11.1",

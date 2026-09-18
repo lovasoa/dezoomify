@@ -260,6 +260,13 @@ fn effect_json(seq: u32, effect: JobEffect) -> serde_json::Value {
             serde_json::json!({"kind":"finalize-output","seq":seq,"partial":partial,"format":format,"canvas":canvas.map(|v| serde_json::json!({"x":v.x,"y":v.y}))})
         }
         JobEffect::CancelWork => serde_json::json!({"kind":"cancel-work","seq":seq}),
+        JobEffect::WaitForRetry {
+            tile,
+            attempt,
+            delay_ms,
+        } => serde_json::json!({
+            "kind":"wait-retry","seq":seq,"tile":tile,"attempt":attempt,"delay_ms":delay_ms,
+        }),
         JobEffect::RequestDecision { generation } => serde_json::json!({
             "kind":"request-decision","seq":seq,"generation":generation,
         }),
@@ -321,7 +328,7 @@ fn format_effect(value: &serde_json::Value) -> (u64, String) {
     let kind = str_field(value, "kind").unwrap_or_else(|| "-".to_string());
     let corr = match kind.as_str() {
         "acquire-resource" => str_field(value, "request"),
-        "acquire-tile" => str_field(value, "tile"),
+        "acquire-tile" | "wait-retry" => str_field(value, "tile"),
         "request-decision" => str_field(value, "generation"),
         _ => None,
     }

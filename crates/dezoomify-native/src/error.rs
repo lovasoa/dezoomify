@@ -343,8 +343,8 @@ mod tests {
 
     #[test]
     fn legacy_remaps_stay_stable() {
-        // Preserved from job_driver.rs:263-275 via map_failure_code; the
-        // boundary mapping must agree on phase/recovery for each legacy code.
+        // Preserved via `exec::map_failure_code`; the boundary mapping must
+        // agree on phase/recovery for each legacy code.
         for code in [
             "discovery.failed",
             "discovery.no-image",

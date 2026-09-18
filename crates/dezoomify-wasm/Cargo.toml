@@ -21,7 +21,8 @@ tsify.workspace = true
 [dev-dependencies]
 wasm-bindgen-test.workspace = true
 
-# 6.1 debt (unblocked for cargo 1.98): adapter docs pending.
+# Manual lint tables until legacy debt clears (see the workspace policy
+# note in the root Cargo.toml).
 [lints.rust]
 missing_docs = "allow"
 

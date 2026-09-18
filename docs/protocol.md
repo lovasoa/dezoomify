@@ -26,15 +26,16 @@ sequenceDiagram
 - `dispatch(JobCommand)` returns a `DispatchResult` immediately;
 - a successful result contains ordered `HostMessage[]` values;
 - `dispose()` returns its final `DispatchResult` and is repeat-safe;
-- arena methods exchange generated `ArenaHandle` and `BufferHandle` objects.
+- arena methods exchange generated `ArenaHandle` and `BufferHandle` objects;
+- `retainedBytes()` reports live arena bytes for quota observation.
 
 Commands, effects, events, config, errors, URLs, and handles cross as plain JavaScript objects (fallible `tsify`/`serde-wasm-bindgen` conversion). Binary bodies stay in the bounded WASM arena. Fixed vocabularies (processing recipes, output formats) are generated string unions, never free text. Present probe observations carry non-zero dimensions; a missing observation is its own union variant.
 
 ## Commands, effects, and events
 
-`JobCommand` carries user intent or answers one correlated effect. `Start` carries ordered discovery roots. Answers carry a job-scoped request number plus a buffer reference or `FetchFailureDto`. Image/level choices are zero-based catalog positions. Recovery choices carry the outstanding decision generation. Deferred metadata travels as `ImageRequest` entries with a follow-up URI for a fresh bounded job.
+`JobCommand` carries user intent or answers one correlated effect. `Start` carries ordered discovery roots. Answers carry a job-scoped request number plus a buffer reference or `FetchFailureDto`. Image/level choices are zero-based catalog positions. Recovery choices carry the outstanding decision generation. Deferred metadata travels as `ImageRequest` entries with a follow-up URI for a fresh bounded job. A host-reported `RetryTimerElapsed{tile, attempt}` answers one outstanding `wait-retry-timer` effect; stale or duplicate completions are ignored.
 
-`HostEffect` (resource/tile/probe acquisition, finalization, cancellation, recovery decisions) and `JobEvent` (state, catalog, progress, warnings, recovery, terminal outcomes) are both exhaustive; boundaries handle them through typed tables. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract).
+`HostEffect` (resource/tile/probe acquisition, finalization, cancellation, recovery decisions) and `JobEvent` (state, catalog, progress, warnings, recovery, terminal outcomes) are both exhaustive; boundaries handle them through typed tables. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract). The retry timer effect is `wait-retry-timer{tile, attempt, delay_ms}`: the host waits `delay_ms` on its own clock and then answers with the matching `RetryTimerElapsed`. Tile failures cross as `TileFailureDto{code, category, http, retry_after_ms, detail}` with bounded diagnostics; `FetchFailureDto` carries the host-observed `retry_after_ms` when the response carries one. The engine backoff is a 1 s base doubling to a 30 s ceiling, with an observed `retry-after` honored to 300 s. Tile acquisition carries `TilePlacementDto{position, expected_size, canvas, processing, probe_output}` so hosts assemble without re-deriving geometry. The format grid includes `second_canvas`.
 
 ## Errors
 

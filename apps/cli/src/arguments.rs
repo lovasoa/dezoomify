@@ -39,8 +39,11 @@ pub struct Args {
     /// Tile retry budget, wired to native `max_retries`. Zero means no
     /// retries and is passed through unchanged.
     pub retries: u32,
-    /// Delay before the first retry, then doubling. Wired to native
-    /// `retry_delay` (plus deterministic per-tile jitter).
+    /// Delay before the first retry, then doubling. Parsed and stored but
+    /// never consulted: retry timing is engine-owned (explicit `WaitForRetry`
+    /// timer effects with exponential backoff plus observed `retry-after`).
+    /// Kept parsing so existing invocations keep working; removal rides with
+    /// the user-doc update.
     pub retry_delay: Duration,
     /// Output compression, 0 is less, 100 is more. Wired to native
     /// `compression`: JPEG quality is `100 - compression`, PNG tiers map
@@ -554,7 +557,7 @@ fn help() -> String {
         "  --pause-after <n>           pause after n tiles, then resume (Pause v1 demo)",
         "  -n, --parallelism <n>       max concurrent tile downloads (default 16)",
         "  -r, --retries <n>           tile retry budget, 0 means no retries (default 3)",
-        "  --retry-delay <duration>    delay before first retry, then doubling (default 2s)",
+        "  --retry-delay <duration>    accepted but unused (default 2s; retry timing is engine-driven)",
         "  --compression <0-100>       output compression, 0 is less, 100 is more (default 5)",
         "  -H, --header \"Name: value\"  HTTP header for tile requests (repeatable, last wins)",
         "  --max-idle-per-host <n>     max idle connections per host (default 32)",

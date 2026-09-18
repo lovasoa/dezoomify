@@ -18,6 +18,7 @@ use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::CatalogEntryDto;
 
 use crate::config::Config;
+use crate::retry::{retry_delay_ms, TileFailure};
 use crate::state::State;
 use crate::transition::{
     JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome, RecoveryChoice,
@@ -45,6 +46,17 @@ impl JobInput {
             contents: Some(contents.into()),
         }
     }
+}
+
+/// One scheduled tile retry: the engine-minted attempt number plus the
+/// explicit host wait. The host owns the clock and reports the elapsed
+/// timer back with the same tile and attempt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingRetry {
+    tile: u32,
+    attempt: u32,
+    delay_ms: u64,
+    timer_issued: bool,
 }
 
 /// One end-to-end user request driven synchronously by explicit host inputs.
@@ -75,7 +87,19 @@ pub struct Job {
     finalizing_partial: Option<bool>,
     cleanup_emitted: bool,
     planned_tiles: Vec<u32>,
-    pending_tiles: Vec<u32>,
+    /// Plan-order tile set mirroring `planned_tiles` for O(1) membership.
+    planned_set: HashSet<u32>,
+    /// FIFO acquisition queue; pops are O(1) from the front.
+    pending_tiles: VecDeque<u32>,
+    /// Plan-order set mirroring `pending_tiles` for O(1) membership: every
+    /// push and pop goes through `enqueue_front`, `enqueue_back`,
+    /// `dequeue_next`, or `remove_from_pending`, so the queue is never
+    /// scanned on the hot path.
+    pending_set: HashSet<u32>,
+    /// Plan-order index by wire tile id, built once per plan. The partial
+    /// retry round requeues in plan order through this map instead of
+    /// scanning `planned_tiles` per tile.
+    plan_order: HashMap<u32, usize>,
     in_flight: HashSet<u32>,
     acquired_tiles: HashSet<u32>,
     tile_attempts: HashMap<u32, u32>,
@@ -104,8 +128,36 @@ pub struct Job {
     recovery_reason: Option<String>,
     pending_decision: Option<u32>,
     failed_tiles: Vec<u32>,
+    /// Settled-as-failed set mirroring `failed_tiles` for O(1) membership.
+    failed_set: HashSet<u32>,
+    /// Planned tiles neither acquired nor settled-as-failed. Drives the
+    /// settle check in O(1); incremented only when a retry round requeues.
+    unsettled: usize,
+    /// Structured failure facts per settled-as-failed tile, in arrival
+    /// order. Backs the full missing detail for partial handling; cleared
+    /// for requeued tiles when a retry round restarts.
+    tile_failure_log: HashMap<u32, Vec<TileFailure>>,
+    /// Retry timers awaiting their host-reported completion, in issue
+    /// order. `timer_issued` marks entries the host already holds a
+    /// `WaitForRetry` effect for; entries created while paused are issued
+    /// on resume instead. Outstanding timers never exceed the concurrency
+    /// gate, so the completion lookup scans a bounded deque.
+    pending_retry_timers: VecDeque<PendingRetry>,
+    /// Elapsed retries deferred while paused; re-driven on resume.
+    ready_retries: Vec<(u32, u32)>,
+    /// Whether the in-flight discovery is a same-job deferred follow
+    /// (failures end the job instead of advancing the input list).
+    following_deferred: bool,
+    /// Same-job deferred follows consumed so far (bounded by config).
+    deferred_follows: u32,
+    /// Discovery URIs already consumed by this job (cycle guard covering
+    /// initial inputs plus every followed URI).
+    visited_uris: HashSet<String>,
     terminal: Option<String>,
-    /// Pause v1 overlay (suspend-acquisition): when true the engine stops
+    /// Stable code and message behind a `Failed` terminal, retained for
+    /// snapshot projection (events are drained, facts must persist).
+    terminal_error: Option<(String, String)>,
+    /// Pause overlay (suspend-acquisition): when true the engine stops
     /// scheduling new `acquire-tile` effects, finishes in-flight work,
     /// retains decoded output, and re-drives on resume. The 19 `State`
     /// variants are unchanged; pause is orthogonal to state.
@@ -149,6 +201,7 @@ impl Job {
         if let Err(e) = config.validate() {
             return Err(JobError::new(&e.code, e.message));
         }
+        let visited_uris: HashSet<String> = inputs.iter().map(|input| input.url.clone()).collect();
         Ok(Self {
             inputs,
             input_index: 0,
@@ -168,7 +221,10 @@ impl Job {
             finalizing_partial: None,
             cleanup_emitted: false,
             planned_tiles: Vec::new(),
-            pending_tiles: Vec::new(),
+            planned_set: HashSet::new(),
+            pending_tiles: VecDeque::new(),
+            pending_set: HashSet::new(),
+            plan_order: HashMap::new(),
             in_flight: HashSet::new(),
             acquired_tiles: HashSet::new(),
             tile_attempts: HashMap::new(),
@@ -187,7 +243,16 @@ impl Job {
             recovery_reason: None,
             pending_decision: None,
             failed_tiles: Vec::new(),
+            failed_set: HashSet::new(),
+            unsettled: 0,
+            tile_failure_log: HashMap::new(),
+            pending_retry_timers: VecDeque::new(),
+            ready_retries: Vec::new(),
+            following_deferred: false,
+            deferred_follows: 0,
+            visited_uris,
             terminal: None,
+            terminal_error: None,
             paused: false,
             next_request: 0,
             next_decision: 0,
@@ -219,7 +284,7 @@ impl Job {
         self.state.is_terminal()
     }
 
-    /// Whether Pause v1 is active (suspend-acquisition overlay).
+    /// Whether the pause overlay is active (suspend-acquisition).
     #[must_use]
     pub fn is_paused(&self) -> bool {
         self.paused
@@ -243,6 +308,112 @@ impl Job {
     #[must_use]
     pub fn pending_message_count(&self) -> usize {
         self.messages.len()
+    }
+
+    /// Selectable level count for one catalog image position.
+    #[must_use]
+    pub fn catalog_level_count(&self, image: u32) -> u32 {
+        let index = usize::try_from(image).ok();
+        let count = index
+            .and_then(|index| self.catalog.as_ref()?.entries().get(index))
+            .and_then(|entry| match entry {
+                CatalogEntry::Ready(image) => Some(image.levels.len()),
+                CatalogEntry::Deferred(_) => None,
+            })
+            .unwrap_or(0);
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
+    /// Still-deferred catalog entries as `(position, follow-up URI)`.
+    #[must_use]
+    pub fn deferred_entries(&self) -> Vec<(u32, String)> {
+        let Some(catalog) = self.catalog.as_ref() else {
+            return Vec::new();
+        };
+        catalog
+            .entries()
+            .iter()
+            .enumerate()
+            .filter_map(|(position, entry)| match entry {
+                CatalogEntry::Ready(_) => None,
+                CatalogEntry::Deferred(deferred) => u32::try_from(position)
+                    .ok()
+                    .map(|position| (position, deferred.uri.clone())),
+            })
+            .collect()
+    }
+
+    /// Stable code and message behind a `Failed` terminal, if the job
+    /// failed. Retained past event draining for snapshot projection.
+    #[must_use]
+    pub fn terminal_error(&self) -> Option<(String, String)> {
+        self.terminal_error.clone()
+    }
+
+    /// Structured failure facts for tiles settled as failed, in arrival
+    /// order per tile. This is the full missing detail behind a partial
+    /// decision; empty while acquisition is still settling.
+    #[must_use]
+    pub fn missing_detail(&self) -> Vec<(u32, Vec<TileFailure>)> {
+        let mut detail: Vec<(u32, Vec<TileFailure>)> = self
+            .tile_failure_log
+            .iter()
+            .map(|(tile, failures)| (*tile, failures.clone()))
+            .collect();
+        detail.sort_by_key(|(tile, _)| *tile);
+        detail
+    }
+
+    /// Attempts recorded so far for one tile (initial try plus retries).
+    #[must_use]
+    pub fn tile_attempts_of(&self, tile: u32) -> u32 {
+        self.tile_attempts.get(&tile).copied().unwrap_or(0)
+    }
+
+    /// Retry timers awaiting host-reported completion.
+    #[must_use]
+    pub fn pending_retry_count(&self) -> usize {
+        self.pending_retry_timers.len()
+    }
+
+    /// Tiles with an acquisition effect outstanding (bounded by the
+    /// concurrency gate; hosts use it to assert bounded active work).
+    #[must_use]
+    pub fn in_flight_count(&self) -> usize {
+        self.in_flight.len()
+    }
+
+    /// Acquisition progress as `(acquired, total)` over the planned tiles.
+    #[must_use]
+    pub fn acquisition_progress(&self) -> (u64, u64) {
+        (
+            self.acquired_tiles.len() as u64,
+            self.planned_tiles.len() as u64,
+        )
+    }
+
+    /// Selected image position, once chosen.
+    #[must_use]
+    pub fn selected_image(&self) -> Option<u32> {
+        self.selected_image
+    }
+
+    /// Selected level position, once chosen.
+    #[must_use]
+    pub fn selected_level(&self) -> Option<u32> {
+        self.selected_level
+    }
+
+    /// Outstanding partial-decision generation, if one is awaited.
+    #[must_use]
+    pub fn pending_decision(&self) -> Option<u32> {
+        self.pending_decision
+    }
+
+    /// Declared canvas size for the planned level, when known.
+    #[must_use]
+    pub fn canvas_size(&self) -> Option<Vec2d> {
+        self.canvas_size
     }
 
     /// Take queued messages exactly once in sequence order.
@@ -330,6 +501,15 @@ impl Job {
     }
 
     fn try_next_input(&mut self, error: DiscoveryError) -> Result<(), JobError> {
+        // A failed same-job deferred follow ends the job: there is no input
+        // list position to advance to, and the visited set already guards
+        // against retrying the same URI.
+        if self.following_deferred {
+            self.following_deferred = false;
+            self.pending_discovery.clear();
+            self.discovery = None;
+            return self.fail_via_cleanup("job.discovery-failed", error.engine_detail());
+        }
         self.pending_discovery.clear();
         self.discovery = None;
         self.input_index += 1;
@@ -375,8 +555,13 @@ impl Job {
             } => self.apply_resource_bytes(request, bytes, final_uri),
             JobCommand::FetchFailure { request, cause } => self.apply_fetch_failure(request, cause),
             JobCommand::SelectImage { image } => self.apply_selected_image(image),
+            JobCommand::FollowDeferred { image } => self.apply_follow_deferred(image),
             JobCommand::SelectLevel { level } => self.apply_selected_level(level),
             JobCommand::TileOutcome { tile, ok } => self.apply_tile_outcome(tile, ok),
+            JobCommand::TileFailed { tile, failure } => self.apply_tile_failed(tile, failure),
+            JobCommand::RetryTimerElapsed { tile, attempt } => {
+                self.apply_retry_timer_elapsed(tile, attempt)
+            }
             JobCommand::ProbeOutcome { tile, outcome } => self.apply_probe_outcome(tile, outcome),
             JobCommand::RecoveryChoice { generation, choice } => {
                 self.apply_recovery_choice(generation, choice)
@@ -449,6 +634,9 @@ impl Job {
         let images = crate::projection::project_catalog(&catalog).entries;
         self.catalog = Some(catalog);
         self.catalog_images = images;
+        // A followed catalog replaces the superseded one in the same job;
+        // the follow flag clears so later failures route normally again.
+        self.following_deferred = false;
         // Sibling discovery fetches still in flight are moot once the
         // catalog wins; drop them so late answers are plain duplicates.
         self.pending_discovery.clear();
@@ -597,6 +785,65 @@ impl Job {
         self.push_event(JobEvent::State {
             state: State::AwaitingLevelSelection,
         })?;
+        Ok(Outcome::Applied)
+    }
+
+    /// Follow one still-deferred catalog entry within the same job.
+    ///
+    /// The follow is bounded by `max_deferred_follows` and guarded against
+    /// cycles by the visited-URI set: the same URI is never fetched twice
+    /// by one job. The catalog is replaced on success; the job ID and
+    /// revision lineage never change, so hosts never fork replacement jobs.
+    fn apply_follow_deferred(&mut self, image: u32) -> Result<Outcome, JobError> {
+        if self.state != State::AwaitingImageSelection || self.selected_image.is_some() {
+            return Err(JobError::invalid_state(
+                "deferred follow valid only before image selection",
+            ));
+        }
+        if self.config.max_deferred_follows == 0 {
+            return Err(JobError::invalid_state("deferred follows are disabled"));
+        }
+        if self.deferred_follows >= self.config.max_deferred_follows {
+            return Err(JobError::invalid_state("deferred follow budget exhausted"));
+        }
+        let index = usize::try_from(image).map_err(|_| JobError::overflow("image position"))?;
+        let uri = match self
+            .catalog
+            .as_ref()
+            .and_then(|catalog| catalog.entries().get(index))
+        {
+            Some(CatalogEntry::Deferred(deferred)) => deferred.uri.clone(),
+            Some(CatalogEntry::Ready(_)) => {
+                return Err(JobError::invalid_state(
+                    "image is ready; only deferred entries are followed",
+                ));
+            }
+            None => {
+                return Err(JobError::invalid_state("image position is out of range"));
+            }
+        };
+        if !self.visited_uris.insert(uri.clone()) {
+            return Err(JobError::invalid_state(
+                "deferred cycle: this URI was already consumed by the job",
+            ));
+        }
+        self.deferred_follows = self
+            .deferred_follows
+            .checked_add(1)
+            .ok_or_else(|| JobError::overflow("deferred follows"))?;
+        // Sibling discovery fetches from the superseded catalog are moot.
+        self.pending_discovery.clear();
+        self.following_deferred = true;
+        let registry = match self.format.as_deref() {
+            None | Some("auto") => default_registry(&uri),
+            Some(name) => registry_for(name).expect("validated by start"),
+        };
+        self.discovery = Some(registry.start(uri));
+        self.set_state(State::Discovering)?;
+        self.push_event(JobEvent::State {
+            state: State::Discovering,
+        })?;
+        self.drive_discovery()?;
         Ok(Outcome::Applied)
     }
 
@@ -789,18 +1036,32 @@ impl Job {
         for wire in planned {
             self.planned_tiles.push(wire);
         }
+        self.planned_set = self.planned_tiles.iter().copied().collect();
+        self.plan_order = self
+            .planned_tiles
+            .iter()
+            .enumerate()
+            .map(|(index, tile)| (*tile, index))
+            .collect();
         self.probe_tiles.clear();
-        self.pending_tiles = self.planned_tiles.clone();
+        self.pending_tiles = self.planned_tiles.iter().copied().collect();
+        self.pending_set = self.planned_tiles.iter().copied().collect();
         self.in_flight.clear();
         self.acquired_tiles.clear();
+        self.failed_tiles.clear();
+        self.failed_set.clear();
         if let Some((tile, destination)) = self.retained_probe.take() {
-            if self.planned_tiles.contains(&tile)
+            if self.planned_set.contains(&tile)
                 && self.tile_destinations.get(&tile) == Some(&destination)
             {
-                self.pending_tiles.retain(|value| *value != tile);
+                self.remove_from_pending(tile);
                 self.acquired_tiles.insert(tile);
             }
         }
+        self.unsettled = self
+            .planned_tiles
+            .len()
+            .saturating_sub(self.acquired_tiles.len());
         let acquired = self.acquired_tiles.len() as u64;
         self.set_state(State::AcquiringTiles)?;
         self.push_event(JobEvent::Progress { acquired, total })?;
@@ -826,27 +1087,47 @@ impl Job {
                 "tile outcome valid only in AcquiringTiles",
             ));
         }
-        if !self.planned_tiles.contains(&tile) {
+        if !self.planned_set.contains(&tile) {
             return Err(JobError::invalid_state("tile ordinal is out of range"));
         }
         if self.acquired_tiles.contains(&tile) {
             return Ok(Outcome::Ignored);
         }
+        // A success for a settled-as-failed tile is a late duplicate of an
+        // already-recorded attempt outcome: it must not resurrect the tile
+        // or double-decrement the settle accounting.
+        if self.failed_set.contains(&tile) {
+            return Ok(Outcome::Ignored);
+        }
         if ok {
-            self.in_flight.remove(&tile);
-            self.pending_tiles.retain(|value| *value != tile);
+            // Flight and queue are disjoint: a tile enters the queue only
+            // when not in flight, so a tile just removed from flight cannot
+            // be queued and the queue is never scanned on the hot path.
+            if !self.in_flight.remove(&tile) {
+                self.remove_from_pending(tile);
+            }
             self.acquired_tiles.insert(tile);
+            self.unsettled = self.unsettled.saturating_sub(1);
             let acquired = u64::try_from(self.acquired_tiles.len())
                 .map_err(|_| JobError::overflow("acquired count"))?;
             let total = self.planned_tiles.len() as u64;
             self.push_event(JobEvent::Progress { acquired, total })?;
-            // Pause v1: finish in-flight, retain decoded, defer completion
+            // A success can settle the round when failures are stashed:
+            // with every planned tile acquired or settled-as-failed the
+            // partial decision carries the complete missing list.
+            if !self.failed_tiles.is_empty() {
+                self.maybe_enter_partial_decision()?;
+                if self.state == State::AwaitingPartialDecision {
+                    return Ok(Outcome::Applied);
+                }
+            }
+            // Pause: finish in-flight, retain decoded, defer completion
             // and new scheduling until resume. Resume re-drives completion
             // when every tile has arrived while paused.
             if self.paused {
                 return Ok(Outcome::Applied);
             }
-            if self.acquired_tiles.len() == self.planned_tiles.len() {
+            if self.unsettled == 0 {
                 self.complete_remaining(false)?;
             } else {
                 self.emit_pending_tiles()?;
@@ -859,25 +1140,170 @@ impl Job {
             .ok_or_else(|| JobError::overflow("tile attempts"))?;
         self.tile_attempts.insert(tile, next);
         if next <= self.config.max_retries {
-            self.in_flight.remove(&tile);
-            if !self.pending_tiles.contains(&tile) {
-                self.pending_tiles.insert(0, tile);
+            let was_in_flight = self.in_flight.remove(&tile);
+            if !was_in_flight {
+                self.remove_from_pending(tile);
             }
+            self.enqueue_front(tile);
             self.push_event(JobEvent::Warning {
                 tile,
                 attempt: next,
             })?;
-            // Pause v1: retry wakeups are preserved in `pending_tiles` and
+            // Pause: retry wakeups are preserved in `pending_tiles` and
             // re-driven on resume; no new `acquire-tile` while paused.
             if !self.paused {
                 self.emit_pending_tiles()?;
             }
             return Ok(Outcome::Applied);
         }
-        self.in_flight.remove(&tile);
-        self.pending_tiles.retain(|value| *value != tile);
-        if !self.failed_tiles.contains(&tile) {
+        let was_in_flight = self.in_flight.remove(&tile);
+        // The legacy boolean carries no failure facts, so the exhaustion
+        // record names the untyped outcome; retry behavior is unchanged.
+        self.tile_failure_log
+            .entry(tile)
+            .or_default()
+            .push(TileFailure::new("job.tile-failed", None, None, None));
+        self.stash_failed_tile(tile, was_in_flight);
+        self.maybe_enter_partial_decision()?;
+        Ok(Outcome::Applied)
+    }
+
+    /// Typed tile failure carrying structured facts instead of one boolean.
+    ///
+    /// Permanent failures settle the tile after exactly one attempt;
+    /// transient failures schedule one explicit retry timer per remaining
+    /// attempt. A settled-as-failed tile joins the partial decision only
+    /// after acquisition settles (nothing in flight, queued, or awaiting a
+    /// timer), so late successes still count and the missing list stays
+    /// complete.
+    fn apply_tile_failed(&mut self, tile: u32, failure: TileFailure) -> Result<Outcome, JobError> {
+        if self.probe_tiles.contains(&tile) {
+            return Err(JobError::invalid_state(
+                "probe tiles are answered with a probe outcome, not a tile failure",
+            ));
+        }
+        if self.state != State::AcquiringTiles {
+            return Err(JobError::invalid_state(
+                "tile failure valid only in AcquiringTiles",
+            ));
+        }
+        if !self.planned_set.contains(&tile) {
+            return Err(JobError::invalid_state("tile ordinal is out of range"));
+        }
+        if self.acquired_tiles.contains(&tile) || self.failed_set.contains(&tile) {
+            return Ok(Outcome::Ignored);
+        }
+        // No re-acquisition was issued since the recorded failure, so a
+        // second report for this tile is a duplicate: the pending timer (or
+        // parked retry) already owns the next attempt.
+        if self
+            .pending_retry_timers
+            .iter()
+            .any(|pending| pending.tile == tile)
+            || self.ready_retries.iter().any(|(ready, _)| *ready == tile)
+        {
+            return Ok(Outcome::Ignored);
+        }
+        let attempt = self
+            .tile_attempts
+            .get(&tile)
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| JobError::overflow("tile attempts"))?;
+        self.tile_attempts.insert(tile, attempt);
+        let was_in_flight = self.in_flight.remove(&tile);
+        self.tile_failure_log
+            .entry(tile)
+            .or_default()
+            .push(failure.clone());
+        if failure.is_retryable() && attempt <= self.config.max_retries {
+            self.push_event(JobEvent::Warning { tile, attempt })?;
+            // Attempts count the initial try: the first failure schedules
+            // retry-timer 1, whose completion re-issues the second try.
+            let delay_ms = retry_delay_ms(attempt, failure.retry_after_ms);
+            let timer_issued = !self.paused;
+            self.pending_retry_timers.push_back(PendingRetry {
+                tile,
+                attempt,
+                delay_ms,
+                timer_issued,
+            });
+            // While paused the timer stays pending and is issued on resume;
+            // no new `acquire-tile` while paused.
+            if timer_issued {
+                self.push_effect(JobEffect::WaitForRetry {
+                    tile,
+                    attempt,
+                    delay_ms,
+                })?;
+            }
+            return Ok(Outcome::Applied);
+        }
+        self.stash_failed_tile(tile, was_in_flight);
+        self.maybe_enter_partial_decision()?;
+        Ok(Outcome::Applied)
+    }
+
+    /// Host-reported elapsed retry timer. Stale or duplicate completions
+    /// (no matching pending timer) are ignored. While paused the retry is
+    /// parked and re-driven on resume; otherwise the tile rejoins the
+    /// acquisition queue immediately.
+    fn apply_retry_timer_elapsed(&mut self, tile: u32, attempt: u32) -> Result<Outcome, JobError> {
+        if self.state != State::AcquiringTiles {
+            return Err(JobError::invalid_state(
+                "retry timer completion valid only in AcquiringTiles",
+            ));
+        }
+        let position = self
+            .pending_retry_timers
+            .iter()
+            .position(|pending| pending.tile == tile && pending.attempt == attempt);
+        let Some(position) = position else {
+            return Ok(Outcome::Ignored);
+        };
+        self.pending_retry_timers.remove(position);
+        if self.acquired_tiles.contains(&tile) || self.failed_set.contains(&tile) {
+            return Ok(Outcome::Applied);
+        }
+        if self.paused {
+            if !self.ready_retries.contains(&(tile, attempt)) {
+                self.ready_retries.push((tile, attempt));
+            }
+            return Ok(Outcome::Applied);
+        }
+        self.enqueue_front(tile);
+        self.emit_pending_tiles()?;
+        Ok(Outcome::Applied)
+    }
+
+    /// Record one tile as settled-as-failed (idempotent). `was_in_flight`
+    /// tells whether the tile just left the flight set: flight and queue
+    /// are disjoint, so only a tile that was not in flight can still be
+    /// queued, and only then is it removed through the membership set.
+    fn stash_failed_tile(&mut self, tile: u32, was_in_flight: bool) {
+        if !was_in_flight {
+            self.remove_from_pending(tile);
+        }
+        if self.failed_set.insert(tile) {
             self.failed_tiles.push(tile);
+            self.unsettled = self.unsettled.saturating_sub(1);
+        }
+    }
+
+    /// Move to the partial decision once acquisition fully settles: every
+    /// planned tile is acquired or settled-as-failed (`unsettled == 0`),
+    /// nothing is in flight, and no retry timer is outstanding or parked.
+    /// Until then failures stay stashed so late successes still count and
+    /// the missing list stays complete. All checks are O(1).
+    fn maybe_enter_partial_decision(&mut self) -> Result<(), JobError> {
+        if self.failed_tiles.is_empty()
+            || self.unsettled != 0
+            || !self.in_flight.is_empty()
+            || !self.pending_retry_timers.is_empty()
+            || !self.ready_retries.is_empty()
+        {
+            return Ok(());
         }
         self.recovery_reason = Some("tile".to_string());
         let generation = self.alloc_decision_generation()?;
@@ -890,7 +1316,7 @@ impl Job {
         self.push_event(JobEvent::State {
             state: State::AwaitingPartialDecision,
         })?;
-        Ok(Outcome::Applied)
+        Ok(())
     }
 
     fn apply_probe_outcome(
@@ -963,7 +1389,23 @@ impl Job {
         self.pending_decision = None;
         match choice {
             RecoveryChoice::Retry => {
-                self.failed_tiles.clear();
+                // Requeue every settled-as-failed tile with a fresh attempt
+                // budget for the new round, in plan order; acquired tiles
+                // are preserved so success is never re-fetched. Restored
+                // tiles rejoin the unsettled count exactly once each.
+                let mut requeued: Vec<u32> = std::mem::take(&mut self.failed_tiles);
+                self.failed_set.clear();
+                requeued
+                    .sort_by_key(|tile| self.plan_order.get(tile).copied().unwrap_or(usize::MAX));
+                let mut restored = 0usize;
+                for tile in requeued {
+                    self.tile_attempts.insert(tile, 0);
+                    self.tile_failure_log.remove(&tile);
+                    if !self.acquired_tiles.contains(&tile) && self.enqueue_back(tile) {
+                        restored = restored.saturating_add(1);
+                    }
+                }
+                self.unsettled = self.unsettled.saturating_add(restored);
                 self.set_state(State::AcquiringTiles)?;
                 self.push_event(JobEvent::State {
                     state: State::AcquiringTiles,
@@ -990,7 +1432,9 @@ impl Job {
     fn enter_cancelled(&mut self) -> Result<Outcome, JobError> {
         self.paused = false;
         self.set_state(State::Cancelling)?;
-        self.push_effect(JobEffect::CancelWork)?;
+        // Exactly one idempotent `cancel-work`: the cleanup gate below
+        // owns the emission, so cancellation and failure paths converge.
+        self.emit_cleanup_once()?;
         self.push_event(JobEvent::State {
             state: State::Cancelling,
         })?;
@@ -1004,7 +1448,7 @@ impl Job {
         Ok(Outcome::Applied)
     }
 
-    /// Pause v1 (suspend-acquisition): stop scheduling new `acquire-tile`
+    /// Pause (suspend-acquisition): stop scheduling new `acquire-tile`
     /// effects, finish in-flight work, retain decoded output. Valid in any
     /// non-terminal state; terminal inputs are already rejected as
     /// post-terminal. FIFO queues are preserved; retry wakeups are preserved
@@ -1028,6 +1472,35 @@ impl Job {
         }
         self.paused = false;
         self.push_event(JobEvent::Resumed)?;
+        // Retry timers created while paused start now: issue one
+        // `WaitForRetry` per pending retry the host does not hold yet.
+        let unissued: Vec<(u32, u32, u64)> = self
+            .pending_retry_timers
+            .iter()
+            .filter(|pending| !pending.timer_issued)
+            .map(|pending| (pending.tile, pending.attempt, pending.delay_ms))
+            .collect();
+        for (tile, attempt, delay_ms) in unissued {
+            if let Some(pending) = self
+                .pending_retry_timers
+                .iter_mut()
+                .find(|pending| pending.tile == tile && pending.attempt == attempt)
+            {
+                pending.timer_issued = true;
+            }
+            self.push_effect(JobEffect::WaitForRetry {
+                tile,
+                attempt,
+                delay_ms,
+            })?;
+        }
+        // Elapsed-while-paused retries rejoin the queue now, ahead of
+        // never-started tiles so the resumed round finishes in order.
+        for (tile, _) in std::mem::take(&mut self.ready_retries) {
+            if !self.acquired_tiles.contains(&tile) && !self.failed_set.contains(&tile) {
+                self.enqueue_front(tile);
+            }
+        }
         if self.state == State::AcquiringTiles
             && self.acquired_tiles.len() == self.planned_tiles.len()
             && !self.planned_tiles.is_empty()
@@ -1099,6 +1572,7 @@ impl Job {
 
     fn fail_via_cleanup(&mut self, code: &str, message: String) -> Result<(), JobError> {
         self.paused = false;
+        self.terminal_error = Some((code.to_string(), message.clone()));
         self.emit_cleanup_once()?;
         self.set_state(State::Failed)?;
         self.push_event(JobEvent::State {
@@ -1121,7 +1595,7 @@ impl Job {
     }
 
     fn emit_pending_tiles(&mut self) -> Result<(), JobError> {
-        // Pause v1: suspend-acquisition stops new scheduling; in-flight
+        // Pause: suspend-acquisition stops new scheduling; in-flight
         // finishes, decoded output is retained, FIFO order is preserved.
         if self.paused {
             return Ok(());
@@ -1129,22 +1603,57 @@ impl Job {
         let limit = usize::try_from(self.config.max_concurrent_fetches)
             .map_err(|_| JobError::overflow("concurrency"))?;
         while self.in_flight.len() < limit {
-            let Some(next) = self.pending_tiles.first().cloned() else {
+            let Some(next) = self.dequeue_next() else {
                 break;
             };
-            if self.acquired_tiles.contains(&next) {
-                self.pending_tiles.remove(0);
+            if self.acquired_tiles.contains(&next)
+                || self.failed_set.contains(&next)
+                || self.in_flight.contains(&next)
+            {
                 continue;
             }
-            if self.in_flight.contains(&next) {
-                self.pending_tiles.remove(0);
-                continue;
-            }
-            self.pending_tiles.remove(0);
             self.in_flight.insert(next);
             self.push_acquire_tile(next, false, false)?;
         }
         Ok(())
+    }
+
+    /// Queue one tile at the front unless already queued. The membership
+    /// set keeps this O(1); the queue itself is never scanned.
+    fn enqueue_front(&mut self, tile: u32) {
+        if self.pending_set.insert(tile) {
+            self.pending_tiles.push_front(tile);
+        }
+    }
+
+    /// Queue one tile at the back unless already queued, reporting whether
+    /// it was queued. The membership set keeps this O(1); the queue itself
+    /// is never scanned.
+    fn enqueue_back(&mut self, tile: u32) -> bool {
+        if self.pending_set.insert(tile) {
+            self.pending_tiles.push_back(tile);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Pop the oldest queued tile, keeping the membership set mirrored.
+    fn dequeue_next(&mut self) -> Option<u32> {
+        let next = self.pending_tiles.pop_front()?;
+        self.pending_set.remove(&next);
+        Some(next)
+    }
+
+    /// Drop one tile from the queue wherever it sits. The set gates the
+    /// scan: absent tiles (the common case, since answered work leaves
+    /// flight first) skip it entirely. Only a still-queued tile pays the
+    /// removal scan, which hosts can only trigger by answering work that
+    /// was never issued.
+    fn remove_from_pending(&mut self, tile: u32) {
+        if self.pending_set.remove(&tile) {
+            self.pending_tiles.retain(|value| *value != tile);
+        }
     }
 
     /// Stable byte-processing recipe name for the wire. Hosts that decode

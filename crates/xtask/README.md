@@ -10,7 +10,7 @@ processes, temporary profiles, servers, and integration registrations.
 ```text
 cargo xtask setup
 cargo xtask check
-cargo xtask test [core|protocol|job|wasm|browser|web|native|scenario|desktop|extension|perf|native-messaging|live|all] [options]
+cargo xtask test [core|protocol|job|wasm|browser|ui|app-model|web|native|scenario|desktop|extension|perf|native-messaging|live|all] [options]
 cargo xtask build <wasm|web|cli|desktop|extension> [options]
 cargo xtask dev <ui|web|desktop|extension> [options]
 cargo xtask ci <check|rust|wasm|browser|web|desktop|extension|protocol|security|local|digest> [--check <hex>]

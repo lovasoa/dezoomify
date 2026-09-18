@@ -34,7 +34,7 @@ pedantic = "allow"
 
 [dependencies]
 # Engine deps (inward only: core -> job -> native runtime + protocol DTOs).
-# All pure Rust via dezoomify-native (ureq/rustls/image/url/sha2); no webview
+# All pure Rust via dezoomify-native (reqwest/rustls/image/url/sha2); no webview
 # system packages, so the lean offline default still builds anywhere.
 dezoomify-core = { path = "../../../crates/dezoomify-core" }
 dezoomify-job = { path = "../../../crates/dezoomify-job" }

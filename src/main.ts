@@ -29,13 +29,12 @@ import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import { errorTransportFor, isProxyEligible } from "./webIntegration.ts";
 import { createProxyTransport, PROXY_METADATA_MAX_BYTES } from "./proxyTransport.ts";
 import {
+  createBrowserRunner,
   createCanvasAssembly,
-  createEngineHost,
   createProbeSize,
   dispatchTyped,
+  type BrowserJobHandle,
   type DispatchTable,
-  type EngineHost,
-  type WorkerHostOutput,
 } from "../packages/browser-runtime/src/index.ts";
 import {
   blockedReason,
@@ -101,14 +100,13 @@ const preview = createPreviewControls();
 let sessionId = `sess:web-${Date.now()}`;
 const controller = createController(sessionId);
 let currentSeq = 0;
-let engineHost: EngineHost | null = null;
-let engineWorker: Worker | null = null;
+// One browser runner attempt (worker, session, abort scope, disposal). The
+// runner owns the engine host; product code here keeps URL input, transport
+// product actions, history, queue, and view wiring only.
+let jobHandle: BrowserJobHandle | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
 let resultTitle: string | undefined;
-// Cross-worker processing calls (session.applyProcessing) awaiting a reply.
-const pendingProcess = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: unknown) => void }>();
-let processSeq = 0;
 // Pause v1 (todo 5.7, suspend-acquisition): the website stops scheduling new
 // tiles while paused, finishes in-flight work, retains the canvas, and
 // re-drives on resume. Integration-layer only; the engine pause lives in
@@ -284,9 +282,10 @@ const webFetcher: WebFetcher = createWebFetcher({
 async function probeSizeFor(
   url: string,
   headers: Record<string, string>,
+  signal?: AbortSignal,
 ) {
   const probe = createProbeSize({
-    fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders),
+    fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders, undefined, signal),
     decode: (bytes) => tileDecoder.decode(bytes),
     loadImage: async (probeUrl) => {
       const img = await loadTileImage(probeUrl, {
@@ -306,29 +305,13 @@ async function probeSizeFor(
   return probe(url, headers);
 }
 
-/** Tear down the active engine attempt: worker, session, assembly, buffers. */
+/** Tear down the active runner attempt: worker, session, assembly, buffers. */
 function disposeAttempt(): void {
-  const host = engineHost;
-  engineHost = null;
-  try { host?.dispose(); } catch { /* teardown is best effort */ }
-  const worker = engineWorker;
-  engineWorker = null;
-  try { worker?.terminate(); } catch { /* already gone */ }
-  for (const { reject } of pendingProcess.values()) {
-    reject(failure("WORKER_FAILED", "The image engine stopped.", false));
-  }
-  pendingProcess.clear();
-}
-
-/** Apply one core processing recipe through the worker session. */
-function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
-  const worker = engineWorker;
-  if (!worker) return Promise.reject(failure("WORKER_FAILED", "The image engine is not running.", false));
-  const requestId = ++processSeq;
-  return new Promise<ArrayBuffer>((resolve, reject) => {
-    pendingProcess.set(requestId, { resolve, reject });
-    worker.postMessage({ type: "engine.process", requestId, recipe, bytes }, [bytes]);
-  });
+  const handle = jobHandle;
+  jobHandle = null;
+  try {
+    void handle?.dispose();
+  } catch { /* teardown is best effort */ }
 }
 
 /** Normalize generated request headers for `fetch`. */
@@ -338,7 +321,10 @@ function headerRecord(headers: HeaderDto[] | undefined): Record<string, string> 
 
 let activeAssembly: ReturnType<typeof createCanvasAssembly> | null = null;
 
-function createAssembly(sourceUrl: string): ReturnType<typeof createCanvasAssembly> {
+function createAssembly(
+  sourceUrl: string,
+  processTile: (recipe: ProcessingRecipe, bytes: ArrayBuffer) => Promise<ArrayBuffer>,
+): ReturnType<typeof createCanvasAssembly> {
   const decoder = createTileDecoder();
   return createCanvasAssembly({
     decode: (bytes: ArrayBuffer) => decoder.decode(bytes),
@@ -481,16 +467,10 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
   update();
 
   let selected = false;
-  let displayOnly = false;
   let terminal: "done" | "failed" | "cancelled" | "display" | "deferred" = "done";
   let deferredNext: string | null = null;
   let settle: () => void = () => {};
   const finished = new Promise<void>((resolve) => { settle = resolve; });
-
-  const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-  engineWorker = worker;
-  const assembly = createAssembly(origin);
-  activeAssembly = assembly;
 
   const onHostFailure = (error: unknown): void => {
     if (token !== jobToken) return;
@@ -516,7 +496,7 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
   };
 
   const complete = (): void => {
-    if (displayOnly || assembly.isTainted()) {
+    if (activeAssembly?.isTainted() === true) {
       terminal = "display";
       settle();
       return;
@@ -572,8 +552,11 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
       controller.dispatch(nextEvent("level-chosen") as never);
       controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
       update();
-      engineHost?.selectImage(selection.image);
-      engineHost?.selectLevel(selection.level);
+      const handle = jobHandle;
+      if (handle) {
+        void handle.command({ type: "select-image", image: selection.image });
+        void handle.command({ type: "select-level", level: selection.level });
+      }
     },
     progress: (event) => {
       reportProgress(event.acquired, event.total, `Saving ${event.total} tiles…`);
@@ -604,30 +587,30 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
     dispatchTyped(eventHandlers, event);
   };
 
-  const host = createEngineHost({
-    worker,
-    jobId: () => sessionId,
-    fetchResource: async (effect) => {
+  // One shared browser runner: the website injects its transport (direct
+  // first with automatic eligible metadata-proxy fallback) and its output
+  // assembly (visible page canvas, anchor save). Retries, partials, and
+  // ordering stay in the engine; the abort scope and disposal live here.
+  const runner = createBrowserRunner({
+    createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
+    fetchResource: async (effect, signal) => {
       const request = effect.request;
       if (request.purpose === "metadata") {
-        const result = await webFetcher.fetchMetadataFor(request.uri, headerRecord(request.headers));
+        const result = await webFetcher.fetchMetadataFor(request.uri, headerRecord(request.headers), signal);
         return {
           bytes: new Uint8Array(result.bytes),
           ...(typeof result.finalUri === "string" && result.finalUri !== "" ? { finalUri: result.finalUri } : {}),
         };
       }
-      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers));
+      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), undefined, signal);
       return { bytes: new Uint8Array(result.bytes) };
     },
-    fetchResourceOnce: async (effect) => {
+    fetchResourceOnce: async (effect, signal) => {
       const request = effect.request;
-      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), 0);
+      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), 0, signal);
       return { bytes: new Uint8Array(result.bytes) };
     },
-    cancelFetch: () => { /* fetches finish harmlessly after a token change */ },
-    assembly,
-    quotas: { max_concurrent_fetches: websiteTileConcurrency() },
-    probeSize: probeSizeFor,
+    probeSize: (probeUrl, probeHeaders, requestId, signal) => probeSizeFor(probeUrl, probeHeaders, signal),
     loadDisplayImage: (tileUrl: string) =>
       loadTileImage(tileUrl, {
         hooks: {
@@ -663,45 +646,39 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
         ...(typeof structured?.detail === "string" ? { detail: structured.detail } : {}),
       };
     },
-    onPermissionRequired: () => { /* the website has no host grants */ },
-    onRecoveryRequested: (generation) => { engineHost?.chooseRecovery(generation, "discard"); },
-    onHostFailure,
-    onEvent: onEngineEvent,
+    createAssembly: ({ processTile }) => {
+      const assembly = createAssembly(origin, processTile);
+      activeAssembly = assembly;
+      return assembly;
+    },
+    quotas: { max_concurrent_fetches: websiteTileConcurrency() },
+    sessionId: () => sessionId,
+    getTransport: () => webFetcher.getActiveTransport(),
+    // The website has no host grants: nothing ever suspends for permission.
+    isPermissionPending: () => false,
+    getOutputState: () => (resultBlobUrl ? "writable" : "pending"),
+    onRecoveryRequested: (generation) => {
+      // Website policy answers partial decisions immediately as discard;
+      // the engine owns the consequence.
+      void jobHandle?.command({ type: "recovery-choice", generation, choice: "discard" });
+    },
     log: (level, code, detail) => {
       if (level === "error") webLog.error(code, detail);
       else if (level === "warn") webLog.warn(code, detail);
       else webLog.info(code, detail);
     },
   });
-  engineHost = host;
-
-  worker.addEventListener("message", (event: MessageEvent<WorkerHostOutput>) => {
-    const data = event.data;
-    if (!data || typeof data.type !== "string") return;
-    if (data.type === "engine.messages") {
-      engineHost?.handleEngineMessages(data.messages);
-      return;
-    }
-    if (data.type === "engine.processed" || data.type === "engine.process-failed") {
-      const requestId = typeof data.requestId === "number" ? data.requestId : -1;
-      const pending = pendingProcess.get(requestId);
-      if (!pending) return;
-      pendingProcess.delete(requestId);
-      if (data.type === "engine.processed" && data.bytes instanceof ArrayBuffer) pending.resolve(data.bytes);
-      else pending.reject(failure("TILE_PROCESSING_FAILED", "A tile could not be processed.", false));
-      return;
-    }
-    if (data.type === "engine.log" && typeof data.line === "string") {
-      webLog.info("runtime", data.line);
-      return;
-    }
-    if (data.type === "engine.error") {
-      onHostFailure(data.error);
-    }
-  });
 
   try {
-    host.start([{ url }]);
+    const handle = await runner.start(
+      { inputs: [{ url }], engine: {}, exec: { kind: "browser", sourceUrl: origin } },
+      (event) => onEngineEvent(event),
+    );
+    if (token !== jobToken) {
+      await handle.dispose();
+      return;
+    }
+    jobHandle = handle;
     await finished;
     if (token !== jobToken) return;
   } catch (error) {
@@ -874,7 +851,7 @@ function update(): void {
         jobPaused = true;
         viewCtx.paused = true;
         jobActivity.pause();
-        engineHost?.pause();
+        void jobHandle?.command({ type: "pause" });
         webLog.info("paused", "no new pieces are being fetched");
         update();
       },
@@ -883,7 +860,7 @@ function update(): void {
         jobPaused = false;
         viewCtx.paused = false;
         jobActivity.resume();
-        engineHost?.resume();
+        void jobHandle?.command({ type: "resume" });
         webLog.info("resumed", "fetching queued pieces again");
         update();
       },

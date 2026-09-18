@@ -75,12 +75,39 @@ pub enum JobCommand {
     SelectImage {
         image: u32,
     },
+    /// Follow one still-deferred catalog entry within the same job: the
+    /// engine fetches the entry's follow-up URI with a bounded,
+    /// cycle-guarded budget and replaces the catalog on success. No host
+    /// recursive replacement jobs: the job ID and revision lineage never
+    /// change. Valid only before any image is selected.
+    FollowDeferred {
+        image: u32,
+    },
     SelectLevel {
         level: u32,
     },
     TileOutcome {
         tile: u32,
         ok: bool,
+    },
+    /// Typed tile result carrying structured failure facts (code, HTTP
+    /// status, retry-after hint, bounded diagnostics). Unlike the legacy
+    /// boolean outcome, permanent failures (e.g. HTTP 403) are never
+    /// retried and transient failures retry on the exact budget with
+    /// explicit timer effects. New hosts must send this; the boolean form
+    /// stays for already-shipped hosts and treats `ok: false` as a
+    /// transient failure with immediate retry.
+    TileFailed {
+        tile: u32,
+        failure: crate::retry::TileFailure,
+    },
+    /// Host-reported elapsed retry timer for one pending retry. The engine
+    /// owns no clocks; the host waits `delay_ms` from the matching
+    /// `WaitForRetry` effect and answers with the same tile and attempt.
+    /// Stale or duplicate completions are ignored.
+    RetryTimerElapsed {
+        tile: u32,
+        attempt: u32,
     },
     ProbeOutcome {
         tile: u32,
@@ -129,6 +156,16 @@ pub enum JobEffect {
         partial: bool,
         format: OutputFormat,
         canvas: Option<Vec2d>,
+    },
+    /// Explicit retry wait: the host waits `delay_ms` (engine-computed
+    /// backoff honoring any observed `retry-after`) and then answers with
+    /// `RetryTimerElapsed` carrying the same tile and attempt. No new
+    /// acquisition for this tile starts before that completion. While
+    /// paused, timers are issued on resume instead.
+    WaitForRetry {
+        tile: u32,
+        attempt: u32,
+        delay_ms: u64,
     },
     CancelWork,
     RequestDecision {

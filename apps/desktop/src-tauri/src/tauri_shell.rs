@@ -7,8 +7,8 @@
 //
 // All commands are async Tauri commands over `State<Mutex<JobTable>>` +
 // `AppHandle`. The mutex is held only inside the synchronous `run_dispatch`
-// helper (never across await/dialog); lifecycle, driver threads,
-// `poll_drivers`, and the shared `NativeRuntime` stay owned by `jobs.rs`.
+// helper (never across await/dialog); lifecycle, driver threads, and
+// `poll_drivers` stay owned by `jobs.rs`.
 
 use std::sync::Mutex;
 

@@ -50,6 +50,10 @@ Selection is explicit when discovery finds several images or levels. Commands ca
 
 The engine schedules retries; the host waits and re-requests. The website proxy transition (one proxy effect for eligible metadata after a classified direct failure or metadata-window expiry) runs before ordinary same-transport retry; see [Browser runtime](browser-runtime.md#request-order). Auth failures, bad metadata, unknown formats, and deterministic decode failures never retry.
 
+Typed tile failures carry structured facts (stable code, HTTP status, `retry_after_ms` hint, bounded diagnostics) instead of one boolean. Permanent failures (auth refusals such as HTTP 403, other 4xx, bad metadata, deterministic decode failures, unknown codes) settle the tile after exactly one attempt. Transient failures (timeouts, network errors, rate limits, 5xx) retry up to the exact budget (`max_retries` retries after the initial attempt) with one explicit `WaitForRetry` timer effect per retry; the delay is a 1 s base doubling to a 30 s ceiling, with an observed `retry-after` honored to 300 s. The host owns the clock and reports the elapsed timer back, so the engine schedules no work from silence. The legacy boolean outcome stays for already-shipped hosts and treats `ok: false` as a transient failure with immediate retry.
+
+A settled-as-failed tile joins the partial decision only after acquisition settles (nothing in flight, queued, or awaiting a timer), so late successes still count and the missing list is complete with full structured detail per tile. A partial retry requeues exactly the settled-as-failed tiles in plan order with a fresh attempt budget and preserves successes.
+
 Progress counts work units per phase (completed, active, queued, failed, total where known). Byte counts supplement unit counts. Progress never moves backward and never claims unknown totals as complete.
 
 ## Cancel and partial output
@@ -79,6 +83,7 @@ While paused the engine schedules no new `acquire-tile` effects, finishes in-fli
 Effects carry everything a host needs; hosts never re-derive job policy or tile geometry. Canonical here; [Browser runtime](browser-runtime.md#engine-effect-assembly) and [Native apps](native-apps.md#native-runtime) cover host-side execution only.
 
 - `acquire-tile`: request (URI, headers, purpose), engine tile id, output placement (position, planned extent, declared canvas, processing recipe). Hosts decode during acquisition, so decode failures arrive as tile outcomes.
+- `wait-retry-timer{tile, attempt, delay_ms}`: the host waits `delay_ms` on its own clock and answers with `RetryTimerElapsed{tile, attempt}`; no new acquisition for the tile starts before that completion.
 - `finalize-output`: partial marker, output format, declared canvas size. The host validates its destination, assembles, encodes, saves or displays, and replies once. Completion follows success only.
 - `cancel-work`: idempotent; cancel work and release kept resources after cancellation or failure.
 
@@ -99,13 +104,15 @@ A probe marked `ProbeAndOutput` counts as already fetched when the resolved plan
 | `ProbeOutcome` | `Planning` | outstanding probe ordinal; available observations need positive width/height | One core probe step: next probe (stay `Planning`) or resolved plan -> `AcquiringTiles` | `acquire-tile` (next probe or first plan tiles) | `progress:0/total`, `job-state` |
 | `TileOutcome{ok:true}` on a probe tile | `AcquiringTiles` | probe tiles are answered with `ProbeOutcome` only | No transition | none | none (`Err(job.invalid-state)`) |
 | `TileOutcome{ok:true}` | `AcquiringTiles` | tile ordinal in plan | Stay or last tile -> `Finalizing` | next `acquire-tile` or one `finalize-output` | `progress`, `job-state:Finalizing` |
-| `TileOutcome{ok:false}` | `AcquiringTiles` | tile ordinal in plan | attempts `<= max_retries` (0..=1024, 0 fails immediately with no refetch): stay + retry `acquire-tile`; else -> `AwaitingPartialDecision` | `acquire-tile` (retry) or `request-decision` (`partial`) | `warning` + `progress`, or `missing-work` + `job-state` |
-| `RecoveryChoice{generation,Retry}` | `AwaitingPartialDecision` | outstanding generation | -> `AcquiringTiles` | `acquire-tile` | `job-state` |
+| `TileOutcome{ok:false}` | `AcquiringTiles` | tile ordinal in plan | attempts `<= max_retries` (0..=1024, 0 fails immediately with no refetch): stay + retry `acquire-tile`; else stash as settled-as-failed and settle (see below) | `acquire-tile` (retry) or, once settled, `request-decision` (`partial`) | `warning` + `progress`, or `missing-work` + `job-state` |
+| `TileFailed{tile, failure}` | `AcquiringTiles` | tile ordinal in plan | permanent (e.g. HTTP 403): settle after exactly one attempt; transient: `Warning` + one `WaitForRetry` per remaining attempt; exhausted: stash as settled-as-failed; the partial decision waits until every planned tile is acquired or settled-as-failed with nothing in flight, queued, or timer-pending | `WaitForRetry{tile, attempt, delay_ms}` or, once settled, `request-decision` (`partial`) | `warning` (transient only) + `progress`, or `missing-work` (complete list + structured detail) + `job-state` |
+| `RetryTimerElapsed{tile, attempt}` | `AcquiringTiles` | matching pending timer | requeue the tile and emit `acquire-tile`; while paused the retry parks and re-drives on resume; stale or duplicate completions are `Ignored` with no state change | `acquire-tile` or none (paused) | `progress` chain on resume |
+| `RecoveryChoice{generation,Retry}` | `AwaitingPartialDecision` | outstanding generation | -> `AcquiringTiles`, requeueing exactly the settled-as-failed tiles in plan order with a fresh attempt budget; acquired tiles are preserved | `acquire-tile` | `job-state` |
 | `RecoveryChoice{generation,Keep}` | `AwaitingPartialDecision` | outstanding generation | -> `Finalizing` | `finalize-output{partial:true}` | `job-state` |
 | `RecoveryChoice{generation,Discard}` | `AwaitingPartialDecision` | outstanding generation | -> `Failed` | `cancel-work` | `failed:job.partial-discarded` |
 | `FinalizationSucceeded` | `Finalizing` | one output pending | -> `Completed` or `PartiallyCompleted` | none | exactly one terminal event |
 | `FinalizationFailed` | `Finalizing` | one output pending | -> `Failed` | `cancel-work` | typed failure |
-| `Cancel` | Any non-terminal |  | -> `Cancelling` -> `Cancelled` | `cancel-work` | terminal `cancelled` |
+| `Cancel` | Any non-terminal |  | -> `Cancelling` -> `Cancelled` | exactly one idempotent `cancel-work` | terminal `cancelled` |
 | `Pause` | Any non-terminal |  | Overlay on (no state change) | none | `paused` (replayable; duplicate is `Ignored`) |
 | `Resume` | Paused only | paused | Overlay off, re-drive pending or complete | `acquire-tile` (pending) or `finalize-output` when all arrived paused | `resumed`, then `progress`/`job-state` chain |
 | `TileOutcome{ok:true}` while paused | `AcquiringTiles` + paused | `tile:*` in plan | Stay (no new scheduling, completion deferred) | none | `progress:a/total` only |

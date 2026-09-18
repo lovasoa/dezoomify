@@ -3,11 +3,20 @@
 //! - `packages/shared-ui` is host-neutral: after stripping comments and
 //!   string literals, no module may reference the host globals `window`,
 //!   `fetch`, `chrome`, or `tauri` (the extension page's no-bundler replica
-//!   and the browser runtimes own every host effect).
-//! - `packages/browser-runtime` never imports `shared-ui`: save names and
-//!   transport labels live one layer down (`save-name.ts`,
-//!   `transport-labels.ts`) and shared-ui re-exports them, so the dependency
-//!   points inward.
+//!   and the browser runtimes own every host effect). Shared UI never
+//!   imports `packages/browser-runtime`: canonical presentation helpers
+//!   (transport labels, save names, history) live in
+//!   `packages/app-model` and shared-ui re-exports them.
+//! - `packages/app-model` is host-neutral and React-free: no host globals,
+//!   no `react`/`react-dom`, no host storage or canvas access. It imports
+//!   generated contract types (`@dezoomify/wasm-bindings`) and relative
+//!   siblings only.
+//! - `packages/browser-runtime` never imports `shared-ui` or `app-model`
+//!   consumers in the wrong direction: save names and transport labels stay
+//!   consumable without a runtime-to-UI import.
+//! - `apps/desktop/src/jobService.ts` uses the public Tauri API only
+//!   (`@tauri-apps/api/core`, `@tauri-apps/api/event`): no
+//!   host-injected Tauri globals, no validation-only fallbacks.
 //!
 //! Only quoted import/export specifiers count for the runtime rule, so prose
 //! comments mentioning shared-ui stay allowed.
@@ -17,13 +26,26 @@ use std::path::{Path, PathBuf};
 /// Host-global tokens forbidden in shared-ui code (lowercase compare).
 const FORBIDDEN_TOKENS: &[&str] = &["window", "fetch", "chrome", "tauri"];
 
+/// Host-global and framework tokens forbidden in app-model code.
+const APP_MODEL_FORBIDDEN_TOKENS: &[&str] = &[
+    "window",
+    "document",
+    "fetch",
+    "chrome",
+    "tauri",
+    "react",
+    "localstorage",
+];
+
 pub fn verify(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         return Err("usage: cargo xtask check (no options)".to_string());
     }
     let root = super::repo_root();
     check_shared_ui(&root.join("packages/shared-ui/src"))?;
+    check_app_model(&root.join("packages/app-model/src"))?;
     check_runtime(&root.join("packages/browser-runtime/src"))?;
+    check_desktop_service(&root.join("apps/desktop/src/jobService.ts"))?;
     check_browser_single_sources(&root)?;
     check_website_runtime_usage(&root)?;
     check_protocol_boundaries(&root)?;
@@ -41,7 +63,7 @@ fn check_protocol_boundaries(root: &Path) -> Result<(), String> {
     for path in [
         "crates/dezoomify-job/src/job.rs",
         "crates/dezoomify-job/src/transition.rs",
-        "crates/dezoomify-native/src/job_driver.rs",
+        "crates/dezoomify-native/src/runner.rs",
         "crates/dezoomify-wasm/src/session.rs",
     ] {
         let file = root.join(path);
@@ -79,7 +101,7 @@ fn check_website_runtime_usage(root: &Path) -> Result<(), String> {
     for required in [
         "createJobActivity",
         "createTileDecoder",
-        "createEngineHost",
+        "createBrowserRunner",
         "createCanvasAssembly",
         "createProbeSize",
         "createTileThrottle",
@@ -166,6 +188,68 @@ fn check_shared_ui(dir: &Path) -> Result<(), String> {
                     file.display()
                 ));
             }
+        }
+        for spec in quoted_specifiers(&strip_comments(&text)) {
+            if spec.contains("browser-runtime") {
+                return Err(format!(
+                    "shared-ui inversion: {} imports `{spec}` (canonical helpers live in @dezoomify/app-model)",
+                    file.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_app_model(dir: &Path) -> Result<(), String> {
+    for file in list_ts(dir)? {
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+        let code = strip_comments_and_strings(&text);
+        for token in tokens(&code) {
+            if APP_MODEL_FORBIDDEN_TOKENS.contains(&token.as_str()) {
+                return Err(format!(
+                    "app-model host leak: {} references `{token}` (app-model is React-free with no host globals)",
+                    file.display()
+                ));
+            }
+        }
+        for spec in quoted_specifiers(&strip_comments(&text)) {
+            if spec.contains("browser-runtime")
+                || spec.contains("shared-ui")
+                || spec == "react"
+                || spec.starts_with("react/")
+                || spec == "react-dom"
+                || spec.starts_with("react-dom/")
+                || spec.contains("@tauri")
+            {
+                return Err(format!(
+                    "app-model inversion: {} imports `{spec}` (app-model imports generated bindings and siblings only)",
+                    file.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_desktop_service(path: &Path) -> Result<(), String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    for required in ["@tauri-apps/api/core", "@tauri-apps/api/event"] {
+        if !text.contains(required) {
+            return Err(format!(
+                "desktop service bypass: {} must use the public Tauri API `{required}`",
+                path.display()
+            ));
+        }
+    }
+    for forbidden in ["__TAURI_INTERNALS__", "__TAURI_EVENT__", "__TAURI__"] {
+        if text.contains(forbidden) {
+            return Err(format!(
+                "desktop service host leak: {} references `{forbidden}` (use @tauri-apps/api with explicit doubles)",
+                path.display()
+            ));
         }
     }
     Ok(())

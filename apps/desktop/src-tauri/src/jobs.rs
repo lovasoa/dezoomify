@@ -2,10 +2,10 @@
 //
 // Shapes mirror the dezoomify-job transcript event kinds (job-state,
 // progress, completed, cancelled, failed) and execution flows through the
-// real native runtime (`dezoomify_native::NativeRuntime` +
-// `pipeline::run`, which drives `job_driver` effect table 1-66 like
-// `apps/cli/src/main.rs:325-346`). The table owns lifecycle, scoped seq
-// ordering, and terminal-once guarantees for the creating window/session.
+// real native pipeline (`pipeline::run` on a background worker: the same
+// engine plus completion-driven effects the shared native runner drives).
+// The table owns lifecycle, scoped seq ordering, and terminal-once
+// guarantees for the creating window/session.
 //
 // Lean offline shell: standard library threads only (no tokio; `tokio` is a
 // dev-dependency of `dezoomify-native`, not a runtime dependency). `start_job`
@@ -29,7 +29,7 @@ use dezoomify_native::pipeline::{
     partial_decision_from_choice, PartialDecision, PartialGate, PartialPolicy, PipelineConfig,
     PipelineEvent,
 };
-use dezoomify_native::{JobEventKind, JobRequest, NativeRuntime};
+use dezoomify_native::JobEventKind;
 
 use crate::settings::{pipeline_config_for, DesktopSettings};
 
@@ -195,6 +195,32 @@ pub fn error_resource_kind(code: &str) -> Option<&'static str> {
 /// protocol redactor (case-insensitive key match, values replaced).
 pub fn redact_message(text: &str) -> String {
     dezoomify_protocol::dto::redact_error_text(text)
+}
+
+/// Redacted job origin: scheme + host (+ port if non-default), never the
+/// path, query, or fragment, which may carry credentials or tokens.
+/// Pure string parsing (no network); `unknown-origin` on malformed input.
+fn redact_origin(input_url: &str) -> String {
+    let Some((scheme, rest)) = input_url.split_once("://") else {
+        return "unknown-origin".to_string();
+    };
+    if scheme != "http" && scheme != "https" {
+        return "unknown-origin".to_string();
+    }
+    let authority = rest
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("");
+    // Strip userinfo (rejected upstream, but it must never reach the
+    // transcript even if validation order changes).
+    let host = authority.rsplit('@').next().unwrap_or("");
+    if host.is_empty() {
+        return "unknown-origin".to_string();
+    }
+    format!("{scheme}://{host}")
 }
 
 /// True when a payload value tree contains a forbidden tile-byte key.
@@ -437,7 +463,6 @@ pub struct JobTable {
     jobs: HashMap<String, JobRecord>,
     next_job: u64,
     capability_seq: u64,
-    runtime: NativeRuntime,
     driver_tx: Sender<DriverMessage>,
     driver_rx: Receiver<DriverMessage>,
     driver_handles: HashMap<String, JoinHandle<()>>,
@@ -468,7 +493,6 @@ impl JobTable {
             jobs: HashMap::new(),
             next_job: 0,
             capability_seq: 0,
-            runtime: NativeRuntime::new(1 << 30),
             driver_tx,
             driver_rx,
             driver_handles: HashMap::new(),
@@ -968,19 +992,11 @@ impl JobTable {
         pipeline_config.cancel_flag = std::sync::Arc::clone(&cancel_flag);
         pipeline_config.partial_gate = Some(std::sync::Arc::clone(&partial_gate));
 
-        // CLI parity (`main.rs:325-346`): open a native handle for the redacted
-        // origin. The desktop `job:n` id stays the transcript key; the native
-        // handle is dropped after capturing its redacted context. No
-        // destination exists yet (the dialog path arrives later via
-        // `request_destination`), so the handle carries no output path.
-        let origin = match self.runtime.start(JobRequest {
-            input_url: input_url.to_string(),
-            output_path: String::new(),
-            overwrite: false,
-        }) {
-            Ok(handle) => handle.origin.clone(),
-            Err(_) => String::new(),
-        };
+        // The desktop `job:n` id stays the transcript key; only the
+        // redacted origin (scheme://host) is stored, never the full URL.
+        // No destination exists yet (the dialog path arrives later via
+        // `request_destination`), so no output path is stored either.
+        let origin = redact_origin(input_url);
 
         self.jobs.insert(
             id.clone(),
@@ -2597,7 +2613,7 @@ mod tests {
 
     #[test]
     fn error_mapping_covers_stable_codes_once_by_code() {
-        // Legacy remaps from job_driver.rs:263-275 stay stable.
+        // Failure-code remaps from `exec::map_failure_code` stay stable.
         for (code, phase) in [
             ("discovery.failed", "discovery"),
             ("discovery.no-image", "discovery"),

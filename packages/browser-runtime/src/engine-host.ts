@@ -52,6 +52,8 @@ export interface EngineHostAssembly {
     canvas?: SizeDto | null,
   ): Promise<void>;
   release(): void;
+  /** True once an ordinary image tainted the surface (display-only output). */
+  isTainted?(): boolean;
 }
 
 export type AcquireEffect = Extract<HostMessage, { kind: "effect"; type: "acquire-resource" | "acquire-tile" }>;
@@ -110,6 +112,93 @@ export function createEngineHost(deps: EngineHostDeps) {
   /** Requests paused while the host asks for an optional grant. */
   const waitingForPermission = new Map<number, { effect: AcquireEffect; failure: HostFailure }>();
   let chain = Promise.resolve();
+  /** Engine pause overlay: while true, elapsed retry timers park until resume. */
+  let paused = false;
+  /** In-flight retry waits keyed by `tile:attempt`, abortable on cancel/dispose. */
+  const retryTimers = new Map<string, AbortController>();
+  /** Retry completions that elapsed while paused, re-driven on resume. */
+  const parkedRetryTimers = new Map<string, { tile: number; attempt: number }>();
+
+  function retryTimerKey(tile: number, attempt: number): string {
+    return `${tile}:${attempt}`;
+  }
+
+  /**
+   * Host-clock wait for one retry delay, abortable on cancel/dispose.
+   * Returns true when the wait was abandoned. Mirrors the
+   * `sleepUnlessAborted` pattern in `web-fetch.ts`.
+   */
+  async function sleepWithAbort(ms: number, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return true;
+    let onAbort: (() => void) | null = null;
+    const aborted = new Promise<boolean>((resolve) => {
+      onAbort = () => resolve(true);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    const elapsed = (async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, ms));
+      return signal.aborted;
+    })();
+    const result = await Promise.race([elapsed, aborted]);
+    if (onAbort) {
+      try {
+        signal.removeEventListener("abort", onAbort);
+      } catch {
+        // Detach is best-effort.
+      }
+    }
+    return result;
+  }
+
+  function flushParkedRetryTimers(): void {
+    if (parkedRetryTimers.size === 0) return;
+    const pending = [...parkedRetryTimers.values()];
+    parkedRetryTimers.clear();
+    for (const { tile, attempt } of pending) {
+      if (cancelled || disposed) return;
+      log("debug", "effect-retry-elapsed", `tile=${tile} attempt=${attempt} resumed=true`);
+      sendToEngine({ type: "engine.command", command: { type: "retry-timer-elapsed", tile, attempt } });
+    }
+  }
+
+  function abortRetryTimers(): void {
+    for (const [, ctrl] of retryTimers) {
+      try {
+        ctrl.abort();
+      } catch {
+        // Abort must never break teardown.
+      }
+    }
+    retryTimers.clear();
+    parkedRetryTimers.clear();
+  }
+
+  /**
+   * Explicit retry wait: the host waits `delay_ms` on its own clock then
+   * answers with the same tile and attempt. While paused the completion
+   * parks and is issued on resume; the engine ignores stale duplicates.
+   */
+  async function waitRetryTimer(effect: Extract<EffectMessage, { type: "wait-retry-timer" }>): Promise<void> {
+    const key = retryTimerKey(effect.tile, effect.attempt);
+    if (retryTimers.has(key) || parkedRetryTimers.has(key)) return;
+    const ctrl = new AbortController();
+    retryTimers.set(key, ctrl);
+    try {
+      log("debug", "effect-retry-wait", `tile=${effect.tile} attempt=${effect.attempt} delay_ms=${effect.delay_ms}`);
+      const abandoned = await sleepWithAbort(effect.delay_ms, ctrl.signal);
+      if (cancelled || disposed) return;
+      if (abandoned || ctrl.signal.aborted) return;
+      if (paused) {
+        parkedRetryTimers.set(key, { tile: effect.tile, attempt: effect.attempt });
+        log("debug", "effect-retry-parked", `tile=${effect.tile} attempt=${effect.attempt}`);
+        return;
+      }
+      log("debug", "effect-retry-elapsed", `tile=${effect.tile} attempt=${effect.attempt}`);
+      sendToEngine({ type: "engine.command", command: { type: "retry-timer-elapsed", tile: effect.tile, attempt: effect.attempt } });
+    } finally {
+      retryTimers.delete(key);
+    }
+  }
 
   function sendToEngine(message: WorkerHostMessage) {
     deps.worker.postMessage(message);
@@ -334,6 +423,13 @@ export function createEngineHost(deps: EngineHostDeps) {
       if (grantable(error, failure)) {
         // A visible, explicit user action may grant this host. Keep the
         // effect pending so the same acquisition can resume after a grant.
+        // Release the shared origin classification first: concurrent tiles
+        // of the same origin wait on its promise, and the retry after grant
+        // must re-classify fresh. Settling as readable lets waiters attempt
+        // their own fetch and join the same permission pause instead of
+        // hanging on an unsettled promise.
+        settleOrigin(originState, "readable");
+        if (originState) originStates.delete(originOf(request.uri));
         waitingForPermission.set(request.id, { effect, failure });
         deps.onPermissionRequired({ hosts: hostsOf(error), requestId: request.id, jobId: deps.jobId() });
         return;
@@ -407,7 +503,9 @@ export function createEngineHost(deps: EngineHostDeps) {
     "acquire-resource": (effect) => { void acquire(effect); },
     "acquire-tile": (effect) => { void acquire(effect); },
     "finalize-output": (effect) => enqueue(() => finalizeOutput(effect)),
+    "wait-retry-timer": (effect) => { void waitRetryTimer(effect); },
     "cancel-work": () => {
+      abortRetryTimers();
       deps.cancelFetch();
       deps.assembly.release();
     },
@@ -426,6 +524,11 @@ export function createEngineHost(deps: EngineHostDeps) {
         // overtake the lifecycle work they describe.
         const event = message;
         log("debug", "event-received", `type=${event.type}`);
+        if (event.type === "paused") paused = true;
+        if (event.type === "resumed") {
+          paused = false;
+          flushParkedRetryTimers();
+        }
         enqueue(() => {
           deps.onEvent(event);
         });
@@ -453,10 +556,13 @@ export function createEngineHost(deps: EngineHostDeps) {
       sendToEngine({ type: "engine.command", command: { type: "recovery-choice", generation, choice } });
     },
     pause() {
+      paused = true;
       sendToEngine({ type: "engine.command", command: { type: "pause" } });
     },
     resume() {
+      paused = false;
       sendToEngine({ type: "engine.command", command: { type: "resume" } });
+      flushParkedRetryTimers();
     },
     resolvePermission(granted: boolean) {
       const pending = [...waitingForPermission.entries()];
@@ -475,6 +581,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       if (cancelled) return;
       log("debug", "controller-cancel", "");
       cancelled = true;
+      abortRetryTimers();
       deps.cancelFetch();
       sendToEngine({ type: "engine.command", command: { type: "cancel" } });
     },
@@ -483,6 +590,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       log("debug", "controller-dispose", "");
       disposed = true;
       cancelled = true;
+      abortRetryTimers();
       deps.cancelFetch();
       deps.assembly?.release();
       sendToEngine({ type: "engine.dispose" });
