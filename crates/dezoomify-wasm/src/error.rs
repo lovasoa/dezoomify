@@ -8,9 +8,8 @@
 //! | code | meaning |
 //! |---|---|
 //! | `malformed` | an object is missing required typed data or has invalid geometry |
-//! | `stale-buffer` | unknown/forged handle, generation mismatch, use after free or consume |
 //! | `limit-exceeded` | quota, oversized length, out-of-bounds access, capacity mismatch, arithmetic overflow |
-//! | `wrong-state` | valid handle/message in the wrong lifecycle phase (double commit, unsealed consume, dispatch vs job state, aliasing) |
+//! | `wrong-state` | valid message in the wrong lifecycle phase (dispatch vs job state) |
 //! | `disposed` | any session use after [`Session::dispose`][crate::session::Session] |
 //!
 //! [`AdapterError::to_error_dto`] maps these to protocol `ErrorDto` values
@@ -27,8 +26,6 @@ use dezoomify_protocol::dto::{redact_error_text, ErrorDto, ErrorPhase};
 pub enum AdapterErrorCode {
     /// Missing typed data or invalid geometry.
     Malformed,
-    /// Unknown/forged handle, generation mismatch, use after free/consume.
-    StaleBuffer,
     /// Quota, oversized length, out-of-bounds access, capacity mismatch, overflow.
     LimitExceeded,
     /// Valid input in the wrong lifecycle phase.
@@ -43,7 +40,6 @@ impl AdapterErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Malformed => "malformed",
-            Self::StaleBuffer => "stale-buffer",
             Self::LimitExceeded => "limit-exceeded",
             Self::WrongState => "wrong-state",
             Self::Disposed => "disposed",
@@ -74,7 +70,7 @@ impl AdapterError {
         self.code
     }
 
-    /// Stable code string (`malformed`, `stale-buffer`, ...).
+    /// Stable code string (`malformed`, `limit-exceeded`, ...).
     #[must_use]
     pub fn code_str(&self) -> &'static str {
         self.code.as_str()
@@ -92,7 +88,6 @@ impl AdapterError {
         let phase = match self.code {
             AdapterErrorCode::Disposed => ErrorPhase::Cleanup,
             AdapterErrorCode::Malformed
-            | AdapterErrorCode::StaleBuffer
             | AdapterErrorCode::LimitExceeded
             | AdapterErrorCode::WrongState => ErrorPhase::Validation,
         };
@@ -141,7 +136,6 @@ mod tests {
     #[test]
     fn codes_are_stable_strings() {
         assert_eq!(AdapterErrorCode::Malformed.as_str(), "malformed");
-        assert_eq!(AdapterErrorCode::StaleBuffer.as_str(), "stale-buffer");
         assert_eq!(AdapterErrorCode::LimitExceeded.as_str(), "limit-exceeded");
         assert_eq!(AdapterErrorCode::WrongState.as_str(), "wrong-state");
         assert_eq!(AdapterErrorCode::Disposed.as_str(), "disposed");
@@ -160,9 +154,9 @@ mod tests {
 
     #[test]
     fn converts_to_protocol_error_dto() {
-        let error = AdapterError::new(AdapterErrorCode::StaleBuffer, "gone");
+        let error = AdapterError::new(AdapterErrorCode::WrongState, "gone");
         let dto = error.to_error_dto();
-        assert_eq!(dto.code, "adapter.stale-buffer");
+        assert_eq!(dto.code, "adapter.wrong-state");
         assert!(!dto.retryable);
     }
 }

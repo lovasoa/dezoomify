@@ -6,8 +6,8 @@
 // table. No tile bytes cross IPC, only protocol progress and events.
 //
 // All commands are async Tauri commands over `State<Mutex<JobTable>>` +
-// `AppHandle`. The mutex is held only inside the synchronous `run_dispatch`
-// helper (never across await/dialog); lifecycle, driver threads, and
+// `AppHandle`. The mutex is held only inside the synchronous typed dispatch
+// calls (never across await/dialog); lifecycle, driver threads, and
 // `poll_drivers` stay owned by `jobs.rs`.
 
 use std::sync::Mutex;
@@ -222,22 +222,22 @@ fn drain_and_emit(app: &AppHandle, table: &mut crate::jobs::JobTable) {
     }
 }
 
-fn run_dispatch(
+/// Run one typed commands-layer dispatch under the table lock.
+fn lock_table(
     state: &State<'_, Mutex<JobTable>>,
-    command: &str,
-    job: Option<&str>,
-    arg: Option<&str>,
-) -> Result<Dispatched, CommandFailure> {
-    let mut table = state.lock().map_err(|_| CommandFailure {
+) -> Result<std::sync::MutexGuard<'_, JobTable>, CommandFailure> {
+    state.lock().map_err(|_| CommandFailure {
         code: "shell.lock".into(),
         message: "job table poisoned".into(),
-    })?;
-    let outcome = commands::dispatch(&mut table, command, job, arg)?;
-    Ok(Dispatched {
+    })
+}
+
+fn to_dispatched(outcome: commands::DispatchOutcome) -> Dispatched {
+    Dispatched {
         job: outcome.job,
         seq: outcome.seq,
         event: outcome.event,
-    })
+    }
 }
 
 #[tauri::command]
@@ -298,9 +298,12 @@ async fn cancel_job(
     job: String,
 ) -> Result<Dispatched, CommandFailure> {
     // Signals `cancel_flag` + the engine `Cancel` transition inside
-    // `jobs.rs cancel_job` (via `dispatch`); the `Cancelling`/`CleaningUp`/
-    // `Cancelled` chain was enqueued as projected `job-state` emits.
-    let dispatched = run_dispatch(&state, "cancel_job", Some(&job), None)?;
+    // `jobs.rs cancel_job`; the `Cancelling`/`CleaningUp`/`Cancelled` chain
+    // was enqueued as projected `job-state` emits.
+    let dispatched = to_dispatched(commands::dispatch_cancel_job(
+        &mut lock_table(&state)?,
+        &job,
+    )?);
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
@@ -316,13 +319,17 @@ async fn answer_choice(
     state: State<'_, Mutex<JobTable>>,
     app: AppHandle,
     job: String,
-    choice: String,
+    choice: serde_json::Value,
 ) -> Result<Dispatched, CommandFailure> {
-    // Maps `img:`/`lvl:`/`keep`/`discard`/`att:` onto `pipeline_config`
-    // inside `jobs.rs answer_choice` (via `dispatch`); the precise
-    // `Awaiting*`/`Running` state was enqueued as a projected `job-state`
-    // emit with the redacted origin.
-    let dispatched = run_dispatch(&state, "answer_choice", Some(&job), Some(&choice))?;
+    // The choice arrives as structured JSON decoding to a typed `Choice`
+    // inside `jobs.rs answer_choice`; the precise `Awaiting*`/`Running`
+    // state was enqueued as a projected `job-state` emit with the redacted
+    // origin.
+    let dispatched = to_dispatched(commands::dispatch_answer_choice(
+        &mut lock_table(&state)?,
+        &job,
+        choice,
+    )?);
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
@@ -337,7 +344,7 @@ async fn answer_choice(
 async fn query_capabilities(
     state: State<'_, Mutex<JobTable>>,
 ) -> Result<CapabilitySnapshot, CommandFailure> {
-    run_dispatch(&state, "query_capabilities", None, None)?;
+    commands::dispatch_query_capabilities(&mut lock_table(&state)?)?;
     Ok(CapabilitySnapshot {
         native_available: true,
         encoders: commands::SUPPORTED_FORMATS

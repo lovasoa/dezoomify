@@ -45,6 +45,7 @@ export type WorkerHostMessage =
   | { type: "engine.bytes"; requestId: number; bytes: Uint8Array; finalUri?: string }
   | { type: "engine.probe"; requestId: number; outcome: ProbeOutcome }
   | { type: "engine.display"; requestId: number }
+  | { type: "engine.acquired"; requestId: number }
   | { type: "engine.process"; requestId: number; recipe: ProcessingRecipe; bytes: Uint8Array | ArrayBuffer }
   | { type: "engine.rank"; requestId: number; urls: string[] }
   | { type: "engine.failure"; requestId: number; error: FetchFailureDto }
@@ -99,17 +100,18 @@ export function createJobWorkerHost(deps: {
 
   function provideBytes(message: Extract<WorkerHostMessage, { type: "engine.bytes" }>): void {
     if (!session || disposed) return;
-    const handle = session.allocateBuffer(message.bytes.byteLength);
-    session.writeBuffer(handle, 0, message.bytes);
-    session.commitBuffer(handle, message.bytes.byteLength);
-    const buffer = session.bufferHandle(handle);
+    // Direct-bytes provide: browser-owned bytes ride inline on the command;
+    // the WASM byte arena is gone (no allocate/write/commit/take/free).
+    // The generated contract declares `bytes: number[]`, so the host sends
+    // a plain array (only small discovery metadata travels here; tile
+    // success is body-free and never carries bytes).
     const finalUri = message.finalUri !== "" ? message.finalUri : undefined;
     dispatch({
       type: "provide-resource",
       request: message.requestId,
-      buffer,
+      bytes: Array.from(message.bytes),
       ...(finalUri ? { final_uri: finalUri } : {}),
-    });
+    } as unknown as JobCommand);
   }
 
   function provideProbe(message: Extract<WorkerHostMessage, { type: "engine.probe" }>): void {
@@ -118,6 +120,12 @@ export function createJobWorkerHost(deps: {
 
   function provideDisplay(message: Extract<WorkerHostMessage, { type: "engine.display" }>): void {
     dispatch({ type: "provide-display-outcome", request: message.requestId });
+  }
+
+  function reportAcquired(message: Extract<WorkerHostMessage, { type: "engine.acquired" }>): void {
+    // Body-free tile acknowledgment: the tile was fetched, decoded, and
+    // placed host-side, so only the typed outcome crosses into the engine.
+    dispatch({ type: "tile-acquired", request: message.requestId });
   }
 
   function processTile(message: Extract<WorkerHostMessage, { type: "engine.process" }>): void {
@@ -138,6 +146,7 @@ export function createJobWorkerHost(deps: {
     "engine.bytes": provideBytes,
     "engine.probe": provideProbe,
     "engine.display": provideDisplay,
+    "engine.acquired": reportAcquired,
     "engine.process": processTile,
     "engine.rank": (input) => {
       deps.postMessage({ type: "engine.ranked", requestId: input.requestId, urls: input.urls });

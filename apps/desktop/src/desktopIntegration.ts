@@ -38,18 +38,11 @@ export const DESKTOP_COMMANDS = [
 
 export type DesktopCommand = (typeof DESKTOP_COMMANDS)[number];
 
-// Must match apps/desktop/src/events.ts DESKTOP_EVENT_CHANNELS.
-// Duplication is intentional: capabilities.test.mjs asserts both registries
-// stay identical, so drift fails fast without cross-module import cycles.
-export const DESKTOP_EVENT_CHANNELS = [
-  "dezoomify://job-state",
-  "dezoomify://job-progress",
-  "dezoomify://job-output",
-  "dezoomify://job-error",
-  "dezoomify://deep-link-pending",
-] as const;
-
-export type DesktopEventChannel = (typeof DESKTOP_EVENT_CHANNELS)[number];
+// The event channels are owned by apps/desktop/src/events.ts (the IPC
+// redaction guards live there); this module re-exports the single registry
+// so capability checks share one source without an import cycle.
+export { DESKTOP_EVENT_CHANNELS } from "./events.ts";
+export type { DesktopEventChannel } from "./events.ts";
 
 export interface DesktopCapabilities {
   readonly nativeAvailable: true;

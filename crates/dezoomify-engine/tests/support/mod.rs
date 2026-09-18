@@ -6,7 +6,7 @@
 
 #![allow(dead_code)]
 
-use dezoomify_job::{
+use dezoomify_engine::{
     Config, Job, JobCommand, JobEffect, JobError, JobEvent, JobInput, JobMessageBody, Outcome,
 };
 

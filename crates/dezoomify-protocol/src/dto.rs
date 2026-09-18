@@ -2,31 +2,11 @@
 //! here exactly once and `tsify` projects it into the WASM declaration.
 
 use serde::{Deserialize, Serialize};
-use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+use std::num::{NonZeroU32, NonZeroU64};
 
 // ---------------------------------------------------------------------------
-// Bounded integers (always safe across the JavaScript boundary)
+// Format grid (one generation source for TS)
 // ---------------------------------------------------------------------------
-
-/// Maximum coordinate/dimension/count (fits JavaScript safe integers).
-pub const MAX_DIMENSION: u64 = 1 << 30;
-/// Maximum tiles, probes, or retries.
-pub const MAX_COUNT: u64 = 1 << 24;
-
-// ---------------------------------------------------------------------------
-// Runtime limits, format grid, transports (one generation source for TS)
-// ---------------------------------------------------------------------------
-
-/// Largest browser-tab canvas area in pixels (16384 x 16384).
-pub const MAX_BROWSER_AREA: u64 = 268_435_456;
-/// Metadata proxy response cap in bytes (2 MiB, mirrors the server limit).
-pub const PROXY_MAX_BYTES: u64 = 2_097_152;
-/// Direct-first metadata head-start window in milliseconds.
-pub const METADATA_WINDOW_MS: u64 = 1_500;
-
-/// Active-transport labels (mirrors browser-runtime types.ts, verified by tests).
-pub const DIRECT_TRANSPORT_LABEL: &str = "Direct from your browser";
-pub const PROXY_TRANSPORT_LABEL: &str = "Metadata proxy";
 
 /// Format grid in registry precedence order: (id, display name).
 /// This is a snapshot of the core registry (`Registry::snapshot` over every
@@ -54,11 +34,8 @@ pub const FORMAT_GRID: &[(&str, &str)] = &[
     ("bulk_text", "Bulk text"),
 ];
 
-/// Power-user format ids (subset of FORMAT_GRID, hidden by default).
-pub const POWER_USER_FORMATS: &[&str] = &["custom", "bulk_text"];
-
 // ---------------------------------------------------------------------------
-// Requests and byte-buffer ownership
+// Requests and direct byte ownership
 // ---------------------------------------------------------------------------
 
 /// Purpose of a resource request (metadata vs tile vs probe).
@@ -149,17 +126,6 @@ pub struct TilePlacementDto {
     /// Whether a successful probe is also part of the final output plan.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub probe_output: bool,
-}
-
-/// Typed reference to bytes owned by the WASM arena.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct BufferHandle {
-    pub id: u32,
-    pub generation: u32,
-    pub length: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +229,10 @@ pub enum JobCommand {
     },
     ProvideResource {
         request: u32,
-        buffer: BufferHandle,
+        /// Resource body, carried directly in the command. Nothing is
+        /// retained adapter-side; tile success is body-free
+        /// (`ProvideDisplayOutcome`) and never carries bytes.
+        bytes: Vec<u8>,
         /// Post-redirect URL observed by the host, when it has one. Relative
         /// tile URLs resolve against this instead of the request URI.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -290,8 +259,15 @@ pub enum JobCommand {
     },
     /// Display-only observation for one outstanding `acquire-tile` in
     /// `AcquiringTiles`. The host has already retained a valid ordinary
-    /// image element and the adapter forwards a successful `TileOutcome`.
+    /// image element and the adapter forwards a typed `TileDisplayed`.
     ProvideDisplayOutcome {
+        request: u32,
+    },
+    /// Successful acquisition of one outstanding `acquire-tile` in
+    /// `AcquiringTiles`. The host has already fetched, decoded, and placed
+    /// the tile; the body is NOT carried (it never re-enters the adapter).
+    /// The adapter forwards a typed `TileAcquired`.
+    TileAcquired {
         request: u32,
     },
     /// Elapsed retry wait for one outstanding `wait-retry-timer` host
@@ -795,15 +771,6 @@ pub fn redact_error_text(input: &str) -> String {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct SessionConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_buffer_bytes: Option<NonZeroU64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_total_bytes: Option<NonZeroU64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", tsify(type = "number"))]
-    pub max_buffers: Option<NonZeroUsize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typescript", tsify(type = "number"))]
     pub max_concurrent_fetches: Option<NonZeroU32>,

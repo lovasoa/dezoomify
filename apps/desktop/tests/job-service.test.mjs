@@ -186,7 +186,14 @@ test("commands route to typed shell commands; engine-only commands reject", asyn
   await handle.command({ type: "recovery-choice", generation: 0, choice: "keep" });
   await handle.command({ type: "recovery-choice", generation: 0, choice: "discard" });
   const routed = ipc.invokes.slice(1).map((call) => call.args.choice ?? call.cmd);
-  assert.deepEqual(routed, ["cancel_job", "img:2", "level:1", "att:0:ready", "partial:keep", "partial:discard"]);
+  assert.deepEqual(routed, [
+    "cancel_job",
+    { kind: "image", index: 2 },
+    { kind: "level", index: 1 },
+    { kind: "retry" },
+    { kind: "partial", keep: true },
+    { kind: "partial", keep: false },
+  ]);
   await assert.rejects(handle.command({ type: "pause" }), (error) => error.code === "desktop.unsupported-command");
   await assert.rejects(handle.command({ type: "resume" }), (error) => error.code === "desktop.unsupported-command");
   await handle.dispose();

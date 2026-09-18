@@ -318,8 +318,6 @@ export const fr = {
   "desktop.rec.destTitle": "La destination d enregistrement demande votre attention",
   "desktop.rec.destDesc":
     "La destination d enregistrement n a pas ete acceptee. Choisissez un fichier de sortie, reessayez ou utilisez une autre application.",
-  "desktop.rec.chooseTitle": "Choisissez ou enregistrer",
-  "desktop.rec.chooseDesc": "Choisissez le fichier de sortie pour continuer l enregistrement de cette image.",
   "desktop.rec.keep": "Conserver l image partielle",
   "desktop.rec.discard": "Abandonner la partie",
   "desktop.rec.retryTiles": "Reessayer les tuiles manquees",

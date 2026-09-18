@@ -557,7 +557,9 @@ impl Job {
             JobCommand::SelectImage { image } => self.apply_selected_image(image),
             JobCommand::FollowDeferred { image } => self.apply_follow_deferred(image),
             JobCommand::SelectLevel { level } => self.apply_selected_level(level),
-            JobCommand::TileOutcome { tile, ok } => self.apply_tile_outcome(tile, ok),
+            JobCommand::TileAcquired { tile } | JobCommand::TileDisplayed { tile } => {
+                self.apply_tile_success(tile)
+            }
             JobCommand::TileFailed { tile, failure } => self.apply_tile_failed(tile, failure),
             JobCommand::RetryTimerElapsed { tile, attempt } => {
                 self.apply_retry_timer_elapsed(tile, attempt)
@@ -1076,15 +1078,19 @@ impl Job {
         Ok(())
     }
 
-    fn apply_tile_outcome(&mut self, tile: u32, ok: bool) -> Result<Outcome, JobError> {
+    /// Record one successful tile acquisition (`TileAcquired` for decoded
+    /// bytes, `TileDisplayed` for an ordinary image element). Both settle
+    /// the tile identically: progress advances, and a round with stashed
+    /// failures settles into the partial decision once complete.
+    fn apply_tile_success(&mut self, tile: u32) -> Result<Outcome, JobError> {
         if self.probe_tiles.contains(&tile) {
             return Err(JobError::invalid_state(
-                "probe tiles are answered with a probe outcome, not a tile outcome",
+                "probe tiles are answered with a probe outcome, not a tile success",
             ));
         }
         if self.state != State::AcquiringTiles {
             return Err(JobError::invalid_state(
-                "tile outcome valid only in AcquiringTiles",
+                "tile success valid only in AcquiringTiles",
             ));
         }
         if !self.planned_set.contains(&tile) {
@@ -1099,72 +1105,38 @@ impl Job {
         if self.failed_set.contains(&tile) {
             return Ok(Outcome::Ignored);
         }
-        if ok {
-            // Flight and queue are disjoint: a tile enters the queue only
-            // when not in flight, so a tile just removed from flight cannot
-            // be queued and the queue is never scanned on the hot path.
-            if !self.in_flight.remove(&tile) {
-                self.remove_from_pending(tile);
-            }
-            self.acquired_tiles.insert(tile);
-            self.unsettled = self.unsettled.saturating_sub(1);
-            let acquired = u64::try_from(self.acquired_tiles.len())
-                .map_err(|_| JobError::overflow("acquired count"))?;
-            let total = self.planned_tiles.len() as u64;
-            self.push_event(JobEvent::Progress { acquired, total })?;
-            // A success can settle the round when failures are stashed:
-            // with every planned tile acquired or settled-as-failed the
-            // partial decision carries the complete missing list.
-            if !self.failed_tiles.is_empty() {
-                self.maybe_enter_partial_decision()?;
-                if self.state == State::AwaitingPartialDecision {
-                    return Ok(Outcome::Applied);
-                }
-            }
-            // Pause: finish in-flight, retain decoded, defer completion
-            // and new scheduling until resume. Resume re-drives completion
-            // when every tile has arrived while paused.
-            if self.paused {
+        // Flight and queue are disjoint: a tile enters the queue only
+        // when not in flight, so a tile just removed from flight cannot
+        // be queued and the queue is never scanned on the hot path.
+        if !self.in_flight.remove(&tile) {
+            self.remove_from_pending(tile);
+        }
+        self.acquired_tiles.insert(tile);
+        self.unsettled = self.unsettled.saturating_sub(1);
+        let acquired = u64::try_from(self.acquired_tiles.len())
+            .map_err(|_| JobError::overflow("acquired count"))?;
+        let total = self.planned_tiles.len() as u64;
+        self.push_event(JobEvent::Progress { acquired, total })?;
+        // A success can settle the round when failures are stashed:
+        // with every planned tile acquired or settled-as-failed the
+        // partial decision carries the complete missing list.
+        if !self.failed_tiles.is_empty() {
+            self.maybe_enter_partial_decision()?;
+            if self.state == State::AwaitingPartialDecision {
                 return Ok(Outcome::Applied);
             }
-            if self.unsettled == 0 {
-                self.complete_remaining(false)?;
-            } else {
-                self.emit_pending_tiles()?;
-            }
+        }
+        // Pause: finish in-flight, retain decoded, defer completion
+        // and new scheduling until resume. Resume re-drives completion
+        // when every tile has arrived while paused.
+        if self.paused {
             return Ok(Outcome::Applied);
         }
-        let current = self.tile_attempts.get(&tile).copied().unwrap_or(0);
-        let next = current
-            .checked_add(1)
-            .ok_or_else(|| JobError::overflow("tile attempts"))?;
-        self.tile_attempts.insert(tile, next);
-        if next <= self.config.max_retries {
-            let was_in_flight = self.in_flight.remove(&tile);
-            if !was_in_flight {
-                self.remove_from_pending(tile);
-            }
-            self.enqueue_front(tile);
-            self.push_event(JobEvent::Warning {
-                tile,
-                attempt: next,
-            })?;
-            // Pause: retry wakeups are preserved in `pending_tiles` and
-            // re-driven on resume; no new `acquire-tile` while paused.
-            if !self.paused {
-                self.emit_pending_tiles()?;
-            }
-            return Ok(Outcome::Applied);
+        if self.unsettled == 0 {
+            self.complete_remaining(false)?;
+        } else {
+            self.emit_pending_tiles()?;
         }
-        let was_in_flight = self.in_flight.remove(&tile);
-        // The legacy boolean carries no failure facts, so the exhaustion
-        // record names the untyped outcome; retry behavior is unchanged.
-        self.tile_failure_log
-            .entry(tile)
-            .or_default()
-            .push(TileFailure::new("job.tile-failed", None, None, None));
-        self.stash_failed_tile(tile, was_in_flight);
-        self.maybe_enter_partial_decision()?;
         Ok(Outcome::Applied)
     }
 

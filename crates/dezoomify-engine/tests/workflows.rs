@@ -1,6 +1,6 @@
 mod support;
 
-use dezoomify_job::{Config, JobCommand, JobInput};
+use dezoomify_engine::{Config, JobCommand, JobInput};
 use support::ScriptedHost;
 
 fn job_id(n: u32) -> String {
@@ -187,11 +187,8 @@ fn successful_finalization_completes() {
     // Respond with the real planned tile ids.
     let planned: Vec<u32> = tiles.into_iter().map(|(tile, _, _)| tile).collect();
     for tile in &planned {
-        host.apply(JobCommand::TileOutcome {
-            tile: *tile,
-            ok: true,
-        })
-        .unwrap();
+        host.apply(JobCommand::TileAcquired { tile: *tile })
+            .unwrap();
     }
 
     assert_eq!(host.state(), "Finalizing");
@@ -235,8 +232,7 @@ fn finalization_failure_cleans_up_once_and_never_completes() {
     let mut host = ScriptedHost::new(&job_id(21), INPUT_URL, test_config()).unwrap();
     let _ = discover_and_select(&mut host, 21);
     for (tile, _, _) in host.tile_effects() {
-        host.apply(JobCommand::TileOutcome { tile, ok: true })
-            .unwrap();
+        host.apply(JobCommand::TileAcquired { tile }).unwrap();
     }
     assert_eq!(host.state(), "Finalizing");
     host.apply(JobCommand::FinalizationFailed {
@@ -272,34 +268,25 @@ fn keeping_a_partial_result_decodes_only_acquired_tiles() {
         .map(|(tile, _, _)| tile)
         .collect();
 
-    host.apply(JobCommand::TileOutcome {
-        tile: planned[0],
-        ok: true,
-    })
-    .unwrap();
-    host.apply(JobCommand::TileOutcome {
+    host.apply(JobCommand::TileAcquired { tile: planned[0] })
+        .unwrap();
+    host.apply(JobCommand::TileFailed {
         tile: planned[1],
-        ok: false,
+        failure: dezoomify_engine::TileFailure::new("TRANSPORT_TIMEOUT", None, None, None),
     })
     .unwrap();
     // Acquisition settles before the partial decision: with two tiles
     // still in flight the failure is stashed, not decided.
     assert_eq!(host.state(), "AcquiringTiles");
-    host.apply(JobCommand::TileOutcome {
-        tile: planned[2],
-        ok: true,
-    })
-    .unwrap();
-    host.apply(JobCommand::TileOutcome {
-        tile: planned[3],
-        ok: true,
-    })
-    .unwrap();
+    host.apply(JobCommand::TileAcquired { tile: planned[2] })
+        .unwrap();
+    host.apply(JobCommand::TileAcquired { tile: planned[3] })
+        .unwrap();
     assert_eq!(host.state(), "AwaitingPartialDecision");
 
     host.apply(JobCommand::RecoveryChoice {
         generation: 0,
-        choice: dezoomify_job::RecoveryChoice::Keep,
+        choice: dezoomify_engine::RecoveryChoice::Keep,
     })
     .unwrap();
 
@@ -321,11 +308,8 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
         .into_iter()
         .map(|(tile, _, _)| tile)
         .collect();
-    host.apply(JobCommand::TileOutcome {
-        tile: tiles[0],
-        ok: true,
-    })
-    .unwrap();
+    host.apply(JobCommand::TileAcquired { tile: tiles[0] })
+        .unwrap();
 
     assert_eq!(host.state(), "AcquiringTiles");
     host.apply(JobCommand::Cancel).unwrap();
@@ -334,10 +318,7 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
 
     let len_after_cancel = host.transcript().len();
     // Late tile outcome after cancellation is stably rejected with no work.
-    let late = host.apply(JobCommand::TileOutcome {
-        tile: tiles[1],
-        ok: true,
-    });
+    let late = host.apply(JobCommand::TileAcquired { tile: tiles[1] });
     assert!(late.is_err());
     assert_eq!(late.unwrap_err().code, "job.post-terminal");
     assert_eq!(host.state(), "Cancelled");
@@ -488,7 +469,7 @@ fn discovery_poll_emits_one_effect_per_outstanding_request() {
     assert_eq!(host.state(), "Discovering");
     // While the fetch is unanswered nothing new is emitted: the poll
     // reports the same request and the engine waits instead of growing.
-    let err = host.apply(JobCommand::TileOutcome { tile: 0, ok: true });
+    let err = host.apply(JobCommand::TileAcquired { tile: 0 });
     assert!(err.is_err());
     assert_eq!(
         acquire_resource_count(&host),
@@ -537,15 +518,12 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     // Duplicate pause is Ignored with no new work.
     let len = host.transcript().len();
     let dup = host.apply(JobCommand::Pause).unwrap();
-    assert_eq!(dup, dezoomify_job::Outcome::Ignored);
+    assert_eq!(dup, dezoomify_engine::Outcome::Ignored);
     assert_eq!(host.transcript().len(), len);
     // In-flight tile finishes while paused: progress is recorded, but no new
     // tile is scheduled and completion is deferred.
-    host.apply(JobCommand::TileOutcome {
-        tile: planned[0],
-        ok: true,
-    })
-    .unwrap();
+    host.apply(JobCommand::TileAcquired { tile: planned[0] })
+        .unwrap();
     assert_eq!(host.state(), "AcquiringTiles");
     assert!(host.job().is_paused());
     let tile_effects = host.tile_effects().len();
@@ -559,11 +537,8 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
         .any(|line| line.starts_with("event:resumed:")));
     // Finish the rest: the job completes with exactly one terminal.
     for tile in planned.iter().skip(1) {
-        host.apply(JobCommand::TileOutcome {
-            tile: *tile,
-            ok: true,
-        })
-        .unwrap();
+        host.apply(JobCommand::TileAcquired { tile: *tile })
+            .unwrap();
     }
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
@@ -583,11 +558,8 @@ fn pause_defers_completion_until_resume() {
         .collect();
     host.apply(JobCommand::Pause).unwrap();
     for tile in &planned {
-        host.apply(JobCommand::TileOutcome {
-            tile: *tile,
-            ok: true,
-        })
-        .unwrap();
+        host.apply(JobCommand::TileAcquired { tile: *tile })
+            .unwrap();
     }
     // Every tile arrived but the job stays acquiring while paused.
     assert_eq!(host.state(), "AcquiringTiles");

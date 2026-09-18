@@ -73,10 +73,9 @@ export function defaultSettings(): DesktopSettings {
 // Resolve the OS Downloads directory through Tauri instead of guessing a
 // platform path. This is deliberately asynchronous: localStorage settings
 // still render immediately, then first-run/null output paths are upgraded
-// before the user starts a job. Browser and test hosts have no Tauri bridge.
+// before the user starts a job. Hosts without the path plugin reject, which
+// maps to null (manual entry) below.
 export async function defaultOutputDirectory(): Promise<string | null> {
-  const internals = (globalThis as Record<string, unknown>)["__TAURI_INTERNALS__"];
-  if (!internals || typeof internals !== "object") return null;
   try {
     const path = await downloadDir();
     return path.length > 0 && path.length <= MAX_PATH_LEN && !path.includes("\0") ? path : null;
@@ -466,10 +465,9 @@ export function describeSettingsForLog(settings: DesktopSettings): string {
 
 // Native directory picker via the Tauri dialog plugin (`dialog:allow-open`).
 // Returns the chosen directory or null when unavailable, denied, or
-// cancelled. Never throws. Falls back to null (manual entry) outside Tauri.
+// cancelled. Never throws. Hosts without the dialog plugin reject, which
+// maps to null (manual entry) below.
 export async function pickDirectory(current: string | null): Promise<string | null> {
-  const internals = (globalThis as Record<string, unknown>)["__TAURI_INTERNALS__"];
-  if (!internals || typeof internals !== "object") return null;
   const attempts: Array<Record<string, unknown>> = [
     { directory: true, multiple: false },
     { directory: true },

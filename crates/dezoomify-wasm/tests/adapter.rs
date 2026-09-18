@@ -5,7 +5,7 @@ use dezoomify_protocol::dto::{
     BlockedReason, ErrorPhase, ErrorTransport, FetchFailureDto, HostMessage, JobCommand, JobEvent,
     JobInputDto, SessionConfig,
 };
-use dezoomify_wasm::{AdapterErrorCode, Session};
+use dezoomify_wasm::Session;
 
 fn session() -> Session {
     Session::new(SessionConfig::default()).expect("typed session")
@@ -71,22 +71,21 @@ fn typed_fetch_error_requires_and_preserves_context() {
 }
 
 #[test]
-fn typed_config_and_handles_enforce_limits_and_generation() {
+fn typed_config_budgets_are_validated_by_the_engine() {
     let mut session = Session::new(SessionConfig {
-        max_buffer_bytes: std::num::NonZeroU64::new(4),
+        max_tiles: std::num::NonZeroU32::new(u32::MAX),
         ..SessionConfig::default()
     })
-    .expect("bounded session");
+    .expect("construction defers budget validation to the engine");
+    let error = session
+        .dispatch(JobCommand::Start {
+            inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
+        })
+        .unwrap_err();
     assert_eq!(
-        session.allocate_buffer(5).unwrap_err().code(),
-        AdapterErrorCode::LimitExceeded
+        error.code(),
+        dezoomify_wasm::AdapterErrorCode::LimitExceeded
     );
-    let handle = session.allocate_buffer(4).expect("allocate");
-    session
-        .write_buffer(handle, 0, &[1, 2, 3, 4])
-        .expect("write");
-    session.commit_buffer(handle, 4).expect("commit");
-    assert_eq!(session.take_buffer(handle).expect("take"), vec![1, 2, 3, 4]);
 }
 
 #[test]
@@ -140,16 +139,11 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
             _ => None,
         })
         .expect("discovery request");
-    let handle = session.allocate_buffer(DZI.len() as u64).expect("allocate");
-    session.write_buffer(handle, 0, DZI).expect("write");
-    session
-        .commit_buffer(handle, DZI.len() as u64)
-        .expect("commit");
-    let buffer = session.buffer_handle(handle).expect("buffer handle");
+    // Discovery bodies cross directly in the command; nothing is retained.
     let messages = session
         .dispatch(JobCommand::ProvideResource {
             request,
-            buffer,
+            bytes: DZI.to_vec(),
             final_uri: None,
         })
         .expect("metadata bytes");
@@ -192,7 +186,7 @@ fn tile_403_failure_forwards_http_and_settles_after_single_attempt() {
         _ => false,
     });
     assert_eq!(reacquired.count(), 0, "403 must not be retried");
-    // Siblings still complete (display-only: zero body bytes into WASM)
+    // Siblings still complete (display-only: body-free acknowledgements)
     // and only then does the partial decision arrive carrying the refusal.
     let mut decided = false;
     for (_, request) in tiles.iter().skip(1) {
@@ -217,7 +211,10 @@ fn tile_403_failure_forwards_http_and_settles_after_single_attempt() {
         .unwrap_err();
     // The 403 request is already settled: a duplicate completion is a
     // wrong-state rejection, never a second attempt.
-    assert_eq!(messages.code(), AdapterErrorCode::WrongState);
+    assert_eq!(
+        messages.code(),
+        dezoomify_wasm::AdapterErrorCode::WrongState
+    );
 }
 
 fn transient_timeout() -> FetchFailureDto {
@@ -292,7 +289,6 @@ fn transient_failure_waits_then_retries_with_backoff() {
         .dispatch(JobCommand::RetryTimerElapsed { tile, attempt: 9 })
         .expect("stale timer tolerated");
     assert!(messages.is_empty());
-    assert_eq!(session.retained_bytes(), 0);
 }
 
 #[test]
@@ -307,7 +303,6 @@ fn retry_after_hint_sets_the_explicit_wait() {
         .dispatch(JobCommand::ProvideFetchFailure { request, error })
         .expect("503 with retry-after accepted");
     assert_eq!(timer_of(&messages), Some((tile, 1, 5_000)));
-    assert_eq!(session.retained_bytes(), 0);
 }
 
 #[test]
@@ -315,7 +310,7 @@ fn ordinary_tile_ack_carries_no_body_bytes() {
     use dezoomify_protocol::dto::HostEffect;
     let (mut session, tiles) = session_acquiring_tiles();
     // Ordinary image display: the host holds `<img>` elements with no
-    // readable bytes, so not one arena buffer is allocated for tiles.
+    // readable bytes, so tile acknowledgements are body-free.
     let mut message_count = 0;
     let mut finalized = false;
     for (_, request) in &tiles {
@@ -331,7 +326,6 @@ fn ordinary_tile_ack_carries_no_body_bytes() {
         });
     }
     assert!(finalized, "display-only acquisition still finalizes");
-    assert_eq!(session.retained_bytes(), 0);
     eprintln!("display-only completion: {message_count} host messages, 0 retained body bytes");
 }
 
@@ -340,7 +334,7 @@ fn display_only_tiles_complete_without_body_bytes() {
     use dezoomify_protocol::dto::HostEffect;
     let (mut session, tiles) = session_acquiring_tiles();
     // Ordinary image display: the host holds `<img>` elements with no
-    // readable bytes, so not one arena buffer is allocated for tiles.
+    // readable bytes, so tile acknowledgements are body-free.
     let mut finalized = false;
     for (_, request) in &tiles {
         let messages = session
@@ -354,4 +348,41 @@ fn display_only_tiles_complete_without_body_bytes() {
         });
     }
     assert!(finalized, "display-only acquisition still finalizes");
+}
+
+#[test]
+fn acquired_tiles_complete_without_body_bytes() {
+    use dezoomify_protocol::dto::HostEffect;
+    let (mut session, tiles) = session_acquiring_tiles();
+    // Readable acquisition: the host fetched, decoded, and placed each
+    // tile, so the acknowledgment carries no body, only the typed outcome.
+    let mut finalized = false;
+    for (_, request) in &tiles {
+        let messages = session
+            .dispatch(JobCommand::TileAcquired { request: *request })
+            .expect("acquired outcome");
+        finalized |= messages.iter().any(|message| {
+            matches!(
+                message,
+                HostMessage::Effect(HostEffect::FinalizeOutput { .. })
+            )
+        });
+    }
+    assert!(finalized, "readable acquisition finalizes");
+}
+
+#[test]
+fn provide_resource_for_tile_request_is_rejected() {
+    let (mut session, tiles) = session_acquiring_tiles();
+    let (_, request) = tiles[0];
+    // Tile bytes never enter the adapter: tile requests are answered with
+    // acquired/display outcomes or fetch failures, never provide-resource.
+    let error = session
+        .dispatch(JobCommand::ProvideResource {
+            request,
+            bytes: vec![1, 2, 3, 4],
+            final_uri: None,
+        })
+        .unwrap_err();
+    assert_eq!(error.code(), dezoomify_wasm::AdapterErrorCode::WrongState);
 }

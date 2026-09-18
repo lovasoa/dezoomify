@@ -6,11 +6,10 @@
 //! `perf-baseline.json`.
 
 use dezoomify_native::pipeline::{
-    canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
+    self, canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
     estimated_peak_streaming_bytes, exceeds_available_memory, required_memory_bytes, should_spill,
     PipelineConfig, MAX_CONCURRENT, SPILL_THRESHOLD_BYTES,
 };
-use dezoomify_native::pool::run_bounded;
 use std::time::Instant;
 
 fn sweep_image() -> image::RgbaImage {
@@ -36,10 +35,6 @@ fn baseline() -> serde_json::Value {
 fn pool_width_is_unified_at_sixteen() {
     assert_eq!(MAX_CONCURRENT, 16);
     assert_eq!(PipelineConfig::default().max_concurrent, 16);
-    assert_eq!(
-        dezoomify_native::download::SchedulerConfig::default().max_concurrent,
-        16
-    );
 }
 
 #[test]
@@ -78,26 +73,85 @@ fn available_memory_gate_is_deterministic() {
     assert!(exceeds_available_memory(1025, 1024));
 }
 
-#[test]
-fn tile_pool_bounds_concurrency() {
-    let start = Instant::now();
-    let jobs: Vec<Box<dyn FnOnce() -> usize + Send>> = (0..16)
-        .map(|index| {
-            let boxed: Box<dyn FnOnce() -> usize + Send> = Box::new(move || {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-                index
-            });
-            boxed
-        })
-        .collect();
-    let out = run_bounded(jobs, MAX_CONCURRENT);
-    assert_eq!(out.len(), 16);
-    let elapsed = start.elapsed();
-    println!("pool 16 tiles in {elapsed:?}");
-    assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "fixed pool must finish promptly"
+/// Four generated tiles plus a `tiles.yaml` manifest: the same local-input
+/// shape the runner tests use, so the concurrency bound is measured on the
+/// shipped fetch/decode/place path instead of a throwaway pool.
+fn write_local_tiles(work: &std::path::Path) -> String {
+    for name in ["tile-0_0", "tile-1_0", "tile-0_1", "tile-1_1"] {
+        let mut tile = image::RgbaImage::new(256, 256);
+        for (x, y, pixel) in tile.enumerate_pixels_mut() {
+            *pixel = image::Rgba([(x % 256) as u8, (y % 256) as u8, 128, 255]);
+        }
+        let mut bytes = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+        image::ImageEncoder::write_image(
+            encoder,
+            tile.as_raw(),
+            256,
+            256,
+            image::ExtendedColorType::Rgba8,
+        )
+        .expect("tile encodes");
+        std::fs::write(work.join(format!("{name}.png")), &bytes).expect("write tile");
+    }
+    let dir = work.to_str().expect("utf8 dir").to_string();
+    let yaml = format!(
+        "url_template: \"file://{dir}/tile-{{{{x}}}}_{{{{y}}}}.png\"\n\
+         x_template: \"x * tile_size\"\n\
+         y_template: \"y * tile_size\"\n\
+         variables:\n\
+         \x20 - {{ name: x, from: 0, to: 1 }}\n\
+         \x20 - {{ name: y, from: 0, to: 1 }}\n\
+         \x20 - {{ name: tile_size, value: 256 }}\n\
+         width: 512\n\
+         height: 512\n\
+         title: \"Perf tiles\"\n"
     );
+    let manifest = work.join("tiles.yaml");
+    std::fs::write(&manifest, yaml.as_bytes()).expect("write manifest");
+    manifest.to_str().expect("utf8 manifest").to_string()
+}
+
+#[test]
+fn exec_bounds_inflight_to_max_concurrent() {
+    let start = Instant::now();
+    let work = std::env::temp_dir().join(format!("dz-perf-exec-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("temp dir");
+    let input = write_local_tiles(&work);
+    let output = work.join("perf.png");
+    let config = PipelineConfig {
+        max_concurrent: 2,
+        ..PipelineConfig::default()
+    };
+    let outcome = pipeline::run(
+        &input,
+        output.to_str().expect("utf8 output"),
+        false,
+        &config,
+        &mut |_| {},
+    )
+    .expect("local pipeline succeeds");
+    assert_eq!(outcome.tile_count, 4);
+    // The engine's own budget bounds outstanding work: the honest
+    // instrumentation peaks within it on the shipped path, with no separate
+    // scheduler or pool to enforce the width.
+    assert_eq!(outcome.instrumentation.acquired, 4);
+    assert!(
+        (1..=2).contains(&outcome.instrumentation.peak_inflight),
+        "inflight stays within the engine budget: {}",
+        outcome.instrumentation.peak_inflight
+    );
+    let elapsed = start.elapsed();
+    println!(
+        "exec 4 tiles with max_concurrent=2 in {elapsed:?} (peak_inflight={})",
+        outcome.instrumentation.peak_inflight
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(60),
+        "bounded exec must finish promptly"
+    );
+    let _ = std::fs::remove_dir_all(&work);
 }
 
 #[test]

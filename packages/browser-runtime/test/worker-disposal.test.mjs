@@ -9,10 +9,6 @@ function fakeWasm(calls) {
       calls.push(`dispatch:${command.type}`);
       return { status: "ok", messages: [] };
     }
-    allocateBuffer(n) { calls.push(`alloc:${n}`); return 1; }
-    writeBuffer() {}
-    commitBuffer() {}
-    bufferHandle() { return { kind: "buffer", id: 1 }; }
     applyProcessing() { return new Uint8Array([9]).buffer; }
     dispose() { calls.push("dispose"); return { status: "ok", messages: [] }; }
   }
@@ -35,6 +31,7 @@ test("a disposed worker drops late bytes and commands; the retired job cannot mu
   await host.onMessage({ type: "engine.command", command: { type: "cancel" } });
   await host.onMessage({ type: "engine.probe", requestId: 4, outcome: { status: "missing" } });
   await host.onMessage({ type: "engine.display", requestId: 5 });
+  await host.onMessage({ type: "engine.acquired", requestId: 6 });
   assert.equal(calls.length, dispatches + 1, `retired worker dispatched late input: ${JSON.stringify(calls)}`);
   assert.ok(!sent.some((message) => message.type === "engine.messages"), "retired worker published messages");
 });
@@ -52,6 +49,30 @@ test("worker disposal is repeat-safe and publishes the session dispose result on
   assert.equal(calls.filter((call) => call === "dispose").length, 1);
 });
 
+test("byte provide dispatches direct bytes with no arena reservation", async () => {
+  const dispatched = [];
+  const sent = [];
+  class Session {
+    dispatch(command) { dispatched.push(command); return { status: "ok", messages: [] }; }
+    dispose() { return { status: "ok", messages: [] }; }
+  }
+  const host = createJobWorkerHost({
+    postMessage: (message) => sent.push(message),
+    wasm: async () => ({ Session }),
+  });
+  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://a.test/x.dzi" }] });
+  const bytes = new Uint8Array([1, 2, 3]);
+  await host.onMessage({ type: "engine.bytes", requestId: 9, bytes, finalUri: "https://a.test/final" });
+  const provide = dispatched.find((command) => command.type === "provide-resource");
+  assert.ok(provide, "expected a provide-resource dispatch");
+  assert.equal(provide.request, 9);
+  assert.ok(Array.isArray(provide.bytes), "bytes ride inline as a plain array per the generated contract");
+  assert.deepEqual(provide.bytes, [1, 2, 3]);
+  assert.equal(provide.final_uri, "https://a.test/final");
+  assert.ok(!("buffer" in provide), "direct-bytes provide carries no arena buffer handle");
+  assert.ok(!sent.some((message) => message.type === "engine.error"), "direct provide must not fault the ABI");
+});
+
 test("processed tile bytes transfer ownership to the host instead of copying", async () => {
   const sent = [];
   const transfers = [];
@@ -66,4 +87,22 @@ test("processed tile bytes transfer ownership to the host instead of copying", a
   assert.ok(processed, "expected an engine.processed reply");
   assert.ok(processed.bytes instanceof ArrayBuffer);
   assert.equal(transfers.flat().length, 1, "processed bytes must transfer, not copy");
+});
+
+test("acquired tiles acknowledge body-free with a typed outcome", async () => {
+  const dispatched = [];
+  class Session {
+    dispatch(command) { dispatched.push(command); return { status: "ok", messages: [] }; }
+    dispose() { return { status: "ok", messages: [] }; }
+  }
+  const host = createJobWorkerHost({
+    postMessage() {},
+    wasm: async () => ({ Session }),
+  });
+  await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://a.test/x.dzi" }] });
+  await host.onMessage({ type: "engine.acquired", requestId: 11 });
+  const acquired = dispatched.find((command) => command.type === "tile-acquired");
+  assert.ok(acquired, "expected a tile-acquired dispatch");
+  assert.equal(acquired.request, 11);
+  assert.ok(!("bytes" in acquired), "tile acknowledgment carries no body");
 });

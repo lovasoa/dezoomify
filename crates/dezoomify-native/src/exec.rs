@@ -1,6 +1,6 @@
 //! Completion-driven native execution: one engine, bounded async tasks.
 //!
-//! This module drives one [`dezoomify_job::Job`] to its terminal without
+//! This module drives one [`dezoomify_engine::Job`] to its terminal without
 //! batch scopes: every engine effect spawns exactly one bounded task whose
 //! single completion is fed back to the engine. There is no competing
 //! retry loop, no scheduler, and no per-batch thread pool:
@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
 use dezoomify_core::core::model::{ProcessingRecipe, Request};
 use dezoomify_core::Vec2d;
-use dezoomify_job::{
+use dezoomify_engine::{
     Config as JobConfig, Job, JobCommand, JobEffect, JobEvent, JobMessageBody, RecoveryChoice,
     State as JobState, TileFailure,
 };
@@ -226,11 +226,8 @@ struct Attempt<'a> {
 }
 
 impl<'a> Attempt<'a> {
-    fn emit(&mut self, kind: &str, detail: BTreeMap<String, String>) {
-        (self.on_event)(PipelineEvent {
-            kind: kind.to_string(),
-            detail,
-        });
+    fn emit(&mut self, event: PipelineEvent) {
+        (self.on_event)(event);
     }
 
     fn note_flight(&mut self) {
@@ -400,10 +397,9 @@ fn execute_attempt(
                     )
                 })?;
                 debug_assert!(job.is_paused());
-                attempt.emit(
-                    "paused",
-                    BTreeMap::from([("acquired".to_string(), attempt.acquired.to_string())]),
-                );
+                attempt.emit(PipelineEvent::Paused {
+                    acquired: attempt.acquired as u64,
+                });
                 job.on_command(JobCommand::Resume).map_err(|e| {
                     NativeError::new(
                         "native.internal",
@@ -411,10 +407,9 @@ fn execute_attempt(
                     )
                 })?;
                 debug_assert!(!job.is_paused());
-                attempt.emit(
-                    "resumed",
-                    BTreeMap::from([("acquired".to_string(), attempt.acquired.to_string())]),
-                );
+                attempt.emit(PipelineEvent::Resumed {
+                    acquired: attempt.acquired as u64,
+                });
             }
         }
     }
@@ -604,13 +599,7 @@ fn handle_event(attempt: &mut Attempt<'_>, event: JobEvent) -> Result<(), Native
                 .collect();
         }
         JobEvent::Progress { acquired, total } => {
-            attempt.emit(
-                "downloading",
-                BTreeMap::from([
-                    ("acquired".to_string(), acquired.to_string()),
-                    ("total".to_string(), total.to_string()),
-                ]),
-            );
+            attempt.emit(PipelineEvent::Downloading { acquired, total });
         }
         JobEvent::Failed { code, message } => attempt.failure = Some((code, message)),
         JobEvent::MissingWork { failed } => {
@@ -650,13 +639,9 @@ fn execute_effects(
                 }
                 let merged = merge_headers(&Request::new(&uri));
                 attempt.instrumentation.attempts += 1;
-                attempt.emit(
-                    "discovery",
-                    BTreeMap::from([(
-                        "resources".to_string(),
-                        attempt.instrumentation.attempts.to_string(),
-                    )]),
-                );
+                attempt.emit(PipelineEvent::Discovery {
+                    resources: attempt.instrumentation.attempts,
+                });
                 spawn_metadata(attempt, completion_tx, handles, request, uri, merged);
             }
             JobEffect::AcquireTile {
@@ -1161,13 +1146,7 @@ fn feed_completion(
                     attempt.settled.insert(id.clone());
                     sink.note_declared(canvas);
                     sink.place(ordinal, destination, extent, decoded)?;
-                    reply(
-                        job,
-                        JobCommand::TileOutcome {
-                            tile: ordinal,
-                            ok: true,
-                        },
-                    )?;
+                    reply(job, JobCommand::TileAcquired { tile: ordinal })?;
                 }
                 Err(failure) => {
                     let tile_failure = TileFailure::new(
@@ -1181,16 +1160,10 @@ fn feed_completion(
                     } else {
                         attempt.instrumentation.failed_permanent += 1;
                     }
-                    attempt.emit(
-                        "tile-failed",
-                        BTreeMap::from([
-                            ("tile".to_string(), id),
-                            (
-                                "error".to_string(),
-                                format!("{} ({})", failure.error.message, failure.error.code),
-                            ),
-                        ]),
-                    );
+                    attempt.emit(PipelineEvent::TileFailed {
+                        tile: id,
+                        error: format!("{} ({})", failure.error.message, failure.error.code),
+                    });
                     reply(
                         job,
                         JobCommand::TileFailed {
@@ -1305,23 +1278,17 @@ fn await_partial_choice(attempt: &mut Attempt<'_>, generation: u32) -> Option<Pa
     missing.dedup();
     let total = attempt.order.len();
     let failed = missing.len().max(1);
-    let joined = missing.join(",");
-    let mut requested = BTreeMap::new();
-    requested.insert("reason".to_string(), "partial".to_string());
-    requested.insert("failed".to_string(), failed.to_string());
-    requested.insert("total".to_string(), total.to_string());
-    if !joined.is_empty() {
-        requested.insert("missing".to_string(), joined.clone());
-    }
-    requested.insert("generation".to_string(), generation.to_string());
-    attempt.emit("recovery-requested", requested.clone());
-    let mut work = BTreeMap::new();
-    work.insert("failed".to_string(), failed.to_string());
-    work.insert("total".to_string(), total.to_string());
-    if !joined.is_empty() {
-        work.insert("missing".to_string(), joined);
-    }
-    attempt.emit("missing-work", work);
+    attempt.emit(PipelineEvent::RecoveryRequested {
+        missing: missing.clone(),
+        failed: failed as u64,
+        total: total as u64,
+        generation,
+    });
+    attempt.emit(PipelineEvent::MissingWork {
+        missing: missing.clone(),
+        failed: failed as u64,
+        total: total as u64,
+    });
     let Some(gate) = attempt.partial_gate.clone() else {
         return Some(if attempt.config.partial_policy == PartialPolicy::Keep {
             PartialDecision::Keep
@@ -1375,7 +1342,7 @@ fn job_config_for(config: &PipelineConfig) -> Result<JobConfig, NativeError> {
     Ok(job)
 }
 
-fn map_setup_error(error: dezoomify_job::JobError) -> NativeError {
+fn map_setup_error(error: dezoomify_engine::JobError) -> NativeError {
     match error.code.as_str() {
         "job.unknown-dezoomer" => {
             NativeError::new("discovery.unknown-dezoomer", error.message.clone())

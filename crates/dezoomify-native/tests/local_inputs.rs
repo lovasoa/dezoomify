@@ -121,7 +121,7 @@ fn file_uri_with_remote_host_is_rejected_typed() {
 
 #[test]
 fn job_validation_accepts_local_but_rejects_remote_file_hosts() {
-    use dezoomify_job::{Config, Job};
+    use dezoomify_engine::{Config, Job};
     let config = Config::default();
     assert!(Job::new("/tmp/tiles.yaml", config.clone()).is_ok());
     assert!(Job::new("tiles.yaml", config.clone()).is_ok());

@@ -1,10 +1,10 @@
 //! Authoritative deterministic job engine for dezoomify.
 //!
-//! This crate is the single home of the job interface every product drives:
-//! formats, discovery, planning, acquisition policy, and output
-//! finalization. It is pure and deterministic: no I/O, clocks, or tasks.
-//! Hosts perform effects, own clocks, and report explicit completions; the
-//! engine decides what happens next.
+//! This crate owns the job interface every product drives: formats,
+//! discovery, planning, acquisition policy, and output finalization. It is
+//! pure and deterministic: no I/O, clocks, or tasks. Hosts perform effects,
+//! own clocks, and report explicit completions; the engine decides what
+//! happens next.
 //!
 //! ```text
 //! dezoomify_engine::EngineJob
@@ -23,21 +23,49 @@
 //! dezoomify_engine::format_inventory
 //! ```
 //!
-//! The canonical state machine lives in `dezoomify_job` and is re-exported
-//! here unchanged, so every host compiles against the `dezoomify_engine`
-//! paths above. `crates/dezoomify-job` exposes the same items at its
-//! own paths; the `dezoomify_engine` paths are canonical for all hosts.
+//! The canonical state machine lives here (`job`, `transition`, `state`,
+//! `config`, `projection`, `retry`) behind the canonical facade
+//! (`engine_api`). All hosts compile against these paths.
 
-pub use dezoomify_job::engine_api::{
-    DecisionPayload, DeferredEntry, DiscoveryInput, Effect, EffectId, EffectResult, EngineError,
-    EngineJob, Failure, JobOptions, JobSnapshot, Lifecycle, OutputDisposition, OutputFormat,
-    OutputSummary, PartialDecision, PartialPolicy, Progress, ResponseMetadata, Selection,
-    SelectionPolicy, Terminal, Update, UserCommand,
+#![forbid(unsafe_code)]
+// Shipped engine code maps failures to typed `JobError`s instead of
+// panicking. Unit tests are exempt via `allow-unwrap-in-tests` in the
+// workspace `clippy.toml`; integration `tests/` targets never inherit this
+// crate-root attribute.
+#![deny(clippy::unwrap_used)]
+
+pub mod config;
+pub mod engine_api;
+pub mod job;
+pub mod projection;
+pub mod retry;
+pub mod state;
+pub mod transition;
+
+pub use config::{Config, ConfigError};
+pub use engine_api::{
+    project_engine_snapshot, DecisionPayload, DeferredEntry, DiscoveryInput, Effect, EffectId,
+    EffectResult, EngineError, EngineJob, Failure, JobOptions, JobSnapshot, Lifecycle,
+    OutputDisposition, OutputFormat, OutputSummary, PartialDecision, PartialPolicy, Progress,
+    ResponseMetadata, Selection, SelectionPolicy, Terminal, Update, UserCommand,
 };
-pub use dezoomify_job::retry::{
+pub use job::{Job, JobInput};
+pub use projection::project_catalog;
+pub use retry::{
     classify_tile_failure, retry_delay_ms, FailureCategory, TileFailure, MAX_FAILURE_DETAIL_CHARS,
     MAX_RETRY_AFTER_MS, RETRY_BASE_DELAY_MS, RETRY_MAX_DELAY_MS,
 };
+pub use state::State;
+pub use transition::{
+    JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome, RecoveryChoice,
+};
+
+/// Command rejection for option validation.
+pub type ValidationError = EngineError;
+/// Command rejection for user commands.
+pub type CommandError = EngineError;
+/// Completion rejection for effect completions.
+pub type CompletionError = EngineError;
 
 /// Ordered `(id, display name)` inventory of every built-in format, derived
 /// from the core registry in candidate precedence order.

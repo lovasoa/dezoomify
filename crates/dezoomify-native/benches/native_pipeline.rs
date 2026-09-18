@@ -1,5 +1,11 @@
-//! Native pipeline benchmarks: tile throughput on the fixed pool,
-//! encode time per format, and peak-RSS model for the 20k by 20k fixture.
+//! Native pipeline benchmarks: end-to-end tile throughput on the shipped
+//! exec path, encode time per format, and the peak-RSS model for the 20k by
+//! 20k fixture.
+//!
+//! The throughput bench runs the real `pipeline::run` over four generated
+//! local tiles (no network, no separate pool): it tracks the shipped
+//! fetch/decode/assemble/encode path the driver uses, including the engine
+//! concurrency budget.
 //!
 //! The 20k fixture itself (about 1.5 GiB of RGBA) is modeled, not allocated:
 //! allocating it in a bench would OOM CI runners. The model compares the
@@ -8,12 +14,11 @@
 //! helpers the driver uses (`estimated_peak_*`, `should_spill`,
 //! `required_memory_bytes`), so the bench tracks the shipped decision.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use dezoomify_native::pipeline::{
-    canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
-    estimated_peak_streaming_bytes, required_memory_bytes, should_spill, MAX_CONCURRENT,
+    self, canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
+    estimated_peak_streaming_bytes, required_memory_bytes, should_spill, PipelineConfig,
 };
-use dezoomify_native::pool::run_bounded;
 use std::hint::black_box;
 
 fn sweep_image(width: u32, height: u32) -> image::RgbaImage {
@@ -47,36 +52,51 @@ fn solid_tile_png() -> Vec<u8> {
     bytes
 }
 
-/// Tile throughput: decode one cached 256 by 256 PNG on each pool job.
-/// Measures the fixed-pool dispatch plus decode path that `acquire_tiles`
-/// uses (fetch is loopback in integration tests; here the bytes are local).
+/// Tile throughput: run the real `pipeline::run` over four generated local
+/// tiles per iteration (fetch is the local fast path; decode, assemble,
+/// and encode are the shipped code). The output reuses one path with
+/// overwrite so every iteration measures the full publish.
 fn bench_tile_throughput(criterion: &mut Criterion) {
+    let work = std::env::temp_dir().join(format!("dezoomify-bench-tiles-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("bench dir");
     let tile = solid_tile_png();
-    let mut group = criterion.benchmark_group("tile-throughput");
-    for width in [4usize, 16usize] {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(width),
-            &width,
-            |bencher, &width| {
-                bencher.iter(|| {
-                    let jobs: Vec<Box<dyn FnOnce() -> usize + Send>> = (0..width)
-                        .map(|_| {
-                            let bytes = tile.clone();
-                            let boxed: Box<dyn FnOnce() -> usize + Send> = Box::new(move || {
-                                let decoded =
-                                    image::load_from_memory(&bytes).expect("tile decodes");
-                                let rgba = decoded.to_rgba8();
-                                black_box(rgba.width() + rgba.height()) as usize
-                            });
-                            boxed
-                        })
-                        .collect();
-                    let out = run_bounded(jobs, MAX_CONCURRENT);
-                    black_box(out.len())
-                });
-            },
-        );
+    for name in ["tile-0_0", "tile-1_0", "tile-0_1", "tile-1_1"] {
+        std::fs::write(work.join(format!("{name}.png")), &tile).expect("write tile");
     }
+    let dir = work.to_str().expect("utf8 dir").to_string();
+    let yaml = format!(
+        "url_template: \"file://{dir}/tile-{{{{x}}}}_{{{{y}}}}.png\"\n\
+         x_template: \"x * tile_size\"\n\
+         y_template: \"y * tile_size\"\n\
+         variables:\n\
+         \x20 - {{ name: x, from: 0, to: 1 }}\n\
+         \x20 - {{ name: y, from: 0, to: 1 }}\n\
+         \x20 - {{ name: tile_size, value: 256 }}\n\
+         width: 512\n\
+         height: 512\n\
+         title: \"Bench tiles\"\n"
+    );
+    let manifest = work.join("tiles.yaml");
+    std::fs::write(&manifest, yaml.as_bytes()).expect("write manifest");
+    let input = manifest.to_str().expect("utf8 manifest").to_string();
+    let output = work.join("bench.png");
+    let output_str = output.to_str().expect("utf8 output").to_string();
+    let config = PipelineConfig::default();
+    let mut group = criterion.benchmark_group("tile-throughput");
+    group.bench_function("pipeline-4-tiles", |bencher| {
+        bencher.iter(|| {
+            let outcome = pipeline::run(
+                black_box(&input),
+                black_box(&output_str),
+                true,
+                black_box(&config),
+                &mut |_| {},
+            )
+            .expect("pipeline succeeds");
+            black_box(outcome.tile_count)
+        });
+    });
     group.finish();
 }
 

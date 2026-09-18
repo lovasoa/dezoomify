@@ -3,7 +3,7 @@
 Real native egress and output: a reqwest-based HTTP client (one reusable
 client per job, per-redirect header rebuild, credential rescoping every hop)
 with size/time limits and zero transport retries (the engine owns the whole
-retry budget); the job-driven download pipeline (`dezoomify-job` owns
+retry budget); the job-driven download pipeline (`dezoomify-engine` owns
 discovery, selection, planning, retry, and lifecycle policy while
 `pipeline`/`exec` execute fetch, probe, decode, assemble, output encode
 (PNG, JPEG, TIFF, ZIF pyramid, WebP, static `iiif-dir` tile trees), atomic

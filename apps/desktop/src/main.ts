@@ -13,30 +13,36 @@
 // Controller mapping (TRANSITIONS in packages/shared-ui/src/controller.ts):
 // discovering -> images-found -> image-chosen -> level-chosen ->
 // preflight-ok -> progress -> save-start -> save-done -> completed, plus
-// fail -> failed, cancel -> cancelled, reset -> idle. The display-only
-// transition exists only in the shared controller for browser paths; the
-// desktop frontend never dispatches preflight-display-only (no native
-// emitter). Recovery-requested (destination/partial) events
+// fail -> failed, cancel -> cancelled, reset -> idle. The native driver
+// auto-selects images[0] at the largest fitting level, so the desktop
+// frontend dispatches only the transitions its real shell signals produce
+// (start, progress, save, terminal); the typed projection in
+// apps/desktop/src/jobService.ts folds the same shell events into
+// authoritative snapshots without any synthetic walk.
+// Recovery-requested (destination/partial) events
 // surface typed choices (retry / choose-output / keep-partial /
-// discard-partial / handoff-to-native) wired to answer_choice (RetryReady /
-// PartialKeep), request_destination, and requestHandoff.
+// discard-partial / handoff-to-native) wired to answer_choice (typed
+// `Choice`), request_destination, and requestHandoff.
 //
-// The controller walk below is the shipped desktop path.
+// The typed job service owns the authoritative snapshot fold;
 // apps/desktop/src/jobService.ts provides the typed JobService over the
 // public Tauri API and shares the same commands, choices, and channels.
 import {
   HISTORY_KEY_DESKTOP,
   clearHistory as clearHistoryStore,
-  createController,
   loadHistory as loadHistoryStore,
   pushHistory,
+  saveHistory as saveHistoryStore,
+  toHistoryEntry,
+  type HistoryEntry,
+} from "@dezoomify/app-model";
+import {
+  createController,
   renderView,
   openConfirmModal,
-  saveHistory as saveHistoryStore,
   t,
-  toHistoryEntry,
 } from "@dezoomify/shared-ui";
-import type { HistoryEntry, ViewContext } from "@dezoomify/shared-ui";
+import type { ViewContext } from "@dezoomify/shared-ui";
 import { createLogger, suggestedNameFor } from "@dezoomify/browser-runtime";
 import {
   asPayload,
@@ -59,13 +65,10 @@ import {
 } from "./errorCopy.ts";
 import type { ValidatedDeepLink } from "./errorCopy.ts";
 import {
-  DISCARD_PARTIAL_CHOICE,
-  KEEP_PARTIAL_CHOICE,
-  RETRY_CHOICE,
   completeJob,
   dispatchFail,
-  ensureChosenThroughPreflight,
   isTerminalStatus,
+  type AnswerChoice,
 } from "./jobController.ts";
 import type { CatalogNotice, PendingDecision } from "./jobController.ts";
 import {
@@ -110,6 +113,7 @@ import {
 } from "./settings.ts";
 import type { DesktopSettings } from "./settings.ts";
 import { listen as tauriApiListen } from "@tauri-apps/api/event";
+import { invoke as tauriPublicInvoke } from "@tauri-apps/api/core";
 
 const root = typeof document !== "undefined" ? document.getElementById("root") : null;
 const integration = createDesktopIntegration();
@@ -345,42 +349,11 @@ function nextSeq(): number {
   return currentSeq;
 }
 
-interface TauriInvokeFn {
-  (cmd: string, args?: Record<string, unknown>): Promise<unknown>;
-}
-
-function tauriInvoke(): TauriInvokeFn | null {
-  const internals = (globalThis as Record<string, unknown>)["__TAURI_INTERNALS__"] as
-    | { invoke?: unknown }
-    | undefined;
-  if (internals && typeof internals.invoke === "function") {
-    return internals.invoke as TauriInvokeFn;
-  }
-  return null;
-}
-
-type TauriListenFn = (
-  channel: string,
-  handler: (event: { payload: unknown }) => void,
-) => Promise<unknown> | unknown;
-
-function tauriListen(): TauriListenFn | null {
-  // The window ships with `withGlobalTauri: false`, so no `listen` global
-  // exists; the bundled `@tauri-apps/api` call reaches the core event
-  // plugin through `__TAURI_INTERNALS__` instead. It rejects outside a
-  // Tauri webview, which `subscribeToDesktopEvents` already tolerates.
-  if (typeof tauriApiListen === "function") {
-    return (channel, handler) => tauriApiListen(channel, handler);
-  }
-  const g = globalThis as Record<string, unknown>;
-  const candidates: Array<unknown> = [g["__TAURI_EVENT__"], g["__TAURI_INTERNALS__"], g["__TAURI__"]];
-  for (const cand of candidates) {
-    if (cand && typeof (cand as Record<string, unknown>)["listen"] === "function") {
-      return (cand as { listen: TauriListenFn }).listen;
-    }
-  }
-  return null;
-}
+// Tauri IPC goes through the public guest bindings only
+// (`@tauri-apps/api/core` invoke, `@tauri-apps/api/event` listen), the same
+// path the typed job service uses. Unreachable hosts reject, and every
+// caller below handles that rejection through its typed error path; there
+// is no host-global sniffing and no silent validation-only fallback.
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
 
@@ -509,10 +482,6 @@ function noteProgress(current: number, total: number): void {
 // stay stateless while behavior is unchanged.
 function controllerDispatch(event: unknown): void {
   controller.dispatch(event as never);
-}
-
-function preflightThrough(imageCount?: number): void {
-  ensureChosenThroughPreflight(controllerDispatch, sessionId, nextSeq, NATIVE_TRANSPORT, imageCount);
 }
 
 const failEnv = {
@@ -773,13 +742,10 @@ function launchNativeJob(trimmed: string, token: number): void {
   desktopSettings = effective.settings;
   pushLog(`Settings: ${describeSettingsForLog(desktopSettings)}`);
   update();
-  const invoke = tauriInvoke();
-  if (!invoke) {
-    return;
-  }
   const settingsArgs = settingsToInvokeArgs(desktopSettings);
   // Tauri commands take camelCase args (`inputUrl` for Rust `input_url`).
-  void invoke("start_job", { inputUrl: trimmed, settings: settingsArgs }).then(
+  // An unreachable host rejects into the typed start-failed path below.
+  void tauriPublicInvoke("start_job", { inputUrl: trimmed, settings: settingsArgs }).then(
     (raw) => {
       if (token !== submitToken) return;
       const res = raw as { job?: unknown; seq?: unknown } | null;
@@ -789,7 +755,7 @@ function launchNativeJob(trimmed: string, token: number): void {
         retiredJobId = null;
         if (cancelPending) {
           cancelPending = false;
-          requestNativeCancellation(job, invoke);
+          requestNativeCancellation(job);
         }
       }
       update();
@@ -992,14 +958,13 @@ function appendDesktopQueuePanel(aux: HTMLElement, doc: Document): void {
   aux.appendChild(box);
 }
 
-function answerChoice(choice: string, onGranted: () => void, failureLabel: string): void {
+function answerChoice(choice: AnswerChoice, onGranted: () => void, failureLabel: string): void {
   const job = currentJobId;
-  const invoke = tauriInvoke();
-  if (!job || !invoke) {
+  if (!job) {
     onGranted();
     return;
   }
-  void invoke("answer_choice", { job, choice }).then(
+  void tauriPublicInvoke("answer_choice", { job, choice }).then(
     () => {
       onGranted();
     },
@@ -1012,7 +977,7 @@ function answerChoice(choice: string, onGranted: () => void, failureLabel: strin
 
 function handleSelectImage(index: number): void {
   if (isTerminalStatus(controller.getState().status)) return;
-  const choice = `img:${index}`;
+  const choice: AnswerChoice = { kind: "image", index };
   pushLog(`Chose image ${index}`);
   answerChoice(
     choice,
@@ -1026,7 +991,7 @@ function handleSelectImage(index: number): void {
 
 function handleSelectLevel(level: number): void {
   if (isTerminalStatus(controller.getState().status)) return;
-  const choice = `level:${level}`;
+  const choice: AnswerChoice = { kind: "level", index: level };
   pushLog(`Chose level ${level}`);
   answerChoice(
     choice,
@@ -1038,8 +1003,8 @@ function handleSelectLevel(level: number): void {
   );
 }
 
-function requestNativeCancellation(job: string, invoke: TauriInvokeFn): void {
-  void invoke("cancel_job", { job }).then(
+function requestNativeCancellation(job: string): void {
+  void tauriPublicInvoke("cancel_job", { job }).then(
     () => {
       if (isTerminalStatus(controller.getState().status)) return;
       if (currentJobId !== job) return;
@@ -1070,15 +1035,14 @@ function requestNativeCancellation(job: string, invoke: TauriInvokeFn): void {
 function handleCancel(): void {
   if (isTerminalStatus(controller.getState().status)) return;
   const job = currentJobId;
-  const invoke = tauriInvoke();
   // Stop is immediate in the UI. The native host still receives cancellation
   // and performs cleanup, while its late events are retired below.
-  if (job && invoke) void invoke("cancel_job", { job }).catch(() => undefined);
+  if (job) void tauriPublicInvoke("cancel_job", { job }).catch(() => undefined);
   handleReset();
   if (job) retiredJobId = job;
 }
 
-// Destination recovery grants a replacement output. On grant, walks the controller into saving;
+// Destination recovery grants a replacement output. On grant, the controller enters saving;
 // completion itself arrives via dezoomify://job-output (exactly-once
 // terminal guard ignores any duplicate).
 function requestOutputAndResume(): void {
@@ -1102,14 +1066,8 @@ function requestOutputAndResume(): void {
             pendingDecision = null;
           }
           pushLog("Save destination granted");
-          preflightThrough();
           controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-start" });
           setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
-          if (!tauriInvoke()) {
-            // Validation-only fallback (no Tauri host): no native worker
-            // will emit job-output, so close the loop locally.
-            controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-done" });
-          }
           update();
         } else if (result.outcome === "denied") {
           // Stable backend code rides `code` when present (output.exists,
@@ -1132,13 +1090,12 @@ function requestOutputAndResume(): void {
 }
 
 async function handleOpenOutput(reveal: boolean): Promise<void> {
-  const invoke = tauriInvoke();
   const job = currentJobId;
-  if (!invoke || !job) return;
+  if (!job) return;
   outputActionError = undefined;
   root?.querySelector("#dz-open-error")?.remove();
   try {
-    await invoke("open_saved_output", { job, reveal });
+    await tauriPublicInvoke("open_saved_output", { job, reveal });
   } catch (error) {
     if (job !== currentJobId) return;
     const rawCode = error && typeof error === "object" && "code" in error ? error.code : null;
@@ -1157,14 +1114,14 @@ async function handleOpenOutput(reveal: boolean): Promise<void> {
 }
 
 // Recovery: retry the outstanding decision (destination -> back to
-// awaiting-destination; partial -> retry failed tiles). Wired to the engine
-// RetryReady response via the att:<suffix> choice shape.
+// awaiting-destination; partial -> retry failed tiles). Wired to the typed
+// shell `Choice::Retry` via answer_choice.
 function handleRecoveryRetry(): void {
   const decision = pendingDecision;
   if (!decision || isTerminalStatus(controller.getState().status)) return;
   pushLog(`Retry requested (${decision.reason})`);
   answerChoice(
-    RETRY_CHOICE,
+    { kind: "retry" },
     () => {
       pendingDecision = null;
       setStep(t("view.step.downloading"), t("desktop.step.retrying"));
@@ -1174,8 +1131,8 @@ function handleRecoveryRetry(): void {
   );
 }
 
-// Recovery: keep or discard a partial result. Wired to the engine PartialKeep
-// response via the partial:keep / partial:discard choice shapes. The terminal
+// Recovery: keep or discard a partial result. Wired to the typed shell
+// `Choice::Partial` via answer_choice. The terminal
 // outcome (partial-completed / failed) arrives as an event; nothing is
 // dispatched locally so the terminal stays exactly-once.
 function handlePartialChoice(keep: boolean): void {
@@ -1184,7 +1141,7 @@ function handlePartialChoice(keep: boolean): void {
   if (isTerminalStatus(controller.getState().status)) return;
   pushLog(keep ? "Keeping partial image…" : "Discarding partial image…");
   answerChoice(
-    keep ? KEEP_PARTIAL_CHOICE : DISCARD_PARTIAL_CHOICE,
+    { kind: "partial", keep },
     () => {
       pendingDecision = null;
       setStep(
@@ -1235,10 +1192,10 @@ function handleOpenExternalLink(url: string): void {
 // shareable browser link to copy. The job view hides the share button when
 // the callback is absent; diagnostics copying has its own explicit button.
 
-// Idempotent walk from discovering through selection into downloading. Each
-// dispatch is accepted only when the controller transition is legal, so
-// calling this on every running/progress signal is safe and duplicate
-// signals never double-advance.
+// Progress and save signals dispatch only the transition each signal
+// represents. Selection steps are never synthesized: the native driver
+// selects images[0] at the largest fitting level internally, and the typed
+// job service projects the same shell events into snapshots.
 function grantedMime(): string {
   return encoderToMime(grantedFormat, "image/png");
 }
@@ -1588,10 +1545,10 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     return;
   }
 
-  // Save destination granted on the host side (request_destination emits a
-  // destination event): record the format and walk into saving. The user
-  // grant itself arrives via requestOutputAndResume; this covers host-side
-  // grants observed as events.
+// Save destination granted on the host side (request_destination emits a
+// destination event): record the format and enter saving. The user
+// grant itself arrives via requestOutputAndResume; this covers host-side
+// grants observed as events.
   if (kind === "destination" || text.indexOf("destination") >= 0) {
     if (text.indexOf("denied") >= 0) {
       dispatchFail(failEnv, "OUTPUT_DENIED", t("desktop.output.deniedFallback"));
@@ -1611,16 +1568,13 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
     }
     if (text.indexOf("awaiting") >= 0 || text.indexOf("request-destination") >= 0) {
       if (!pendingDecision) {
-        pendingDecision = { kind: "destination-request", reason: "destination" };
+        pendingDecision = { kind: "destination-recovery", reason: "destination" };
       }
       setStep(t("desktop.step.chooseWhere"), t("desktop.step.pickOutput"));
       pushLog("Save destination requested");
       update();
       return;
     }
-    preflightThrough(
-      numField(payload, detailRaw, ["imageCount", "images", "count"]),
-    );
     controller.dispatch({ seq: nextSeq(), sessionId, kind: "save-start" });
     setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
     update();
@@ -1632,10 +1586,9 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
   // handle_event "catalog" only fills the attempt; PipelineEvent kinds are
   // discovery/downloading/encoding), jobs.rs projects no imageCount (the
   // progress allowlist is acquired/total/resources/bytes/files), and the
-  // shell selects images[0] at the largest fitting level by default. The
-  // shared view's choiceCount notice stays for other apps (website
-  // discovery sets imageCount); desktop walks choosing-image transiently
-  // via preflightThrough with no count, so the notice never renders here.
+// shell selects images[0] at the largest fitting level by default. No
+// selection events are synthesized here; the shared view's choiceCount
+// notice stays for other apps (website discovery sets imageCount).
 
   // Level selection offered: record image-chosen (legal from
   // choosing-image), then wait for the running signal before level-chosen.
@@ -1660,8 +1613,8 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
   // branch on the native path" window assertion pins this.
 
   // Progress snapshots: discovery (resources), downloading (acquired/total),
-  // encoding. Each ensures the selection chain first so a progress signal
-  // alone walks discovering -> downloading.
+  // encoding. Each signal dispatches its own progress transition; the
+  // activity ledger and step labels update unconditionally.
   if (
     channel === "dezoomify://job-progress" ||
     kind === "progress" ||
@@ -1677,7 +1630,6 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
       reportedTotal > 0 ? numField(payload, detailRaw, ["current", "acquired", "completed", "done"]) ?? 0 : 0);
     const message = strField(payload, ["message"]);
     const progressCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
-    preflightThrough(progressCount);
     if (progressCount !== undefined || total > 0) {
       const prevCount = catalogNotice?.imageCount ?? controller.getState().imageCount ?? 0;
       catalogNotice = {
@@ -1720,7 +1672,6 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
   ) {
     if (text.indexOf("running") >= 0 || text.indexOf("downloading") >= 0 || text.indexOf("acquiring") >= 0) {
       const runningCount = numField(payload, detailRaw, ["imageCount", "images", "count"]);
-      preflightThrough(runningCount);
       if (runningCount !== undefined && !catalogNotice) {
         catalogNotice = { imageCount: runningCount };
       }
@@ -1736,12 +1687,10 @@ function handleDesktopEvent(channel: DesktopEventChannel, raw: unknown): void {
 }
 
 function subscribeToDesktopEvents(): void {
-  const listen = tauriListen();
-  if (!listen) return;
   for (const channel of DESKTOP_EVENT_CHANNELS) {
     const name: DesktopEventChannel = channel;
     try {
-      const maybe = listen(name, (event) => {
+      const maybe = tauriApiListen(name, (event) => {
         const raw = (event as { payload?: unknown }).payload ?? event;
         try {
           handleDesktopEvent(name, raw);
@@ -1760,15 +1709,12 @@ function subscribeToDesktopEvents(): void {
 
 // Boot handshake: invoke the granted `query_capabilities` command once at
 // startup so the `dezoomify:allow-query-capabilities` grant always maps to
-// shipped code. Local IPC only, so it works offline; without a Tauri host
-// (unit tests, validation-only fallback) it skips silently. A denied invoke
-// or a protocol/registry mismatch only records a typed log line: the
+// shipped code. Local IPC only, so it works offline; an unreachable host or
+// a protocol/registry mismatch only records a typed log line: the
 // controller has no `fail` transition from idle, so a mismatch surfaces its
 // stable code without bricking the app, and offline use is never blocked.
 function queryCapabilitiesAtBoot(): void {
-  const invoke = tauriInvoke();
-  if (!invoke) return;
-  void invoke("query_capabilities").then(
+  void tauriPublicInvoke("query_capabilities").then(
     (raw) => {
       const snapshot = (raw ?? {}) as {
         protocol_min?: unknown;
@@ -1996,17 +1942,14 @@ function ensureDesktopAuxPanel(): void {
       addButton(t("desktop.rec.keep"), true, () => handlePartialChoice(true));
       addButton(t("desktop.rec.discard"), false, () => handlePartialChoice(false));
       addButton(t("desktop.rec.retryTiles"), false, () => handleRecoveryRetry());
-    } else if (decision.kind === "destination-recovery") {
+    } else {
+      // Destination recovery (sole remaining destination kind): choose an
+      // output or retry the outstanding decision.
       title.textContent = t("desktop.rec.destTitle");
       desc.textContent = t("desktop.rec.destDesc");
       decisionBox.append(title, desc, row);
       addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
       addButton(t("desktop.rec.tryAgain"), false, () => handleRecoveryRetry());
-    } else {
-      title.textContent = t("desktop.rec.chooseTitle");
-      desc.textContent = t("desktop.rec.chooseDesc");
-      decisionBox.append(title, desc, row);
-      addButton(t("desktop.rec.chooseOutput"), true, () => requestOutputAndResume());
     }
     decisionBox.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape") {

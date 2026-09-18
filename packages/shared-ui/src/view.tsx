@@ -16,7 +16,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import type { ControllerState, StructuredError } from "./controller.ts";
-import type { HistoryEntry } from "./history.ts";
+import type { HistoryEntry } from "@dezoomify/app-model";
 import {
   getPhaseForStatus,
 } from "./view-types.ts";

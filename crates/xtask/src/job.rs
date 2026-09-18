@@ -12,9 +12,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         return Err(format!("unknown test job arg '{}'", args[0]));
     }
-    super::command::cargo_test(&["-p", "dezoomify-job"])
+    super::command::cargo_test(&["-p", "dezoomify-engine"])
 }
 
 fn transcripts_only() -> Result<(), String> {
-    super::command::cargo_test(&["-p", "dezoomify-job", "--test", "workflows"])
+    super::command::cargo_test(&["-p", "dezoomify-engine", "--test", "workflows"])
 }

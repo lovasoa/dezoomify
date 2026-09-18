@@ -318,8 +318,6 @@ export const it = {
   "desktop.rec.destTitle": "La destinazione di salvataggio richiede attenzione",
   "desktop.rec.destDesc":
     "La destinazione di salvataggio non e stata accettata. Scegli un file di uscita, riprova oppure usa un altra applicazione.",
-  "desktop.rec.chooseTitle": "Scegli dove salvare",
-  "desktop.rec.chooseDesc": "Scegli il file di uscita per continuare a salvare questa immagine.",
   "desktop.rec.keep": "Conserva l immagine parziale",
   "desktop.rec.discard": "Scarta la parziale",
   "desktop.rec.retryTiles": "Riprova i riquadri mancanti",

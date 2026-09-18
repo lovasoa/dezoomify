@@ -1,6 +1,8 @@
 // Desktop job control (todo 2.2 split from main.tsx).
-// Controller walks plus the failure/completion terminals. Job state arrives
-// through explicit env callbacks, so this module owns no globals.
+// Failure/completion terminals plus the opaque shell choice strings. Job
+// state arrives through explicit env callbacks, so this module owns no
+// globals. Shell lifecycle signals map to single controller transitions;
+// selection steps are never synthesized here.
 // File move, no behavior change.
 import { describeFailure, t } from "@dezoomify/shared-ui";
 import {
@@ -9,15 +11,14 @@ import {
   trimTechnical,
 } from "./errorCopy.ts";
 
-// Opaque desktop choice strings. They must keep matching the shell mapping
-// (apps/desktop/src-tauri/src/jobs.rs map_choice_kind) and the engine
-// response shapes (RetryReady needs att:<suffix>, PartialKeep derives keep
-// from keep/discard/partial markers):
-// - retry -> RetryReady ("att:" prefix)
-// - keep-partial / discard-partial -> PartialKeep ("partial:" + keep/discard)
-export const RETRY_CHOICE = "att:0:ready";
-export const KEEP_PARTIAL_CHOICE = "partial:keep";
-export const DISCARD_PARTIAL_CHOICE = "partial:discard";
+// Typed desktop choice shapes sent to the shell `answer_choice` command.
+// Structured end to end: these objects decode to the shell `Choice` enum
+// directly; no string parsing is involved.
+export type AnswerChoice =
+  | { kind: "image"; index: number }
+  | { kind: "level"; index: number }
+  | { kind: "partial"; keep: boolean }
+  | { kind: "retry" };
 
 
 export function isTerminalStatus(status: string): boolean {
@@ -26,7 +27,7 @@ export function isTerminalStatus(status: string): boolean {
 
 
 export interface PendingDecision {
-  kind: "destination-request" | "destination-recovery" | "partial-recovery";
+  kind: "destination-recovery" | "partial-recovery";
   reason: string;
   recovery?: string;
   attempt?: string;
@@ -96,29 +97,6 @@ export function dispatchFail(env: FailEnv, code: string, message: string, opts?:
 }
 
 
-export function ensureChosenThroughPreflight(
-  dispatch: (event: unknown) => void,
-  sessionId: string,
-  next: () => number,
-  nativeTransport: string,
-  imageCount?: number,
-): void {
-  // The native driver selects images[0] at the largest fitting level, so the
-  // shipped desktop path walks the shared controller from discovering through
-  // selection into downloading on each grant and completion signal.
-  dispatch({
-    seq: next(),
-    sessionId,
-    kind: "images-found",
-    ...(typeof imageCount === "number" ? { imageCount } : {}),
-    transport: nativeTransport,
-  });
-  dispatch({ seq: next(), sessionId, kind: "image-chosen" });
-  dispatch({ seq: next(), sessionId, kind: "level-chosen" });
-  dispatch({ seq: next(), sessionId, kind: "preflight-ok", transport: nativeTransport });
-}
-
-
 export interface CompletedInfo {
   width: number;
   height: number;
@@ -160,7 +138,6 @@ export function completeJob(
   missing?: Array<string>,
 ): void {
   if (isTerminalStatus(env.getStatus())) return;
-  ensureChosenThroughPreflight(env.dispatch, env.sessionId(), env.next, env.nativeTransport);
   if (completedInfo) env.setCompletedInfo(completedInfo);
   const info = env.getCompletedInfo();
   if (info && info.width > 0 && info.height > 0) {

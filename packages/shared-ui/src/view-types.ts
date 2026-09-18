@@ -1,5 +1,5 @@
 import type { AppCapabilities, ControllerState } from "./controller.ts";
-import type { HistoryEntry } from "./history.ts";
+import type { HistoryEntry } from "@dezoomify/app-model";
 import type { ReactElement, ReactNode } from "react";
 
 /** Effects supplied by the graphical product that hosts the shared UI. */

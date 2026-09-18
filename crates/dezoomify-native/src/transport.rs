@@ -252,9 +252,24 @@ async fn fetch_once(
         )),
         Err(error) => Err(NativeError::new(
             "transport.network-error",
-            format!("network failure: {error}"),
+            format!(
+                "network failure: {}",
+                redact_url_from_error(&error, &request.uri)
+            ),
         )),
     }
+}
+
+/// Strip credential-bearing URL text from a transport diagnostic: reqwest
+/// error displays echo the request URL verbatim, so the raw URI is replaced
+/// with its redacted form (sensitive query keys, userinfo, and fragments
+/// never reach logs, events, or error messages).
+fn redact_url_from_error(error: &impl std::fmt::Display, uri: &str) -> String {
+    let redacted = dezoomify_core::core::redact_uri(uri);
+    if redacted == uri {
+        return error.to_string();
+    }
+    error.to_string().replace(uri, &redacted)
 }
 
 /// Stream the body with a hard cap (`max_bytes + 1`): oversize responses fail
@@ -285,9 +300,13 @@ async fn read_body_capped(
             }
             Ok(None) => break,
             Err(e) => {
+                let url = response.url().clone();
                 return Err(NativeError::new(
                     "transport.network-error",
-                    format!("body read failed: {e}"),
+                    format!(
+                        "body read failed: {}",
+                        redact_url_from_error(&e, url.as_str())
+                    ),
                 ));
             }
         }

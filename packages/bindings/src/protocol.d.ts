@@ -1,6 +1,4 @@
 export type {
-  ArenaHandle,
-  BufferHandle,
   CatalogDto,
   CatalogEntryDto,
   HeaderDto,

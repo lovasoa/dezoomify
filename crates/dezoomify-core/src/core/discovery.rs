@@ -60,23 +60,6 @@ pub enum TransportKind {
     DisplayOnly,
 }
 
-impl TransportKind {
-    /// Lenient wire parse of a host transport string. Aliases cover the
-    /// strings today's hosts actually send; unknown and missing values
-    /// fall back to the direct transport (it is the first every host
-    /// tries), so a stale host never fails discovery outright.
-    #[must_use]
-    pub fn from_wire(value: Option<&str>) -> Self {
-        match value {
-            Some("metadata-proxy" | "proxy") => Self::MetadataProxy,
-            Some("browser-session" | "extension-origin") => Self::BrowserSession,
-            Some("native") => Self::Native,
-            Some("display-only") => Self::DisplayOnly,
-            _ => Self::Direct,
-        }
-    }
-}
-
 /// Stable code of one fetch failure. Variant names mirror the codes the
 /// hosts already emit, so the browser passes its strings through
 /// unmapped; [`FetchCode::Unknown`] exists only to decode foreign codes
@@ -1697,30 +1680,5 @@ mod tests {
         assert_eq!(lenient.transport, TransportKind::Direct);
         assert_eq!(lenient.http, None);
         assert_eq!(lenient.reason, None);
-    }
-
-    #[test]
-    fn transport_kind_parses_host_strings() {
-        assert_eq!(
-            TransportKind::from_wire(Some("browser-session")),
-            TransportKind::BrowserSession
-        );
-        assert_eq!(
-            TransportKind::from_wire(Some("extension-origin")),
-            TransportKind::BrowserSession
-        );
-        assert_eq!(
-            TransportKind::from_wire(Some("metadata-proxy")),
-            TransportKind::MetadataProxy
-        );
-        assert_eq!(
-            TransportKind::from_wire(Some("native")),
-            TransportKind::Native
-        );
-        assert_eq!(TransportKind::from_wire(None), TransportKind::Direct);
-        assert_eq!(
-            TransportKind::from_wire(Some("stale-host")),
-            TransportKind::Direct
-        );
     }
 }

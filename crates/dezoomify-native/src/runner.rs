@@ -495,19 +495,20 @@ fn project_event(
     acquired: &mut u64,
     total: &mut u64,
 ) {
-    match event.kind.as_str() {
-        "discovery" => *lifecycle = Lifecycle::Discovering,
-        "downloading" => {
+    match event {
+        PipelineEvent::Discovery { .. } => *lifecycle = Lifecycle::Discovering,
+        PipelineEvent::Downloading {
+            acquired: next_acquired,
+            total: next_total,
+        } => {
             *lifecycle = Lifecycle::AcquiringTiles;
-            if let Some(value) = event.detail.get("acquired").and_then(|v| v.parse().ok()) {
-                *acquired = (*acquired).max(value);
-            }
-            if let Some(value) = event.detail.get("total").and_then(|v| v.parse().ok()) {
-                *total = (*total).max(value);
-            }
+            *acquired = (*acquired).max(*next_acquired);
+            *total = (*total).max(*next_total);
         }
-        "encoding" => *lifecycle = Lifecycle::Finalizing,
-        "recovery-requested" => *lifecycle = Lifecycle::AwaitingPartialDecision,
+        PipelineEvent::Encoding { .. } => *lifecycle = Lifecycle::Finalizing,
+        PipelineEvent::RecoveryRequested { .. } => {
+            *lifecycle = Lifecycle::AwaitingPartialDecision;
+        }
         _ => {}
     }
 }

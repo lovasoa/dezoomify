@@ -33,7 +33,7 @@
 //! * Kept partials publish to the `.partial` sibling, never masquerading
 //!   as complete output.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use dezoomify_core::Vec2d;
@@ -555,46 +555,31 @@ impl Sink {
                     exif.as_deref(),
                 )?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(
-                    &mut *on_event,
-                    BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
-                );
+                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Jpeg => {
                 let encoded = encode_jpeg(&canvas, self.jpeg_quality, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(
-                    &mut *on_event,
-                    BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
-                );
+                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Tiff => {
                 let encoded = encode_tiff(&canvas, self.compression, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(
-                    &mut *on_event,
-                    BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
-                );
+                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Zif => {
                 let encoded = encode_zif_pyramid(&canvas, self.compression, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(
-                    &mut *on_event,
-                    BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
-                );
+                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Webp => {
                 let encoded = encode_webp(&canvas, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(
-                    &mut *on_event,
-                    BTreeMap::from([("bytes".to_string(), encoded.len().to_string())]),
-                );
+                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::IiifDir => {
@@ -607,10 +592,8 @@ impl Sink {
                     info_json.len() as u64 + tiles.iter().map(|(_, b)| b.len() as u64).sum::<u64>();
                 Self::emit_encoding(
                     &mut *on_event,
-                    BTreeMap::from([
-                        ("bytes".to_string(), info_json.len().to_string()),
-                        ("files".to_string(), (tiles.len() + 1).to_string()),
-                    ]),
+                    info_json.len() as u64,
+                    Some(tiles.len() as u64 + 1),
                 );
                 commit_iiif_dir(&dest, &info_json, &tiles)?;
             }
@@ -666,11 +649,8 @@ impl Sink {
         self.painted_count
     }
 
-    fn emit_encoding(on_event: &mut dyn FnMut(PipelineEvent), detail: BTreeMap<String, String>) {
-        on_event(PipelineEvent {
-            kind: "encoding".to_string(),
-            detail,
-        });
+    fn emit_encoding(on_event: &mut dyn FnMut(PipelineEvent), bytes: u64, files: Option<u64>) {
+        on_event(PipelineEvent::Encoding { bytes, files });
     }
 }
 

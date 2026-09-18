@@ -1095,7 +1095,7 @@ name = "dezoomify-desktop"
 version = "0.0.0"
 dependencies = [
  "dezoomify-core",
- "dezoomify-job",
+ "dezoomify-engine",
  "dezoomify-native",
  "dezoomify-protocol",
  "open",
@@ -1114,9 +1114,9 @@ name = "dezoomify-engine"
 version = "0.1.0"
 dependencies = [
  "dezoomify-core",
- "dezoomify-job",
  "dezoomify-protocol",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1137,24 +1137,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "dezoomify-job"
-version = "2.0.0"
-dependencies = [
- "dezoomify-core",
- "dezoomify-protocol",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "dezoomify-native"
 version = "1.0.0"
 dependencies = [
  "axum",
  "criterion",
  "dezoomify-core",
+ "dezoomify-engine",
  "dezoomify-fixture-server",
- "dezoomify-job",
  "dezoomify-protocol",
  "image",
  "reqwest 0.12.28",
@@ -1183,7 +1173,7 @@ name = "dezoomify-wasm"
 version = "0.1.0"
 dependencies = [
  "dezoomify-core",
- "dezoomify-job",
+ "dezoomify-engine",
  "dezoomify-protocol",
  "serde",
  "serde-wasm-bindgen",

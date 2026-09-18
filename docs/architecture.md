@@ -4,7 +4,7 @@ dezoomify is one monorepo containing Rust crates, generated WASM bindings, the s
 
 ```mermaid
 flowchart TD
-    UI[Shared UI or CLI] -->|typed command| JOB[crates/dezoomify-job]
+    UI[Shared UI or CLI] -->|typed command| JOB[crates/dezoomify-engine]
     JOB <-->|supplied bytes and results| CORE[crates/dezoomify-core]
     JOB -->|typed effects| HOST
     HOST -->|typed events| UI
@@ -23,7 +23,7 @@ flowchart TD
 
 Pure Rust: turns supplied bytes and URLs into discovery results, image catalogs, tile plans, and processing recipes. It never fetches anything and touches no network, filesystem, clock, UI, or codecs. Formats register in one ordered registry; registry order sets automatic precedence. Catalog and level order freezes before publication; selection uses array positions.
 
-### `crates/dezoomify-job`
+### `crates/dezoomify-engine`
 
 Pure state machine: owns discovery, selection, planning, acquisition, recovery choices, and finalization. Hosts send typed commands and carry out the effects it emits. It keeps no routing identifiers; integrations keep opaque job tokens outside it. See [Job engine](job-engine.md).
 
@@ -61,8 +61,8 @@ flowchart LR
         T2[Extension transport:<br/>tab-origin fetch + img fallback]
     end
     subgraph WASM[WASM module]
-        SES[Session<br/>job + byte arena]
-        JOB[crates/dezoomify-job]
+        SES[Session<br/>job + direct bytes]
+        JOB[crates/dezoomify-engine]
         CORE[crates/dezoomify-core]
     end
     SITE --> EH

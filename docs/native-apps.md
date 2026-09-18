@@ -1,6 +1,6 @@
 # Native apps
 
-The CLI and Tauri desktop app share `crates/dezoomify-native`: native HTTP, filesystem, decoding, processing, and encoders driving `crates/dezoomify-job`. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract); native execution only below. User behavior: [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md).
+The CLI and Tauri desktop app share `crates/dezoomify-native`: native HTTP, filesystem, decoding, processing, and encoders driving `crates/dezoomify-engine`. Effect meanings are in the [host-effect contract](job-engine.md#host-effect-contract); native execution only below. User behavior: [Desktop app guide](user/desktop-app.md), [Command-line guide](user/command-line.md).
 
 ## Native runtime
 
