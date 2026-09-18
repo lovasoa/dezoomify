@@ -65,48 +65,31 @@ export function collectCandidates(): { ok: true; documentUrl: string; inputs: Ar
 }
 
 /**
- * Fetch one engine-declared source request in the source tab's origin and
- * return only bounded, structured-cloneable data. Credentials default to
+ * Fetch one coordinator-approved source request in the source tab's origin
+ * and return only bounded, structured-cloneable data. The caller owns all
+ * validation (url, method, headers); this unit performs only tab-side I/O,
+ * so it stays free of validation branches. Credentials default to
  * same-origin: the page's session applies to its own origin, while public
  * cross-origin metadata uses ordinary CORS instead of credentialed CORS.
- * The body travels as one base64 payload: execution results must stay
- * JSON-serializable in Chrome, so typed arrays and chunk streams are not
- * used. The coordinator retries a failed source request through the
- * extension-origin transport. Cookies/session credentials are never part of
- * this result.
+ * The body travels as one base64 payload via the native codec (the
+ * extension minimums guarantee it): execution results must stay
+ * JSON-serializable in Chrome, so typed arrays are not used. The
+ * coordinator retries a failed source request through the extension-origin
+ * transport. Cookies/session credentials are never part of this result.
  */
 export async function fetchSource(request: SourceRequest): Promise<FetchFailure | { ok: true; status: number; url: string; bytes: number; data: string }> {
-  const MAX_URL_LENGTH = 2048;
   const MAX_SOURCE_FETCH_BYTES = 8 * 1024 * 1024;
-  const validMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
   const fail = (code: string, status?: number): FetchFailure => ({ ok: false, code, ...(Number.isInteger(status) ? { status } : {}) });
 
-  if (!request || typeof request !== "object" || typeof request.url !== "string" || request.url.length === 0 || request.url.length > MAX_URL_LENGTH) {
-    return fail("invalid-url");
-  }
-  let parsed;
-  try { parsed = new URL(request.url); } catch { return fail("invalid-url"); }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fail("invalid-url");
-
-  const method = typeof request.method === "string" && request.method.length > 0 ? request.method.toUpperCase() : "GET";
-  if (!validMethods.has(method)) return fail("invalid-method");
-  if (!Array.isArray(request.headers)) return fail("invalid-headers");
   const headers: Record<string, string> = {};
-  for (const header of request.headers) {
-    if (!header || typeof header.name !== "string" || typeof header.value !== "string" ||
-      !header.name || /[\r\n]/.test(header.name) || /[\r\n]/.test(header.value)) return fail("invalid-headers");
-    headers[header.name] = header.value;
-  }
+  for (const header of request.headers) headers[header.name] = header.value;
 
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   try {
-    const response = await fetch(parsed.href, { method, headers, signal: controller?.signal });
-    const responseUrl = response?.url || parsed.href;
-    let responseParsed;
-    try { responseParsed = new URL(responseUrl); } catch { return fail("invalid-response"); }
-    if (responseParsed.protocol !== "http:" && responseParsed.protocol !== "https:") return fail("invalid-response");
+    const response = await fetch(request.url, { method: request.method ?? "GET", headers, signal: controller?.signal });
     if (!response || typeof response.status !== "number") return fail("invalid-response");
     if (!response.ok) return fail("http-error", response.status);
+    const responseUrl = typeof response.url === "string" && response.url !== "" ? response.url : request.url;
 
     const parts: Uint8Array[] = [];
     let total = 0;
@@ -135,11 +118,7 @@ export async function fetchSource(request: SourceRequest): Promise<FetchFailure 
     const bytes = new Uint8Array(total);
     let offset = 0;
     for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
-    let binary = "";
-    for (let at = 0; at < bytes.byteLength; at += 0x8000) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(at, at + 0x8000) as unknown as number[]);
-    }
-    return { ok: true, status: response.status, url: responseUrl, bytes: total, data: btoa(binary) };
+    return { ok: true, status: response.status, url: responseUrl, bytes: total, data: bytes.toBase64() };
   } catch (error) {
     const caught = error as { code?: unknown; name?: unknown };
     if (caught?.code === "too-large") return fail("too-large");

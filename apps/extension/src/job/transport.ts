@@ -1,4 +1,5 @@
-import { asFetchFailure, originOf } from "../runtime/fetch.ts";
+import { asFetchFailure } from "../runtime/fetch.ts";
+import { decodeBase64Payload, originOfUrl, SOURCE_FETCH_BYTE_LIMIT } from "@dezoomify/browser-runtime";
 import type { AcquireEffect } from "@dezoomify/browser-runtime";
 
 /** @typedef {{ jobId: string, tabId: number, frameId: number, documentGeneration: number }} JobBinding */
@@ -13,22 +14,6 @@ export function isJobBinding(value: unknown): value is JobBinding {
   return !!binding && typeof binding.jobId === "string" && binding.jobId.startsWith("job:") &&
     Number.isInteger(binding.tabId) && Number.isInteger(binding.frameId) &&
     typeof binding.documentGeneration === "number" && Number.isInteger(binding.documentGeneration) && binding.documentGeneration >= 0;
-}
-
-/**
- * Decode one base64 source payload. The coordinator already validated the
- * length and byte count; this is a shape guard so a malformed bridge message
- * fails typed instead of crashing the fetch.
- * @param {unknown} value
- */
-function decodeSourceData(value: unknown): Uint8Array | null {
-  if (typeof value !== "string" || value.length === 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return null;
-  try {
-    const binary = atob(value);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  } catch { return null; }
 }
 
 /**
@@ -73,7 +58,7 @@ export function createCoordinatorSourceTransport(deps: { sendMessage(message: un
         }));
         return true;
       }
-      const bytes = decodeSourceData(message.data);
+      const bytes = decodeBase64Payload(message.data, SOURCE_FETCH_BYTE_LIMIT);
       if (!bytes) {
         state.reject(Object.assign(new Error("malformed source payload"), { category: "malformed" }));
         return true;
@@ -91,7 +76,7 @@ export function engineFailure(error: unknown) {
 
 /** @param {unknown} uri */
 function requestOrigin(uri: unknown): string {
-  try { return typeof uri === "string" ? originOf(uri) : ""; } catch { return ""; }
+  return typeof uri === "string" ? originOfUrl(uri) : "";
 }
 
 /**

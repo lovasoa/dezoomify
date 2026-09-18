@@ -16,7 +16,8 @@ import {
   type DispatchTable,
   type WorkerHostOutput,
 } from "@dezoomify/browser-runtime";
-import { createExtensionFetcher, originOf } from "../runtime/fetch.ts";
+import { createExtensionFetcher } from "../runtime/fetch.ts";
+import { originOfUrl } from "@dezoomify/browser-runtime";
 import { createLogger } from "@dezoomify/browser-runtime/logging";
 import type { EngineHost } from "@dezoomify/browser-runtime";
 import { AccessRequestView, PartialOutputActions } from "./view.tsx";
@@ -407,7 +408,7 @@ function setup(bound: unknown) {
   };
   try {
     const documentUrl = (bound as { documentUrl?: unknown }).documentUrl;
-    siteOrigin = typeof documentUrl === "string" ? originOf(documentUrl) : "";
+    siteOrigin = typeof documentUrl === "string" ? originOfUrl(documentUrl) : "";
   } catch { siteOrigin = ""; }
   jobLog.info("binding-received", `jobId=${binding.jobId} tab=${binding.tabId} frame=${binding.frameId} gen=${binding.documentGeneration}`);
   followDepth = 0;
