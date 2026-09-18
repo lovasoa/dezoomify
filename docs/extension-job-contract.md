@@ -60,7 +60,10 @@ executor (imported from `packages/browser-runtime`) executes the engine's
 effects. The controller never grows a second state machine:
 
 - Catalog selection is deterministic (`engine-selection.ts`): largest ready
-  image, largest level that fits the browser canvas. Selection commands
+  image, largest level that fits the browser canvas. When no ready image is
+  selectable, the first still-deferred `ImageRequest` entry's URI is followed
+  with a fresh bounded attempt (`MAX_DEFERRED_FOLLOWS`), mirroring the native
+  driver; otherwise the job fails typed. Selection commands
   (`select-image`, `select-level`) are correlated to the job.
 - Tile bytes are decoded during acquisition (the native model): a tile
   that cannot decode fails its acquisition outcome and flows through the

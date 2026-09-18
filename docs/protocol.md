@@ -35,7 +35,10 @@ union variant.
 carries ordered discovery roots. Resource answers carry a job-scoped request
 number and either a buffer reference or a `FetchFailureDto`. Image and level
 choices are zero-based positions in the immutable catalog. Recovery choices
-carry the outstanding decision generation.
+carry the outstanding decision generation. The catalog is an ordered union:
+`Image` entries carry selectable geometry and levels, while `ImageRequest`
+entries carry the follow-up URI of still-deferred metadata for the host to
+follow with a fresh bounded job.
 
 `HostEffect` is exhaustive: resource acquisition, tile/probe acquisition,
 output finalization, host cancellation, and recovery decisions. `JobEvent` is

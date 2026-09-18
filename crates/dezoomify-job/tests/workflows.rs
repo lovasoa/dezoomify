@@ -81,9 +81,9 @@ fn discover_success_minimal() {
         .rev()
         .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("catalog"))
         .expect("catalog event");
-    let image = &catalog_event["images"][0];
+    let image = &catalog_event["entries"][0];
     assert_eq!(image["format"], "deepzoom");
-    assert_eq!(image["readiness"], "ready");
+    assert_eq!(image["kind"], "image");
     assert_eq!(image["width"], 512);
     assert_eq!(image["height"], 512);
     assert_eq!(image["sourceKind"], "grid");

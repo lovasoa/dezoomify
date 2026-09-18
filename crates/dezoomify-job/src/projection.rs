@@ -1,7 +1,7 @@
 //! Total core-to-protocol catalog projection.
 
 use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, LevelDescriptor};
-use dezoomify_protocol::dto::{CatalogDto, ImageDto, LevelDto, Readiness};
+use dezoomify_protocol::dto::{CatalogDto, CatalogEntryDto, ImageDto, ImageRequestDto, LevelDto};
 
 fn source_kind(level: &LevelDescriptor) -> &'static str {
     use dezoomify_core::core::tile_plan::TileSource;
@@ -25,7 +25,7 @@ fn level_dto(position: usize, level: &LevelDescriptor) -> LevelDto {
     }
 }
 
-fn image_dto(entry: &CatalogEntry) -> ImageDto {
+fn image_dto(entry: &CatalogEntry) -> CatalogEntryDto {
     match entry {
         CatalogEntry::Ready(image) => {
             let levels: Vec<_> = image
@@ -37,25 +37,19 @@ fn image_dto(entry: &CatalogEntry) -> ImageDto {
             let (width, height) = levels.iter().fold((0, 0), |(width, height), level| {
                 (width.max(level.width), height.max(level.height))
             });
-            ImageDto {
+            CatalogEntryDto::Image(ImageDto {
                 title: image.title.clone(),
                 format: image.format.to_string(),
                 width,
                 height,
-                readiness: Readiness::Ready,
                 source_kind: image.levels.first().map_or("unknown", source_kind).into(),
                 levels,
-            }
+            })
         }
-        CatalogEntry::Deferred(image) => ImageDto {
+        CatalogEntry::Deferred(image) => CatalogEntryDto::ImageRequest(ImageRequestDto {
             title: image.title.clone(),
-            format: String::new(),
-            width: 0,
-            height: 0,
-            readiness: Readiness::Deferred,
-            source_kind: "deferred".into(),
-            levels: Vec::new(),
-        },
+            uri: image.uri.clone(),
+        }),
     }
 }
 
@@ -63,7 +57,7 @@ fn image_dto(entry: &CatalogEntry) -> ImageDto {
 #[must_use]
 pub fn project_catalog(catalog: &ImageCatalog) -> CatalogDto {
     CatalogDto {
-        images: catalog.entries().iter().map(image_dto).collect(),
+        entries: catalog.entries().iter().map(image_dto).collect(),
     }
 }
 
@@ -108,14 +102,20 @@ mod tests {
             }),
         ]);
         let dto = project_catalog(&catalog);
-        assert_eq!(dto.images[0].title, None);
+        let CatalogEntryDto::Image(image) = &dto.entries[0] else {
+            panic!("ready entries project to images");
+        };
+        assert_eq!(image.title, None);
         assert_eq!(
-            dto.images[0].levels[0].label,
+            image.levels[0].label,
             "Level 1 (  512 x   512 pixels,   4 tiles)"
         );
-        assert_eq!(dto.images[1].title, None);
-        assert_eq!(dto.images[1].readiness, Readiness::Deferred);
+        let CatalogEntryDto::ImageRequest(request) = &dto.entries[1] else {
+            panic!("deferred entries project to image requests");
+        };
+        assert_eq!(request.title, None);
+        assert_eq!(request.uri, "https://fixtures.test/manifest");
 
-        assert_eq!(dto.images.len(), 2);
+        assert_eq!(dto.entries.len(), 2);
     }
 }

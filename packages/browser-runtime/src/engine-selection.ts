@@ -5,10 +5,19 @@
 // rule; this is the shared one: the ready image whose largest declared level
 // is biggest, and inside it the largest level that fits the browser canvas
 // (falling back to the smallest declared level so the plan gate fails fast,
-// mirroring `pickLevel` in `./limits.ts`). Pure: no I/O, no clocks.
+// mirroring `pickLevel` in `./limits.ts`). When no ready image is selectable,
+// `pickDeferredUri` surfaces the first still-deferred entry so the host can
+// follow it with a fresh bounded attempt, mirroring the native driver. Pure:
+// no I/O, no clocks.
 import { BROWSER_LIMITS, probeLimits, safeArea } from "./limits.ts";
 import type { BrowserLimits } from "./types.ts";
 import type { CatalogDto, ImageDto, LevelDto } from "@dezoomify/wasm-bindings";
+
+/**
+ * Deferred-resolution bound: the initial discovery plus this many deferred
+ * follows, matching the native driver's `MAX_DEFERRED_FOLLOWS`.
+ */
+export const MAX_DEFERRED_FOLLOWS = 10;
 
 export interface EngineSelection {
   image: number;
@@ -34,13 +43,13 @@ export function pickEngineSelection(
   catalog: CatalogDto | undefined,
   limits: BrowserLimits = BROWSER_LIMITS,
 ): EngineSelection | null {
-  const images = Array.isArray(catalog?.images) ? catalog.images : [];
+  const entries = Array.isArray(catalog?.entries) ? catalog.entries : [];
   let bestImage: ImageDto | null = null;
   let bestImageIndex = -1;
   let bestImageArea = -1;
-  for (const [imageIndex, image] of images.entries()) {
-    if (image?.readiness && image.readiness !== "ready") continue;
-    const levels = Array.isArray(image.levels) ? image.levels : [];
+  for (const [imageIndex, entry] of entries.entries()) {
+    if (!entry || entry.kind !== "image") continue;
+    const levels = Array.isArray(entry.levels) ? entry.levels : [];
     if (levels.length === 0) continue;
     let imageArea = -1;
     for (const level of levels) {
@@ -50,7 +59,7 @@ export function pickEngineSelection(
     // Probe-driven and adversarial dimensions may not have a safe area yet.
     // They remain selectable; declared geometry is evaluated below.
     if (!bestImage || imageArea >= bestImageArea) {
-      bestImage = image;
+      bestImage = entry;
       bestImageIndex = imageIndex;
       bestImageArea = imageArea;
     }
@@ -85,4 +94,23 @@ export function pickEngineSelection(
     level: best ? bestIndex : smallestIndex,
     ...(typeof bestImage.title === "string" ? { title: bestImage.title } : {}),
   };
+}
+
+/**
+ * Follow-up URI of the first still-deferred catalog entry, or null when the
+ * catalog has none. The caller follows it with a fresh bounded attempt; the
+ * engine never resolves deferred metadata silently.
+ */
+export function pickDeferredUri(catalog: CatalogDto | undefined): string | null {
+  const entries = Array.isArray(catalog?.entries) ? catalog.entries : [];
+  for (const entry of entries) {
+    if (
+      entry?.kind === "image-request"
+      && typeof entry.uri === "string"
+      && entry.uri !== ""
+    ) {
+      return entry.uri;
+    }
+  }
+  return null;
 }

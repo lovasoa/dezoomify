@@ -17,7 +17,7 @@ test("picks the largest level that fits the browser canvas", () => {
     { width: 32768, height: 32768 },
     { width: 2147483648, height: 2140449280 },
   ];
-  assert.deepEqual(pickEngineSelection({ images: [{ readiness: "ready", levels }] }), { image: 0, level: 2 });
+  assert.deepEqual(pickEngineSelection({ entries: [{ kind: "image", levels }] }), { image: 0, level: 2 });
 });
 
 test("a level exactly at the bound still fits", () => {
@@ -25,7 +25,7 @@ test("a level exactly at the bound still fits", () => {
     { width: 8192, height: 8192 },
     { width: 16384, height: 16384 },
   ];
-  assert.deepEqual(pickEngineSelection({ images: [{ readiness: "ready", levels }] }), { image: 0, level: 1 });
+  assert.deepEqual(pickEngineSelection({ entries: [{ kind: "image", levels }] }), { image: 0, level: 1 });
 });
 
 test("falls back to the smallest level when nothing fits", () => {
@@ -35,11 +35,11 @@ test("falls back to the smallest level when nothing fits", () => {
   ];
   // Smallest, so the post-plan canvas check fails cheaply with desktop-app
   // guidance instead of planning the gigapixel level.
-  assert.deepEqual(pickEngineSelection({ images: [{ readiness: "ready", levels }] }), { image: 0, level: 0 });
+  assert.deepEqual(pickEngineSelection({ entries: [{ kind: "image", levels }] }), { image: 0, level: 0 });
 });
 
 test("undeclared levels have no selectable geometry", () => {
   const levels = [{ width: 0, height: 0 }, { width: 0, height: 0 }];
-  assert.equal(pickEngineSelection({ images: [{ readiness: "ready", levels }] }), null);
-  assert.equal(pickEngineSelection({ images: [] }), null);
+  assert.equal(pickEngineSelection({ entries: [{ kind: "image", levels }] }), null);
+  assert.equal(pickEngineSelection({ entries: [] }), null);
 });

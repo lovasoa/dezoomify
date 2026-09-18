@@ -153,7 +153,7 @@ impl ScriptedHost {
             .iter()
             .rev()
             .find(|v| v.get("kind").and_then(serde_json::Value::as_str) == Some("catalog"))?;
-        let image = event.get("images")?.get(0)?;
+        let image = event.get("entries")?.get(0)?;
         let levels: Vec<u32> = image
             .get("levels")?
             .as_array()?
@@ -272,7 +272,7 @@ fn event_json(seq: u32, event: JobEvent) -> serde_json::Value {
             serde_json::json!({"kind":"job-state","seq":seq,"state":state.name()})
         }
         JobEvent::Catalog { catalog } => {
-            serde_json::json!({"kind":"catalog","seq":seq,"images":catalog.images})
+            serde_json::json!({"kind":"catalog","seq":seq,"entries":catalog.entries})
         }
         JobEvent::Levels { image, levels } => {
             serde_json::json!({"kind":"levels","seq":seq,"image":image,"levels":levels})
@@ -335,9 +335,9 @@ fn format_event(value: &serde_json::Value) -> (u64, String) {
     let detail = match kind.as_str() {
         "job-state" => str_field(value, "state"),
         "catalog" => value
-            .get("images")
-            .and_then(|images| images.as_array())
-            .and_then(|images| images.first())
+            .get("entries")
+            .and_then(|entries| entries.as_array())
+            .and_then(|entries| entries.first())
             .and_then(|first| first.get("id"))
             .and_then(|id| id.as_str())
             .map(ToString::to_string),
