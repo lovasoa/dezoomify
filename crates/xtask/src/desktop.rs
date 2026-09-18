@@ -182,6 +182,7 @@ fn test_desktop_e2e_window() -> Result<(), String> {
         std::time::Duration::from_secs(20 * 60),
         &[
             "--test",
+            "--test-reporter=dot",
             "apps/desktop/tests/window-e2e/specs/desktop.e2e.mjs",
         ],
         &[
@@ -920,7 +921,12 @@ fn run_node(args: &[&str]) -> Result<(), String> {
     // Vite descendant with the owning spec named instead of letting CI hang.
     let label = args.join(" ");
     // React `.tsx` sources import directly under the test hook.
-    let mut with_loader: Vec<&str> = vec!["--import", "./test/tsx-loader.mjs", "--test"];
+    let mut with_loader: Vec<&str> = vec![
+        "--import",
+        "./test/tsx-loader.mjs",
+        "--test",
+        "--test-reporter=dot",
+    ];
     with_loader.extend_from_slice(args);
     run_node_with_deadline(
         std::time::Duration::from_secs(6 * 60),
@@ -941,21 +947,8 @@ pub(crate) fn run_node_with_deadline(
     env: &[(&str, &str)],
     label: &str,
 ) -> Result<(), String> {
-    // `--test-reporter=dot` keeps a passing run to one character per test. The
-    // second, file-bound reporter captures the diagnostics dot drops (most
-    // visibly a spec that throws while loading): printed only on failure.
-    let report =
-        std::env::temp_dir().join(format!("dezoomify-node-test-{}.txt", std::process::id()));
-    let _ = std::fs::remove_file(&report);
-    let report_arg = format!("--test-reporter-destination={}", report.display());
     let mut command = Command::new("node");
     command
-        .args([
-            "--test-reporter=dot",
-            "--test-reporter-destination=stdout",
-            "--test-reporter=spec",
-            report_arg.as_str(),
-        ])
         .args(args)
         .envs(env.iter().copied())
         .current_dir(super::repo_root());
@@ -971,16 +964,13 @@ pub(crate) fn run_node_with_deadline(
         match child.try_wait() {
             Ok(Some(status)) => {
                 if status.success() {
-                    let _ = std::fs::remove_file(&report);
                     return Ok(());
                 }
-                print_node_failure_report(&report);
                 return Err(format!("node tests failed ({label})"));
             }
             Ok(None) => {
                 if start.elapsed() > deadline {
                     terminate_owned_process_tree(&mut child);
-                    print_node_failure_report(&report);
                     return Err(format!(
                         "node tests killed after {:.0} s ({label}): the spec process did not exit; \
                          a leaked child is holding its pipes or the frontend server open",
@@ -992,15 +982,6 @@ pub(crate) fn run_node_with_deadline(
             Err(e) => return Err(format!("failed to wait for node ({label}): {e}")),
         }
     }
-}
-
-/// Emit and clear the diagnostics a failing run left for the reporter that is
-/// bound to a file. Successful runs never reach this, so quiet lanes stay quiet.
-fn print_node_failure_report(report: &std::path::Path) {
-    if let Ok(text) = std::fs::read_to_string(report) {
-        eprint!("{text}");
-    }
-    let _ = std::fs::remove_file(report);
 }
 
 #[cfg(test)]
