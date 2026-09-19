@@ -432,8 +432,6 @@ impl Session {
                 "resource does not match an outstanding request",
             ));
         }
-        self.live_discovery_requests.remove(&request);
-        self.request_context.remove(&request);
         // Discovery is intentionally concurrent. A sibling metadata
         // fetch may finish after another candidate has already
         // produced the catalog and advanced the job. The job engine
@@ -453,6 +451,12 @@ impl Session {
                 &bytes,
             )
             .map_err(Self::engine_error)?;
+        // The engine keeps an outstanding metadata effect live when it
+        // rejects an empty body, so only settle the bridge correlation after
+        // the engine accepted this completion. Otherwise a host cannot retry
+        // the same effect with the body it subsequently obtained.
+        self.live_discovery_requests.remove(&request);
+        self.request_context.remove(&request);
         Ok(self.drain_update(update))
     }
 
