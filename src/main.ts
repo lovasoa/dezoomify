@@ -193,12 +193,10 @@ const jobActivity = createJobActivity({ onUpdate: update });
 const webLog = createLogger("web", { defaultContext: "web" });
 webLog.addSink((entry) => jobActivity.pushLog(entry.line));
 let tileAttempts = 0;
-let tileRetries = 0;
 const metadataAttempts: Array<{ at: number; transport: string; target: string; outcome: string; durationMs: number; bytes?: number }> = [];
 
 function resetActivity(url: string): void {
   tileAttempts = 0;
-  tileRetries = 0;
   metadataAttempts.length = 0;
   jobActivity.reset(url, REQUEST_TIMEOUT_MS);
   jobActivity.state.detail = `Contacting ${hostOf(url)}…`;
@@ -221,7 +219,7 @@ function refreshDiagnostics(): void {
   if (tileAttempts > 0) {
     if (lines.length > 0) lines.push("");
     lines.push("Tile acquisition");
-    lines.push(`${tileAttempts} attempts · ${tileRetries} retries`);
+    lines.push(`${tileAttempts} one-attempt requests`);
   }
   a.diagnostics = lines.join("\n");
 }
@@ -249,7 +247,7 @@ const tileThrottle = createTileThrottle();
 const tileDecoder = createTileDecoder();
 
 // The product-specific proxy transport owns the actual /api/proxy POST.
-// Browser-runtime owns direct-first orchestration, fallback, retries, and
+// Browser-runtime owns direct-first orchestration, fallback, and
 // failure classification around this injected effect.
 const proxyTransport = createProxyTransport(
   (input: string, init?: Record<string, unknown>) =>
@@ -272,9 +270,8 @@ const webFetcher: WebFetcher = createWebFetcher({
     onUpdate: update,
     onMetadataAttempt: ({ startedAt, transport, target, outcome, bytes }) =>
       recordMetadataAttempt(startedAt, transport, target, outcome, bytes),
-    onTileAttempt: (retrying) => {
+    onTileAttempt: () => {
       tileAttempts += 1;
-      if (retrying) tileRetries += 1;
       refreshDiagnostics();
     },
   },
@@ -291,7 +288,7 @@ async function probeSizeFor(
   signal?: AbortSignal,
 ) {
   const probe = createProbeSize({
-    fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders, undefined, signal),
+    fetchTile: (probeUrl, probeHeaders) => webFetcher.fetchTileFor(probeUrl, probeHeaders, signal),
     decode: (bytes) => tileDecoder.decode(bytes),
     loadImage: async (probeUrl) => {
       const img = await loadTileImage(probeUrl, {
@@ -550,12 +547,7 @@ async function runJob(url: string, origin = url): Promise<void> {
           ...(typeof result.finalUri === "string" && result.finalUri !== "" ? { finalUri: result.finalUri } : {}),
         };
       }
-      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), undefined, signal);
-      return { bytes: new Uint8Array(result.bytes) };
-    },
-    fetchResourceOnce: async (effect, signal) => {
-      const request = effect.request;
-      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), 0, signal);
+      const result = await webFetcher.fetchTileFor(request.uri, headerRecord(request.headers), signal);
       return { bytes: new Uint8Array(result.bytes) };
     },
     probeSize: (probeUrl, probeHeaders, requestId, signal) => probeSizeFor(probeUrl, probeHeaders, signal),
@@ -572,23 +564,25 @@ async function runJob(url: string, origin = url): Promise<void> {
         blocked_reason?: unknown;
         retryable?: unknown;
         message?: unknown;
-        cause?: { reason?: unknown; transport?: unknown; http?: unknown };
+        cause?: { code?: unknown; reason?: unknown; transport?: unknown; http?: unknown };
         transportKind?: unknown;
         http?: unknown;
         preview?: unknown;
         detail?: unknown;
+        retry_after_ms?: unknown;
       };
       const reason = blockedReason(structured?.blocked_reason)
         ?? blockedReason(structured?.cause?.reason);
       const transport = errorTransport(structured?.transportKind)
         ?? errorTransport(structured?.cause?.transport);
       return {
-        code: stableErrorCode(error),
+        code: typeof structured?.cause?.code === "string" ? structured.cause.code : stableErrorCode(error),
         retryable: structured?.retryable === true,
         message: typeof structured?.message === "string" ? structured.message : "The browser could not read this resource.",
         ...(reason ? { blocked_reason: reason } : {}),
         transport: transport ?? "direct",
         ...(typeof structured?.http === "number" ? { http: structured.http } : {}),
+        ...(typeof structured?.retry_after_ms === "number" ? { retry_after_ms: structured.retry_after_ms } : {}),
         ...(typeof structured?.cause?.http === "number" ? { http: structured.cause.http } : {}),
         ...(typeof structured?.preview === "string" ? { preview: structured.preview } : {}),
         ...(typeof structured?.detail === "string" ? { detail: structured.detail } : {}),

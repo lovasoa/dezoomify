@@ -268,10 +268,10 @@ test("fetchMetadataFor retries a transient proxy throttle once", async () => {
   });
 });
 
-test("fetchTileFor retries then succeeds, else throws TILE_FAILED", async () => {
+test("fetchTileFor performs one attempt and returns retryable failures to the engine", async () => {
   const h = hooks();
   const attempts = [];
-  h.onTileAttempt = (retrying) => attempts.push(retrying);
+  h.onTileAttempt = () => attempts.push("attempt");
   let calls = 0;
   const fetcher = createWebFetcher({
     fetchImpl: async () => {
@@ -284,12 +284,14 @@ test("fetchTileFor retries then succeeds, else throws TILE_FAILED", async () => 
     messages,
     sleepFn: async () => {},
     throttle: async () => {},
-    randomFn: () => 0,
   });
-  const res = await fetcher.fetchTileFor("https://a.test/1.png", {});
-  assert.equal(calls, 3);
-  assert.ok(res.bytes instanceof ArrayBuffer);
-  assert.deepEqual(attempts, [false, true, true]);
+  await assert.rejects(() => fetcher.fetchTileFor("https://a.test/1.png", {}), (e) => {
+    assert.equal(e.code, "TILE_FAILED");
+    assert.equal(e.retryable, true);
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(attempts, ["attempt"]);
   const failing = createWebFetcher({
     fetchImpl: async () => { throw new Error("down"); },
     isProxyEligible: () => ({ eligible: false, reason: "tile" }),
@@ -297,7 +299,6 @@ test("fetchTileFor retries then succeeds, else throws TILE_FAILED", async () => 
     messages,
     sleepFn: async () => {},
     throttle: async () => {},
-    randomFn: () => 0,
   });
   await assert.rejects(() => failing.fetchTileFor("https://a.test/1.png", {}), (e) => {
     assert.equal(e.code, "TILE_FAILED");
@@ -311,6 +312,6 @@ test("fetchTileFor retries then succeeds, else throws TILE_FAILED", async () => 
     messages,
     sleepFn: async () => {},
   });
-  await assert.rejects(() => once.fetchTileFor("https://a.test/1.png", {}, 0), /could not be saved/);
+  await assert.rejects(() => once.fetchTileFor("https://a.test/1.png", {}), /could not be saved/);
   assert.equal(calls, 1, "origin classification performs exactly one readable attempt");
 });

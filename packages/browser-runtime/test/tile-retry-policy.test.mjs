@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebFetcher } from "../src/web-fetch.ts";
-import { TILE_MAX_RETRIES } from "../src/tile-policy.ts";
 
 function hooks() {
   let seq = 0;
@@ -26,7 +25,6 @@ function baseDeps(overrides = {}) {
     messages,
     sleepFn: async () => {},
     throttle: async () => {},
-    randomFn: () => 0,
     ...overrides,
   };
 }
@@ -76,7 +74,28 @@ test("a throttled tile (HTTP 429) costs exactly one direct attempt", async () =>
   assert.equal(calls(), 1, `429 retried at the route: ${calls()} direct attempts`);
 });
 
-test("a transient network failure still retries within the route budget", async () => {
+test("a tile Retry-After hint survives the one-attempt fetch for engine scheduling", async () => {
+  let calls = 0;
+  const fetcher = createWebFetcher(baseDeps({
+    nowFn: () => 1000,
+    fetchImpl: async () => {
+      calls += 1;
+      return {
+        url: "https://tiles.test/0/0.png",
+        status: 429,
+        headers: { get: (name) => name === "retry-after" ? "3" : null },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    },
+  }));
+  await assert.rejects(() => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}), (error) => {
+    assert.equal(error.retry_after_ms, 3000);
+    return true;
+  });
+  assert.equal(calls, 1);
+});
+
+test("a transient network failure costs one direct attempt; the engine owns retries", async () => {
   let calls = 0;
   const fetcher = createWebFetcher(baseDeps({
     fetchImpl: async () => { calls += 1; throw new Error("connection reset"); },
@@ -85,10 +104,10 @@ test("a transient network failure still retries within the route budget", async 
     assert.equal(error.code, "TILE_FAILED");
     return true;
   });
-  assert.equal(calls, TILE_MAX_RETRIES + 1);
+  assert.equal(calls, 1);
 });
 
-test("a transient failure recovers on a later attempt", async () => {
+test("a transient failure is returned to the engine for retry", async () => {
   let calls = 0;
   const fetcher = createWebFetcher(baseDeps({
     fetchImpl: async () => {
@@ -102,26 +121,29 @@ test("a transient failure recovers on a later attempt", async () => {
       };
     },
   }));
-  const res = await fetcher.fetchTileFor("https://tiles.test/0/0.png", {});
-  assert.ok(res.bytes instanceof ArrayBuffer);
-  assert.equal(calls, 2);
+  await assert.rejects(() => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}), (error) => {
+    assert.equal(error.code, "TILE_FAILED");
+    assert.equal(error.retryable, true);
+    return true;
+  });
+  assert.equal(calls, 1);
 });
 
-test("aborting the job signal stops further tile attempts", async () => {
+test("a pre-aborted job signal prevents a tile attempt", async () => {
   let calls = 0;
   const fetcher = createWebFetcher(baseDeps({
     fetchImpl: async () => { calls += 1; throw new Error("flaky"); },
-    sleepFn: async () => { controller.abort(); },
   }));
   const controller = new AbortController();
+  controller.abort();
   await assert.rejects(
-    () => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}, TILE_MAX_RETRIES, controller.signal),
+    () => fetcher.fetchTileFor("https://tiles.test/0/0.png", {}, controller.signal),
     (error) => {
       assert.equal(error.code, "TRANSPORT_CANCELLED");
       return true;
     },
   );
-  assert.equal(calls, 1, `aborted job kept fetching: ${calls} direct attempts`);
+  assert.equal(calls, 0, `pre-aborted job fetched a tile: ${calls} direct attempts`);
 });
 
 test("a pre-aborted job signal performs no metadata fetch", async () => {

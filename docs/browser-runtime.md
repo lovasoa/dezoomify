@@ -6,6 +6,8 @@
 
 The website and the extension job tab share one engine host (`engine-host.ts`) over the WASM session and differ only in transport and output surface. The runtime owns no job policy (retries, cancellation, partials, ordering stay in the engine). Effect meanings are defined in the [host-effect contract](job-engine.md#host-effect-contract); browser execution only below.
 
+The shared runtime calls the product's tile fetch callback once per engine acquisition. The website callback performs one direct fetch; the extension retains its source-to-extension fallback, with each selected route attempted once. Typed failures preserve the stable transport code, HTTP status, route, and any `Retry-After` hint in milliseconds; the engine alone decides whether and when to retry. Metadata keeps its direct-first fetch and eligible proxy fallback policy below, including its bounded proxy rate-limit retry.
+
 - `acquire-tile`: the website checks and shows the declared canvas before the first tile, then decodes and paints each good tile at once. The visible canvas is the output throughout, including while paused. Bad tiles fail the acquisition and flow into engine retry/partial handling. Probes (`purpose: probe`) share the `probe.ts` helper; a probe kept for output also paints at once.
 - `finalize-output`: encodes and saves the surface already on screen. Plans lacking declared dimensions size the surface from accumulated placements here. Over-limit dimensions fail typed (`PLAN_INVALID` plus a desktop handoff) before allocation.
 - Tiles draw at planned placement, 1:1 scale. Pixels past the planned edge crop from right and bottom (padded edge tiles); short tiles leave the gap empty. Each bitmap closes right after painting.

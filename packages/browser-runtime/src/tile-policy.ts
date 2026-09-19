@@ -1,10 +1,9 @@
 // Browser tile policy: politeness, resilience, and timeouts.
 //
 // This module owns every tile-fetch tuning constant plus the per-host throttle,
-// the retry backoff, the adaptive concurrency picker, the combined timeout
-// signal, and the proxy rate-limit delay. Pure and dependency-injected where
-// the host clock or randomness is involved, so node tests drive it with
-// fakes.
+// the adaptive concurrency picker, combined timeout signal, and proxy
+// rate-limit delay. Tile retries belong to the engine. Pure and dependency
+// injected where the host clock is involved, so node tests use fakes.
 import { failure } from "./failure.ts";
 import type { StructuredFailure } from "./failure.ts";
 
@@ -24,9 +23,8 @@ export const DIRECT_METADATA_TIMEOUT_MS = 1500;
  * Tile politeness + resilience plus capability-negotiated concurrency.
  * At most 5 tile request starts per second per host (legacy
  * ZoomManager.MAX_REQUESTS_PER_SECOND parity: 1000/5 ms spacing between
- * starts). Each tile retries twice (3 attempts) with exponential backoff +
- * jitter; the exhausted failure still maps to TILE_FAILED (never a display
- * string). Capability policy: website 6, extension 6, native 16
+ * starts). The engine owns retries; this module only schedules one attempt.
+ * Capability policy: website 6, extension 6, native 16
  * (protocol `browser_baseline` 6 vs `native_baseline` 16 vs
  * `extension_baseline` 6). The website picker below stays adaptive 6-12
  * for future caps but the live website path negotiates to the browser
@@ -34,8 +32,6 @@ export const DIRECT_METADATA_TIMEOUT_MS = 1500;
  */
 export const TILE_MAX_REQUESTS_PER_SECOND = 5;
 export const TILE_MIN_INTERVAL_MS = 1000 / TILE_MAX_REQUESTS_PER_SECOND;
-export const TILE_MAX_RETRIES = 2;
-export const TILE_RETRY_BASE_MS = 250;
 
 /**
  * Website tile concurrency bounds. The adaptive picker range is 6-12;
@@ -185,11 +181,6 @@ export function createTileThrottle(clock?: ThrottleClock): {
   return { throttle, reset };
 }
 
-/** Exponential backoff with jitter between tile attempts. */
-export function tileRetryDelayMs(retryIndex: number, random: () => number = Math.random): number {
-  return TILE_RETRY_BASE_MS * Math.pow(2, retryIndex) + random() * 100;
-}
-
 /**
  * Delay before a single retry after PROXY_RATE_LIMITED. Honors
  * the relay's Retry-After hint when present, otherwise backs off 1 s.
@@ -284,17 +275,32 @@ export function hostOf(url: string): string {
   }
 }
 
-/** Exhausted tile retries map to TILE_FAILED (never a display string). */
+/** One failed tile attempt maps to a typed failure with engine retry facts. */
 export function tileFailedError(
   lastOutcome: string,
   lastStatus: number | undefined,
   _url: string,
+  retryAfterMs?: number,
 ): StructuredFailure {
-  return failure(
+  const httpFailure = typeof lastStatus === "number" && lastStatus > 0;
+  const causeCode = httpFailure ? "TRANSPORT_HTTP_ERROR" : "TRANSPORT_NETWORK_ERROR";
+  const error = failure(
     "TILE_FAILED",
     "Part of the image could not be saved. Try again in a moment.",
-    true,
+    !httpFailure || lastStatus === 429 || lastStatus >= 500,
     undefined,
-    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after ${TILE_MAX_RETRIES + 1} attempts`,
+    `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after 1 attempt`,
   );
+  error.transportKind = "direct";
+  error.url = _url;
+  error.cause = {
+    code: causeCode,
+    ...(httpFailure ? { http: lastStatus } : {}),
+    transport: "direct",
+  };
+  if (httpFailure) error.http = lastStatus;
+  if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
+    error.retry_after_ms = retryAfterMs;
+  }
+  return error;
 }

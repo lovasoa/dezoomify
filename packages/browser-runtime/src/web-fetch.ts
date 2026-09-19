@@ -11,11 +11,9 @@ import type { FetchCause, StructuredFailure } from "./failure.ts";
 import {
   DIRECT_METADATA_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
-  TILE_MAX_RETRIES,
   combineTimeout,
   proxyRateLimitDelayMs,
   shortUrl,
-  tileRetryDelayMs,
   sleep,
   tileFailedError,
 } from "./tile-policy.ts";
@@ -31,6 +29,7 @@ export interface DirectOutcome {
   status?: number;
   bytes?: ArrayBuffer;
   contentType?: string;
+  retryAfterMs?: number;
   /** Bounded server signal from an HTTP error body (best effort). */
   preview?: string;
 }
@@ -77,7 +76,7 @@ export interface WebFetchHooks {
     outcome: string;
     bytes?: number;
   }): void;
-  onTileAttempt?(retrying: boolean): void;
+  onTileAttempt?(): void;
 }
 
 /** Caller-owned UI copy plus the readable-bytes hint (never gates). */
@@ -95,7 +94,6 @@ export interface WebFetchDeps {
   hooks: WebFetchHooks;
   messages: WebFetchMessages;
   sleepFn?: (ms: number) => Promise<void>;
-  randomFn?: () => number;
   nowFn?: () => number;
   throttle?: (url: string) => Promise<void>;
   timeouts?: { requestMs?: number; metadataMs?: number };
@@ -113,7 +111,7 @@ export interface WebFetcher {
     retryAfterMs?: number;
   }>;
   fetchMetadataFor(url: string, headers: Record<string, string>, signal?: AbortSignal): Promise<{ bytes: ArrayBuffer; finalUri?: string; via: string }>;
-  fetchTileFor(url: string, headers: Record<string, string>, maxRetries?: number, signal?: AbortSignal): Promise<{ bytes: ArrayBuffer }>;
+  fetchTileFor(url: string, headers: Record<string, string>, signal?: AbortSignal): Promise<{ bytes: ArrayBuffer }>;
   getActiveTransport(): string | null;
   resetActiveTransport(): void;
 }
@@ -266,6 +264,22 @@ async function readErrorPreview(res: {
   }
 }
 
+function parseRetryAfterMs(headers: unknown, at: number): number | undefined {
+  try {
+    const value = headers as { get?: (name: string) => string | null; [name: string]: unknown } | null;
+    const raw = typeof value?.get === "function"
+      ? value.get("retry-after")
+      : value?.["retry-after"] ?? value?.["Retry-After"];
+    if (typeof raw !== "string" || raw.trim() === "") return undefined;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.floor(seconds * 1000);
+    const date = Date.parse(raw);
+    return Number.isFinite(date) ? Math.max(0, date - at) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function cancelledFailure(url: string): StructuredFailure {
   return fetchFailure("TRANSPORT_CANCELLED", "The request was cancelled.", false, {
     cause: { code: "TRANSPORT_CANCELLED", transport: "direct" },
@@ -350,10 +364,12 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
       if (!(res.status >= 200 && res.status <= 299)) {
         hooks.onRequestEnd(reqId, false);
         const preview = await readErrorPreview(res);
+        const retryAfterMs = parseRetryAfterMs(res.headers, now());
         return {
           outcome: "http-error",
           finalUrl: typeof res.url === "string" ? res.url : url,
           status: res.status,
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
           ...(preview ? { preview } : {}),
         };
       }
@@ -598,49 +614,22 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
   async function fetchTileFor(
     url: string,
     headers: Record<string, string>,
-    maxRetries: number = TILE_MAX_RETRIES,
     signal?: AbortSignal,
   ): Promise<{ bytes: ArrayBuffer }> {
-    let lastOutcome = "network-error";
-    let lastStatus: number | undefined;
-    for (let attempt = 0; ; attempt++) {
-      if (signal?.aborted) throw cancelledFailure(url);
-      hooks.onTileAttempt?.(attempt > 0);
-      if (deps.throttle) {
-        try {
-          await deps.throttle(url);
-        } catch {
-          // Throttle waits must never fail a tile.
-        }
-      }
-      if (signal?.aborted) throw cancelledFailure(url);
-      const direct = await fetchDirect(url, headers, signal, requestMs, false);
-      if (direct.outcome === "readable" && direct.bytes) {
-        return { bytes: direct.bytes };
-      }
-      lastOutcome = direct.outcome;
-      lastStatus = direct.status;
-      // HTTP refusals are permanent at the route (a 403 stays refused): only
-      // transient network failures retry here. The engine owns the one retry
-      // budget across routes, so a repeated refusal costs one attempt each.
-      if (direct.outcome === "http-error" || direct.outcome === "cancelled" || attempt >= maxRetries) {
-        break;
-      }
-      if (await sleepUnlessAborted(tileRetryDelayMs(attempt, deps.randomFn), sleepFn, signal)) {
-        throw cancelledFailure(url);
+    if (signal?.aborted) throw cancelledFailure(url);
+    hooks.onTileAttempt?.();
+    if (deps.throttle) {
+      try {
+        await deps.throttle(url);
+      } catch {
+        // Throttle waits must never fail a tile.
       }
     }
-    if (signal?.aborted || lastOutcome === "cancelled") throw cancelledFailure(url);
-    const error: StructuredFailure = maxRetries === TILE_MAX_RETRIES
-      ? tileFailedError(lastOutcome, lastStatus, url)
-      : failure(
-          "TILE_FAILED",
-          "Part of the image could not be saved. Try again in a moment.",
-          true,
-          undefined,
-          `tile fetch: ${lastOutcome} (HTTP ${lastStatus ?? "n/a"}) after ${maxRetries + 1} attempts`,
-        );
-    throw error;
+    if (signal?.aborted) throw cancelledFailure(url);
+    const direct = await fetchDirect(url, headers, signal, requestMs, false);
+    if (direct.outcome === "readable" && direct.bytes) return { bytes: direct.bytes };
+    if (direct.outcome === "cancelled" || signal?.aborted) throw cancelledFailure(url);
+    throw tileFailedError(direct.outcome, direct.status, url, direct.retryAfterMs);
   }
 
   function getActiveTransport(): string | null {

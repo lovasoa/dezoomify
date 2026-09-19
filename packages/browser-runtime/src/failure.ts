@@ -26,6 +26,8 @@ export interface StructuredFailure extends Error {
   url?: string;
   /** HTTP status when the failure is an HTTP refusal. */
   http?: number;
+  /** Host-observed Retry-After hint in milliseconds for a retryable response. */
+  retry_after_ms?: number;
   /** Transport kind id (`direct`, `metadata-proxy`, ...). */
   transportKind?: ErrorTransport;
   /** Bounded single-line server signal captured from an HTTP error body. */

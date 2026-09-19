@@ -72,6 +72,7 @@ export interface HostFailure {
   blocked_reason?: BlockedReason;
   transport: ErrorTransport;
   http?: number;
+  retry_after_ms?: number;
   preview?: string;
   detail?: string;
 }
@@ -81,12 +82,6 @@ export interface EngineHostDeps {
   jobId(): string;
   /** Fetch one effect resource as readable bytes (product transport). Single attempt; the engine owns retries. */
   fetchResource(effect: AcquireEffect): Promise<{ bytes: Uint8Array; finalUri?: string }>;
-  /**
-   * Single-attempt variant used in place of `fetchResource` when the host
-   * supplies one. The engine schedules retries through `wait-retry-timer`
-   * effects; the host never retries on its own.
-   */
-  fetchResourceOnce?(effect: AcquireEffect): Promise<{ bytes: Uint8Array; finalUri?: string }>;
   /** Cancel in-flight fetches (product transport). */
   cancelFetch(): void;
   assembly: EngineHostAssembly;
@@ -296,6 +291,7 @@ export function createEngineHost(deps: EngineHostDeps) {
       transport: failure.transport,
       ...(failure.blocked_reason ? { blocked_reason: failure.blocked_reason } : {}),
       ...(typeof failure.http === "number" ? { http: failure.http } : {}),
+      ...(typeof failure.retry_after_ms === "number" ? { retry_after_ms: failure.retry_after_ms } : {}),
       ...(failure.preview ? { preview: failure.preview } : {}),
       ...(failure.detail ? { detail: failure.detail } : {}),
     };
@@ -425,12 +421,6 @@ export function createEngineHost(deps: EngineHostDeps) {
   async function acquireAttempt(effect: AcquireEffect, settle?: (displayOnly: boolean) => void) {
     const request = effect.request;
     log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=${request.purpose}`);
-    // Metadata (acquire-resource) owns direct-first fetch, eligible proxy
-    // fallback, and final-URI tracking inside fetchResource; the
-    // single-attempt tile fast path must never serve it.
-    const fetch = effect.type === "acquire-tile" && deps.fetchResourceOnce
-      ? deps.fetchResourceOnce
-      : deps.fetchResource;
     for (;;) {
       if (tornDown()) return;
       try {
@@ -438,7 +428,7 @@ export function createEngineHost(deps: EngineHostDeps) {
           // Prepare before network I/O so tiles become visible as they arrive.
           deps.assembly.prepare(effect.placement.canvas);
         }
-        const result = await fetch(effect);
+        const result = await deps.fetchResource(effect);
         // Readable bytes for this origin: it is not display-only.
         settle?.(false);
         if (tornDown()) return;
