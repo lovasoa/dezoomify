@@ -7,6 +7,7 @@
     "test": "node --test-reporter=dot --test \"tests/unit/!(job-worker|manifest-policy).test.mjs\"",
     "test:unit": "node --test-reporter=dot --test \"tests/unit/!(job-worker|manifest-policy).test.mjs\"",
     "typecheck": "tsc --noEmit",
+    "postinstall": "wxt prepare",
     "build": "wxt build --browser chrome && wxt build --browser firefox",
     "package": "wxt zip",
     "publish:store": "bash ./scripts/chrome-webstore-publish.sh"
