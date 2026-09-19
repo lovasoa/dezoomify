@@ -453,7 +453,7 @@ mod tests {
             Some(r#"{"compression": 9, "retries": 0}"#),
         )
         .unwrap();
-        let config = table.config_for(&ok.job).unwrap();
+        let config = table.options_for(&ok.job).unwrap();
         assert_eq!(config.compression, 9);
         assert_eq!(config.max_retries, 0);
         // Invalid compression fails closed with no new job.
@@ -478,7 +478,7 @@ mod tests {
         // Omitted settings take defaults.
         let with_defaults =
             dispatch_start_job_with_settings(&mut table, "https://example.com/d", None).unwrap();
-        let config = table.config_for(&with_defaults.job).unwrap();
+        let config = table.options_for(&with_defaults.job).unwrap();
         assert_eq!(config.compression, 5);
         assert_eq!(config.max_retries, 3);
     }

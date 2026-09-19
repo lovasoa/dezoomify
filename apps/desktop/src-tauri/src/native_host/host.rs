@@ -781,14 +781,14 @@ mod tests {
             .and_then(|j| j.as_str())
             .expect("driver job id")
             .to_string();
-        let config = state
+        let options = state
             .jobs
-            .config_for(&driver_job)
-            .expect("driver config for handoff job");
+            .options_for(&driver_job)
+            .expect("driver options for handoff job");
         assert_eq!(
-            config.user_headers.get("cookie").map(String::as_str),
+            options.headers.get("cookie").map(String::as_str),
             Some("session=CANARY-abc123"),
-            "consented cookie must reach the driver"
+            "consented cookie must reach the runner"
         );
         let debug = format!("{:?}", state.jobs);
         assert!(
@@ -1052,11 +1052,11 @@ mod tests {
             .get("job")
             .and_then(|j| j.as_str())
             .expect("driver job id");
-        let config = state.jobs.config_for(driver_job).expect("driver config");
-        // Only the source-origin cookie reaches the driver; the sibling is
+        let options = state.jobs.options_for(driver_job).expect("driver options");
+        // Only the source-origin cookie reaches the runner; the sibling is
         // dropped and never sent to another origin.
         assert_eq!(
-            config.user_headers.get("cookie").map(String::as_str),
+            options.headers.get("cookie").map(String::as_str),
             Some("session=CANARY-A"),
             "sibling cookie must never reach the source job"
         );
@@ -1096,9 +1096,9 @@ mod tests {
             "cookieless handoff must start: {value}"
         );
         let driver_job = value.get("job").and_then(|j| j.as_str()).unwrap();
-        let config = state.jobs.config_for(driver_job).unwrap();
+        let options = state.jobs.options_for(driver_job).unwrap();
         assert!(
-            !config.user_headers.contains_key("cookie"),
+            !options.headers.contains_key("cookie"),
             "cookieless job must carry no cookie header"
         );
     }

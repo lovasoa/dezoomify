@@ -219,6 +219,16 @@ pub enum Lifecycle {
     AwaitingPartialDecision,
 }
 
+/// Interactive partial-decision ledger riding a snapshot: the redacted
+/// missing tile ids plus the counts the host dialog shows. Present only
+/// while the job awaits an explicit keep/discard/retry answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecoveryLedger {
+    pub missing: Vec<String>,
+    pub failed: u64,
+    pub total: u64,
+}
+
 /// Honest output summary for a published job: what was actually written.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputSummary {
@@ -231,8 +241,10 @@ pub struct OutputSummary {
     pub missing: Vec<String>,
 }
 
-/// Terminal outcome. `Completed` arrives only after successful finalization;
-/// `Cancelled` arrives only after quiescence with nothing published.
+/// Terminal outcome. `Completed` arrives only after successful finalization
+/// (a publication that won the cancel race is reported as committed, never
+/// as a cancellation); `Cancelled` arrives only after quiescence with
+/// nothing published.
 #[derive(Clone, Debug)]
 pub enum Terminal {
     Completed(OutputSummary),
@@ -249,6 +261,7 @@ pub struct JobSnapshot {
     pub lifecycle: Lifecycle,
     pub acquired: u64,
     pub total: u64,
+    pub recovery: Option<RecoveryLedger>,
     pub terminal: Option<Terminal>,
 }
 
@@ -383,31 +396,35 @@ fn run_job(
     options: &JobOptions,
     config: &PipelineConfig,
     snapshots: &mpsc::Sender<JobSnapshot>,
-    cancel_flag: &AtomicBool,
+    _cancel_flag: &AtomicBool,
     _gate: &PartialGate,
 ) -> Terminal {
     let mut seq: u64 = 0;
     let mut lifecycle = Lifecycle::Discovering;
     let mut acquired: u64 = 0;
     let mut total: u64 = 0;
+    let mut recovery: Option<RecoveryLedger> = None;
     let mut emit = |lifecycle_next: Lifecycle,
                     acquired_next: u64,
                     total_next: u64,
+                    recovery_next: Option<RecoveryLedger>,
                     terminal: Option<Terminal>| {
         seq = seq.saturating_add(1);
         lifecycle = lifecycle_next.clone();
         acquired = acquired_next;
         total = total_next;
+        recovery = recovery_next.clone();
         let _ = snapshots.send(JobSnapshot {
             job: id.to_string(),
             seq,
             lifecycle: lifecycle_next,
             acquired: acquired_next,
             total: total_next,
+            recovery: recovery_next,
             terminal,
         });
     };
-    emit(Lifecycle::Discovering, 0, 0, None);
+    emit(Lifecycle::Discovering, 0, 0, None, None);
     let result = match &options.output {
         OutputTarget::File(path) => {
             let output = path.to_string_lossy().into_owned();
@@ -417,7 +434,8 @@ fn run_job(
                 options.overwrite,
                 config,
                 &mut |event: PipelineEvent| {
-                    project_event(&event, &mut lifecycle, &mut acquired, &mut total);
+                    let ledger = project_event(&event, &mut lifecycle, &mut acquired, &mut total);
+                    recovery = ledger;
                     seq = seq.saturating_add(1);
                     let _ = snapshots.send(JobSnapshot {
                         job: id.to_string(),
@@ -425,6 +443,7 @@ fn run_job(
                         lifecycle: lifecycle.clone(),
                         acquired,
                         total,
+                        recovery: recovery.clone(),
                         terminal: None,
                     });
                 },
@@ -436,7 +455,8 @@ fn run_job(
             *format,
             config,
             &mut |event: PipelineEvent| {
-                project_event(&event, &mut lifecycle, &mut acquired, &mut total);
+                let ledger = project_event(&event, &mut lifecycle, &mut acquired, &mut total);
+                recovery = ledger;
                 seq = seq.saturating_add(1);
                 let _ = snapshots.send(JobSnapshot {
                     job: id.to_string(),
@@ -444,6 +464,7 @@ fn run_job(
                     lifecycle: lifecycle.clone(),
                     acquired,
                     total,
+                    recovery: recovery.clone(),
                     terminal: None,
                 });
             },
@@ -451,31 +472,22 @@ fn run_job(
     };
     let terminal = match result {
         Ok(outcome) => {
-            if cancel_flag.load(Ordering::SeqCst) {
-                // The commit point already refuses to publish once
-                // cancellation was requested; reaching here with the flag set
-                // means the race resolved before commit, so report cancel.
-                Terminal::Cancelled
-            } else {
-                Terminal::Completed(OutputSummary {
-                    path: outcome.output_path,
-                    tile_count: outcome.tile_count,
-                    width: outcome.image_size.x,
-                    height: outcome.image_size.y,
-                    format: outcome.format,
-                    partial: outcome.partial,
-                    missing: outcome.missing,
-                })
-            }
+            // Publication won the race: report the committed result, never
+            // a cancellation (the commit point already refuses to publish
+            // once cancellation was requested, so reaching here with the
+            // flag set means the bytes were committed first).
+            Terminal::Completed(OutputSummary {
+                path: outcome.output_path,
+                tile_count: outcome.tile_count,
+                width: outcome.image_size.x,
+                height: outcome.image_size.y,
+                format: outcome.format,
+                partial: outcome.partial,
+                missing: outcome.missing,
+            })
         }
         Err(error) if error.code == "job.cancelled" => Terminal::Cancelled,
-        Err(error) => {
-            if cancel_flag.load(Ordering::SeqCst) {
-                Terminal::Cancelled
-            } else {
-                Terminal::Failed(error)
-            }
-        }
+        Err(error) => Terminal::Failed(error),
     };
     seq = seq.saturating_add(1);
     let _ = snapshots.send(JobSnapshot {
@@ -484,19 +496,26 @@ fn run_job(
         lifecycle: lifecycle.clone(),
         acquired,
         total,
+        recovery: None,
         terminal: Some(terminal.clone()),
     });
     terminal
 }
 
+/// Project one driver event onto the ordered snapshot state. Returns the
+/// recovery ledger when the event announces or re-announces an interactive
+/// partial decision, `None` when it resolves one (any other event).
 fn project_event(
     event: &PipelineEvent,
     lifecycle: &mut Lifecycle,
     acquired: &mut u64,
     total: &mut u64,
-) {
+) -> Option<RecoveryLedger> {
     match event {
-        PipelineEvent::Discovery { .. } => *lifecycle = Lifecycle::Discovering,
+        PipelineEvent::Discovery { .. } => {
+            *lifecycle = Lifecycle::Discovering;
+            None
+        }
         PipelineEvent::Downloading {
             acquired: next_acquired,
             total: next_total,
@@ -504,12 +523,31 @@ fn project_event(
             *lifecycle = Lifecycle::AcquiringTiles;
             *acquired = (*acquired).max(*next_acquired);
             *total = (*total).max(*next_total);
+            None
         }
-        PipelineEvent::Encoding { .. } => *lifecycle = Lifecycle::Finalizing,
-        PipelineEvent::RecoveryRequested { .. } => {
+        PipelineEvent::Encoding { .. } => {
+            *lifecycle = Lifecycle::Finalizing;
+            None
+        }
+        PipelineEvent::RecoveryRequested {
+            missing,
+            failed,
+            total,
+            ..
+        }
+        | PipelineEvent::MissingWork {
+            missing,
+            failed,
+            total,
+        } => {
             *lifecycle = Lifecycle::AwaitingPartialDecision;
+            Some(RecoveryLedger {
+                missing: missing.clone(),
+                failed: *failed,
+                total: *total,
+            })
         }
-        _ => {}
+        _ => None,
     }
 }
 

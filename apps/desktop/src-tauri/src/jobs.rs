@@ -1,40 +1,34 @@
-// In-memory desktop job table backed by the real native driver.
+// In-memory desktop job table backed by the shared native runner.
 //
-// Shapes mirror the dezoomify-engine transcript event kinds (job-state,
-// progress, completed, cancelled, failed) and execution flows through the
-// real native pipeline (`pipeline::run` on a background worker: the same
-// engine plus completion-driven effects the shared native runner drives).
-// The table owns lifecycle, scoped seq ordering, and terminal-once
-// guarantees for the creating window/session.
+// The table is an id registry plus a projection layer: it mints `job:n`,
+// keeps per-job monotonic seq and the ordered transcript, routes window
+// commands to [`NativeRunner`] handles, and folds the runner's typed
+// snapshots into the projected IPC payloads. All execution (engine,
+// completion-driven effects, partial gate, cancellation flag, output
+// publication) lives in the runner and the pipeline it drives; the table
+// owns no lifecycle machine of its own and no scheduling policy.
 //
 // Lean offline shell: standard library threads only (no tokio; `tokio` is a
-// dev-dependency of `dezoomify-native`, not a runtime dependency). `start_job`
-// validates, mints `job:n`, records `Discovering` seq 1 followed by the
-// synchronous `AwaitingDestination` cue (or the automatic `destination`
-// grant for settings starts), and spawns the real `pipeline::run` worker
-// after a destination grant without blocking. Synchronous lifecycle methods
-// stay the source of truth so the lean offline build passes with no network.
+// dev-dependency of `dezoomify-native`, not a runtime dependency). A manual
+// start rests at the `AwaitingDestination` cue until `request_destination`
+// grants a path and starts the runner; a settings start (an output format
+// plus directory) launches the runner immediately with the automatic
+// directory destination.
 //
-// Driver progress travels typed end to end: background workers forward the
-// native [`PipelineEvent`] variants over the driver channel, the pump folds
-// them into the monotonic record snapshot, and transcript events carry only
-// lifecycle kinds plus format ids. Counts, ledgers, and error codes live in
-// the record (never string-encoded into `k=v` or JSON details).
+// Counts, ledgers, and error codes live in the record (never string-encoded
+// into `k=v` or JSON details); only counts, hashes, codes, and the redacted
+// origin cross IPC.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver, Sender},
-};
-use std::thread::JoinHandle;
 
 use dezoomify_native::output::{validate_destination, OutputFormat};
-use dezoomify_native::pipeline::{
-    PartialDecision, PartialGate, PartialPolicy, PipelineConfig, PipelineEvent,
+use dezoomify_native::runner::{
+    JobOptions, JobSnapshot as RunnerSnapshot, Lifecycle, NativeRunner, OutputSummary,
+    OutputTarget, RunningJob, Terminal, UserCommand,
 };
 
-use crate::settings::{pipeline_config_for, DesktopSettings};
+use crate::settings::{job_options_for, DesktopSettings};
 
 /// Desktop event channels. Must stay identical to
 /// `apps/desktop/src/events.ts` `DESKTOP_EVENT_CHANNELS` and the generated
@@ -57,34 +51,21 @@ const FORBIDDEN_IPC_SUBSTRINGS: &[&str] = &[
     "imagedata",
 ];
 
-/// Lifecycle states tracked by the shell.
-///
-/// Names are PascalCase engine parity (`Created` … `Failed`) so the
-/// `job-state` channel projects the driver lifecycle without inferring
-/// policy. `Acquiring`/`Processing` are the shell shorthands for the engine
-/// `AcquiringTiles`/`ProcessingTiles` phases. `Running` is the shell's
-/// post-choice active marker (maps to acquisition once tiles flow).
-/// `AwaitingChoice` is the legacy single-choice alias for
-/// `AwaitingImageSelection` and is kept for transcript compatibility.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Shell state: the runner-snapshot projection plus the pre-start rest
+/// states. Names are engine parity (`Discovering` … `Failed`) so the
+/// `job-state` channel projects the live lifecycle without inferring
+/// policy; `Cancelling` marks a requested cancellation awaiting the
+/// runner's terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobState {
-    Created,
     Discovering,
     AwaitingImageSelection,
     AwaitingLevelSelection,
     AwaitingDestination,
-    AwaitingChoice,
-    AwaitingPartialDecision,
-    AwaitingRecovery,
-    Running,
-    Planning,
-    Acquiring,
-    Processing,
-    Encoding,
+    AcquiringTiles,
     Finalizing,
-    Publishing,
+    AwaitingPartialDecision,
     Cancelling,
-    CleaningUp,
     Completed,
     PartiallyCompleted,
     Cancelled,
@@ -94,23 +75,14 @@ pub enum JobState {
 impl JobState {
     pub fn name(&self) -> &'static str {
         match self {
-            JobState::Created => "Created",
             JobState::Discovering => "Discovering",
             JobState::AwaitingImageSelection => "AwaitingImageSelection",
             JobState::AwaitingLevelSelection => "AwaitingLevelSelection",
             JobState::AwaitingDestination => "AwaitingDestination",
-            JobState::AwaitingChoice => "AwaitingChoice",
-            JobState::AwaitingPartialDecision => "AwaitingPartialDecision",
-            JobState::AwaitingRecovery => "AwaitingRecovery",
-            JobState::Running => "Running",
-            JobState::Planning => "Planning",
-            JobState::Acquiring => "Acquiring",
-            JobState::Processing => "Processing",
-            JobState::Encoding => "Encoding",
+            JobState::AcquiringTiles => "AcquiringTiles",
             JobState::Finalizing => "Finalizing",
-            JobState::Publishing => "Publishing",
+            JobState::AwaitingPartialDecision => "AwaitingPartialDecision",
             JobState::Cancelling => "Cancelling",
-            JobState::CleaningUp => "CleaningUp",
             JobState::Completed => "Completed",
             JobState::PartiallyCompleted => "PartiallyCompleted",
             JobState::Cancelled => "Cancelled",
@@ -127,18 +99,16 @@ impl JobState {
                 | JobState::Failed
         )
     }
+}
 
-    /// True for the `Awaiting*` family (choice, destination, recovery).
-    pub fn is_awaiting(&self) -> bool {
-        matches!(
-            self,
-            JobState::AwaitingImageSelection
-                | JobState::AwaitingLevelSelection
-                | JobState::AwaitingDestination
-                | JobState::AwaitingChoice
-                | JobState::AwaitingPartialDecision
-                | JobState::AwaitingRecovery
-        )
+impl From<Lifecycle> for JobState {
+    fn from(lifecycle: Lifecycle) -> Self {
+        match lifecycle {
+            Lifecycle::Discovering => JobState::Discovering,
+            Lifecycle::AcquiringTiles => JobState::AcquiringTiles,
+            Lifecycle::Finalizing => JobState::Finalizing,
+            Lifecycle::AwaitingPartialDecision => JobState::AwaitingPartialDecision,
+        }
     }
 }
 
@@ -273,33 +243,32 @@ pub struct JobEvent {
     pub detail: String,
 }
 
-/// One tracked job: lifecycle snapshot plus the real driver handles.
+/// One tracked job: projection record plus the live runner handle.
 ///
-/// `Debug` is redacted on purpose: the driver config may hold the handoff
+/// `Debug` is redacted on purpose: the runner options may hold the handoff
 /// `Cookie` header (memory-only, never logged or cached), so only header
 /// names are shown, never values.
-#[derive(Clone)]
 pub struct JobRecord {
     pub id: String,
     pub state: JobState,
     pub seq: u64,
     pub events: Vec<JobEvent>,
     pub window: String,
-    /// Full input URL the driver fetches (never embedded in events).
+    /// Full input URL the runner fetches (never embedded in events).
     pub input_url: String,
     /// Redacted input origin (`scheme://host`) for event context.
     pub origin: String,
-    /// Shared cancellation flag; cloned into `pipeline_config` so the
-    /// background `pipeline::run` observes `cancel_job` promptly.
-    pub cancel_flag: std::sync::Arc<AtomicBool>,
-    /// Cancellation has been requested but the background worker has not yet
-    /// completed cleanup. The cancelled terminal is emitted only after the
-    /// worker exits, so a late publish cannot survive cancellation.
+    /// Runner options: settings, handoff headers, and pre-start selections.
+    /// Cloned into the runner at start; later edits never affect a live job.
+    pub options: JobOptions,
+    /// Live runner handle (None until a destination exists). The runner owns
+    /// the engine, the partial gate, the cancel flag, and publication.
+    pub runner: Option<RunningJob>,
+    /// Cancellation has been requested; the terminal `cancelled` event is
+    /// emitted only after the runner reports quiescence.
     pub cancel_requested: bool,
-    /// Driver configuration (selection, retry, fetch bounds, `cancel_flag`).
-    pub pipeline_config: PipelineConfig,
     /// Granted save destination: the real dialog-chosen path, stored per job
-    /// and passed to `pipeline::run` for atomic publish. `None` until
+    /// and passed to the runner for atomic publish. `None` until
     /// `request_destination`.
     pub destination: Option<PathBuf>,
     /// Actual published output, retained natively for explicit open/reveal actions.
@@ -310,9 +279,8 @@ pub struct JobRecord {
     /// Always false until an explicit overwrite confirmation exists; an
     /// existing destination is denied for choose-output recovery instead.
     pub destination_overwrite: bool,
-    /// Settings-selected output directory (`None` keeps the dialog default).
-    /// Seeds the save dialog's initial directory; the granted destination is
-    /// always the real dialog-chosen path.
+    /// Settings-selected output directory (`None` keeps the temp fallback
+    /// for automatic saves).
     pub output_dir: Option<PathBuf>,
     /// Monotonic progress: highest `acquired` count observed. Never
     /// decreases across retries; cache hits still count as acquired, so
@@ -321,22 +289,18 @@ pub struct JobRecord {
     /// Monotonic progress: highest `total` observed. Unknown totals stay 0
     /// and never claim completeness.
     pub progress_total: u64,
-    /// Output geometry from the driver publish step (`None` until publish).
+    /// Output geometry from the runner's published summary (`None` until publish).
     pub output_width: Option<u32>,
-    /// Output geometry from the driver publish step (`None` until publish).
+    /// Output geometry from the runner's published summary (`None` until publish).
     pub output_height: Option<u32>,
     /// Tiles encoded into the published output (`None` until publish).
     pub output_tile_count: Option<usize>,
-    /// Detected source format id from the driver (e.g. `zoomify`, `iiif`).
+    /// Detected source format id from the runner (e.g. `zoomify`, `iiif`).
     pub output_source_format: Option<String>,
-    /// Last typed driver failure (`None` unless the job failed).
+    /// Last typed runner failure (`None` unless the job failed).
     pub last_error_code: Option<String>,
-    /// Last typed driver failure message, redacted (`None` unless failed).
+    /// Last typed runner failure message, redacted (`None` unless failed).
     pub last_error_message: Option<String>,
-    /// Interactive partial gate shared with the background driver worker.
-    /// Cloned into `pipeline_config.partial_gate` so `answer_choice`
-    /// wakes a waiting driver without polling.
-    pub partial_gate: std::sync::Arc<PartialGate>,
     /// Pending interactive partial request (missing ledger while the host
     /// dialog waits). `None` unless `AwaitingPartialDecision`.
     pub pending_partial: Option<PartialPending>,
@@ -360,7 +324,7 @@ pub struct PartialPending {
 
 impl std::fmt::Debug for JobRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let header_names: Vec<&String> = self.pipeline_config.user_headers.keys().collect();
+        let header_names: Vec<&String> = self.options.headers.keys().collect();
         f.debug_struct("JobRecord")
             .field("id", &self.id)
             .field("state", &self.state)
@@ -415,57 +379,8 @@ pub struct ProjectedEmit {
     pub payload: serde_json::Value,
 }
 
-/// Terminal driver result delivered by the background worker.
-#[derive(Debug, Clone)]
-struct DriverSuccess {
-    saved_path: PathBuf,
-    format: String,
-    width: u32,
-    height: u32,
-    tile_count: usize,
-    /// True when the driver kept a partial (blank missing regions).
-    partial: bool,
-    /// Missing tile ids for a kept partial (empty for complete saves).
-    missing: Vec<String>,
-    /// Sibling basename for a kept partial (`out.partial.png`, never the
-    /// granted path). `None` for complete saves.
-    sibling: Option<String>,
-}
-
-/// Typed driver failure delivered by the background worker.
-#[derive(Debug, Clone)]
-struct DriverFailure {
-    code: String,
-    message: String,
-}
-
-/// Messages from background workers to the table (pumped without blocking).
-/// Progress carries the typed native [`PipelineEvent`] the driver emitted:
-/// the pump matches variants directly, never string keys or detail maps.
-#[derive(Debug)]
-enum DriverMessage {
-    Progress {
-        job: String,
-        event: PipelineEvent,
-    },
-    /// Interactive partial decision requested by the driver. Moves the job
-    /// to `AwaitingPartialDecision` with one `job-state`
-    /// `recovery-requested` event carrying the redacted missing ledger,
-    /// which is the frontend's cue to offer keep/discard/retry.
-    RecoveryRequested {
-        job: String,
-        missing: Vec<String>,
-        failed: u64,
-        total: u64,
-    },
-    Finished {
-        job: String,
-        result: Result<DriverSuccess, DriverFailure>,
-    },
-}
-
-/// In-memory table keyed by job id, plus one shared native runtime and the
-/// background worker handles/channels.
+/// In-memory table keyed by job id: the id registry, per-job transcript,
+/// and the live runner handles.
 ///
 /// `pending` holds projected IPC emits in seq order. Every transcript push
 /// enqueues exactly one projected emit; the Tauri shell drains the queue
@@ -475,9 +390,6 @@ pub struct JobTable {
     jobs: HashMap<String, JobRecord>,
     next_job: u64,
     capability_seq: u64,
-    driver_tx: Sender<DriverMessage>,
-    driver_rx: Receiver<DriverMessage>,
-    driver_handles: HashMap<String, JoinHandle<()>>,
     pending: Vec<ProjectedEmit>,
 }
 
@@ -487,7 +399,6 @@ impl std::fmt::Debug for JobTable {
             .field("jobs", &self.jobs)
             .field("next_job", &self.next_job)
             .field("capability_seq", &self.capability_seq)
-            .field("drivers", &self.driver_handles.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -500,14 +411,10 @@ impl Default for JobTable {
 
 impl JobTable {
     pub fn new() -> Self {
-        let (driver_tx, driver_rx) = mpsc::channel();
         Self {
             jobs: HashMap::new(),
             next_job: 0,
             capability_seq: 0,
-            driver_tx,
-            driver_rx,
-            driver_handles: HashMap::new(),
             pending: Vec::new(),
         }
     }
@@ -537,7 +444,7 @@ impl JobTable {
             .unwrap_or_default()
     }
 
-    /// Snapshot of the driver destination, if granted.
+    /// Snapshot of the granted destination, if any.
     pub fn destination_for(&self, job: &str) -> Option<PathBuf> {
         self.jobs.get(job).and_then(|r| r.destination.clone())
     }
@@ -555,7 +462,7 @@ impl JobTable {
 
     /// Current shell state, if known.
     pub fn state_of(&self, job: &str) -> Option<JobState> {
-        self.jobs.get(job).map(|r| r.state.clone())
+        self.jobs.get(job).map(|r| r.state)
     }
 
     /// Monotonic progress snapshot `(acquired, total)` for a job.
@@ -621,7 +528,7 @@ impl JobTable {
                 .unwrap_or((0, 0));
             let state = record
                 .map(|r| r.state.name().to_string())
-                .unwrap_or_else(|| "Acquiring".to_string());
+                .unwrap_or_else(|| "AcquiringTiles".to_string());
             let payload = serde_json::json!({
                 "job": base_job,
                 "jobId": base_job,
@@ -754,115 +661,11 @@ impl JobTable {
         (channel, payload)
     }
 
-    /// Finish a cancellation after the worker has stopped. A successful
-    /// worker result is treated as uncommitted when cancellation was already
-    /// requested, and its actual output path is removed before the cancelled
-    /// terminal is emitted. Automatic outputs are included even though they
-    /// do not have a dialog-granted `destination` in the record.
-    fn finish_cancellation(&mut self, job: &str, published: Option<PathBuf>) {
-        let Some((destination, overwrite)) = self.jobs.get(job).and_then(|record| {
-            record
-                .cancel_requested
-                .then(|| (record.destination.clone(), record.destination_overwrite))
-        }) else {
-            return;
-        };
-
-        let mut cleanup = Vec::new();
-        if let Some(path) = published {
-            let is_granted = destination.as_ref().is_some_and(|dest| dest == &path);
-            cleanup.push((path, is_granted && overwrite));
-        }
-        if let Some(path) = destination {
-            cleanup.push((path, overwrite));
-        }
-        for (path, overwrite) in cleanup {
-            remove_uncommitted_output(&path, overwrite);
-        }
-
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.cancel_requested = false;
-            record.output_width = None;
-            record.output_height = None;
-            record.output_tile_count = None;
-            record.output_source_format = None;
-            record.pending_partial = None;
-            record.output_missing.clear();
-            record.output_sibling = None;
-            record.saved_path = None;
-            record.state = JobState::Cancelled;
-        }
-        self.push_event(job, "cancelled", "Cancelled");
-    }
-
-    /// Fold one typed partial-decision request into the transcript. Only live
-    /// acquisition waits: a late duplicate after the user already answered
-    /// (`Running`) or after terminal is ignored so the dialog appears exactly
-    /// once per request. The redacted ledger and counts land in the record;
-    /// the event carries the kind only.
-    fn apply_recovery_request(&mut self, job: &str, missing: &[String], failed: u64, total: u64) {
-        let live = self.jobs.get(job).is_some_and(|r| !r.state.is_terminal());
-        if !live {
-            return;
-        }
-        let awaiting = self.jobs.get(job).is_some_and(|r| {
-            matches!(
-                r.state,
-                JobState::Planning
-                    | JobState::Acquiring
-                    | JobState::Running
-                    | JobState::AwaitingPartialDecision
-            )
-        });
-        if !awaiting {
-            return;
-        }
-        let ledger = redact_ledger(missing);
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.pending_partial = Some(PartialPending {
-                missing: ledger,
-                failed,
-                total,
-                recovery: None,
-            });
-            record.state = JobState::AwaitingPartialDecision;
-            if total > 0 {
-                record.progress_total = record.progress_total.max(total);
-            }
-        }
-        self.push_event(job, "recovery-requested", "");
-    }
-
-    /// Finalize cancellations whose worker has already exited. This is
-    /// separate from `cancel_job` because the driver poller owns the eventual
-    /// worker completion and must process its result before cleanup.
-    fn finalize_ready_cancellations(&mut self) {
-        let ready: Vec<String> = self
-            .jobs
-            .iter()
-            .filter(|(job, record)| {
-                record.cancel_requested
-                    && matches!(record.state, JobState::CleaningUp)
-                    && !self.driver_handles.contains_key(*job)
-            })
-            .map(|(job, _)| job.clone())
-            .collect();
-        for job in ready {
-            self.finish_cancellation(&job, None);
-        }
-    }
-
-    /// Drain finished workers and fold their messages into the transcript.
-    /// Non-blocking; terminal-once is enforced (late outcomes after a sync
-    /// terminal transition are ignored).
-    pub fn poll_drivers(&mut self) {
-        self.pump_drivers();
-    }
-
     /// Append one ordered transcript event and enqueue its projected IPC
     /// emit. Seq is per-job monotonic via `saturating_add`; post-terminal
-    /// pushes are refused by the caller (see `require_live` and the pump's
-    /// live check), so terminals appear exactly once.
+    /// pushes are refused by the callers (see `require_live` and the
+    /// terminal-once guard in `apply_runner_snapshot`), so terminals appear
+    /// exactly once.
     fn push_event(&mut self, job: &str, kind: &str, detail: &str) -> u64 {
         let redacted_detail = redact_message(detail);
         // Never let paths, full URLs, or secrets into the transcript: only
@@ -904,84 +707,25 @@ impl JobTable {
         seq
     }
 
-    /// Start one job and return its id immediately (never blocks on I/O).
-    pub fn start_job(&mut self, input_url: &str) -> Result<String, String> {
-        let id = self.start_job_with_config(input_url, PipelineConfig::default())?;
-        self.cue_awaiting_destination(&id);
-        Ok(id)
-    }
-
-    /// Start one handoff job with origin-scoped trusted headers (memory-only).
-    ///
-    /// `user_headers` carries the consented `Cookie` header for the input
-    /// origin (or is empty for a cookieless handoff). The map lives in the
-    /// job's driver config RAM only: never logged (see the redacted `Debug`
-    /// above), never written to disk, and never inserted into the tile cache
-    /// (bodies only). Origin scoping itself is enforced by the caller
-    /// (`native_host::host`) before this call and by the native `UserHeaders`
-    /// layer at fetch time (credentials only to the input host).
-    pub fn start_job_with_user_headers(
-        &mut self,
-        input_url: &str,
-        user_headers: BTreeMap<String, String>,
-    ) -> Result<String, String> {
-        let config = PipelineConfig {
-            user_headers,
-            ..PipelineConfig::default()
-        };
-        let id = self.start_job_with_config(input_url, config)?;
-        self.cue_awaiting_destination(&id);
-        Ok(id)
-    }
-
-    /// Start one job with validated desktop settings (compression,
-    /// retries, caps, cache dir, trusted headers, output folder, and format). Bounds are
-    /// enforced by `settings::parse_settings` before this call; the fixed
-    /// transport mirrors the CLI (`pipeline_config_for`).
-    pub fn start_job_with_settings(
-        &mut self,
-        input_url: &str,
-        settings: &DesktopSettings,
-    ) -> Result<String, String> {
-        let config = pipeline_config_for(settings);
-        let output_dir = settings.output_dir.clone();
-        let id = self.start_job_with_config(input_url, config)?;
-        if let Some(record) = self.jobs.get_mut(&id) {
-            record.output_dir = output_dir;
-            record.destination_format = Some(settings.output_format.clone());
-        }
-        // Automatic settings starts save without a dialog: the `destination`
-        // event tells the frontend that saving starts (no choose-output
-        // step), and the real worker derives the file name from the selected
-        // catalog title inside the native driver.
-        let automatic = self
-            .jobs
-            .get(&id)
-            .is_some_and(|r| r.destination.is_none() && r.destination_format.is_some());
-        if automatic {
-            if let Some(record) = self.jobs.get_mut(&id) {
-                record.state = JobState::Planning;
+    fn require_live(&self, job: &str) -> Result<JobState, String> {
+        match self.jobs.get(job) {
+            None => Err("unknown".to_string()),
+            Some(record) if record.state.is_terminal() || record.cancel_requested => {
+                Err("stale".to_string())
             }
-            let format = self
-                .jobs
-                .get(&id)
-                .and_then(|r| r.destination_format.clone())
-                .unwrap_or_else(|| "png".to_string());
-            self.push_event(&id, "destination", &format);
-            self.spawn_pipeline_worker(&id);
+            Some(record) => Ok(record.state),
         }
-        Ok(id)
     }
 
-    /// Start one job with explicit driver options (selection, retry, fetch
-    /// bounds). The supplied `cancel_flag` is replaced with the job's shared
-    /// flag so `cancel_job` always reaches the worker.
-    pub fn start_job_with_config(
+    /// Create one job record with the given runner options. Validates the
+    /// input URL shape, mints `job:n`, records `Discovering` seq 1, and
+    /// enqueues the initial `job-state` emit. No runner starts here: a
+    /// destination (dialog grant or automatic directory) starts it.
+    fn start_job_with_options(
         &mut self,
         input_url: &str,
-        config: PipelineConfig,
+        mut options: JobOptions,
     ) -> Result<String, String> {
-        self.pump_drivers();
         if input_url.is_empty() || input_url.len() > 2048 {
             return Err("input_url must be 1..2048 bytes".to_string());
         }
@@ -990,7 +734,7 @@ impl JobTable {
         }
         // Reject userinfo credentials embedded in the authority section
         // (parity with the commands-layer `is_valid_input_url` gate; secrets
-        // never enter the table, transcript, or driver).
+        // never enter the table, transcript, or runner).
         if let Some(after_scheme) = input_url.split("://").nth(1) {
             let authority = after_scheme.split('/').next().unwrap_or("");
             let authority = authority.split('?').next().unwrap_or(authority);
@@ -1002,16 +746,9 @@ impl JobTable {
         self.next_job = self.next_job.saturating_add(1);
         let id = format!("job:{n}");
 
-        let cancel_flag = std::sync::Arc::new(AtomicBool::new(false));
-        let partial_gate = std::sync::Arc::new(PartialGate::new());
-        let mut pipeline_config = config;
-        pipeline_config.cancel_flag = std::sync::Arc::clone(&cancel_flag);
-        pipeline_config.partial_gate = Some(std::sync::Arc::clone(&partial_gate));
-
-        // The desktop `job:n` id stays the transcript key; only the
-        // redacted origin (scheme://host) is stored, never the full URL.
-        // No destination exists yet (the dialog path arrives later via
-        // `request_destination`), so no output path is stored either.
+        // The runner fetches the input URL; only the redacted origin
+        // (scheme://host) is stored for events, never the full URL.
+        options.input_url = input_url.to_string();
         let origin = redact_origin(input_url);
 
         self.jobs.insert(
@@ -1019,18 +756,14 @@ impl JobTable {
             JobRecord {
                 id: id.clone(),
                 state: JobState::Discovering,
-                seq: 1,
-                events: vec![JobEvent {
-                    seq: 1,
-                    kind: "job-state".to_string(),
-                    detail: "Discovering".to_string(),
-                }],
+                seq: 0,
+                events: Vec::new(),
                 window: "main".to_string(),
                 input_url: input_url.to_string(),
                 origin,
-                cancel_flag,
+                options,
+                runner: None,
                 cancel_requested: false,
-                pipeline_config,
                 destination: None,
                 saved_path: None,
                 destination_format: None,
@@ -1044,7 +777,6 @@ impl JobTable {
                 output_source_format: None,
                 last_error_code: None,
                 last_error_message: None,
-                partial_gate,
                 pending_partial: None,
                 output_missing: Vec::new(),
                 output_sibling: None,
@@ -1052,30 +784,81 @@ impl JobTable {
         );
         // Enqueue the initial `Discovering` emit so the shell emits
         // `job-state` seq 1 without a second transcript push.
-        {
-            let event = JobEvent {
-                seq: 1,
-                kind: "job-state".to_string(),
-                detail: "Discovering".to_string(),
-            };
-            let (channel, payload) = self.project_event(&id, &event);
-            debug_assert!(!payload_has_forbidden_keys(&payload));
-            self.pending.push(ProjectedEmit {
-                channel: channel_for_kind(&event.kind),
-                job: id.clone(),
-                seq: 1,
-                payload,
-            });
-            let _ = channel;
-        }
-        // The job rests at `Discovering` (seq 1) here. Manual starts advance
-        // to the destination cue via `cue_awaiting_destination`; settings
-        // starts replace it with the automatic `destination` grant (see
-        // `start_job_with_settings`).
+        self.push_event(&id, "job-state", "Discovering");
         Ok(id)
     }
 
-    /// Move a fresh manual job from `Discovering` to `AwaitingDestination`
+    /// Start one job and return its id immediately (never blocks on I/O).
+    /// The job rests at the `AwaitingDestination` cue until
+    /// `request_destination` grants a path.
+    pub fn start_job(&mut self, input_url: &str) -> Result<String, String> {
+        let id = self.start_job_with_options(input_url, JobOptions::default())?;
+        self.cue_awaiting_destination(&id);
+        Ok(id)
+    }
+
+    /// Start one handoff job with origin-scoped trusted headers (memory-only).
+    ///
+    /// `user_headers` carries the consented `Cookie` header for the input
+    /// origin (or is empty for a cookieless handoff). The map lives in the
+    /// job's runner options RAM only: never logged (see the redacted `Debug`
+    /// above), never written to disk, and never inserted into the tile cache
+    /// (bodies only). Origin scoping itself is enforced by the caller
+    /// (`native_host::host`) before this call and by the native `UserHeaders`
+    /// layer at fetch time (credentials only to the input host).
+    pub fn start_job_with_user_headers(
+        &mut self,
+        input_url: &str,
+        user_headers: BTreeMap<String, String>,
+    ) -> Result<String, String> {
+        let options = JobOptions {
+            headers: user_headers,
+            ..JobOptions::default()
+        };
+        let id = self.start_job_with_options(input_url, options)?;
+        self.cue_awaiting_destination(&id);
+        Ok(id)
+    }
+
+    /// Start one job with validated desktop settings (compression,
+    /// retries, caps, cache dir, trusted headers, output folder, and format).
+    /// Bounds are enforced by `settings::parse_settings` before this call;
+    /// the fixed transport mirrors the CLI (`job_options_for`).
+    pub fn start_job_with_settings(
+        &mut self,
+        input_url: &str,
+        settings: &DesktopSettings,
+    ) -> Result<String, String> {
+        let options = job_options_for(settings);
+        let output_dir = settings.output_dir.clone();
+        let id = self.start_job_with_options(input_url, options)?;
+        if let Some(record) = self.jobs.get_mut(&id) {
+            record.output_dir = output_dir;
+            record.destination_format = Some(settings.output_format.clone());
+        }
+        // Automatic settings starts save without a dialog: the `destination`
+        // event tells the frontend that saving starts (no choose-output
+        // step), and the runner derives the file name from the selected
+        // catalog title inside the native driver.
+        let automatic = self
+            .jobs
+            .get(&id)
+            .is_some_and(|r| r.destination.is_none() && r.destination_format.is_some());
+        if automatic {
+            let format = settings.output_format.clone();
+            if let Some(record) = self.jobs.get_mut(&id) {
+                record.options.output = OutputTarget::AutoDir {
+                    dir: record.output_dir.clone().unwrap_or_else(std::env::temp_dir),
+                    format: output_format_for_id(&format).unwrap_or(OutputFormat::Png),
+                };
+            }
+            self.push_event(&id, "destination", &format);
+            self.start_runner(&id);
+        }
+        Ok(id)
+    }
+
+    /// Move a fresh manual job to `AwaitingDestination`
     /// with one `job-state` event: the frontend's cue to offer the save
     /// destination.
     fn cue_awaiting_destination(&mut self, id: &str) {
@@ -1085,130 +868,135 @@ impl JobTable {
         self.push_event(id, "job-state", "AwaitingDestination");
     }
 
-    fn require_live(&self, job: &str) -> Result<JobState, String> {
-        match self.jobs.get(job) {
-            None => Err("unknown".to_string()),
-            Some(record) if record.state.is_terminal() || record.cancel_requested => {
-                Err("stale".to_string())
+    /// Start the runner for a job whose options already carry a destination.
+    /// Idempotent: a live runner is never replaced.
+    fn start_runner(&mut self, job: &str) {
+        if self.jobs.get(job).is_some_and(|r| r.runner.is_some()) {
+            return;
+        }
+        let Some(record) = self.jobs.get(job) else {
+            return;
+        };
+        let options = record.options.clone();
+        match NativeRunner::start(options) {
+            Ok(runner) => {
+                if let Some(record) = self.jobs.get_mut(job) {
+                    record.runner = Some(runner);
+                }
             }
-            Some(record) => Ok(record.state.clone()),
+            Err(error) => {
+                // Typed failure before any effect: the job fails closed.
+                if let Some(record) = self.jobs.get_mut(job) {
+                    record.last_error_code = Some(error.code.clone());
+                    record.last_error_message = Some(redact_message(&error.message));
+                    record.state = JobState::Failed;
+                }
+                self.push_event(job, "failed", "");
+            }
         }
     }
 
-    /// Cancel a live job. Signals the shared flag so the background
-    /// `pipeline::run` aborts before publish (no output on the cancel path),
-    /// then maps the engine `Cancel` transition
-    /// (`Cancelling` -> `CleaningUp` -> `Cancelled` with `release-bytes`).
-    /// Terminal jobs report stale; missing jobs report unknown.
+    /// Cancel a live job. Forwards one `Cancel` to the runner (the shared
+    /// flag the driver polls at every effect boundary; work in flight
+    /// finishes, nothing new starts, and the commit point refuses to
+    /// publish, so no output appears on the cancel path). Pre-runner jobs
+    /// finish immediately: no pipeline can have published output before a
+    /// destination existed. Terminal jobs report stale; missing jobs
+    /// report unknown.
     pub fn cancel_job(&mut self, job: &str) -> Result<u64, String> {
-        self.pump_drivers();
-        let immediate = matches!(
-            self.jobs.get(job).map(|record| &record.state),
-            Some(
-                JobState::Discovering
-                    | JobState::AwaitingImageSelection
-                    | JobState::AwaitingLevelSelection
-                    | JobState::AwaitingDestination
-                    | JobState::AwaitingChoice
-            )
-        );
+        self.poll_drivers();
         self.require_live(job)?;
+        let has_runner = self.jobs.get(job).is_some_and(|r| r.runner.is_some());
         if let Some(record) = self.jobs.get_mut(job) {
-            record.cancel_flag.store(true, Ordering::SeqCst);
             record.cancel_requested = true;
-        }
-
-        if let Some(record) = self.jobs.get_mut(job) {
+            if let Some(runner) = record.runner.as_ref() {
+                // A rejected send means the driver already exited; its
+                // terminal is on the stream and settles the job below.
+                let _ = runner.send(UserCommand::Cancel);
+            }
             record.state = JobState::Cancelling;
         }
         let cancelling = self.push_event(job, "job-state", "Cancelling");
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.state = JobState::CleaningUp;
+        if !has_runner {
+            // No runner ever started: nothing to clean up, finish now.
+            if let Some(record) = self.jobs.get_mut(job) {
+                record.state = JobState::Cancelled;
+            }
+            let cancelled = self.push_event(job, "cancelled", "Cancelled");
+            return Ok(cancelled.max(cancelling));
         }
-        let cleanup = self.push_event(job, "job-state", "CleaningUp");
-        // No pipeline can have published output in the discovery/choice
-        // states, so those cancellations can finish immediately. Once a
-        // pipeline worker exists, it owns the automatic output path and final
-        // cleanup waits for its result.
-        if immediate {
-            self.finish_cancellation(job, None);
-        } else {
-            self.finalize_ready_cancellations();
-        }
-        Ok(self.last_seq(job).unwrap_or(cleanup.max(cancelling)))
+        // The runner owns quiescence: the cancelled terminal arrives on the
+        // snapshot stream and is folded by `poll_drivers`.
+        Ok(cancelling)
     }
 
-    /// Answer an image/level choice for a live job. The choice is a typed
-    /// [`Choice`] decoded from JSON at the command boundary, matched here
-    /// directly (`SelectedImage`/`SelectedLevel`/`PartialKeep`/`RetryReady`
-    /// engine responses); selection indices fold into the driver config so
-    /// the background worker plans the chosen image/level.
+    /// Answer an image/level choice for a live job, or resolve a pending
+    /// partial decision.
     ///
-    /// The shell state projects the selection precisely so the `job-state`
-    /// channel carries the `Awaiting*` family: image choices move to
-    /// `AwaitingLevelSelection`, level choices to `AwaitingDestination`,
-    /// recovery retries to `Running`, and partial keep/discard to `Running`
-    /// (the terminal `PartiallyCompleted`/`Failed` arrives via the driver).
-    ///
-    /// Partial decisions while `AwaitingPartialDecision` also wake the
-    /// waiting driver through the shared [`PartialGate`]: keep/discard map
-    /// to [`PartialDecision`], retry re-drives the failed tiles. The gate
-    /// answer is stored even for early choices so a racing driver still
-    /// observes it; the policy is updated alongside for timeout fallback.
+    /// Image/level selections fold into the runner options so the runner
+    /// plans the chosen image/level when it starts; selection states
+    /// project the `Awaiting*` family so the `job-state` channel carries
+    /// them. Partial keep/discard/retry forward to the live runner's gate
+    /// (early answers survive: the gate stores them before the wait
+    /// starts), and the terminal outcome arrives as the next snapshot.
     pub fn answer_choice(&mut self, job: &str, choice: &Choice) -> Result<(u64, String), String> {
-        self.pump_drivers();
+        self.poll_drivers();
         self.require_live(job)?;
-        // Interactive partial answers wake the driver even before the pump
-        // observed the request: the gate stores early answers.
+        let has_runner = self.jobs.get(job).is_some_and(|r| r.runner.is_some());
         let next_state = match *choice {
             Choice::Partial { keep } => {
-                let decision = if keep {
-                    PartialDecision::Keep
-                } else {
-                    PartialDecision::Discard
-                };
                 if let Some(record) = self.jobs.get(job) {
-                    record.partial_gate.answer(decision);
+                    if let Some(runner) = record.runner.as_ref() {
+                        let _ = runner.send(if keep {
+                            UserCommand::KeepPartial
+                        } else {
+                            UserCommand::DiscardPartial
+                        });
+                    }
                 }
-                // Keep/discard update the fallback policy so a 60s timeout
+                // Keep/discard update the fallback policy so a timeout
                 // stays honest to the last explicit choice.
                 if let Some(record) = self.jobs.get_mut(job) {
-                    record.pipeline_config.partial_policy = if keep {
-                        PartialPolicy::Keep
-                    } else {
-                        PartialPolicy::Fail
-                    };
+                    record.options.keep_partial = keep;
                     if record.state == JobState::AwaitingPartialDecision {
                         record.pending_partial = None;
+                        record.state = JobState::AcquiringTiles;
                     }
-                    record.state = JobState::Running;
                 }
-                JobState::Running
+                JobState::AcquiringTiles
             }
             Choice::Retry => {
                 if let Some(record) = self.jobs.get(job) {
-                    record.partial_gate.answer(PartialDecision::Retry);
+                    if let Some(runner) = record.runner.as_ref() {
+                        let _ = runner.send(UserCommand::RetryPartial);
+                    }
                 }
                 // Retry never changes the fallback policy.
                 if let Some(record) = self.jobs.get_mut(job) {
                     if record.state == JobState::AwaitingPartialDecision {
                         record.pending_partial = None;
+                        record.state = JobState::AcquiringTiles;
                     }
-                    record.state = JobState::Running;
                 }
-                JobState::Running
+                JobState::AcquiringTiles
             }
             Choice::Image { index } => {
                 if let Some(record) = self.jobs.get_mut(job) {
-                    record.pipeline_config.image_index = Some(index);
-                    record.state = JobState::AwaitingLevelSelection;
+                    record.options.image_index = Some(index);
+                    // A live runner already selected; the stored choice only
+                    // matters for a runner that has not started yet.
+                    if !has_runner {
+                        record.state = JobState::AwaitingLevelSelection;
+                    }
                 }
                 JobState::AwaitingLevelSelection
             }
             Choice::Level { index } => {
                 if let Some(record) = self.jobs.get_mut(job) {
-                    record.pipeline_config.zoom_level = Some(index);
-                    record.state = JobState::AwaitingDestination;
+                    record.options.zoom_level = Some(index);
+                    if !has_runner {
+                        record.state = JobState::AwaitingDestination;
+                    }
                 }
                 JobState::AwaitingDestination
             }
@@ -1218,24 +1006,15 @@ impl JobTable {
     }
 
     /// Record a save destination grant for a live job and ensure the real
-    /// `pipeline::run` worker is running.
+    /// runner is running.
     ///
     /// The commands layer owns the format-id check
     /// (`png`/`jpeg`/`tiff`/`zif`/`webp`/`iiif-dir`); this layer owns
     /// extension matching through the output layer: the format maps to an
     /// [`OutputFormat`], the path extension infers via
-    /// [`OutputFormat::infer_from_path`] (`.png` -> PNG, `.jpg`/`.jpeg` ->
-    /// JPEG, `.tif`/`.tiff` -> TIFF, `.zif` -> ZIF pyramid, `.webp` ->
-    /// lossless WebP, `.iiif`/extensionless/existing directory -> `iiif-dir`,
-    /// anything else a typed error), and [`validate_destination`] enforces
-    /// the extension/format match plus the overwrite policy. Any mismatch or
-    /// refusal is a typed error before any work: no state change, no event,
-    /// no worker. A denied destination recovers via request-decision
-    /// (choose-output) at the caller.
-    ///
-    /// The real dialog path is stored per job and passed to `pipeline::run`
-    /// for atomic publish. The path never crosses IPC; transcript events
-    /// carry the format id only.
+    /// [`OutputFormat::infer_from_path`], and [`validate_destination`]
+    /// enforces the match plus the overwrite policy, all before any work.
+    /// A grant for a job with a live runner only records the destination.
     pub fn request_destination(
         &mut self,
         job: &str,
@@ -1243,84 +1022,253 @@ impl JobTable {
         format: &str,
         overwrite: bool,
     ) -> Result<u64, String> {
-        self.pump_drivers();
+        self.poll_drivers();
         self.require_live(job)?;
         let requested =
             output_format_for_id(format).ok_or_else(|| "unsupported format".to_string())?;
         // Typed error before any work: unknown extensions never start the
-        // driver (fail-closed; only the compiled PNG/JPEG/TIFF/ZIF/WebP
+        // runner (fail-closed; only the compiled PNG/JPEG/TIFF/ZIF/WebP
         // codecs plus the `iiif-dir` tree exist).
         OutputFormat::infer_from_path(path).map_err(|e| e.to_string())?;
         // Extension/format match plus overwrite policy, also before any work.
         validate_destination(path, &requested, overwrite).map_err(|e| e.to_string())?;
+        let has_runner = self.jobs.get(job).is_some_and(|r| r.runner.is_some());
         if let Some(record) = self.jobs.get_mut(job) {
             record.destination = Some(path.to_path_buf());
             record.destination_format = Some(format.to_string());
             record.destination_overwrite = overwrite;
-            // The grant moves an `AwaitingDestination` job into active work.
-            // `Planning` is the honest projection: the driver plans before
-            // the first tile flows (the `Acquiring` state arrives with the
-            // first `downloading` progress).
-            if record.state == JobState::AwaitingDestination
-                || record.state == JobState::Discovering
-                || record.state == JobState::Running
-            {
-                record.state = JobState::Planning;
+            if !has_runner {
+                record.options.output = OutputTarget::File(path.to_path_buf());
+                record.options.overwrite = overwrite;
+                // The grant moves an `AwaitingDestination` job into active
+                // work.
+                if matches!(
+                    record.state,
+                    JobState::Discovering
+                        | JobState::AwaitingDestination
+                        | JobState::AwaitingImageSelection
+                        | JobState::AwaitingLevelSelection
+                ) {
+                    record.state = JobState::Discovering;
+                }
             }
         }
         let seq = self.push_event(job, "destination", format);
-        self.spawn_pipeline_worker(job);
+        if !has_runner {
+            self.start_runner(job);
+        }
         Ok(seq)
     }
 
-    /// Complete a live job (test helper modelling native finalization).
-    /// Models the driver publish step and emits the terminal `completed`
-    /// event exactly once on the `job-output` channel.
-    pub fn complete_job(&mut self, job: &str) -> Result<u64, String> {
-        self.pump_drivers();
-        self.require_live(job)?;
-        if let Some(record) = self.jobs.get_mut(job) {
-            if record.output_tile_count.is_none() {
-                record.output_tile_count = Some(0);
+    /// Drain live runner snapshots into the transcript. Non-blocking;
+    /// terminal-once is enforced (snapshots after a terminal are ignored)
+    /// and the runner handle is dropped once its terminal is folded.
+    pub fn poll_drivers(&mut self) {
+        let live: Vec<String> = self
+            .jobs
+            .iter()
+            .filter(|(_, record)| record.runner.is_some() && !record.state.is_terminal())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in live {
+            let runner = match self.jobs.get_mut(&id).and_then(|r| r.runner.take()) {
+                Some(runner) => runner,
+                None => continue,
+            };
+            let mut terminal_seen = false;
+            while let Ok(snapshot) = runner.snapshots().try_recv() {
+                let is_terminal = snapshot.terminal.is_some();
+                self.apply_runner_snapshot(&id, &snapshot);
+                if is_terminal {
+                    terminal_seen = true;
+                    break;
+                }
             }
-            record.state = JobState::Completed;
+            if !terminal_seen {
+                if let Some(record) = self.jobs.get_mut(&id) {
+                    record.runner = Some(runner);
+                }
+            }
+            // With a terminal folded, the handle is dropped: the driver
+            // thread has finished its sends and exits on its own.
         }
-        Ok(self.push_event(job, "completed", ""))
     }
 
-    /// Record a driver publish for tests without spawning I/O: stores the
-    /// output geometry and emits the terminal output event.
-    /// Post-terminal calls are rejected as stale.
-    #[cfg(test)]
-    pub fn publish_test_output(
-        &mut self,
-        job: &str,
-        format: &str,
-        width: u32,
-        height: u32,
-        tile_count: usize,
-    ) -> Result<u64, String> {
-        self.pump_drivers();
-        self.require_live(job)?;
+    /// Fold one runner snapshot into the transcript. Terminal-once: a
+    /// snapshot after a terminal is ignored. Lifecycle changes project one
+    /// `job-state` event; progress advances project one `downloading`
+    /// event carrying the monotonic record counts; recovery ledgers
+    /// project one `recovery-requested` event; terminals project exactly
+    /// one output/error/cancelled event.
+    pub fn apply_runner_snapshot(&mut self, job: &str, snapshot: &RunnerSnapshot) {
+        let Some(record) = self.jobs.get(job) else {
+            return;
+        };
+        if record.state.is_terminal() {
+            return;
+        }
+        // Recovery ledger: the dialog cue with the redacted ledger.
+        if let Some(ledger) = &snapshot.recovery {
+            let missing = redact_ledger(&ledger.missing);
+            let failed = ledger.failed;
+            let total = ledger.total;
+            let already = record
+                .pending_partial
+                .as_ref()
+                .is_some_and(|p| p.missing == missing && p.failed == failed && p.total == total);
+            if let Some(record) = self.jobs.get_mut(job) {
+                record.pending_partial = Some(PartialPending {
+                    missing: missing.clone(),
+                    failed,
+                    total,
+                    recovery: None,
+                });
+                record.state = JobState::AwaitingPartialDecision;
+                if total > 0 {
+                    record.progress_total = record.progress_total.max(total);
+                }
+            }
+            if !already {
+                self.push_event(job, "recovery-requested", "");
+            }
+            return;
+        }
+        if snapshot.terminal.is_none() {
+            // Live progression: fold the lifecycle and the monotonic counts.
+            let next = JobState::from(snapshot.lifecycle.clone());
+            let acquired_advanced = snapshot.acquired > record.progress_acquired;
+            let total_advanced = snapshot.total > record.progress_total;
+            let lifecycle_changed = record.state != next;
+            if let Some(record) = self.jobs.get_mut(job) {
+                record.progress_acquired = record.progress_acquired.max(snapshot.acquired);
+                record.progress_total = record.progress_total.max(snapshot.total);
+                if !matches!(record.state, JobState::Cancelling) {
+                    record.state = next;
+                }
+            }
+            if acquired_advanced || total_advanced {
+                self.push_event(job, "downloading", "");
+            } else if lifecycle_changed {
+                let kind = match next {
+                    JobState::Finalizing => "encoding",
+                    JobState::Discovering => "discovery",
+                    _ => "job-state",
+                };
+                self.push_event(job, kind, next.name());
+            }
+            return;
+        }
+        // Terminal: exactly once, from the runner's honest outcome.
+        let Some(terminal) = snapshot.terminal.clone() else {
+            return;
+        };
+        match terminal {
+            Terminal::Completed(summary) => {
+                self.fold_published(job, &summary);
+            }
+            Terminal::Cancelled => {
+                if let Some(record) = self.jobs.get_mut(job) {
+                    record.state = JobState::Cancelled;
+                    record.cancel_requested = false;
+                    record.pending_partial = None;
+                }
+                self.push_event(job, "cancelled", "Cancelled");
+            }
+            Terminal::Failed(error) => {
+                if let Some(record) = self.jobs.get_mut(job) {
+                    record.last_error_code = Some(error.code.clone());
+                    record.last_error_message = Some(redact_message(&error.message));
+                    record.state = JobState::Failed;
+                    record.cancel_requested = false;
+                    record.pending_partial = None;
+                }
+                self.push_event(job, "failed", "");
+            }
+        }
+    }
+
+    /// Fold one published output summary into the record and the honest
+    /// terminal event (`partial-completed` for kept partials, `completed`
+    /// otherwise). The sibling basename is the only path fragment that
+    /// ever reaches IPC.
+    fn fold_published(&mut self, job: &str, summary: &OutputSummary) {
+        let partial = summary.partial;
+        // Sibling basename only: the granted path never crosses IPC or the
+        // transcript.
+        let sibling = std::path::Path::new(&summary.path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string);
         if let Some(record) = self.jobs.get_mut(job) {
+            record.saved_path = Some(summary.path.clone());
             record.destination_format = Some(
                 record
                     .destination_format
                     .clone()
-                    .unwrap_or_else(|| format.to_string()),
+                    .unwrap_or_else(|| summary.format.clone()),
             );
-            record.output_width = Some(width);
-            record.output_height = Some(height);
-            record.output_tile_count = Some(tile_count);
-            record.state = JobState::Completed;
+            record.output_width = Some(summary.width);
+            record.output_height = Some(summary.height);
+            record.output_tile_count = Some(summary.tile_count);
+            record.output_source_format = Some(summary.format.clone());
+            record.output_missing = summary.missing.clone();
+            record.output_sibling = sibling;
+            record.pending_partial = None;
+            record.cancel_requested = false;
+            record.state = if partial {
+                JobState::PartiallyCompleted
+            } else {
+                JobState::Completed
+            };
         }
-        Ok(self.push_event(job, "completed", ""))
+        if partial {
+            self.push_event(job, "partial-completed", "");
+        } else {
+            self.push_event(job, "completed", "");
+        }
     }
 
-    /// Record a kept-partial driver publish for tests without spawning I/O:
-    /// stores output geometry and emits the terminal
-    /// `partial-completed` output event exactly once (`PartiallyCompleted`).
-    /// Post-terminal calls are rejected as stale.
+    /// Snapshot of the settings-selected output directory, if any.
+    pub fn output_dir_for(&self, job: &str) -> Option<PathBuf> {
+        self.jobs.get(job).and_then(|r| r.output_dir.clone())
+    }
+
+    /// Snapshot of the runner options for a job (test helper).
+    #[cfg(test)]
+    pub fn options_for(&self, job: &str) -> Option<JobOptions> {
+        self.jobs.get(job).map(|r| r.options.clone())
+    }
+
+    /// Test seam: fold a synthetic completed runner terminal (models native
+    /// finalization without I/O).
+    #[cfg(test)]
+    pub fn complete_job(&mut self, job: &str) -> Result<u64, String> {
+        self.require_live(job)?;
+        let summary = OutputSummary {
+            path: PathBuf::from("/tmp/dz-published.png"),
+            tile_count: 0,
+            width: 0,
+            height: 0,
+            format: "png".to_string(),
+            partial: false,
+            missing: Vec::new(),
+        };
+        self.apply_runner_snapshot(
+            job,
+            &RunnerSnapshot {
+                job: job.to_string(),
+                seq: 0,
+                lifecycle: Lifecycle::Finalizing,
+                acquired: 0,
+                total: 0,
+                recovery: None,
+                terminal: Some(Terminal::Completed(summary)),
+            },
+        );
+        Ok(self.last_seq(job).unwrap_or(0))
+    }
+
+    /// Test seam: fold a synthetic kept-partial runner terminal.
     #[cfg(test)]
     pub fn complete_partial_test_output(
         &mut self,
@@ -1330,92 +1278,55 @@ impl JobTable {
         height: u32,
         tile_count: usize,
     ) -> Result<u64, String> {
-        self.pump_drivers();
         self.require_live(job)?;
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.destination_format = Some(
-                record
-                    .destination_format
-                    .clone()
-                    .unwrap_or_else(|| format.to_string()),
-            );
-            record.output_width = Some(width);
-            record.output_height = Some(height);
-            record.output_tile_count = Some(tile_count);
-            record.output_missing.clear();
-            record.output_sibling = None;
-            record.pending_partial = None;
-            record.state = JobState::PartiallyCompleted;
-        }
-        Ok(self.push_event(job, "partial-completed", ""))
-    }
-
-    /// Honest kept-partial publish for tests: stores the digest, geometry,
-    /// missing ledger, and sibling basename, then emits `partial-completed`
-    /// (the ledger and sibling live in the record, never the granted path).
-    /// Test seam with explicit scalar params mirroring the production
-    /// publish shape; grouping them would diverge the seam from the call
-    /// shape it exercises.
-    #[allow(clippy::too_many_arguments)]
-    #[cfg(test)]
-    pub fn complete_partial_with_ledger_for_test(
-        &mut self,
-        job: &str,
-        format: &str,
-        width: u32,
-        height: u32,
-        tile_count: usize,
-        missing: &[String],
-        sibling: &str,
-    ) -> Result<u64, String> {
-        self.pump_drivers();
-        self.require_live(job)?;
-        let ledger = redact_ledger(missing);
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.destination_format = Some(
-                record
-                    .destination_format
-                    .clone()
-                    .unwrap_or_else(|| format.to_string()),
-            );
-            record.output_width = Some(width);
-            record.output_height = Some(height);
-            record.output_tile_count = Some(tile_count);
-            record.output_missing = ledger;
-            record.output_sibling = Some(sibling.to_string());
-            record.pending_partial = None;
-            record.state = JobState::PartiallyCompleted;
-        }
-        Ok(self.push_event(job, "partial-completed", ""))
-    }
-
-    /// Interactive partial request for tests: moves a live job to
-    /// `AwaitingPartialDecision` with the redacted ledger and emits the
-    /// `recovery-requested` dialog event exactly once.
-    #[cfg(test)]
-    pub fn request_partial_for_test(
-        &mut self,
-        job: &str,
-        missing: &[String],
-        failed: u64,
-        total: u64,
-    ) -> Result<u64, String> {
-        self.pump_drivers();
-        self.require_live(job)?;
-        let ledger = redact_ledger(missing);
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.pending_partial = Some(PartialPending {
-                missing: ledger,
-                failed,
-                total,
+        self.apply_runner_snapshot(
+            job,
+            &RunnerSnapshot {
+                job: job.to_string(),
+                seq: 0,
+                lifecycle: Lifecycle::Finalizing,
+                acquired: 0,
+                total: 0,
                 recovery: None,
-            });
-            record.state = JobState::AwaitingPartialDecision;
-            if total > 0 {
-                record.progress_total = record.progress_total.max(total);
-            }
-        }
-        Ok(self.push_event(job, "recovery-requested", ""))
+                terminal: Some(Terminal::Completed(OutputSummary {
+                    path: PathBuf::from("/tmp/dz-published.png"),
+                    tile_count,
+                    width,
+                    height,
+                    format: format.to_string(),
+                    partial: true,
+                    missing: Vec::new(),
+                })),
+            },
+        );
+        Ok(self.last_seq(job).unwrap_or(0))
+    }
+
+    /// Test seam: fold a synthetic typed runner failure.
+    #[cfg(test)]
+    pub fn fail_test_job(&mut self, job: &str, code: &str, message: &str) -> Result<u64, String> {
+        self.require_live(job)?;
+        self.apply_runner_snapshot(
+            job,
+            &RunnerSnapshot {
+                job: job.to_string(),
+                seq: 0,
+                lifecycle: Lifecycle::AcquiringTiles,
+                acquired: 0,
+                total: 0,
+                recovery: None,
+                terminal: Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+                    code, message,
+                ))),
+            },
+        );
+        Ok(self.last_seq(job).unwrap_or(0))
+    }
+
+    /// Whether the runner is live for a job (test helper).
+    #[cfg(test)]
+    pub fn has_runner(&self, job: &str) -> bool {
+        self.jobs.get(job).is_some_and(|r| r.runner.is_some())
     }
 
     /// Snapshot of the pending partial ledger, if the dialog waits.
@@ -1435,410 +1346,6 @@ impl JobTable {
     /// Snapshot of the kept-partial sibling basename, if published.
     pub fn output_sibling_for(&self, job: &str) -> Option<String> {
         self.jobs.get(job).and_then(|r| r.output_sibling.clone())
-    }
-
-    /// Record driver progress for tests without spawning I/O: folds
-    /// `acquired`/`total` monotonically (retries and cache hits never move
-    /// progress backwards) and emits one `job-progress` event.
-    /// Post-terminal calls are rejected as stale.
-    #[cfg(test)]
-    pub fn record_test_progress(
-        &mut self,
-        job: &str,
-        acquired: u64,
-        total: u64,
-    ) -> Result<u64, String> {
-        self.pump_drivers();
-        self.require_live(job)?;
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.progress_acquired = record.progress_acquired.max(acquired);
-            record.progress_total = record.progress_total.max(total);
-            if record.state == JobState::Planning
-                || record.state == JobState::Running
-                || record.state == JobState::Discovering
-            {
-                record.state = JobState::Acquiring;
-            }
-        }
-        Ok(self.push_event(job, "downloading", ""))
-    }
-
-    /// Record a typed driver failure for tests: stores the stable code plus
-    /// the redacted message, moves through `CleaningUp` to `Failed`, and
-    /// emits the terminal `job-error` event exactly once.
-    #[cfg(test)]
-    pub fn fail_test_job(&mut self, job: &str, code: &str, message: &str) -> Result<u64, String> {
-        self.pump_drivers();
-        self.require_live(job)?;
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.state = JobState::CleaningUp;
-        }
-        self.push_event(job, "job-state", "CleaningUp");
-        if let Some(record) = self.jobs.get_mut(job) {
-            record.last_error_code = Some(code.to_string());
-            record.last_error_message = Some(redact_message(message));
-            record.state = JobState::Failed;
-        }
-        Ok(self.push_event(job, "failed", ""))
-    }
-
-    /// Snapshot of the settings-selected output directory, if any.
-    pub fn output_dir_for(&self, job: &str) -> Option<PathBuf> {
-        self.jobs.get(job).and_then(|r| r.output_dir.clone())
-    }
-
-    /// Snapshot of the driver config for a job (test helper).
-    #[cfg(test)]
-    pub fn config_for(&self, job: &str) -> Option<PipelineConfig> {
-        self.jobs.get(job).map(|r| r.pipeline_config.clone())
-    }
-
-    /// Ensure the real pipeline worker is running. A desktop setting starts
-    /// with an automatic directory destination; its final file name is
-    /// derived from the selected catalog title inside the native driver.
-    fn spawn_pipeline_worker(&mut self, job: &str) {
-        let Some(record) = self.jobs.get(job) else {
-            return;
-        };
-        let destination = record.destination.clone();
-        let auto_destination = if destination.is_none() {
-            record
-                .destination_format
-                .as_deref()
-                .and_then(output_format_for_id)
-                .map(|format| {
-                    (
-                        record.output_dir.clone().unwrap_or_else(std::env::temp_dir),
-                        format,
-                    )
-                })
-        } else {
-            None
-        };
-        if destination.is_none() && auto_destination.is_none() {
-            return;
-        }
-        if let Some(handle) = self.driver_handles.get(job) {
-            if !handle.is_finished() {
-                return;
-            }
-        }
-        let job_id = record.id.clone();
-        let input_url = record.input_url.clone();
-        let overwrite = record.destination_overwrite;
-        let config = record.pipeline_config.clone();
-        let tx = self.driver_tx.clone();
-        if let Ok(handle) = std::thread::Builder::new()
-            .name(format!("dezoomify-{job_id}-pipeline"))
-            .spawn(move || {
-                let tx_progress = tx.clone();
-                let job_for_events = job_id.clone();
-                let mut on_event = |event: PipelineEvent| {
-                    match event {
-                        PipelineEvent::RecoveryRequested {
-                            missing,
-                            failed,
-                            total,
-                            ..
-                        }
-                        | PipelineEvent::MissingWork {
-                            missing,
-                            failed,
-                            total,
-                        } => {
-                            let _ = tx_progress.send(DriverMessage::RecoveryRequested {
-                                job: job_for_events.clone(),
-                                missing: redact_ledger(&missing),
-                                failed,
-                                total,
-                            });
-                        }
-                        // Tile request diagnostics are intended for the CLI.
-                        // The desktop only exposes typed recovery and must not
-                        // treat an informational event as a terminal engine
-                        // failure.
-                        PipelineEvent::TileFailed { .. } => {}
-                        event => {
-                            let _ = tx_progress.send(DriverMessage::Progress {
-                                job: job_for_events.clone(),
-                                event,
-                            });
-                        }
-                    }
-                };
-                let result = match (destination, auto_destination) {
-                    (Some(destination), _) => dezoomify_native::pipeline::run(
-                        &input_url,
-                        &destination.to_string_lossy(),
-                        overwrite,
-                        &config,
-                        &mut on_event,
-                    ),
-                    (None, Some((output_dir, format))) => {
-                        dezoomify_native::pipeline::run_auto_named(
-                            &input_url,
-                            &output_dir,
-                            format,
-                            &config,
-                            &mut on_event,
-                        )
-                    }
-                    (None, None) => return,
-                };
-                let outcome = match result {
-                    Ok(outcome) => {
-                        // Sibling basename only: the granted path never
-                        // crosses IPC or the transcript.
-                        let sibling = std::path::Path::new(&outcome.output_path)
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .map(str::to_string);
-                        Ok(DriverSuccess {
-                            saved_path: outcome.output_path,
-                            format: outcome.format,
-                            width: outcome.image_size.x,
-                            height: outcome.image_size.y,
-                            tile_count: outcome.tile_count,
-                            partial: outcome.partial,
-                            missing: outcome.missing,
-                            sibling,
-                        })
-                    }
-                    Err(error) => Err(DriverFailure {
-                        code: error.code,
-                        message: error.message,
-                    }),
-                };
-                let _ = tx.send(DriverMessage::Finished {
-                    job: job_id,
-                    result: outcome,
-                });
-            })
-        {
-            self.driver_handles.insert(job.to_string(), handle);
-        }
-    }
-
-    /// Fold pending worker messages into the transcript. Reaps finished
-    /// threads without blocking and enforces terminal-once.
-    ///
-    /// Projection rules (Task 1.5):
-    /// - `job-state`: lifecycle (`Discovering`/`Planning`/`Acquiring`/
-    ///   `Processing`/`Encoding`/`Finalizing`/`Publishing`/`CleaningUp` plus
-    ///   the `Awaiting*`/`Running`/`Completed`/`Cancelled`/`Failed` family).
-    /// - `job-progress`: `acquired`/`total` monotonic via `max` (survives
-    ///   retries and resume-cache hits; unknown totals stay 0 and never
-    ///   claim completeness).
-    /// - `job-output`: real sha256 of bytes written plus format/geometry.
-    /// - `job-error`: stable code/phase/retryable/recovery plus the redacted
-    ///   origin only.
-    ///
-    /// Only counts, hashes, codes, and the redacted origin cross IPC; tile
-    /// bytes, paths, full URLs, and secrets never do. Post-terminal driver
-    /// messages are ignored so terminals appear exactly once.
-    fn pump_drivers(&mut self) {
-        let finished: Vec<String> = self
-            .driver_handles
-            .iter()
-            .filter_map(|(id, handle)| {
-                if handle.is_finished() {
-                    Some(id.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        for id in finished {
-            if let Some(handle) = self.driver_handles.remove(&id) {
-                let _ = handle.join();
-            }
-        }
-        while let Ok(message) = self.driver_rx.try_recv() {
-            match message {
-                DriverMessage::Progress { job, event } => {
-                    let live = self.jobs.get(&job).is_some_and(|r| !r.state.is_terminal());
-                    if !live {
-                        continue;
-                    }
-                    match event {
-                        PipelineEvent::Downloading { acquired, total } => {
-                            if let Some(record) = self.jobs.get_mut(&job) {
-                                record.progress_acquired = record.progress_acquired.max(acquired);
-                                record.progress_total = record.progress_total.max(total);
-                                if record.state != JobState::Encoding {
-                                    record.state = JobState::Acquiring;
-                                }
-                            }
-                            self.push_event(&job, "downloading", "");
-                        }
-                        PipelineEvent::Discovery { .. } => {
-                            if let Some(record) = self.jobs.get_mut(&job) {
-                                if record.state == JobState::Discovering
-                                    || record.state == JobState::Running
-                                {
-                                    record.state = JobState::Discovering;
-                                }
-                            }
-                            self.push_event(&job, "discovery", "");
-                        }
-                        PipelineEvent::Encoding { .. } => {
-                            if let Some(record) = self.jobs.get_mut(&job) {
-                                record.state = JobState::Encoding;
-                            }
-                            self.push_event(&job, "encoding", "");
-                        }
-                        PipelineEvent::Paused { .. } => {
-                            self.push_event(&job, "paused", "");
-                        }
-                        PipelineEvent::Resumed { .. } => {
-                            self.push_event(&job, "resumed", "");
-                        }
-                        PipelineEvent::RecoveryRequested {
-                            missing,
-                            failed,
-                            total,
-                            ..
-                        }
-                        | PipelineEvent::MissingWork {
-                            missing,
-                            failed,
-                            total,
-                        } => {
-                            self.apply_recovery_request(
-                                &job,
-                                &redact_ledger(&missing),
-                                failed,
-                                total,
-                            );
-                        }
-                        // Informational tile diagnostics never reach the
-                        // transcript.
-                        PipelineEvent::TileFailed { .. } => {}
-                    }
-                }
-                DriverMessage::RecoveryRequested {
-                    job,
-                    missing,
-                    failed,
-                    total,
-                } => {
-                    self.apply_recovery_request(&job, &missing, failed, total);
-                }
-                DriverMessage::Finished { job, result } => {
-                    let live = self.jobs.get(&job).is_some_and(|r| !r.state.is_terminal());
-                    if !live {
-                        continue;
-                    }
-                    if self
-                        .jobs
-                        .get(&job)
-                        .is_some_and(|record| record.cancel_requested)
-                    {
-                        let published = match result {
-                            Ok(success) => Some(success.saved_path),
-                            Err(_) => None,
-                        };
-                        self.finish_cancellation(&job, published);
-                        continue;
-                    }
-                    match result {
-                        Ok(success) => {
-                            if let Some(record) = self.jobs.get_mut(&job) {
-                                record.saved_path = Some(success.saved_path.clone());
-                            }
-                            if success.partial {
-                                // Honest partial terminal: `partial-completed`
-                                // with the missing ledger plus the sibling
-                                // basename in the record (never the granted
-                                // path), so the UI can never claim a complete
-                                // save.
-                                let ledger = redact_ledger(&success.missing);
-                                let sibling = success
-                                    .sibling
-                                    .clone()
-                                    .unwrap_or_else(|| "output.partial".to_string());
-                                if let Some(record) = self.jobs.get_mut(&job) {
-                                    record.state = JobState::PartiallyCompleted;
-                                    record.output_width = Some(success.width);
-                                    record.output_height = Some(success.height);
-                                    record.output_tile_count = Some(success.tile_count);
-                                    record.output_source_format = Some(success.format);
-                                    record.output_missing = ledger.clone();
-                                    record.output_sibling = Some(sibling.clone());
-                                    record.pending_partial = None;
-                                    record.progress_acquired =
-                                        record.progress_acquired.max(success.tile_count as u64);
-                                    if record.progress_total != 0 {
-                                        record.progress_total =
-                                            record.progress_total.max(success.tile_count as u64);
-                                    }
-                                }
-                                self.push_event(&job, "partial-completed", "");
-                            } else {
-                                if let Some(record) = self.jobs.get_mut(&job) {
-                                    record.state = JobState::Completed;
-                                    record.output_width = Some(success.width);
-                                    record.output_height = Some(success.height);
-                                    record.output_tile_count = Some(success.tile_count);
-                                    record.output_source_format = Some(success.format);
-                                    record.output_missing.clear();
-                                    record.output_sibling = None;
-                                    record.pending_partial = None;
-                                    record.progress_acquired =
-                                        record.progress_acquired.max(success.tile_count as u64);
-                                    if record.progress_total != 0 {
-                                        record.progress_total =
-                                            record.progress_total.max(success.tile_count as u64);
-                                    }
-                                }
-                                self.push_event(&job, "completed", "");
-                            }
-                        }
-                        Err(failure) => {
-                            if failure.code == "job.cancelled" {
-                                let uncommitted = self.jobs.get(&job).and_then(|r| {
-                                    r.destination.clone().map(|d| (d, r.destination_overwrite))
-                                });
-                                if let Some(record) = self.jobs.get_mut(&job) {
-                                    record.state = JobState::Cancelled;
-                                    record.output_width = None;
-                                    record.output_height = None;
-                                    record.output_tile_count = None;
-                                    record.output_source_format = None;
-                                    record.pending_partial = None;
-                                    record.output_missing.clear();
-                                    record.output_sibling = None;
-                                }
-                                if let Some((dest, overwrite)) = uncommitted {
-                                    remove_uncommitted_output(&dest, overwrite);
-                                }
-                                self.push_event(&job, "cancelled", "Cancelled");
-                            } else {
-                                let uncommitted = self.jobs.get(&job).and_then(|r| {
-                                    r.destination.clone().map(|d| (d, r.destination_overwrite))
-                                });
-                                if let Some(record) = self.jobs.get_mut(&job) {
-                                    record.last_error_code = Some(failure.code.clone());
-                                    record.last_error_message =
-                                        Some(redact_message(&failure.message));
-                                    record.state = JobState::CleaningUp;
-                                }
-                                self.push_event(&job, "job-state", "CleaningUp");
-                                if let Some(record) = self.jobs.get_mut(&job) {
-                                    record.state = JobState::Failed;
-                                    record.pending_partial = None;
-                                }
-                                if let Some((dest, overwrite)) = uncommitted {
-                                    remove_uncommitted_output(&dest, overwrite);
-                                }
-                                self.push_event(&job, "failed", "");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        self.finalize_ready_cancellations();
     }
 }
 
@@ -1872,40 +1379,20 @@ fn output_format_for_id(format: &str) -> Option<OutputFormat> {
     }
 }
 
-/// Best-effort removal of uncommitted output (no logging; paths stay
-/// native). The atomic-write temp sibling is never user data and is always
-/// safe to drop. The destination itself is removed only when overwrite was
-/// refused: then it did not exist at grant time, so anything there now is
-/// uncommitted. With overwrite confirmed the destination may hold user data
-/// and is left alone.
-fn remove_uncommitted_output(path: &Path, overwrite: bool) {
-    let tmp = path.with_extension("tmp");
-    if tmp != path {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    if overwrite {
-        return;
-    }
-    if path.is_dir() {
-        let _ = std::fs::remove_dir_all(path);
-    } else {
-        let _ = std::fs::remove_file(path);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dezoomify_native::runner::RecoveryLedger;
 
     /// A fresh manual job cues `AwaitingDestination` synchronously with one
     /// `job-state` event: the frontend's cue to offer the save destination.
-    /// No background worker is involved; the real discovery runs inside the
-    /// pipeline worker after the destination grant.
+    /// No runner runs until the destination grant.
     #[test]
     fn discovery_completion_requests_destination() {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
         assert_eq!(table.state_of(&id), Some(JobState::AwaitingDestination));
+        assert!(!table.has_runner(&id), "no runner before the grant");
         let events = table.events_for(&id);
         assert!(events.len() >= 2, "submit plus destination request");
         let last = events.last().expect("destination request event");
@@ -1945,6 +1432,7 @@ mod tests {
                 .any(|event| event.detail == "AwaitingDestination"),
             "automatic saves never expose a choose-output step"
         );
+        assert!(table.has_runner(&id), "the runner starts automatically");
         let _ = table.cancel_job(&id);
     }
 
@@ -1955,7 +1443,16 @@ mod tests {
         table
             .answer_choice(&id, &Choice::Image { index: 0 })
             .unwrap();
-        table.complete_job(&id).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AcquiringTiles,
+                1,
+                2,
+                None,
+                Some(Terminal::Completed(published("png", 8, 6, 2))),
+            ),
+        );
         let events = table.events_for(&id);
         let seqs: Vec<u64> = events.iter().map(|e| e.seq).collect();
         let mut sorted = seqs.clone();
@@ -1994,12 +1491,12 @@ mod tests {
         let id = table
             .start_job_with_settings("https://example.com/item", &settings)
             .unwrap();
-        let config = table.config_for(&id).unwrap();
-        assert_eq!(config.compression, 9);
-        assert_eq!(config.max_retries, 0);
-        assert_eq!(config.max_width, Some(800));
-        assert_eq!(config.max_concurrent, 16);
-        assert_eq!(config.fetch.max_idle_per_host, 32);
+        let options = table.options_for(&id).unwrap();
+        assert_eq!(options.compression, 9);
+        assert_eq!(options.max_retries, 0);
+        assert_eq!(options.max_width, Some(800));
+        assert_eq!(options.max_concurrent, 16);
+        assert_eq!(options.max_idle_per_host, 32);
         assert!(table.output_dir_for(&id).is_none());
         let with_dir = parse_settings(&serde_json::json!({"output_dir": "/tmp/dz-out"})).unwrap();
         let id2 = table
@@ -2009,14 +1506,7 @@ mod tests {
             table.output_dir_for(&id2).unwrap(),
             std::path::PathBuf::from("/tmp/dz-out")
         );
-        // Real destination ONLY: the grant stores the dialog-chosen path
-        // (here under the settings output dir), not a derived temp path.
-        let path = std::path::PathBuf::from("/tmp/dz-out/grant.png");
-        let seq = table
-            .request_destination(&id2, &path, "png", false)
-            .unwrap();
-        assert!(seq >= 1);
-        assert_eq!(table.destination_for(&id2).unwrap(), path);
+        table.cancel_job(&id).unwrap();
         table.cancel_job(&id2).unwrap();
     }
 
@@ -2032,10 +1522,10 @@ mod tests {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
         // The destination cue is synchronous, so the event count below is
-        // exact with no worker to race.
+        // exact with no runner to race.
         assert_eq!(table.state_of(&id), Some(JobState::AwaitingDestination));
         // Unknown extensions fail before any work: no destination, no new
-        // event, no worker outcome.
+        // event, no runner.
         let bad = scratch_path("validate", "out.bmp");
         let events_before = table.events_for(&id).len();
         let err = table
@@ -2046,6 +1536,7 @@ mod tests {
             "typed error, got {err}"
         );
         assert!(table.destination_for(&id).is_none());
+        assert!(!table.has_runner(&id), "no runner on refused grant");
         assert_eq!(table.events_for(&id).len(), events_before);
         // Extension/format mismatch fails before any work.
         let mismatch = scratch_path("validate", "out.jpg");
@@ -2064,11 +1555,12 @@ mod tests {
             .unwrap_err();
         assert_eq!(err, "unsupported format");
         assert!(table.destination_for(&id).is_none());
-        // A matching grant stores the real path; the format is the only
-        // destination detail that enters the event.
+        // A matching grant stores the real path and starts the runner; the
+        // format is the only destination detail that enters the event.
         let seq = table.request_destination(&id, &png, "png", false).unwrap();
         assert!(seq >= 1);
         assert_eq!(table.destination_for(&id).unwrap(), png);
+        assert!(table.has_runner(&id), "the grant starts the runner");
         let events = table.events_for(&id);
         let granted = events.iter().find(|e| e.kind == "destination").unwrap();
         assert_eq!(granted.detail, "png");
@@ -2108,13 +1600,15 @@ mod tests {
         table.request_destination(&id, &path, "png", true).unwrap();
         assert_eq!(table.destination_for(&id).unwrap(), path);
         table.cancel_job(&id).unwrap();
-        // Overwrite grants leave pre-existing user data alone on cancel.
+        // Overwrite grants leave pre-existing user data alone on cancel:
+        // the runner never publishes on the cancel path and the desktop
+        // never removes a confirmed-overwrite destination.
         assert_eq!(std::fs::read(&path).unwrap(), b"existing");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn handoff_user_headers_reach_driver_and_stay_out_of_debug() {
+    fn handoff_user_headers_reach_runner_and_stay_out_of_debug() {
         use std::collections::BTreeMap;
         let mut table = JobTable::new();
         let mut headers = BTreeMap::new();
@@ -2122,11 +1616,11 @@ mod tests {
         let id = table
             .start_job_with_user_headers("https://protected.example/item", headers)
             .unwrap();
-        let config = table.config_for(&id).unwrap();
+        let options = table.options_for(&id).unwrap();
         assert_eq!(
-            config.user_headers.get("cookie").map(String::as_str),
+            options.headers.get("cookie").map(String::as_str),
             Some("session=CANARY-handoff"),
-            "handoff cookie must reach the driver config"
+            "handoff cookie must reach the runner options"
         );
         // Memory-only secrets never appear in Debug, events, or ids.
         let debug = format!("{:?}", table);
@@ -2155,10 +1649,22 @@ mod tests {
             .unwrap();
         let s2 = table.last_seq(&id).unwrap();
         assert!(s2 > 1, "seq must increase");
-        table.record_test_progress(&id, 3, 10).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 3, 10, None, None),
+        );
         let s3 = table.last_seq(&id).unwrap();
         assert!(s3 > s2, "progress must bump seq");
-        table.complete_job(&id).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AcquiringTiles,
+                3,
+                10,
+                None,
+                Some(Terminal::Completed(published("png", 4, 4, 1))),
+            ),
+        );
         let terminal_seq = table.last_seq(&id).unwrap();
         let events = table.events_for(&id);
         // Terminal appears exactly once; seqs are strictly increasing.
@@ -2173,14 +1679,19 @@ mod tests {
         assert_eq!(terminals.len(), 1, "terminal exactly once");
         // Post-terminal inputs are stale with no new effects.
         let before = events.len();
-        assert_eq!(table.record_test_progress(&id, 9, 10).unwrap_err(), "stale");
+        assert_eq!(table.cancel_job(&id).unwrap_err(), "stale");
         assert_eq!(
             table
                 .answer_choice(&id, &Choice::Image { index: 1 })
                 .unwrap_err(),
             "stale"
         );
-        assert_eq!(table.cancel_job(&id).unwrap_err(), "stale");
+        // Late runner snapshots after the terminal add nothing.
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 9, 10, None, None),
+        );
+        table.poll_drivers();
         assert_eq!(table.events_for(&id).len(), before);
         assert_eq!(table.last_seq(&id), Some(terminal_seq));
         // Drained emits are ordered and never replay.
@@ -2198,18 +1709,30 @@ mod tests {
     fn progress_monotonic_survives_retries_and_cache() {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table.record_test_progress(&id, 5, 10).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 5, 10, None, None),
+        );
         assert_eq!(table.progress_for(&id), Some((5, 10)));
         // A retry re-report with lower counts never moves backwards.
-        table.record_test_progress(&id, 2, 10).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 2, 10, None, None),
+        );
         assert_eq!(table.progress_for(&id), Some((5, 10)));
         // A resume-cache hit still counts forward.
-        table.record_test_progress(&id, 7, 10).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 7, 10, None, None),
+        );
         assert_eq!(table.progress_for(&id), Some((7, 10)));
         // Unknown totals stay 0 and never claim completeness.
         let mut fresh = JobTable::new();
         let id2 = fresh.start_job("https://example.com/other").unwrap();
-        fresh.record_test_progress(&id2, 1, 0).unwrap();
+        fresh.apply_runner_snapshot(
+            &id2,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 1, 0, None, None),
+        );
         assert_eq!(fresh.progress_for(&id2), Some((1, 0)));
         // Projected progress payloads carry the monotonic record snapshot
         // (counts live in the record, never string-encoded into the event),
@@ -2232,7 +1755,16 @@ mod tests {
     fn output_carries_geometry() {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table.publish_test_output(&id, "png", 800, 600, 12).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::Finalizing,
+                12,
+                12,
+                None,
+                Some(Terminal::Completed(published("png", 800, 600, 12))),
+            ),
+        );
         let snapshot = table.output_snapshot_for(&id).unwrap();
         assert_eq!(snapshot.format, "png");
         assert_eq!((snapshot.width, snapshot.height), (800, 600));
@@ -2254,13 +1786,19 @@ mod tests {
         let id = table
             .start_job("https://example.com/item?token=CANARY-secret")
             .unwrap();
-        table
-            .fail_test_job(
-                &id,
-                "tile.download-failed",
-                "3 tiles failed; token=CANARY-secret",
-            )
-            .unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AcquiringTiles,
+                1,
+                4,
+                None,
+                Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+                    "tile.download-failed",
+                    "3 tiles failed; token=CANARY-secret",
+                ))),
+            ),
+        );
         let snapshot = table.error_snapshot_for(&id).unwrap();
         assert_eq!(snapshot.code, "tile.download-failed");
         assert_eq!(snapshot.phase, "acquisition");
@@ -2399,13 +1937,19 @@ mod tests {
         // redacted origin; full URLs, paths, and secrets never do.
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table
-            .fail_test_job(
-                &id,
-                "output.canvas-limit",
-                "composed image 40000x40000 needs 5.9 GiB",
-            )
-            .unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AcquiringTiles,
+                1,
+                4,
+                None,
+                Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+                    "output.canvas-limit",
+                    "composed image 40000x40000 needs 5.9 GiB",
+                ))),
+            ),
+        );
         let snapshot = table.error_snapshot_for(&id).unwrap();
         assert_eq!(snapshot.code, "output.canvas-limit");
         assert_eq!(snapshot.phase, "output");
@@ -2448,7 +1992,10 @@ mod tests {
         // Real payloads never contain them.
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table.record_test_progress(&id, 1, 4).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 1, 4, None, None),
+        );
         for emit in table.drain_pending() {
             assert!(
                 !payload_has_forbidden_keys(&emit.payload),
@@ -2465,90 +2012,31 @@ mod tests {
     }
 
     #[test]
-    fn job_state_names_cover_task_phases() {
+    fn job_state_names_cover_runner_phases() {
         for (state, name) in [
-            (JobState::Created, "Created"),
             (JobState::Discovering, "Discovering"),
             (JobState::AwaitingImageSelection, "AwaitingImageSelection"),
             (JobState::AwaitingLevelSelection, "AwaitingLevelSelection"),
             (JobState::AwaitingDestination, "AwaitingDestination"),
-            (JobState::AwaitingPartialDecision, "AwaitingPartialDecision"),
-            (JobState::AwaitingRecovery, "AwaitingRecovery"),
-            (JobState::Running, "Running"),
-            (JobState::Planning, "Planning"),
-            (JobState::Acquiring, "Acquiring"),
-            (JobState::Processing, "Processing"),
-            (JobState::Encoding, "Encoding"),
+            (JobState::AcquiringTiles, "AcquiringTiles"),
             (JobState::Finalizing, "Finalizing"),
-            (JobState::Publishing, "Publishing"),
-            (JobState::CleaningUp, "CleaningUp"),
+            (JobState::AwaitingPartialDecision, "AwaitingPartialDecision"),
+            (JobState::Cancelling, "Cancelling"),
             (JobState::Completed, "Completed"),
             (JobState::Cancelled, "Cancelled"),
             (JobState::Failed, "Failed"),
         ] {
             assert_eq!(state.name(), name);
         }
-        assert!(JobState::AwaitingDestination.is_awaiting());
-        assert!(!JobState::Running.is_awaiting());
+        assert!(JobState::AwaitingDestination != JobState::AcquiringTiles);
         assert!(JobState::Completed.is_terminal());
-        assert!(!JobState::Running.is_terminal());
-    }
-
-    #[test]
-    fn destination_cancel_removes_uncommitted_file() {
-        let dir = scratch_path("cancel", "dir");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("out.jpg");
-        let mut table = JobTable::new();
-        let id = table.start_job("https://example.com/item").unwrap();
-        // No worker runs before the destination grant: set up the
-        // cancellation-only fixture directly. The production destination
-        // path starts a worker, which could legitimately finish before this
-        // synchronous assertion.
-        assert!(!table.driver_handles.contains_key(&id));
-        if let Some(record) = table.jobs.get_mut(&id) {
-            record.destination = Some(path.clone());
-            record.destination_format = Some("jpeg".to_string());
-            record.destination_overwrite = false;
-        }
-        // Simulate uncommitted output plus its atomic-write temp sibling.
-        std::fs::write(&path, b"partial").unwrap();
-        std::fs::write(path.with_extension("tmp"), b"temp").unwrap();
-        table.cancel_job(&id).unwrap();
-        assert!(!path.exists(), "uncommitted output removed on cancel");
-        assert!(
-            !path.with_extension("tmp").exists(),
-            "temp sibling removed on cancel"
-        );
-        assert_eq!(table.state_of(&id), Some(JobState::Cancelled));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn cancellation_removes_auto_output_reported_by_worker() {
-        let path = scratch_path("cancel-auto", "saved.png");
-        let _ = std::fs::remove_file(&path);
-        std::fs::write(&path, b"published-after-cancel").unwrap();
-
-        let mut table = JobTable::new();
-        let id = table.start_job("https://example.com/item").unwrap();
-        if let Some(record) = table.jobs.get_mut(&id) {
-            record.cancel_requested = true;
-            record.state = JobState::CleaningUp;
-        }
-        table.finish_cancellation(&id, Some(path.clone()));
-
-        assert!(!path.exists(), "automatic output is removed on cancel");
-        assert_eq!(table.state_of(&id), Some(JobState::Cancelled));
+        assert!(!JobState::AcquiringTiles.is_terminal());
+        // Runner lifecycles project onto the shell states.
         assert_eq!(
-            table
-                .events_for(&id)
-                .iter()
-                .filter(|event| event.kind == "cancelled")
-                .count(),
-            1
+            JobState::from(Lifecycle::AcquiringTiles),
+            JobState::AcquiringTiles
         );
+        assert_eq!(JobState::from(Lifecycle::Finalizing), JobState::Finalizing);
     }
 
     /// Task 6.1: unknown job ids are rejected before any work.
@@ -2574,29 +2062,6 @@ mod tests {
                 .unwrap_err(),
             "unknown"
         );
-        assert_eq!(table.complete_job("job:missing").unwrap_err(), "unknown");
-        assert_eq!(
-            table
-                .publish_test_output("job:missing", "png", 1, 1, 1)
-                .unwrap_err(),
-            "unknown"
-        );
-        assert_eq!(
-            table
-                .complete_partial_test_output("job:missing", "png", 1, 1, 1)
-                .unwrap_err(),
-            "unknown"
-        );
-        assert_eq!(
-            table.record_test_progress("job:missing", 1, 2).unwrap_err(),
-            "unknown"
-        );
-        assert_eq!(
-            table
-                .fail_test_job("job:missing", "tile.download-failed", "x")
-                .unwrap_err(),
-            "unknown"
-        );
         assert!(table.events_for("job:missing").is_empty());
         assert_eq!(table.last_seq("job:missing"), None);
         assert_eq!(table.state_of("job:missing"), None);
@@ -2617,17 +2082,50 @@ mod tests {
                     table.cancel_job(&id).unwrap();
                 }
                 "completed" => {
-                    table.publish_test_output(&id, "png", 8, 6, 2).unwrap();
+                    table.apply_runner_snapshot(
+                        &id,
+                        &runner_snapshot(
+                            Lifecycle::Finalizing,
+                            2,
+                            2,
+                            None,
+                            Some(Terminal::Completed(published("png", 8, 6, 2))),
+                        ),
+                    );
                 }
                 "partial" => {
-                    table
-                        .complete_partial_test_output(&id, "png", 8, 6, 1)
-                        .unwrap();
+                    table.apply_runner_snapshot(
+                        &id,
+                        &runner_snapshot(
+                            Lifecycle::Finalizing,
+                            1,
+                            2,
+                            None,
+                            Some(Terminal::Completed(published_partial(
+                                "png",
+                                8,
+                                6,
+                                1,
+                                &["tile:1".to_string()],
+                                "out.partial.png",
+                            ))),
+                        ),
+                    );
                 }
                 _ => {
-                    table
-                        .fail_test_job(&id, "tile.download-failed", "tiles missing")
-                        .unwrap();
+                    table.apply_runner_snapshot(
+                        &id,
+                        &runner_snapshot(
+                            Lifecycle::AcquiringTiles,
+                            0,
+                            2,
+                            None,
+                            Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+                                "tile.download-failed",
+                                "tiles missing",
+                            ))),
+                        ),
+                    );
                 }
             }
             assert!(
@@ -2684,30 +2182,16 @@ mod tests {
                 .unwrap_err(),
             "stale"
         );
-        assert_eq!(table.complete_job(&id).unwrap_err(), "stale");
-        assert_eq!(
-            table.publish_test_output(&id, "png", 1, 1, 1).unwrap_err(),
-            "stale"
-        );
-        assert_eq!(
-            table
-                .complete_partial_test_output(&id, "png", 1, 1, 1)
-                .unwrap_err(),
-            "stale"
-        );
-        assert_eq!(table.record_test_progress(&id, 9, 9).unwrap_err(), "stale");
-        assert_eq!(
-            table
-                .fail_test_job(&id, "tile.download-failed", "late")
-                .unwrap_err(),
-            "stale"
-        );
         assert_eq!(table.state_of(&id), Some(JobState::Cancelled));
         assert_eq!(table.events_for(&id).len(), events_before);
         assert_eq!(table.last_seq(&id), Some(seq_before));
         assert!(table.drain_pending().is_empty(), "no work after terminal");
         assert!(table.destination_for(&id).is_none());
-        // Late driver pump after a sync terminal adds nothing.
+        // Late runner snapshots after a sync terminal add nothing.
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 9, 9, None, None),
+        );
         table.poll_drivers();
         assert_eq!(table.events_for(&id).len(), events_before);
     }
@@ -2722,15 +2206,22 @@ mod tests {
         // Desktop: lower re-reports never move progress backwards.
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table.record_test_progress(&id, 5, 10).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 5, 10, None, None),
+        );
         let snapshot_before = table.progress_for(&id).unwrap();
-        let state_before = table.state_of(&id).unwrap();
-        table.record_test_progress(&id, 5, 10).unwrap();
-        table.record_test_progress(&id, 2, 9).unwrap();
-        assert_eq!(table.progress_for(&id), Some(snapshot_before));
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 5, 10, None, None),
+        );
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 2, 9, None, None),
+        );
         // Only the monotonic max survives; the snapshot never regresses.
+        assert_eq!(table.progress_for(&id), Some(snapshot_before));
         assert_eq!(table.progress_for(&id), Some((5, 10)));
-        let _ = state_before;
         // Engine parity: unknown/consumed request ids replay as Ignored.
         let mut engine =
             dezoomify_engine::Job::new("https://example.com/item", Default::default()).unwrap();
@@ -2762,16 +2253,23 @@ mod tests {
         let s2 = table.last_seq(&id).unwrap();
         assert!(s2 > last, "choice must bump seq");
         last = s2;
-        table.record_test_progress(&id, 1, 4).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 1, 4, None, None),
+        );
         let s3 = table.last_seq(&id).unwrap();
         assert!(s3 > last, "progress must bump seq");
         last = s3;
-        let path = scratch_path("seq", "out.png");
-        table.request_destination(&id, &path, "png", false).unwrap();
-        let s4 = table.last_seq(&id).unwrap();
-        assert!(s4 > last, "destination must bump seq");
-        last = s4;
-        table.publish_test_output(&id, "png", 4, 4, 1).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::Finalizing,
+                4,
+                4,
+                None,
+                Some(Terminal::Completed(published("png", 4, 4, 1))),
+            ),
+        );
         let terminal_seq = table.last_seq(&id).unwrap();
         assert!(terminal_seq > last);
         let seqs: Vec<u64> = table.events_for(&id).iter().map(|e| e.seq).collect();
@@ -2820,13 +2318,35 @@ mod tests {
         {
             let mut table = JobTable::new();
             let id = table.start_job("https://example.com/item").unwrap();
-            table.complete_job(&id).unwrap();
+            table.apply_runner_snapshot(
+                &id,
+                &runner_snapshot(
+                    Lifecycle::Finalizing,
+                    2,
+                    2,
+                    None,
+                    Some(Terminal::Completed(published("png", 4, 4, 2))),
+                ),
+            );
             let events = table.events_for(&id);
             let terminals = terminal_kinds(&events);
             assert_eq!(terminals.len(), 1);
             assert_eq!(terminals[0].kind, "completed");
             assert_eq!(table.state_of(&id), Some(JobState::Completed));
-            assert_eq!(table.complete_job(&id).unwrap_err(), "stale");
+            // A second terminal snapshot is ignored.
+            table.apply_runner_snapshot(
+                &id,
+                &runner_snapshot(
+                    Lifecycle::Finalizing,
+                    2,
+                    2,
+                    None,
+                    Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+                        "tile.download-failed",
+                        "late",
+                    ))),
+                ),
+            );
             let events = table.events_for(&id);
             assert_eq!(terminal_kinds(&events).len(), 1);
         }
@@ -2834,9 +2354,23 @@ mod tests {
         {
             let mut table = JobTable::new();
             let id = table.start_job("https://example.com/item").unwrap();
-            table
-                .complete_partial_test_output(&id, "png", 2, 2, 1)
-                .unwrap();
+            table.apply_runner_snapshot(
+                &id,
+                &runner_snapshot(
+                    Lifecycle::Finalizing,
+                    1,
+                    2,
+                    None,
+                    Some(Terminal::Completed(published_partial(
+                        "png",
+                        2,
+                        2,
+                        1,
+                        &["tile:1".to_string()],
+                        "out.partial.png",
+                    ))),
+                ),
+            );
             assert_eq!(table.state_of(&id), Some(JobState::PartiallyCompleted));
             let events = table.events_for(&id);
             let terminals = terminal_kinds(&events);
@@ -2853,20 +2387,24 @@ mod tests {
         {
             let mut table = JobTable::new();
             let id = table.start_job("https://example.com/item").unwrap();
-            table
-                .fail_test_job(&id, "tile.download-failed", "boom")
-                .unwrap();
+            table.apply_runner_snapshot(
+                &id,
+                &runner_snapshot(
+                    Lifecycle::AcquiringTiles,
+                    0,
+                    2,
+                    None,
+                    Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+                        "tile.download-failed",
+                        "boom",
+                    ))),
+                ),
+            );
             let events = table.events_for(&id);
             let terminals = terminal_kinds(&events);
             assert_eq!(terminals.len(), 1);
             assert_eq!(terminals[0].kind, "failed");
             assert_eq!(table.state_of(&id), Some(JobState::Failed));
-            assert_eq!(
-                table
-                    .fail_test_job(&id, "tile.download-failed", "again")
-                    .unwrap_err(),
-                "stale"
-            );
             let events = table.events_for(&id);
             assert_eq!(terminal_kinds(&events).len(), 1);
         }
@@ -2978,7 +2516,20 @@ mod tests {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
         let missing = vec!["tile:1".to_string(), "tile:2".to_string()];
-        table.request_partial_for_test(&id, &missing, 2, 4).unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AwaitingPartialDecision,
+                2,
+                4,
+                Some(RecoveryLedger {
+                    missing: missing.clone(),
+                    failed: 2,
+                    total: 4,
+                }),
+                None,
+            ),
+        );
         assert_eq!(table.state_of(&id), Some(JobState::AwaitingPartialDecision));
         let pending = table.pending_partial_for(&id).expect("pending ledger");
         assert_eq!(pending.missing, missing);
@@ -3000,105 +2551,121 @@ mod tests {
         assert_eq!(payload["missing"], serde_json::json!(["tile:1", "tile:2"]));
         assert!(!payload.to_string().contains("example.com/item"));
         assert!(!payload_has_forbidden_keys(&payload));
+        // A duplicate announcement with the same ledger does not re-cue.
+        let events_before = table.events_for(&id).len();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AwaitingPartialDecision,
+                2,
+                4,
+                Some(RecoveryLedger {
+                    missing,
+                    failed: 2,
+                    total: 4,
+                }),
+                None,
+            ),
+        );
+        assert_eq!(table.events_for(&id).len(), events_before);
     }
 
     #[test]
-    fn partial_answer_wakes_the_driver_gate() {
+    fn partial_answer_forwards_to_the_runner_gate() {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table
-            .request_partial_for_test(&id, &["tile:9".to_string()], 1, 4)
-            .unwrap();
-        // Keep wakes the gate and leaves the awaiting state for the driver
-        // terminal.
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AwaitingPartialDecision,
+                3,
+                4,
+                Some(RecoveryLedger {
+                    missing: vec!["tile:9".to_string()],
+                    failed: 1,
+                    total: 4,
+                }),
+                None,
+            ),
+        );
+        // Keep leaves the awaiting state for the runner terminal.
         table
             .answer_choice(&id, &Choice::Partial { keep: true })
             .unwrap();
-        assert_eq!(table.state_of(&id), Some(JobState::Running));
+        assert_eq!(table.state_of(&id), Some(JobState::AcquiringTiles));
         assert!(table.pending_partial_for(&id).is_none());
-        let gate = table.jobs.get(&id).expect("record").partial_gate.clone();
-        // The answer was consumed by the wait in `answer_choice`? No: the
-        // gate still holds it for the background driver to take.
-        // `answer_choice` answers but does not take, so the driver observes
-        // it exactly once.
-        assert_eq!(
-            gate.take_decision(),
-            Some(dezoomify_native::pipeline::PartialDecision::Keep)
-        );
+        // The fallback policy tracks the explicit answer for an honest
+        // gate timeout.
+        assert!(table.options_for(&id).unwrap().keep_partial);
         // Discard maps distinctly; retry never changes the fallback policy.
         let id2 = table.start_job("https://example.com/other").unwrap();
-        table
-            .request_partial_for_test(&id2, &["tile:3".to_string()], 1, 2)
-            .unwrap();
+        table.apply_runner_snapshot(
+            &id2,
+            &runner_snapshot(
+                Lifecycle::AwaitingPartialDecision,
+                1,
+                2,
+                Some(RecoveryLedger {
+                    missing: vec!["tile:3".to_string()],
+                    failed: 1,
+                    total: 2,
+                }),
+                None,
+            ),
+        );
         table
             .answer_choice(&id2, &Choice::Partial { keep: false })
             .unwrap();
-        let gate2 = table.jobs.get(&id2).expect("record").partial_gate.clone();
-        assert_eq!(
-            gate2.take_decision(),
-            Some(dezoomify_native::pipeline::PartialDecision::Discard)
-        );
-        assert_eq!(
-            table.config_for(&id2).expect("config").partial_policy,
-            dezoomify_native::pipeline::PartialPolicy::Fail
-        );
+        assert!(!table.options_for(&id2).unwrap().keep_partial);
         let id3 = table.start_job("https://example.com/third").unwrap();
-        table
-            .request_partial_for_test(&id3, &["tile:4".to_string()], 1, 2)
-            .unwrap();
-        table.answer_choice(&id3, &Choice::Retry).unwrap();
-        let gate3 = table.jobs.get(&id3).expect("record").partial_gate.clone();
-        assert_eq!(
-            gate3.take_decision(),
-            Some(dezoomify_native::pipeline::PartialDecision::Retry)
+        table.apply_runner_snapshot(
+            &id3,
+            &runner_snapshot(
+                Lifecycle::AwaitingPartialDecision,
+                1,
+                2,
+                Some(RecoveryLedger {
+                    missing: vec!["tile:4".to_string()],
+                    failed: 1,
+                    total: 2,
+                }),
+                None,
+            ),
         );
+        let keep_before = table.options_for(&id3).unwrap().keep_partial;
+        table.answer_choice(&id3, &Choice::Retry).unwrap();
+        assert_eq!(
+            table.options_for(&id3).unwrap().keep_partial,
+            keep_before,
+            "retry never changes the fallback policy"
+        );
+        assert_eq!(table.state_of(&id3), Some(JobState::AcquiringTiles));
     }
 
     #[test]
     fn partial_completed_terminal_carries_ledger_and_sibling_only() {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        // Grant a real path, then publish an honest partial: the terminal
+        // Publish an honest partial through the runner boundary: the terminal
         // must name the sibling basename, never the granted path.
-        let granted = scratch_path("honest-partial", "saved.png");
-        // Stop the discovery worker so the grant below is synchronous.
-        if let Some(handle) = table.driver_handles.remove(&id) {
-            handle.join().unwrap();
-        }
-        table.pump_drivers();
-        table
-            .request_destination(&id, &granted, "png", false)
-            .unwrap();
-        // Remove the pipeline worker handle without waiting: this test
-        // asserts the honest terminal shape, not real I/O.
-        if let Some(handle) = table.driver_handles.remove(&id) {
-            // The worker may still be starting; detach without joining a
-            // running pipeline (join would block on real network).
-            if handle.is_finished() {
-                let _ = handle.join();
-            } else {
-                // Signal cancellation so a stray worker exits promptly,
-                // then detach (the handle is dropped without join; the
-                // thread is short-lived in tests).
-                if let Some(record) = table.jobs.get(&id) {
-                    record
-                        .cancel_flag
-                        .store(true, std::sync::atomic::Ordering::SeqCst);
-                }
-            }
-        }
         let missing = vec!["tile:1".to_string()];
-        table
-            .complete_partial_with_ledger_for_test(
-                &id,
-                "png",
-                512,
-                512,
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::Finalizing,
                 3,
-                &missing,
-                "saved.partial.png",
-            )
-            .unwrap();
+                4,
+                None,
+                Some(Terminal::Completed(published_partial(
+                    "png",
+                    512,
+                    512,
+                    3,
+                    &missing.clone(),
+                    "saved.partial.png",
+                ))),
+            ),
+        );
         assert_eq!(table.state_of(&id), Some(JobState::PartiallyCompleted));
         assert_eq!(table.output_missing_for(&id), missing);
         assert_eq!(
@@ -3119,7 +2686,7 @@ mod tests {
         assert_eq!(payload["state"], serde_json::json!("PartiallyCompleted"));
         assert_eq!(payload["missing"], serde_json::json!(["tile:1"]));
         assert_eq!(payload["sibling"], serde_json::json!("saved.partial.png"));
-        assert!(!payload.to_string().contains("honest-partial"));
+        assert!(!payload.to_string().contains("/tmp"));
         assert!(!payload_has_forbidden_keys(&payload));
         // Post-terminal answers stay stale.
         assert_eq!(
@@ -3134,13 +2701,111 @@ mod tests {
     fn partial_discard_fails_honestly_with_no_output() {
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table
-            .fail_test_job(&id, "tile.download-failed", "1 tile(s) still failing")
-            .unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AcquiringTiles,
+                0,
+                1,
+                None,
+                Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+                    "tile.download-failed",
+                    "1 tile(s) still failing",
+                ))),
+            ),
+        );
         assert_eq!(table.state_of(&id), Some(JobState::Failed));
         assert!(table.output_missing_for(&id).is_empty());
         assert!(table.output_sibling_for(&id).is_none());
         let snapshot = table.error_snapshot_for(&id).expect("error snapshot");
         assert_eq!(snapshot.code, "tile.download-failed");
+    }
+
+    #[test]
+    fn runner_snapshots_fold_through_poll_drivers() {
+        let mut table = JobTable::new();
+        let mut settings = DesktopSettings::with_defaults();
+        settings.output_dir = Some(std::env::temp_dir().join("dezoomify-fold-test"));
+        settings.output_format = "png".to_string();
+        // 127.0.0.1:9 refuses connections immediately, so the runner reaches
+        // a typed Failed terminal without touching any network.
+        let id = table
+            .start_job_with_settings("http://127.0.0.1:9/item", &settings)
+            .unwrap();
+        assert!(table.has_runner(&id));
+        // Poll until the runner's terminal is folded (bounded wait).
+        let mut folded = false;
+        for _ in 0..200 {
+            table.poll_drivers();
+            if table.state_of(&id).is_some_and(|s| s.is_terminal()) {
+                folded = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(folded, "runner terminal must fold into the transcript");
+        let snapshot = table.error_snapshot_for(&id).expect("error snapshot");
+        assert!(
+            snapshot.code.starts_with("transport.") || snapshot.code.starts_with("discovery."),
+            "typed failure code, got {}",
+            snapshot.code
+        );
+        let events = table.events_for(&id);
+        assert!(events.iter().any(|e| e.kind == "failed"));
+        assert!(events.iter().any(|e| e.kind == "destination"));
+        // The runner handle is released once the terminal folded.
+        assert!(!table.has_runner(&id));
+    }
+
+    /// Test helper: build one runner snapshot.
+    fn runner_snapshot(
+        lifecycle: Lifecycle,
+        acquired: u64,
+        total: u64,
+        recovery: Option<RecoveryLedger>,
+        terminal: Option<Terminal>,
+    ) -> RunnerSnapshot {
+        RunnerSnapshot {
+            job: "job:test".to_string(),
+            seq: 0,
+            lifecycle,
+            acquired,
+            total,
+            recovery,
+            terminal,
+        }
+    }
+
+    /// Test helper: a complete published output.
+    fn published(format: &str, width: u32, height: u32, tile_count: usize) -> OutputSummary {
+        OutputSummary {
+            path: PathBuf::from("/tmp/dz-published.png"),
+            tile_count,
+            width,
+            height,
+            format: format.to_string(),
+            partial: false,
+            missing: Vec::new(),
+        }
+    }
+
+    /// Test helper: a kept-partial published output.
+    fn published_partial(
+        format: &str,
+        width: u32,
+        height: u32,
+        tile_count: usize,
+        missing: &[String],
+        sibling: &str,
+    ) -> OutputSummary {
+        OutputSummary {
+            path: PathBuf::from(format!("/tmp/{sibling}")),
+            tile_count,
+            width,
+            height,
+            format: format.to_string(),
+            partial: true,
+            missing: missing.to_vec(),
+        }
     }
 }
