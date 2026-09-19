@@ -481,7 +481,6 @@ mod tests {
                     decision: None,
                     terminal: Some(engine_terminal),
                     output: None,
-                    notices: Vec::new(),
                 },
                 published,
             },

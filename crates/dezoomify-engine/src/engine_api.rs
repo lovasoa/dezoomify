@@ -105,9 +105,9 @@
 
 use std::collections::HashMap;
 
-use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
-use dezoomify_core::core::model::ProcessingRecipe as CoreProcessingRecipe;
 use dezoomify_core::Vec2d;
+use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
+use dezoomify_core::core::model::{CatalogEntry, ProcessingRecipe as CoreProcessingRecipe};
 use dezoomify_protocol::dto::{
     EngineSnapshotDto, ErrorDto as ProtocolErrorDto, ErrorPhase as ProtocolErrorPhase,
     FailureCategoryDto, JobState, MissingTileDto, OutputDispositionDto,
@@ -117,10 +117,7 @@ use dezoomify_protocol::dto::{
 };
 
 use crate::retry::TileFailure as InnerFailure;
-use crate::{
-    Config, Job, JobCommand as InnerCommand, JobEffect as InnerEffect, JobEvent as InnerEvent,
-    JobMessageBody, Outcome,
-};
+use crate::{Config, Job, JobCommand as InnerCommand, JobEffect as InnerEffect, Outcome};
 pub use dezoomify_protocol::dto::RecoveryChoice;
 
 /// One ordered discovery root: a URL the host can fetch, or inline bytes
@@ -550,27 +547,12 @@ pub struct OutputSummary {
     pub disposition: Option<OutputDisposition>,
 }
 
-/// One transient engine notice: a scheduled retry or a settled missing
-/// tile. Notices are a bounded recent log (never a lifecycle), carried so
-/// hosts keep the same diagnostic trace they had from the event stream.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EngineNotice {
-    /// Job-scoped revision that produced the notice.
-    pub revision: u32,
-    /// Affected engine tile id.
-    pub tile: u32,
-    /// Retry attempt the notice belongs to, when it is a retry.
-    pub attempt: Option<u32>,
-    /// Tiles settled as missing, when the notice settles work.
-    pub missing: Vec<u32>,
-}
-
 /// Job projection: lifecycle, pause flag, progress, selection/decision
 /// payload, terminal result, and output summary. No secrets, pixels,
 /// paths, or handles cross here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobSnapshot {
-    /// Job-scoped revision (the engine sequence at projection time).
+    /// Job-scoped revision, advanced once per accepted public transition.
     pub revision: u32,
     /// Observable lifecycle phase (canonical protocol vocabulary).
     pub lifecycle: JobState,
@@ -586,8 +568,6 @@ pub struct JobSnapshot {
     pub terminal: Option<SnapshotTerminalDto>,
     /// Output summary, once the plan declares geometry.
     pub output: Option<OutputSummary>,
-    /// Bounded recent engine notices (retries, settled work).
-    pub notices: Vec<EngineNotice>,
 }
 
 /// Engine answer: newly issued effects plus the current snapshot.
@@ -693,6 +673,7 @@ pub enum OutstandingKind {
 pub struct EngineJob {
     inner: Job,
     options: JobOptions,
+    revision: u32,
     next_effect: u32,
     outstanding: HashMap<EffectId, Outstanding>,
     /// Request URIs by outstanding effect id, so host failure context can
@@ -703,13 +684,7 @@ pub struct EngineJob {
     /// (code, transport, HTTP status). Cleared when a catalog wins, exactly
     /// like the adapter-side retention it replaces.
     discovery_failure: Option<ProtocolErrorDto>,
-    terminal_failure: Option<(String, String)>,
-    catalog_images: u32,
-    catalog_levels: Vec<u32>,
-    catalog: Option<dezoomify_protocol::dto::CatalogDto>,
-    deferred: Vec<DeferredEntry>,
     disposition: Option<OutputDisposition>,
-    notices: Vec<EngineNotice>,
 }
 
 impl EngineJob {
@@ -762,22 +737,19 @@ impl EngineJob {
         let mut job = Self {
             inner,
             options,
+            revision: 0,
             next_effect: 0,
             outstanding: HashMap::new(),
             effect_uris: HashMap::new(),
             discovery_failure: None,
-            terminal_failure: None,
-            catalog_images: 0,
-            catalog_levels: Vec::new(),
-            catalog: None,
-            deferred: Vec::new(),
-            notices: Vec::new(),
             disposition: None,
         };
         job.inner
             .start()
             .map_err(|error| EngineError::new(&error.code, error.message))?;
+        job.bump_revision()?;
         let update = job.drain()?;
+        let update = job.apply_policies(update)?;
         Ok((job, update))
     }
 
@@ -789,6 +761,15 @@ impl EngineJob {
     /// Returns [`CommandError`] for wrong-phase commands, stale decision
     /// answers, and post-terminal input.
     pub fn command(&mut self, command: UserCommand) -> Result<Update, CommandError> {
+        let outcome = self.apply_command_inner(command)?;
+        if outcome == Outcome::Applied {
+            self.bump_revision()?;
+        }
+        let update = self.drain()?;
+        self.apply_policies(update)
+    }
+
+    fn apply_command_inner(&mut self, command: UserCommand) -> Result<Outcome, EngineError> {
         let inner = match command {
             UserCommand::SelectImage { image } => InnerCommand::SelectImage { image },
             UserCommand::FollowDeferred { image } => InnerCommand::FollowDeferred { image },
@@ -806,10 +787,7 @@ impl EngineJob {
         };
         self.inner
             .on_command(inner)
-            .map_err(|error| EngineError::new(&error.code, error.message))?;
-        let mut update = self.drain()?;
-        update = self.apply_policies(update)?;
-        Ok(update)
+            .map_err(|error| EngineError::new(&error.code, error.message))
     }
 
     /// Complete one outstanding effect with a body-free result. Metadata
@@ -849,13 +827,14 @@ impl EngineJob {
             return self.drain();
         }
         let (inner, disposition) = self.translate_completion(effect, outstanding, result)?;
-        match self.inner.on_command(inner) {
+        let applied = match self.inner.on_command(inner) {
             Ok(Outcome::Ignored) => {
                 // Late success/failure after the acquisition settled: the
                 // effect was live when issued, so the completion is
                 // accepted but changes nothing further.
                 self.outstanding.remove(&effect);
                 self.effect_uris.remove(&effect);
+                false
             }
             Ok(Outcome::Applied) => {
                 self.outstanding.remove(&effect);
@@ -866,10 +845,14 @@ impl EngineJob {
                 if let Some(disposition) = disposition {
                     self.disposition = Some(disposition);
                 }
+                true
             }
             Err(error) => {
                 return Err(EngineError::new(&error.code, error.message));
             }
+        };
+        if applied {
+            self.bump_revision()?;
         }
         let update = self.drain()?;
         self.apply_policies(update).map_err(|error| {
@@ -914,20 +897,24 @@ impl EngineJob {
         // an accepted or inner-rejected answer settles it. Inner rejections
         // (post-terminal, over-limit terminal) consume the effect because
         // the inner machine observed the answer.
-        match self.inner.on_command(InnerCommand::ResourceBytes {
+        let outcome = match self.inner.on_command(InnerCommand::ResourceBytes {
             request,
             bytes: bytes.to_vec(),
             final_uri: response.final_uri.filter(|uri| !uri.is_empty()),
         }) {
-            Ok(_) => {
+            Ok(outcome) => {
                 self.outstanding.remove(&effect);
                 self.effect_uris.remove(&effect);
+                outcome
             }
             Err(error) => {
                 self.outstanding.remove(&effect);
                 self.effect_uris.remove(&effect);
                 return Err(EngineError::new(&error.code, error.message));
             }
+        };
+        if outcome == Outcome::Applied {
+            self.bump_revision()?;
         }
         let update = self.drain()?;
         self.apply_policies(update).map_err(|error| {
@@ -1117,13 +1104,15 @@ impl EngineJob {
     fn apply_policies(&mut self, mut update: Update) -> Result<Update, EngineError> {
         if self.options.selection == SelectionPolicy::FirstImageLargestLevel {
             if update.snapshot.lifecycle == JobState::AwaitingImageSelection {
-                update = self.command(UserCommand::SelectImage { image: 0 })?;
+                self.apply_command_inner(UserCommand::SelectImage { image: 0 })?;
+                update = self.drain()?;
             }
             if update.snapshot.lifecycle == JobState::AwaitingLevelSelection
                 && update.snapshot.selection.level_count > 0
             {
                 let level = update.snapshot.selection.level_count - 1;
-                update = self.command(UserCommand::SelectLevel { level })?;
+                self.apply_command_inner(UserCommand::SelectLevel { level })?;
+                update = self.drain()?;
             }
         }
         if update.snapshot.lifecycle == JobState::AwaitingPartialDecision {
@@ -1136,10 +1125,11 @@ impl EngineJob {
                         .as_ref()
                         .map(|decision| decision.generation)
                         .unwrap_or(0);
-                    update = self.command(UserCommand::AnswerPartial {
+                    self.apply_command_inner(UserCommand::AnswerPartial {
                         generation,
                         decision: RecoveryChoice::Discard,
                     })?;
+                    update = self.drain()?;
                 }
                 PartialPolicy::Keep => {
                     let generation = update
@@ -1148,10 +1138,11 @@ impl EngineJob {
                         .as_ref()
                         .map(|decision| decision.generation)
                         .unwrap_or(0);
-                    update = self.command(UserCommand::AnswerPartial {
+                    self.apply_command_inner(UserCommand::AnswerPartial {
                         generation,
                         decision: RecoveryChoice::Keep,
                     })?;
+                    update = self.drain()?;
                 }
             }
         }
@@ -1167,29 +1158,25 @@ impl EngineJob {
         Ok(id)
     }
 
-    /// Record one transient notice, keeping the recent log bounded.
-    fn push_notice(&mut self, notice: EngineNotice) {
-        self.notices.push(notice);
-        if self.notices.len() > 20 {
-            let overflow = self.notices.len() - 20;
-            self.notices.drain(..overflow);
-        }
+    fn bump_revision(&mut self) -> Result<(), EngineError> {
+        self.revision = self.revision.checked_add(1).ok_or_else(|| {
+            EngineError::new("job.overflow", "snapshot revision counter overflowed")
+        })?;
+        Ok(())
     }
 
-    /// Drain the inner message queue into newly issued effects plus the
-    /// current snapshot. Events update the projection; effects mint fresh
-    /// per-attempt IDs with their correlation recorded.
+    /// Drain newly issued inner effects and mint canonical IDs once.
     fn drain(&mut self) -> Result<Update, EngineError> {
         let mut effects = Vec::new();
-        for message in self.inner.drain_messages() {
-            match message.body {
-                JobMessageBody::Effect(effect) => {
-                    if let Some(effect) = self.project_effect(effect)? {
-                        effects.push(effect);
-                    }
-                }
-                JobMessageBody::Event(event) => self.absorb_event(event),
+        for effect in self.inner.drain_effects() {
+            if let Some(effect) = self.project_effect(effect)? {
+                effects.push(effect);
             }
+        }
+        if self.inner.state() == crate::State::AwaitingImageSelection
+            && self.inner.catalog().is_some()
+        {
+            self.discovery_failure = None;
         }
         Ok(Update {
             effects,
@@ -1288,75 +1275,6 @@ impl EngineJob {
         }
     }
 
-    /// Fold one inner event into the projection state.
-    fn absorb_event(&mut self, event: InnerEvent) {
-        match event {
-            InnerEvent::Catalog { catalog } => {
-                // A winning catalog replaces the host failure context: later
-                // terminals report the new round, never a stale fetch.
-                self.discovery_failure = None;
-                self.catalog_images = u32::try_from(catalog.entries.len()).unwrap_or(u32::MAX);
-                self.catalog_levels = Vec::new();
-                self.deferred = Vec::new();
-                for (position, entry) in catalog.entries.iter().enumerate() {
-                    let Ok(position) = u32::try_from(position) else {
-                        continue;
-                    };
-                    match entry {
-                        dezoomify_protocol::dto::CatalogEntryDto::Image(image) => {
-                            let count = u32::try_from(image.levels.len()).unwrap_or(u32::MAX);
-                            self.catalog_levels.push(count);
-                        }
-                        dezoomify_protocol::dto::CatalogEntryDto::ImageRequest(request) => {
-                            self.catalog_levels.push(0);
-                            self.deferred.push(DeferredEntry {
-                                position,
-                                uri: request.uri.clone(),
-                            });
-                        }
-                    }
-                }
-                self.catalog = Some(catalog);
-            }
-            InnerEvent::Warning { tile, attempt } => {
-                self.push_notice(EngineNotice {
-                    revision: self.inner.seq(),
-                    tile,
-                    attempt: Some(attempt),
-                    missing: Vec::new(),
-                });
-            }
-            InnerEvent::MissingWork { failed } => {
-                self.push_notice(EngineNotice {
-                    revision: self.inner.seq(),
-                    tile: failed.first().copied().unwrap_or(0),
-                    attempt: None,
-                    missing: failed,
-                });
-            }
-            InnerEvent::Paused | InnerEvent::Resumed => {
-                // Pause and resume moments are engine notices: the overlay
-                // itself lives in the snapshot's paused flag.
-                self.push_notice(EngineNotice {
-                    revision: self.inner.seq(),
-                    tile: u32::MAX,
-                    attempt: None,
-                    missing: Vec::new(),
-                });
-            }
-            InnerEvent::Failed { code, message } => {
-                self.terminal_failure = Some((code, message));
-            }
-            InnerEvent::Completed
-            | InnerEvent::PartialCompleted
-            | InnerEvent::Cancelled
-            | InnerEvent::State { .. }
-            | InnerEvent::Levels { .. }
-            | InnerEvent::Progress { .. }
-            | InnerEvent::RecoveryRequested { .. } => {}
-        }
-    }
-
     /// Project the current snapshot from inner state plus absorbed events.
     /// Lifecycle and terminal use the canonical protocol vocabulary
     /// directly: the inner machine already runs on it, so no mapping table
@@ -1372,7 +1290,7 @@ impl EngineJob {
         let (completed, total) = self.inner.acquisition_progress();
         let terminal = self.terminal();
         JobSnapshot {
-            revision: self.inner.seq(),
+            revision: self.revision,
             lifecycle,
             paused: self.inner.is_paused(),
             progress: Progress {
@@ -1385,14 +1303,24 @@ impl EngineJob {
                 level_count: self
                     .inner
                     .selected_image()
-                    .and_then(|image| {
-                        usize::try_from(image)
-                            .ok()
-                            .and_then(|index| self.catalog_levels.get(index).copied())
-                    })
-                    .unwrap_or(0),
-                catalog: self.catalog.clone(),
-                deferred: self.deferred.clone(),
+                    .map_or(0, |image| self.inner.level_count(image)),
+                catalog: self.inner.catalog().map(crate::projection::project_catalog),
+                deferred: self.inner.catalog().map_or_else(Vec::new, |catalog| {
+                    catalog
+                        .entries()
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, entry)| {
+                            let CatalogEntry::Deferred(deferred) = entry else {
+                                return None;
+                            };
+                            u32::try_from(index).ok().map(|position| DeferredEntry {
+                                position,
+                                uri: deferred.uri.clone(),
+                            })
+                        })
+                        .collect()
+                }),
             },
             decision: self
                 .inner
@@ -1403,7 +1331,6 @@ impl EngineJob {
                 }),
             output: self.output_summary(),
             terminal,
-            notices: self.notices.clone(),
         }
     }
 
@@ -1430,8 +1357,9 @@ impl EngineJob {
             }),
             Some("failed") => {
                 let (code, message) = self
-                    .terminal_failure
-                    .clone()
+                    .inner
+                    .terminal_error()
+                    .map(|(code, message)| (code.clone(), message.clone()))
                     .unwrap_or_else(|| ("job.failed".to_string(), "job failed".to_string()));
                 let missing: Vec<u32> = self
                     .inner

@@ -1,14 +1,14 @@
-//! Typed inputs and ordered outputs for the deterministic job engine.
+//! Typed inputs and ordered effects for the deterministic job engine.
 
 use std::collections::BTreeMap;
 
-use dezoomify_core::core::discovery::FetchCause;
 use dezoomify_core::Vec2d;
+use dezoomify_core::core::discovery::FetchCause;
 /// Canonical partial-decision vocabulary, owned by the protocol. The engine
 /// answers the outstanding partial decision with this exact type; there is
 /// no engine-local duplicate.
 pub use dezoomify_protocol::dto::RecoveryChoice;
-use dezoomify_protocol::dto::{CatalogDto, OutputFormat, ProbeOutcome as ProbeObservation};
+use dezoomify_protocol::dto::{OutputFormat, ProbeOutcome as ProbeObservation};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,34 +177,4 @@ pub enum JobEffect {
     RequestDecision {
         generation: u32,
     },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum JobEvent {
-    State { state: crate::State },
-    Catalog { catalog: CatalogDto },
-    Levels { image: u32, levels: Vec<u32> },
-    Progress { acquired: u64, total: u64 },
-    Warning { tile: u32, attempt: u32 },
-    MissingWork { failed: Vec<u32> },
-    RecoveryRequested { generation: u32 },
-    Completed,
-    PartialCompleted,
-    Failed { code: String, message: String },
-    Cancelled,
-    Paused,
-    Resumed,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum JobMessageBody {
-    Effect(JobEffect),
-    Event(JobEvent),
-}
-
-/// One item in the job's single FIFO queue.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JobMessage {
-    pub sequence: u32,
-    pub body: JobMessageBody,
 }

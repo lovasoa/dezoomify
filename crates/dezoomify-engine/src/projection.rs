@@ -64,9 +64,9 @@ pub fn project_catalog(catalog: &ImageCatalog) -> CatalogDto {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dezoomify_core::Vec2d;
     use dezoomify_core::core::model::{DeferredImage, ImageDescriptor};
     use dezoomify_core::core::tile_plan::{Grid, GridRequests, GridTile};
-    use dezoomify_core::Vec2d;
 
     #[derive(Debug)]
     struct TestRequests;
