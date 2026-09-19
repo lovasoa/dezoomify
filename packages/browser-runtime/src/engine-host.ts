@@ -1,9 +1,13 @@
 // Shared engine-effect host for browser products (website + extension).
 //
 // One job-engine session drives both products: the host answers the
-// engine's correlated effects and forwards engine events to product UI. It
-// owns no job policy: retries, cancellation, partial-output decisions, and
-// ordering belong to the engine. Products inject their transports
+// engine's correlated effects and forwards engine snapshots to product UI.
+// It owns no job policy and keeps no job-state mirrors: retries,
+// cancellation, pause, partial-output decisions, and ordering belong to the
+// engine. Pause arrives via `snapshot.paused`; retry waits live exactly as
+// long as their `wait-retry-timer` effect (the engine ignores stale
+// duplicates); permission holds suspend the awaiting effect itself until the
+// explicit user action resolves it. Products inject their transports
 // (website: direct-first + metadata proxy fallback; extension: tab-origin
 // + extension-origin under host grants) and their output assembly.
 //
@@ -31,8 +35,7 @@ import type {
   ErrorDto,
   ErrorTransport,
   FetchFailureDto,
-  HostMessage,
-  JobEvent,
+  HostEffect,
   JobInputDto,
   OutputFormat,
   RequestDto,
@@ -57,8 +60,8 @@ export interface EngineHostAssembly {
   isTainted?(): boolean;
 }
 
-export type AcquireEffect = Extract<HostMessage, { kind: "effect"; type: "acquire-resource" | "acquire-tile" }>;
-type EffectMessage = Extract<HostMessage, { kind: "effect" }>;
+export type AcquireEffect = Extract<HostEffect, { type: "acquire-resource" | "acquire-tile" }>;
+type EffectMessage = HostEffect;
 
 export interface HostFailure {
   code: string;
@@ -74,12 +77,12 @@ export interface HostFailure {
 export interface EngineHostDeps {
   worker: { postMessage(message: WorkerHostMessage): void };
   jobId(): string;
-  /** Fetch one effect resource as readable bytes (product transport). */
+  /** Fetch one effect resource as readable bytes (product transport). Single attempt; the engine owns retries. */
   fetchResource(effect: AcquireEffect): Promise<{ bytes: Uint8Array; finalUri?: string }>;
   /**
-   * One-attempt fetch used to classify a tile origin (no transport retries).
-   * Defaults to `fetchResource`; hosts with a retrying transport supply a
-   * single-attempt variant so an unreadable origin is detected once.
+   * Single-attempt variant used in place of `fetchResource` when the host
+   * supplies one. The engine schedules retries through `wait-retry-timer`
+   * effects; the host never retries on its own.
    */
   fetchResourceOnce?(effect: AcquireEffect): Promise<{ bytes: Uint8Array; finalUri?: string }>;
   /** Cancel in-flight fetches (product transport). */
@@ -99,7 +102,7 @@ export interface EngineHostDeps {
   /** The engine asks for a keep/retry/discard choice after tile failures. */
   onRecoveryRequested(generation: number): void;
   onHostFailure(error: unknown): void;
-  onEvent(event: JobEvent): void;
+  /** Absolute engine snapshot for the UI. The only job-state object. */
   onSnapshot?(snapshot: EngineSnapshotDto): void;
   log?(level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown): void;
 }
@@ -108,21 +111,22 @@ export type RecoveryChoice = "keep" | "retry" | "discard";
 
 export function createEngineHost(deps: EngineHostDeps) {
   const log: NonNullable<EngineHostDeps["log"]> = deps.log ?? (() => {});
-  let cancelled = false;
   let disposed = false;
-  const settled = new Set<number>();
-  /** Requests paused while the host asks for an optional grant. */
-  const waitingForPermission = new Map<number, { effect: AcquireEffect; failure: HostFailure }>();
+  /** Host lifetime: aborted on cancel/dispose so late outcomes never send. Snapshots always forward. */
+  const lifetime = new AbortController();
   let chain = Promise.resolve();
-  /** Engine pause overlay: while true, elapsed retry timers park until resume. */
-  let paused = false;
-  /** In-flight retry waits keyed by `tile:attempt`, abortable on cancel/dispose. */
-  const retryTimers = new Map<string, AbortController>();
-  /** Retry completions that elapsed while paused, re-driven on resume. */
-  const parkedRetryTimers = new Map<string, { tile: number; attempt: number }>();
+  /** Retry waits owned by their `wait-retry-timer` effect, abortable on cancel/dispose. */
+  const pendingRetries = new Set<AbortController>();
+  /**
+   * Effects held for an explicit host grant. Each entry suspends its own
+   * acquisition (an effect hold, not a job-state mirror) until
+   * resolvePermission releases it; a grant retries the same acquisition in
+   * place, a denial fails it typed.
+   */
+  const permissionGates = new Map<number, (granted: boolean) => void>();
 
-  function retryTimerKey(tile: number, attempt: number): string {
-    return `${tile}:${attempt}`;
+  function tornDown(): boolean {
+    return disposed || lifetime.signal.aborted;
   }
 
   /**
@@ -152,53 +156,48 @@ export function createEngineHost(deps: EngineHostDeps) {
     return result;
   }
 
-  function flushParkedRetryTimers(): void {
-    if (parkedRetryTimers.size === 0) return;
-    const pending = [...parkedRetryTimers.values()];
-    parkedRetryTimers.clear();
-    for (const { tile, attempt } of pending) {
-      if (cancelled || disposed) return;
-      log("debug", "effect-retry-elapsed", `tile=${tile} attempt=${attempt} resumed=true`);
-      sendToEngine({ type: "engine.command", command: { type: "retry-timer-elapsed", tile, attempt } });
-    }
-  }
-
-  function abortRetryTimers(): void {
-    for (const [, ctrl] of retryTimers) {
+  function abortPendingRetries(): void {
+    for (const ctrl of pendingRetries) {
       try {
         ctrl.abort();
       } catch {
         // Abort must never break teardown.
       }
     }
-    retryTimers.clear();
-    parkedRetryTimers.clear();
+    pendingRetries.clear();
+  }
+
+  /** Release every held effect. Denials fail the held acquisitions typed. */
+  function releaseGates(granted: boolean): void {
+    if (permissionGates.size === 0) return;
+    const gates = [...permissionGates.values()];
+    permissionGates.clear();
+    for (const resolve of gates) {
+      try {
+        resolve(granted);
+      } catch {
+        // Release must never break teardown.
+      }
+    }
   }
 
   /**
    * Explicit retry wait: the host waits `delay_ms` on its own clock then
-   * answers with the same tile and attempt. While paused the completion
-   * parks and is issued on resume; the engine ignores stale duplicates.
+   * answers with the same tile and attempt. The wait lives exactly as long
+   * as this effect handling; the engine ignores stale duplicates, so no
+   * pause parking is kept host-side.
    */
   async function waitRetryTimer(effect: Extract<EffectMessage, { type: "wait-retry-timer" }>): Promise<void> {
-    const key = retryTimerKey(effect.tile, effect.attempt);
-    if (retryTimers.has(key) || parkedRetryTimers.has(key)) return;
     const ctrl = new AbortController();
-    retryTimers.set(key, ctrl);
+    pendingRetries.add(ctrl);
     try {
       log("debug", "effect-retry-wait", `tile=${effect.tile} attempt=${effect.attempt} delay_ms=${effect.delay_ms}`);
       const abandoned = await sleepWithAbort(effect.delay_ms, ctrl.signal);
-      if (cancelled || disposed) return;
-      if (abandoned || ctrl.signal.aborted) return;
-      if (paused) {
-        parkedRetryTimers.set(key, { tile: effect.tile, attempt: effect.attempt });
-        log("debug", "effect-retry-parked", `tile=${effect.tile} attempt=${effect.attempt}`);
-        return;
-      }
+      if (tornDown() || abandoned || ctrl.signal.aborted) return;
       log("debug", "effect-retry-elapsed", `tile=${effect.tile} attempt=${effect.attempt}`);
       sendToEngine({ type: "engine.command", command: { type: "retry-timer-elapsed", tile: effect.tile, attempt: effect.attempt } });
     } finally {
-      retryTimers.delete(key);
+      pendingRetries.delete(ctrl);
     }
   }
 
@@ -241,48 +240,6 @@ export function createEngineHost(deps: EngineHostDeps) {
     return placement.processing === "none";
   }
 
-  // Per-origin readable/display classification. The first tile of an origin
-  // performs the readable attempt; concurrent tiles of the same origin wait
-  // for that classification instead of repeating a fetch that is known to
-  // fail. Once an origin is display-only, later tiles go straight to <img>.
-  type OriginMode = "readable" | "display";
-  interface OriginState {
-    settled: boolean;
-    mode?: OriginMode;
-    promise: Promise<OriginMode>;
-    resolve: (mode: OriginMode) => void;
-  }
-  const originStates = new Map<string, OriginState>();
-
-  function originOf(url: string): string {
-    try {
-      return new URL(url, typeof window === "undefined" ? undefined : window.location.href).origin;
-    } catch {
-      return url;
-    }
-  }
-
-  /** Claim the origin for a first tile, or share the existing classification. */
-  function claimOrigin(url: string): { state: OriginState; owner: boolean } {
-    const origin = originOf(url);
-    const existing = originStates.get(origin);
-    if (existing) return { state: existing, owner: false };
-    let resolve!: (mode: OriginMode) => void;
-    const promise = new Promise<OriginMode>((r) => { resolve = r; });
-    // A shared classification never settles for a disposed attempt.
-    promise.catch(() => undefined);
-    const state: OriginState = { settled: false, promise, resolve };
-    originStates.set(origin, state);
-    return { state, owner: true };
-  }
-
-  function settleOrigin(state: OriginState | null, mode: OriginMode): void {
-    if (!state || state.settled) return;
-    state.settled = true;
-    state.mode = mode;
-    state.resolve(mode);
-  }
-
   async function displayFallback(
     effect: AcquireEffect,
     requestId: number,
@@ -296,13 +253,13 @@ export function createEngineHost(deps: EngineHostDeps) {
     const uri = effect.request.uri;
     try {
       const image = await deps.loadDisplayImage(uri);
-      if (cancelled) return true;
+      if (tornDown()) return true;
       const width = image.naturalWidth;
       const height = image.naturalHeight;
       if (!(width > 0 && height > 0)) return false;
       deps.assembly.acquireDisplayTile(effect.tile, effect.placement, image);
       log("debug", "effect-outcome", `type=${effect.type} request=${requestId} display=true size=${width}x${height}`);
-      if (!cancelled) {
+      if (!tornDown()) {
         sendToEngine({ type: "engine.display", requestId });
       }
       return true;
@@ -325,23 +282,35 @@ export function createEngineHost(deps: EngineHostDeps) {
     };
   }
 
-  async function acquire(effect: AcquireEffect) {
+  /**
+   * Suspend one acquisition for the visible permission action. A grant
+   * retries the same acquisition in place; a denial fails it typed. The
+   * hold belongs to the effect lifetime: teardown releases it denied and
+   * the waiter suppresses its outcome.
+   */
+  function holdForPermission(requestId: number, error: unknown): Promise<boolean> {
+    deps.onPermissionRequired({ hosts: hostsOf(error), requestId, jobId: deps.jobId() });
+    return new Promise<boolean>((resolve) => {
+      permissionGates.set(requestId, resolve);
+    });
+  }
+
+  async function acquireProbe(effect: AcquireEffect): Promise<void> {
     const request = effect.request;
-    if (settled.has(request.id)) return;
-    settled.add(request.id);
     // Probe effects resolve planning geometry. Probe-and-output effects also
     // retain the successful tile so the resolved plan does not fetch it again.
-    if (effect.type === "acquire-tile" && request.purpose === "probe") {
+    for (;;) {
+      if (tornDown()) return;
       log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=probe route=probe`);
       try {
-        if (effect.placement.probe_output === true) {
+        if (effect.type === "acquire-tile" && effect.placement.probe_output === true) {
           // A probe retained as output participates in the visible assembly;
           // a measurement-only probe must not reveal a provisional canvas.
           deps.assembly.prepare(effect.placement.canvas);
         }
         const size = await deps.probeSize(request.uri, headerRecord(request.headers), request.id);
-        if (cancelled) return;
-        const probeOutput = effect.placement.probe_output === true;
+        if (tornDown()) return;
+        const probeOutput = effect.type === "acquire-tile" && effect.placement.probe_output === true;
         let outcome = size.status === "available"
           ? { status: "available" as const, width: size.width, height: size.height }
           : { status: "missing" as const };
@@ -358,99 +327,97 @@ export function createEngineHost(deps: EngineHostDeps) {
         }
         const dimensions = outcome.status === "available" ? `${outcome.width}x${outcome.height}` : "missing";
         log("debug", "effect-outcome", `type=${effect.type} request=${request.id} probe=${dimensions}`);
-        if (!cancelled) {
+        if (!tornDown()) {
           sendToEngine({ type: "engine.probe", requestId: request.id, outcome });
         }
+        return;
       } catch (error) {
         const failure = deps.classifyFailure(error);
         log("warn", "effect-failed", `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`);
         if (grantable(error, failure)) {
-          waitingForPermission.set(request.id, { effect, failure });
-          deps.onPermissionRequired({ hosts: hostsOf(error), requestId: request.id, jobId: deps.jobId() });
-          return;
+          const granted = await holdForPermission(request.id, error);
+          permissionGates.delete(request.id);
+          if (!granted) {
+            if (tornDown()) return;
+            sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
+            return;
+          }
+          continue;
         }
         // A failed probe fetch is a missing observation, never a tile
         // failure: the adapter maps it to ProbeOutcome{available:false}.
-        if (!cancelled) sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
+        if (tornDown()) return;
+        sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
+        return;
       }
+    }
+  }
+
+  async function acquire(effect: AcquireEffect) {
+    const request = effect.request;
+    if (tornDown()) return;
+    if (effect.type === "acquire-tile" && request.purpose === "probe") {
+      await acquireProbe(effect);
       return;
     }
     log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=${request.purpose}`);
-    // Classify the origin before fetching an ordinary tile: a display-only
-    // origin goes straight to its image, and concurrent first tiles await
-    // the owner's classification instead of repeating a failing fetch. The
-    // owner classifies with a single attempt so a blocked origin is detected
-    // once; the fallback marks the whole origin display-only.
-    let originState: OriginState | null = null;
-    let originOwner = false;
-    if (
-      effect.type === "acquire-tile"
-      && deps.loadDisplayImage
-    ) {
-      const claim = claimOrigin(request.uri);
-      originState = claim.state;
-      originOwner = claim.owner;
-      if (!claim.owner) {
-        const mode = await originState.promise;
-        if (mode === "display" && (await displayFallback(effect, request.id))) return;
-      }
-    }
-    try {
-      if (effect.type === "acquire-tile") {
-        // Prepare before network I/O so tiles become visible as they arrive.
-        deps.assembly.prepare(effect.placement.canvas);
-      }
-      const fetch = originOwner && deps.fetchResourceOnce ? deps.fetchResourceOnce : deps.fetchResource;
-      const result = await fetch(effect);
-      if (cancelled) return;
-      log("debug", "effect-outcome", `type=${effect.type} request=${request.id} bytes=${result.bytes.byteLength}`);
-      if (effect.type === "acquire-tile") {
-        // Decode-at-acquisition: the placement is recorded and the bitmap is
-        // held before the outcome settles, so assembly never depends on a
-        // later bytes hand-off and decode failures retry honestly.
-        await deps.assembly.acquireTile(effect.tile, effect.placement, asArrayBuffer(result.bytes));
-      }
-      settleOrigin(originState, "readable");
-      if (cancelled) return;
-      if (effect.type === "acquire-tile") {
-        // Body-free tile acknowledgment: the tile was decoded and placed
-        // above, so only the typed outcome crosses into the engine. Only
-        // metadata (`acquire-resource`) carries bytes.
-        sendToEngine({ type: "engine.acquired", requestId: request.id });
+    // Single attempt per effect: a granted host retries the same
+    // acquisition in place; any other failure reports immediately and the
+    // engine schedules retries through `wait-retry-timer` effects.
+    for (;;) {
+      if (tornDown()) return;
+      try {
+        if (effect.type === "acquire-tile") {
+          // Prepare before network I/O so tiles become visible as they arrive.
+          deps.assembly.prepare(effect.placement.canvas);
+        }
+        const fetch = deps.fetchResourceOnce ?? deps.fetchResource;
+        const result = await fetch(effect);
+        if (tornDown()) return;
+        log("debug", "effect-outcome", `type=${effect.type} request=${request.id} bytes=${result.bytes.byteLength}`);
+        if (effect.type === "acquire-tile") {
+          // Decode-at-acquisition: the placement is recorded and the bitmap is
+          // held before the outcome settles, so assembly never depends on a
+          // later bytes hand-off and decode failures retry honestly.
+          await deps.assembly.acquireTile(effect.tile, effect.placement, asArrayBuffer(result.bytes));
+        }
+        if (tornDown()) return;
+        if (effect.type === "acquire-tile") {
+          // Body-free tile acknowledgment: the tile was decoded and placed
+          // above, so only the typed outcome crosses into the engine. Only
+          // metadata (`acquire-resource`) carries bytes.
+          sendToEngine({ type: "engine.acquired", requestId: request.id });
+          return;
+        }
+        sendToEngine({
+          type: "engine.bytes",
+          requestId: request.id,
+          bytes: result.bytes,
+          ...(result.finalUri ? { finalUri: result.finalUri } : {}),
+        });
+        return;
+      } catch (error) {
+        const failure = deps.classifyFailure(error);
+        log("warn", "effect-failed", `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`);
+        if (grantable(error, failure)) {
+          // A visible, explicit user action may grant this host. Hold the
+          // effect so the same acquisition resumes after a grant.
+          const granted = await holdForPermission(request.id, error);
+          permissionGates.delete(request.id);
+          if (!granted) {
+            if (tornDown()) return;
+            sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
+            return;
+          }
+          continue;
+        }
+        if (effect.type === "acquire-tile" && (await displayFallback(effect, request.id))) {
+          return;
+        }
+        if (tornDown()) return;
+        sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
         return;
       }
-      sendToEngine({
-        type: "engine.bytes",
-        requestId: request.id,
-        bytes: result.bytes,
-        ...(result.finalUri ? { finalUri: result.finalUri } : {}),
-      });
-    } catch (error) {
-      const failure = deps.classifyFailure(error);
-      log("warn", "effect-failed", `type=${effect.type} request=${request.id} code=${String(failure.code ?? failure.blocked_reason ?? "unknown")} retryable=${failure.retryable === true}`);
-      if (grantable(error, failure)) {
-        // A visible, explicit user action may grant this host. Keep the
-        // effect pending so the same acquisition can resume after a grant.
-        // Release the shared origin classification first: concurrent tiles
-        // of the same origin wait on its promise, and the retry after grant
-        // must re-classify fresh. Settling as readable lets waiters attempt
-        // their own fetch and join the same permission pause instead of
-        // hanging on an unsettled promise.
-        settleOrigin(originState, "readable");
-        if (originState) originStates.delete(originOf(request.uri));
-        waitingForPermission.set(request.id, { effect, failure });
-        deps.onPermissionRequired({ hosts: hostsOf(error), requestId: request.id, jobId: deps.jobId() });
-        return;
-      }
-      if (effect.type === "acquire-tile" && (await displayFallback(effect, request.id))) {
-        settleOrigin(originState, "display");
-        return;
-      }
-      // Neither readable nor display worked: settle the shared classification
-      // and drop it so a retry can classify the origin again.
-      settleOrigin(originState, "readable");
-      if (originState) originStates.delete(originOf(request.uri));
-      if (!cancelled) sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });
     }
   }
 
@@ -493,15 +460,30 @@ export function createEngineHost(deps: EngineHostDeps) {
     sendToEngine({ type: "engine.command", command: { type: "finalization-succeeded" } });
   }
 
+  /** Abort in-flight host work: retry waits, permission holds, and fetches. */
+  function abortInFlight(): void {
+    abortPendingRetries();
+    releaseGates(false);
+    try {
+      lifetime.abort();
+    } catch {
+      // Abort must never break teardown.
+    }
+    try {
+      deps.cancelFetch();
+    } catch {
+      // Product abort must never break teardown.
+    }
+  }
+
   function enqueue(step: () => Promise<void> | void) {
     chain = chain
       .then(() => {
-        if (!cancelled) return step();
+        if (!tornDown()) return step();
       })
       .catch((error) => {
-        if (cancelled) return;
-        cancelled = true;
-        deps.cancelFetch();
+        if (tornDown()) return;
+        abortInFlight();
         deps.onHostFailure(error);
         sendToEngine({ type: "engine.command", command: { type: "cancel" } });
       });
@@ -513,8 +495,13 @@ export function createEngineHost(deps: EngineHostDeps) {
     "finalize-output": (effect) => enqueue(() => finalizeOutput(effect)),
     "wait-retry-timer": (effect) => { void waitRetryTimer(effect); },
     "cancel-work": () => {
-      abortRetryTimers();
-      deps.cancelFetch();
+      abortPendingRetries();
+      releaseGates(false);
+      try {
+        deps.cancelFetch();
+      } catch {
+        // Product abort must never break teardown.
+      }
       deps.assembly.release();
     },
     "request-decision": (effect) => enqueue(() => {
@@ -522,26 +509,15 @@ export function createEngineHost(deps: EngineHostDeps) {
     }),
   } satisfies DispatchTable<EffectMessage, void>;
 
-  function handleEngineMessages(messages: HostMessage[], snapshot?: EngineSnapshotDto) {
+  function handleEngineMessages(messages: HostEffect[], snapshot?: EngineSnapshotDto) {
+    // The snapshot is the only job-state object: it always forwards,
+    // including after cancel. Engine events carry no state host-side
+    // (pause, terminals, and progress all ride the snapshot) and are only
+    // logged here, never refolded.
     if (snapshot) deps.onSnapshot?.(snapshot);
     for (const message of messages) {
-      if (message.kind === "effect") {
-        log("debug", "effect-received", `type=${message.type}${"tile" in message ? ` tile=${message.tile}` : ""}`);
-        dispatchTyped(effectHandlers, message);
-      } else {
-        // Events pass through the same chain so terminal events never
-        // overtake the lifecycle work they describe.
-        const event = message;
-        log("debug", "event-received", `type=${event.type}`);
-        if (event.type === "paused") paused = true;
-        if (event.type === "resumed") {
-          paused = false;
-          flushParkedRetryTimers();
-        }
-        enqueue(() => {
-          deps.onEvent(event);
-        });
-      }
+      log("debug", "effect-received", `type=${message.type}${"tile" in message ? ` tile=${message.tile}` : ""}`);
+      dispatchTyped(effectHandlers, message);
     }
   }
 
@@ -565,42 +541,27 @@ export function createEngineHost(deps: EngineHostDeps) {
       sendToEngine({ type: "engine.command", command: { type: "recovery-choice", generation, choice } });
     },
     pause() {
-      paused = true;
+      // Pause state arrives back via snapshot.paused; the host keeps no flag.
       sendToEngine({ type: "engine.command", command: { type: "pause" } });
     },
     resume() {
-      paused = false;
       sendToEngine({ type: "engine.command", command: { type: "resume" } });
-      flushParkedRetryTimers();
     },
     resolvePermission(granted: boolean) {
-      const pending = [...waitingForPermission.entries()];
-      waitingForPermission.clear();
-      for (const [id, { effect, failure }] of pending) {
-        if (cancelled) return;
-        if (!granted) {
-          sendToEngine({ type: "engine.failure", requestId: id, error: fetchFailure(failure) });
-          continue;
-        }
-        settled.delete(id);
-        void acquire(effect);
-      }
+      // Release the held effects; each resumes (grant) or fails typed (denial).
+      releaseGates(granted);
     },
     cancel() {
-      if (cancelled) return;
+      if (disposed || lifetime.signal.aborted) return;
       log("debug", "controller-cancel", "");
-      cancelled = true;
-      abortRetryTimers();
-      deps.cancelFetch();
+      abortInFlight();
       sendToEngine({ type: "engine.command", command: { type: "cancel" } });
     },
     dispose() {
       if (disposed) return;
       log("debug", "controller-dispose", "");
       disposed = true;
-      cancelled = true;
-      abortRetryTimers();
-      deps.cancelFetch();
+      abortInFlight();
       deps.assembly?.release();
       sendToEngine({ type: "engine.dispose" });
     },

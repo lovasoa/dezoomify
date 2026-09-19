@@ -485,7 +485,7 @@ impl HostState {
             .jobs
             .start_job_with_user_headers(source_url, user_headers)
         {
-            Ok(id) => id,
+            Ok((id, _emit)) => id,
             Err(_) => {
                 overwrite_owned(&mut values);
                 overwrite_cookie_values(cookies);

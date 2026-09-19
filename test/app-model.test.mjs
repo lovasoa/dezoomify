@@ -94,16 +94,6 @@ test("snapshot fold walks a full job deterministically", () => {
   assert.deepEqual(snap.terminal, { kind: "completed" });
   assert.equal(snap.output.doneTiles, 12);
   assert.equal(snap.output.partial, false);
-
-  // Late events after the terminal outcome are dropped (same reference).
-  const late = applyJobEvent(snap, { type: "progress", acquired: 99, total: 99 }, tick());
-  assert.equal(late, snap);
-  const lateTerminal = applyJobEvent(
-    snap,
-    { type: "failed", error: { code: "x", phase: "output", retryable: false, message: "x", recovery: [] } },
-    tick(),
-  );
-  assert.equal(lateTerminal, snap);
 });
 
 test("snapshot fold keeps warnings bounded and records recovery", () => {
@@ -138,29 +128,19 @@ test("snapshot fold keeps warnings bounded and records recovery", () => {
 // Store: identity + revision guards
 // ---------------------------------------------------------------------------
 
-test("snapshot store drops stale revisions and unknown jobs", () => {
+test("snapshot store keeps the newest revision per job", () => {
   const store = createSnapshotStore();
   assert.equal(store.get("job:1"), undefined);
-  let calls = 0;
-  const unsub = store.subscribe("job:1", () => {
-    calls += 1;
-  });
   const first = { ...initialSnapshot("job:1", 1), revision: 3 };
-  assert.ok(store.publish(first));
-  assert.equal(calls, 1);
+  store.publish(first);
   assert.equal(store.get("job:1").revision, 3);
-  assert.equal(store.publish({ ...first, revision: 3 }), false);
-  assert.equal(store.publish({ ...first, revision: 1 }), false);
-  assert.equal(calls, 1);
-  assert.equal(store.publish({ ...first, revision: 4 }), true);
-  assert.equal(calls, 2);
-  assert.equal(store.publish({ ...initialSnapshot("", 1), revision: 1 }), false);
+  // Stale revisions never move the UI.
+  store.publish({ ...first, revision: 1 });
+  assert.equal(store.get("job:1").revision, 3);
+  store.publish({ ...first, revision: 4 });
+  assert.equal(store.get("job:1").revision, 4);
   store.remove("job:1");
   assert.equal(store.get("job:1"), undefined);
-  assert.equal(calls, 3);
-  unsub();
-  assert.ok(store.publish({ ...first, revision: 9 }));
-  assert.equal(calls, 3);
 });
 
 // ---------------------------------------------------------------------------
@@ -223,37 +203,6 @@ test("service routes interleaved emissions to the owning observer only", async (
   runners[0].sink.event({ type: "progress", acquired: 4, total: 4 }, initialHostStatus());
   assert.equal(seenA[seenA.length - 1].acquired, 1);
   assert.ok(runners[0].disposed);
-});
-
-test("service folds absolute snapshots with revision guards", async () => {
-  const log = [];
-  const { runner, runners } = fakeRunner(log);
-  let now = 100;
-  const service = createJobService(runner, { now: () => ++now });
-  const seen = [];
-  const handle = await service.start(browserRequest("https://c.example.org/3"), {
-    snapshot: (s) => seen.push(s),
-    hostStatus: () => {},
-  });
-  const dto = (revision, acquired, total, lifecycle) => ({
-    revision,
-    lifecycle,
-    paused: false,
-    progress: { completed: acquired, total },
-    selection: { image: null, level: null, level_count: 0, deferred: [] },
-    decision: null,
-    terminal: null,
-    output: null,
-  });
-  runners[0].sink.snapshot(dto(1, 2, 4, "AcquiringTiles"));
-  assert.equal(seen[seen.length - 1].acquired, 2);
-  assert.equal(seen[seen.length - 1].state, "AcquiringTiles");
-  // Stale revisions never move the UI.
-  runners[0].sink.snapshot(dto(1, 9, 9, "AcquiringTiles"));
-  assert.equal(seen[seen.length - 1].acquired, 2);
-  runners[0].sink.snapshot(dto(2, 9, 9, "AcquiringTiles"));
-  assert.equal(seen[seen.length - 1].acquired, 9);
-  await handle.dispose();
 });
 
 test("service rejects invalid requests with stable validation codes", async () => {

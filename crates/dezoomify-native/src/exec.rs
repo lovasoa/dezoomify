@@ -44,12 +44,15 @@ use dezoomify_core::Vec2d;
 use dezoomify_engine::{
     DiscoveryInput, Effect as EngineEffect, EffectId as EngineEffectId,
     EffectResult as EngineEffectResult, EngineError as EngineJobError, EngineJob,
-    JobOptions as EngineOptions, JobSnapshot as EngineSnapshot, Lifecycle as EngineLifecycle,
-    OutputDisposition, PartialDecision as EnginePartialDecision,
-    ResponseMetadata as EngineResponseMetadata, SelectionPolicy as EngineSelectionPolicy,
-    Terminal as EngineTerminal, Update as EngineUpdate, UserCommand as EngineUserCommand,
+    JobOptions as EngineOptions, JobSnapshot as EngineSnapshot, OutputDisposition,
+    RecoveryChoice as EnginePartialDecision, ResponseMetadata as EngineResponseMetadata,
+    SelectionPolicy as EngineSelectionPolicy, Update as EngineUpdate,
+    UserCommand as EngineUserCommand,
 };
-use dezoomify_protocol::dto::{CatalogDto, CatalogEntryDto, ProbeOutcome};
+use dezoomify_protocol::dto::{
+    CatalogDto, CatalogEntryDto, JobState as EngineLifecycle, ProbeOutcome,
+    SnapshotTerminalDto as EngineTerminal,
+};
 
 use crate::error::NativeError;
 use crate::http::{FetchOutcome, UserHeaders};
@@ -453,10 +456,10 @@ fn execute_attempt(
     abort_and_join(&attempt.transport, &mut handles);
     // Any completion that landed after the terminal is dropped, never fed.
     let terminal = match pump.snapshot.terminal.clone() {
-        Some(EngineTerminal::Completed) | Some(EngineTerminal::PartiallyCompleted { .. }) => {
+        Some(EngineTerminal::Completed) | Some(EngineTerminal::PartialCompleted { .. }) => {
             let partial = matches!(
                 pump.snapshot.terminal,
-                Some(EngineTerminal::PartiallyCompleted { .. })
+                Some(EngineTerminal::PartialCompleted { .. })
             );
             match attempt.published.take() {
                 Some(published) => {
@@ -688,8 +691,8 @@ fn fold_snapshot(attempt: &mut Attempt<'_>, snapshot: &EngineSnapshot) -> Result
             attempt.pending_missing = missing;
         }
     }
-    if let Some(EngineTerminal::Failed { code, message }) = &snapshot.terminal {
-        attempt.failure = Some((code.clone(), message.clone()));
+    if let Some(EngineTerminal::Failed { error }) = &snapshot.terminal {
+        attempt.failure = Some((error.code.clone(), error.message.clone()));
     }
     Ok(())
 }
@@ -883,7 +886,10 @@ fn execute_effects(
                     gate.clear_pending();
                 }
                 let update = job
-                    .command(EngineUserCommand::AnswerPartial { decision: choice })
+                    .command(EngineUserCommand::AnswerPartial {
+                        generation,
+                        decision: choice,
+                    })
                     .map_err(|e| {
                         NativeError::new(
                             "native.internal",

@@ -474,12 +474,12 @@ fn run_job(
     terminal
 }
 
-impl From<&dezoomify_engine::Lifecycle> for Lifecycle {
+impl From<&dezoomify_protocol::dto::JobState> for Lifecycle {
     /// Project one engine lifecycle onto the four runner phases the shell
     /// renders. Pre-acquisition phases read as discovering; selection and
     /// planning read as acquiring once tiles flow.
-    fn from(lifecycle: &dezoomify_engine::Lifecycle) -> Self {
-        use dezoomify_engine::Lifecycle as EngineLifecycle;
+    fn from(lifecycle: &dezoomify_protocol::dto::JobState) -> Self {
+        use dezoomify_protocol::dto::JobState as EngineLifecycle;
         match lifecycle {
             EngineLifecycle::Created
             | EngineLifecycle::Discovering

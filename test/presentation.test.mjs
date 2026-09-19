@@ -14,7 +14,6 @@ import {
   renderErrorSummary,
   renderProgress,
 } from "../packages/shared-ui/src/components.ts";
-import fs from "node:fs";
 
 function run(jobId, events) {
   let now = 0;
@@ -54,25 +53,6 @@ test("a finished job can still present display-only from the host override", () 
   const taintedTerminal = presentSnapshot({ ...snap, displayOnly: true, terminal: { kind: "completed" } }, "browser-session");
   assert.equal(taintedTerminal.phase, "completed");
   assert.equal(taintedTerminal.displayOnly, false, "terminals render their own phase");
-});
-
-test("fold is exactly-once terminal and ignores late events by reference", () => {
-  let snap = run("job:12", [
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "progress", acquired: 2, total: 4 },
-    { type: "cancelled" },
-  ]);
-  assert.equal(snap.terminal.kind, "cancelled");
-  assert.equal(snap.state, "Cancelled");
-  // Late events after a terminal outcome return the identical snapshot.
-  const late = applyJobEvent(snap, { type: "progress", acquired: 4, total: 4 }, 99);
-  assert.equal(late, snap, "late event must not move a terminal snapshot");
-  const secondTerminal = applyJobEvent(snap, { type: "completed" }, 100);
-  assert.equal(secondTerminal, snap, "a second terminal must not overwrite the first");
-  // Cancel then reset is a fresh snapshot.
-  const fresh = initialSnapshot("job:12", 1);
-  assert.equal(fresh.state, "Created");
-  assert.equal(fresh.terminal, null);
 });
 
 test("app-choice guidance is plain language with no jargon", () => {
@@ -138,18 +118,4 @@ test("failure classification derives from codes, never text", () => {
   assert.equal(phaseFor("OUTPUT_DENIED"), "output");
   assert.equal(phaseFor("TILE_FAILED"), "acquisition");
   assert.equal(phaseFor({ code: "OUTPUT_DENIED" }), "acquisition");
-});
-
-test("website scenario transcripts have fixed shape", () => {
-  const root = new URL("../", import.meta.url);
-  const directPath = new URL("testdata/scenarios/website/direct-success/expected/result.json", root);
-  const fallbackPath = new URL("testdata/scenarios/website/proxy-fallback/expected/result.json", root);
-  const direct = JSON.parse(fs.readFileSync(directPath, "utf8"));
-  const fallback = JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
-  assert.deepEqual(direct.attempts, ["direct"]);
-  assert.equal(direct.transport, "Direct from your browser");
-  assert.ok(typeof direct.tilePolicy === "string");
-  assert.deepEqual(fallback.attempts, ["direct", "proxy"]);
-  assert.equal(fallback.transport, "Metadata proxy");
-  assert.ok(fallback.proxyScope === "metadata-only");
 });

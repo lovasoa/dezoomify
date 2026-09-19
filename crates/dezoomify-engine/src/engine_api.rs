@@ -46,6 +46,7 @@
 //!
 //! ```rust
 //! use dezoomify_engine::engine_api::*;
+//! use dezoomify_protocol::dto::{JobState, SnapshotTerminalDto};
 //!
 //! const DZI: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 //! <Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
@@ -56,25 +57,25 @@
 //! // Discovery input -> catalog -> selection -> tiles -> finalize -> terminal.
 //! let options = JobOptions::new(vec![DiscoveryInput::new("https://example.test/image.dzi")]);
 //! let (mut job, update) = EngineJob::start(options).expect("valid options");
-//! assert_eq!(update.snapshot.lifecycle, Lifecycle::Discovering);
+//! assert_eq!(update.snapshot.lifecycle, JobState::Discovering);
 //! let metadata = update.metadata_effects();
 //! assert_eq!(metadata.len(), 1);
 //!
 //! let update = job
 //!     .provide_metadata(metadata[0].id(), ResponseMetadata::new(), DZI)
 //!     .expect("metadata bytes");
-//! assert_eq!(update.snapshot.lifecycle, Lifecycle::AwaitingImageSelection);
+//! assert_eq!(update.snapshot.lifecycle, JobState::AwaitingImageSelection);
 //!
 //! let update = job
 //!     .command(UserCommand::SelectImage { image: 0 })
 //!     .expect("select image");
-//! assert_eq!(update.snapshot.lifecycle, Lifecycle::AwaitingLevelSelection);
+//! assert_eq!(update.snapshot.lifecycle, JobState::AwaitingLevelSelection);
 //!
 //! let levels = update.snapshot.selection.level_count;
 //! let update = job
 //!     .command(UserCommand::SelectLevel { level: levels - 1 })
 //!     .expect("select largest level");
-//! assert_eq!(update.snapshot.lifecycle, Lifecycle::AcquiringTiles);
+//! assert_eq!(update.snapshot.lifecycle, JobState::AcquiringTiles);
 //!
 //! // Complete every planned tile, then await finalization.
 //! let tile_ids: Vec<EffectId> = update.tile_effects().iter().map(|effect| effect.id()).collect();
@@ -83,7 +84,7 @@
 //! for id in tile_ids {
 //!     update = job.complete(id, EffectResult::TileAcquired).expect("tile done");
 //! }
-//! assert_eq!(update.snapshot.lifecycle, Lifecycle::Finalizing);
+//! assert_eq!(update.snapshot.lifecycle, JobState::Finalizing);
 //! let finalize = update.finalize_effects();
 //! assert_eq!(finalize.len(), 1);
 //!
@@ -95,8 +96,11 @@
 //!         },
 //!     )
 //!     .expect("output committed");
-//! assert_eq!(update.snapshot.lifecycle, Lifecycle::Completed);
-//! assert!(update.snapshot.terminal.as_ref().is_some_and(|t| t.completed()));
+//! assert_eq!(update.snapshot.lifecycle, JobState::Completed);
+//! assert!(matches!(
+//!     update.snapshot.terminal,
+//!     Some(SnapshotTerminalDto::Completed)
+//! ));
 //! ```
 
 use std::collections::HashMap;
@@ -106,17 +110,17 @@ use dezoomify_core::core::model::ProcessingRecipe as CoreProcessingRecipe;
 use dezoomify_core::Vec2d;
 use dezoomify_protocol::dto::{
     EngineSnapshotDto, ErrorDto as ProtocolErrorDto, ErrorPhase as ProtocolErrorPhase,
-    FailureCategoryDto, JobState as ProtocolJobState, MissingTileDto,
-    OutputFormat as ProtocolOutputFormat, SizeDto as ProtocolSizeDto, SnapshotDecisionDto,
-    SnapshotDeferredDto, SnapshotOutputDto, SnapshotProgressDto, SnapshotSelectionDto,
-    SnapshotTerminalDto, TileFailureDto,
+    FailureCategoryDto, JobState, MissingTileDto, OutputFormat as ProtocolOutputFormat,
+    SizeDto as ProtocolSizeDto, SnapshotDecisionDto, SnapshotDeferredDto, SnapshotOutputDto,
+    SnapshotProgressDto, SnapshotSelectionDto, SnapshotTerminalDto, TileFailureDto,
 };
 
 use crate::retry::TileFailure as InnerFailure;
 use crate::{
     Config, Job, JobCommand as InnerCommand, JobEffect as InnerEffect, JobEvent as InnerEvent,
-    JobMessageBody, Outcome, RecoveryChoice as InnerChoice,
+    JobMessageBody, Outcome,
 };
+pub use dezoomify_protocol::dto::RecoveryChoice;
 
 /// One ordered discovery root: a URL the host can fetch, or inline bytes
 /// the engine evaluates directly.
@@ -254,24 +258,16 @@ pub enum UserCommand {
     /// Zero-based position into the selected image's levels.
     SelectLevel { level: u32 },
     /// Answer the outstanding partial decision.
-    AnswerPartial { decision: PartialDecision },
+    AnswerPartial {
+        generation: u32,
+        decision: RecoveryChoice,
+    },
     /// Stop scheduling new acquisitions; in-flight work settles.
     Pause,
     /// Re-drive pending work, including timers created while paused.
     Resume,
     /// Stop new work and release kept resources.
     Cancel,
-}
-
-/// Answer to a [`Effect::RequestPartialDecision`] effect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PartialDecision {
-    /// Requeue settled-as-failed tiles with a fresh attempt budget.
-    Retry,
-    /// Finalize with the gaps marked.
-    Keep,
-    /// Fail the job with no output.
-    Discard,
 }
 
 /// Engine-minted correlation for one issued effect, scoped to the job.
@@ -488,37 +484,6 @@ pub enum EffectResult {
     CleanupAcknowledged,
 }
 
-/// Observable lifecycle phases (projection of the internal phase machine).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Lifecycle {
-    /// Validated, no effects issued yet.
-    Created,
-    /// Acquiring metadata resources.
-    Discovering,
-    /// Catalog ready, image choice awaited.
-    AwaitingImageSelection,
-    /// Image chosen, level choice awaited.
-    AwaitingLevelSelection,
-    /// Resolving the tile plan (including probes).
-    Planning,
-    /// Acquiring tiles.
-    AcquiringTiles,
-    /// Tiles missing after settle; user decision awaited (or auto-applied).
-    AwaitingPartialDecision,
-    /// Output operation awaited.
-    Finalizing,
-    /// Cancellation requested; quiescence awaited.
-    Cancelling,
-    /// Terminal: output saved.
-    Completed,
-    /// Terminal: gappy output saved.
-    PartiallyCompleted,
-    /// Terminal: job failed.
-    Failed,
-    /// Terminal: job cancelled.
-    Cancelled,
-}
-
 /// Unit progress for the active phase (never moves backward; totals stay
 /// unknown until the plan resolves).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -565,30 +530,6 @@ pub struct DecisionPayload {
     pub missing: Vec<(u32, Vec<InnerFailure>)>,
 }
 
-/// Terminal outcome for a finished job.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Terminal {
-    /// Output saved.
-    Completed,
-    /// Gappy output saved.
-    PartiallyCompleted {
-        /// Tiles missing from the output.
-        missing: Vec<u32>,
-    },
-    /// Job failed with a stable code and message.
-    Failed { code: String, message: String },
-    /// Job cancelled.
-    Cancelled,
-}
-
-impl Terminal {
-    /// Whether the job completed with full output.
-    #[must_use]
-    pub const fn completed(&self) -> bool {
-        matches!(self, Self::Completed)
-    }
-}
-
 /// Output summary: geometry, completeness, and the honest disposition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputSummary {
@@ -626,8 +567,8 @@ pub struct EngineNotice {
 pub struct JobSnapshot {
     /// Job-scoped revision (the engine sequence at projection time).
     pub revision: u32,
-    /// Observable lifecycle phase.
-    pub lifecycle: Lifecycle,
+    /// Observable lifecycle phase (canonical protocol vocabulary).
+    pub lifecycle: JobState,
     /// Pause overlay: no new acquisitions while set.
     pub paused: bool,
     /// Acquisition progress.
@@ -636,8 +577,8 @@ pub struct JobSnapshot {
     pub selection: Selection,
     /// Outstanding partial decision, when one is awaited.
     pub decision: Option<DecisionPayload>,
-    /// Terminal outcome, once finished.
-    pub terminal: Option<Terminal>,
+    /// Terminal outcome, once finished (canonical protocol vocabulary).
+    pub terminal: Option<SnapshotTerminalDto>,
     /// Output summary, once the plan declares geometry.
     pub output: Option<OutputSummary>,
     /// Bounded recent engine notices (retries, settled work).
@@ -728,6 +669,20 @@ enum Outstanding {
     Cancel,
 }
 
+/// Which outstanding engine effect an adapter correlation id names. Adapters
+/// correlate through the engine's own outstanding [`EffectId`]s instead of
+/// keeping a second correlation machine: request ids round-trip as effect
+/// ids, and timers/finalize resolve through the queries below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutstandingKind {
+    /// An outstanding metadata acquisition.
+    Metadata,
+    /// An outstanding ordinary tile acquisition.
+    Tile,
+    /// An outstanding probe acquisition.
+    Probe,
+}
+
 /// One end-to-end user request behind the canonical API.
 #[derive(Debug)]
 pub struct EngineJob {
@@ -735,6 +690,14 @@ pub struct EngineJob {
     options: JobOptions,
     next_effect: u32,
     outstanding: HashMap<EffectId, Outstanding>,
+    /// Request URIs by outstanding effect id, so host failure context can
+    /// name the request it came from without any adapter-side retention.
+    effect_uris: HashMap<EffectId, String>,
+    /// Host failure context behind the latest metadata failure, retained so
+    /// the terminal `Failed` error and snapshot keep the observed facts
+    /// (code, transport, HTTP status). Cleared when a catalog wins, exactly
+    /// like the adapter-side retention it replaces.
+    discovery_failure: Option<ProtocolErrorDto>,
     terminal_failure: Option<(String, String)>,
     catalog_images: u32,
     catalog_levels: Vec<u32>,
@@ -796,6 +759,8 @@ impl EngineJob {
             options,
             next_effect: 0,
             outstanding: HashMap::new(),
+            effect_uris: HashMap::new(),
+            discovery_failure: None,
             terminal_failure: None,
             catalog_images: 0,
             catalog_levels: Vec::new(),
@@ -823,19 +788,13 @@ impl EngineJob {
             UserCommand::SelectImage { image } => InnerCommand::SelectImage { image },
             UserCommand::FollowDeferred { image } => InnerCommand::FollowDeferred { image },
             UserCommand::SelectLevel { level } => InnerCommand::SelectLevel { level },
-            UserCommand::AnswerPartial { decision } => {
-                let generation = self.inner.pending_decision().ok_or_else(|| {
-                    EngineError::new("job.invalid-state", "no partial decision is outstanding")
-                })?;
-                InnerCommand::RecoveryChoice {
-                    generation,
-                    choice: match decision {
-                        PartialDecision::Retry => InnerChoice::Retry,
-                        PartialDecision::Keep => InnerChoice::Keep,
-                        PartialDecision::Discard => InnerChoice::Discard,
-                    },
-                }
-            }
+            UserCommand::AnswerPartial {
+                generation,
+                decision,
+            } => InnerCommand::RecoveryChoice {
+                generation,
+                choice: decision,
+            },
             UserCommand::Pause => InnerCommand::Pause,
             UserCommand::Resume => InnerCommand::Resume,
             UserCommand::Cancel => InnerCommand::Cancel,
@@ -867,6 +826,7 @@ impl EngineJob {
                 format!("{effect} is unknown or already settled"),
             )
         })?;
+        self.effect_uris.remove(&effect);
         // Cleanup acknowledgements are accepted idempotently with no inner
         // input: the inner machine already rests terminal, so the ack only
         // refreshes the projection.
@@ -914,6 +874,7 @@ impl EngineJob {
                 format!("{effect} is unknown or already settled"),
             )
         })?;
+        self.effect_uris.remove(&effect);
         let Outstanding::Metadata { request } = outstanding else {
             return Err(EngineError::new(
                 "job.wrong-result-kind",
@@ -964,6 +925,66 @@ impl EngineJob {
     #[must_use]
     pub fn project_dto(&self) -> dezoomify_protocol::dto::EngineSnapshotDto {
         EngineSnapshotDto::from(&self.snapshot())
+    }
+
+    /// Which outstanding effect `effect` names, if it is still unsettled.
+    /// Adapters correlate request ids through this instead of retaining
+    /// their own request tables: unknown or already-settled ids report
+    /// `None`, exactly like a stale completion.
+    #[must_use]
+    pub fn outstanding_kind(&self, effect: EffectId) -> Option<OutstandingKind> {
+        match self.outstanding.get(&effect) {
+            Some(Outstanding::Metadata { .. }) => Some(OutstandingKind::Metadata),
+            Some(Outstanding::Tile { .. }) => Some(OutstandingKind::Tile),
+            Some(Outstanding::Probe { .. }) => Some(OutstandingKind::Probe),
+            _ => None,
+        }
+    }
+
+    /// Outstanding retry-timer effect for one `(tile, attempt)` wait, if the
+    /// host still holds it. Absent timers are stale completions the host
+    /// tolerates with no work.
+    #[must_use]
+    pub fn outstanding_timer(&self, tile: u32, attempt: u32) -> Option<EffectId> {
+        self.outstanding
+            .iter()
+            .find_map(|(id, outstanding)| match outstanding {
+                Outstanding::Timer {
+                    tile: pending,
+                    attempt: pending_attempt,
+                } if *pending == tile && *pending_attempt == attempt => Some(*id),
+                _ => None,
+            })
+    }
+
+    /// Outstanding finalize effect, if the host awaits output. Absent means
+    /// no output operation is awaited.
+    #[must_use]
+    pub fn outstanding_finalize(&self) -> Option<EffectId> {
+        self.outstanding
+            .iter()
+            .find_map(|(id, outstanding)| match outstanding {
+                Outstanding::Finalize => Some(*id),
+                _ => None,
+            })
+    }
+
+    /// Retain host failure context for one outstanding metadata effect. The
+    /// terminal `Failed` error keeps these observed facts (naming the
+    /// request URI from the issued effect), so adapters forward the context
+    /// without retaining it themselves. Calls for unknown or non-metadata
+    /// effects are ignored; a winning catalog clears the retention.
+    pub fn note_metadata_failure(&mut self, effect: EffectId, mut error: ProtocolErrorDto) {
+        if !matches!(
+            self.outstanding.get(&effect),
+            Some(Outstanding::Metadata { .. })
+        ) {
+            return;
+        }
+        if let Some(uri) = self.effect_uris.get(&effect) {
+            error.request = Some(uri.clone());
+        }
+        self.discovery_failure = Some(error);
     }
 
     fn translate_completion(
@@ -1052,27 +1073,41 @@ impl EngineJob {
     /// transition instead of surfacing it.
     fn apply_policies(&mut self, mut update: Update) -> Result<Update, EngineError> {
         if self.options.selection == SelectionPolicy::FirstImageLargestLevel {
-            if update.snapshot.lifecycle == Lifecycle::AwaitingImageSelection {
+            if update.snapshot.lifecycle == JobState::AwaitingImageSelection {
                 update = self.command(UserCommand::SelectImage { image: 0 })?;
             }
-            if update.snapshot.lifecycle == Lifecycle::AwaitingLevelSelection
+            if update.snapshot.lifecycle == JobState::AwaitingLevelSelection
                 && update.snapshot.selection.level_count > 0
             {
                 let level = update.snapshot.selection.level_count - 1;
                 update = self.command(UserCommand::SelectLevel { level })?;
             }
         }
-        if update.snapshot.lifecycle == Lifecycle::AwaitingPartialDecision {
+        if update.snapshot.lifecycle == JobState::AwaitingPartialDecision {
             match self.options.partial {
                 PartialPolicy::Prompt => {}
                 PartialPolicy::Fail => {
+                    let generation = update
+                        .snapshot
+                        .decision
+                        .as_ref()
+                        .map(|decision| decision.generation)
+                        .unwrap_or(0);
                     update = self.command(UserCommand::AnswerPartial {
-                        decision: PartialDecision::Discard,
+                        generation,
+                        decision: RecoveryChoice::Discard,
                     })?;
                 }
                 PartialPolicy::Keep => {
+                    let generation = update
+                        .snapshot
+                        .decision
+                        .as_ref()
+                        .map(|decision| decision.generation)
+                        .unwrap_or(0);
                     update = self.command(UserCommand::AnswerPartial {
-                        decision: PartialDecision::Keep,
+                        generation,
+                        decision: RecoveryChoice::Keep,
                     })?;
                 }
             }
@@ -1128,6 +1163,7 @@ impl EngineJob {
             InnerEffect::AcquireResource { request, uri, .. } => {
                 self.outstanding
                     .insert(id, Outstanding::Metadata { request });
+                self.effect_uris.insert(id, uri.clone());
                 Ok(Some(Effect::AcquireMetadata { id, uri }))
             }
             InnerEffect::AcquireTile {
@@ -1213,6 +1249,9 @@ impl EngineJob {
     fn absorb_event(&mut self, event: InnerEvent) {
         match event {
             InnerEvent::Catalog { catalog } => {
+                // A winning catalog replaces the host failure context: later
+                // terminals report the new round, never a stale fetch.
+                self.discovery_failure = None;
                 self.catalog_images = u32::try_from(catalog.entries.len()).unwrap_or(u32::MAX);
                 self.catalog_levels = Vec::new();
                 self.deferred = Vec::new();
@@ -1276,21 +1315,16 @@ impl EngineJob {
     }
 
     /// Project the current snapshot from inner state plus absorbed events.
+    /// Lifecycle and terminal use the canonical protocol vocabulary
+    /// directly: the inner machine already runs on it, so no mapping table
+    /// exists here.
     fn project(&self) -> JobSnapshot {
         let lifecycle = match self.inner.state() {
-            crate::State::Created => Lifecycle::Created,
-            crate::State::Discovering => Lifecycle::Discovering,
-            crate::State::AwaitingImageSelection => Lifecycle::AwaitingImageSelection,
-            crate::State::AwaitingLevelSelection => Lifecycle::AwaitingLevelSelection,
-            crate::State::Planning => Lifecycle::Planning,
-            crate::State::AcquiringTiles => Lifecycle::AcquiringTiles,
-            crate::State::AwaitingPartialDecision => Lifecycle::AwaitingPartialDecision,
-            crate::State::Finalizing => Lifecycle::Finalizing,
-            crate::State::Cancelling => Lifecycle::Cancelling,
             crate::State::Completed
             | crate::State::PartiallyCompleted
             | crate::State::Failed
             | crate::State::Cancelled => self.terminal_lifecycle(),
+            state => state,
         };
         let (completed, total) = self.inner.acquisition_progress();
         let terminal = self.terminal();
@@ -1330,20 +1364,20 @@ impl EngineJob {
         }
     }
 
-    fn terminal_lifecycle(&self) -> Lifecycle {
+    fn terminal_lifecycle(&self) -> JobState {
         match self.inner.terminal_kind() {
-            Some("completed") => Lifecycle::Completed,
-            Some("partial-completed") => Lifecycle::PartiallyCompleted,
-            Some("failed") => Lifecycle::Failed,
-            Some("cancelled") => Lifecycle::Cancelled,
-            _ => Lifecycle::Failed,
+            Some("completed") => JobState::Completed,
+            Some("partial-completed") => JobState::PartiallyCompleted,
+            Some("failed") => JobState::Failed,
+            Some("cancelled") => JobState::Cancelled,
+            _ => JobState::Failed,
         }
     }
 
-    fn terminal(&self) -> Option<Terminal> {
+    fn terminal(&self) -> Option<SnapshotTerminalDto> {
         match self.inner.terminal_kind() {
-            Some("completed") => Some(Terminal::Completed),
-            Some("partial-completed") => Some(Terminal::PartiallyCompleted {
+            Some("completed") => Some(SnapshotTerminalDto::Completed),
+            Some("partial-completed") => Some(SnapshotTerminalDto::PartialCompleted {
                 missing: self
                     .inner
                     .missing_detail()
@@ -1356,9 +1390,27 @@ impl EngineJob {
                     .terminal_failure
                     .clone()
                     .unwrap_or_else(|| ("job.failed".to_string(), "job failed".to_string()));
-                Some(Terminal::Failed { code, message })
+                let missing: Vec<u32> = self
+                    .inner
+                    .missing_detail()
+                    .iter()
+                    .map(|(tile, _)| *tile)
+                    .collect();
+                let phase = failure_phase_for(&code, !missing.is_empty());
+                let mut error = ProtocolErrorDto::new(code, phase, message);
+                // The retained host failure context patches the terminal
+                // error, so the absolute snapshot never discards what the
+                // event stream keeps.
+                if let Some(enriched) = &self.discovery_failure {
+                    let mut patched = enriched.clone();
+                    if patched.detail.is_none() && patched.message != error.message {
+                        patched.detail = Some(error.message.clone());
+                    }
+                    error = patched;
+                }
+                Some(SnapshotTerminalDto::Failed { error })
             }
-            Some("cancelled") => Some(Terminal::Cancelled),
+            Some("cancelled") => Some(SnapshotTerminalDto::Cancelled),
             _ => None,
         }
     }
@@ -1400,44 +1452,10 @@ fn failure_phase_for(code: &str, has_missing_tiles: bool) -> ProtocolErrorPhase 
 
 impl From<&JobSnapshot> for EngineSnapshotDto {
     /// Project one canonical snapshot onto the wire DTO. Single projector:
-    /// every host renders identical state from the same snapshot.
+    /// every host renders identical state from the same snapshot. Lifecycle
+    /// and terminal already use the protocol vocabulary, so both cross
+    /// verbatim.
     fn from(snapshot: &JobSnapshot) -> Self {
-        let lifecycle = match snapshot.lifecycle {
-            Lifecycle::Created => ProtocolJobState::Created,
-            Lifecycle::Discovering => ProtocolJobState::Discovering,
-            Lifecycle::AwaitingImageSelection => ProtocolJobState::AwaitingImageSelection,
-            Lifecycle::AwaitingLevelSelection => ProtocolJobState::AwaitingLevelSelection,
-            Lifecycle::Planning => ProtocolJobState::Planning,
-            Lifecycle::AcquiringTiles => ProtocolJobState::AcquiringTiles,
-            Lifecycle::AwaitingPartialDecision => ProtocolJobState::AwaitingPartialDecision,
-            Lifecycle::Finalizing => ProtocolJobState::Finalizing,
-            Lifecycle::Cancelling => ProtocolJobState::Cancelling,
-            Lifecycle::Completed => ProtocolJobState::Completed,
-            Lifecycle::PartiallyCompleted => ProtocolJobState::PartiallyCompleted,
-            Lifecycle::Failed => ProtocolJobState::Failed,
-            Lifecycle::Cancelled => ProtocolJobState::Cancelled,
-        };
-        let missing_tiles: Vec<u32> = snapshot
-            .output
-            .as_ref()
-            .map(|output| output.missing.clone())
-            .unwrap_or_default();
-        let terminal = match &snapshot.terminal {
-            Some(Terminal::Completed) => Some(SnapshotTerminalDto::Completed),
-            Some(Terminal::PartiallyCompleted { missing }) => {
-                Some(SnapshotTerminalDto::PartialCompleted {
-                    missing: missing.clone(),
-                })
-            }
-            Some(Terminal::Failed { code, message }) => {
-                let phase = failure_phase_for(code, !missing_tiles.is_empty());
-                Some(SnapshotTerminalDto::Failed {
-                    error: ProtocolErrorDto::new(code.clone(), phase, message.clone()),
-                })
-            }
-            Some(Terminal::Cancelled) => Some(SnapshotTerminalDto::Cancelled),
-            None => None,
-        };
         let output = snapshot.output.as_ref().and_then(|output| {
             let canvas = output.canvas.map(|(width, height)| ProtocolSizeDto {
                 width: u64::from(width),
@@ -1456,7 +1474,7 @@ impl From<&JobSnapshot> for EngineSnapshotDto {
         });
         EngineSnapshotDto {
             revision: snapshot.revision,
-            lifecycle,
+            lifecycle: snapshot.lifecycle,
             paused: snapshot.paused,
             progress: SnapshotProgressDto {
                 completed: snapshot.progress.completed,
@@ -1466,6 +1484,7 @@ impl From<&JobSnapshot> for EngineSnapshotDto {
                 image: snapshot.selection.image,
                 level: snapshot.selection.level,
                 level_count: snapshot.selection.level_count,
+                catalog: snapshot.selection.catalog.clone(),
                 deferred: snapshot
                     .selection
                     .deferred
@@ -1506,7 +1525,7 @@ impl From<&JobSnapshot> for EngineSnapshotDto {
                         })
                         .collect(),
                 }),
-            terminal,
+            terminal: snapshot.terminal.clone(),
             output,
         }
     }

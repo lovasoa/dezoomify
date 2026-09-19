@@ -4,6 +4,10 @@ use std::collections::BTreeMap;
 
 use dezoomify_core::core::discovery::FetchCause;
 use dezoomify_core::Vec2d;
+/// Canonical partial-decision vocabulary, owned by the protocol. The engine
+/// answers the outstanding partial decision with this exact type; there is
+/// no engine-local duplicate.
+pub use dezoomify_protocol::dto::RecoveryChoice;
 use dezoomify_protocol::dto::{CatalogDto, OutputFormat, ProbeOutcome as ProbeObservation};
 use serde::{Deserialize, Serialize};
 
@@ -134,13 +138,6 @@ pub enum JobCommand {
     Cancel,
     Pause,
     Resume,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecoveryChoice {
-    Keep,
-    Retry,
-    Discard,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

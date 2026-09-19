@@ -122,12 +122,15 @@ const service = createDesktopJobService({
   },
 });
 
-// The job this window currently follows. Late snapshots for retired jobs
-// are dropped before they can move the view.
+// The job this window currently follows. Snapshots arrive verbatim from
+// the typed service and render directly; no follow guard or partial field
+// mirrors live here. Product wiring only: the active handle plus the
+// sequential queue and the local history ledger below.
 let activeHandle: DesktopJobHandle | null = null;
-let followedJobId: string | null = null;
-// Authoritative snapshot of the followed job; null before any start.
-let latestSnapshot: JobSnapshot | null = null;
+// Authoritative snapshot of the active job; null before any start. Set
+// verbatim from the observer with no fold and no follow check: late
+// snapshots for retired jobs never arrive (their observer was disposed).
+let currentSnapshot: JobSnapshot | null = null;
 // Host-local failure that never reached an engine snapshot (invalid input,
 // rejected start, denied dialog). Renders through presentFailure.
 let localFailure: StructuredError | null = null;
@@ -266,9 +269,20 @@ interface PendingDecision {
   generation: number;
 }
 
+// AwaitingDestination is a host UI derivation only: the backend never
+// stores it (protocol `JobState` has no such variant). A `Created` snapshot
+// carrying a `choose-output` recovery cue derives this label for the save
+// destination step.
+const AWAITING_DESTINATION = "AwaitingDestination";
+
+function isAwaitingDestination(snapshot: JobSnapshot | null): boolean {
+  if (!snapshot || snapshot.terminal) return false;
+  return (snapshot.recovery?.actions ?? []).some((action) => action.kind === "choose-output");
+}
+
 function pendingDecisionOf(): PendingDecision | null {
   if (localFailure) return null;
-  const snapshot = latestSnapshot;
+  const snapshot = currentSnapshot;
   if (!snapshot || snapshot.terminal || snapshot.state !== "AwaitingPartialDecision") return null;
   const recovery = snapshot.recovery;
   if (!recovery) return null;
@@ -344,7 +358,7 @@ let outputActionError: { action: "open" | "folder"; code: string } | undefined;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 function isTerminalNow(): boolean {
-  return localFailure !== null || (latestSnapshot?.terminal ?? null) !== null;
+  return localFailure !== null || (currentSnapshot?.terminal ?? null) !== null;
 }
 
 // --- Live job activity (drives the progressive-disclosure job view) ---
@@ -485,7 +499,7 @@ function failLocally(
     url: sourceUrl || undefined,
     host: hostOf(sourceUrl),
     extras: [
-      `Status: ${latestSnapshot?.state ?? "idle"}`,
+      `Status: ${currentSnapshot?.state ?? (isAwaitingDestination(currentSnapshot) ? AWAITING_DESTINATION : "idle")}`,
       `Origin: ${redactedOriginOnly(sourceUrl) === "" ? "n/a" : redactedOriginOnly(sourceUrl)}`,
     ],
   });
@@ -538,13 +552,13 @@ function diagnosticsSnapshot() {
   return {
     status: presentation.stateLabel ?? presentation.phase,
     transport: presentation.transport,
-    jobId: followedJobId,
+    jobId: activeHandle?.id ?? null,
     attempt: undefined,
     sessionId: NATIVE_TRANSPORT,
     nativeTransport: NATIVE_TRANSPORT,
     progress:
-      latestSnapshot && (latestSnapshot.total !== null || latestSnapshot.acquired > 0)
-        ? { current: latestSnapshot.acquired, total: latestSnapshot.total ?? 0 }
+      currentSnapshot && (currentSnapshot.total !== null || currentSnapshot.acquired > 0)
+        ? { current: currentSnapshot.acquired, total: currentSnapshot.total ?? 0 }
         : undefined,
     origin: redactedOriginOnly(lastInputUrl),
     outputActionError,
@@ -575,8 +589,8 @@ function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | nu
 
 function currentPresentation(): SnapshotPresentation {
   if (localFailure) return presentFailure(localFailure, NATIVE_TRANSPORT);
-  if (!latestSnapshot) return presentIdle();
-  return failurePresentationOf(latestSnapshot) ?? presentSnapshot(latestSnapshot, NATIVE_TRANSPORT);
+  if (!currentSnapshot) return presentIdle();
+  return failurePresentationOf(currentSnapshot) ?? presentSnapshot(currentSnapshot, NATIVE_TRANSPORT);
 }
 
 function clearJobViewState(): void {
@@ -631,8 +645,7 @@ function handleSubmitUrl(url: string): void {
 function retireActiveJob(): void {
   const handle = activeHandle;
   activeHandle = null;
-  followedJobId = null;
-  latestSnapshot = null;
+  currentSnapshot = null;
   localFailure = null;
   clearJobViewState();
   if (handle) void handle.dispose().catch(() => undefined);
@@ -678,7 +691,6 @@ function launchNativeJob(trimmed: string, token: number): void {
         return;
       }
       activeHandle = handle;
-      followedJobId = handle.id;
       update();
     },
     (error: unknown) => {
@@ -688,13 +700,13 @@ function launchNativeJob(trimmed: string, token: number): void {
   );
 }
 
-// Authoritative snapshots from the typed service. Side effects (logs, queue
-// progress, history, settling) key off snapshot transitions; the view itself
-// renders the presentation derived in update().
+// Authoritative snapshots from the typed service. The payload is already
+// the `JobSnapshot`: it renders verbatim with no fold and no follow guard.
+// Side effects (logs, queue progress, history, settling) key off snapshot
+// transitions; the view itself renders the presentation derived in update().
 const jobObserver: JobObserver = {
   snapshot(snapshot: JobSnapshot): void {
-    if (followedJobId !== null && snapshot.jobId !== followedJobId) return;
-    latestSnapshot = snapshot;
+    currentSnapshot = snapshot;
     onSnapshotSideEffects(snapshot);
     update();
   },
@@ -969,9 +981,9 @@ function handleCancel(): void {
   handleReset();
 }
 
-// Destination recovery grants a replacement output. On grant, the shell's
-// destination event moves the snapshot into active work; completion itself
-// arrives via the output terminal (exactly-once by the fold).
+// Destination recovery grants a replacement output. On grant, the next
+// snapshot moves into active work; completion itself arrives via the
+// terminal snapshot (exactly-once from the shell).
 function requestOutputAndResume(): void {
   const handle = activeHandle;
   const decision = pendingDecisionOf();
@@ -979,8 +991,8 @@ function requestOutputAndResume(): void {
   const format = normalizeNativeFormat(grantedFormat);
   const suggestedName = suggestedNameForFormat(
     format,
-    latestSnapshot?.output?.width,
-    latestSnapshot?.output?.height,
+    currentSnapshot?.output?.width,
+    currentSnapshot?.output?.height,
   );
   pushLog("Requesting save destination…");
   void handle.requestDestination({ format, suggestedName }).then(
@@ -1184,7 +1196,7 @@ function initInitialUrl(): void {
 }
 
 function syncInitialUrlFromLocation(): void {
-  if (latestSnapshot !== null || localFailure !== null) return;
+  if (currentSnapshot !== null || localFailure !== null) return;
   const prefilled = readInitialUrl();
   const current = viewCtx.initialUrl;
   if (prefilled && prefilled !== current) {
@@ -1411,7 +1423,7 @@ function ensureDesktopAuxPanel(): void {
   }
 
   if (showPartialDone) {
-    const output = latestSnapshot?.output;
+    const output = currentSnapshot?.output;
     const completedMissing = output?.missingTiles ?? [];
     const completedSibling = output?.siblingName ?? null;
     const doneBox = doc.createElement("div");
@@ -1584,9 +1596,9 @@ function update() {
   if (viewCtx.jobActivity && presentation.phase === "job") {
     refreshLongestPending();
   }
-  // Completion geometry rides the enriched snapshot output; the view context
+  // Completion geometry rides the snapshot output; the view context
   // only carries what the shared view renders.
-  const output = latestSnapshot?.output ?? null;
+  const output = currentSnapshot?.output ?? null;
   if (presentation.phase === "completed" && output && output.width && output.height) {
     viewCtx.completedInfo = {
       width: output.width,
@@ -1689,32 +1701,7 @@ if (root !== null) {
 }
 
 function getCurrentJobId(): string | null {
-  return followedJobId;
-}
-
-function getPendingDecision(): PendingDecision | null {
-  const decision = pendingDecisionOf();
-  if (!decision) return null;
-  return {
-    ...decision,
-    missingTiles: [...decision.missingTiles],
-  };
-}
-
-function getCompletedPartial(): boolean {
-  return currentPresentation().partial;
-}
-
-function getCompletedMissing(): Array<string> {
-  return [...(latestSnapshot?.output?.missingTiles ?? [])];
-}
-
-function getCompletedSibling(): string | null {
-  return latestSnapshot?.output?.siblingName ?? null;
-}
-
-function getLatestSnapshot(): JobSnapshot | null {
-  return latestSnapshot;
+  return activeHandle?.id ?? null;
 }
 
 export {
@@ -1722,11 +1709,6 @@ export {
   service,
   update,
   getCurrentJobId,
-  getPendingDecision,
-  getCompletedPartial,
-  getCompletedMissing,
-  getCompletedSibling,
-  getLatestSnapshot,
   getEffectiveSettings,
   buildCopyDiagnostics,
   handleCopyDiagnostics,

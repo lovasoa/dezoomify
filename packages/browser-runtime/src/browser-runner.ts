@@ -2,21 +2,22 @@
 // the extension job tab. Products inject their transport, output assembly,
 // and product actions; the runner owns exactly one attempt: the worker, the
 // WASM session bridge, cross-worker processing calls, the abort scope, and
-// disposal. It owns no job policy (retries, partials, ordering stay in the
-// engine) and no UI (snapshots stay in `@dezoomify/app-model`).
+// disposal. It owns no job policy (retries, partials, pause, ordering stay
+// in the engine) and no UI (snapshots stay in `@dezoomify/app-model`).
 //
 // The runner implements the app-model `HostRunner` declaration: `start`
-// runs one browser attempt and emits ordered engine events plus host
-// presentation state; the returned handle takes exactly one `UserCommand`
-// at a time and disposes the attempt. Selection stays explicit: catalog
-// events flow to the observer and the product answers with select commands.
-// Deferred metadata is a product concern (a fresh start), never followed
-// silently here.
+// runs one browser attempt and emits absolute engine snapshots plus host
+// presentation state; the returned handle forwards every `UserCommand` to
+// the engine and disposes the attempt. Selection stays explicit: the engine
+// terminal is the only settle signal, so the runner keeps no settled flag
+// and no terminal gating. Stale revisions and retired jobs are dropped here
+// at the transport edge, the single place that guards them. The pending
+// cross-worker processing ledger plus the worker and assembly handles are
+// the only per-attempt state kept.
 import type {
   EngineSnapshotDto,
   HostRunner,
   HostStatus,
-  JobEvent,
   JobStartRequest,
   RunnerHandle,
   RunnerSink,
@@ -126,7 +127,10 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
     }
     const worker = product.createWorker();
     const attemptSignal = new AbortController();
-    let settled = false;
+    let disposed = false;
+    // Transport-edge revision guard: the single stale drop. Live snapshots
+    // apply only when newer; engine terminals always apply and settle the UI.
+    let lastSnapshotRevision = -1;
     let host: EngineHost | null = null;
     let assembly: EngineHostAssembly | null = null;
     // Cross-worker processing calls (session.applyProcessing) awaiting a reply.
@@ -161,7 +165,7 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
     }
 
     function processTile(recipe: ProcessingRecipe, bytes: ArrayBuffer): Promise<ArrayBuffer> {
-      if (settled) {
+      if (disposed) {
         return Promise.reject(runnerError("browser.job-settled", "The browser job already finished."));
       }
       const requestId = ++processSeq;
@@ -172,23 +176,61 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       });
     }
 
-    function onEvent(event: JobEvent): void {
-      if (settled) return;
-      if (
-        event.type === "completed" ||
-        event.type === "partial-completed" ||
-        event.type === "failed" ||
-        event.type === "cancelled"
-      ) {
-        settled = true;
-      }
-      sink.event(event, status());
+    function forwardSnapshot(snapshot: EngineSnapshotDto): void {
+      lastSnapshotRevision = snapshot.revision;
+      sink.snapshot(snapshot, status());
     }
 
     function onSnapshot(snapshot: EngineSnapshotDto): void {
-      if (settled) return;
-      if (snapshot.terminal) settled = true;
-      sink.snapshot(snapshot);
+      // Stale live snapshots never move the UI; terminals always settle it.
+      if (disposed) return;
+      if (!snapshot.terminal && snapshot.revision <= lastSnapshotRevision) return;
+      forwardSnapshot(snapshot);
+    }
+
+    /**
+     * Terminal projection for a dead engine (adapter ABI fault or host
+     * execution failure): the engine cannot report its own terminal, so the
+     * edge projects one from the typed error instead of hanging. Codes,
+     * phases, transports, and previews pass through untouched.
+     */
+    function forwardTerminalError(error: ErrorDto): void {
+      if (disposed) return;
+      forwardSnapshot({
+        revision: lastSnapshotRevision + 1,
+        lifecycle: "Failed",
+        paused: false,
+        progress: { completed: 0, total: undefined },
+        selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+        decision: undefined,
+        terminal: { type: "failed", error },
+        output: undefined,
+      });
+    }
+
+    function projectFailure(error: unknown): ErrorDto {
+      // A host execution failure is terminal with no later effects faked:
+      // project the typed error (codes, phases, transports, previews pass
+      // through untouched) so the snapshot still terminates honestly.
+      const candidate = error && typeof error === "object" ? (error as Partial<ErrorDto>) : null;
+      const code = typeof candidate?.code === "string" && candidate.code !== "" ? candidate.code : "browser.host-failed";
+      const message = typeof candidate?.message === "string" && candidate.message !== ""
+        ? candidate.message
+        : "The browser could not assemble the image.";
+      return {
+        code,
+        phase: candidate?.phase ?? "output",
+        retryable: candidate?.retryable ?? false,
+        message,
+        recovery: candidate?.recovery ?? [],
+        ...(candidate?.transport ? { transport: candidate.transport } : {}),
+        ...(candidate?.blocked_reason ? { blocked_reason: candidate.blocked_reason } : {}),
+        ...(candidate?.resource_kind ? { resource_kind: candidate.resource_kind } : {}),
+        ...(candidate?.request ? { request: candidate.request } : {}),
+        ...(typeof candidate?.http === "number" ? { http: candidate.http } : {}),
+        ...(candidate?.preview ? { preview: candidate.preview } : {}),
+        ...(candidate?.detail ? { detail: candidate.detail } : {}),
+      };
     }
 
     assembly = product.createAssembly({ sourceUrl, processTile });
@@ -217,40 +259,17 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       },
       onSnapshot,
       onHostFailure: (error) => {
-        if (settled) return;
-        settled = true;
-        // A host execution failure is terminal with no later effects faked:
-        // project the typed error (codes, phases, transports, previews pass
-        // through untouched) so the snapshot still terminates honestly.
-        const candidate = error && typeof error === "object" ? (error as Partial<ErrorDto>) : null;
-        const code = typeof candidate?.code === "string" && candidate.code !== "" ? candidate.code : "browser.host-failed";
-        const message = typeof candidate?.message === "string" && candidate.message !== ""
-          ? candidate.message
-          : "The browser could not assemble the image.";
-        const failure: ErrorDto = {
-          code,
-          phase: candidate?.phase ?? "output",
-          retryable: candidate?.retryable ?? false,
-          message,
-          recovery: candidate?.recovery ?? [],
-          ...(candidate?.transport ? { transport: candidate.transport } : {}),
-          ...(candidate?.blocked_reason ? { blocked_reason: candidate.blocked_reason } : {}),
-          ...(candidate?.resource_kind ? { resource_kind: candidate.resource_kind } : {}),
-          ...(candidate?.request ? { request: candidate.request } : {}),
-          ...(typeof candidate?.http === "number" ? { http: candidate.http } : {}),
-          ...(candidate?.preview ? { preview: candidate.preview } : {}),
-          ...(candidate?.detail ? { detail: candidate.detail } : {}),
-        };
-        sink.event({ type: "failed", error: failure }, status());
+        if (disposed) return;
+        abortAttempt();
+        forwardTerminalError(projectFailure(error));
       },
-      onEvent,
       log,
     });
     const activeHost = host;
 
     worker.addEventListener("message", (event: { data: WorkerHostOutput }) => {
       const data = event.data;
-      if (!data || typeof data !== "object" || settled) return;
+      if (!data || typeof data !== "object" || disposed) return;
       if (data.type === "engine.messages") {
         activeHost.handleEngineMessages(data.messages, data.snapshot);
         return;
@@ -268,16 +287,19 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
         return;
       }
       if (data.type === "engine.error") {
-        if (settled) return;
-        settled = true;
-        sink.event({ type: "failed", error: data.error }, status());
+        if (disposed) return;
+        abortAttempt();
+        forwardTerminalError(data.error);
       }
     });
 
     activeHost.start(request.inputs);
 
     async function command(command: UserCommand): Promise<void> {
-      if (settled && command.type !== "cancel") {
+      // Every command forwards to the engine, including after its terminal:
+      // the engine owns post-terminal semantics. Only a disposed attempt
+      // rejects, since its worker and assembly are gone.
+      if (disposed) {
         throw runnerError("browser.job-settled", "The browser job already finished.");
       }
       switch (command.type) {
@@ -305,7 +327,8 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
     }
 
     async function dispose(): Promise<void> {
-      settled = true;
+      if (disposed) return;
+      disposed = true;
       abortAttempt();
       for (const { reject } of pendingProcess.values()) {
         reject(runnerError("browser.job-settled", "The browser job already finished."));

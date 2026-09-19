@@ -13,10 +13,10 @@
 
 use dezoomify_engine::{
     DiscoveryInput, Effect, EffectId, EffectResult, EngineError, EngineJob, Failure, JobOptions,
-    OutputDisposition, PartialDecision, ResponseMetadata, SelectionPolicy, Terminal, Update,
-    UserCommand,
+    OutputDisposition, RecoveryChoice, ResponseMetadata, SelectionPolicy, Update, UserCommand,
 };
 use dezoomify_protocol::dto::ProbeOutcome;
+use dezoomify_protocol::dto::SnapshotTerminalDto;
 use std::collections::{HashMap, HashSet};
 
 /// Recognizable Deep Zoom input URL: the registry's deepzoom candidate
@@ -85,9 +85,6 @@ pub enum JobCommand {
     /// Re-drive pending work.
     Resume,
 }
-
-/// Answer to an outstanding partial decision.
-pub use dezoomify_engine::PartialDecision as RecoveryChoice;
 
 /// Deterministic host wrapping one [`EngineJob`] plus an ordered transcript.
 #[derive(Debug)]
@@ -365,14 +362,10 @@ impl ScriptedHost {
                         "recovery choice does not match the outstanding recovery",
                     ));
                 }
-                let decision = match choice {
-                    RecoveryChoice::Retry => PartialDecision::Retry,
-                    RecoveryChoice::Keep => PartialDecision::Keep,
-                    RecoveryChoice::Discard => PartialDecision::Discard,
-                };
-                let update = self
-                    .job_mut()?
-                    .command(UserCommand::AnswerPartial { decision })?;
+                let update = self.job_mut()?.command(UserCommand::AnswerPartial {
+                    generation,
+                    decision: choice,
+                })?;
                 self.record(update);
                 Ok(())
             }
@@ -425,13 +418,6 @@ impl ScriptedHost {
         }
     }
 
-    /// Recorded activity count (effects plus events): the change detector
-    /// for tolerated no-ops.
-    #[must_use]
-    pub fn activity_len(&self) -> usize {
-        self.effects.len() + self.events.len()
-    }
-
     /// Current job lifecycle name.
     #[must_use]
     pub fn state(&self) -> String {
@@ -439,12 +425,6 @@ impl ScriptedHost {
             .as_ref()
             .map(|job| format!("{:?}", job.snapshot().lifecycle))
             .unwrap_or_else(|| "Created".to_string())
-    }
-
-    /// Current snapshot revision.
-    #[must_use]
-    pub fn revision(&self) -> u32 {
-        self.snapshot_revision()
     }
 
     /// Whether the job is paused.
@@ -460,10 +440,12 @@ impl ScriptedHost {
         self.job
             .as_ref()
             .and_then(|job| match job.snapshot().terminal {
-                Some(Terminal::Completed) => Some("completed".to_string()),
-                Some(Terminal::PartiallyCompleted { .. }) => Some("partial-completed".to_string()),
-                Some(Terminal::Failed { .. }) => Some("failed".to_string()),
-                Some(Terminal::Cancelled) => Some("cancelled".to_string()),
+                Some(SnapshotTerminalDto::Completed) => Some("completed".to_string()),
+                Some(SnapshotTerminalDto::PartialCompleted { .. }) => {
+                    Some("partial-completed".to_string())
+                }
+                Some(SnapshotTerminalDto::Failed { .. }) => Some("failed".to_string()),
+                Some(SnapshotTerminalDto::Cancelled) => Some("cancelled".to_string()),
                 None => None,
             })
     }
@@ -504,7 +486,7 @@ impl ScriptedHost {
         if let Some(decision) = &snapshot.decision {
             return decision.missing.iter().map(|(tile, _)| *tile).collect();
         }
-        if let Some(Terminal::PartiallyCompleted { missing }) = &snapshot.terminal {
+        if let Some(SnapshotTerminalDto::PartialCompleted { missing }) = &snapshot.terminal {
             return missing.clone();
         }
         Vec::new()
@@ -535,15 +517,6 @@ impl ScriptedHost {
         self.outstanding.len()
     }
 
-    /// Whether a `job-state` event for one lifecycle phase was recorded.
-    #[must_use]
-    pub fn has_state_event(&self, phase: &str) -> bool {
-        self.events.iter().any(|event| {
-            event.get("kind").and_then(serde_json::Value::as_str) == Some("job-state")
-                && event.get("state").and_then(serde_json::Value::as_str) == Some(phase)
-        })
-    }
-
     /// Whether an event of one kind was recorded.
     #[must_use]
     pub fn has_event(&self, kind: &str) -> bool {
@@ -559,20 +532,6 @@ impl ScriptedHost {
             .iter()
             .filter(|event| event.get("kind").and_then(serde_json::Value::as_str) == Some("failed"))
             .collect()
-    }
-
-    /// Count terminal events (must be 0 or 1).
-    #[must_use]
-    pub fn terminal_count(&self) -> usize {
-        self.events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    event.get("kind").and_then(serde_json::Value::as_str),
-                    Some("completed" | "partial-completed" | "failed" | "cancelled")
-                )
-            })
-            .count()
     }
 
     /// Positions of the first catalog image and its levels.
@@ -785,16 +744,16 @@ impl ScriptedHost {
             if let Some(terminal) = &snapshot.terminal {
                 self.emitted_terminal = true;
                 let value = match terminal {
-                    Terminal::Completed => {
+                    SnapshotTerminalDto::Completed => {
                         serde_json::json!({"kind":"completed","seq":self.claim_seq()})
                     }
-                    Terminal::PartiallyCompleted { .. } => {
+                    SnapshotTerminalDto::PartialCompleted { .. } => {
                         serde_json::json!({"kind":"partial-completed","seq":self.claim_seq()})
                     }
-                    Terminal::Failed { code, message } => serde_json::json!({
-                        "kind":"failed","seq":self.claim_seq(),"code":code,"message":message,
+                    SnapshotTerminalDto::Failed { error } => serde_json::json!({
+                        "kind":"failed","seq":self.claim_seq(),"code":error.code,"message":error.message,
                     }),
-                    Terminal::Cancelled => {
+                    SnapshotTerminalDto::Cancelled => {
                         serde_json::json!({"kind":"cancelled","seq":self.claim_seq()})
                     }
                 };

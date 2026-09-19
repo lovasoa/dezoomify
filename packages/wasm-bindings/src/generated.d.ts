@@ -70,6 +70,11 @@ export interface SnapshotSelectionDto {
     image: number | undefined;
     level: number | undefined;
     level_count: number;
+    /**
+     * The kept catalog with full geometry, once discovered. Replaced when
+     * a deferred catalog entry is followed within the same job.
+     */
+    catalog: CatalogDto | undefined;
     deferred: SnapshotDeferredDto[];
 }
 
@@ -284,7 +289,7 @@ export interface SessionConfig {
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "redirect-unavailable" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
 
-export type DispatchResult = { status: "ok"; messages: HostMessage[]; snapshot: EngineSnapshotDto } | { status: "error"; error: ErrorDto };
+export type DispatchResult = { status: "ok"; messages: HostEffect[]; snapshot: EngineSnapshotDto } | { status: "error"; error: ErrorDto };
 
 export type ErrorPhase = "handshake" | "validation" | "discovery" | "acquisition" | "decode" | "processing" | "output" | "publication" | "cleanup";
 
@@ -292,11 +297,7 @@ export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "
 
 export type HostEffect = { type: "acquire-resource"; request: RequestDto } | { type: "acquire-tile"; request: RequestDto; tile: number; placement: TilePlacementDto } | { type: "finalize-output"; partial: boolean; format: OutputFormat; canvas: SizeDto | undefined } | { type: "wait-retry-timer"; tile: number; attempt: number; delay_ms: number } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
 
-export type HostMessage = ({ kind: "effect" } & HostEffect) | ({ kind: "event" } & JobEvent);
-
 export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "provide-resource"; request: number; bytes: number[]; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "select-image"; image: number } | { type: "select-level"; level: number } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "tile-acquired"; request: number } | { type: "retry-timer-elapsed"; tile: number; attempt: number } | { type: "recovery-choice"; generation: number; choice: RecoveryChoice } | { type: "finalization-succeeded" } | { type: "finalization-failed"; error: ErrorDto } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
-
-export type JobEvent = { type: "job-state"; state: JobState } | { type: "catalog"; catalog: CatalogDto } | { type: "progress"; acquired: number; total: number } | { type: "warning"; error: ErrorDto } | { type: "recovery-request"; generation: number; actions: RecoveryAction[] } | { type: "completed" } | { type: "partial-completed" } | { type: "failed"; error: ErrorDto } | { type: "cancelled" } | { type: "paused" } | { type: "resumed" };
 
 export type JobState = "Created" | "Discovering" | "AwaitingImageSelection" | "AwaitingLevelSelection" | "Planning" | "AcquiringTiles" | "AwaitingPartialDecision" | "Finalizing" | "Cancelling" | "Completed" | "PartiallyCompleted" | "Failed" | "Cancelled";
 

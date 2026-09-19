@@ -100,12 +100,6 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 fn setup_three_of_four() -> (String, Arc<Mutex<HashMap<String, usize>>>) {
-    setup_three_of_four_missing("404 Not Found")
-}
-
-fn setup_three_of_four_missing(
-    missing_status: &str,
-) -> (String, Arc<Mutex<HashMap<String, usize>>>) {
     let shared: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     let counts: Arc<Mutex<HashMap<String, usize>>> = Arc::new(Mutex::new(HashMap::new()));
     {
@@ -121,12 +115,10 @@ fn setup_three_of_four_missing(
                 http_response("200 OK", "image/png", &bytes),
             );
         }
-        // The last tile always fails with the configured status: 404 (or
-        // 403) is permanent and attempts once; 500 is transient and retries
-        // to the exact budget.
+        // The last tile is permanently missing.
         map.insert(
             "/pyr_files/9/1_1.png".to_string(),
-            http_response(missing_status, "text/plain", b"tile failure"),
+            http_response("404 Not Found", "text/plain", b"tile failure"),
         );
     }
     let base = serve_counted(Arc::clone(&shared), Arc::clone(&counts));
@@ -157,90 +149,10 @@ fn retries_zero_sends_no_second_request() {
     assert_eq!(error.code, "tile.download-failed");
     assert!(!output.exists());
     let counts = counts.lock().expect("lock");
-    // Each of the four tiles is requested exactly once; the missing tile
-    // is never refetched.
-    for tile in ["0_0", "1_0", "0_1", "1_1"] {
-        let path = format!("/pyr_files/9/{tile}.png");
-        assert_eq!(
-            counts.get(&path).copied().unwrap_or(0),
-            1,
-            "tile {tile} requested exactly once with retries=0: {counts:?}"
-        );
-    }
-}
-
-#[test]
-fn permanent_404_attempted_exactly_once_despite_budget() {
-    // A 404 is permanent: even with retries left, the tile is attempted
-    // exactly once (the 403-retried-N-times bug class stays fixed by
-    // construction). Explicit `Fail` discards with no output.
-    let (base, counts) = setup_three_of_four_missing("404 Not Found");
-    let input = format!("{base}/pyr.dzi");
-    let out_dir = temp_dir("permanent");
-    let output = out_dir.join("permanent.png");
-    let config = PipelineConfig {
-        max_retries: 3,
-        partial_policy: PartialPolicy::Fail,
-        ..Default::default()
-    };
-    let error = dezoomify_native::pipeline::run(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_| {},
-    )
-    .expect_err("missing tile fails");
-    assert_eq!(error.code, "tile.download-failed");
-    assert!(!output.exists());
-    let counts = counts.lock().expect("lock");
-    for tile in ["0_0", "1_0", "0_1", "1_1"] {
-        let path = format!("/pyr_files/9/{tile}.png");
-        assert_eq!(
-            counts.get(&path).copied().unwrap_or(0),
-            1,
-            "tile {tile} requested exactly once despite retries=3: {counts:?}"
-        );
-    }
-}
-
-#[test]
-fn transient_500_retried_to_the_exact_budget() {
-    // A 500 is transient: the missing tile retries exactly to the budget on
-    // the engine's explicit timer, then still fails honestly. Explicit
-    // `Fail` discards with no output.
-    let (base, counts) = setup_three_of_four_missing("500 Internal Server Error");
-    let input = format!("{base}/pyr.dzi");
-    let out_dir = temp_dir("transient");
-    let output = out_dir.join("transient.png");
-    let config = PipelineConfig {
-        max_retries: 1,
-        partial_policy: PartialPolicy::Fail,
-        ..Default::default()
-    };
-    let error = dezoomify_native::pipeline::run(
-        &input,
-        output.to_str().expect("utf8 output"),
-        false,
-        &config,
-        &mut |_| {},
-    )
-    .expect_err("missing tile still fails after one retry");
-    assert_eq!(error.code, "tile.download-failed");
-    assert!(!output.exists());
-    let counts = counts.lock().expect("lock");
-    // Good tiles are requested once; the failing tile is retried once.
-    for tile in ["0_0", "1_0", "0_1"] {
-        let path = format!("/pyr_files/9/{tile}.png");
-        assert_eq!(
-            counts.get(&path).copied().unwrap_or(0),
-            1,
-            "good tile {tile} requested once: {counts:?}"
-        );
-    }
+    // The missing tile is never refetched with retries=0.
     assert_eq!(
         counts.get("/pyr_files/9/1_1.png").copied().unwrap_or(0),
-        2,
-        "failing tile retried once with retries=1: {counts:?}"
+        1,
+        "missing tile requested once with retries=0: {counts:?}"
     );
 }

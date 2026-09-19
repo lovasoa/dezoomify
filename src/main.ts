@@ -20,7 +20,6 @@ import {
 } from "../packages/app-model/src/index.ts";
 import type {
   HistoryEntry,
-  JobEvent,
   JobHandle,
   JobSnapshot,
 } from "../packages/app-model/src/index.ts";
@@ -68,7 +67,7 @@ import {
   isAllowedSourceUrl,
   isLocalFileUrl,
 } from "../packages/browser-runtime/src/plan-gates.ts";
-import { MAX_DEFERRED_FOLLOWS, pickDeferredUri, pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
+import { pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
   cancelAllWeb,
   createWebQueue,
@@ -116,22 +115,18 @@ const preview = createPreviewControls();
 // runner owns the engine host; product code here keeps URL input, transport
 // product actions, history, queue, and view wiring only.
 let jobHandle: JobHandle | null = null;
-let jobToken = 0;
+let activeRun = 0;
 let resultBlobUrl: string | null = null;
 let resultTitle: string | undefined;
-// Authoritative snapshot of the active job, folded by the job service.
-let latestSnapshot: JobSnapshot | null = null;
+// Single authoritative snapshot of the active job, folded by the job service.
+let activeSnapshot: JobSnapshot | null = null;
+// Host-known display-only flag (tainted canvas): passed explicitly to
+// presentSnapshot until the engine snapshot round-trips with
+// output.disposition. Never written into the DTO.
+let displayOnlyActive = false;
 // Host-local failure that never reached an engine snapshot (invalid input,
-// host rejections). Renders through presentFailure.
-let webFailure: StructuredError | null = null;
-// Tainted-canvas display-only override: the picture finished as ordinary
-// image display with no readable bytes, so the view must stay display-only.
-let displayOnlyFlag = false;
-// One auto-selection per attempt: the catalog handler issues the engine
-// selection commands exactly once.
-let selectionDone = false;
-// Message riding the progress line ("Saving 12 tiles…").
-let progressMessage: string | undefined;
+// host rejections). View telemetry only; renders through presentFailure.
+let hostFailure: StructuredError | null = null;
 
 // Recent-jobs history: local-only ledger, newest first, at most
 // 20 entries. Each entry keeps its full source address.
@@ -373,7 +368,9 @@ function createAssembly(
       viewCtx.originClean = false;
       viewCtx.sourceUrl = sourceUrl;
       viewCtx.desktopHandoffUrl = desktopHandoffLink(sourceUrl);
-      displayOnlyFlag = true;
+      // Display-only is a host-known output fact; it rides an explicit
+      // presentation flag, never a forged snapshot field.
+      displayOnlyActive = true;
       const dims = activeAssembly?.dimensions();
       recordWebHistory(sourceUrl, dims?.width ?? 0, dims?.height ?? 0, "display");
       update();
@@ -386,8 +383,6 @@ function createAssembly(
 /** Shared presenter for engine failures: headline plus stable classification. */
 function presentEngineFailure(error: ErrorDto, url: string): void {
   const code = error.code;
-  const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
-  const lower = code.toLowerCase();
   webLog.error("failed", `code=${code} message=${error.message}`);
   if (code === "PLAN_INVALID" || code === "job.resource-limit") {
     const link = desktopHandoffLink(url);
@@ -397,7 +392,7 @@ function presentEngineFailure(error: ErrorDto, url: string): void {
     }
   }
   const discovery = classifyDiscoveryCopy(code);
-  webFailure = describeFailure({
+  hostFailure = describeFailure({
     code,
     engineDetail: error.detail ?? error.message,
     phase: error.phase,
@@ -433,7 +428,9 @@ function classifyDiscoveryCopy(code: string): { retryable: boolean } | null {
 }
 
 function reportProgress(current: number, total: number, message: string): void {
-  progressMessage = message;
+  // Progress text is view telemetry only: it rides the shared view context
+  // and never gates engine commands.
+  viewCtx.currentProgress = { ...(viewCtx.currentProgress ?? {}), message };
   jobActivity.touchProgress();
   jobActivity.scheduleUpdate();
 }
@@ -465,9 +462,9 @@ function clearHash(): void {
 /** Snapshot-failure presentation with the website's discovery copy. */
 function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | null {
   const terminal = snapshot.terminal;
-  if (!terminal || terminal.kind !== "failed" || !terminal.error) return null;
-  presentEngineFailure(terminal.error, viewCtx.jobActivity?.url ?? latestSnapshot?.jobId ?? "");
-  return webFailure ? presentFailure(webFailure, webFetcher.getActiveTransport()) : null;
+  if (!terminal || terminal.type !== "failed") return null;
+  presentEngineFailure(terminal.error, viewCtx.jobActivity?.url ?? "");
+  return hostFailure ? presentFailure(hostFailure, webFetcher.getActiveTransport()) : null;
 }
 
 function activeTransport(): string | null {
@@ -475,39 +472,27 @@ function activeTransport(): string | null {
 }
 
 function currentPresentation(): SnapshotPresentation {
-  if (webFailure) return presentFailure(webFailure, activeTransport());
-  if (!latestSnapshot) return presentIdle();
-  const snapshot = displayOnlyFlag ? { ...latestSnapshot, displayOnly: true } : latestSnapshot;
-  const presentation = failurePresentationOf(latestSnapshot) ?? presentSnapshot(snapshot, activeTransport());
-  if (displayOnlyFlag && presentation.phase !== "failed") {
-    return {
-      ...presentation,
-      phase: "display-only",
-      displayOnly: true,
-      headlineKey: "view.display.title",
-      canCancel: false,
-      canReset: true,
-    };
-  }
-  return presentation;
+  // Render the authoritative snapshot directly; hostFailure covers failures
+  // that never reached a snapshot. Display-only rides an explicit host flag.
+  if (hostFailure && !activeSnapshot) return presentFailure(hostFailure, activeTransport());
+  if (!activeSnapshot) return presentIdle();
+  return failurePresentationOf(activeSnapshot) ?? presentSnapshot(activeSnapshot, activeTransport(), { displayOnly: displayOnlyActive });
 }
 
 function isTerminalNow(): boolean {
-  return webFailure !== null || displayOnlyFlag || (latestSnapshot?.terminal ?? null) !== null;
+  return hostFailure !== null || (activeSnapshot?.terminal ?? null) !== null || displayOnlyActive;
 }
 
-async function runJob(url: string, followDepth = 0, origin = url): Promise<void> {
-  const token = ++jobToken;
+async function runJob(url: string, origin = url): Promise<void> {
+  const run = ++activeRun;
   webFetcher.resetActiveTransport();
   tileThrottle.reset();
   resetActivity(origin);
   setCanvasVisible(document, false);
   preview.resetTransform(document);
-  latestSnapshot = null;
-  webFailure = null;
-  displayOnlyFlag = false;
-  selectionDone = false;
-  progressMessage = undefined;
+  activeSnapshot = null;
+  displayOnlyActive = false;
+  hostFailure = null;
   viewCtx.imageChoice = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
@@ -516,24 +501,22 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
   viewCtx.originClean = true;
   resultTitle = undefined;
   // Hash owns the active job only: queued URLs never touch the hash until
-  // they become active and reach this point. A deferred follow keeps the
-  // user's original address; the resolved request never rewrites it.
-  if (followDepth === 0) writeHash(origin);
+  // they become active and reach this point.
+  writeHash(origin);
   jobActivity.startHeartbeat();
   update();
 
-  let terminal: "done" | "failed" | "cancelled" | "display" | "deferred" = "done";
-  let deferredNext: string | null = null;
   let settle: () => void = () => {};
   const finished = new Promise<void>((resolve) => { settle = resolve; });
+  let settledOutcome: "done" | "failed" | "cancelled" = "done";
 
   const onHostFailure = (error: unknown): void => {
-    if (token !== jobToken) return;
-    if (terminal !== "done") return;
+    if (run !== activeRun) return;
+    if (hostFailure || activeSnapshot?.terminal) return;
     const structured = error as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown };
     const code = typeof structured?.code === "string" ? structured.code : "OUTPUT_FAILED";
     webLog.error("host-failure", `code=${code} message=${String(structured?.message ?? code)}`);
-    webFailure = describeFailure({
+    hostFailure = describeFailure({
       code,
       engineDetail: typeof structured?.detail === "string" ? structured.detail : undefined,
       message: typeof structured?.message === "string" ? structured.message : undefined,
@@ -541,7 +524,7 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
       transport: "browser-session",
       host: hostOf(origin),
     });
-    terminal = "failed";
+    settledOutcome = "failed";
     update();
     settle();
   };
@@ -613,7 +596,7 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
       return assembly;
     },
     quotas: { max_concurrent_fetches: websiteTileConcurrency() },
-    sessionId: () => `job:web-${token}`,
+    sessionId: () => `job:web-${run}`,
     getTransport: () => webFetcher.getActiveTransport(),
     // The website has no host grants: nothing ever suspends for permission.
     isPermissionPending: () => false,
@@ -633,108 +616,125 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
   const service = createJobService(runner);
 
   const onSnapshot = (snapshot: JobSnapshot): void => {
-    if (token !== jobToken) return;
-    latestSnapshot = snapshot;
+    if (run !== activeRun) return;
+    activeSnapshot = snapshot;
+    const like = snapshot as unknown as {
+      catalog?: { entries?: Array<{ kind?: string; title?: unknown; levels?: Array<{ width?: number; height?: number }> }> };
+      selection?: { image?: number | null; deferred?: Array<{ position: number }> };
+      acquired?: number;
+      total?: number | null;
+      progress?: { completed?: number; total?: number | null };
+      terminal?: { kind?: string; type?: string };
+      lifecycle?: string;
+    };
 
-    // Auto-selection: exactly one attempt per catalog. A deferred catalog
-    // (IIIF manifest, bulk list) resolves through its first request with a
-    // fresh, bounded attempt; the engine never follows it silently.
-    if (!selectionDone && snapshot.catalog) {
-      selectionDone = true;
-      const catalog = snapshot.catalog;
-      const entries = catalog.entries;
-      const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
-      if (!selection) {
-        const deferredUri = pickDeferredUri(catalog);
-        if (deferredUri) {
-          if (followDepth >= MAX_DEFERRED_FOLLOWS) {
-            onHostFailure(failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false));
+    // Auto-selection reads the authoritative selection: while no image is
+    // chosen, pick the engine default once from the catalog shape when it
+    // is present; the generated DTO shape carries deferred follows in
+    // `selection.deferred` instead. `follow-deferred` stays in the same job
+    // (engine owns budget and cycle guards).
+    const selectedImage = like.selection?.image;
+    if ((selectedImage === null || selectedImage === undefined)) {
+      const catalog = like.catalog;
+      if (catalog && Array.isArray(catalog.entries)) {
+        const entries = catalog.entries;
+        const selection = pickEngineSelection(catalog as unknown as Parameters<typeof pickEngineSelection>[0], BROWSER_LIMITS);
+        if (!selection) {
+          const deferredIndex = entries.findIndex((entry) => entry?.kind === "image-request");
+          if (deferredIndex >= 0) {
+            followDeferredAt(deferredIndex);
             return;
           }
-          deferredNext = deferredUri;
-          terminal = "deferred";
-          settle();
+          onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
           return;
         }
-        onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
+        const entry = entries[selection.image];
+        const image = entry && entry.kind === "image" ? entry : null;
+        resultTitle = typeof image?.title === "string" ? image.title : undefined;
+        const level = image?.levels?.[selection.level];
+        if (level && typeof level.width === "number" && typeof level.height === "number") viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
+        update();
+        const handle = jobHandle;
+        if (handle) {
+          void handle.command({ type: "select-image", image: selection.image });
+          void handle.command({ type: "select-level", level: selection.level });
+        }
         return;
       }
-      const entry = entries[selection.image];
-      const image = entry && entry.kind === "image" ? entry : null;
-      resultTitle = image?.title;
-      const level = image?.levels?.[selection.level];
-      if (level) viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
-      update();
-      const handle = jobHandle;
-      if (handle) {
-        void handle.command({ type: "select-image", image: selection.image });
-        void handle.command({ type: "select-level", level: selection.level });
+      const deferred = Array.isArray(like.selection?.deferred) ? like.selection.deferred : [];
+      if (deferred.length > 0 && typeof deferred[0]?.position === "number") {
+        followDeferredAt(deferred[0].position);
+        return;
       }
-      return;
     }
 
-    if (snapshot.acquired > 0 || snapshot.total !== null) {
-      reportProgress(snapshot.acquired, snapshot.total ?? 0, `Saving ${snapshot.total ?? "?"} tiles…`);
+    const completed = like.progress?.completed ?? like.acquired ?? 0;
+    const total = (like.progress?.total as number | null | undefined) ?? like.total ?? null;
+    if (completed > 0 || total !== null) {
+      reportProgress(completed, total ?? 0, `Saving ${total ?? "?"} tiles…`);
       update();
     }
 
-    const terminalOutcome = snapshot.terminal;
-    if (terminalOutcome) {
-      if (displayOnlyFlag || activeAssembly?.isTainted() === true) {
-        terminal = "display";
+    const terminalOutcome = like.terminal;
+    const terminalKind = typeof terminalOutcome?.kind === "string" ? terminalOutcome.kind : terminalOutcome?.type;
+    if (terminalOutcome && terminalKind) {
+      if (activeAssembly?.isTainted() === true) {
+        settledOutcome = "done";
         settle();
         return;
       }
-      if (terminalOutcome.kind === "completed" || terminalOutcome.kind === "partial-completed") {
+      if (terminalKind === "completed" || terminalKind === "partial-completed") {
         recordWebHistory(origin, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
-        terminal = "done";
+        settledOutcome = "done";
         update();
         settle();
         return;
       }
-      if (terminalOutcome.kind === "failed") {
-        terminal = "failed";
+      if (terminalKind === "failed") {
+        settledOutcome = "failed";
         update();
         settle();
         return;
       }
-      terminal = "cancelled";
+      settledOutcome = "cancelled";
       update();
       settle();
     }
   };
+
+  function followDeferredAt(image: number): void {
+    webLog.info("deferred-follow", `image=${image} host=${hostOf(origin)}`);
+    const handle = jobHandle;
+    if (handle) {
+      void handle.command({ type: "follow-deferred", image } as unknown as Parameters<typeof handle.command>[0]).catch((error) =>
+        onHostFailure(error instanceof Error ? error : failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false)),
+      );
+    }
+    update();
+  }
 
   try {
     const handle = await service.start(
       { inputs: [{ url }], engine: {}, exec: { kind: "browser", sourceUrl: origin } },
       { snapshot: onSnapshot, hostStatus: () => {} },
     );
-    if (token !== jobToken) {
+    if (run !== activeRun) {
       await handle.dispose();
       return;
     }
     jobHandle = handle;
     await finished;
-    if (token !== jobToken) return;
+    if (run !== activeRun) return;
   } catch (error) {
-    if (token !== jobToken) return;
+    if (run !== activeRun) return;
     onHostFailure(error);
   }
-  if (token !== jobToken) return;
+  if (run !== activeRun) return;
   jobActivity.stopHeartbeat();
   jobActivity.refreshLongestPending();
   disposeAttempt();
   activeAssembly = null;
-  if ((terminal as string) === "deferred" && deferredNext) {
-    // The catalog asked for another resource: restart the whole attempt
-    // against it under the same logical job and original address. The bound
-    // is checked in the catalog handler; the engine never follows silently.
-    webLog.info("deferred-follow", `depth=${followDepth + 1} host=${hostOf(deferredNext)}`);
-    void runJob(deferredNext, followDepth + 1, origin);
-    return;
-  }
-  const queueOutcome: "done" | "failed" | "cancelled" =
-    (terminal as string) === "failed" ? "failed" : (terminal as string) === "cancelled" ? "cancelled" : "done";
+  const queueOutcome: "done" | "failed" | "cancelled" = settledOutcome;
   // Sequential queue: the active entry settles, then the first waiting
   // entry (if any) becomes active and starts. A failed entry never stops
   // the rest. Engine stays single-job throughout.
@@ -744,11 +744,9 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
     const next = settled.next;
     if (next) {
       if (isTerminalNow()) {
-        latestSnapshot = null;
-        webFailure = null;
-        displayOnlyFlag = false;
-        selectionDone = false;
-        progressMessage = undefined;
+        activeSnapshot = null;
+        displayOnlyActive = false;
+        hostFailure = null;
       }
       const summary = summarizeWebQueue(webQueue);
       webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
@@ -765,7 +763,7 @@ function submitQueuedUrl(url: string): void {
   const res = enqueueWebQueue(webQueue, url);
   webQueue = res.queue;
   if (res.code !== "ok" || !res.entry) {
-    webFailure = {
+    hostFailure = {
       code: "INVALID_URL",
       category: "validation",
       retryable: false,
@@ -821,17 +819,22 @@ function update(): void {
   if (!appContainer) return;
   const presentation = currentPresentation();
   // In-flight tile count rides the context; counts come from the snapshot.
-  if (presentation.phase === "job" && latestSnapshot?.total) {
+  // Telemetry (pending requests, progress text) never gates engine commands.
+  const keptMessage = viewCtx.currentProgress?.message;
+  const snapLike = activeSnapshot as unknown as { total?: number | null; acquired?: number; progress?: { completed?: number; total?: number | null } } | null;
+  const snapTotal = snapLike?.progress?.total ?? snapLike?.total ?? null;
+  const snapDone = snapLike?.progress?.completed ?? snapLike?.acquired ?? 0;
+  if (presentation.phase === "job" && snapTotal) {
     viewCtx.currentProgress = {
       active: Math.min(
         jobActivity.state.pendingRequests ?? 0,
-        Math.max(0, latestSnapshot.total - latestSnapshot.acquired),
+        Math.max(0, snapTotal - snapDone),
       ),
-      ...(progressMessage ? { message: progressMessage } : {}),
+      ...(keptMessage ? { message: keptMessage } : {}),
     };
-  } else if (progressMessage) {
-    viewCtx.currentProgress = { message: progressMessage };
-  } else {
+  } else if (keptMessage && presentation.phase === "job") {
+    viewCtx.currentProgress = { message: keptMessage };
+  } else if (presentation.phase !== "job") {
     viewCtx.currentProgress = undefined;
   }
   if (viewCtx.jobActivity) jobActivity.refreshLongestPending();
@@ -845,7 +848,7 @@ function update(): void {
           viewCtx.initialUrl = url;
           viewCtx.sourceUrl = url;
           viewCtx.desktopHandoffUrl = undefined;
-          webFailure = {
+          hostFailure = {
             code: "INVALID_URL",
             category: "validation",
             retryable: false,
@@ -858,7 +861,7 @@ function update(): void {
           return;
         }
         if (!isAllowedSourceUrl(url)) {
-          webFailure = {
+          hostFailure = {
             code: "INVALID_URL",
             category: "validation",
             retryable: false,
@@ -884,11 +887,11 @@ function update(): void {
         update();
       },
       onCancel() {
-        jobToken += 1;
+        activeRun += 1;
         jobActivity.stopHeartbeat();
         disposeAttempt();
         // Stop returns directly to the initial view. Effects from the retired
-        // token finish harmlessly without mutating the replacement job.
+        // run finish harmlessly without mutating the replacement job.
         if (webQueueEnabled()) {
           webQueue = cancelAllWeb(webQueue);
           webQueue = createWebQueue();
@@ -906,7 +909,7 @@ function update(): void {
         update();
       },
       onReset() {
-        jobToken += 1;
+        activeRun += 1;
         jobActivity.stopHeartbeat();
         disposeAttempt();
         webFetcher.resetActiveTransport();
@@ -1003,11 +1006,9 @@ function update(): void {
 }
 
 function resetJobViewState(): void {
-  latestSnapshot = null;
-  webFailure = null;
-  displayOnlyFlag = false;
-  selectionDone = false;
-  progressMessage = undefined;
+  activeSnapshot = null;
+  displayOnlyActive = false;
+  hostFailure = null;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.jobActivity = undefined;

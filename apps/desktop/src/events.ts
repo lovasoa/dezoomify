@@ -1,17 +1,14 @@
 // Desktop Tauri event channels and IPC redaction guards.
 //
-// The desktop job keeps pixels in the native runtime. Only protocol
-// progress and job events cross the IPC boundary; tile bytes never do.
+// The desktop job keeps pixels in the native runtime. Only the
+// self-describing `job-snapshot` (a `JobSnapshot` the service forwards
+// verbatim to its observer) crosses the IPC boundary; tile bytes never do.
 // This module names the allowed channels and guards their payloads.
 
 // Keep erasable syntax only so node type-stripping can read this file.
 
 export const DESKTOP_EVENT_CHANNELS = [
   "dezoomify://job-snapshot",
-  "dezoomify://job-state",
-  "dezoomify://job-progress",
-  "dezoomify://job-output",
-  "dezoomify://job-error",
   "dezoomify://deep-link-pending",
 ] as const;
 
@@ -25,102 +22,48 @@ export interface DesktopEventEnvelope {
 }
 
 /// Self-describing runner snapshot, emitted on `dezoomify://job-snapshot`
-/// for every runner snapshot the shell folds. Carries the shell state plus
-/// the authoritative lifecycle, counts, recovery ledger, and terminal. The
-/// four legacy channels stay subscribed for N-1 shells.
+/// for every runner snapshot the shell forwards verbatim. The payload is
+/// the authoritative `JobSnapshot`: identity, revision, protocol state,
+/// monotonic counts, the typed recovery ledger, exactly one terminal, and
+/// the honest output account. No legacy `job-state`/`job-progress`/
+/// `job-output`/`job-error` channels exist.
 export interface JobSnapshotPayload {
   job: string;
   jobId: string;
+  revision: number;
   seq: number;
   kind: "snapshot";
+  jobSnapshot: boolean;
   state: string;
   lifecycle: string;
+  catalog: null;
   acquired: number;
-  total: number;
+  total: number | null;
+  paused: boolean;
+  selection: { image: number | null; level: number | null };
+  warnings: Array<unknown>;
+  recovery: null | {
+    generation: number;
+    actions: Array<{ id: string; kind: string; scope: string; rationale: string }>;
+    missing?: Array<string>;
+    failed?: number;
+    total?: number;
+  };
+  terminal: null | { kind: string; error?: Record<string, unknown> };
+  output: null | {
+    doneTiles: number;
+    totalTiles: number | null;
+    failedTiles: number;
+    partial: boolean;
+    format: string | null;
+    width: number | null;
+    height: number | null;
+    missingTiles: Array<string>;
+    siblingName?: string;
+  };
+  displayOnly: boolean;
+  updatedAt: number;
   origin: string;
-  recovery?: { missing: Array<string>; failed: number; total: number };
-  terminal?: string;
-  format?: string;
-  width?: number;
-  height?: number;
-  tileCount?: number;
-  missingTiles?: Array<string>;
-  sibling?: string;
-  code?: string;
-  phase?: string;
-  retryable?: boolean;
-  recoveryHint?: string;
-  message?: string;
-  transport?: string;
-}
-
-// Typed payload shapes emitted by the Rust shell (`jobs.rs` projection).
-// Every job payload carries both `job` and `jobId` aliases plus `seq` so
-// stale-job and stale-seq guards keep working. Only counts, hashes, codes,
-// and the redacted origin cross IPC; tile bytes, paths, full URLs, and
-// secrets never do.
-export interface JobStatePayload {
-  job: string;
-  jobId: string;
-  seq: number;
-  kind: string;
-  state: string;
-  detail: string;
-  origin: string;
-  reason?: string;
-  missing?: Array<string>;
-  missingTiles?: Array<string>;
-  failed?: number;
-  total?: number;
-  recovery?: string;
-}
-
-export interface JobProgressPayload {
-  job: string;
-  jobId: string;
-  seq: number;
-  kind: string;
-  state: string;
-  acquired: number;
-  total: number;
-  detail: string;
-  origin: string;
-}
-
-export interface JobOutputPayload {
-  job: string;
-  jobId: string;
-  seq: number;
-  kind: string;
-  state: string;
-  format: string;
-  width: number;
-  height: number;
-  tileCount: number;
-  detail: string;
-  origin: string;
-  missing?: Array<string>;
-  missingTiles?: Array<string>;
-  sibling?: string;
-}
-
-export interface JobErrorPayload {
-  job: string;
-  jobId: string;
-  seq: number;
-  kind: string;
-  state: string;
-  code: string;
-  phase: string;
-  retryable: boolean;
-  recovery: string;
-  message: string;
-  detail: string;
-  origin: string;
-  transport: string;
-  ["resource-kind"]?: string;
-  resource_kind?: string;
-  resourceKind?: string;
 }
 
 const FORBIDDEN_IPC_KEYS = new Set([
@@ -153,22 +96,16 @@ export function isDesktopEventChannel(value: string): value is DesktopEventChann
   return (DESKTOP_EVENT_CHANNELS as readonly string[]).includes(value);
 }
 
-// Canonical IPC identity: the Rust shell emits every job payload with both
-// `job` and `jobId` aliases plus a numeric `seq` (jobs.rs projection,
-// asserted in the shell tests). Readers take `job` first and accept `jobId`;
-// anything else (job_id, seqNo, string seqs) is rejected, so speculative
-// spellings fail closed instead of matching unrelated fields.
+// Canonical IPC identity: the Rust shell emits every snapshot with both
+// `job` and `jobId` aliases plus a numeric `revision`/`seq` (verbatim
+// runner seq). Readers take `job` first and accept `jobId`; anything else
+// (job_id, seqNo, string seqs) is rejected, so speculative spellings fail
+// closed instead of matching unrelated fields.
 export function eventJobId(payload: Record<string, unknown>): string | null {
   for (const key of ["job", "jobId"]) {
     const value = payload[key];
     if (typeof value === "string" && value.length > 0) return value;
   }
-  return null;
-}
-
-export function eventSeq(payload: Record<string, unknown>): number | null {
-  const value = payload["seq"];
-  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
   return null;
 }
 

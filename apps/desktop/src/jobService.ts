@@ -2,30 +2,26 @@
 // Uses `@tauri-apps/api/core` invoke and `@tauri-apps/api/event` listen
 // only (never host-injected globals, never validation-only fallbacks: with
 // no host the service reports typed host-unavailable errors and tests inject
-// explicit doubles). One service owns many window-owned jobs; each job gets
-// a per-job snapshot channel backed by the shared snapshot store.
+// explicit doubles). One service owns many window-owned jobs; each job is an
+// observer entry keyed by its snapshot identity.
+//
+// Snapshot-only transport: the shell emits `dezoomify://job-snapshot`
+// `JobSnapshot` payloads verbatim from the runner (identity, revision,
+// protocol state, monotonic counts, typed recovery, exactly one terminal).
+// The service forwards each snapshot payload directly to its observer: no
+// channel/kind fold, no seq guard, no settled mirror. Exactly-once
+// terminals, monotonic progress, honest partials, typed failure codes, and
+// redaction are the shell's contract; the frontend never refolds them.
 //
 // Command routing against the shipped shell (DESKTOP_COMMANDS):
 // cancel -> cancel_job; image/level/recovery choices -> answer_choice with
 // the shell's typed choice shapes (single source here); pause/resume and
 // engine-internal commands have no shell command yet and reject with
 // desktop.unsupported-command until the typed native IPC lands.
-//
-// Event projection is explicit and total: each payload maps by its channel
-// plus kind/state fields to one generated JobEvent, or is ignored. No
-// substring matching on display text. Payload shapes are imported from
-// events.ts (canonical); destination formats from desktopIntegration.ts.
-// Native payloads carry data the shared fold cannot know (output geometry,
-// partial ledgers, sibling basenames); the service enriches the folded
-// snapshot with it before publishing, so the snapshot stays the single
-// source of truth the UI renders.
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
-  ErrorDto,
-  HostStatus,
-  JobEvent,
   JobHandle,
   JobObserver,
   JobService,
@@ -34,15 +30,9 @@ import type {
   UserCommand,
 } from "@dezoomify/app-model";
 import {
-  applyJobEvent,
-  createSnapshotStore,
-  initialSnapshot,
-  type SnapshotStore,
-} from "@dezoomify/app-model";
-import {
   DESKTOP_EVENT_CHANNELS,
+  assertNoTileBytes,
   eventJobId,
-  eventSeq,
   type DesktopEventChannel,
 } from "./events.ts";
 import { DESKTOP_COMMANDS, NATIVE_FORMATS } from "./desktopIntegration.ts";
@@ -69,7 +59,6 @@ export interface DesktopIpc {
 
 export interface DesktopJobServiceDeps {
   ipc?: DesktopIpc;
-  store?: SnapshotStore;
   now?: () => number;
   /** Extra start_job settings (output preferences); default omits the key. */
   settings?: () => Record<string, unknown>;
@@ -103,329 +92,8 @@ function publicIpc(): DesktopIpc {
   };
 }
 
-function serviceError(code: string, message: string): ErrorDto {
-  return { code, phase: "validation", retryable: false, message, recovery: [] };
-}
-
-function strField(record: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string") return value;
-  }
-  return undefined;
-}
-
-function numField(record: Record<string, unknown>, keys: string[]): number | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-  }
-  return undefined;
-}
-
-function stringList(record: Record<string, unknown>, keys: string[]): string[] {
-  for (const key of keys) {
-    const value = record[key];
-    if (Array.isArray(value)) {
-      return value.filter((item): item is string => typeof item === "string" && item !== "");
-    }
-  }
-  return [];
-}
-
-const VALID_PHASES = new Set([
-  "handshake",
-  "validation",
-  "discovery",
-  "acquisition",
-  "decode",
-  "processing",
-  "output",
-  "publication",
-  "cleanup",
-]);
-
-type ErrorPhaseName =
-  | "handshake"
-  | "validation"
-  | "discovery"
-  | "acquisition"
-  | "decode"
-  | "processing"
-  | "output"
-  | "publication"
-  | "cleanup";
-
-function phaseOf(payload: Record<string, unknown>): ErrorPhaseName {
-  const phase = strField(payload, ["phase"]);
-  if (phase && VALID_PHASES.has(phase)) return phase as ErrorPhaseName;
-  return "acquisition";
-}
-
-function flatKind(payload: Record<string, unknown>): string {
-  const kind = strField(payload, ["kind"]) ?? "";
-  return kind.toLowerCase().replace(/[-_]/g, "");
-}
-
-function stateOf(payload: Record<string, unknown>): string {
-  return (strField(payload, ["state"]) ?? "").toLowerCase().replace(/[-_]/g, "");
-}
-
-/** Typed recovery actions for each native recovery family. */
-const PARTIAL_ACTIONS = [
-  { id: "keep-partial", kind: "keep-partial", scope: "job", rationale: "kept-partial" },
-  { id: "discard-partial", kind: "discard-partial", scope: "job", rationale: "fail-closed" },
-  { id: "retry", kind: "retry", scope: "tile", rationale: "transient" },
-] as const;
-
-const DESTINATION_ACTIONS = [
-  { id: "choose-output", kind: "choose-output", scope: "job", rationale: "output-denied" },
-  { id: "retry", kind: "retry", scope: "job", rationale: "transient" },
-] as const;
-
-/** Shell state names that map onto one engine job state. */
-const SHELL_STATE_TABLE: Record<string, JobEvent> = {
-  created: { type: "job-state", state: "Created" },
-  discovering: { type: "job-state", state: "Discovering" },
-  awaitingimageselection: { type: "job-state", state: "AwaitingImageSelection" },
-  awaitinglevelselection: { type: "job-state", state: "AwaitingLevelSelection" },
-  planning: { type: "job-state", state: "Planning" },
-  running: { type: "job-state", state: "AcquiringTiles" },
-  acquiring: { type: "job-state", state: "AcquiringTiles" },
-  acquiringtiles: { type: "job-state", state: "AcquiringTiles" },
-  processing: { type: "job-state", state: "AcquiringTiles" },
-  encoding: { type: "job-state", state: "Finalizing" },
-  finalizing: { type: "job-state", state: "Finalizing" },
-  cancelling: { type: "job-state", state: "Cancelling" },
-  cleaningup: { type: "job-state", state: "Cancelling" },
-  awaitingpartialdecision: { type: "job-state", state: "AwaitingPartialDecision" },
-};
-
-/**
- * Fold one self-describing `job-snapshot` payload into generated events.
- * The shell already folded the runner snapshot into the record; the emit
- * carries lifecycle, counts, the recovery ledger, and the terminal, so no
- * payload parsing beyond typed fields is involved.
- */
-export function foldSnapshotPayload(
-  payload: Record<string, unknown>,
-): JobEvent[] {
-  const out: JobEvent[] = [];
-  const lifecycle = stateOf(payload);
-  const stateEvent = SHELL_STATE_TABLE[lifecycle];
-  if (stateEvent) out.push(stateEvent);
-  const acquired = numField(payload, ["acquired"]);
-  const total = numField(payload, ["total"]);
-  if (typeof acquired === "number" && typeof total === "number") {
-    out.push({ type: "progress", acquired, total });
-  }
-  const recovery = payload["recovery"];
-  if (recovery && typeof recovery === "object") {
-    const table = recovery as Record<string, unknown>;
-    const generation = eventSeq(payload) ?? 0;
-    const reason = strField(payload, ["reason"]);
-    const actions = reason === "destination" ? DESTINATION_ACTIONS : PARTIAL_ACTIONS;
-    out.push({
-      type: "recovery-request",
-      generation,
-      actions: actions.map((action) => ({ ...action })),
-    });
-  }
-  const terminal = strField(payload, ["terminal"]);
-  const terminalKind = terminal ? terminal.toLowerCase().replace(/[-_]/g, "") : "";
-  if (terminalKind === "completed") {
-    out.push({ type: "completed" });
-  } else if (terminalKind === "partialcompleted") {
-    out.push({ type: "partial-completed" });
-  } else if (terminalKind === "cancelled") {
-    out.push({ type: "cancelled" });
-  } else if (terminalKind === "failed") {
-    const code = strField(payload, ["code"]) ?? "desktop.job-failed";
-    const message = strField(payload, ["message"]) ?? "The desktop job failed.";
-    const retryable = payload["retryable"] === true;
-    out.push({
-      type: "failed",
-      error: {
-        code,
-        phase: phaseOf(payload),
-        retryable,
-        message,
-        recovery: [],
-        transport: "native",
-      },
-    });
-  }
-  return out;
-}
-
-/**
- * Project one shell payload to one generated JobEvent. Returns null for
- * payloads that carry no engine event (grants, heartbeats, unknown kinds):
- * the snapshot stays put instead of moving on display text.
- */
-export function projectDesktopEvent(
-  channel: DesktopEventChannel,
-  payload: Record<string, unknown>,
-): JobEvent | null {
-  const kind = flatKind(payload);
-  const state = stateOf(payload);
-
-  if (channel === "dezoomify://deep-link-pending") return null;
-
-  if (
-    channel === "dezoomify://job-progress" ||
-    kind === "progress" ||
-    kind === "downloading" ||
-    kind === "discovery" ||
-    kind === "encoding"
-  ) {
-    const acquired = numField(payload, ["acquired"]);
-    const total = numField(payload, ["total"]);
-    if (typeof acquired === "number" && typeof total === "number") {
-      return { type: "progress", acquired, total };
-    }
-    return null;
-  }
-
-  if (
-    channel === "dezoomify://job-output" ||
-    kind === "completed" ||
-    kind === "partialcompleted" ||
-    kind === "output"
-  ) {
-    if (kind === "partialcompleted" || state === "partiallycompleted") {
-      return { type: "partial-completed" };
-    }
-    return { type: "completed" };
-  }
-
-  if (channel === "dezoomify://job-error" || kind === "failed" || kind === "error") {
-    const code = strField(payload, ["code"]) ?? "desktop.job-failed";
-    const message = strField(payload, ["message"]) ?? "The desktop job failed.";
-    const retryable = payload["retryable"] === true;
-    const transportRaw = strField(payload, ["transport"]);
-    const transport =
-      transportRaw === "direct" ||
-      transportRaw === "metadata-proxy" ||
-      transportRaw === "browser-session" ||
-      transportRaw === "native" ||
-      transportRaw === "display-only"
-        ? transportRaw
-        : "native";
-    return {
-      type: "failed",
-      error: {
-        code,
-        phase: phaseOf(payload),
-        retryable,
-        message,
-        recovery: [],
-        transport,
-      },
-    };
-  }
-
-  if (kind === "cancelled") return { type: "cancelled" };
-  if (kind === "paused") return { type: "paused" };
-  if (kind === "resumed") return { type: "resumed" };
-
-  // Recovery requests: partial decisions offer keep/discard/retry; the
-  // destination cue (any event reporting the AwaitingDestination shell
-  // state) offers choose-output. The reason field is typed, never display
-  // text.
-  if (
-    kind === "recoveryrequested" ||
-    kind === "requestdecision" ||
-    kind === "awaitingrecovery" ||
-    kind === "awaitingpartialdecision" ||
-    kind === "awaitingpartial"
-  ) {
-    const generation = eventSeq(payload) ?? 0;
-    const reason = strField(payload, ["reason"]);
-    const actions = reason === "destination" ? DESTINATION_ACTIONS : PARTIAL_ACTIONS;
-    return {
-      type: "recovery-request",
-      generation,
-      actions: actions.map((action) => ({ ...action })),
-    };
-  }
-  if (state === "awaitingdestination") {
-    const generation = eventSeq(payload) ?? 0;
-    return {
-      type: "recovery-request",
-      generation,
-      actions: DESTINATION_ACTIONS.map((action) => ({ ...action })),
-    };
-  }
-  // A destination grant moves the job into active work: the driver plans
-  // before the first tile flows.
-  if (kind === "destination") {
-    return { type: "job-state", state: "Planning" };
-  }
-
-  const stateEvent = SHELL_STATE_TABLE[state];
-  return stateEvent ?? null;
-}
-
-/**
- * Fold the shell state riding a progress payload before the progress event:
- * the snapshot state must track Acquiring/Finalizing during downloads.
- */
-function progressStateEvent(payload: Record<string, unknown>): JobEvent | null {
-  const stateEvent = SHELL_STATE_TABLE[stateOf(payload)];
-  return stateEvent ?? null;
-}
-
-/** Typed output details a native terminal payload carries beyond the fold. */
-function enrichOutput(
-  snapshot: JobSnapshot,
-  payload: Record<string, unknown>,
-): JobSnapshot {
-  if (!snapshot.output) return snapshot;
-  const width = numField(payload, ["width"]);
-  const height = numField(payload, ["height"]);
-  const format = strField(payload, ["format"]);
-  const missing = stringList(payload, ["missingTiles", "missing"]);
-  const siblingRaw = strField(payload, ["sibling"]);
-  const sibling =
-    typeof siblingRaw === "string" &&
-    siblingRaw.length > 0 &&
-    siblingRaw.length <= 256 &&
-    siblingRaw.indexOf("/") < 0 &&
-    siblingRaw.indexOf("\\") < 0
-      ? siblingRaw
-      : undefined;
-  return {
-    ...snapshot,
-    output: {
-      ...snapshot.output,
-      ...(typeof width === "number" && width > 0 ? { width } : {}),
-      ...(typeof height === "number" && height > 0 ? { height } : {}),
-      ...(format ? { format } : {}),
-      ...(missing.length > 0 ? { missingTiles: missing } : {}),
-      ...(sibling ? { siblingName: sibling } : {}),
-    },
-  };
-}
-
-/** Typed partial-ledger details a native recovery payload carries. */
-function enrichRecovery(
-  snapshot: JobSnapshot,
-  payload: Record<string, unknown>,
-): JobSnapshot {
-  if (!snapshot.recovery) return snapshot;
-  const missing = stringList(payload, ["missingTiles", "missing"]);
-  const failed = numField(payload, ["failed", "failedRequests", "failures"]);
-  const total = numField(payload, ["total", "tiles", "tileCount"]);
-  return {
-    ...snapshot,
-    recovery: {
-      ...snapshot.recovery,
-      ...(missing.length > 0 ? { missing } : {}),
-      ...(typeof failed === "number" ? { failed } : {}),
-      ...(typeof total === "number" ? { total } : {}),
-    },
-  };
+function serviceError(code: string, message: string): { code: string; message: string } {
+  return { code, message };
 }
 
 function extensionFor(format: string): string | null {
@@ -451,25 +119,52 @@ export interface DesktopJobService extends JobService {
   dispose(): Promise<void>;
 }
 
-interface TrackedJob {
+interface TrackedObserver {
   nativeId: string;
   observer: JobObserver;
-  current: JobSnapshot;
-  seenSeq: number;
-  settled: boolean;
 }
+
+function isSnapshotPayload(value: unknown): value is JobSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record["jobId"] === "string" &&
+    typeof record["state"] === "string"
+  );
+}
+
+/** Local initial snapshot: `Created` with nothing selected. The shell's
+ * first verbatim snapshot replaces it; no fold lives here. */
+function initialLocalSnapshot(jobId: string): JobSnapshot {
+  return {
+    jobId,
+    revision: 0,
+    state: "Created",
+    catalog: null,
+    acquired: 0,
+    total: null,
+    paused: false,
+    selection: { image: null, level: null },
+    warnings: [],
+    recovery: null,
+    terminal: null,
+    output: null,
+    displayOnly: false,
+    updatedAt: Date.now(),
+  } as unknown as JobSnapshot;
+}
+
 export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJobService {
   const ipc = deps?.ipc ?? publicIpc();
-  const store = deps?.store ?? createSnapshotStore();
   const now = deps?.now ?? Date.now;
   const settingsOf = deps?.settings;
   const onDeepLink = deps?.onDeepLink;
-  const jobs = new Map<string, TrackedJob>();
+  const observers = new Map<string, TrackedObserver>();
   const unlistens: Array<() => void> = [];
   let listening = false;
   let listenFailed: unknown = null;
 
-  function hostStatus(): HostStatus {
+  function hostStatus(): { transport: string; permission: string; output: string } {
     return { transport: "native", permission: "granted", output: "writable" };
   }
 
@@ -480,47 +175,25 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       }
       return;
     }
+    if (channel !== "dezoomify://job-snapshot") return;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
     const payload = raw as Record<string, unknown>;
     const id = eventJobId(payload);
     if (!id) return;
-    const tracked = jobs.get(id);
-    if (!tracked || tracked.settled) return;
-    const remoteSeq = eventSeq(payload);
-    if (remoteSeq !== null) {
-      if (remoteSeq <= tracked.seenSeq) return;
-      tracked.seenSeq = remoteSeq;
+    const tracked = observers.get(id);
+    if (!tracked) return;
+    if (!isSnapshotPayload(payload)) return;
+    try {
+      assertNoTileBytes(payload);
+    } catch {
+      return;
     }
-    const events =
-      channel === "dezoomify://job-snapshot"
-        ? foldSnapshotPayload(payload)
-        : (() => {
-            const event = projectDesktopEvent(channel, payload);
-            return event ? [event] : [];
-          })();
-    if (events.length === 0) return;
-    let folded = tracked.current;
-    for (const event of events) {
-      // Progress payloads carry the live shell state alongside the counts;
-      // fold it first so the snapshot state tracks the download.
-      if (event.type === "progress") {
-        const stateEvent = progressStateEvent(payload);
-        if (stateEvent && stateEvent.type === "job-state" && stateEvent.state !== folded.state) {
-          folded = applyJobEvent(folded, stateEvent, now());
-        }
-      }
-      folded = applyJobEvent(folded, event, now());
-      if (event.type === "completed" || event.type === "partial-completed") {
-        folded = enrichOutput(folded, payload);
-      } else if (event.type === "recovery-request") {
-        folded = enrichRecovery(folded, payload);
-      }
-    }
-    if (folded === tracked.current) return;
-    tracked.current = folded;
-    if (store.publish(folded)) tracked.observer.snapshot(folded);
-    tracked.observer.hostStatus(hostStatus());
-    if (folded.terminal !== null) tracked.settled = true;
+    // Verbatim forward: the snapshot is already authoritative (shell
+    // guarantees exactly-once terminals, monotonic counts, honest
+    // partials, typed codes, redacted context), so no fold, no seq guard,
+    // and no settled mirror live here.
+    tracked.observer.snapshot(payload as unknown as JobSnapshot);
+    tracked.observer.hostStatus(hostStatus() as never);
   }
 
   async function ensureListening(): Promise<void> {
@@ -600,18 +273,16 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       throw serviceError("desktop.start-failed", "The desktop host returned no job.");
     }
     const id: string = nativeId;
-    const current = initialSnapshot(id, now());
-    store.publish(current);
+    const existing = observers.get(id);
+    if (existing) observers.delete(id);
+    observers.set(id, { nativeId: id, observer });
+    const current = initialLocalSnapshot(id);
     observer.snapshot(current);
-    observer.hostStatus(hostStatus());
-    const tracked: TrackedJob = { nativeId: id, observer, current, seenSeq: 0, settled: false };
-    const existing = jobs.get(id);
-    if (existing) existing.settled = true;
-    jobs.set(id, tracked);
+    observer.hostStatus(hostStatus() as never);
 
     async function command(command: UserCommand): Promise<void> {
-      const live = jobs.get(id);
-      if (!live || live.settled) {
+      const live = observers.get(id);
+      if (!live) {
         throw serviceError("desktop.job-settled", "The job already finished.");
       }
       if (command.type === "cancel") {
@@ -693,10 +364,7 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     }
 
     async function dispose(): Promise<void> {
-      const live = jobs.get(id);
-      if (live) live.settled = true;
-      jobs.delete(id);
-      store.remove(id);
+      observers.delete(id);
     }
 
     return { id, command, dispose, requestDestination, openOutput };
@@ -729,11 +397,8 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
   }
 
   async function dispose(): Promise<void> {
-    for (const id of [...jobs.keys()]) {
-      const tracked = jobs.get(id);
-      if (tracked) tracked.settled = true;
-      jobs.delete(id);
-      store.remove(id);
+    for (const id of [...observers.keys()]) {
+      observers.delete(id);
     }
     while (unlistens.length > 0) {
       const unlisten = unlistens.pop();
