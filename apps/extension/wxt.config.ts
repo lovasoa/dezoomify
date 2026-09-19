@@ -7,11 +7,11 @@ import { defineConfig } from "wxt";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(root, "../..");
 const publicDir = path.join(root, "public");
-const isTestPackage = process.env.DEZOOMIFY_TEST_DRIVER === "1";
 const testOrigin = process.env.DEZOOMIFY_TEST_ORIGIN ?? "";
 const testScenario = process.env.DEZOOMIFY_TEST_SCENARIO ?? "";
 
-function testHostPermissions(): string[] {
+function testHostPermissions(isTestPackage: boolean): string[] {
+  if (!isTestPackage) return [];
   if (process.env.DEZOOMIFY_TEST_HOST_PERMISSIONS !== "1") return [];
   if (!/^https?:\/\/[^/]+$/.test(testOrigin)) {
     throw new Error("DEZOOMIFY_TEST_ORIGIN must be an http(s) origin for the E2E package");
@@ -26,7 +26,7 @@ function testHostPermissions(): string[] {
 export default defineConfig({
   targetBrowsers: ["chrome", "firefox"],
   manifestVersion: 3,
-  outDir: isTestPackage ? ".output-test" : ".output",
+  outDir: ".output",
   imports: false,
   dev: { reloadCommand: false },
   zip: {
@@ -34,7 +34,7 @@ export default defineConfig({
     artifactTemplate: "dezoomify-{{browser}}.zip",
     zipSources: false,
   },
-  manifest: ({ browser }) => ({
+  manifest: ({ browser, mode }) => ({
     version: process.env.DEZOOMIFY_VERSION ?? "0.0.1",
     action: {
       default_title: "Dezoomify",
@@ -54,7 +54,7 @@ export default defineConfig({
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'",
     },
     description: "Click to find zoomable images on the current page and rebuild them at full resolution. No background monitoring.",
-    host_permissions: testHostPermissions(),
+    host_permissions: testHostPermissions(mode === "testing"),
     icons: {
       16: "icons/icon16.png",
       48: "icons/icon48.png",
@@ -67,7 +67,7 @@ export default defineConfig({
     minimum_chrome_version: browser === "chrome" ? "140" : undefined,
   }),
   hooks: {
-    async "build:before"() {
+    async "build:before"(wxt) {
       const wasm = path.join(repository, "wasm");
       for (const file of ["dezoomify-wasm.js", "dezoomify-wasm_bg.wasm"]) {
         try {
@@ -84,7 +84,7 @@ export default defineConfig({
       await cp(path.join(wasm, "dezoomify-wasm.js"), path.join(publicDir, "wasm/dezoomify-wasm.js"));
       await cp(path.join(wasm, "dezoomify-wasm_bg.wasm"), path.join(publicDir, "wasm/dezoomify-wasm_bg.wasm"));
 
-      if (isTestPackage) {
+      if (wxt.config.mode === "testing") {
         await cp(path.join(root, "src/test"), path.join(publicDir, "test"), { recursive: true });
         await writeFile(
           path.join(publicDir, "test/config.js"),
@@ -100,8 +100,5 @@ export default defineConfig({
     // packaged extension must stay one-click debuggable. Maps are fetched
     // lazily by devtools only. The Rust/wasm core stays lean (no DWARF).
     build: { sourcemap: true },
-    define: {
-      __DEZOOMIFY_TEST_PERMISSION_MOCK__: JSON.stringify(isTestPackage && testScenario === "permission"),
-    },
   }),
 });

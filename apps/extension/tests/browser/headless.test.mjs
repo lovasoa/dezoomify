@@ -34,10 +34,10 @@ after(() => {
   if (fixtureWork) rmSync(fixtureWork, { recursive: true, force: true });
 });
 
-function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermissions = true, sourceHostOnly = false, scenario } = {}) {
+function stagePackage(browser, dir, origin, { grantHostPermissions = true, sourceHostOnly = false, scenario } = {}) {
   const zip = path.join(dir, `dezoomify-${browser}.zip`);
   const wxtBrowser = browser === "chromium" ? "chrome" : browser;
-  const staged = spawnSync("pnpm", ["--dir", EXTENSION_ROOT, "exec", "wxt", "zip", "--browser", wxtBrowser], {
+  const staged = spawnSync("pnpm", ["--dir", EXTENSION_ROOT, "exec", "wxt", "zip", "--browser", wxtBrowser, "--mode", "testing"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     env: {
@@ -45,12 +45,11 @@ function stagePackage(browser, dir, origin, { testDriver = false, grantHostPermi
       DEZOOMIFY_TEST_HOST_PERMISSIONS: grantHostPermissions ? "1" : "0",
       ...(sourceHostOnly ? { DEZOOMIFY_TEST_SOURCE_HOST_ONLY: "1" } : {}),
       DEZOOMIFY_TEST_ORIGIN: origin,
-      DEZOOMIFY_TEST_DRIVER: testDriver ? "1" : "0",
       ...(scenario ? { DEZOOMIFY_TEST_SCENARIO: scenario } : {}),
     },
   });
   assert.equal(staged.status, 0, `WXT package ${browser} failed:\n${staged.stderr}`);
-  copyFileSync(path.join(EXTENSION_ROOT, ".output-test", `dezoomify-${wxtBrowser}.zip`), zip);
+  copyFileSync(path.join(EXTENSION_ROOT, ".output", `dezoomify-${wxtBrowser}.zip`), zip);
   return zip;
 }
 
@@ -157,7 +156,7 @@ async function waitForVisible(page, selector, label) {
 }
 
 async function runChromiumJob(base, work, options = {}) {
-  const zip = stagePackage("chromium", work, base, { testDriver: true, ...options });
+  const zip = stagePackage("chromium", work, base, options);
   const pkgDir = path.join(work, "pkg");
   spawnSync("python3", ["-m", "zipfile", "-e", zip, pkgDir], { encoding: "utf8" });
   const context = await chromium.launchPersistentContext(path.join(work, "profile"), {
@@ -226,7 +225,7 @@ function findFirefoxBinary() {
 }
 
 async function runFirefoxJob(base, work) {
-  const zip = stagePackage("firefox", work, base, { testDriver: true });
+  const zip = stagePackage("firefox", work, base);
   const binary = findFirefoxBinary();
   assert.ok(binary, "no Firefox binary found; set DEZOOMIFY_FIREFOX_BIN");
   const downloadsDir = path.join(work, "downloads");

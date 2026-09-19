@@ -36,7 +36,6 @@ export type BrowserApi = {
 };
 export type BrowserTab = { id?: number; url?: string };
 type BrowserSender = { tab?: BrowserTab; frameId?: number };
-const testGlobals = globalThis as typeof globalThis & { __DEZOOMIFY_TEST__?: boolean };
 const STORAGE_KEY = "dezoomify.sourceBindings.v1";
 const IDLE_ICON = { 16: "icons/icon16-grey.png", 48: "icons/icon48-grey.png", 128: "icons/icon128-grey.png" };
 const ACTIVE_ICON = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
@@ -59,7 +58,7 @@ function sameDocumentUrl(a: string, b: string): boolean {
   } catch { return a === b; }
 }
 
-export function createBackgroundCoordinator({ browserApi }: { browserApi?: BrowserApi }) {
+export function createBackgroundCoordinator({ browserApi, testing = false }: { browserApi?: BrowserApi; testing?: boolean }) {
   const backgroundLogger = createLogger("background");
 
   function setBackgroundLogLevel(level: string | number) { backgroundLogger.setLevel(level); }
@@ -284,7 +283,7 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
     // The job page owns `permissions.request()` because it retains the user
     // activation from its Allow button. The coordinator verifies that grant
     // before resuming a paused acquisition.
-    if (testGlobals.__DEZOOMIFY_TEST__ && message.testGrant === true) granted = true;
+    if (testing && message.testGrant === true) granted = true;
     else try { granted = Boolean(await browserApi?.permissions?.contains?.({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
     if (granted) for (const origin of origins) entry.grantedOrigins.add(origin);
     await persistBindings();
@@ -430,10 +429,10 @@ export function createBackgroundCoordinator({ browserApi }: { browserApi?: Brows
       if (!requestId(message)) return;
       // Test-only toolbar equivalent: headless browsers cannot click browser
       // chrome, so the E2E driver asks for the same createJob path the
-      // toolbar uses. Inert in store packages: the flag is set only by the
-      // WXT's test-only build flag, and no webpage can execute here.
+      // toolbar uses. Inert in store packages: WXT's testing mode is injected
+      // into this coordinator only by the background entrypoint.
       if (message.type === "dezoomify-test-start-job") {
-        if (!testGlobals.__DEZOOMIFY_TEST__ || typeof message.tabId !== "number" || !isPublicHttpUrl(message.url)) return;
+        if (!testing || typeof message.tabId !== "number" || !isPublicHttpUrl(message.url)) return;
         void createJob({ id: message.tabId, url: message.url });
         try { sendResponse?.({ ok: true }); } catch {}
         return true;
