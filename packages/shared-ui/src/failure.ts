@@ -19,6 +19,9 @@ const JPEG_MAX_SIDE = 65535;
 export function categoryFor(code: unknown): string {
   if (typeof code !== "string") return "transport";
   if (code === "INVALID_URL" || code === "INVALID_SETTINGS") return "validation";
+  if (typeof code === "string" && code.toLowerCase() === "adapter.wrong-state") {
+    return "internal";
+  }
   if (code === "NO_IMAGE_FOUND") return "discovery";
   if (code.indexOf("OUTPUT_") === 0 || code === "OUTPUT_DENIED") return "output";
   if (code === "WORKER_FAILED" || code === "PLAN_INVALID") return "internal";
@@ -68,6 +71,9 @@ export function plainMessageFor(code: string, engineMessage: string, host: strin
   const lowerCode = String(code ?? "").toLowerCase();
   if (code === "INVALID_URL") {
     return t("desktop.url.notWebPage");
+  }
+  if (lowerCode === "adapter.wrong-state") {
+    return t("view.ext.desynced");
   }
   if (code === "INVALID_SETTINGS") {
     return t("desktop.settings.unusable");
@@ -122,6 +128,8 @@ export function plainMessageFor(code: string, engineMessage: string, host: strin
   }
   if (
     code === "NO_IMAGE_FOUND" ||
+    code === "DISCOVERY_FAILED" ||
+    lowerCode === "discovery.failed" ||
     lowerCode.indexOf("discovery.no-image") >= 0 ||
     lowerCode.indexOf("discovery.failed") >= 0 ||
     lowerCode.indexOf("discovery.") === 0 ||
@@ -131,7 +139,7 @@ export function plainMessageFor(code: string, engineMessage: string, host: strin
     lowerCode.indexOf("job.empty") >= 0 ||
     lowerCode.indexOf("unknown-dezoomer") >= 0
   ) {
-    return t("desktop.discovery.none", { host });
+    return t("view.discovery.none");
   }
   if (
     lowerCode.indexOf("plan") >= 0 ||

@@ -103,6 +103,9 @@ export interface SnapshotPresentation {
   /** i18n key for the headline step line. */
   headlineKey: I18nKey;
   headlineVars?: Record<string, string | number>;
+  /** i18n key for the detail line under the headline, when the state names one. */
+  detailKey?: I18nKey;
+  detailVars?: Record<string, string | number>;
   progress: { current: number; total: number | null } | null;
   paused: boolean;
   selection: SnapshotSelection | null;
@@ -144,11 +147,16 @@ function levelOptionsOf(catalog: CatalogDto | null, image: number | null): Snaps
   }));
 }
 
-function headlineForState(state: JobState): { key: I18nKey; vars?: Record<string, string | number> } {
+function headlineForState(state: JobState): {
+  key: I18nKey;
+  vars?: Record<string, string | number>;
+  detail?: I18nKey;
+  detailVars?: Record<string, string | number>;
+} {
   switch (state) {
     case "Created":
     case "Discovering":
-      return { key: "view.step.discovering" };
+      return { key: "view.step.discovering", detail: "view.step.contactingDetail" };
     case "AwaitingImageSelection":
       return { key: "view.step.choosingImage" };
     case "AwaitingLevelSelection":
@@ -158,11 +166,11 @@ function headlineForState(state: JobState): { key: I18nKey; vars?: Record<string
     case "AcquiringTiles":
       return { key: "view.step.downloading" };
     case "AwaitingPartialDecision":
-      return { key: "view.step.saving" };
+      return { key: "view.step.saving", detail: "view.step.recoveryDetail" };
     case "Finalizing":
-      return { key: "view.step.saving" };
+      return { key: "view.step.saving", detail: "view.step.encodingDetail" };
     case "Cancelling":
-      return { key: "view.step.working" };
+      return { key: "view.step.working", detail: "view.step.cleanupDetail" };
     case "Completed":
     case "PartiallyCompleted":
       return { key: "view.done.ready" };
@@ -278,6 +286,9 @@ export function presentSnapshot(
       ? { current: snapshot.acquired, total: snapshot.total }
       : null;
 
+  const detailKey = displayOnly ? undefined : headline.detail;
+  const detailVars =
+    displayOnly || !headline.detailVars ? undefined : headline.detailVars;
   return {
     ...basePresentation(),
     phase,
@@ -285,6 +296,8 @@ export function presentSnapshot(
     stateLabel: snapshot.state,
     headlineKey: displayOnly ? "view.display.title" : headline.key,
     ...(headline.vars ? { headlineVars: headline.vars } : {}),
+    ...(detailKey ? { detailKey } : {}),
+    ...(detailVars ? { detailVars } : {}),
     progress,
     paused: snapshot.paused,
     selection,
@@ -331,7 +344,8 @@ export function presentStatus(
     ...basePresentation(),
     phase: phaseForStatus(status),
     stateLabel: status,
-    headlineKey: headline,
+    headlineKey: headline.key,
+    ...(headline.detail ? { detailKey: headline.detail } : {}),
     transport,
     transportLabel: transport === null ? null : renderTransportLabel(transport),
   };
@@ -367,30 +381,30 @@ function phaseForStatus(status: PresentationStatus): SnapshotPhase {
   return "job";
 }
 
-function headlineForStatus(status: PresentationStatus): I18nKey {
+function headlineForStatus(status: PresentationStatus): { key: I18nKey; detail?: I18nKey } {
   switch (status) {
     case "idle":
-      return "view.idle.submit";
+      return { key: "view.idle.submit" };
     case "discovering":
-      return "view.step.discovering";
+      return { key: "view.step.discovering", detail: "view.step.contactingDetail" };
     case "choosing-image":
-      return "view.step.choosingImage";
+      return { key: "view.step.choosingImage" };
     case "choosing-level":
-      return "view.step.choosingLevel";
+      return { key: "view.step.choosingLevel" };
     case "preflighting":
-      return "view.step.preflighting";
+      return { key: "view.step.preflighting" };
     case "downloading":
-      return "view.step.downloading";
+      return { key: "view.step.downloading" };
     case "saving":
-      return "view.step.saving";
+      return { key: "view.step.saving" };
     case "display-only":
-      return "view.display.title";
+      return { key: "view.display.title" };
     case "completed":
-      return "view.done.ready";
+      return { key: "view.done.ready" };
     case "failed":
-      return "view.fail.title";
+      return { key: "view.fail.title" };
     case "cancelled":
-      return "view.cancel.title";
+      return { key: "view.cancel.title" };
   }
 }
 

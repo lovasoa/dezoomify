@@ -27,11 +27,12 @@ export function AccessRequestView({
   );
 }
 
-export function PartialOutputActions({ onChoose }: { onChoose(keep: boolean): void }): ReactElement {
+export function PartialOutputActions({ onChoose, onRetry }: { onChoose(keep: boolean): void; onRetry(): void }): ReactElement {
   return (
     <div className="dz-actions-row" data-dz-partial-decision="true">
       <button type="button" className="dz-btn-tactile" data-dz-partial-choice="keep" onClick={() => onChoose(true)}>Keep the partial image</button>
-      <button type="button" className="dz-btn-tactile" data-dz-partial-choice="discard" onClick={() => onChoose(false)}>Discard the partial image</button>
+      <button type="button" className="dz-btn-secondary" data-dz-partial-choice="discard" onClick={() => onChoose(false)}>Discard the partial image</button>
+      <button type="button" className="dz-btn-secondary" data-dz-partial-choice="retry" onClick={() => onRetry()}>Retry the missing tiles</button>
     </div>
   );
 }

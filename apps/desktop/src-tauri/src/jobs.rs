@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use dezoomify_native::output::{validate_destination, OutputFormat};
+use dezoomify_native::pipeline::PartialDecision;
 use dezoomify_native::runner::{
     JobOptions, JobSnapshot as RunnerSnapshot, Lifecycle, NativeRunner, OutputTarget, RunningJob,
     UserCommand,
@@ -226,14 +227,14 @@ pub fn payload_has_forbidden_keys(value: &serde_json::Value) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Choice {
-    /// Choose a catalog image by position.
+    /// Choose a catalog image by position (pre-start option only).
     Image { index: usize },
-    /// Choose a level of the chosen image by position.
+    /// Choose a level of the chosen image by position (pre-start option only).
     Level { index: usize },
-    /// Answer a pending partial decision: keep or discard the partial output.
-    Partial { keep: bool },
-    /// Retry the failed work of a pending partial decision.
-    Retry,
+    /// Answer a pending partial decision (keep, retry, or discard).
+    Partial {
+        decision: dezoomify_protocol::dto::RecoveryChoice,
+    },
 }
 
 /// One ordered transcript event for a job.
@@ -970,35 +971,25 @@ impl JobTable {
         self.require_live(job)?;
         let has_runner = self.jobs.get(job).is_some_and(|r| r.runner.is_some());
         let next_state = match *choice {
-            Choice::Partial { keep } => {
+            Choice::Partial { decision } => {
+                use dezoomify_native::runner::UserCommand as RunnerCommand;
+                use dezoomify_protocol::dto::RecoveryChoice as WireDecision;
                 if let Some(record) = self.jobs.get(job) {
                     if let Some(runner) = record.runner.as_ref() {
-                        let _ = runner.send(if keep {
-                            UserCommand::KeepPartial
-                        } else {
-                            UserCommand::DiscardPartial
-                        });
+                        let _ = runner.send(RunnerCommand::AnswerPartial(match decision {
+                            WireDecision::Keep => PartialDecision::Keep,
+                            WireDecision::Retry => PartialDecision::Retry,
+                            WireDecision::Discard => PartialDecision::Discard,
+                        }));
                     }
                 }
                 // Keep/discard update the fallback policy so a timeout
-                // stays honest to the last explicit choice.
+                // stays honest to the last explicit choice. Retry never
+                // changes the fallback policy.
                 if let Some(record) = self.jobs.get_mut(job) {
-                    record.options.keep_partial = keep;
-                    if record.state == JobState::AwaitingPartialDecision {
-                        record.pending_partial = None;
-                        record.state = JobState::AcquiringTiles;
+                    if decision != WireDecision::Retry {
+                        record.options.keep_partial = decision == WireDecision::Keep;
                     }
-                }
-                JobState::AcquiringTiles
-            }
-            Choice::Retry => {
-                if let Some(record) = self.jobs.get(job) {
-                    if let Some(runner) = record.runner.as_ref() {
-                        let _ = runner.send(UserCommand::RetryPartial);
-                    }
-                }
-                // Retry never changes the fallback policy.
-                if let Some(record) = self.jobs.get_mut(job) {
                     if record.state == JobState::AwaitingPartialDecision {
                         record.pending_partial = None;
                         record.state = JobState::AcquiringTiles;
@@ -2701,7 +2692,12 @@ mod tests {
         );
         // Keep leaves the awaiting state for the runner terminal.
         table
-            .answer_choice(&id, &Choice::Partial { keep: true })
+            .answer_choice(
+                &id,
+                &Choice::Partial {
+                    decision: dezoomify_protocol::dto::RecoveryChoice::Keep,
+                },
+            )
             .unwrap();
         assert_eq!(table.state_of(&id), Some(JobState::AcquiringTiles));
         assert!(table.pending_partial_for(&id).is_none());
@@ -2725,7 +2721,12 @@ mod tests {
             ),
         );
         table
-            .answer_choice(&id2, &Choice::Partial { keep: false })
+            .answer_choice(
+                &id2,
+                &Choice::Partial {
+                    decision: dezoomify_protocol::dto::RecoveryChoice::Discard,
+                },
+            )
             .unwrap();
         assert!(!table.options_for(&id2).unwrap().keep_partial);
         let id3 = table.start_job("https://example.com/third").unwrap();
@@ -2744,7 +2745,14 @@ mod tests {
             ),
         );
         let keep_before = table.options_for(&id3).unwrap().keep_partial;
-        table.answer_choice(&id3, &Choice::Retry).unwrap();
+        table
+            .answer_choice(
+                &id3,
+                &Choice::Partial {
+                    decision: dezoomify_protocol::dto::RecoveryChoice::Retry,
+                },
+            )
+            .unwrap();
         assert_eq!(
             table.options_for(&id3).unwrap().keep_partial,
             keep_before,
@@ -2802,7 +2810,12 @@ mod tests {
         // Post-terminal answers stay stale.
         assert_eq!(
             table
-                .answer_choice(&id, &Choice::Partial { keep: true })
+                .answer_choice(
+                    &id,
+                    &Choice::Partial {
+                        decision: dezoomify_protocol::dto::RecoveryChoice::Keep
+                    }
+                )
                 .unwrap_err(),
             "stale"
         );

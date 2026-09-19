@@ -40,7 +40,6 @@ import {
   RATE_LIMITED_BY_SITE_MESSAGE,
   SITE_BUSY_MESSAGE,
   classifyReadableBytes,
-  discoveryFailedError,
   noImageFoundError,
 } from "./discovery.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
@@ -291,7 +290,7 @@ const webFetcher: WebFetcher = createWebFetcher({
   messages: {
     rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
     siteBusy: SITE_BUSY_MESSAGE,
-    discoveryFailed: (via) => noImageFoundError(via).message,
+    discoveryFailed: (_via) => noImageFoundError().message ?? "No zoomable image was found at this address.",
   },
   throttle: (url) => tileThrottle.throttle(url),
 });
@@ -397,22 +396,12 @@ function presentEngineFailure(error: ErrorDto, url: string): void {
       viewCtx.desktopHandoffUrl = link;
     }
   }
-  const noImageFound =
-    code === "NO_IMAGE_FOUND" || lower.indexOf("no-images") >= 0 || lower.indexOf("catalog") >= 0 || lower.indexOf("empty-resource") >= 0;
-  const discoveryFailed = lower.indexOf("discovery") >= 0 || lower.indexOf("unknown-dezoomer") >= 0;
-  const discoveryCopy = noImageFound
-    ? noImageFoundError(via)
-    : discoveryFailed
-      ? discoveryFailedError(via)
-      : null;
+  const discovery = classifyDiscoveryCopy(code);
   webFailure = describeFailure({
     code,
     engineDetail: error.detail ?? error.message,
-    ...(discoveryCopy
-      ? { message: discoveryCopy.message, category: discoveryCopy.category }
-      : {}),
     phase: error.phase,
-    retryable: discoveryCopy ? discoveryCopy.retryable : error.retryable,
+    retryable: discovery ? discovery.retryable : error.retryable,
     transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
     host: hostOf(url),
     url: error.request,
@@ -420,6 +409,27 @@ function presentEngineFailure(error: ErrorDto, url: string): void {
     preview: error.preview,
   });
   update();
+}
+
+/**
+ * Website discovery facts for the shared failure table: the transport the
+ * metadata rode plus the retry policy. Headline copy stays in the table;
+ * only facts travel here.
+ */
+function classifyDiscoveryCopy(code: string): { retryable: boolean } | null {
+  const lower = code.toLowerCase();
+  if (
+    code === "NO_IMAGE_FOUND" ||
+    lower.indexOf("no-images") >= 0 ||
+    lower.indexOf("catalog") >= 0 ||
+    lower.indexOf("empty-resource") >= 0
+  ) {
+    return { retryable: false };
+  }
+  if (lower.indexOf("discovery") >= 0 || lower.indexOf("unknown-dezoomer") >= 0) {
+    return { retryable: true };
+  }
+  return null;
 }
 
 function reportProgress(current: number, total: number, message: string): void {
@@ -510,7 +520,6 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
   // user's original address; the resolved request never rewrites it.
   if (followDepth === 0) writeHash(origin);
   jobActivity.startHeartbeat();
-  jobActivity.setStep("Finding the zoomable image…", `Contacting ${hostOf(origin)}…`);
   update();
 
   let terminal: "done" | "failed" | "cancelled" | "display" | "deferred" = "done";
@@ -655,7 +664,6 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
       resultTitle = image?.title;
       const level = image?.levels?.[selection.level];
       if (level) viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
-      jobActivity.setStep("Choosing the highest resolution…");
       update();
       const handle = jobHandle;
       if (handle) {

@@ -409,8 +409,6 @@ function resetActivity(url: string): void {
     url,
     startedAt: now,
     now,
-    stepLabel: t("view.step.discovering"),
-    detail: t("desktop.step.contacting", { host: hostOf(url) }),
     pendingRequests: 0,
     completedRequests: 0,
     failedRequests: 0,
@@ -427,14 +425,6 @@ function touchProgress(): void {
   const now = Date.now();
   a.now = now;
   a.lastProgressAt = now;
-}
-
-function setStep(label: string, detail?: string): void {
-  const a = activity();
-  a.stepLabel = label;
-  if (detail !== undefined) a.detail = detail;
-  touchProgress();
-  update();
 }
 
 function pushLog(line: string): void {
@@ -999,7 +989,7 @@ function requestOutputAndResume(): void {
       if (result.outcome === "granted") {
         grantedFormat = format;
         pushLog("Save destination granted");
-        setStep(t("view.step.saving"), t("desktop.step.encodingNative"));
+        touchProgress();
         update();
       } else if (result.outcome === "denied") {
         // Stable backend code rides `code` when present (output.exists,
@@ -1053,7 +1043,7 @@ function handleRecoveryRetry(): void {
   pushLog(`Retry requested (${decision.reason})`);
   void handle.command({ type: "recovery-choice", generation: decision.generation, choice: "retry" }).then(
     () => {
-      setStep(t("view.step.downloading"), t("desktop.step.retrying"));
+      touchProgress();
       update();
     },
     (error: unknown) => {
@@ -1074,10 +1064,7 @@ function handlePartialChoice(keep: boolean): void {
   pushLog(keep ? "Keeping partial image…" : "Discarding partial image…");
   void handle.command({ type: "recovery-choice", generation: decision.generation, choice: keep ? "keep" : "discard" }).then(
     () => {
-      setStep(
-        keep ? t("view.step.saving") : t("view.step.working"),
-        keep ? t("desktop.step.encodingPartial") : t("desktop.step.discardingPartial"),
-      );
+      touchProgress();
       update();
     },
     (error: unknown) => {
@@ -1590,65 +1577,12 @@ function ensureDesktopFooter(): void {
   footer.setAttribute("data-dz-wired", "true");
 }
 
-// Step copy derives from the snapshot state: discovering, downloading,
-// saving, recovery, and cleanup each name their step with the same desktop
-// copy the event router used to set imperatively.
-function syncActivityStep(presentation: SnapshotPresentation): void {
-  if (presentation.phase !== "job") return;
-  const a = activity();
-  const snapshot = latestSnapshot;
-  const state = snapshot?.state;
-  const decision = pendingDecisionOf();
-  if (decision && state === "AwaitingPartialDecision") {
-    if (decision.kind === "partial-recovery") {
-      a.stepLabel = t("desktop.step.partialTitle");
-      a.detail = t("desktop.step.partialDetail");
-    } else {
-      a.stepLabel = t("desktop.step.chooseWhere");
-      a.detail = t("desktop.step.chooseWhereDetail");
-    }
-    return;
-  }
-  switch (state) {
-    case "Created":
-    case "Discovering":
-      a.stepLabel = t("view.step.discovering");
-      a.detail = t("desktop.step.contacting", { host: hostOf(lastInputUrl || a.url || "") });
-      break;
-    case "AwaitingImageSelection":
-      a.stepLabel = t("view.step.choosingImage");
-      break;
-    case "AwaitingLevelSelection":
-      a.stepLabel = t("view.step.choosingLevel");
-      break;
-    case "Planning":
-    case "Finalizing":
-      a.stepLabel = t("view.step.saving");
-      a.detail = t("desktop.step.encodingNative");
-      break;
-    case "AcquiringTiles":
-      a.stepLabel = t("view.step.downloading");
-      a.detail =
-        snapshot && snapshot.total !== null && snapshot.total > 0
-          ? t("desktop.step.tilesAtFull", { current: snapshot.acquired, total: snapshot.total })
-          : undefined;
-      break;
-    case "Cancelling":
-      a.stepLabel = t("view.step.working");
-      a.detail = t("desktop.step.cleanupDetail");
-      break;
-    default:
-      break;
-  }
-}
-
 function update() {
   if (!root) return;
   const presentation = currentPresentation();
   const caps = integration.getCapabilities();
   if (viewCtx.jobActivity && presentation.phase === "job") {
     refreshLongestPending();
-    syncActivityStep(presentation);
   }
   // Completion geometry rides the enriched snapshot output; the view context
   // only carries what the shared view renders.

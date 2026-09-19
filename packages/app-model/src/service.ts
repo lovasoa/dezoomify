@@ -108,6 +108,9 @@ export function createJobService(runner: HostRunner, opts?: ServiceOptions): Job
       async command(command: UserCommand): Promise<void> {
         await handle.command(command);
       },
+      ...(typeof handle.resolvePermission === "function"
+        ? { resolvePermission: handle.resolvePermission.bind(handle) }
+        : {}),
       async dispose(): Promise<void> {
         settled = true;
         store.remove(id);

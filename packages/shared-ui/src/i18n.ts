@@ -200,6 +200,10 @@ const en = {
   "view.step.downloading": "Saving image tiles…",
   "view.step.saving": "Assembling the final picture…",
   "view.step.working": "Working…",
+  "view.step.contactingDetail": "Contacting the image host…",
+  "view.step.recoveryDetail": "A recovery decision needs attention before the job can continue.",
+  "view.step.encodingDetail": "Encoding in the app.",
+  "view.step.cleanupDetail": "Cleaning up unfinished files…",
   // Live job section.
   "view.job.workingOn": "Working on",
   "view.job.cancel": "Cancel",
@@ -361,6 +365,8 @@ const en = {
     "Some pieces of this picture from {host} could not be saved. Retry the failed pieces, or keep the partial picture with blank areas.",
   "desktop.discovery.none":
     "Could not find a zoomable image at this address from {host}. Try a different page or check the address.",
+  "view.discovery.none":
+    "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
   "desktop.plan.none":
     "This picture has no usable size to save from {host}. Try a different picture or a smaller Max width.",
   "desktop.transport.stalled": "Saving stalled while contacting {host}. Check your connection and try again.",
@@ -369,6 +375,7 @@ const en = {
   "desktop.job.cancelledMsg": "The image save was stopped. Any unfinished file was removed.",
   "desktop.start.failed": "Could not start saving this picture from {host}. Try again.",
   "desktop.choice.failed": "That choice was not accepted. Try again.",
+  "view.ext.desynced": "The extension lost sync while reading this image. Start the scan again.",
   "desktop.save.generic": "Could not save this picture from {host}. Try again with a different address.",
   "desktop.internal.error":
     "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
