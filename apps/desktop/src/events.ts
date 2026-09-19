@@ -7,6 +7,7 @@
 // Keep erasable syntax only so node type-stripping can read this file.
 
 export const DESKTOP_EVENT_CHANNELS = [
+  "dezoomify://job-snapshot",
   "dezoomify://job-state",
   "dezoomify://job-progress",
   "dezoomify://job-output",
@@ -21,6 +22,36 @@ export interface DesktopEventEnvelope {
   jobId: string;
   seq: number;
   payload: Record<string, unknown>;
+}
+
+/// Self-describing runner snapshot, emitted on `dezoomify://job-snapshot`
+/// for every runner snapshot the shell folds. Carries the shell state plus
+/// the authoritative lifecycle, counts, recovery ledger, and terminal. The
+/// four legacy channels stay subscribed for N-1 shells.
+export interface JobSnapshotPayload {
+  job: string;
+  jobId: string;
+  seq: number;
+  kind: "snapshot";
+  state: string;
+  lifecycle: string;
+  acquired: number;
+  total: number;
+  origin: string;
+  recovery?: { missing: Array<string>; failed: number; total: number };
+  terminal?: string;
+  format?: string;
+  width?: number;
+  height?: number;
+  tileCount?: number;
+  missingTiles?: Array<string>;
+  sibling?: string;
+  code?: string;
+  phase?: string;
+  retryable?: boolean;
+  recoveryHint?: string;
+  message?: string;
+  transport?: string;
 }
 
 // Typed payload shapes emitted by the Rust shell (`jobs.rs` projection).

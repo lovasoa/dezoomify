@@ -51,6 +51,7 @@ function assertNoTrailingSpaces(content, label) {
 
 const EXPECTED_COMMANDS = ["answer_choice", "cancel_job", "open_saved_output", "query_capabilities", "request_destination", "start_job"];
 const EXPECTED_CHANNELS = [
+  "dezoomify://job-snapshot",
   "dezoomify://job-state",
   "dezoomify://job-progress",
   "dezoomify://job-output",

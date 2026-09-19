@@ -24,7 +24,8 @@
     "dezoomify://job-progress",
     "dezoomify://job-output",
     "dezoomify://job-error",
-    "dezoomify://deep-link-pending"
+    "dezoomify://deep-link-pending",
+    "dezoomify://job-snapshot"
   ],
   "nativeHost": {
     "name": "dev.ophir.dezoomify.native_host"

@@ -201,6 +201,63 @@ const SHELL_STATE_TABLE: Record<string, JobEvent> = {
 };
 
 /**
+ * Fold one self-describing `job-snapshot` payload into generated events.
+ * The shell already folded the runner snapshot into the record; the emit
+ * carries lifecycle, counts, the recovery ledger, and the terminal, so no
+ * payload parsing beyond typed fields is involved.
+ */
+export function foldSnapshotPayload(
+  payload: Record<string, unknown>,
+): JobEvent[] {
+  const out: JobEvent[] = [];
+  const lifecycle = stateOf(payload);
+  const stateEvent = SHELL_STATE_TABLE[lifecycle];
+  if (stateEvent) out.push(stateEvent);
+  const acquired = numField(payload, ["acquired"]);
+  const total = numField(payload, ["total"]);
+  if (typeof acquired === "number" && typeof total === "number") {
+    out.push({ type: "progress", acquired, total });
+  }
+  const recovery = payload["recovery"];
+  if (recovery && typeof recovery === "object") {
+    const table = recovery as Record<string, unknown>;
+    const generation = eventSeq(payload) ?? 0;
+    const reason = strField(payload, ["reason"]);
+    const actions = reason === "destination" ? DESTINATION_ACTIONS : PARTIAL_ACTIONS;
+    out.push({
+      type: "recovery-request",
+      generation,
+      actions: actions.map((action) => ({ ...action })),
+    });
+  }
+  const terminal = strField(payload, ["terminal"]);
+  const terminalKind = terminal ? terminal.toLowerCase().replace(/[-_]/g, "") : "";
+  if (terminalKind === "completed") {
+    out.push({ type: "completed" });
+  } else if (terminalKind === "partialcompleted") {
+    out.push({ type: "partial-completed" });
+  } else if (terminalKind === "cancelled") {
+    out.push({ type: "cancelled" });
+  } else if (terminalKind === "failed") {
+    const code = strField(payload, ["code"]) ?? "desktop.job-failed";
+    const message = strField(payload, ["message"]) ?? "The desktop job failed.";
+    const retryable = payload["retryable"] === true;
+    out.push({
+      type: "failed",
+      error: {
+        code,
+        phase: phaseOf(payload),
+        retryable,
+        message,
+        recovery: [],
+        transport: "native",
+      },
+    });
+  }
+  return out;
+}
+
+/**
  * Project one shell payload to one generated JobEvent. Returns null for
  * payloads that carry no engine event (grants, heartbeats, unknown kinds):
  * the snapshot stays put instead of moving on display text.
@@ -433,22 +490,30 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
       if (remoteSeq <= tracked.seenSeq) return;
       tracked.seenSeq = remoteSeq;
     }
-    const event = projectDesktopEvent(channel, payload);
-    if (!event) return;
+    const events =
+      channel === "dezoomify://job-snapshot"
+        ? foldSnapshotPayload(payload)
+        : (() => {
+            const event = projectDesktopEvent(channel, payload);
+            return event ? [event] : [];
+          })();
+    if (events.length === 0) return;
     let folded = tracked.current;
-    // Progress payloads carry the live shell state alongside the counts;
-    // fold it first so the snapshot state tracks the download.
-    if (event.type === "progress") {
-      const stateEvent = progressStateEvent(payload);
-      if (stateEvent && stateEvent.type === "job-state" && stateEvent.state !== folded.state) {
-        folded = applyJobEvent(folded, stateEvent, now());
+    for (const event of events) {
+      // Progress payloads carry the live shell state alongside the counts;
+      // fold it first so the snapshot state tracks the download.
+      if (event.type === "progress") {
+        const stateEvent = progressStateEvent(payload);
+        if (stateEvent && stateEvent.type === "job-state" && stateEvent.state !== folded.state) {
+          folded = applyJobEvent(folded, stateEvent, now());
+        }
       }
-    }
-    folded = applyJobEvent(folded, event, now());
-    if (event.type === "completed" || event.type === "partial-completed") {
-      folded = enrichOutput(folded, payload);
-    } else if (event.type === "recovery-request") {
-      folded = enrichRecovery(folded, payload);
+      folded = applyJobEvent(folded, event, now());
+      if (event.type === "completed" || event.type === "partial-completed") {
+        folded = enrichOutput(folded, payload);
+      } else if (event.type === "recovery-request") {
+        folded = enrichRecovery(folded, payload);
+      }
     }
     if (folded === tracked.current) return;
     tracked.current = folded;

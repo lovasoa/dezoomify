@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 
 use dezoomify_native::output::{validate_destination, OutputFormat};
 use dezoomify_native::runner::{
-    JobOptions, JobSnapshot as RunnerSnapshot, Lifecycle, NativeRunner, OutputSummary,
-    OutputTarget, RunningJob, Terminal, UserCommand,
+    JobOptions, JobSnapshot as RunnerSnapshot, Lifecycle, NativeRunner, OutputTarget, RunningJob,
+    UserCommand,
 };
 
 use crate::settings::{job_options_for, DesktopSettings};
@@ -33,6 +33,7 @@ use crate::settings::{job_options_for, DesktopSettings};
 /// Desktop event channels. Must stay identical to
 /// `apps/desktop/src/events.ts` `DESKTOP_EVENT_CHANNELS` and the generated
 /// capability documents.
+pub const CHANNEL_JOB_SNAPSHOT: &str = "dezoomify://job-snapshot";
 pub const CHANNEL_JOB_STATE: &str = "dezoomify://job-state";
 pub const CHANNEL_JOB_PROGRESS: &str = "dezoomify://job-progress";
 pub const CHANNEL_JOB_OUTPUT: &str = "dezoomify://job-output";
@@ -297,10 +298,8 @@ pub struct JobRecord {
     pub output_tile_count: Option<usize>,
     /// Detected source format id from the runner (e.g. `zoomify`, `iiif`).
     pub output_source_format: Option<String>,
-    /// Last typed runner failure (`None` unless the job failed).
-    pub last_error_code: Option<String>,
-    /// Last typed runner failure message, redacted (`None` unless failed).
-    pub last_error_message: Option<String>,
+    /// Last runner terminal (`None` until the runner reports one).
+    pub terminal: Option<dezoomify_native::runner::Terminal>,
     /// Pending interactive partial request (missing ledger while the host
     /// dialog waits). `None` unless `AwaitingPartialDecision`.
     pub pending_partial: Option<PartialPending>,
@@ -320,6 +319,18 @@ pub struct PartialPending {
     pub failed: u64,
     pub total: u64,
     pub recovery: Option<String>,
+}
+
+impl JobRecord {
+    /// Stable (code, redacted message) behind a failed runner terminal.
+    fn terminal_code(&self) -> Option<(String, String)> {
+        match &self.terminal {
+            Some(dezoomify_native::runner::Terminal::Failed(error)) => {
+                Some((error.code.clone(), redact_message(&error.message)))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Debug for JobRecord {
@@ -370,13 +381,26 @@ pub struct JobErrorSnapshot {
 /// One projected IPC emit: the Tauri channel plus the redacted payload.
 /// Payloads always carry both `job` and `jobId` aliases plus `seq` so the
 /// frontend stale-job and stale-seq guards keep working, alongside the
-/// typed fields each channel documents.
+/// typed fields each channel documents. Snapshot emits share the
+/// transcript seq of the fold they project; `order_rank` keeps the shared
+/// timeline total when seqs tie.
 #[derive(Debug, Clone)]
 pub struct ProjectedEmit {
     pub channel: &'static str,
     pub job: String,
     pub seq: u64,
+    pub order_rank: u64,
     pub payload: serde_json::Value,
+}
+
+/// Channel rank for shared-timeline ordering: legacy channel lines first,
+/// the snapshot projection last, per transcript seq.
+fn channel_rank(channel: &str) -> u64 {
+    if channel == CHANNEL_JOB_SNAPSHOT {
+        1
+    } else {
+        0
+    }
 }
 
 /// In-memory table keyed by job id: the id registry, per-job transcript,
@@ -449,6 +473,11 @@ impl JobTable {
         self.jobs.get(job).and_then(|r| r.destination.clone())
     }
 
+    /// Stable (code, redacted message) behind a failed terminal, if any.
+    pub fn terminal_code(&self, job: &str) -> Option<(String, String)> {
+        self.jobs.get(job)?.terminal_code()
+    }
+
     pub fn saved_output_for(&self, job: &str) -> Option<PathBuf> {
         let record = self.jobs.get(job)?;
         if !matches!(
@@ -489,8 +518,7 @@ impl JobTable {
     /// Structured error snapshot for a failed job.
     pub fn error_snapshot_for(&self, job: &str) -> Option<JobErrorSnapshot> {
         let record = self.jobs.get(job)?;
-        let code = record.last_error_code.clone()?;
-        let message = record.last_error_message.clone().unwrap_or_default();
+        let (code, message) = record.terminal_code()?;
         Some(JobErrorSnapshot {
             phase: error_phase(&code).to_string(),
             retryable: error_retryable(&code),
@@ -503,10 +531,14 @@ impl JobTable {
         })
     }
 
-    /// Drain projected IPC emits in seq order. Each emit leaves the queue
-    /// exactly once; callers emit each on its `channel` with `payload`.
+    /// Drain projected IPC emits in shared-timeline order: transcript seq
+    /// first, legacy lines before snapshot projections on ties. Each emit
+    /// leaves the queue exactly once; callers emit each on its `channel`
+    /// with `payload`.
     pub fn drain_pending(&mut self) -> Vec<ProjectedEmit> {
-        std::mem::take(&mut self.pending)
+        let mut pending = std::mem::take(&mut self.pending);
+        pending.sort_by_key(|emit| (emit.seq, emit.order_rank));
+        pending
     }
 
     /// Project one transcript event to its channel payload. The payload
@@ -590,20 +622,14 @@ impl JobTable {
             return (channel, payload);
         }
         if channel == CHANNEL_JOB_ERROR {
-            // The typed failure lives in the record; the transcript detail
-            // carries no `code: message` string to split back apart.
-            let (code, message) = record
-                .and_then(|r| {
-                    r.last_error_code
-                        .clone()
-                        .map(|code| (code, r.last_error_message.clone().unwrap_or_default()))
-                })
-                .unwrap_or_else(|| {
-                    (
-                        "native.internal".to_string(),
-                        "job failed without diagnostics".to_string(),
-                    )
-                });
+            // The typed failure lives in the runner terminal; the transcript
+            // detail carries no `code: message` string to split back apart.
+            let (code, message) = record.and_then(|r| r.terminal_code()).unwrap_or_else(|| {
+                (
+                    "native.internal".to_string(),
+                    "job failed without diagnostics".to_string(),
+                )
+            });
             let resource_kind = error_resource_kind(&code);
             let mut payload = serde_json::json!({
                 "job": base_job,
@@ -614,7 +640,7 @@ impl JobTable {
                 "code": code,
                 "phase": error_phase(&code),
                 "retryable": error_retryable(&code),
-                "recovery": error_recovery(&code),
+                "recoveryHint": error_recovery(&code),
                 "message": redact_message(&message),
                 "detail": redact_message(&event.detail),
                 "origin": origin,
@@ -654,18 +680,18 @@ impl JobTable {
             payload["failed"] = serde_json::json!(failed);
             payload["total"] = serde_json::json!(total);
             if let Some(id) = recovery {
-                payload["recovery"] = serde_json::json!(id);
+                payload["recoveryId"] = serde_json::json!(id);
             }
         }
         debug_assert!(!payload_has_forbidden_keys(&payload));
         (channel, payload)
     }
 
-    /// Append one ordered transcript event and enqueue its projected IPC
-    /// emit. Seq is per-job monotonic via `saturating_add`; post-terminal
-    /// pushes are refused by the callers (see `require_live` and the
-    /// terminal-once guard in `apply_runner_snapshot`), so terminals appear
-    /// exactly once.
+    /// Append one ordered transcript line for the debug log and enqueue its
+    /// projected IPC emit. Seq is per-job monotonic via `saturating_add`;
+    /// post-terminal pushes are refused by the callers (see `require_live`
+    /// and the terminal-once guard in `apply_runner_snapshot`), so terminals
+    /// appear exactly once.
     fn push_event(&mut self, job: &str, kind: &str, detail: &str) -> u64 {
         let redacted_detail = redact_message(detail);
         // Never let paths, full URLs, or secrets into the transcript: only
@@ -695,12 +721,14 @@ impl JobTable {
             kind: kind.to_string(),
             detail: redacted_detail,
         };
-        let (channel, payload) = self.project_event(job, &event);
+        let (_, payload) = self.project_event(job, &event);
         debug_assert!(!payload_has_forbidden_keys(&payload));
+        let channel = channel_for_kind(&event.kind);
         self.pending.push(ProjectedEmit {
-            channel: channel_for_kind(&event.kind),
+            channel,
             job: job.to_string(),
             seq,
+            order_rank: channel_rank(channel),
             payload,
         });
         let _ = channel;
@@ -775,8 +803,7 @@ impl JobTable {
                 output_height: None,
                 output_tile_count: None,
                 output_source_format: None,
-                last_error_code: None,
-                last_error_message: None,
+                terminal: None,
                 pending_partial: None,
                 output_missing: Vec::new(),
                 output_sibling: None,
@@ -887,8 +914,7 @@ impl JobTable {
             Err(error) => {
                 // Typed failure before any effect: the job fails closed.
                 if let Some(record) = self.jobs.get_mut(job) {
-                    record.last_error_code = Some(error.code.clone());
-                    record.last_error_message = Some(redact_message(&error.message));
+                    record.terminal = Some(dezoomify_native::runner::Terminal::Failed(error));
                     record.state = JobState::Failed;
                 }
                 self.push_event(job, "failed", "");
@@ -1060,9 +1086,10 @@ impl JobTable {
         Ok(seq)
     }
 
-    /// Drain live runner snapshots into the transcript. Non-blocking;
-    /// terminal-once is enforced (snapshots after a terminal are ignored)
-    /// and the runner handle is dropped once its terminal is folded.
+    /// Drain live runner snapshots: fold each into the transcript and
+    /// project it as one `job-snapshot` emit. Non-blocking; terminal-once
+    /// is enforced (snapshots after a terminal are ignored) and the runner
+    /// handle is dropped once its terminal is folded.
     pub fn poll_drivers(&mut self) {
         let live: Vec<String> = self
             .jobs
@@ -1079,6 +1106,7 @@ impl JobTable {
             while let Ok(snapshot) = runner.snapshots().try_recv() {
                 let is_terminal = snapshot.terminal.is_some();
                 self.apply_runner_snapshot(&id, &snapshot);
+                self.emit_snapshot(&id, &snapshot);
                 if is_terminal {
                     terminal_seen = true;
                     break;
@@ -1094,6 +1122,107 @@ impl JobTable {
         }
     }
 
+    /// Project one runner snapshot as a self-describing `job-snapshot`
+    /// emit. Counts, ledgers, and error codes travel as typed fields;
+    /// secrets, paths, and full URLs never cross (only the redacted
+    /// origin). The transcript keeps one legacy line per snapshot for the
+    /// debug log only.
+    fn emit_snapshot(&mut self, job: &str, snapshot: &RunnerSnapshot) {
+        let origin = self
+            .jobs
+            .get(job)
+            .map(|r| r.origin.clone())
+            .unwrap_or_default();
+        let record = match self.jobs.get(job) {
+            Some(record) => record,
+            None => return,
+        };
+        let state_name = record.state.name();
+        let (acquired, total) = (record.progress_acquired, record.progress_total);
+        let mut payload = serde_json::json!({
+            "job": job,
+            "jobId": job,
+            "seq": record.seq,
+            "kind": "snapshot",
+            "state": state_name,
+            "lifecycle": format!("{:?}", snapshot.lifecycle),
+            "acquired": acquired,
+            "total": total,
+            "origin": origin,
+        });
+        if let Some(ledger) = &snapshot.recovery {
+            payload["recovery"] = serde_json::json!({
+                "missing": redact_ledger(&ledger.missing),
+                "failed": ledger.failed,
+                "total": ledger.total,
+            });
+        }
+        if let Some(terminal) = &snapshot.terminal {
+            let (kind, extra) = Self::terminal_payload(terminal);
+            payload["terminal"] = serde_json::json!(kind);
+            for (key, value) in extra {
+                payload[key] = value;
+            }
+        }
+        debug_assert!(!payload_has_forbidden_keys(&payload));
+        self.pending.push(ProjectedEmit {
+            channel: CHANNEL_JOB_SNAPSHOT,
+            job: job.to_string(),
+            seq: record.seq,
+            order_rank: channel_rank(CHANNEL_JOB_SNAPSHOT),
+            payload,
+        });
+    }
+
+    /// Terminal kind plus the typed output/error fields for a snapshot emit.
+    fn terminal_payload(
+        terminal: &dezoomify_native::runner::Terminal,
+    ) -> (&'static str, Vec<(&'static str, serde_json::Value)>) {
+        use dezoomify_native::runner::Terminal as RunnerTerminal;
+        match terminal {
+            RunnerTerminal::Completed(summary) => {
+                let kind = if summary.partial {
+                    "partial-completed"
+                } else {
+                    "completed"
+                };
+                let sibling = std::path::Path::new(&summary.path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("");
+                let mut extra = vec![
+                    ("format", serde_json::json!(summary.format)),
+                    ("width", serde_json::json!(summary.width)),
+                    ("height", serde_json::json!(summary.height)),
+                    ("tileCount", serde_json::json!(summary.tile_count)),
+                    (
+                        "missingTiles",
+                        serde_json::json!(redact_ledger(&summary.missing)),
+                    ),
+                ];
+                if summary.partial && !sibling.is_empty() {
+                    extra.push(("sibling", serde_json::json!(sibling)));
+                }
+                (kind, extra)
+            }
+            RunnerTerminal::Cancelled => ("cancelled", Vec::new()),
+            RunnerTerminal::Failed(error) => (
+                "failed",
+                vec![
+                    ("code", serde_json::json!(error.code)),
+                    ("phase", serde_json::json!(error_phase(&error.code))),
+                    ("retryable", serde_json::json!(error_retryable(&error.code))),
+                    (
+                        "recoveryHint",
+                        serde_json::json!(error_recovery(&error.code)),
+                    ),
+                    ("message", serde_json::json!(redact_message(&error.message))),
+                    ("transport", serde_json::json!(error_transport(&error.code))),
+                ],
+            ),
+        }
+    }
+
     /// Fold one runner snapshot into the transcript. Terminal-once: a
     /// snapshot after a terminal is ignored. Lifecycle changes project one
     /// `job-state` event; progress advances project one `downloading`
@@ -1106,6 +1235,21 @@ impl JobTable {
         };
         if record.state.is_terminal() {
             return;
+        }
+        if self.fold_runner_snapshot(job, snapshot) {
+            self.emit_snapshot(job, snapshot);
+        }
+    }
+
+    /// Fold one runner snapshot into the record and the legacy transcript
+    /// line. Returns true when the fold moved the record.
+    fn fold_runner_snapshot(&mut self, job: &str, snapshot: &RunnerSnapshot) -> bool {
+        use dezoomify_native::runner::Terminal as RunnerTerminal;
+        let Some(record) = self.jobs.get(job) else {
+            return false;
+        };
+        if record.state.is_terminal() {
+            return false;
         }
         // Recovery ledger: the dialog cue with the redacted ledger.
         if let Some(ledger) = &snapshot.recovery {
@@ -1131,7 +1275,7 @@ impl JobTable {
             if !already {
                 self.push_event(job, "recovery-requested", "");
             }
-            return;
+            return true;
         }
         if snapshot.terminal.is_none() {
             // Live progression: fold the lifecycle and the monotonic counts.
@@ -1156,17 +1300,17 @@ impl JobTable {
                 };
                 self.push_event(job, kind, next.name());
             }
-            return;
+            return acquired_advanced || total_advanced || lifecycle_changed;
         }
         // Terminal: exactly once, from the runner's honest outcome.
         let Some(terminal) = snapshot.terminal.clone() else {
-            return;
+            return false;
         };
         match terminal {
-            Terminal::Completed(summary) => {
+            RunnerTerminal::Completed(summary) => {
                 self.fold_published(job, &summary);
             }
-            Terminal::Cancelled => {
+            RunnerTerminal::Cancelled => {
                 if let Some(record) = self.jobs.get_mut(job) {
                     record.state = JobState::Cancelled;
                     record.cancel_requested = false;
@@ -1174,10 +1318,9 @@ impl JobTable {
                 }
                 self.push_event(job, "cancelled", "Cancelled");
             }
-            Terminal::Failed(error) => {
+            terminal @ RunnerTerminal::Failed(_) => {
                 if let Some(record) = self.jobs.get_mut(job) {
-                    record.last_error_code = Some(error.code.clone());
-                    record.last_error_message = Some(redact_message(&error.message));
+                    record.terminal = Some(terminal);
                     record.state = JobState::Failed;
                     record.cancel_requested = false;
                     record.pending_partial = None;
@@ -1185,13 +1328,14 @@ impl JobTable {
                 self.push_event(job, "failed", "");
             }
         }
+        true
     }
 
     /// Fold one published output summary into the record and the honest
     /// terminal event (`partial-completed` for kept partials, `completed`
     /// otherwise). The sibling basename is the only path fragment that
     /// ever reaches IPC.
-    fn fold_published(&mut self, job: &str, summary: &OutputSummary) {
+    fn fold_published(&mut self, job: &str, summary: &dezoomify_native::runner::OutputSummary) {
         let partial = summary.partial;
         // Sibling basename only: the granted path never crosses IPC or the
         // transcript.
@@ -1298,7 +1442,7 @@ fn output_format_for_id(format: &str) -> Option<OutputFormat> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dezoomify_native::runner::RecoveryLedger;
+    use dezoomify_native::runner::{OutputSummary, RecoveryLedger, Terminal};
 
     /// A fresh manual job cues `AwaitingDestination` synchronously with one
     /// `job-state` event: the frontend's cue to offer the save destination.
@@ -1613,10 +1757,10 @@ mod tests {
         // Drained emits are ordered and never replay.
         let pending = table.drain_pending();
         assert!(!pending.is_empty(), "projection must enqueue emits");
-        let mut last = 0u64;
+        let mut last = (0u64, 0u64);
         for emit in &pending {
-            assert!(emit.seq > last, "pending emits ordered");
-            last = emit.seq;
+            assert!((emit.seq, emit.order_rank) > last, "pending emits ordered");
+            last = (emit.seq, emit.order_rank);
         }
         assert!(table.drain_pending().is_empty(), "drain never replays");
     }
@@ -1732,7 +1876,7 @@ mod tests {
         assert_eq!(payload["code"], serde_json::json!("tile.download-failed"));
         assert_eq!(payload["phase"], serde_json::json!("acquisition"));
         assert_eq!(payload["retryable"], serde_json::json!(true));
-        assert_eq!(payload["recovery"], serde_json::json!("retry"));
+        assert_eq!(payload["recoveryHint"], serde_json::json!("retry"));
         assert_eq!(payload["transport"], serde_json::json!("native"));
         assert!(!payload.to_string().contains("CANARY-secret"));
         assert!(payload["message"]
@@ -1925,6 +2069,48 @@ mod tests {
             assert_eq!(emit.payload["job"], serde_json::json!(id));
             assert_eq!(emit.payload["seq"], serde_json::json!(emit.seq));
         }
+    }
+
+    #[test]
+    fn snapshot_emit_is_self_describing_and_typed() {
+        let mut table = JobTable::new();
+        let id = table.start_job("https://example.com/item").unwrap();
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(Lifecycle::AcquiringTiles, 3, 10, None, None),
+        );
+        table.apply_runner_snapshot(
+            &id,
+            &runner_snapshot(
+                Lifecycle::AwaitingPartialDecision,
+                9,
+                12,
+                Some(RecoveryLedger {
+                    missing: vec!["t-1".to_string()],
+                    failed: 3,
+                    total: 12,
+                }),
+                None,
+            ),
+        );
+        let snapshot_emits: Vec<_> = table
+            .drain_pending()
+            .into_iter()
+            .filter(|emit| emit.channel == CHANNEL_JOB_SNAPSHOT)
+            .collect();
+        assert_eq!(snapshot_emits.len(), 2, "one emit per runner snapshot");
+        let progress = &snapshot_emits[0].payload;
+        assert_eq!(progress["kind"], serde_json::json!("snapshot"));
+        assert_eq!(progress["lifecycle"], serde_json::json!("AcquiringTiles"));
+        assert_eq!(progress["acquired"], serde_json::json!(3u64));
+        assert_eq!(progress["total"], serde_json::json!(10u64));
+        assert!(progress.get("terminal").is_none());
+        let recovery = &snapshot_emits[1].payload;
+        assert_eq!(recovery["recovery"]["missing"], serde_json::json!(["t-1"]));
+        assert_eq!(recovery["recovery"]["failed"], serde_json::json!(3u64));
+        assert_eq!(recovery["recovery"]["total"], serde_json::json!(12u64));
+        assert!(!payload_has_forbidden_keys(&snapshot_emits[0].payload));
+        assert!(!payload_has_forbidden_keys(&snapshot_emits[1].payload));
     }
 
     #[test]
@@ -2195,12 +2381,15 @@ mod tests {
             assert!(window[1] > window[0], "transcript seq strictly monotonic");
         }
         let pending = table.drain_pending();
-        let mut emit_last = 0u64;
+        let mut emit_last = (0u64, 0u64);
         for emit in &pending {
-            assert!(emit.seq > emit_last, "pending emits ordered");
-            emit_last = emit.seq;
+            assert!(
+                (emit.seq, emit.order_rank) > emit_last,
+                "pending emits ordered"
+            );
+            emit_last = (emit.seq, emit.order_rank);
         }
-        assert_eq!(emit_last, terminal_seq);
+        assert_eq!(emit_last.0, terminal_seq);
     }
 
     /// Task 6.1: each terminal appears exactly once; later terminals are stale.
