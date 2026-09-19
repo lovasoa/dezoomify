@@ -437,40 +437,6 @@ pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compressio
     }
 }
 
-/// Typed progress event emitted by the pipeline. Counts, byte sizes, and
-/// redacted ledgers travel as typed fields: nothing is string-encoded into a
-/// `k=v` map and nothing is parsed back. Hosts match variants directly.
-#[derive(Clone, Debug)]
-pub enum PipelineEvent {
-    /// Discovery issued another metadata fetch (`resources` total attempts).
-    Discovery { resources: u64 },
-    /// Tile acquisition progress (monotonic per job).
-    Downloading { acquired: u64, total: u64 },
-    /// Output encode finished (`bytes` encoded, `files` only for `iiif-dir`).
-    Encoding { bytes: u64, files: Option<u64> },
-    /// One tile attempt failed (redacted tile id plus diagnostics, never a
-    /// URL). Informational: the engine owns the retry budget.
-    TileFailed { tile: String, error: String },
-    /// The driver waits for an interactive partial decision on this
-    /// generation. Tile ids and counts only, never URLs or paths.
-    RecoveryRequested {
-        missing: Vec<String>,
-        failed: u64,
-        total: u64,
-        generation: u32,
-    },
-    /// Missing-work ledger accompanying a partial decision (same redaction).
-    MissingWork {
-        missing: Vec<String>,
-        failed: u64,
-        total: u64,
-    },
-    /// Engine paused after `acquired` tiles (pause demonstration overlay).
-    Paused { acquired: u64 },
-    /// Engine resumed after `acquired` tiles.
-    Resumed { acquired: u64 },
-}
-
 /// Successful pipeline result for the bytes actually written.
 #[derive(Clone, Debug)]
 pub struct PipelineOutcome {
@@ -502,7 +468,7 @@ pub fn run(
     output_path: &str,
     overwrite: bool,
     config: &PipelineConfig,
-    on_event: &mut dyn FnMut(PipelineEvent),
+    on_snapshot: &mut dyn FnMut(&dezoomify_engine::JobSnapshot),
 ) -> Result<PipelineOutcome, NativeError> {
     let format = OutputFormat::infer_from_path(std::path::Path::new(output_path))?;
     validate_destination(std::path::Path::new(output_path), &format, overwrite)?;
@@ -518,7 +484,7 @@ pub fn run(
         },
         config,
         &user,
-        on_event,
+        on_snapshot,
     )?;
     Ok(PipelineOutcome {
         output_path: result.output_path,
@@ -539,7 +505,7 @@ pub fn run_auto_named(
     output_dir: &Path,
     format: OutputFormat,
     config: &PipelineConfig,
-    on_event: &mut dyn FnMut(PipelineEvent),
+    on_snapshot: &mut dyn FnMut(&dezoomify_engine::JobSnapshot),
 ) -> Result<PipelineOutcome, NativeError> {
     let user = user_headers_for(input_url, config);
     let result = crate::exec::execute(
@@ -552,7 +518,7 @@ pub fn run_auto_named(
         },
         config,
         &user,
-        on_event,
+        on_snapshot,
     )?;
     Ok(PipelineOutcome {
         output_path: result.output_path,

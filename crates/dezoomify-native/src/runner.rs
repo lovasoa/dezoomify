@@ -31,9 +31,7 @@ use std::time::Duration;
 use crate::error::NativeError;
 use crate::http::{FetchLimits, TlsPolicy};
 use crate::output::OutputFormat;
-use crate::pipeline::{
-    self, PartialDecision, PartialGate, PartialPolicy, PipelineConfig, PipelineEvent,
-};
+use crate::pipeline::{self, PartialDecision, PartialGate, PartialPolicy, PipelineConfig};
 
 /// Where the finished output goes.
 #[derive(Clone, Debug)]
@@ -403,28 +401,29 @@ fn run_job(
     let mut lifecycle = Lifecycle::Discovering;
     let mut acquired: u64 = 0;
     let mut total: u64 = 0;
-    let mut recovery: Option<RecoveryLedger> = None;
-    let mut emit = |lifecycle_next: Lifecycle,
-                    acquired_next: u64,
-                    total_next: u64,
-                    recovery_next: Option<RecoveryLedger>,
-                    terminal: Option<Terminal>| {
+    let mut emit = |snapshot: &dezoomify_engine::JobSnapshot, terminal: Option<Terminal>| {
         seq = seq.saturating_add(1);
-        lifecycle = lifecycle_next.clone();
-        acquired = acquired_next;
-        total = total_next;
-        recovery = recovery_next.clone();
+        lifecycle = Lifecycle::from(&snapshot.lifecycle);
+        acquired = snapshot.progress.completed;
+        total = snapshot.progress.total.unwrap_or(0);
         let _ = snapshots.send(JobSnapshot {
             job: id.to_string(),
             seq,
-            lifecycle: lifecycle_next,
-            acquired: acquired_next,
-            total: total_next,
-            recovery: recovery_next,
+            lifecycle: lifecycle.clone(),
+            acquired,
+            total,
+            recovery: snapshot.decision.as_ref().map(|decision| RecoveryLedger {
+                missing: decision
+                    .missing
+                    .iter()
+                    .map(|(tile, _)| tile.to_string())
+                    .collect(),
+                failed: decision.missing.len().max(1) as u64,
+                total,
+            }),
             terminal,
         });
     };
-    emit(Lifecycle::Discovering, 0, 0, None, None);
     let result = match &options.output {
         OutputTarget::File(path) => {
             let output = path.to_string_lossy().into_owned();
@@ -433,19 +432,8 @@ fn run_job(
                 &output,
                 options.overwrite,
                 config,
-                &mut |event: PipelineEvent| {
-                    let ledger = project_event(&event, &mut lifecycle, &mut acquired, &mut total);
-                    recovery = ledger;
-                    seq = seq.saturating_add(1);
-                    let _ = snapshots.send(JobSnapshot {
-                        job: id.to_string(),
-                        seq,
-                        lifecycle: lifecycle.clone(),
-                        acquired,
-                        total,
-                        recovery: recovery.clone(),
-                        terminal: None,
-                    });
+                &mut |snapshot: &dezoomify_engine::JobSnapshot| {
+                    emit(snapshot, None);
                 },
             )
         }
@@ -454,19 +442,8 @@ fn run_job(
             dir,
             *format,
             config,
-            &mut |event: PipelineEvent| {
-                let ledger = project_event(&event, &mut lifecycle, &mut acquired, &mut total);
-                recovery = ledger;
-                seq = seq.saturating_add(1);
-                let _ = snapshots.send(JobSnapshot {
-                    job: id.to_string(),
-                    seq,
-                    lifecycle: lifecycle.clone(),
-                    acquired,
-                    total,
-                    recovery: recovery.clone(),
-                    terminal: None,
-                });
+            &mut |snapshot: &dezoomify_engine::JobSnapshot| {
+                emit(snapshot, None);
             },
         ),
     };
@@ -502,52 +479,27 @@ fn run_job(
     terminal
 }
 
-/// Project one driver event onto the ordered snapshot state. Returns the
-/// recovery ledger when the event announces or re-announces an interactive
-/// partial decision, `None` when it resolves one (any other event).
-fn project_event(
-    event: &PipelineEvent,
-    lifecycle: &mut Lifecycle,
-    acquired: &mut u64,
-    total: &mut u64,
-) -> Option<RecoveryLedger> {
-    match event {
-        PipelineEvent::Discovery { .. } => {
-            *lifecycle = Lifecycle::Discovering;
-            None
+impl From<&dezoomify_engine::Lifecycle> for Lifecycle {
+    /// Project one engine lifecycle onto the four runner phases the shell
+    /// renders. Pre-acquisition phases read as discovering; selection and
+    /// planning read as acquiring once tiles flow.
+    fn from(lifecycle: &dezoomify_engine::Lifecycle) -> Self {
+        use dezoomify_engine::Lifecycle as EngineLifecycle;
+        match lifecycle {
+            EngineLifecycle::Created
+            | EngineLifecycle::Discovering
+            | EngineLifecycle::AwaitingImageSelection
+            | EngineLifecycle::AwaitingLevelSelection
+            | EngineLifecycle::Planning => Lifecycle::Discovering,
+            EngineLifecycle::AcquiringTiles => Lifecycle::AcquiringTiles,
+            EngineLifecycle::AwaitingPartialDecision => Lifecycle::AwaitingPartialDecision,
+            EngineLifecycle::Finalizing
+            | EngineLifecycle::Cancelling
+            | EngineLifecycle::Completed
+            | EngineLifecycle::PartiallyCompleted
+            | EngineLifecycle::Failed
+            | EngineLifecycle::Cancelled => Lifecycle::Finalizing,
         }
-        PipelineEvent::Downloading {
-            acquired: next_acquired,
-            total: next_total,
-        } => {
-            *lifecycle = Lifecycle::AcquiringTiles;
-            *acquired = (*acquired).max(*next_acquired);
-            *total = (*total).max(*next_total);
-            None
-        }
-        PipelineEvent::Encoding { .. } => {
-            *lifecycle = Lifecycle::Finalizing;
-            None
-        }
-        PipelineEvent::RecoveryRequested {
-            missing,
-            failed,
-            total,
-            ..
-        }
-        | PipelineEvent::MissingWork {
-            missing,
-            failed,
-            total,
-        } => {
-            *lifecycle = Lifecycle::AwaitingPartialDecision;
-            Some(RecoveryLedger {
-                missing: missing.clone(),
-                failed: *failed,
-                total: *total,
-            })
-        }
-        _ => None,
     }
 }
 

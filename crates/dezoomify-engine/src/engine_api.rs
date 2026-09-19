@@ -507,6 +507,8 @@ pub enum Lifecycle {
     AwaitingPartialDecision,
     /// Output operation awaited.
     Finalizing,
+    /// Cancellation requested; quiescence awaited.
+    Cancelling,
     /// Terminal: output saved.
     Completed,
     /// Terminal: gappy output saved.
@@ -958,10 +960,10 @@ impl EngineJob {
     }
 
     /// Project the canonical wire snapshot for the active job: the same
-    /// projector every host renders. No new work is issued.
+    /// fold every host renders. No new work is issued.
     #[must_use]
     pub fn project_dto(&self) -> dezoomify_protocol::dto::EngineSnapshotDto {
-        project_engine_snapshot(&self.inner)
+        EngineSnapshotDto::from(&self.snapshot())
     }
 
     fn translate_completion(
@@ -1250,6 +1252,16 @@ impl EngineJob {
                     missing: failed,
                 });
             }
+            InnerEvent::Paused | InnerEvent::Resumed => {
+                // Pause and resume moments are engine notices: the overlay
+                // itself lives in the snapshot's paused flag.
+                self.push_notice(EngineNotice {
+                    revision: self.inner.seq(),
+                    tile: u32::MAX,
+                    attempt: None,
+                    missing: Vec::new(),
+                });
+            }
             InnerEvent::Failed { code, message } => {
                 self.terminal_failure = Some((code, message));
             }
@@ -1259,9 +1271,7 @@ impl EngineJob {
             | InnerEvent::State { .. }
             | InnerEvent::Levels { .. }
             | InnerEvent::Progress { .. }
-            | InnerEvent::RecoveryRequested { .. }
-            | InnerEvent::Paused
-            | InnerEvent::Resumed => {}
+            | InnerEvent::RecoveryRequested { .. } => {}
         }
     }
 
@@ -1276,8 +1286,8 @@ impl EngineJob {
             crate::State::AcquiringTiles => Lifecycle::AcquiringTiles,
             crate::State::AwaitingPartialDecision => Lifecycle::AwaitingPartialDecision,
             crate::State::Finalizing => Lifecycle::Finalizing,
-            crate::State::Cancelling
-            | crate::State::Completed
+            crate::State::Cancelling => Lifecycle::Cancelling,
+            crate::State::Completed
             | crate::State::PartiallyCompleted
             | crate::State::Failed
             | crate::State::Cancelled => self.terminal_lifecycle(),
@@ -1388,113 +1398,116 @@ fn failure_phase_for(code: &str, has_missing_tiles: bool) -> ProtocolErrorPhase 
     }
 }
 
-/// Project the canonical wire snapshot for one engine job. This is the
-/// single projector behind both the native `EngineJob::snapshot` fold and
-/// the WASM `Session::snapshot` export, so all hosts render identical
-/// state. Routing IDs and clocks stay host-side: the DTO carries the
-/// job-scoped revision only.
-#[must_use]
-pub fn project_engine_snapshot(job: &Job) -> EngineSnapshotDto {
-    let lifecycle = match job.state() {
-        crate::State::Created => ProtocolJobState::Created,
-        crate::State::Discovering => ProtocolJobState::Discovering,
-        crate::State::AwaitingImageSelection => ProtocolJobState::AwaitingImageSelection,
-        crate::State::AwaitingLevelSelection => ProtocolJobState::AwaitingLevelSelection,
-        crate::State::Planning => ProtocolJobState::Planning,
-        crate::State::AcquiringTiles => ProtocolJobState::AcquiringTiles,
-        crate::State::AwaitingPartialDecision => ProtocolJobState::AwaitingPartialDecision,
-        crate::State::Finalizing => ProtocolJobState::Finalizing,
-        crate::State::Cancelling => ProtocolJobState::Cancelling,
-        crate::State::Completed => ProtocolJobState::Completed,
-        crate::State::PartiallyCompleted => ProtocolJobState::PartiallyCompleted,
-        crate::State::Failed => ProtocolJobState::Failed,
-        crate::State::Cancelled => ProtocolJobState::Cancelled,
-    };
-    let (completed, total) = job.acquisition_progress();
-    let missing = job.missing_detail();
-    let missing_tiles: Vec<u32> = missing.iter().map(|(tile, _)| *tile).collect();
-    let terminal = match job.terminal_kind() {
-        Some("completed") => Some(SnapshotTerminalDto::Completed),
-        Some("partial-completed") => Some(SnapshotTerminalDto::PartialCompleted {
-            missing: missing_tiles.clone(),
-        }),
-        Some("failed") => {
-            let (code, message) = job
-                .terminal_error()
-                .unwrap_or_else(|| ("job.failed".to_string(), "job failed".to_string()));
-            let phase = failure_phase_for(&code, !missing_tiles.is_empty());
-            Some(SnapshotTerminalDto::Failed {
-                error: ProtocolErrorDto::new(code, phase, message),
+impl From<&JobSnapshot> for EngineSnapshotDto {
+    /// Project one canonical snapshot onto the wire DTO. Single projector:
+    /// every host renders identical state from the same snapshot.
+    fn from(snapshot: &JobSnapshot) -> Self {
+        let lifecycle = match snapshot.lifecycle {
+            Lifecycle::Created => ProtocolJobState::Created,
+            Lifecycle::Discovering => ProtocolJobState::Discovering,
+            Lifecycle::AwaitingImageSelection => ProtocolJobState::AwaitingImageSelection,
+            Lifecycle::AwaitingLevelSelection => ProtocolJobState::AwaitingLevelSelection,
+            Lifecycle::Planning => ProtocolJobState::Planning,
+            Lifecycle::AcquiringTiles => ProtocolJobState::AcquiringTiles,
+            Lifecycle::AwaitingPartialDecision => ProtocolJobState::AwaitingPartialDecision,
+            Lifecycle::Finalizing => ProtocolJobState::Finalizing,
+            Lifecycle::Cancelling => ProtocolJobState::Cancelling,
+            Lifecycle::Completed => ProtocolJobState::Completed,
+            Lifecycle::PartiallyCompleted => ProtocolJobState::PartiallyCompleted,
+            Lifecycle::Failed => ProtocolJobState::Failed,
+            Lifecycle::Cancelled => ProtocolJobState::Cancelled,
+        };
+        let missing_tiles: Vec<u32> = snapshot
+            .output
+            .as_ref()
+            .map(|output| output.missing.clone())
+            .unwrap_or_default();
+        let terminal = match &snapshot.terminal {
+            Some(Terminal::Completed) => Some(SnapshotTerminalDto::Completed),
+            Some(Terminal::PartiallyCompleted { missing }) => {
+                Some(SnapshotTerminalDto::PartialCompleted {
+                    missing: missing.clone(),
+                })
+            }
+            Some(Terminal::Failed { code, message }) => {
+                let phase = failure_phase_for(code, !missing_tiles.is_empty());
+                Some(SnapshotTerminalDto::Failed {
+                    error: ProtocolErrorDto::new(code.clone(), phase, message.clone()),
+                })
+            }
+            Some(Terminal::Cancelled) => Some(SnapshotTerminalDto::Cancelled),
+            None => None,
+        };
+        let output = snapshot.output.as_ref().and_then(|output| {
+            let canvas = output.canvas.map(|(width, height)| ProtocolSizeDto {
+                width: u64::from(width),
+                height: u64::from(height),
+            });
+            if canvas.is_none() && snapshot.progress.total.unwrap_or(0) == 0 {
+                return None;
+            }
+            Some(SnapshotOutputDto {
+                canvas,
+                format: ProtocolOutputFormat::Png,
+                complete: output.complete,
+                missing: output.missing.clone(),
+                disposition: None,
             })
-        }
-        Some("cancelled") => Some(SnapshotTerminalDto::Cancelled),
-        _ => None,
-    };
-    let canvas = job.canvas_size().map(|size| ProtocolSizeDto {
-        width: u64::from(size.x),
-        height: u64::from(size.y),
-    });
-    let output = if canvas.is_none() && total == 0 {
-        None
-    } else {
-        Some(SnapshotOutputDto {
-            canvas,
-            format: ProtocolOutputFormat::Png,
-            complete: total > 0 && completed == total && missing_tiles.is_empty(),
-            missing: missing_tiles,
-            disposition: None,
-        })
-    };
-    EngineSnapshotDto {
-        revision: job.seq(),
-        lifecycle,
-        paused: job.is_paused(),
-        progress: SnapshotProgressDto {
-            completed,
-            total: Some(total),
-        },
-        selection: SnapshotSelectionDto {
-            image: job.selected_image(),
-            level: job.selected_level(),
-            level_count: job
-                .selected_image()
-                .map(|image| job.catalog_level_count(image))
-                .unwrap_or(0),
-            deferred: job
-                .deferred_entries()
-                .into_iter()
-                .map(|(position, uri)| SnapshotDeferredDto { position, uri })
-                .collect(),
-        },
-        decision: job
-            .pending_decision()
-            .map(|generation| SnapshotDecisionDto {
-                generation,
-                missing: missing
+        });
+        EngineSnapshotDto {
+            revision: snapshot.revision,
+            lifecycle,
+            paused: snapshot.paused,
+            progress: SnapshotProgressDto {
+                completed: snapshot.progress.completed,
+                total: snapshot.progress.total,
+            },
+            selection: SnapshotSelectionDto {
+                image: snapshot.selection.image,
+                level: snapshot.selection.level,
+                level_count: snapshot.selection.level_count,
+                deferred: snapshot
+                    .selection
+                    .deferred
                     .iter()
-                    .map(|(tile, failures)| MissingTileDto {
-                        tile: *tile,
-                        failures: failures
-                            .iter()
-                            .map(|failure| TileFailureDto {
-                                code: failure.code.clone(),
-                                category: match failure.category {
-                                    crate::retry::FailureCategory::Permanent => {
-                                        FailureCategoryDto::Permanent
-                                    }
-                                    crate::retry::FailureCategory::Transient => {
-                                        FailureCategoryDto::Transient
-                                    }
-                                },
-                                http: failure.http,
-                                retry_after_ms: failure.retry_after_ms,
-                                detail: failure.detail.clone(),
-                            })
-                            .collect(),
+                    .map(|entry| SnapshotDeferredDto {
+                        position: entry.position,
+                        uri: entry.uri.clone(),
                     })
                     .collect(),
-            }),
-        terminal,
-        output,
+            },
+            decision: snapshot
+                .decision
+                .as_ref()
+                .map(|decision| SnapshotDecisionDto {
+                    generation: decision.generation,
+                    missing: decision
+                        .missing
+                        .iter()
+                        .map(|(tile, failures)| MissingTileDto {
+                            tile: *tile,
+                            failures: failures
+                                .iter()
+                                .map(|failure| TileFailureDto {
+                                    code: failure.code.clone(),
+                                    category: match failure.category {
+                                        crate::retry::FailureCategory::Permanent => {
+                                            FailureCategoryDto::Permanent
+                                        }
+                                        crate::retry::FailureCategory::Transient => {
+                                            FailureCategoryDto::Transient
+                                        }
+                                    },
+                                    http: failure.http,
+                                    retry_after_ms: failure.retry_after_ms,
+                                    detail: failure.detail.clone(),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                }),
+            terminal,
+            output,
+        }
     }
 }

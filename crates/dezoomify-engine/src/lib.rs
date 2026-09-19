@@ -44,11 +44,11 @@ mod transition;
 
 pub use config::{Config, ConfigError};
 pub use engine_api::{
-    project_engine_snapshot, DecisionPayload, DeferredEntry, DiscoveryInput, Effect, EffectId,
-    EffectResult, EngineError, EngineJob, EngineNotice, Failure, HeaderPair, JobOptions,
-    JobSnapshot, Lifecycle, OutputDisposition, OutputFormat, OutputSummary, PartialDecision,
-    PartialPolicy, Progress, ResponseMetadata, Selection, SelectionPolicy, Terminal, TilePosition,
-    TileSize, Update, UserCommand,
+    DecisionPayload, DeferredEntry, DiscoveryInput, Effect, EffectId, EffectResult, EngineError,
+    EngineJob, EngineNotice, Failure, HeaderPair, JobOptions, JobSnapshot, Lifecycle,
+    OutputDisposition, OutputFormat, OutputSummary, PartialDecision, PartialPolicy, Progress,
+    ResponseMetadata, Selection, SelectionPolicy, Terminal, TilePosition, TileSize, Update,
+    UserCommand,
 };
 pub(crate) use job::{Job, JobInput};
 pub use projection::project_catalog;

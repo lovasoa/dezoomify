@@ -56,7 +56,7 @@ use crate::http::{FetchOutcome, UserHeaders};
 use crate::output::OutputFormat;
 use crate::pipeline::{
     effective_cache_dir, load_image_with_metadata, merge_headers, DecodedTile, ExecCommand,
-    PartialDecision, PartialGate, PartialPolicy, PartialRequest, PipelineConfig, PipelineEvent,
+    PartialDecision, PartialGate, PartialPolicy, PartialRequest, PipelineConfig,
 };
 use crate::sink::{Published, Sink};
 use crate::transport::NativeTransport;
@@ -132,11 +132,11 @@ pub fn execute(
     output: &OutputSpec,
     config: &PipelineConfig,
     user: &UserHeaders,
-    on_event: &mut dyn FnMut(PipelineEvent),
+    on_snapshot: &mut dyn FnMut(&EngineSnapshot),
 ) -> Result<ExecResult, NativeError> {
     let mut url = input_url.to_string();
     for _ in 0..=MAX_DEFERRED_FOLLOWS {
-        match execute_attempt(&url, output, config, user, on_event)? {
+        match execute_attempt(&url, output, config, user, on_snapshot)? {
             AttemptDone::Done(result) => return Ok(result),
             AttemptDone::Deferred(next) => url = next,
         }
@@ -212,9 +212,10 @@ struct Attempt<'a> {
     format: OutputFormat,
     auto_output_dir: Option<PathBuf>,
     cache: Option<(PathBuf, String)>,
-    on_event: &'a mut dyn FnMut(PipelineEvent),
     catalog: Vec<CatalogImage>,
     selected_image: Option<usize>,
+    /// Last snapshot (revision, paused) reported to the host (sparse reporting).
+    reported: (u32, bool),
     progress_emitted: (u64, Option<u64>),
     /// Plan-order tile ids (first-seen order matches plan order).
     order: Vec<String>,
@@ -234,10 +235,6 @@ struct Attempt<'a> {
 }
 
 impl<'a> Attempt<'a> {
-    fn emit(&mut self, event: PipelineEvent) {
-        (self.on_event)(event);
-    }
-
     fn note_flight(&mut self) {
         self.in_flight += 1;
         self.instrumentation.peak_inflight = self.instrumentation.peak_inflight.max(self.in_flight);
@@ -253,7 +250,7 @@ fn execute_attempt(
     output: &OutputSpec,
     config: &PipelineConfig,
     user: &UserHeaders,
-    on_event: &mut dyn FnMut(PipelineEvent),
+    on_snapshot: &mut dyn FnMut(&EngineSnapshot),
 ) -> Result<AttemptDone, NativeError> {
     let options = engine_options_for(input_url, config)?;
     let (mut job, update) = EngineJob::start(options).map_err(map_setup_error)?;
@@ -272,12 +269,12 @@ fn execute_attempt(
             effective_cache_dir(config),
             crate::cache::job_namespace(input_url),
         )),
-        on_event,
         catalog: Vec::new(),
         selected_image: None,
         order: Vec::new(),
         settled: HashSet::new(),
         acquired: 0,
+        reported: (0, false),
         progress_emitted: (0, None),
         throttle_last: None,
         failure: None,
@@ -295,6 +292,7 @@ fn execute_attempt(
 
     loop {
         drain_commands(&mut job, &mut pump, &mut attempt);
+        report_snapshot(&mut job, &mut attempt, on_snapshot);
         if attempt.config.cancel_flag.load(Ordering::SeqCst)
             && pump.snapshot.terminal.is_none()
             && !attempt.cancel_sent
@@ -370,6 +368,7 @@ fn execute_attempt(
             );
             continue;
         }
+        report_snapshot(&mut job, &mut attempt, on_snapshot);
         let effects = pump.take_effects();
         if effects.is_empty() {
             if attempt.in_flight > 0 {
@@ -404,6 +403,7 @@ fn execute_attempt(
             &mut handles,
             effects,
         )?;
+        report_snapshot(&mut job, &mut attempt, on_snapshot);
         // Opportunistic completions: feed whatever already landed before
         // the next drain so pipelining never waits a full round trip.
         while let Ok(completion) = completion_rx.try_recv() {
@@ -411,7 +411,9 @@ fn execute_attempt(
             apply_update(&mut pump, update);
         }
         // Pause v1 demonstration (`--pause-after N`): same overlay proof as
-        // the legacy driver, now against the completion-driven pump.
+        // the legacy driver, now against the completion-driven pump. The
+        // paused and resumed snapshots report so the paused=true state is
+        // observable on the stream.
         if let Some(threshold) = attempt.config.pause_after {
             if !attempt.pause_demonstrated
                 && attempt.acquired >= threshold
@@ -430,9 +432,7 @@ fn execute_attempt(
                     })?,
                 );
                 debug_assert!(pump.snapshot.paused);
-                attempt.emit(PipelineEvent::Paused {
-                    acquired: attempt.acquired as u64,
-                });
+                report_snapshot(&mut job, &mut attempt, on_snapshot);
                 apply_update(
                     &mut pump,
                     job.command(EngineUserCommand::Resume).map_err(|e| {
@@ -443,9 +443,6 @@ fn execute_attempt(
                     })?,
                 );
                 debug_assert!(!pump.snapshot.paused);
-                attempt.emit(PipelineEvent::Resumed {
-                    acquired: attempt.acquired as u64,
-                });
             }
         }
     }
@@ -564,6 +561,19 @@ fn apply_update(pump: &mut Pump, update: EngineUpdate) {
     pump.apply(update);
 }
 
+/// Report the current snapshot to the host when it advanced.
+fn report_snapshot(
+    job: &mut EngineJob,
+    attempt: &mut Attempt<'_>,
+    on_snapshot: &mut dyn FnMut(&EngineSnapshot),
+) {
+    let snapshot = job.snapshot();
+    if (snapshot.revision, snapshot.paused) != attempt.reported {
+        attempt.reported = (snapshot.revision, snapshot.paused);
+        on_snapshot(&snapshot);
+    }
+}
+
 /// Deferred follow-up URI for one still-deferred catalog position.
 fn snapshot_deferred_uri(snapshot: &EngineSnapshot, image: u32) -> Option<String> {
     snapshot
@@ -667,10 +677,6 @@ fn fold_snapshot(attempt: &mut Attempt<'_>, snapshot: &EngineSnapshot) -> Result
     let (completed, total) = (snapshot.progress.completed, snapshot.progress.total);
     if completed > attempt.progress_emitted.0 || total != attempt.progress_emitted.1 {
         attempt.progress_emitted = (completed, total);
-        attempt.emit(PipelineEvent::Downloading {
-            acquired: completed,
-            total: total.unwrap_or(0),
-        });
     }
     if let Some(decision) = &snapshot.decision {
         let missing: Vec<String> = decision
@@ -742,9 +748,6 @@ fn execute_effects(
                 }
                 let merged = merge_headers(&Request::new(&uri));
                 attempt.instrumentation.attempts += 1;
-                attempt.emit(PipelineEvent::Discovery {
-                    resources: attempt.instrumentation.attempts,
-                });
                 spawn_metadata(attempt, completion_tx, handles, id, uri, merged);
             }
             EngineEffect::AcquireTile {
@@ -1294,10 +1297,6 @@ fn feed_completion(
                     } else {
                         attempt.instrumentation.failed_permanent += 1;
                     }
-                    attempt.emit(PipelineEvent::TileFailed {
-                        tile: id,
-                        error: format!("{} ({})", failure.error.message, failure.error.code),
-                    });
                     complete_effect(
                         job,
                         effect,
@@ -1371,7 +1370,6 @@ fn finalize_output(
         missing = ledger;
     }
     let tile_count = attempt.settled.len();
-    let on_event = &mut *attempt.on_event;
     match sink.commit(crate::sink::CommitParams {
         dest: &dest,
         format,
@@ -1381,7 +1379,6 @@ fn finalize_output(
         missing: missing.clone(),
         tile_count,
         image_size,
-        on_event,
     }) {
         Ok(published) => {
             attempt.published = Some(crate::sink::Published {
@@ -1427,17 +1424,7 @@ fn await_partial_choice(attempt: &mut Attempt<'_>, generation: u32) -> Option<Pa
     missing.dedup();
     let total = attempt.order.len();
     let failed = missing.len().max(1);
-    attempt.emit(PipelineEvent::RecoveryRequested {
-        missing: missing.clone(),
-        failed: failed as u64,
-        total: total as u64,
-        generation,
-    });
-    attempt.emit(PipelineEvent::MissingWork {
-        missing: missing.clone(),
-        failed: failed as u64,
-        total: total as u64,
-    });
+    let _ = generation;
     let Some(gate) = attempt.partial_gate.clone() else {
         return Some(if attempt.config.partial_policy == PartialPolicy::Keep {
             PartialDecision::Keep
