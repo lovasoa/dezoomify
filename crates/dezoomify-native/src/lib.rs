@@ -1,7 +1,7 @@
 //! Native effect runtime: real HTTP egress (rustls), header/auth scope,
 //! bounded scheduler bookkeeping, tile resume cache (storage `cache`),
-//! output validation, progress
-//! counters, image decode/assemble/encode pipeline (PNG, JPEG, TIFF, ZIF
+//! output validation,
+//! image decode/assemble/encode pipeline (PNG, JPEG, TIFF, ZIF
 //! pyramid, WebP, and static `iiif-dir` tile trees), and real output hashing.
 #![forbid(unsafe_code)]
 // 6.1 unwrap policy: shipped runtime code maps failures to typed
@@ -17,7 +17,6 @@ pub mod exec;
 pub mod http;
 pub mod output;
 pub mod pipeline;
-pub mod progress;
 pub mod runner;
 pub mod sink;
 pub mod transport;
