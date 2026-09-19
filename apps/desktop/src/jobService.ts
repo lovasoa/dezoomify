@@ -196,9 +196,12 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
   const settingsOf = deps?.settings;
   const onDeepLink = deps?.onDeepLink;
   const observers = new Map<string, TrackedObserver>();
+  // IPC events can arrive before start_job returns its routing identity.
+  // Keep only the latest absolute snapshot until that identity is known.
+  const startingSnapshots = new Map<string, JobSnapshot>();
+  let pendingStarts = 0;
   const unlistens: Array<() => void> = [];
-  let listening = false;
-  let listenFailed: unknown = null;
+  let listening: Promise<void> | null = null;
 
   function hostStatus(): { transport: string; permission: string; output: string } {
     return { transport: "native", permission: "granted", output: "writable" };
@@ -216,12 +219,15 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     const payload = raw as Record<string, unknown>;
     const id = eventJobId(payload);
     if (!id) return;
-    const tracked = observers.get(id);
-    if (!tracked) return;
     if (!isSnapshotPayload(payload)) return;
     try {
       assertNoTileBytes(payload);
     } catch {
+      return;
+    }
+    const tracked = observers.get(id);
+    if (!tracked) {
+      if (pendingStarts > 0) startingSnapshots.set(id, payload);
       return;
     }
     // Verbatim forward: the snapshot is already authoritative (shell
@@ -232,28 +238,26 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     tracked.observer.hostStatus(hostStatus() as never);
   }
 
-  async function ensureListening(): Promise<void> {
-    if (listening || listenFailed) return;
-    listening = true;
-    for (const channel of DESKTOP_EVENT_CHANNELS) {
-      const name = channel as DesktopEventChannel;
+  function ensureListening(): Promise<void> {
+    return listening ??= (async () => {
       try {
-        const maybe = await ipc.listen(name, (event) => {
-          try {
-            route(name, event.payload);
-          } catch {
-            // One bad payload never breaks the channel.
-          }
-        });
-        if (typeof maybe === "function") unlistens.push(maybe as () => void);
-      } catch (error) {
-        listenFailed = error;
+        for (const channel of DESKTOP_EVENT_CHANNELS) {
+          const maybe = await ipc.listen(channel, (event) => {
+            try {
+              route(channel, event.payload);
+            } catch {
+              // One bad payload never breaks the channel.
+            }
+          });
+          if (typeof maybe === "function") unlistens.push(maybe as () => void);
+        }
+      } catch {
         throw serviceError(
           "desktop.host-unavailable",
           "The desktop host is not reachable from this window.",
         );
       }
-    }
+    })();
   }
 
   function validateStart(request: JobStartRequest): { url: string } {
@@ -293,9 +297,12 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     const args: Record<string, unknown> = { inputUrl: url };
     if (settingsOf) args["settings"] = settingsOf();
     let raw: unknown;
+    pendingStarts += 1;
     try {
       raw = await ipc.invoke("start_job", args);
     } catch (error) {
+      pendingStarts -= 1;
+      if (pendingStarts === 0) startingSnapshots.clear();
       throw serviceError(
         "desktop.start-failed",
         error instanceof Error ? error.message : "The desktop job could not start.",
@@ -306,16 +313,19 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
         ? ((raw as Record<string, unknown>)["job"] as string)
         : null;
     if (!nativeId) {
+      pendingStarts -= 1;
+      if (pendingStarts === 0) startingSnapshots.clear();
       throw serviceError("desktop.start-failed", "The desktop host returned no job.");
     }
     const id: string = nativeId;
     const existing = observers.get(id);
     if (existing) observers.delete(id);
     observers.set(id, { nativeId: id, observer });
-    // No local initial snapshot: the view stays snapshot-absent idle until
-    // the backend emits the first verbatim `Created` snapshot (revision 0).
-    // Minting a local revision 0 here would compete with the engine's own
-    // revision scale on the single snapshot channel.
+    const startingSnapshot = startingSnapshots.get(id);
+    startingSnapshots.delete(id);
+    pendingStarts -= 1;
+    if (pendingStarts === 0) startingSnapshots.clear();
+    if (startingSnapshot) observer.snapshot(startingSnapshot);
     observer.hostStatus(hostStatus() as never);
 
     async function command(command: UserCommand): Promise<void> {
@@ -458,6 +468,8 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
   }
 
   async function dispose(): Promise<void> {
+    await listening?.catch(() => {});
+    startingSnapshots.clear();
     for (const id of [...observers.keys()]) {
       observers.delete(id);
     }
@@ -469,7 +481,7 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
         // Teardown best-effort.
       }
     }
-    listening = false;
+    listening = null;
   }
 
   return { start, queryCapabilities, dispose };
