@@ -1,4 +1,4 @@
-//! Generic HTML page parsing helpers shared by the site-specific dezoomers.
+//! Generic HTML page parsing helpers shared by the site-specific formats.
 
 use std::sync::LazyLock;
 
@@ -39,7 +39,7 @@ pub fn iframe_source(bytes: &[u8]) -> Option<String> {
 ///
 /// Prefers Open Graph and Twitter Card metadata over the plain `<title>`
 /// element, decodes HTML entities, and returns `None` when the page declares
-/// nothing meaningful. Dezoomers use it to name images after the page that
+/// nothing meaningful. Formats use it to name images after the page that
 /// embeds them instead of inventing a generic name.
 #[must_use]
 pub fn page_title(page: &str) -> Option<String> {

@@ -412,8 +412,7 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         Some(v) => parse_opt_dir(v, "output_dir")?,
     };
     let output_format = parse_output_format(obj.get("output_format"))?;
-    // Accept both snake_case and kebab-case aliases from the frontend.
-    let cache_dir = match obj.get("cache_dir").or_else(|| obj.get("cache-dir")) {
+    let cache_dir = match obj.get("cache_dir") {
         None => None,
         Some(v) => parse_opt_dir(v, "cache_dir")?,
     };

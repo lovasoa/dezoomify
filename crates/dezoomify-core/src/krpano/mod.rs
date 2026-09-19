@@ -18,8 +18,8 @@ use crate::core::discovery::ResourceFailure;
 use crate::core::redact_uri;
 use crate::core::resolve_relative;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, GridRequests, GridTile, ImageCatalog,
+    CatalogEntry, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImageCatalog,
     ImageDescriptor, LevelDescriptor, Request,
 };
 use crate::krpano::krpano_metadata::{ImageInfo, LevelDesc};
@@ -34,7 +34,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::UrlPredicate(is_javascript_uri).then(handle_viewer_js),
 ];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("krpano", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
     .with_display_name("krpano")
     .on_failure(handle_failure)
     .preferring(|uri| uri.contains("tiles.xml"));

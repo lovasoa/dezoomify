@@ -9,8 +9,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
+    CatalogEntry, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
     LevelDescriptor, Request, image_title,
 };
 
@@ -33,7 +33,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::Any.extract(catalog),
 ];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("hungaricana", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("hungaricana", ROUTES)
     .with_display_name("Hungaricana")
     .recognizing(is_hungaricana_url, "not a Hungaricana URL")
     .preferring(|uri| uri.to_ascii_lowercase().contains("hungaricana"));

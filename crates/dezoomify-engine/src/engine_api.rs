@@ -211,6 +211,8 @@ pub struct JobOptions {
     pub max_bytes: u64,
     /// Maximum same-job deferred catalog follows (0 disables following).
     pub max_deferred_follows: u32,
+    /// Base retry wait in milliseconds (see [`Config::retry_base_delay_ms`]).
+    pub retry_base_delay_ms: u64,
 }
 
 impl JobOptions {
@@ -229,6 +231,7 @@ impl JobOptions {
             max_retries: defaults.max_retries,
             max_bytes: defaults.max_bytes,
             max_deferred_follows: defaults.max_deferred_follows,
+            retry_base_delay_ms: defaults.retry_base_delay_ms,
         }
     }
 
@@ -241,6 +244,7 @@ impl JobOptions {
             max_buffers: self.max_concurrent.max(16),
             max_bytes: self.max_bytes,
             max_deferred_follows: self.max_deferred_follows,
+            retry_base_delay_ms: self.retry_base_delay_ms,
         }
     }
 }

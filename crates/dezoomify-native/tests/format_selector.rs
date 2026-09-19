@@ -130,7 +130,7 @@ fn unknown_format_fails_typed_without_output() {
     let error = run_with_format(&input, &output, Some("nope".to_string()))
         .expect_err("unknown format must fail");
     // Stable code, never display-string matching.
-    assert_eq!(error.code, "discovery.unknown-dezoomer");
+    assert_eq!(error.code, "discovery.unknown-format");
     assert!(
         error.message.contains("nope"),
         "message names the bad format without credentials: {}",

@@ -8,8 +8,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
+    CatalogEntry, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
     LevelDescriptor, Request, resolve_relative, resolve_url_template,
 };
 use crate::web_page::decode_html_entities;
@@ -81,7 +81,7 @@ fn known_detail_url(uri: &str) -> Result<Request, DiscoveryError> {
         .ok_or_else(|| DiscoveryError::Session("not a known Memorix detail URL".into()))
 }
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("topviewer", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("topviewer", ROUTES)
     .with_display_name("TopViewer")
     .preferring(|uri| uri.contains("topviewjson") || uri.contains("memorix"));
 

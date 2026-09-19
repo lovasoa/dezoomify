@@ -426,7 +426,7 @@ function classifyDiscoveryCopy(code: string): { retryable: boolean } | null {
   ) {
     return { retryable: false };
   }
-  if (lower.indexOf("discovery") >= 0 || lower.indexOf("unknown-dezoomer") >= 0) {
+  if (lower.indexOf("discovery") >= 0 || lower.indexOf("unknown-format") >= 0) {
     return { retryable: true };
   }
   return null;

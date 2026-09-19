@@ -28,7 +28,6 @@ import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFa
 import type { JobBinding } from "./transport.ts";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
-declare const __DEZOOMIFY_TEST_DRIVER__: boolean;
 declare const __DEZOOMIFY_TEST_PERMISSION_MOCK__: boolean;
 
 type ExtensionApi = {

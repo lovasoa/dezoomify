@@ -250,14 +250,12 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
     // `--largest` (or bulk-implied largest) selects the uncapped level,
     // mirroring the reference `should_use_largest` rule. The `largest` flag
     // itself is also passed through so size caps are ignored natively.
-    // `--dezoomer` selects the native `format` (`auto` auto-detects, named
+    // `--format` selects the native `format` (`auto` auto-detects, named
     // selects the single program); `max_retries` (including 0),
-    // `parallelism`, `min_interval`, and `pause_after` are passed through
-    // unchanged. Partial output is kept by default (reference
-    // `PartialDownload` file behavior); `--no-partial` discards instead.
-    // `--retry-delay` still parses but is never consulted: retry timing is
-    // engine-owned (explicit `WaitForRetry` timer effects with exponential
-    // backoff plus observed `retry-after`).
+    // `retry_base_delay`, `parallelism`, and `min_interval` are passed
+    // through unchanged. Partial output is kept by default
+    // (reference `PartialDownload` file behavior); `--no-partial` discards
+    // instead.
     let max_width = if parsed.should_use_largest() {
         None
     } else {
@@ -267,10 +265,10 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
         input_url: input.to_string(),
         output: OutputTarget::File(output.to_path_buf()),
         overwrite: parsed.overwrite,
-        format: if parsed.dezoomer.eq_ignore_ascii_case("auto") {
+        format: if parsed.format.eq_ignore_ascii_case("auto") {
             None
         } else {
-            Some(parsed.dezoomer.clone())
+            Some(parsed.format.clone())
         },
         image_index: parsed.image_index,
         zoom_level: parsed.zoom_level,
@@ -278,6 +276,7 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
         max_width,
         max_height: parsed.max_height,
         max_retries: parsed.retries,
+        retry_base_delay: parsed.retry_delay,
         keep_partial: parsed.keep_partial,
         compression: parsed.compression,
         headers: user_headers,
@@ -291,7 +290,6 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
         accept_invalid_certs: parsed.accept_invalid_certs,
         max_concurrent: parsed.parallelism,
         min_interval: parsed.min_interval,
-        pause_after: parsed.pause_after,
     }
 }
 
@@ -301,8 +299,8 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
 fn emit_verbose_diagnostics(level: &str, parsed: &Args) {
     if report::is_verbose(level) {
         eprintln!(
-            "debug dezoomer={} retries={} parallelism={} largest={} logging={}",
-            parsed.dezoomer, parsed.retries, parsed.parallelism, parsed.largest, parsed.logging,
+            "debug format={} retries={} parallelism={} largest={} logging={}",
+            parsed.format, parsed.retries, parsed.parallelism, parsed.largest, parsed.logging,
         );
     }
     if report::is_trace(level) {

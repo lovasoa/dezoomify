@@ -19,7 +19,7 @@ pub const FORMAT_GRID: &[(&str, &str)] = &[
     ("iiif", "IIIF"),
     ("deepzoom", "Seadragon (Deep Zoom Image)"),
     ("second_canvas", "Second Canvas"),
-    ("generic", "Generic dezoomer"),
+    ("generic", "Generic format"),
     ("krpano", "krpano"),
     ("iipimage", "IIPImage"),
     ("xlimage", "XLimage"),

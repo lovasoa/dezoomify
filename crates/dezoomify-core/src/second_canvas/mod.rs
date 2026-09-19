@@ -8,8 +8,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
+    CatalogEntry, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
     LevelDescriptor, Positioned, PositionedTile, ProcessingRecipe, Request, TileSourceError,
     resolve_relative,
 };
@@ -20,8 +20,8 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(contains_second_canvas_iframe).then(follow_iframe),
 ];
 
-pub const SPEC: DezoomerSpec =
-    DezoomerSpec::new("second_canvas", ROUTES).with_display_name("Second Canvas");
+pub const SPEC: FormatSpec =
+    FormatSpec::new("second_canvas", ROUTES).with_display_name("Second Canvas");
 
 fn contains_gigapixel(bytes: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(bytes)

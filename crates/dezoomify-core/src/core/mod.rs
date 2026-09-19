@@ -16,8 +16,8 @@ pub use adaptive::{
     ProbeContinuation,
 };
 pub use discovery::{
-    CandidateDiagnostic, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, RejectionKind,
+    CandidateDiagnostic, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, RejectionKind,
 };
 #[cfg(test)]
 pub use discovery::{RequestId, ResourceResponse};

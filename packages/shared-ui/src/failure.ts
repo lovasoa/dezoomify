@@ -137,7 +137,7 @@ export function plainMessageFor(code: string, engineMessage: string, host: strin
     lowerCode.indexOf("job.no-images") >= 0 ||
     lowerCode.indexOf("job.catalog") >= 0 ||
     lowerCode.indexOf("job.empty") >= 0 ||
-    lowerCode.indexOf("unknown-dezoomer") >= 0
+    lowerCode.indexOf("unknown-format") >= 0
   ) {
     return t("view.discovery.none");
   }

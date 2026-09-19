@@ -101,7 +101,6 @@ export default defineConfig({
     // lazily by devtools only. The Rust/wasm core stays lean (no DWARF).
     build: { sourcemap: true },
     define: {
-      __DEZOOMIFY_TEST_DRIVER__: JSON.stringify(isTestPackage),
       __DEZOOMIFY_TEST_PERMISSION_MOCK__: JSON.stringify(isTestPackage && testScenario === "permission"),
     },
   }),

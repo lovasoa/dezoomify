@@ -225,7 +225,6 @@ struct Attempt<'a> {
     failure: Option<(String, String)>,
     published: Option<Published>,
     cancel_sent: bool,
-    pause_demonstrated: bool,
     partial_gate: Option<Arc<PartialGate>>,
     pending_missing: Vec<String>,
     command_rx: Option<Arc<Mutex<mpsc::Receiver<EngineUserCommand>>>>,
@@ -349,7 +348,6 @@ fn execute_attempt(
         failure: None,
         published: None,
         cancel_sent: false,
-        pause_demonstrated: false,
         partial_gate: config.partial_gate.clone(),
         pending_missing: Vec::new(),
         command_rx: config.exec_command_rx.clone(),
@@ -508,41 +506,6 @@ fn execute_attempt(
                 }
             };
             apply_update(&mut pump, update);
-        }
-        // Pause v1 demonstration (`--pause-after N`): same overlay proof as
-        // the legacy driver, now against the completion-driven pump. The
-        // paused and resumed snapshots report so the paused=true state is
-        // observable on the stream.
-        if let Some(threshold) = attempt.config.pause_after {
-            if !attempt.pause_demonstrated
-                && attempt.acquired >= threshold
-                && pump.snapshot.lifecycle == EngineLifecycle::AcquiringTiles
-                && pump.snapshot.terminal.is_none()
-                && !pump.snapshot.paused
-            {
-                attempt.pause_demonstrated = true;
-                apply_update(
-                    &mut pump,
-                    job.command(EngineUserCommand::Pause).map_err(|e| {
-                        NativeError::new(
-                            "native.internal",
-                            format!("pause rejected ({}): {}", e.code, e.message),
-                        )
-                    })?,
-                );
-                debug_assert!(pump.snapshot.paused);
-                report_snapshot(&mut job, &mut attempt, on_snapshot);
-                apply_update(
-                    &mut pump,
-                    job.command(EngineUserCommand::Resume).map_err(|e| {
-                        NativeError::new(
-                            "native.internal",
-                            format!("resume rejected ({}): {}", e.code, e.message),
-                        )
-                    })?,
-                );
-                debug_assert!(!pump.snapshot.paused);
-            }
         }
     }
 
@@ -1645,6 +1608,9 @@ fn engine_options_for(
     let tiles = config.max_tiles.clamp(1, 16_777_216) as u32;
     let fetches = (config.max_concurrent.clamp(1, 64) as u32).min(tiles);
     let retries = config.max_retries.clamp(0, 1024);
+    let retry_base_delay_ms = config
+        .retry_base_delay_ms
+        .clamp(0, dezoomify_engine::retry::MAX_RETRY_AFTER_MS);
     let max_bytes = config.fetch.max_bytes.clamp(1024, 4_294_967_296);
     let mut options = EngineOptions::new(vec![DiscoveryInput::new(input_url)]);
     options.format = config.format.clone();
@@ -1655,6 +1621,7 @@ fn engine_options_for(
     options.max_concurrent = fetches;
     options.max_tiles = tiles;
     options.max_retries = retries;
+    options.retry_base_delay_ms = retry_base_delay_ms;
     options.max_bytes = max_bytes;
     options.max_deferred_follows = MAX_DEFERRED_FOLLOWS;
     // Bounds and inputs validated by the canonical start; oversize budgets
@@ -1671,9 +1638,7 @@ fn engine_options_for(
 
 fn map_setup_error(error: EngineJobError) -> NativeError {
     match error.code.as_str() {
-        "job.unknown-dezoomer" => {
-            NativeError::new("discovery.unknown-dezoomer", error.message.clone())
-        }
+        "job.unknown-format" => NativeError::new("discovery.unknown-format", error.message.clone()),
         "job.invalid-input" => NativeError::new("discovery.failed", error.message.clone()),
         _ => NativeError::new(
             "native.internal",

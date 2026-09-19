@@ -183,7 +183,7 @@ pub fn map_engine_failure_to_native(code: &str) -> &str {
     match code {
         "job.discovery-failed" | "job.catalog-invalid" | "job.empty-resource" => "discovery.failed",
         "job.no-images" => "discovery.no-image",
-        "job.unknown-dezoomer" => "discovery.unknown-dezoomer",
+        "job.unknown-format" => "discovery.unknown-format",
         "job.resource-limit" => "tile.limit",
         "job.plan-invalid" => "discovery.tile-plan",
         "job.plan-empty" => "discovery.no-level",
@@ -215,8 +215,8 @@ pub fn error_phase(code: &str) -> &'static str {
         "validation"
     } else if code.starts_with("discovery.")
         || code.starts_with("job.discovery")
-        || code == "discovery.unknown-dezoomer"
-        || code == "job.unknown-dezoomer"
+        || code == "discovery.unknown-format"
+        || code == "job.unknown-format"
         || code == "job.no-images"
         || code == "job.catalog-invalid"
         || code == "job.empty-resource"
@@ -511,7 +511,7 @@ mod tests {
             "discovery.no-image",
             "discovery.tile-plan",
             "discovery.no-level",
-            "discovery.unknown-dezoomer",
+            "discovery.unknown-format",
             "tile.decode-failed",
             "tile.processing-failed",
             "tile.limit",

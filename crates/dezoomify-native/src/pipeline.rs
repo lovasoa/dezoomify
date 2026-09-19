@@ -269,6 +269,10 @@ pub struct PipelineConfig {
     /// Tile retry budget owned by the job engine. `0` means no retries:
     /// the first failure fails the tile (generic-probing parity).
     pub max_retries: u32,
+    /// Base retry wait in milliseconds, owned by the job engine (attempt
+    /// `n` waits this value doubled `n-1` times, capped by the backoff
+    /// ceiling; an observed `retry-after` still overrides upward).
+    pub retry_base_delay_ms: u64,
     /// Minimum interval between tile request starts (per-tile throttle).
     /// `ZERO` disables the sleep (the CLI default); the reference default
     /// is 50ms. Applied as start staggering, not as a post-completion wait.
@@ -310,10 +314,10 @@ pub struct PipelineConfig {
     /// level-specifying arg was given (`should_use_largest`); uncapped width
     /// already selects the largest level emergently.
     pub largest: bool,
-    /// Format selector (`--dezoomer`): `None` auto-detects via
+    /// Format selector (`--format`): `None` auto-detects via
     /// `default_registry`; `Some(name)` selects the single named program via
     /// `registry_for` (case-insensitive, `auto` also means auto-detect).
-    /// Unknown names fail with typed `discovery.unknown-dezoomer`.
+    /// Unknown names fail with typed `discovery.unknown-format`.
     pub format: Option<String>,
     /// What to do when required tiles still fail after retries.
     /// Default `Keep` matches the reference `PartialDownload` file behavior
@@ -329,12 +333,6 @@ pub struct PipelineConfig {
     /// work at the next effect boundary, cleans up, and reports
     /// `job.cancelled` without writing output. Clones share the flag.
     pub cancel_flag: Arc<AtomicBool>,
-    /// Pause v1 demonstration (`--pause-after`): when `Some(n)`,
-    /// the driver pauses the engine after `n` tiles are acquired (suspending
-    /// new `acquire-tile` scheduling, finishing in-flight, retaining
-    /// decoded output), verifies no new work while paused, then resumes and
-    /// completes. `None` disables the demonstration. Never set by default.
-    pub pause_after: Option<usize>,
     /// Bound on retained (overlapping, unpainted) tile bytes in the output
     /// sink. Beyond it the job fails `output.canvas-limit` instead of
     /// growing without bound.
@@ -347,7 +345,7 @@ pub struct PipelineConfig {
     /// selection (image/level/deferred follow), pause/resume. Cancel travels
     /// on the shared flag, partial answers on the gate. `None` disables
     /// remote commands; the engine overlay itself stays available through
-    /// the `--pause-after` demonstration and pre-start options.
+    /// pre-start options.
     pub exec_command_rx:
         Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<dezoomify_engine::UserCommand>>>>,
 }
@@ -360,6 +358,7 @@ impl Default for PipelineConfig {
             max_tiles: 1 << 20,
             max_concurrent: 16,
             max_retries: 3,
+            retry_base_delay_ms: dezoomify_engine::retry::RETRY_BASE_DELAY_MS,
             min_interval: Duration::ZERO,
             compression: 5,
             cache_dir: Some(default_tile_cache_dir()),
@@ -372,7 +371,6 @@ impl Default for PipelineConfig {
             partial_policy: PartialPolicy::Keep,
             partial_gate: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
-            pause_after: None,
             output_retain_cap: 512 << 20,
             output_spool_cap: 1 << 30,
             exec_command_rx: None,

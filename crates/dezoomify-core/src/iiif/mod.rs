@@ -7,11 +7,11 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    AdaptiveProgram, AdaptiveSource, CatalogEntry, DeferredImage, DezoomerSpec, DiscoverableStep,
+    AdaptiveProgram, AdaptiveSource, CatalogEntry, DeferredImage, DiscoverableStep,
     DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource, DiscoveryRoute,
-    DiscoveryStep, Grid, GridRequests, GridTile, ImageCatalog, ImageDescriptor, LevelDescriptor,
-    ObservationResult, ProbeContinuation, Request, TileRole, TileSourceError, TileSpec,
-    resolve_relative,
+    DiscoveryStep, FormatSpec, Grid, GridRequests, GridTile, ImageCatalog, ImageDescriptor,
+    LevelDescriptor, ObservationResult, ProbeContinuation, Request, TileRole, TileSourceError,
+    TileSpec, resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -41,8 +41,8 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::Any.extract(catalog),
 ];
 
-/// IIIF dezoomer. See <https://iiif.io/>.
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("iiif", ROUTES)
+/// IIIF format. See <https://iiif.io/>.
+pub const SPEC: FormatSpec = FormatSpec::new("iiif", ROUTES)
     .with_display_name("IIIF")
     .preferring(|uri| {
         uri.contains("info.json")

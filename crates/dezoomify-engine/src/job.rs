@@ -154,7 +154,7 @@ pub struct Job {
     /// Format selector: `None` auto-detects via `default_registry`;
     /// `Some(name)` selects the single named program via `registry_for`
     /// (`auto` also means auto-detect). Unknown names fail `start()` with
-    /// typed `job.unknown-dezoomer`.
+    /// typed `job.unknown-format`.
     format: Option<String>,
     state: State,
     seq: u32,
@@ -406,7 +406,7 @@ impl Job {
     /// Set the format selector before [`Job::start`]: `None` auto-detects,
     /// `Some("auto")` also auto-detects, otherwise the single named program
     /// is selected (case-insensitive, matching the core `registry_for`).
-    /// Unknown names fail `start()` with typed `job.unknown-dezoomer`.
+    /// Unknown names fail `start()` with typed `job.unknown-format`.
     pub fn set_format(&mut self, format: Option<String>) {
         self.format = format;
     }
@@ -416,7 +416,7 @@ impl Job {
     /// # Errors
     ///
     /// Returns [`JobError`] when called outside `Created`, on overflow, or
-    /// for an unknown named format (`job.unknown-dezoomer`).
+    /// for an unknown named format (`job.unknown-format`).
     pub fn start(&mut self) -> Result<Outcome, JobError> {
         if self.terminal.is_some() {
             return Err(JobError::post_terminal());
@@ -427,8 +427,8 @@ impl Job {
         if let Some(name) = self.format.as_deref() {
             if name != "auto" && registry_for(name).is_none() {
                 return Err(JobError::new(
-                    "job.unknown-dezoomer",
-                    format!("unknown dezoomer '{name}'"),
+                    "job.unknown-format",
+                    format!("unknown format '{name}'"),
                 ));
             }
         }
@@ -1197,7 +1197,11 @@ impl Job {
             self.push_event(JobEvent::Warning { tile, attempt })?;
             // Attempts count the initial try: the first failure schedules
             // retry-timer 1, whose completion re-issues the second try.
-            let delay_ms = retry_delay_ms(attempt, failure.retry_after_ms);
+            let delay_ms = retry_delay_ms(
+                attempt,
+                failure.retry_after_ms,
+                self.config.retry_base_delay_ms,
+            );
             let timer_issued = !self.paused;
             self.pending_retry_timers.push_back(PendingRetry {
                 tile,

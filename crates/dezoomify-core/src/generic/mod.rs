@@ -2,11 +2,11 @@
 
 use crate::core::adaptive::is_generic_template;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoverableGrid, ImageCatalog, ImageDescriptor, LevelDescriptor,
+    CatalogEntry, DiscoverableGrid, FormatSpec, ImageCatalog, ImageDescriptor, LevelDescriptor,
 };
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::immediate("generic", |template| Ok(catalog(template)))
-    .with_display_name("Generic dezoomer")
+pub const SPEC: FormatSpec = FormatSpec::immediate("generic", |template| Ok(catalog(template)))
+    .with_display_name("Generic format")
     .recognizing(is_generic_template, "not a generic X/Y tile template")
     .preferring(|uri| uri.contains("{{"));
 

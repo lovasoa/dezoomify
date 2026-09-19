@@ -13,8 +13,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryRoute,
-    DiscoveryStep, Grid, ImageCatalog, ImageDescriptor, LevelDescriptor, Request, resolve_relative,
+    CatalogEntry, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryRoute, DiscoveryStep,
+    FormatSpec, Grid, ImageCatalog, ImageDescriptor, LevelDescriptor, Request, resolve_relative,
 };
 
 mod image_properties;
@@ -34,7 +34,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::ContentPredicate(has_ete_url).then(extract_ete_catalog),
 ];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("zoomify", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES)
     .with_display_name("Zoomify")
     .preferring(is_zoomify_url);
 
