@@ -1,11 +1,14 @@
 // Desktop Tauri event channels and IPC redaction guards.
 //
 // The desktop job keeps pixels in the native runtime. Only the
-// self-describing `job-snapshot` (a `JobSnapshot` the service forwards
-// verbatim to its observer) crosses the IPC boundary; tile bytes never do.
+// self-describing `job-snapshot` (the canonical `EngineSnapshotDto` the
+// service forwards verbatim to its observer, plus host routing aliases)
+// crosses the IPC boundary; tile bytes never do.
 // This module names the allowed channels and guards their payloads.
 
 // Keep erasable syntax only so node type-stripping can read this file.
+
+import type { EngineSnapshotDto } from "@dezoomify/app-model";
 
 export const DESKTOP_EVENT_CHANNELS = [
   "dezoomify://job-snapshot",
@@ -21,50 +24,17 @@ export interface DesktopEventEnvelope {
   payload: Record<string, unknown>;
 }
 
-/// Self-describing runner snapshot, emitted on `dezoomify://job-snapshot`
+/// Canonical runner snapshot, emitted on `dezoomify://job-snapshot`
 /// for every runner snapshot the shell forwards verbatim. The payload is
-/// the authoritative `JobSnapshot`: identity, revision, protocol state,
-/// monotonic counts, the typed recovery ledger, exactly one terminal, and
-/// the honest output account. No legacy `job-state`/`job-progress`/
-/// `job-output`/`job-error` channels exist.
-export interface JobSnapshotPayload {
+/// the authoritative `EngineSnapshotDto`: revision, lifecycle, paused,
+/// progress, selection (with catalog), decision, terminal, and output.
+/// `job`/`jobId` are host routing aliases only: the DTO carries no job
+/// identity. No legacy `job-state`/`job-progress`/`job-output`/`job-error`
+/// channels exist.
+export type JobSnapshotPayload = EngineSnapshotDto & {
   job: string;
   jobId: string;
-  revision: number;
-  seq: number;
-  kind: "snapshot";
-  jobSnapshot: boolean;
-  state: string;
-  lifecycle: string;
-  catalog: null;
-  acquired: number;
-  total: number | null;
-  paused: boolean;
-  selection: { image: number | null; level: number | null };
-  warnings: Array<unknown>;
-  recovery: null | {
-    generation: number;
-    actions: Array<{ id: string; kind: string; scope: string; rationale: string }>;
-    missing?: Array<string>;
-    failed?: number;
-    total?: number;
-  };
-  terminal: null | { kind: string; error?: Record<string, unknown> };
-  output: null | {
-    doneTiles: number;
-    totalTiles: number | null;
-    failedTiles: number;
-    partial: boolean;
-    format: string | null;
-    width: number | null;
-    height: number | null;
-    missingTiles: Array<string>;
-    siblingName?: string;
-  };
-  displayOnly: boolean;
-  updatedAt: number;
-  origin: string;
-}
+};
 
 const FORBIDDEN_IPC_KEYS = new Set([
   "tilebytes",

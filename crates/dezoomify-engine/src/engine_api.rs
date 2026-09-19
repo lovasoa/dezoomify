@@ -810,6 +810,11 @@ impl EngineJob {
     /// Complete one outstanding effect with a body-free result. Metadata
     /// bodies travel through `provide_metadata`, never here.
     ///
+    /// Wrong-kind and validation rejections leave the outstanding effect
+    /// live so the host can still answer it with the correct kind; only
+    /// accepted completions settle it. A rejected `OutputCommitted` never
+    /// sets the output disposition.
+    ///
     /// # Errors
     ///
     /// Returns [`CompletionError`] for unknown effects, duplicate
@@ -820,29 +825,43 @@ impl EngineJob {
         effect: EffectId,
         result: EffectResult,
     ) -> Result<Update, CompletionError> {
-        let outstanding = self.outstanding.remove(&effect).ok_or_else(|| {
+        let outstanding = self.outstanding.get(&effect).cloned().ok_or_else(|| {
             EngineError::new(
                 "job.stale-effect",
                 format!("{effect} is unknown or already settled"),
             )
         })?;
-        self.effect_uris.remove(&effect);
         // Cleanup acknowledgements are accepted idempotently with no inner
         // input: the inner machine already rests terminal, so the ack only
-        // refreshes the projection.
+        // refreshes the projection. Wrong-kind and validation rejections
+        // leave the outstanding effect live so the host can still answer it
+        // with the correct kind; only accepted completions settle it.
         if matches!(outstanding, Outstanding::Cancel)
             && matches!(result, EffectResult::CleanupAcknowledged)
         {
+            self.outstanding.remove(&effect);
+            self.effect_uris.remove(&effect);
             return self.drain();
         }
-        let inner = self.translate_completion(effect, outstanding, result)?;
+        let (inner, disposition) = self.translate_completion(effect, outstanding, result)?;
         match self.inner.on_command(inner) {
             Ok(Outcome::Ignored) => {
                 // Late success/failure after the acquisition settled: the
                 // effect was live when issued, so the completion is
                 // accepted but changes nothing further.
+                self.outstanding.remove(&effect);
+                self.effect_uris.remove(&effect);
             }
-            Ok(Outcome::Applied) => {}
+            Ok(Outcome::Applied) => {
+                self.outstanding.remove(&effect);
+                self.effect_uris.remove(&effect);
+                // Publication is claimed only once the inner machine accepts
+                // the finalize completion: rejected `OutputCommitted` answers
+                // leave the disposition unset.
+                if let Some(disposition) = disposition {
+                    self.disposition = Some(disposition);
+                }
+            }
             Err(error) => {
                 return Err(EngineError::new(&error.code, error.message));
             }
@@ -868,13 +887,12 @@ impl EngineJob {
         response: ResponseMetadata,
         bytes: &[u8],
     ) -> Result<Update, CompletionError> {
-        let outstanding = self.outstanding.remove(&effect).ok_or_else(|| {
+        let outstanding = self.outstanding.get(&effect).cloned().ok_or_else(|| {
             EngineError::new(
                 "job.stale-effect",
                 format!("{effect} is unknown or already settled"),
             )
         })?;
-        self.effect_uris.remove(&effect);
         let Outstanding::Metadata { request } = outstanding else {
             return Err(EngineError::new(
                 "job.wrong-result-kind",
@@ -887,13 +905,25 @@ impl EngineJob {
                 "metadata bodies must not be empty",
             ));
         }
-        self.inner
-            .on_command(InnerCommand::ResourceBytes {
-                request,
-                bytes: bytes.to_vec(),
-                final_uri: response.final_uri.filter(|uri| !uri.is_empty()),
-            })
-            .map_err(|error| EngineError::new(&error.code, error.message))?;
+        // Wrong-kind and empty-body rejections leave the effect live; only
+        // an accepted or inner-rejected answer settles it. Inner rejections
+        // (post-terminal, over-limit terminal) consume the effect because
+        // the inner machine observed the answer.
+        match self.inner.on_command(InnerCommand::ResourceBytes {
+            request,
+            bytes: bytes.to_vec(),
+            final_uri: response.final_uri.filter(|uri| !uri.is_empty()),
+        }) {
+            Ok(_) => {
+                self.outstanding.remove(&effect);
+                self.effect_uris.remove(&effect);
+            }
+            Err(error) => {
+                self.outstanding.remove(&effect);
+                self.effect_uris.remove(&effect);
+                return Err(EngineError::new(&error.code, error.message));
+            }
+        }
         let update = self.drain()?;
         self.apply_policies(update).map_err(|error| {
             EngineError::new(
@@ -988,11 +1018,11 @@ impl EngineJob {
     }
 
     fn translate_completion(
-        &mut self,
+        &self,
         effect: EffectId,
         outstanding: Outstanding,
         result: EffectResult,
-    ) -> Result<InnerCommand, CompletionError> {
+    ) -> Result<(InnerCommand, Option<OutputDisposition>), CompletionError> {
         let wrong_kind = |effect: EffectId| {
             EngineError::new(
                 "job.wrong-result-kind",
@@ -1001,17 +1031,18 @@ impl EngineJob {
         };
         match (outstanding, result) {
             (Outstanding::Tile { tile }, EffectResult::TileAcquired) => {
-                Ok(InnerCommand::TileAcquired { tile })
+                Ok((InnerCommand::TileAcquired { tile }, None))
             }
             (Outstanding::Tile { tile }, EffectResult::TileDisplayed) => {
-                Ok(InnerCommand::TileDisplayed { tile })
+                Ok((InnerCommand::TileDisplayed { tile }, None))
             }
-            (Outstanding::Tile { tile }, EffectResult::TileFailed(failure)) => {
-                Ok(InnerCommand::TileFailed {
+            (Outstanding::Tile { tile }, EffectResult::TileFailed(failure)) => Ok((
+                InnerCommand::TileFailed {
                     tile,
                     failure: failure.into_inner(),
-                })
-            }
+                },
+                None,
+            )),
             (Outstanding::Probe { tile }, EffectResult::ProbeAvailable { width, height }) => {
                 if width == 0 || height == 0 {
                     return Err(EngineError::new(
@@ -1019,30 +1050,38 @@ impl EngineJob {
                         "probe observations carry non-zero dimensions",
                     ));
                 }
-                Ok(InnerCommand::ProbeOutcome {
-                    tile,
-                    outcome: dezoomify_protocol::dto::ProbeOutcome::Available {
-                        width: std::num::NonZeroU64::new(u64::from(width)).ok_or_else(|| {
-                            EngineError::new(
-                                "job.invalid-result",
-                                "probe width does not fit the contract range",
-                            )
-                        })?,
-                        height: std::num::NonZeroU64::new(u64::from(height)).ok_or_else(|| {
-                            EngineError::new(
-                                "job.invalid-result",
-                                "probe height does not fit the contract range",
-                            )
-                        })?,
+                Ok((
+                    InnerCommand::ProbeOutcome {
+                        tile,
+                        outcome: dezoomify_protocol::dto::ProbeOutcome::Available {
+                            width: std::num::NonZeroU64::new(u64::from(width)).ok_or_else(
+                                || {
+                                    EngineError::new(
+                                        "job.invalid-result",
+                                        "probe width does not fit the contract range",
+                                    )
+                                },
+                            )?,
+                            height: std::num::NonZeroU64::new(u64::from(height)).ok_or_else(
+                                || {
+                                    EngineError::new(
+                                        "job.invalid-result",
+                                        "probe height does not fit the contract range",
+                                    )
+                                },
+                            )?,
+                        },
                     },
-                })
+                    None,
+                ))
             }
-            (Outstanding::Probe { tile }, EffectResult::ProbeMissing) => {
-                Ok(InnerCommand::ProbeOutcome {
+            (Outstanding::Probe { tile }, EffectResult::ProbeMissing) => Ok((
+                InnerCommand::ProbeOutcome {
                     tile,
                     outcome: dezoomify_protocol::dto::ProbeOutcome::Missing,
-                })
-            }
+                },
+                None,
+            )),
             (Outstanding::Metadata { request }, EffectResult::MetadataFailed(failure)) => {
                 let transport = failure.transport.unwrap_or(TransportKind::Direct);
                 let cause = FetchCause {
@@ -1051,17 +1090,16 @@ impl EngineJob {
                     transport,
                     reason: None,
                 };
-                Ok(InnerCommand::FetchFailure { request, cause })
+                Ok((InnerCommand::FetchFailure { request, cause }, None))
             }
             (Outstanding::Timer { tile, attempt }, EffectResult::TimerElapsed) => {
-                Ok(InnerCommand::RetryTimerElapsed { tile, attempt })
+                Ok((InnerCommand::RetryTimerElapsed { tile, attempt }, None))
             }
             (Outstanding::Finalize, EffectResult::OutputCommitted { disposition }) => {
-                self.disposition = Some(disposition);
-                Ok(InnerCommand::FinalizationSucceeded)
+                Ok((InnerCommand::FinalizationSucceeded, Some(disposition)))
             }
             (Outstanding::Finalize, EffectResult::OutputFailed { code, message }) => {
-                Ok(InnerCommand::FinalizationFailed { code, message })
+                Ok((InnerCommand::FinalizationFailed { code, message }, None))
             }
             _ => Err(wrong_kind(effect)),
         }

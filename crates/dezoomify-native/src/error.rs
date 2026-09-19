@@ -175,6 +175,36 @@ impl From<dezoomify_core::core::processing::ProcessingError> for NativeError {
     }
 }
 
+/// Map an engine terminal failure code onto the stable native product code
+/// while preserving the engine message. Branches on the stable engine code
+/// only, never on message text. Unknown codes fail closed as internal.
+#[must_use]
+pub fn map_engine_failure_to_native(code: &str) -> &str {
+    match code {
+        "job.discovery-failed" | "job.catalog-invalid" | "job.empty-resource" => "discovery.failed",
+        "job.no-images" => "discovery.no-image",
+        "job.unknown-dezoomer" => "discovery.unknown-dezoomer",
+        "job.resource-limit" => "tile.limit",
+        "job.plan-invalid" => "discovery.tile-plan",
+        "job.plan-empty" => "discovery.no-level",
+        "job.partial-discarded" => "tile.download-failed",
+        // Already-native product codes pass through untouched.
+        already
+            if already.starts_with("discovery.")
+                || already.starts_with("tile.")
+                || already.starts_with("transport.")
+                || already.starts_with("output.")
+                || already.starts_with("auth.")
+                || already.starts_with("protocol.")
+                || already.starts_with("handoff.")
+                || already == "job.cancelled" =>
+        {
+            already
+        }
+        _ => "native.internal",
+    }
+}
+
 /// Stable phase for a native error code. Branches only on the namespaced
 /// code prefix/exact code, never on display strings.
 #[must_use]

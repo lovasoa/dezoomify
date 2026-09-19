@@ -24,6 +24,6 @@ pub mod transport;
 
 pub use error::NativeError;
 pub use runner::{
-    CommandRejected, JobCommandAck, JobOptions, JobSnapshot, Lifecycle, NativeRunner,
-    OutputSummary, OutputTarget, RunningJob, Terminal, UserCommand,
+    CommandRejected, JobCommandAck, JobOptions, JobSnapshot, NativeRunner, OutputSummary,
+    OutputTarget, RunningJob, UserCommand,
 };

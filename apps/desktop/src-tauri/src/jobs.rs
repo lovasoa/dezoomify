@@ -31,12 +31,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use dezoomify_native::output::{validate_destination, OutputFormat};
-use dezoomify_native::pipeline::PartialDecision;
 use dezoomify_native::runner::{
-    JobOptions, JobSnapshot as RunnerSnapshot, Lifecycle, NativeRunner, OutputTarget, RunningJob,
-    UserCommand,
+    JobOptions, JobSnapshot as RunnerSnapshot, NativeRunner, OutputTarget, RunningJob,
+    UserCommand as RunnerCommand,
 };
-use dezoomify_protocol::dto::JobState as ProtocolState;
+use dezoomify_protocol::dto::{JobState as ProtocolState, SnapshotTerminalDto};
 
 use crate::settings::{job_options_for, DesktopSettings};
 
@@ -151,14 +150,25 @@ pub fn payload_has_forbidden_keys(value: &serde_json::Value) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Choice {
-    /// Choose a catalog image by position (pre-start option only).
+    /// Choose a catalog image by position (pre-start option, plus live
+    /// `SelectImage` when the runner is already awaiting selection).
     Image { index: usize },
-    /// Choose a level of the chosen image by position (pre-start option only).
+    /// Choose a level of the chosen image by position (pre-start option, plus
+    /// live `SelectLevel` when awaiting level selection).
     Level { index: usize },
-    /// Answer a pending partial decision (keep, retry, or discard).
+    /// Answer a pending partial decision (keep, retry, or discard) with the
+    /// engine generation when known (`generation` omitted answers the latest
+    /// pending decision; stale generations are rejected by the engine).
     Partial {
         decision: dezoomify_protocol::dto::RecoveryChoice,
+        #[serde(default)]
+        generation: Option<u32>,
     },
+    /// Pause tile acquisition (engine overlay; wrong-phase rejections are safe
+    /// no-ops).
+    Pause,
+    /// Resume tile acquisition.
+    Resume,
 }
 
 /// One tracked job: host handles only. No stored lifecycle, seq,
@@ -188,11 +198,15 @@ pub struct JobEntry {
     /// for automatic saves). A host cue for the save dialog, not job state.
     pub output_dir: Option<PathBuf>,
     /// Actual published output, retained natively for explicit open/reveal
-    /// actions. Set once from the runner terminal; `None` until publish.
+    /// actions. Set once from the runner publication; `None` until publish.
     pub saved_path: Option<PathBuf>,
     /// Terminal already forwarded exactly once. Guards stale dispatches and
     /// drops late runner snapshots; never a lifecycle mirror.
     pub settled: bool,
+    /// Latest pending partial-decision generation from the verbatim engine
+    /// snapshot (`None` until `AwaitingPartialDecision`). Used to answer with
+    /// the engine generation; never a lifecycle mirror.
+    pub pending_generation: Option<u32>,
 }
 
 impl std::fmt::Debug for JobEntry {
@@ -245,18 +259,6 @@ impl Default for JobTable {
     }
 }
 
-/// Map one runner lifecycle onto the protocol state the snapshot carries.
-/// Names match `dezoomify_protocol::dto::JobState` exactly; the desktop
-/// stores no divergent enum.
-fn protocol_state_for(lifecycle: &Lifecycle) -> ProtocolState {
-    match lifecycle {
-        Lifecycle::Discovering => ProtocolState::Discovering,
-        Lifecycle::AcquiringTiles => ProtocolState::AcquiringTiles,
-        Lifecycle::Finalizing => ProtocolState::Finalizing,
-        Lifecycle::AwaitingPartialDecision => ProtocolState::AwaitingPartialDecision,
-    }
-}
-
 fn protocol_state_name(state: ProtocolState) -> &'static str {
     match state {
         ProtocolState::Created => "Created",
@@ -286,8 +288,10 @@ fn destination_recovery() -> serde_json::Value {
 }
 
 fn partial_recovery(
-    generation: u64,
-    ledger: &dezoomify_native::runner::RecoveryLedger,
+    generation: u32,
+    missing: &[String],
+    failed: usize,
+    total: u64,
 ) -> serde_json::Value {
     serde_json::json!({
         "generation": generation,
@@ -296,84 +300,87 @@ fn partial_recovery(
             {"id": "discard-partial", "kind": "discard-partial", "scope": "job", "rationale": "fail-closed"},
             {"id": "retry", "kind": "retry", "scope": "tile", "rationale": "transient"},
         ],
-        "missing": redact_ledger(&ledger.missing),
-        "failed": ledger.failed,
-        "total": ledger.total,
+        "missing": redact_ledger(missing),
+        "failed": failed,
+        "total": total,
     })
 }
 
-/// Build one `JobSnapshot` payload verbatim from a runner snapshot.
-/// Counts, ledgers, and error codes travel as typed fields; secrets,
-/// paths, and full URLs never cross (only the redacted origin).
-fn snapshot_payload(
-    job: &str,
-    origin: &str,
-    selection: (Option<usize>, Option<usize>),
-    snapshot: &RunnerSnapshot,
-) -> serde_json::Value {
-    let revision = snapshot.seq;
-    let acquired = snapshot.acquired;
-    let total = if snapshot.total == 0 {
-        serde_json::Value::Null
-    } else {
-        serde_json::json!(snapshot.total)
+/// Build one `JobSnapshot` payload verbatim from the engine projection plus
+/// the native publication. Lifecycle, progress, selection, decision, and
+/// terminal forward the engine snapshot untouched; the publication supplies
+/// the saved path for open/reveal. Counts, ledgers, and error codes travel as
+/// typed fields; secrets, paths, and full URLs never cross (only the redacted
+/// origin and the published sibling basename).
+fn snapshot_payload(job: &str, origin: &str, snapshot: &RunnerSnapshot) -> serde_json::Value {
+    let inner = &snapshot.snapshot;
+    let revision = inner.revision;
+    let acquired = inner.progress.completed;
+    let total = match inner.progress.total {
+        Some(0) | None => serde_json::Value::Null,
+        Some(total) => serde_json::json!(total),
     };
-    let mut state_name = protocol_state_name(protocol_state_for(&snapshot.lifecycle));
-    let mut recovery = snapshot
-        .recovery
-        .as_ref()
-        .map(|ledger| partial_recovery(revision, ledger));
+    // State is the engine lifecycle verbatim; terminal states override to the
+    // engine terminal (Completed vs PartiallyCompleted stay distinct).
+    let mut state_name = protocol_state_name(inner.lifecycle);
+    let mut recovery = inner.decision.as_ref().map(|decision| {
+        let missing: Vec<String> = decision
+            .missing
+            .iter()
+            .map(|(tile, _)| tile.to_string())
+            .collect();
+        let total_count = inner.progress.total.unwrap_or(0);
+        partial_recovery(decision.generation, &missing, missing.len(), total_count)
+    });
     let mut terminal: Option<serde_json::Value> = None;
     let mut output: Option<serde_json::Value> = None;
-    if let Some(term) = snapshot.terminal.as_ref() {
+    if let Some(term) = inner.terminal.as_ref() {
         match term {
-            dezoomify_native::runner::Terminal::Completed(summary) => {
-                let partial = summary.partial;
-                state_name = if partial {
-                    "PartiallyCompleted"
-                } else {
-                    "Completed"
-                };
-                terminal = Some(serde_json::json!({
-                    "kind": if partial { "partial-completed" } else { "completed" },
-                }));
-                let sibling = std::path::Path::new(&summary.path)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("");
-                let mut out = serde_json::json!({
-                    "doneTiles": summary.tile_count,
-                    "totalTiles": snapshot.total,
-                    "failedTiles": summary.missing.len(),
-                    "partial": partial,
-                    "format": summary.format,
-                    "width": summary.width,
-                    "height": summary.height,
-                    "missingTiles": redact_ledger(&summary.missing),
-                });
-                if partial && !sibling.is_empty() {
-                    out["siblingName"] = serde_json::json!(sibling);
+            SnapshotTerminalDto::Completed => {
+                state_name = "Completed";
+                terminal = Some(serde_json::json!({"kind": "completed"}));
+                if let Some(published) = snapshot.published.as_ref() {
+                    output = Some(published_output(
+                        published,
+                        inner.progress.total.unwrap_or(0),
+                        false,
+                    ));
                 }
-                output = Some(out);
-                // A terminal never carries a pending recovery cue.
                 recovery = None;
             }
-            dezoomify_native::runner::Terminal::Cancelled => {
+            SnapshotTerminalDto::PartialCompleted { .. } => {
+                state_name = "PartiallyCompleted";
+                terminal = Some(serde_json::json!({"kind": "partial-completed"}));
+                if let Some(published) = snapshot.published.as_ref() {
+                    output = Some(published_output(
+                        published,
+                        inner.progress.total.unwrap_or(0),
+                        true,
+                    ));
+                }
+                recovery = None;
+            }
+            SnapshotTerminalDto::Cancelled => {
                 state_name = "Cancelled";
                 terminal = Some(serde_json::json!({"kind": "cancelled"}));
                 recovery = None;
             }
-            dezoomify_native::runner::Terminal::Failed(error) => {
+            SnapshotTerminalDto::Failed { error } => {
                 state_name = "Failed";
+                // Preserve the native product code for the TS lane: engine
+                // `job.*` failures map once via the native boundary (e.g.
+                // `job.no-images` -> `discovery.no-image`); already-native
+                // codes pass through untouched.
+                let code = dezoomify_native::error::map_engine_failure_to_native(&error.code);
                 let mut err = serde_json::json!({
-                    "code": error.code,
-                    "phase": error_phase(&error.code),
-                    "retryable": error_retryable(&error.code),
+                    "code": code,
+                    "phase": error_phase(code),
+                    "retryable": error_retryable(code),
                     "message": redact_message(&error.message),
                     "recovery": [],
-                    "transport": error_transport(&error.code),
+                    "transport": error_transport(code),
                 });
-                if let Some(kind) = error_resource_kind(&error.code) {
+                if let Some(kind) = error_resource_kind(code) {
                     err["resource_kind"] = serde_json::json!(kind);
                 }
                 terminal = Some(serde_json::json!({"kind": "failed", "error": err}));
@@ -381,9 +388,20 @@ fn snapshot_payload(
             }
         }
     }
-    // PartiallyCompleted never reads as Completed: the terminal kind,
-    // the state name, and `output.partial` all agree on the honest
-    // outcome straight from `summary.partial`.
+    // A published native publication without an engine terminal yet (should not
+    // happen: the runner attaches publication to the terminal) still reports
+    // honestly from the publication flag; otherwise the terminal decides.
+    if terminal.is_none() {
+        if let Some(published) = snapshot.published.as_ref() {
+            if published.partial {
+                state_name = "PartiallyCompleted";
+            }
+        }
+    }
+    // Selection is the engine projection verbatim (positions into the kept
+    // catalog); the host options only seed pre-start defaults.
+    let selection_image = inner.selection.image.map(|image| image as usize);
+    let selection_level = inner.selection.level.map(|level| level as usize);
     let payload = serde_json::json!({
         "job": job,
         "jobId": job,
@@ -392,12 +410,12 @@ fn snapshot_payload(
         "kind": "snapshot",
         "jobSnapshot": true,
         "state": state_name,
-        "lifecycle": format!("{:?}", snapshot.lifecycle),
+        "lifecycle": format!("{:?}", inner.lifecycle),
         "catalog": null,
         "acquired": acquired,
         "total": total,
-        "paused": false,
-        "selection": {"image": selection.0, "level": selection.1},
+        "paused": inner.paused,
+        "selection": {"image": selection_image, "level": selection_level},
         "warnings": [],
         "recovery": recovery.unwrap_or(serde_json::Value::Null),
         "terminal": terminal.unwrap_or(serde_json::Value::Null),
@@ -408,6 +426,34 @@ fn snapshot_payload(
     });
     debug_assert!(!payload_has_forbidden_keys(&payload));
     payload
+}
+
+/// Honest native publication payload: what was actually written. Partial
+/// publications name the `.partial` sibling basename, never the granted path.
+fn published_output(
+    published: &dezoomify_native::runner::OutputSummary,
+    total: u64,
+    partial_terminal: bool,
+) -> serde_json::Value {
+    let partial = published.partial || partial_terminal;
+    let sibling = std::path::Path::new(&published.path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    let mut out = serde_json::json!({
+        "doneTiles": published.tile_count,
+        "totalTiles": total,
+        "failedTiles": published.missing.len(),
+        "partial": partial,
+        "format": published.format,
+        "width": published.width,
+        "height": published.height,
+        "missingTiles": redact_ledger(&published.missing),
+    });
+    if partial && !sibling.is_empty() {
+        out["siblingName"] = serde_json::json!(sibling);
+    }
+    out
 }
 
 /// Initial host snapshot for a fresh job: `Created` with a
@@ -593,6 +639,7 @@ impl JobTable {
                 output_dir,
                 saved_path: None,
                 settled: false,
+                pending_generation: None,
             },
         );
         let payload = initial_payload(&id, &origin, needs_destination);
@@ -751,7 +798,7 @@ impl JobTable {
             if let Some(runner) = record.runner.as_ref() {
                 // A rejected send means the driver already exited; its
                 // terminal is on the stream and settles the job below.
-                let _ = runner.send(UserCommand::Cancel);
+                let _ = runner.send(RunnerCommand::Cancel);
             }
         }
         // The runner owns quiescence: the cancelled terminal arrives on the
@@ -759,16 +806,19 @@ impl JobTable {
         Ok((0, Vec::new()))
     }
 
-    /// Answer an image/level choice for a live job, or resolve a pending
-    /// partial decision.
+    /// Answer an image/level choice for a live job, resolve a pending
+    /// partial decision, or pause/resume acquisition.
     ///
     /// Image/level selections fold into the runner options so the runner
-    /// plans the chosen image/level when it starts. Partial keep/discard/retry
-    /// forward to the live runner's gate (early answers survive: the gate
-    /// stores them before the wait starts), and the terminal outcome arrives
-    /// as the next runner snapshot. No snapshot is emitted synchronously:
-    /// pre-runner choices update options silently and live answers resolve
-    /// through the runner stream.
+    /// plans the chosen image/level when it starts, plus a live engine
+    /// command when the runner is already awaiting selection (wrong-phase
+    /// rejections are safe no-ops). Partial keep/discard/retry forward to the
+    /// live runner with the engine generation (early answers survive; stale
+    /// generations are rejected by the engine), and the terminal outcome
+    /// arrives as the next runner snapshot. Pause/resume forward live
+    /// (wrong-phase safe). No snapshot is emitted synchronously: pre-runner
+    /// choices update options silently and live answers resolve through the
+    /// runner stream.
     pub fn answer_choice(
         &mut self,
         job: &str,
@@ -777,16 +827,24 @@ impl JobTable {
         self.poll_snapshots();
         self.require_live(job)?;
         match *choice {
-            Choice::Partial { decision } => {
-                use dezoomify_native::runner::UserCommand as RunnerCommand;
+            Choice::Partial {
+                decision,
+                generation,
+            } => {
                 use dezoomify_protocol::dto::RecoveryChoice as WireDecision;
-                if let Some(record) = self.jobs.get(job) {
-                    if let Some(runner) = record.runner.as_ref() {
-                        let _ = runner.send(RunnerCommand::AnswerPartial(match decision {
-                            WireDecision::Keep => PartialDecision::Keep,
-                            WireDecision::Retry => PartialDecision::Retry,
-                            WireDecision::Discard => PartialDecision::Discard,
-                        }));
+                let generation = generation.or_else(|| {
+                    self.jobs
+                        .get(job)
+                        .and_then(|record| record.pending_generation)
+                });
+                if let Some(generation) = generation {
+                    if let Some(record) = self.jobs.get(job) {
+                        if let Some(runner) = record.runner.as_ref() {
+                            let _ = runner.send(RunnerCommand::AnswerPartial {
+                                generation,
+                                decision,
+                            });
+                        }
                     }
                 }
                 // Keep/discard update the fallback policy so a timeout
@@ -802,10 +860,36 @@ impl JobTable {
                 if let Some(record) = self.jobs.get_mut(job) {
                     record.options.image_index = Some(index);
                 }
+                if let Some(record) = self.jobs.get(job) {
+                    if let Some(runner) = record.runner.as_ref() {
+                        let image = u32::try_from(index).unwrap_or(u32::MAX);
+                        let _ = runner.send(RunnerCommand::SelectImage { image });
+                    }
+                }
             }
             Choice::Level { index } => {
                 if let Some(record) = self.jobs.get_mut(job) {
                     record.options.zoom_level = Some(index);
+                }
+                if let Some(record) = self.jobs.get(job) {
+                    if let Some(runner) = record.runner.as_ref() {
+                        let level = u32::try_from(index).unwrap_or(u32::MAX);
+                        let _ = runner.send(RunnerCommand::SelectLevel { level });
+                    }
+                }
+            }
+            Choice::Pause => {
+                if let Some(record) = self.jobs.get(job) {
+                    if let Some(runner) = record.runner.as_ref() {
+                        let _ = runner.send(RunnerCommand::Pause);
+                    }
+                }
+            }
+            Choice::Resume => {
+                if let Some(record) = self.jobs.get(job) {
+                    if let Some(runner) = record.runner.as_ref() {
+                        let _ = runner.send(RunnerCommand::Resume);
+                    }
                 }
             }
         }
@@ -888,7 +972,7 @@ impl JobTable {
                     terminal_seen = true;
                     break;
                 }
-                let is_terminal = snapshot.terminal.is_some();
+                let is_terminal = snapshot.snapshot.terminal.is_some();
                 if let Some(emit) = self.forward_runner_snapshot(&id, &snapshot) {
                     emits.push(emit);
                 }
@@ -917,32 +1001,31 @@ impl JobTable {
         job: &str,
         snapshot: &RunnerSnapshot,
     ) -> Option<SnapshotEmit> {
-        let (origin, selection) = match self.jobs.get(job) {
-            Some(record) if !record.settled => (
-                record.origin.clone(),
-                (record.options.image_index, record.options.zoom_level),
-            ),
+        let origin = match self.jobs.get(job) {
+            Some(record) if !record.settled => record.origin.clone(),
             _ => return None,
         };
-        // Monotonic progress flows through untouched: the runner seq and
+        // Monotonic progress flows through untouched: the engine revision and
         // counts are authoritative, so no max() fold can reorder them.
-        // Partial honesty flows through untouched: `summary.partial`
+        // Partial honesty flows through untouched: the engine terminal
         // decides between `Completed` and `PartiallyCompleted`, never a
-        // display string.
-        let payload = snapshot_payload(job, &origin, selection, snapshot);
-        let seq = snapshot.seq;
-        if let Some(terminal) = snapshot.terminal.as_ref() {
+        // display string; the native publication supplies the saved path.
+        let payload = snapshot_payload(job, &origin, snapshot);
+        let seq = u64::from(snapshot.snapshot.revision);
+        if let Some(decision) = snapshot.snapshot.decision.as_ref() {
+            if let Some(record) = self.jobs.get_mut(job) {
+                record.pending_generation = Some(decision.generation);
+            }
+        }
+        if snapshot.snapshot.terminal.is_some() {
             if let Some(record) = self.jobs.get_mut(job) {
                 record.settled = true;
-                match terminal {
-                    dezoomify_native::runner::Terminal::Completed(summary) => {
-                        record.saved_path = Some(summary.path.clone());
-                        if record.destination.is_none() {
-                            record.destination = Some(summary.path.clone());
-                        }
+                record.pending_generation = None;
+                if let Some(published) = snapshot.published.as_ref() {
+                    record.saved_path = Some(published.path.clone());
+                    if record.destination.is_none() {
+                        record.destination = Some(published.path.clone());
                     }
-                    dezoomify_native::runner::Terminal::Cancelled
-                    | dezoomify_native::runner::Terminal::Failed(_) => {}
                 }
             }
         }
@@ -988,7 +1071,96 @@ fn output_format_for_id(format: &str) -> Option<OutputFormat> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dezoomify_native::runner::{OutputSummary, RecoveryLedger, Terminal};
+    use dezoomify_native::runner::OutputSummary;
+
+    /// Build one verbatim engine snapshot for forwarder tests (no I/O).
+    fn engine_snapshot(
+        revision: u32,
+        lifecycle: ProtocolState,
+        acquired: u64,
+        total: Option<u64>,
+        terminal: Option<SnapshotTerminalDto>,
+    ) -> dezoomify_engine::JobSnapshot {
+        dezoomify_engine::JobSnapshot {
+            revision,
+            lifecycle,
+            paused: false,
+            progress: dezoomify_engine::Progress {
+                completed: acquired,
+                total,
+            },
+            selection: dezoomify_engine::Selection {
+                image: None,
+                level: None,
+                level_count: 0,
+                catalog: None,
+                deferred: Vec::new(),
+            },
+            decision: None,
+            terminal,
+            output: None,
+            notices: Vec::new(),
+        }
+    }
+
+    fn runner_snapshot(
+        job: &str,
+        revision: u32,
+        lifecycle: ProtocolState,
+        acquired: u64,
+        total: Option<u64>,
+        terminal: Option<SnapshotTerminalDto>,
+        published: Option<OutputSummary>,
+    ) -> RunnerSnapshot {
+        RunnerSnapshot {
+            job: job.to_string(),
+            snapshot: engine_snapshot(revision, lifecycle, acquired, total, terminal),
+            published,
+        }
+    }
+
+    fn runner_snapshot_with_decision(
+        job: &str,
+        revision: u32,
+        lifecycle: ProtocolState,
+        acquired: u64,
+        total: Option<u64>,
+        generation: u32,
+        missing_tiles: &[u32],
+    ) -> RunnerSnapshot {
+        let mut snapshot = engine_snapshot(revision, lifecycle, acquired, total, None);
+        snapshot.decision = Some(dezoomify_engine::DecisionPayload {
+            generation,
+            missing: missing_tiles
+                .iter()
+                .map(|tile| (*tile, Vec::new()))
+                .collect(),
+        });
+        RunnerSnapshot {
+            job: job.to_string(),
+            snapshot,
+            published: None,
+        }
+    }
+
+    fn failed_terminal(code: &str, message: &str) -> SnapshotTerminalDto {
+        SnapshotTerminalDto::Failed {
+            error: dezoomify_protocol::dto::ErrorDto {
+                code: code.to_string(),
+                phase: dezoomify_protocol::dto::ErrorPhase::Acquisition,
+                retryable: false,
+                message: message.to_string(),
+                recovery: Vec::new(),
+                request: None,
+                transport: None,
+                blocked_reason: None,
+                resource_kind: None,
+                http: None,
+                preview: None,
+                detail: None,
+            },
+        }
+    }
 
     fn snapshot_seq(payload: &serde_json::Value) -> u64 {
         payload
@@ -1154,6 +1326,15 @@ mod tests {
             "unknown"
         );
         table.cancel_job(&id).unwrap();
+        // The runner owns quiescence: poll until the cancelled terminal is
+        // forwarded (bounded wait), then post-terminal grants are stale.
+        for _ in 0..200 {
+            if table.is_settled(&id) {
+                break;
+            }
+            let _ = table.poll_drivers();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         assert_eq!(
             table
                 .request_destination(&id, &png, "png", false)
@@ -1229,15 +1410,15 @@ mod tests {
             .unwrap();
         // Inject a terminal by polling a real runner is racy; instead drive
         // the verbatim builder directly through a synthetic snapshot.
-        let terminal_snapshot = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 7,
-            lifecycle: Lifecycle::Finalizing,
-            acquired: 2,
-            total: 2,
-            recovery: None,
-            terminal: Some(Terminal::Completed(published("png", 4, 4, 1))),
-        };
+        let terminal_snapshot = runner_snapshot(
+            "job:test",
+            7,
+            ProtocolState::Finalizing,
+            2,
+            Some(2),
+            Some(SnapshotTerminalDto::Completed),
+            Some(published("png", 4, 4, 1)),
+        );
         let emit = table
             .forward_runner_snapshot(&id, &terminal_snapshot)
             .expect("terminal forwards");
@@ -1247,10 +1428,8 @@ mod tests {
         assert_eq!(snapshot_state(&emit.payload), "Completed");
         assert!(table.is_settled(&id));
         // A straggler after the terminal is dropped: exactly-once.
-        let straggler = RunnerSnapshot {
-            seq: 8,
-            ..terminal_snapshot.clone()
-        };
+        let mut straggler = terminal_snapshot.clone();
+        straggler.snapshot.revision = 8;
         assert!(table.forward_runner_snapshot(&id, &straggler).is_none());
         // Post-terminal inputs are stale with no new effects.
         assert_eq!(table.cancel_job(&id).unwrap_err(), "stale");
@@ -1265,17 +1444,17 @@ mod tests {
     #[test]
     fn progress_flows_verbatim_and_never_claims_unknown_totals() {
         // Unknown totals stay null and never claim completeness: the
-        // verbatim builder maps runner `0` to JSON null.
-        let snapshot = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 3,
-            lifecycle: Lifecycle::AcquiringTiles,
-            acquired: 1,
-            total: 0,
-            recovery: None,
-            terminal: None,
-        };
-        let payload = snapshot_payload("job:1", "https://example.com", (None, None), &snapshot);
+        // verbatim builder maps engine `None` to JSON null.
+        let snapshot = runner_snapshot(
+            "job:test",
+            3,
+            ProtocolState::AcquiringTiles,
+            1,
+            None,
+            None,
+            None,
+        );
+        let payload = snapshot_payload("job:1", "https://example.com", &snapshot);
         assert!(payload["total"].is_null());
         assert_eq!(payload["acquired"], serde_json::json!(1u64));
         assert_eq!(snapshot_state(&payload), "AcquiringTiles");
@@ -1285,16 +1464,16 @@ mod tests {
 
     #[test]
     fn output_carries_geometry_verbatim() {
-        let snapshot = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 4,
-            lifecycle: Lifecycle::Finalizing,
-            acquired: 12,
-            total: 12,
-            recovery: None,
-            terminal: Some(Terminal::Completed(published("png", 800, 600, 12))),
-        };
-        let payload = snapshot_payload("job:1", "https://example.com", (None, None), &snapshot);
+        let snapshot = runner_snapshot(
+            "job:test",
+            4,
+            ProtocolState::Finalizing,
+            12,
+            Some(12),
+            Some(SnapshotTerminalDto::Completed),
+            Some(published("png", 800, 600, 12)),
+        );
+        let payload = snapshot_payload("job:1", "https://example.com", &snapshot);
         assert_eq!(terminal_kind(&payload).as_deref(), Some("completed"));
         assert_eq!(snapshot_state(&payload), "Completed");
         assert_eq!(payload["output"]["format"], serde_json::json!("png"));
@@ -1307,19 +1486,19 @@ mod tests {
 
     #[test]
     fn error_carries_stable_code_phase_retryable_recovery() {
-        let snapshot = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 5,
-            lifecycle: Lifecycle::AcquiringTiles,
-            acquired: 1,
-            total: 4,
-            recovery: None,
-            terminal: Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+        let snapshot = runner_snapshot(
+            "job:test",
+            5,
+            ProtocolState::AcquiringTiles,
+            1,
+            Some(4),
+            Some(failed_terminal(
                 "tile.download-failed",
                 "3 tiles failed; token=CANARY-secret",
-            ))),
-        };
-        let payload = snapshot_payload("job:1", "https://example.com", (None, None), &snapshot);
+            )),
+            None,
+        );
+        let payload = snapshot_payload("job:1", "https://example.com", &snapshot);
         assert_eq!(terminal_kind(&payload).as_deref(), Some("failed"));
         assert_eq!(snapshot_state(&payload), "Failed");
         let error = &payload["terminal"]["error"];
@@ -1459,52 +1638,43 @@ mod tests {
 
     #[test]
     fn snapshot_emit_is_self_describing_and_typed() {
-        let progress = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 2,
-            lifecycle: Lifecycle::AcquiringTiles,
-            acquired: 3,
-            total: 10,
-            recovery: None,
-            terminal: None,
-        };
-        let payload = snapshot_payload("job:1", "https://example.com", (None, None), &progress);
+        let progress = runner_snapshot(
+            "job:test",
+            2,
+            ProtocolState::AcquiringTiles,
+            3,
+            Some(10),
+            None,
+            None,
+        );
+        let payload = snapshot_payload("job:1", "https://example.com", &progress);
         assert_eq!(payload["kind"], serde_json::json!("snapshot"));
         assert_eq!(payload["lifecycle"], serde_json::json!("AcquiringTiles"));
         assert_eq!(payload["state"], serde_json::json!("AcquiringTiles"));
         assert_eq!(payload["acquired"], serde_json::json!(3u64));
         assert_eq!(payload["total"], serde_json::json!(10u64));
         assert!(payload["terminal"].is_null());
-        let recovery_snapshot = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 3,
-            lifecycle: Lifecycle::AwaitingPartialDecision,
-            acquired: 9,
-            total: 12,
-            recovery: Some(RecoveryLedger {
-                missing: vec!["t-1".to_string()],
-                failed: 3,
-                total: 12,
-            }),
-            terminal: None,
-        };
-        let recovery_payload = snapshot_payload(
-            "job:1",
-            "https://example.com",
-            (None, None),
-            &recovery_snapshot,
+        let recovery_snapshot = runner_snapshot_with_decision(
+            "job:test",
+            3,
+            ProtocolState::AwaitingPartialDecision,
+            9,
+            Some(12),
+            1,
+            &[1],
         );
+        let recovery_payload = snapshot_payload("job:1", "https://example.com", &recovery_snapshot);
         assert_eq!(
             recovery_payload["state"],
             serde_json::json!("AwaitingPartialDecision")
         );
         assert_eq!(
             recovery_payload["recovery"]["missing"],
-            serde_json::json!(["t-1"])
+            serde_json::json!(["1"])
         );
         assert_eq!(
             recovery_payload["recovery"]["failed"],
-            serde_json::json!(3u64)
+            serde_json::json!(1u64)
         );
         assert_eq!(
             recovery_payload["recovery"]["total"],
@@ -1514,23 +1684,20 @@ mod tests {
     }
 
     #[test]
-    fn protocol_states_cover_runner_phases_without_divergence() {
-        // The desktop stores no divergent enum: runner lifecycles map onto
+    fn protocol_states_cover_engine_phases_without_divergence() {
+        // The desktop stores no divergent enum: engine lifecycles map onto
         // protocol `JobState` names verbatim.
         assert_eq!(
-            protocol_state_name(protocol_state_for(&Lifecycle::Discovering)),
+            protocol_state_name(ProtocolState::Discovering),
             "Discovering"
         );
         assert_eq!(
-            protocol_state_name(protocol_state_for(&Lifecycle::AcquiringTiles)),
+            protocol_state_name(ProtocolState::AcquiringTiles),
             "AcquiringTiles"
         );
+        assert_eq!(protocol_state_name(ProtocolState::Finalizing), "Finalizing");
         assert_eq!(
-            protocol_state_name(protocol_state_for(&Lifecycle::Finalizing)),
-            "Finalizing"
-        );
-        assert_eq!(
-            protocol_state_name(protocol_state_for(&Lifecycle::AwaitingPartialDecision)),
+            protocol_state_name(ProtocolState::AwaitingPartialDecision),
             "AwaitingPartialDecision"
         );
     }
@@ -1576,57 +1743,52 @@ mod tests {
                     table
                         .request_destination(&id, &scratch_path("stale", "out.png"), "png", false)
                         .unwrap();
-                    let snapshot = RunnerSnapshot {
-                        job: "job:test".to_string(),
-                        seq: 2,
-                        lifecycle: Lifecycle::Finalizing,
-                        acquired: 2,
-                        total: 2,
-                        recovery: None,
-                        terminal: Some(Terminal::Completed(published("png", 8, 6, 2))),
-                    };
+                    let snapshot = runner_snapshot(
+                        "job:test",
+                        2,
+                        ProtocolState::Finalizing,
+                        2,
+                        Some(2),
+                        Some(SnapshotTerminalDto::Completed),
+                        Some(published("png", 8, 6, 2)),
+                    );
                     table.forward_runner_snapshot(&id, &snapshot);
                 }
                 "partial" => {
                     table
                         .request_destination(&id, &scratch_path("stale", "out.png"), "png", false)
                         .unwrap();
-                    let snapshot = RunnerSnapshot {
-                        job: "job:test".to_string(),
-                        seq: 2,
-                        lifecycle: Lifecycle::Finalizing,
-                        acquired: 1,
-                        total: 2,
-                        recovery: None,
-                        terminal: Some(Terminal::Completed(published_partial(
+                    let snapshot = runner_snapshot(
+                        "job:test",
+                        2,
+                        ProtocolState::Finalizing,
+                        1,
+                        Some(2),
+                        Some(SnapshotTerminalDto::PartialCompleted { missing: vec![1] }),
+                        Some(published_partial(
                             "png",
                             8,
                             6,
                             1,
-                            &["tile:1".to_string()],
+                            &["1".to_string()],
                             "out.partial.png",
-                        ))),
-                    };
+                        )),
+                    );
                     table.forward_runner_snapshot(&id, &snapshot);
                 }
                 _ => {
                     table
                         .request_destination(&id, &scratch_path("stale", "out.png"), "png", false)
                         .unwrap();
-                    let snapshot = RunnerSnapshot {
-                        job: "job:test".to_string(),
-                        seq: 2,
-                        lifecycle: Lifecycle::AcquiringTiles,
-                        acquired: 0,
-                        total: 2,
-                        recovery: None,
-                        terminal: Some(Terminal::Failed(
-                            dezoomify_native::error::NativeError::new(
-                                "tile.download-failed",
-                                "tiles missing",
-                            ),
-                        )),
-                    };
+                    let snapshot = runner_snapshot(
+                        "job:test",
+                        2,
+                        ProtocolState::AcquiringTiles,
+                        0,
+                        Some(2),
+                        Some(failed_terminal("tile.download-failed", "tiles missing")),
+                        None,
+                    );
                     table.forward_runner_snapshot(&id, &snapshot);
                 }
             }
@@ -1674,29 +1836,6 @@ mod tests {
         assert!(table.destination_for(&id).is_none());
     }
 
-    /// Task 6.1: duplicates are safe no-ops with no state change.
-    #[test]
-    fn duplicate_inputs_are_ignored_without_state_change() {
-        // Engine parity: unknown effect completions are rejected with no
-        // state change.
-        let (mut engine, _) =
-            dezoomify_engine::EngineJob::start(engine_options(&["https://example.com/item"]))
-                .unwrap();
-        let revision_before = engine.snapshot().revision;
-        let err = engine
-            .complete(
-                dezoomify_engine::EffectId(u32::MAX),
-                dezoomify_engine::EffectResult::TileAcquired,
-            )
-            .unwrap_err();
-        assert_eq!(err.code, "job.stale-effect");
-        assert_eq!(
-            engine.snapshot().revision,
-            revision_before,
-            "rejected completions change nothing"
-        );
-    }
-
     /// Task 6.1: each terminal appears exactly once; later terminals are stale.
     #[test]
     fn terminal_exactly_once_for_all_four_kinds() {
@@ -1719,23 +1858,21 @@ mod tests {
             table
                 .request_destination(&id, &scratch_path("once", "out.png"), "png", false)
                 .unwrap();
-            let snapshot = RunnerSnapshot {
-                job: "job:test".to_string(),
-                seq: 2,
-                lifecycle: Lifecycle::Finalizing,
-                acquired: 2,
-                total: 2,
-                recovery: None,
-                terminal: Some(Terminal::Completed(published("png", 4, 4, 2))),
-            };
+            let snapshot = runner_snapshot(
+                "job:test",
+                2,
+                ProtocolState::Finalizing,
+                2,
+                Some(2),
+                Some(SnapshotTerminalDto::Completed),
+                Some(published("png", 4, 4, 2)),
+            );
             let emit = table.forward_runner_snapshot(&id, &snapshot).unwrap();
             assert_eq!(terminal_kind(&emit.payload).as_deref(), Some("completed"));
             assert_eq!(snapshot_state(&emit.payload), "Completed");
             // A second terminal snapshot is dropped.
-            let late = RunnerSnapshot {
-                seq: 3,
-                ..snapshot.clone()
-            };
+            let mut late = snapshot.clone();
+            late.snapshot.revision = 3;
             assert!(table.forward_runner_snapshot(&id, &late).is_none());
         }
         // PartiallyCompleted never reads as Completed.
@@ -1745,22 +1882,22 @@ mod tests {
             table
                 .request_destination(&id, &scratch_path("once", "out.png"), "png", false)
                 .unwrap();
-            let snapshot = RunnerSnapshot {
-                job: "job:test".to_string(),
-                seq: 2,
-                lifecycle: Lifecycle::Finalizing,
-                acquired: 1,
-                total: 2,
-                recovery: None,
-                terminal: Some(Terminal::Completed(published_partial(
+            let snapshot = runner_snapshot(
+                "job:test",
+                2,
+                ProtocolState::Finalizing,
+                1,
+                Some(2),
+                Some(SnapshotTerminalDto::PartialCompleted { missing: vec![1] }),
+                Some(published_partial(
                     "png",
                     2,
                     2,
                     1,
-                    &["tile:1".to_string()],
+                    &["1".to_string()],
                     "out.partial.png",
-                ))),
-            };
+                )),
+            );
             let emit = table.forward_runner_snapshot(&id, &snapshot).unwrap();
             assert_eq!(
                 terminal_kind(&emit.payload).as_deref(),
@@ -1777,74 +1914,36 @@ mod tests {
             table
                 .request_destination(&id, &scratch_path("once", "out.png"), "png", false)
                 .unwrap();
-            let snapshot = RunnerSnapshot {
-                job: "job:test".to_string(),
-                seq: 2,
-                lifecycle: Lifecycle::AcquiringTiles,
-                acquired: 0,
-                total: 2,
-                recovery: None,
-                terminal: Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
-                    "tile.download-failed",
-                    "boom",
-                ))),
-            };
+            let snapshot = runner_snapshot(
+                "job:test",
+                2,
+                ProtocolState::AcquiringTiles,
+                0,
+                Some(2),
+                Some(failed_terminal("tile.download-failed", "boom")),
+                None,
+            );
             let emit = table.forward_runner_snapshot(&id, &snapshot).unwrap();
             assert_eq!(terminal_kind(&emit.payload).as_deref(), Some("failed"));
             assert_eq!(snapshot_state(&emit.payload), "Failed");
         }
     }
 
-    /// Wrong-state commands are rejected through the canonical API.
+    /// Wrong-state shell inputs are rejected without work (engine wrong-state
+    /// coverage lives in `dezoomify-engine` tests; this backend never drives
+    /// a transient engine).
     #[test]
-    fn wrong_state_and_unknown_reply_are_safe() {
-        let (mut engine, _) =
-            dezoomify_engine::EngineJob::start(engine_options(&["https://example.com/item"]))
-                .unwrap();
-        let revision_before = engine.snapshot().revision;
-        // Supplying bytes for an unknown effect is rejected, never applied.
-        let err = engine
-            .provide_metadata(
-                dezoomify_engine::EffectId(u32::MAX),
-                dezoomify_engine::ResponseMetadata::new(),
-                &[1],
-            )
-            .unwrap_err();
-        assert_eq!(err.code, "job.stale-effect");
-        assert_eq!(engine.snapshot().revision, revision_before);
-        // Selecting before a catalog exists is a wrong-state rejection.
-        let err = engine
-            .command(dezoomify_engine::UserCommand::SelectImage { image: 99 })
-            .unwrap_err();
-        assert_eq!(err.code, "job.invalid-state");
+    fn wrong_state_shell_ids_are_safe() {
         // Shell table: unmapped ids are unknown with no work.
         let mut table = JobTable::new();
         assert_eq!(table.cancel_job("bad-id").unwrap_err(), "unknown");
         assert_eq!(table.cancel_job("job:").unwrap_err(), "unknown");
     }
 
-    /// Engine post-terminal inputs return stable `job.post-terminal`
-    /// with no new work; the shell projects the same moment as `stale`.
+    /// Post-terminal shell inputs project as `stale` with no new work.
     #[test]
-    fn engine_post_terminal_returns_job_post_terminal_without_work() {
-        let (mut engine, _) =
-            dezoomify_engine::EngineJob::start(engine_options(&["https://example.com/item"]))
-                .unwrap();
-        engine
-            .command(dezoomify_engine::UserCommand::Cancel)
-            .unwrap();
-        assert!(engine.snapshot().terminal.is_some());
-        let revision_before = engine.snapshot().revision;
-        let err = engine
-            .command(dezoomify_engine::UserCommand::Cancel)
-            .unwrap_err();
-        assert_eq!(err.code, "job.post-terminal");
-        assert_eq!(
-            engine.snapshot().revision,
-            revision_before,
-            "no work after terminal"
-        );
-        // Shell projection of the same moment.
+    fn shell_post_terminal_without_work() {
+        // Shell projection of the terminal moment.
         let mut table = JobTable::new();
         let (id, _) = table.start_job("https://example.com/item").unwrap();
         table.cancel_job(&id).unwrap();
@@ -1892,24 +1991,20 @@ mod tests {
 
     #[test]
     fn partial_recovery_request_is_honest_and_reachable() {
-        let snapshot = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 4,
-            lifecycle: Lifecycle::AwaitingPartialDecision,
-            acquired: 2,
-            total: 4,
-            recovery: Some(RecoveryLedger {
-                missing: vec!["tile:1".to_string(), "tile:2".to_string()],
-                failed: 2,
-                total: 4,
-            }),
-            terminal: None,
-        };
-        let payload = snapshot_payload("job:1", "https://example.com", (None, None), &snapshot);
+        let snapshot = runner_snapshot_with_decision(
+            "job:test",
+            4,
+            ProtocolState::AwaitingPartialDecision,
+            2,
+            Some(4),
+            1,
+            &[1, 2],
+        );
+        let payload = snapshot_payload("job:1", "https://example.com", &snapshot);
         assert_eq!(snapshot_state(&payload), "AwaitingPartialDecision");
         assert_eq!(
             payload["recovery"]["missing"],
-            serde_json::json!(["tile:1", "tile:2"])
+            serde_json::json!(["1", "2"])
         );
         assert_eq!(payload["recovery"]["failed"], serde_json::json!(2u64));
         assert_eq!(payload["recovery"]["total"], serde_json::json!(4u64));
@@ -1930,6 +2025,7 @@ mod tests {
                 &id,
                 &Choice::Partial {
                     decision: dezoomify_protocol::dto::RecoveryChoice::Keep,
+                    generation: Some(1),
                 },
             )
             .unwrap();
@@ -1944,6 +2040,7 @@ mod tests {
                 &id2,
                 &Choice::Partial {
                     decision: dezoomify_protocol::dto::RecoveryChoice::Discard,
+                    generation: Some(1),
                 },
             )
             .unwrap();
@@ -1958,6 +2055,7 @@ mod tests {
                 &id3,
                 &Choice::Partial {
                     decision: dezoomify_protocol::dto::RecoveryChoice::Retry,
+                    generation: Some(1),
                 },
             )
             .unwrap();
@@ -1974,34 +2072,32 @@ mod tests {
     #[test]
     fn partial_completed_terminal_carries_ledger_and_sibling_only() {
         // Publish an honest partial through the runner boundary: the terminal
-        // must name the sibling basename, never the granted path.
-        let missing = vec!["tile:1".to_string()];
-        let snapshot = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 6,
-            lifecycle: Lifecycle::Finalizing,
-            acquired: 3,
-            total: 4,
-            recovery: None,
-            terminal: Some(Terminal::Completed(published_partial(
+        // must name the sibling basename, never the granted path. Engine
+        // missing ordinals forward as numeric ids.
+        let missing = vec!["1".to_string()];
+        let snapshot = runner_snapshot(
+            "job:test",
+            6,
+            ProtocolState::Finalizing,
+            3,
+            Some(4),
+            Some(SnapshotTerminalDto::PartialCompleted { missing: vec![1] }),
+            Some(published_partial(
                 "png",
                 512,
                 512,
                 3,
                 &missing.clone(),
                 "saved.partial.png",
-            ))),
-        };
-        let payload = snapshot_payload("job:1", "https://example.com", (None, None), &snapshot);
+            )),
+        );
+        let payload = snapshot_payload("job:1", "https://example.com", &snapshot);
         assert_eq!(snapshot_state(&payload), "PartiallyCompleted");
         assert_eq!(
             terminal_kind(&payload).as_deref(),
             Some("partial-completed")
         );
-        assert_eq!(
-            payload["output"]["missingTiles"],
-            serde_json::json!(["tile:1"])
-        );
+        assert_eq!(payload["output"]["missingTiles"], serde_json::json!(["1"]));
         assert_eq!(
             payload["output"]["siblingName"],
             serde_json::json!("saved.partial.png")
@@ -2012,19 +2108,19 @@ mod tests {
 
     #[test]
     fn partial_discard_fails_honestly_with_no_output() {
-        let snapshot = RunnerSnapshot {
-            job: "job:test".to_string(),
-            seq: 2,
-            lifecycle: Lifecycle::AcquiringTiles,
-            acquired: 0,
-            total: 1,
-            recovery: None,
-            terminal: Some(Terminal::Failed(dezoomify_native::error::NativeError::new(
+        let snapshot = runner_snapshot(
+            "job:test",
+            2,
+            ProtocolState::AcquiringTiles,
+            0,
+            Some(1),
+            Some(failed_terminal(
                 "tile.download-failed",
                 "1 tile(s) still failing",
-            ))),
-        };
-        let payload = snapshot_payload("job:1", "https://example.com", (None, None), &snapshot);
+            )),
+            None,
+        );
+        let payload = snapshot_payload("job:1", "https://example.com", &snapshot);
         assert_eq!(terminal_kind(&payload).as_deref(), Some("failed"));
         assert!(payload["output"].is_null());
     }
@@ -2069,16 +2165,6 @@ mod tests {
         // The runner handle is released once the terminal forwarded.
         assert!(!table.has_runner(&id));
         assert!(table.saved_output_for(&id).is_none());
-    }
-
-    /// Test helper: canonical options for one input URL.
-    fn engine_options(inputs: &[&str]) -> dezoomify_engine::JobOptions {
-        dezoomify_engine::JobOptions::new(
-            inputs
-                .iter()
-                .map(|url| dezoomify_engine::DiscoveryInput::new((*url).to_string()))
-                .collect(),
-        )
     }
 
     /// Test helper: a complete published output.

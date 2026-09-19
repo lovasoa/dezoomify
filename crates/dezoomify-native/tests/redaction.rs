@@ -5,7 +5,7 @@
 //! surface must carry only redacted transport diagnostics, never the
 //! credential-bearing query.
 
-use dezoomify_native::{JobOptions, NativeRunner, OutputTarget, Terminal};
+use dezoomify_native::{JobOptions, NativeRunner, OutputTarget};
 use std::time::Duration;
 
 #[test]
@@ -22,32 +22,27 @@ fn canaries_never_appear_in_snapshots_or_terminals() {
     // The input URL (with its secret query) flows through the driver; every
     // observable surface must never carry it back.
     let mut snapshots = Vec::new();
-    let terminal = loop {
+    loop {
         let snapshot = job
             .snapshots()
             .recv_timeout(Duration::from_secs(60))
             .expect("snapshot arrives");
         assert_eq!(snapshot.job, job.id, "snapshots stay job-scoped");
-        let done = snapshot.terminal.clone();
+        let done = snapshot.snapshot.terminal.is_some() || snapshot.published.is_some();
         snapshots.push(snapshot);
-        if let Some(terminal) = done {
-            break terminal;
+        if done {
+            break;
         }
-    };
+    }
     assert!(!snapshots.is_empty(), "started plus terminal snapshots");
     let text = format!("{snapshots:?}");
     assert!(
         !text.contains("CANARY-TOKEN"),
         "canary leaked into snapshots: {text}"
     );
-    let terminal_text = format!("{terminal:?}");
-    assert!(
-        !terminal_text.contains("CANARY-TOKEN"),
-        "canary leaked into terminal: {terminal_text}"
-    );
     match job.join() {
-        Terminal::Failed(_) | Terminal::Cancelled => {}
-        Terminal::Completed(summary) => {
+        Err(_) => {}
+        Ok(summary) => {
             panic!("refused input must not publish: {summary:?}")
         }
     }
