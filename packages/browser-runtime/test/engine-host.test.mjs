@@ -166,7 +166,7 @@ test("lifecycle effects run in engine order on one chain", async () => {
   assert.deepEqual(assembly.calls.map(([kind]) => kind), ["finalizeOutput"]);
   assert.deepEqual(assembly.calls[0], ["finalizeOutput", false, "png", { width: 32, height: 32 }]);
   const finalized = sent.find((message) => message.type === "engine.command");
-  assert.deepEqual(finalized.command, { type: "finalization-succeeded" });
+  assert.deepEqual(finalized.command, { type: "finalization-succeeded", disposition: "browser-save-initiated" });
 });
 
 test("cancel-work releases retained resources and cancels fetching", async () => {

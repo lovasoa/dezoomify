@@ -425,9 +425,12 @@ export function createEngineHost(deps: EngineHostDeps) {
   async function acquireAttempt(effect: AcquireEffect, settle?: (displayOnly: boolean) => void) {
     const request = effect.request;
     log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=${request.purpose}`);
-    // Single attempt per effect: a granted host retries the same
-    // acquisition in place; any other failure reports immediately and the
-    // engine schedules retries through `wait-retry-timer` effects.
+    // Metadata (acquire-resource) owns direct-first fetch, eligible proxy
+    // fallback, and final-URI tracking inside fetchResource; the
+    // single-attempt tile fast path must never serve it.
+    const fetch = effect.type === "acquire-tile" && deps.fetchResourceOnce
+      ? deps.fetchResourceOnce
+      : deps.fetchResource;
     for (;;) {
       if (tornDown()) return;
       try {
@@ -435,7 +438,6 @@ export function createEngineHost(deps: EngineHostDeps) {
           // Prepare before network I/O so tiles become visible as they arrive.
           deps.assembly.prepare(effect.placement.canvas);
         }
-        const fetch = deps.fetchResourceOnce ?? deps.fetchResource;
         const result = await fetch(effect);
         // Readable bytes for this origin: it is not display-only.
         settle?.(false);
@@ -525,7 +527,16 @@ export function createEngineHost(deps: EngineHostDeps) {
       });
       return;
     }
-    sendToEngine({ type: "engine.command", command: { type: "finalization-succeeded" } });
+    sendToEngine({
+      type: "engine.command",
+      // Honest disposition from the performing host: a tainted canvas was
+      // shown without readable bytes, so the engine must present preview
+      // instead of claiming a saved file.
+      command: {
+        type: "finalization-succeeded",
+        disposition: deps.assembly.isTainted?.() === true ? "display-only" : "browser-save-initiated",
+      },
+    });
   }
 
   /** Abort in-flight host work: retry waits, permission holds, and fetches. */

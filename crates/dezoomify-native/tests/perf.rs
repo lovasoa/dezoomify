@@ -154,6 +154,114 @@ fn exec_bounds_inflight_to_max_concurrent() {
     let _ = std::fs::remove_dir_all(&work);
 }
 
+/// Grid-shaped local inputs for the scaling test: `grid` by `grid` tiles of
+/// `tile_px`, the same local-input shape the runner tests use, so scaling is
+/// measured on the shipped fetch/decode/place path.
+fn write_local_tiles_grid(work: &std::path::Path, grid: u32, tile_px: u32) -> String {
+    for x in 0..grid {
+        for y in 0..grid {
+            let mut tile = image::RgbaImage::new(tile_px, tile_px);
+            for (px, py, pixel) in tile.enumerate_pixels_mut() {
+                *pixel = image::Rgba([
+                    ((px + x * 13) % 256) as u8,
+                    ((py + y * 29) % 256) as u8,
+                    128,
+                    255,
+                ]);
+            }
+            let mut bytes = Vec::new();
+            let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+            image::ImageEncoder::write_image(
+                encoder,
+                tile.as_raw(),
+                tile_px,
+                tile_px,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("tile encodes");
+            std::fs::write(work.join(format!("tile-{x}_{y}.png")), &bytes).expect("write tile");
+        }
+    }
+    let edge = grid * tile_px;
+    let dir = work.to_str().expect("utf8 dir").to_string();
+    let yaml = format!(
+        "url_template: \"file://{dir}/tile-{{{{x}}}}_{{{{y}}}}.png\"\n\
+         x_template: \"x * tile_size\"\n\
+         y_template: \"y * tile_size\"\n\
+         variables:\n\
+         \x20 - {{ name: x, from: 0, to: {} }}\n\
+         \x20 - {{ name: y, from: 0, to: {} }}\n\
+         \x20 - {{ name: tile_size, value: {tile_px} }}\n\
+         width: {edge}\n\
+         height: {edge}\n\
+         title: \"Scaling tiles\"\n",
+        grid - 1,
+        grid - 1,
+    );
+    let manifest = work.join("tiles.yaml");
+    std::fs::write(&manifest, yaml.as_bytes()).expect("write manifest");
+    manifest.to_str().expect("utf8 manifest").to_string()
+}
+
+/// Scheduling scaling on the REAL pipeline: 1/16/64/256-tile grids through
+/// the shipped `pipeline::run` (local fetch, decode, assemble, encode).
+/// In-flight descriptors stay within the engine slot budget at every shape
+/// while completions track the plan exactly (linear by construction).
+#[test]
+fn exec_scales_with_bounded_inflight_across_increasing_tile_counts() {
+    use std::time::Instant;
+    let work = std::env::temp_dir().join(format!("dz-perf-scale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("temp dir");
+    const BUDGET: usize = 8;
+    let mut table = Vec::new();
+    for grid in [1u32, 4, 8, 16] {
+        let expected = (grid * grid) as usize;
+        // The local-input route matches the `tiles.yaml` filename, so each
+        // shape gets its own directory.
+        let shape = work.join(format!("grid-{grid}"));
+        std::fs::create_dir_all(&shape).expect("shape dir");
+        let input = write_local_tiles_grid(&shape, grid, 64);
+        let output = work.join(format!("scale-{grid}.png"));
+        let config = PipelineConfig {
+            max_concurrent: BUDGET,
+            ..PipelineConfig::default()
+        };
+        let start = Instant::now();
+        let outcome = pipeline::run(
+            &input,
+            output.to_str().expect("utf8 output"),
+            false,
+            &config,
+            &mut |_| {},
+        )
+        .expect("local pipeline succeeds");
+        let elapsed = start.elapsed();
+        assert_eq!(
+            outcome.tile_count, expected,
+            "plan size for {grid}x{grid} grid"
+        );
+        assert_eq!(
+            outcome.instrumentation.acquired, expected as u64,
+            "completions track the plan for {grid}x{grid} grid"
+        );
+        assert!(
+            (1..=BUDGET).contains(&outcome.instrumentation.peak_inflight),
+            "inflight stays within the engine budget at {expected} tiles: {}",
+            outcome.instrumentation.peak_inflight
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(120),
+            "scaling shape {expected} tiles must finish promptly"
+        );
+        table.push((expected, outcome.instrumentation.peak_inflight, elapsed));
+    }
+    for (tiles, peak, elapsed) in &table {
+        println!("native scaling: tiles={tiles} peak_inflight={peak} elapsed={elapsed:?}");
+    }
+    let _ = std::fs::remove_dir_all(&work);
+}
+
 #[test]
 fn encode_bytes_stay_within_twenty_percent_of_baseline() {
     let image = sweep_image();

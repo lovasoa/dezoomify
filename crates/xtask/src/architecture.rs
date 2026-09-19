@@ -50,6 +50,7 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     check_website_runtime_usage(&root)?;
     check_protocol_boundaries(&root)?;
     check_engine_single_api(&root)?;
+    check_engine_single_runner(&root)?;
     println!("architecture: ok");
     Ok(())
 }
@@ -93,6 +94,61 @@ fn check_engine_single_api(root: &Path) -> Result<(), String> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+/// Positive ownership proofs complementing the duality absence check above:
+/// the single native runner owns the engine inside `dezoomify-native`
+/// (`NativeRunner` drives `EngineJob`), the WASM session drives `EngineJob`,
+/// and out-of-crate hosts (desktop backend, CLI) drive the job through the
+/// single `NativeRunner` instead of a second runner.
+fn check_engine_single_runner(root: &Path) -> Result<(), String> {
+    for (path, required) in [
+        ("crates/dezoomify-native/src/exec.rs", "EngineJob"),
+        ("crates/dezoomify-native/src/runner.rs", "dezoomify_engine"),
+        ("crates/dezoomify-wasm/src/session.rs", "EngineJob"),
+        ("apps/desktop/src-tauri/src/jobs.rs", "NativeRunner"),
+        ("apps/cli/src/main.rs", "NativeRunner"),
+    ] {
+        let file = root.join(path);
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+        if !text.contains(required) {
+            return Err(format!(
+                "engine ownership: {path} must drive `{required}` (one EngineJob, one native runner)"
+            ));
+        }
+    }
+    // Exactly one runner struct owns native execution: a second runner type
+    // in `dezoomify-native` would split the single-runner contract.
+    let native = root.join("crates/dezoomify-native/src");
+    let mut runners = Vec::new();
+    for file in list_rs(&native)? {
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+        for line in strip_comments(&text).lines() {
+            let line = line.trim();
+            if line.starts_with("pub struct ") && line.contains("Runner") {
+                runners.push(format!("{}: {line}", file.display()));
+            }
+        }
+    }
+    if runners != vec![runners.first().cloned().unwrap_or_default()]
+        || !runners.iter().any(|r| r.contains("NativeRunner"))
+    {
+        return Err(format!(
+            "engine ownership: exactly one native runner struct is allowed, found {runners:?}"
+        ));
+    }
+    // The website imports the shared browser runtime directly (semantic
+    // import-direction proof alongside the required-factory list below).
+    let main = std::fs::read_to_string(root.join("src/main.ts"))
+        .map_err(|e| format!("read src/main.ts: {e}"))?;
+    if !main.contains("packages/browser-runtime") {
+        return Err(
+            "website runtime bypass: src/main.ts must import packages/browser-runtime".to_string(),
+        );
     }
     Ok(())
 }

@@ -544,6 +544,79 @@ fn engine_policies_replace_host_algorithms() {
     }
 }
 
+fn dzi_doc(edge_px: u32) -> Vec<u8> {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
+  <Size Width="{edge_px}" Height="{edge_px}"/>
+</Image>
+"#
+    )
+    .into_bytes()
+}
+
+#[test]
+fn acquisition_scales_with_bounded_outstanding_across_increasing_tile_counts() {
+    // Scheduling scaling on the real EngineJob path: 256px tiles give
+    // 1/4/16/64/256-tile grids at 256/512/1024/2048/4096px edges. The
+    // engine windows acquisitions at the slot budget however large the
+    // plan grows, and completions track the plan exactly.
+    const BUDGET: u32 = 8;
+    for (edge, expected) in [
+        (256u32, 1u32),
+        (512, 4),
+        (1024, 16),
+        (2048, 64),
+        (4096, 256),
+    ] {
+        let mut options = dzi_options();
+        options.max_concurrent = BUDGET;
+        let (mut job, update) = EngineJob::start(options).expect("start");
+        let id = metadata_id(&update);
+        let update = job
+            .provide_metadata(id, ResponseMetadata::new(), &dzi_doc(edge))
+            .expect("catalog");
+        assert_eq!(update.snapshot.lifecycle, JobState::AwaitingImageSelection);
+        let update = job
+            .command(dezoomify_engine::UserCommand::SelectImage { image: 0 })
+            .expect("select image");
+        let level = update.snapshot.selection.level_count - 1;
+        let update = job
+            .command(dezoomify_engine::UserCommand::SelectLevel { level })
+            .expect("select level");
+        assert_eq!(update.snapshot.lifecycle, JobState::AcquiringTiles);
+        let mut pending: std::collections::VecDeque<EffectId> =
+            tile_ids(&update).into_iter().collect();
+        assert_eq!(
+            pending.len() as u32,
+            expected.min(BUDGET),
+            "initial window is the slot budget at {edge}px"
+        );
+        let mut peak = pending.len();
+        let mut completed = 0u32;
+        while let Some(id) = pending.pop_front() {
+            let update = job
+                .complete(id, EffectResult::TileAcquired)
+                .expect("tile done");
+            completed += 1;
+            pending.extend(tile_ids(&update));
+            peak = peak.max(pending.len());
+            assert!(
+                pending.len() <= BUDGET as usize,
+                "outstanding never exceeds the slot budget at {edge}px: {}",
+                pending.len()
+            );
+        }
+        assert_eq!(
+            completed, expected,
+            "completions track the plan at {edge}px"
+        );
+        assert_eq!(job.snapshot().lifecycle, JobState::Finalizing);
+        assert_eq!(job.snapshot().progress.completed, u64::from(expected));
+        println!("engine scaling: {edge}px plan={expected} peak_outstanding={peak}");
+    }
+}
+
 #[test]
 fn pause_defers_retry_timers_until_resume() {
     let mut options = dzi_options();

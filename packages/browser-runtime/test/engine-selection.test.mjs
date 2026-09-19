@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pickDeferredUri, pickEngineSelection, planSelectionDrive } from "../src/engine-selection.ts";
+import { createSelectionDriver, pickDeferredUri, pickEngineSelection, planSelectionDrive } from "../src/engine-selection.ts";
 import { BROWSER_MAX_CANVAS_SIDE } from "../src/limits.ts";
 
 function level(width, height) {
@@ -127,4 +127,27 @@ test("planSelectionDrive waits while discovering and fails closed on empty catal
   assert.deepEqual(planSelectionDrive(snapshot({})), { action: "waiting" });
   assert.deepEqual(planSelectionDrive(snapshot({ catalog: { entries: [] } })), { action: "unselectable" });
   assert.deepEqual(planSelectionDrive(snapshot({ catalog: { entries: [image([])] } })), { action: "unselectable" });
+});
+
+test("the selection driver sends each deferred follow once per job", () => {
+  const viaCatalog = { entries: [request("https://fixtures.test/iiif/image/info.json")] };
+  const driver = createSelectionDriver();
+  assert.deepEqual(driver.drive(snapshot({ catalog: viaCatalog })), {
+    action: "follow-deferred",
+    position: 0,
+  });
+  // The follow command's own answer snapshot still carries the old catalog
+  // while the fetch is in flight: replaying it must not resend the follow.
+  assert.deepEqual(driver.drive(snapshot({ catalog: viaCatalog })), { action: "already-driven" });
+  // A replaced catalog may legitimately defer again, even at position 0.
+  const replaced = { entries: [request("https://fixtures.test/iiif/other/info.json")] };
+  assert.deepEqual(driver.drive(snapshot({ catalog: replaced })), {
+    action: "follow-deferred",
+    position: 0,
+  });
+  driver.reset();
+  assert.deepEqual(driver.drive(snapshot({ catalog: viaCatalog })), {
+    action: "follow-deferred",
+    position: 0,
+  });
 });

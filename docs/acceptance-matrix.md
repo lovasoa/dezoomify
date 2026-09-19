@@ -43,6 +43,13 @@ sites; `cargo xtask test live --public` stays opt-in and advisory.
 | Permission-gated and display-only paths | `testdata/scenarios/extension/cookie-session`, `testdata/scenarios/web/assembly` | `cargo xtask test extension`, `cargo xtask test web` |
 | Scoped handoff with revision match | `testdata/scenarios/extension/cookie-handoff`, `testdata/scenarios/desktop/handoff` | `cargo xtask test extension`, `cargo xtask test desktop` |
 | Protocol error terminals and handshake | `testdata/scenarios/protocol-v2/error-terminal`, `testdata/scenarios/protocol-v2/handshake-ok` | `cargo xtask test protocol` |
+| Scheduling scales with bounded in-flight slots (1/4/16/64/256-tile plans) | `crates/dezoomify-engine/tests/checklist.rs` (acquisition scaling), `crates/dezoomify-native/tests/perf.rs` (pipeline scaling) | `cargo xtask test job`, `cargo xtask test perf` |
+
+## Deployment
+
+| Behavior | Corpus | Lane |
+|---|---|---|
+| Legacy site serves `/`, the new app serves `/beta`, both proxies stay bound | `test/website-deploy.test.mjs` | `cargo xtask test web` |
 
 ## Reading the matrix
 

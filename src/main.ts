@@ -67,7 +67,7 @@ import {
   isAllowedSourceUrl,
   isLocalFileUrl,
 } from "../packages/browser-runtime/src/plan-gates.ts";
-import { planSelectionDrive } from "../packages/browser-runtime/src/engine-selection.ts";
+import { createSelectionDriver } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
   cancelAllWeb,
   createWebQueue,
@@ -127,6 +127,10 @@ let displayOnlyActive = false;
 // Host-local failure that never reached an engine snapshot (invalid input,
 // host rejections). View telemetry only; renders through presentFailure.
 let hostFailure: StructuredError | null = null;
+// Dedupe key for the engine-failure presentation below: failurePresentationOf
+// runs on every render, so without this the failure would log and rebuild on
+// every heartbeat (and the rebuild's re-render would recurse forever).
+let lastEngineFailureKey: string | null = null;
 
 // Recent-jobs history: local-only ledger, newest first, at most
 // 20 entries. Each entry keeps its full source address.
@@ -403,7 +407,8 @@ function presentEngineFailure(error: ErrorDto, url: string): void {
     http: error.http,
     preview: error.preview,
   });
-  update();
+  // No update() here: callers render (failurePresentationOf runs inside a
+  // render pass); re-rendering from inside would recurse without bound.
 }
 
 /**
@@ -463,7 +468,13 @@ function clearHash(): void {
 function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | null {
   const terminal = snapshot.terminal;
   if (!terminal || terminal.type !== "failed") return null;
-  presentEngineFailure(terminal.error, viewCtx.jobActivity?.url ?? "");
+  // Runs on every render: present (log + hostFailure) exactly once per
+  // distinct engine failure, then reuse the stored presentation inputs.
+  const key = `${terminal.error.code}\n${terminal.error.message}\n${terminal.error.detail ?? ""}`;
+  if (key !== lastEngineFailureKey) {
+    presentEngineFailure(terminal.error, viewCtx.jobActivity?.url ?? "");
+    lastEngineFailureKey = key;
+  }
   return hostFailure ? presentFailure(hostFailure, webFetcher.getActiveTransport()) : null;
 }
 
@@ -493,6 +504,7 @@ async function runJob(url: string, origin = url): Promise<void> {
   activeSnapshot = null;
   displayOnlyActive = false;
   hostFailure = null;
+  lastEngineFailureKey = null;
   viewCtx.imageChoice = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
@@ -614,6 +626,9 @@ async function runJob(url: string, origin = url): Promise<void> {
   });
 
   const service = createJobService(runner);
+  // One selection driver per run: a follow command's own answer snapshot
+  // still carries the old catalog, so replays must not resend the follow.
+  const selectionDriver = createSelectionDriver();
 
   const onSnapshot = (snapshot: JobSnapshot): void => {
     if (run !== activeRun) return;
@@ -633,7 +648,8 @@ async function runJob(url: string, origin = url): Promise<void> {
     // entries follow in the same job (the engine owns budget and cycle
     // guards). Engine commands plus the product side effects (title,
     // image choice) stay here.
-    const drive = planSelectionDrive(snapshot, BROWSER_LIMITS);
+    const drive = selectionDriver.drive(snapshot, BROWSER_LIMITS);
+    if (drive.action === "already-driven") return;
     if (drive.action === "select") {
       const entry = snapshot.selection.catalog?.entries[drive.image];
       const image = entry && entry.kind === "image" ? entry : null;
@@ -998,6 +1014,8 @@ function resetJobViewState(): void {
   activeSnapshot = null;
   displayOnlyActive = false;
   hostFailure = null;
+  lastEngineFailureKey = null;
+  lastEngineFailureKey = null;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.jobActivity = undefined;

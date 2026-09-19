@@ -274,13 +274,19 @@ export function presentSnapshot(
   const partial = snapshot.terminal?.type === "partial-completed";
   // Display-only is a host-known output fact (tainted canvas): the assembly
   // reports it explicitly via options until the engine snapshot round-trips
-  // with output.disposition. It is never folded into the DTO itself, and it
-  // never overrides a terminal.
+  // with output.disposition. The host flag never overrides a terminal, but
+  // an engine-reported display-only disposition on a finished job presents
+  // preview: the output was shown, never saved.
+  const engineDisplayOnly = snapshot.output?.disposition === "display-only"
+    && (terminal?.kind === "completed" || terminal?.kind === "partial-completed");
   const displayOnly =
-    (options?.displayOnly === true || snapshot.output?.disposition === "display-only") &&
-    terminal === null;
+    ((options?.displayOnly === true || snapshot.output?.disposition === "display-only") &&
+      terminal === null)
+    || engineDisplayOnly;
   let phase: SnapshotPhase = "job";
-  if (terminal) {
+  if (engineDisplayOnly) {
+    phase = "display-only";
+  } else if (terminal) {
     if (terminal.kind === "completed" || terminal.kind === "partial-completed") phase = "completed";
     else if (terminal.kind === "failed") phase = "failed";
     else phase = "cancelled";
