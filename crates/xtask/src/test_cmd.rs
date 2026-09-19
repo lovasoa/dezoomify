@@ -79,8 +79,8 @@ pub(crate) fn test_ui(args: &[String]) -> Result<(), String> {
     )
 }
 
-/// `test app-model`: host-neutral service, snapshot fold, store, queue,
-/// history, and labels. Pure Node, no hosts.
+/// `test app-model`: host-neutral service, snapshot predicates, history,
+/// and labels. Pure Node, no hosts.
 pub(crate) fn test_app_model(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         return Err(format!(

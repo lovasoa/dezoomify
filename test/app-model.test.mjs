@@ -1,9 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  createJobQueue,
   createJobService,
-  createSnapshotStore,
   initialHostStatus,
   isActiveSnapshot,
   isTerminalSnapshot,
@@ -82,33 +80,6 @@ test("snapshot predicates read the terminal only", () => {
   });
   assert.ok(isTerminalSnapshot(failed));
   assert.equal(failed.terminal.error.code, "boom");
-});
-
-// ---------------------------------------------------------------------------
-// Store: single latest-snapshot cell, no guards
-// ---------------------------------------------------------------------------
-
-test("snapshot store holds the latest snapshot verbatim", () => {
-  const store = createSnapshotStore();
-  assert.equal(store.get(), undefined);
-  const first = dto({ revision: 3 });
-  store.set(first);
-  assert.equal(store.get().revision, 3);
-  // No revision guards here: stale revisions are dropped at the transport
-  // edge (the runner) before they ever reach this cell.
-  store.set(dto({ revision: 1 }));
-  assert.equal(store.get().revision, 1);
-  let notified = 0;
-  const unsubscribe = store.subscribe(() => {
-    notified += 1;
-  });
-  store.set(dto({ revision: 2 }));
-  assert.equal(notified, 1);
-  unsubscribe();
-  store.clear();
-  assert.equal(store.get(), undefined);
-  assert.equal(typeof store.getSnapshot(), "function");
-  assert.equal(store.getSnapshot()(), undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -204,66 +175,6 @@ test("service rejects invalid requests with stable validation codes", async () =
     ),
     (error) => error.code === "validation.bad-exec-source",
   );
-});
-
-// ---------------------------------------------------------------------------
-// Queue: sequential, isolated failures, cancel/retry
-// ---------------------------------------------------------------------------
-
-test("queue runs sequentially and isolates failures", async () => {
-  const started = [];
-  const terminals = new Map();
-  const service = {
-    start(request, observer) {
-      const index = started.length;
-      started.push(request.inputs[0].url);
-      const emit = (event) => observer.snapshot(event);
-      terminals.set(index, emit);
-      return Promise.resolve({ command: () => Promise.resolve(), dispose: () => Promise.resolve() });
-    },
-  };
-  const queue = createJobQueue(service);
-  const h1 = queue.enqueue(browserRequest("https://q.example.org/1"));
-  const h2 = queue.enqueue(browserRequest("https://q.example.org/2"));
-  const h3 = queue.enqueue(browserRequest("https://q.example.org/3"));
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(started, ["https://q.example.org/1"]);
-
-  // Fail the first job: the queue retains it and moves on.
-  terminals.get(0)(dto({
-    revision: 1,
-    lifecycle: "Failed",
-    terminal: {
-      type: "failed",
-      error: { code: "boom", phase: "acquisition", retryable: true, message: "b", recovery: [] },
-    },
-  }));
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(started, ["https://q.example.org/1", "https://q.example.org/2"]);
-  const entries = queue.entries();
-  assert.equal(entries[0].status, "failed");
-  assert.equal(entries[1].status, "active");
-
-  // Cancel the third while queued; retry the first.
-  h3.cancel();
-  assert.equal(queue.entries()[2].status, "cancelled");
-  h1.retry();
-  assert.equal(queue.entries()[0].status, "queued");
-
-  // Finish the second; the retried first runs next (FIFO: retry goes to back).
-  terminals.get(1)(dto({
-    revision: 1,
-    lifecycle: "Completed",
-    progress: { completed: 4, total: 4 },
-    terminal: { type: "completed" },
-    output: { canvas: undefined, format: "png", complete: true, missing: [], disposition: undefined },
-  }));
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(started[started.length - 1], "https://q.example.org/1");
-
-  queue.cancelAll();
-  await queue.dispose();
-  void h2;
 });
 
 // ---------------------------------------------------------------------------

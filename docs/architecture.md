@@ -45,7 +45,7 @@ One React view (`.tsx`) for discovery, selection, progress, recovery, and output
 
 ### `packages/app-model`
 
-The host-neutral application model: the `JobService` contract, the deterministic snapshot fold, the latest-snapshot store with identity and revision guards, the sequential queue, shared history, and the canonical transport labels and save-name helpers. React-free with no host globals; hosts inject effects, storage, and clocks. See [Application model](app-model.md).
+The host-neutral application model: the `JobService` contract, the snapshot predicates, shared history, and the canonical transport labels and save-name helpers. React-free with no host globals; hosts inject effects, storage, and clocks. Queues live in the products' integration layers. See [Application model](app-model.md).
 
 ### `packages/browser-runtime`
 
