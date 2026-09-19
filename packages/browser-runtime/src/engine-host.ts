@@ -25,6 +25,7 @@
 // ordinary image loads, the tile is held as display-only. The canvas taints
 // on draw, so the job completes as display-only with no programmatic save.
 import type { EngineSnapshotDto } from "@dezoomify/wasm-bindings";
+import { originOfUrl } from "./fetch-primitives.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 import type { ProbeSize } from "./probe.ts";
 import type { WorkerHostMessage } from "./worker-host.ts";
@@ -124,6 +125,18 @@ export function createEngineHost(deps: EngineHostDeps) {
    * place, a denial fails it typed.
    */
   const permissionGates = new Map<number, (granted: boolean) => void>();
+  /**
+   * Origins whose ordinary tiles already fell back to `<img>` display-only
+   * this job. Only the first tile per origin tries readable bytes; later
+   * ordinary tiles load straight through `<img>`.
+   */
+  const displayOnlyOrigins = new Set<string>();
+  /**
+   * Origins with a tile classifying readable bytes right now. Concurrent
+   * same-origin ordinary tiles await the outcome instead of fetching.
+   * Entries always settle (deleted in `finally`), so waiters never hang.
+   */
+  const originClassifying = new Map<string, Promise<boolean>>();
 
   function tornDown(): boolean {
     return disposed || lifetime.signal.aborted;
@@ -258,6 +271,11 @@ export function createEngineHost(deps: EngineHostDeps) {
       const height = image.naturalHeight;
       if (!(width > 0 && height > 0)) return false;
       deps.assembly.acquireDisplayTile(effect.tile, effect.placement, image);
+      // A successful ordinary `<img>` fallback marks that origin
+      // display-only for the job, so later ordinary tiles skip readable
+      // bytes and load directly through `<img>`.
+      const origin = originOfUrl(uri);
+      if (origin !== "") displayOnlyOrigins.add(origin);
       log("debug", "effect-outcome", `type=${effect.type} request=${requestId} display=true size=${width}x${height}`);
       if (!tornDown()) {
         sendToEngine({ type: "engine.display", requestId });
@@ -360,6 +378,51 @@ export function createEngineHost(deps: EngineHostDeps) {
       await acquireProbe(effect);
       return;
     }
+    // Ordinary tiles share one per-origin readable-bytes classification:
+    // the first tile decides while concurrent same-origin tiles wait for
+    // its outcome instead of repeating the fetch. Tiles of a display-only
+    // origin load straight through `<img>`. A failed fast path falls
+    // through to the normal attempt below.
+    if (effect.type === "acquire-tile" && plainRecipe(effect.placement) && deps.loadDisplayImage) {
+      const origin = originOfUrl(request.uri);
+      if (origin !== "") {
+        if (displayOnlyOrigins.has(origin)) {
+          if (await displayFallback(effect, request.id)) return;
+          if (tornDown()) return;
+        } else if (originClassifying.has(origin)) {
+          const displayOnly = await originClassifying.get(origin)!;
+          if (tornDown()) return;
+          if (displayOnly) {
+            if (await displayFallback(effect, request.id)) return;
+            if (tornDown()) return;
+          }
+        } else {
+          let resolveClass!: (displayOnly: boolean) => void;
+          const classified = new Promise<boolean>((resolve) => {
+            resolveClass = resolve;
+          });
+          originClassifying.set(origin, classified);
+          let settled = false;
+          const settle = (displayOnly: boolean) => {
+            if (settled) return;
+            settled = true;
+            resolveClass(displayOnly);
+          };
+          try {
+            await acquireAttempt(effect, settle);
+          } finally {
+            settle(false);
+            originClassifying.delete(origin);
+          }
+          return;
+        }
+      }
+    }
+    await acquireAttempt(effect);
+  }
+
+  async function acquireAttempt(effect: AcquireEffect, settle?: (displayOnly: boolean) => void) {
+    const request = effect.request;
     log("debug", "effect-fetch", `type=${effect.type} request=${request.id} purpose=${request.purpose}`);
     // Single attempt per effect: a granted host retries the same
     // acquisition in place; any other failure reports immediately and the
@@ -373,6 +436,8 @@ export function createEngineHost(deps: EngineHostDeps) {
         }
         const fetch = deps.fetchResourceOnce ?? deps.fetchResource;
         const result = await fetch(effect);
+        // Readable bytes for this origin: it is not display-only.
+        settle?.(false);
         if (tornDown()) return;
         log("debug", "effect-outcome", `type=${effect.type} request=${request.id} bytes=${result.bytes.byteLength}`);
         if (effect.type === "acquire-tile") {
@@ -411,8 +476,10 @@ export function createEngineHost(deps: EngineHostDeps) {
           }
           continue;
         }
-        if (effect.type === "acquire-tile" && (await displayFallback(effect, request.id))) {
-          return;
+        if (effect.type === "acquire-tile") {
+          const fellBack = await displayFallback(effect, request.id);
+          settle?.(fellBack);
+          if (fellBack) return;
         }
         if (tornDown()) return;
         sendToEngine({ type: "engine.failure", requestId: request.id, error: fetchFailure(failure) });

@@ -1,12 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyJobEvent,
   createJobQueue,
   createJobService,
   createSnapshotStore,
   initialHostStatus,
-  initialSnapshot,
   isActiveSnapshot,
   isTerminalSnapshot,
   extensionForSaveFormat,
@@ -46,101 +44,71 @@ function browserRequest(url = "https://museum.example.org/iiif/1/manifest.json")
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot fold
+// Snapshots: absolute engine projections, predicates read the terminal only
 // ---------------------------------------------------------------------------
 
-test("snapshot fold walks a full job deterministically", () => {
-  let now = 1000;
-  const tick = () => (now += 10);
-  let snap = initialSnapshot("job:1", tick());
-  assert.equal(snap.state, "Created");
-  assert.equal(snap.revision, 0);
-  assert.ok(isActiveSnapshot(snap));
-
-  snap = applyJobEvent(snap, { type: "job-state", state: "Discovering" }, tick());
-  assert.equal(snap.state, "Discovering");
-  assert.equal(snap.revision, 1);
-
-  const catalog = {
-    entries: [
-      {
-        kind: "image",
-        title: "Altarpiece",
-        format: "IIIF",
-        width: 8000,
-        height: 6000,
-        sourceKind: "iiif",
-        levels: [{ label: "full", width: 8000, height: 6000, tileWidth: 512, tileHeight: 512 }],
-      },
-    ],
+// Authoritative EngineSnapshotDto builder: the engine owns all job state;
+// nothing here folds events or assigns revisions.
+function dto(overrides = {}) {
+  return {
+    revision: 0,
+    lifecycle: "Discovering",
+    paused: false,
+    progress: { completed: 0, total: undefined },
+    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    decision: undefined,
+    terminal: undefined,
+    output: undefined,
+    ...overrides,
   };
-  snap = applyJobEvent(snap, { type: "catalog", catalog }, tick());
-  assert.equal(snap.catalog.entries.length, 1);
+}
 
-  snap = applyJobEvent(snap, { type: "progress", acquired: 3, total: 12 }, tick());
-  assert.equal(snap.acquired, 3);
-  assert.equal(snap.total, 12);
+test("snapshot predicates read the terminal only", () => {
+  const live = dto({ revision: 3, lifecycle: "AcquiringTiles", progress: { completed: 3, total: 12 } });
+  assert.ok(isActiveSnapshot(live));
+  assert.ok(!isTerminalSnapshot(live));
 
-  snap = applyJobEvent(snap, { type: "paused" }, tick());
-  assert.equal(snap.paused, true);
-  assert.equal(snap.acquired, 3);
-  snap = applyJobEvent(snap, { type: "resumed" }, tick());
-  assert.equal(snap.paused, false);
+  const done = dto({ revision: 9, lifecycle: "Completed", terminal: { type: "completed" } });
+  assert.ok(isTerminalSnapshot(done));
+  assert.ok(!isActiveSnapshot(done));
 
-  snap = applyJobEvent(snap, { type: "progress", acquired: 12, total: 12 }, tick());
-  snap = applyJobEvent(snap, { type: "completed" }, tick());
-  assert.equal(snap.state, "Completed");
-  assert.ok(isTerminalSnapshot(snap));
-  assert.deepEqual(snap.terminal, { kind: "completed" });
-  assert.equal(snap.output.doneTiles, 12);
-  assert.equal(snap.output.partial, false);
-});
-
-test("snapshot fold keeps warnings bounded and records recovery", () => {
-  let snap = initialSnapshot("job:w", 0);
-  const warn = (n) => ({
-    type: "warning",
-    error: { code: `w${n}`, phase: "acquisition", retryable: true, message: `w${n}`, recovery: [] },
+  const failed = dto({
+    revision: 10,
+    lifecycle: "Failed",
+    terminal: {
+      type: "failed",
+      error: { code: "boom", phase: "decode", retryable: false, message: "boom", recovery: [] },
+    },
   });
-  for (let n = 0; n < 25; n++) snap = applyJobEvent(snap, warn(n), n);
-  assert.equal(snap.warnings.length, 20);
-  assert.equal(snap.warnings[0].code, "w5");
-
-  snap = applyJobEvent(
-    snap,
-    { type: "recovery-request", generation: 7, actions: [{ id: "a", kind: "retry", scope: "tile", rationale: "r" }] },
-    99,
-  );
-  assert.equal(snap.state, "AwaitingPartialDecision");
-  assert.equal(snap.recovery.generation, 7);
-
-  snap = applyJobEvent(
-    snap,
-    { type: "failed", error: { code: "boom", phase: "decode", retryable: false, message: "boom", recovery: [] } },
-    100,
-  );
-  assert.equal(snap.state, "Failed");
-  assert.equal(snap.terminal.error.code, "boom");
-  assert.equal(snap.output, null);
+  assert.ok(isTerminalSnapshot(failed));
+  assert.equal(failed.terminal.error.code, "boom");
 });
 
 // ---------------------------------------------------------------------------
-// Store: identity + revision guards
+// Store: single latest-snapshot cell, no guards
 // ---------------------------------------------------------------------------
 
-test("snapshot store keeps the newest revision per job", () => {
+test("snapshot store holds the latest snapshot verbatim", () => {
   const store = createSnapshotStore();
-  assert.equal(store.get("job:1"), undefined);
-  const first = { ...initialSnapshot("job:1", 1), revision: 3 };
-  store.publish(first);
-  assert.equal(store.get("job:1").revision, 3);
-  // Stale revisions never move the UI.
-  store.publish({ ...first, revision: 1 });
-  assert.equal(store.get("job:1").revision, 3);
-  store.publish({ ...first, revision: 4 });
-  assert.equal(store.get("job:1").revision, 4);
-  store.remove("job:1");
-  assert.equal(store.get("job:1"), undefined);
+  assert.equal(store.get(), undefined);
+  const first = dto({ revision: 3 });
+  store.set(first);
+  assert.equal(store.get().revision, 3);
+  // No revision guards here: stale revisions are dropped at the transport
+  // edge (the runner) before they ever reach this cell.
+  store.set(dto({ revision: 1 }));
+  assert.equal(store.get().revision, 1);
+  let notified = 0;
+  const unsubscribe = store.subscribe(() => {
+    notified += 1;
+  });
+  store.set(dto({ revision: 2 }));
+  assert.equal(notified, 1);
+  unsubscribe();
+  store.clear();
+  assert.equal(store.get(), undefined);
+  assert.equal(typeof store.getSnapshot(), "function");
+  assert.equal(store.getSnapshot()(), undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -172,16 +140,16 @@ function fakeRunner(log) {
   };
 }
 
-test("service routes interleaved emissions to the owning observer only", async () => {
+test("service routes absolute snapshots to the owning observer only", async () => {
   const log = [];
   const { runner, runners } = fakeRunner(log);
-  let now = 0;
-  const service = createJobService(runner, { now: () => ++now });
+  const service = createJobService(runner);
   const seenA = [];
   const seenB = [];
+  const statusA = [];
   const handleA = await service.start(browserRequest("https://a.example.org/1"), {
     snapshot: (s) => seenA.push(s),
-    hostStatus: () => {},
+    hostStatus: (s) => statusA.push(s),
   });
   const handleB = await service.start(browserRequest("https://b.example.org/2"), {
     snapshot: (s) => seenB.push(s),
@@ -190,18 +158,25 @@ test("service routes interleaved emissions to the owning observer only", async (
   assert.notEqual(handleA.id, handleB.id);
   assert.equal(log.join(","), "start:0,start:1");
 
-  runners[0].sink.event({ type: "progress", acquired: 1, total: 4 }, initialHostStatus());
-  runners[1].sink.event({ type: "progress", acquired: 2, total: 8 }, initialHostStatus());
-  assert.equal(seenA[seenA.length - 1].acquired, 1);
-  assert.equal(seenB[seenB.length - 1].acquired, 2);
-  assert.equal(seenA[seenA.length - 1].jobId, handleA.id);
+  runners[0].sink.snapshot(
+    dto({ revision: 1, lifecycle: "AcquiringTiles", progress: { completed: 1, total: 4 } }),
+    initialHostStatus(),
+  );
+  runners[1].sink.snapshot(
+    dto({ revision: 1, lifecycle: "AcquiringTiles", progress: { completed: 2, total: 8 } }),
+    initialHostStatus(),
+  );
+  assert.equal(seenA[seenA.length - 1].progress.completed, 1);
+  assert.equal(seenB[seenB.length - 1].progress.completed, 2);
+  // One neutral status on start plus the runner-forwarded one.
+  assert.equal(statusA.length, 2);
 
   await handleA.command({ type: "cancel" });
   assert.deepEqual(runners[0].commands, [{ type: "cancel" }]);
 
+  // Dispose delegates to the runner handle; late emissions after teardown
+  // stay invisible because the runner drops them at its edge.
   await handleA.dispose();
-  runners[0].sink.event({ type: "progress", acquired: 4, total: 4 }, initialHostStatus());
-  assert.equal(seenA[seenA.length - 1].acquired, 1);
   assert.ok(runners[0].disposed);
 });
 
@@ -255,22 +230,14 @@ test("queue runs sequentially and isolates failures", async () => {
   assert.deepEqual(started, ["https://q.example.org/1"]);
 
   // Fail the first job: the queue retains it and moves on.
-  terminals.get(0)({
-    jobId: "queue:1",
+  terminals.get(0)(dto({
     revision: 1,
-    state: "Failed",
-    catalog: null,
-    acquired: 0,
-    total: 4,
-    paused: false,
-    selection: { image: null, level: null },
-    warnings: [],
-    recovery: null,
-    terminal: { kind: "failed", error: { code: "boom", phase: "acquisition", retryable: true, message: "b", recovery: [] } },
-    output: null,
-    displayOnly: false,
-    updatedAt: 1,
-  });
+    lifecycle: "Failed",
+    terminal: {
+      type: "failed",
+      error: { code: "boom", phase: "acquisition", retryable: true, message: "b", recovery: [] },
+    },
+  }));
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(started, ["https://q.example.org/1", "https://q.example.org/2"]);
   const entries = queue.entries();
@@ -284,22 +251,13 @@ test("queue runs sequentially and isolates failures", async () => {
   assert.equal(queue.entries()[0].status, "queued");
 
   // Finish the second; the retried first runs next (FIFO: retry goes to back).
-  terminals.get(1)({
-    jobId: "queue:2",
+  terminals.get(1)(dto({
     revision: 1,
-    state: "Completed",
-    catalog: null,
-    acquired: 4,
-    total: 4,
-    paused: false,
-    selection: { image: null, level: null },
-    warnings: [],
-    recovery: null,
-    terminal: { kind: "completed" },
-    output: { doneTiles: 4, totalTiles: 4, failedTiles: 0, partial: false, format: null, width: null, height: null, missingTiles: [] },
-    displayOnly: false,
-    updatedAt: 2,
-  });
+    lifecycle: "Completed",
+    progress: { completed: 4, total: 4 },
+    terminal: { type: "completed" },
+    output: { canvas: undefined, format: "png", complete: true, missing: [], disposition: undefined },
+  }));
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(started[started.length - 1], "https://q.example.org/1");
 

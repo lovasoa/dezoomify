@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyJobEvent, initialSnapshot } from "../packages/app-model/src/index.ts";
 import { presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
 import { renderAppChoice } from "../packages/shared-ui/src/components.ts";
 import {
@@ -15,42 +14,50 @@ import {
   renderProgress,
 } from "../packages/shared-ui/src/components.ts";
 
-function run(jobId, events) {
-  let now = 0;
-  let snap = initialSnapshot(jobId, ++now);
-  for (const event of events) snap = applyJobEvent(snap, event, ++now);
-  return snap;
+// Authoritative EngineSnapshotDto builder: the latest snapshot renders
+// directly, even when intermediate notifications were skipped.
+function dto(overrides = {}) {
+  return {
+    revision: 0,
+    lifecycle: "Discovering",
+    paused: false,
+    progress: { completed: 0, total: undefined },
+    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    decision: undefined,
+    terminal: undefined,
+    output: undefined,
+    ...overrides,
+  };
 }
 
-test("snapshot fold walks the full happy path", () => {
-  const snap = run("job:1", [
-    { type: "job-state", state: "Discovering" },
-    { type: "catalog", catalog: { entries: [{ kind: "image", format: "IIIF", width: 8, height: 6, sourceKind: "iiif", levels: [{ label: "full", width: 8, height: 6, tileWidth: 4, tileHeight: 4 }] }] } },
-    { type: "job-state", state: "AwaitingImageSelection" },
-    { type: "job-state", state: "AwaitingLevelSelection" },
-    { type: "job-state", state: "Planning" },
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "progress", acquired: 1, total: 4 },
-    { type: "job-state", state: "Finalizing" },
-    { type: "completed" },
-  ]);
-  // The completed-phase presentation shape is covered in snapshot-view;
-  // here the fold itself must terminate exactly once with its progress.
-  assert.equal(snap.state, "Completed");
-  assert.equal(snap.terminal.kind, "completed");
-  assert.equal(snap.acquired, 1);
-  assert.equal(snap.total, 4);
+test("the latest snapshot presents the terminal exactly once with its progress", () => {
+  const snap = dto({
+    revision: 9,
+    lifecycle: "Completed",
+    progress: { completed: 1, total: 4 },
+    terminal: { type: "completed" },
+  });
+  // Intermediate notifications skipped: only the latest snapshot renders.
+  const view = presentSnapshot(snap, "direct");
+  assert.equal(view.phase, "completed");
+  assert.equal(view.terminal.kind, "completed");
+  assert.deepEqual(view.progress, { current: 1, total: 4 });
 });
 
 test("a finished job can still present display-only from the host override", () => {
-  const snap = run("job:11", [
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "progress", acquired: 2, total: 4 },
-  ]);
-  const view = presentSnapshot({ ...snap, displayOnly: true }, "browser-session");
+  const snap = dto({
+    revision: 3,
+    lifecycle: "AcquiringTiles",
+    progress: { completed: 2, total: 4 },
+  });
+  const view = presentSnapshot(snap, "browser-session", { displayOnly: true });
   assert.equal(view.phase, "display-only");
   assert.equal(view.progress.current, 2);
-  const taintedTerminal = presentSnapshot({ ...snap, displayOnly: true, terminal: { kind: "completed" } }, "browser-session");
+  const taintedTerminal = presentSnapshot(
+    dto({ ...snap, terminal: { type: "completed" } }),
+    "browser-session",
+    { displayOnly: true },
+  );
   assert.equal(taintedTerminal.phase, "completed");
   assert.equal(taintedTerminal.displayOnly, false, "terminals render their own phase");
 });

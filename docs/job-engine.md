@@ -42,6 +42,8 @@ Hosts drive the single canonical API on `EngineJob` (`crates/dezoomify-engine/sr
 
 Effects carry engine-minted, job-scoped correlation (`EffectId`, one fresh ID per attempt). Hosts echo the ID back verbatim; unknown or already-settled completions are rejected with `job.stale-effect` and change nothing. The host feeds retry wakeups explicitly, so replaying the same inputs replays the same state.
 
+Phase-specific data lives in single-discriminant groups (`Selection`, `Decision`, `Finalization`, one unified probe flight), so unrelated phases cannot represent each other's data: answering a partial decision with none pending is a single-check rejection on the decision discriminant, decided data never survives its phase exit on any answer arm, and a probe flight (continuation, wire tile, reuse flag) is set and cleared as one unit.
+
 ## Phases
 
 Discovery, selection, planning, tile acquisition, then one awaited finalization. The engine exposes only phases it observes; codec and save progress are product-local UI events.

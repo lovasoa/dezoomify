@@ -59,6 +59,93 @@ struct PendingRetry {
     timer_issued: bool,
 }
 
+/// Image position once chosen: the wire position plus the catalog index.
+/// Both travel together so image selection is never half-recorded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ImageSelection {
+    position: u32,
+    index: usize,
+}
+
+/// Level position once chosen: the wire position plus the level index.
+/// Both travel together so level selection is never half-recorded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct LevelSelection {
+    position: u32,
+    index: usize,
+}
+
+/// Selection phase data. Exactly one variant is live, so an image answer
+/// cannot exist while awaiting an image, a level answer cannot exist
+/// before its image, and decided data cannot leak across phase exits:
+/// leaving a phase moves the discriminant, dropping the old payload.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Selection {
+    /// No image chosen yet (`AwaitingImageSelection`).
+    #[default]
+    AwaitingImage,
+    /// Image chosen, level still open (`AwaitingLevelSelection`).
+    AwaitingLevel { image: ImageSelection },
+    /// Image and level chosen (planning and everything after).
+    Selected {
+        image: ImageSelection,
+        level: LevelSelection,
+    },
+}
+
+impl Selection {
+    fn image_position(&self) -> Option<u32> {
+        match *self {
+            Selection::AwaitingImage => None,
+            Selection::AwaitingLevel { image } | Selection::Selected { image, .. } => {
+                Some(image.position)
+            }
+        }
+    }
+
+    fn level_position(&self) -> Option<u32> {
+        match *self {
+            Selection::Selected { level, .. } => Some(level.position),
+            Selection::AwaitingImage | Selection::AwaitingLevel { .. } => None,
+        }
+    }
+}
+
+/// Partial-decision phase data. `Pending` exists only while
+/// `AwaitingPartialDecision` is live; answering (or leaving) the phase
+/// returns the discriminant to `None`, so decided data cannot survive
+/// the phase exit and answering with none pending is a single-check
+/// rejection on this discriminant.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Decision {
+    #[default]
+    None,
+    Pending {
+        generation: u32,
+    },
+}
+
+/// Finalization phase data. `Pending` exists only while `Finalizing` is
+/// live; settling the phase returns the discriminant to `Idle`, so the
+/// partial flag cannot leak into (or out of) finalization.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Finalization {
+    #[default]
+    Idle,
+    Pending {
+        partial: bool,
+    },
+}
+
+/// Outstanding probe flight. The continuation, its wire tile, and the
+/// output-reuse flag are set and cleared as one unit: exactly one probe
+/// is ever in flight, so none of the three can exist without the others.
+struct ActiveProbe {
+    continuation: ProbeContinuation,
+    tile: u32,
+    output: bool,
+}
+
 /// One end-to-end user request driven synchronously by explicit host inputs.
 pub struct Job {
     inputs: Vec<JobInput>,
@@ -80,11 +167,8 @@ pub struct Job {
     catalog: Option<ImageCatalog>,
     /// Projected wire catalog (same order as `catalog` entries).
     catalog_images: Vec<CatalogEntryDto>,
-    selected_image: Option<u32>,
-    selected_image_index: Option<usize>,
-    selected_level: Option<u32>,
-    selected_level_index: Option<usize>,
-    finalizing_partial: Option<bool>,
+    selection: Selection,
+    finalization: Finalization,
     cleanup_emitted: bool,
     planned_tiles: Vec<u32>,
     /// Plan-order tile set mirroring `planned_tiles` for O(1) membership.
@@ -117,16 +201,12 @@ pub struct Job {
     /// Declared canvas size for the planned level (`None` while unknown,
     /// e.g. mid-probe or custom layouts that derive it from tiles).
     canvas_size: Option<Vec2d>,
-    /// Wire tile ids emitted as probes (answered via `ProbeOutcome`).
-    probe_tiles: HashSet<u32>,
-    /// Pending probe continuation; exactly one probe is in flight.
-    probe: Option<ProbeContinuation>,
-    probe_tile: Option<u32>,
-    probe_output: bool,
+    /// Pending probe flight (continuation plus its wire tile and
+    /// output-reuse flag as one unit); exactly one probe is in flight.
+    probe: Option<ActiveProbe>,
     retained_probe: Option<(u32, Vec2d)>,
     probes_emitted: u32,
-    recovery_reason: Option<String>,
-    pending_decision: Option<u32>,
+    decision: Decision,
     failed_tiles: Vec<u32>,
     /// Settled-as-failed set mirroring `failed_tiles` for O(1) membership.
     failed_set: HashSet<u32>,
@@ -204,11 +284,8 @@ impl Job {
             discovery: None,
             catalog: None,
             catalog_images: Vec::new(),
-            selected_image: None,
-            selected_image_index: None,
-            selected_level: None,
-            selected_level_index: None,
-            finalizing_partial: None,
+            selection: Selection::AwaitingImage,
+            finalization: Finalization::Idle,
             cleanup_emitted: false,
             planned_tiles: Vec::new(),
             planned_set: HashSet::new(),
@@ -224,14 +301,10 @@ impl Job {
             tile_destinations: HashMap::new(),
             tile_extents: HashMap::new(),
             canvas_size: None,
-            probe_tiles: HashSet::new(),
             probe: None,
-            probe_tile: None,
-            probe_output: false,
             retained_probe: None,
             probes_emitted: 0,
-            recovery_reason: None,
-            pending_decision: None,
+            decision: Decision::None,
             failed_tiles: Vec::new(),
             failed_set: HashSet::new(),
             unsettled: 0,
@@ -300,19 +373,22 @@ impl Job {
     /// Selected image position, once chosen.
     #[must_use]
     pub fn selected_image(&self) -> Option<u32> {
-        self.selected_image
+        self.selection.image_position()
     }
 
     /// Selected level position, once chosen.
     #[must_use]
     pub fn selected_level(&self) -> Option<u32> {
-        self.selected_level
+        self.selection.level_position()
     }
 
     /// Outstanding partial-decision generation, if one is awaited.
     #[must_use]
     pub fn pending_decision(&self) -> Option<u32> {
-        self.pending_decision
+        match self.decision {
+            Decision::Pending { generation } => Some(generation),
+            Decision::None => None,
+        }
     }
 
     /// Declared canvas size for the planned level, when known.
@@ -653,10 +729,13 @@ impl Job {
     }
 
     fn apply_selected_image(&mut self, image: u32) -> Result<Outcome, JobError> {
-        if self.selected_image == Some(image) {
+        // A repeat of the decided image is a duplicate, whatever the phase.
+        if self.selection.image_position() == Some(image) {
             return Ok(Outcome::Ignored);
         }
-        if self.state != State::AwaitingImageSelection {
+        if self.state != State::AwaitingImageSelection
+            || !matches!(self.selection, Selection::AwaitingImage)
+        {
             return Err(JobError::invalid_state(
                 "image selection valid only in AwaitingImageSelection",
             ));
@@ -674,8 +753,12 @@ impl Job {
             };
             selected.levels.len()
         };
-        self.selected_image = Some(image);
-        self.selected_image_index = Some(index);
+        self.selection = Selection::AwaitingLevel {
+            image: ImageSelection {
+                position: image,
+                index,
+            },
+        };
         self.set_state(State::AwaitingLevelSelection)?;
         let levels: Vec<u32> = (0..level_count)
             .map(|position| {
@@ -696,7 +779,9 @@ impl Job {
     /// by one job. The catalog is replaced on success; the job ID and
     /// revision lineage never change, so hosts never fork replacement jobs.
     fn apply_follow_deferred(&mut self, image: u32) -> Result<Outcome, JobError> {
-        if self.state != State::AwaitingImageSelection || self.selected_image.is_some() {
+        if self.state != State::AwaitingImageSelection
+            || !matches!(self.selection, Selection::AwaitingImage)
+        {
             return Err(JobError::invalid_state(
                 "deferred follow valid only before image selection",
             ));
@@ -749,7 +834,8 @@ impl Job {
     }
 
     fn apply_selected_level(&mut self, level: u32) -> Result<Outcome, JobError> {
-        if self.selected_level == Some(level) {
+        // A repeat of the decided level is a duplicate, whatever the phase.
+        if self.selection.level_position() == Some(level) {
             return Ok(Outcome::Ignored);
         }
         if self.state != State::AwaitingLevelSelection {
@@ -757,9 +843,10 @@ impl Job {
                 "level selection valid only in AwaitingLevelSelection",
             ));
         }
-        let image_index = self
-            .selected_image_index
-            .ok_or_else(|| JobError::invalid_state("no image selected"))?;
+        let Selection::AwaitingLevel { image } = self.selection else {
+            return Err(JobError::invalid_state("no image selected"));
+        };
+        let image_index = image.index;
         let level_index =
             usize::try_from(level).map_err(|_| JobError::overflow("level position"))?;
         let in_range = match &self.catalog_images[image_index] {
@@ -769,8 +856,13 @@ impl Job {
         if !in_range {
             return Err(JobError::invalid_state("level position is out of range"));
         }
-        self.selected_level = Some(level);
-        self.selected_level_index = Some(level_index);
+        self.selection = Selection::Selected {
+            image,
+            level: LevelSelection {
+                position: level,
+                index: level_index,
+            },
+        };
         self.set_state(State::Planning)?;
         self.push_event(JobEvent::State {
             state: State::Planning,
@@ -786,12 +878,11 @@ impl Job {
                 .catalog
                 .as_ref()
                 .ok_or_else(|| JobError::invalid_state("no catalog"))?;
-            let image_index = self
-                .selected_image_index
-                .ok_or_else(|| JobError::invalid_state("no image selected"))?;
-            let level_index = self
-                .selected_level_index
-                .ok_or_else(|| JobError::invalid_state("no level selected"))?;
+            let Selection::Selected { image, level } = self.selection else {
+                return Err(JobError::invalid_state("no level selected"));
+            };
+            let image_index = image.index;
+            let level_index = level.index;
             let CatalogEntry::Ready(image) = &catalog.entries()[image_index] else {
                 return self.fail_via_cleanup(
                     "job.plan-invalid",
@@ -898,10 +989,13 @@ impl Job {
                         .ok_or_else(|| JobError::overflow("probe id"))?;
                     wire
                 };
-                self.probe = Some(continuation);
-                self.probe_tile = Some(wire);
-                self.probe_output = probe_output;
-                self.probe_tiles.insert(wire);
+                // The flight is one unit: continuation, wire tile, and the
+                // reuse flag are set together and cleared together.
+                self.probe = Some(ActiveProbe {
+                    continuation,
+                    tile: wire,
+                    output: probe_output,
+                });
                 self.tile_uris.insert(wire, tile.request.uri.clone());
                 self.tile_headers.insert(wire, tile.request.headers.clone());
                 self.tile_processing.insert(wire, tile.processing);
@@ -944,7 +1038,10 @@ impl Job {
             .enumerate()
             .map(|(index, tile)| (*tile, index))
             .collect();
-        self.probe_tiles.clear();
+        // Any probe flight ended with the resolved plan: the plan owns the
+        // tiles now (a reused `probe_output` tile arrives via `retained_probe`
+        // below, never via the probe flight).
+        self.probe = None;
         self.pending_tiles = self.planned_tiles.iter().copied().collect();
         self.pending_set = self.planned_tiles.iter().copied().collect();
         self.in_flight.clear();
@@ -982,7 +1079,11 @@ impl Job {
     /// the tile identically: progress advances, and a round with stashed
     /// failures settles into the partial decision once complete.
     fn apply_tile_success(&mut self, tile: u32) -> Result<Outcome, JobError> {
-        if self.probe_tiles.contains(&tile) {
+        if self
+            .probe
+            .as_ref()
+            .is_some_and(|flight| flight.tile == tile)
+        {
             return Err(JobError::invalid_state(
                 "probe tiles are answered with a probe outcome, not a tile success",
             ));
@@ -1048,7 +1149,11 @@ impl Job {
     /// timer), so late successes still count and the missing list stays
     /// complete.
     fn apply_tile_failed(&mut self, tile: u32, failure: TileFailure) -> Result<Outcome, JobError> {
-        if self.probe_tiles.contains(&tile) {
+        if self
+            .probe
+            .as_ref()
+            .is_some_and(|flight| flight.tile == tile)
+        {
             return Err(JobError::invalid_state(
                 "probe tiles are answered with a probe outcome, not a tile failure",
             ));
@@ -1176,7 +1281,6 @@ impl Job {
         {
             return Ok(());
         }
-        self.recovery_reason = Some("tile".to_string());
         let generation = self.alloc_decision_generation()?;
         self.set_state(State::AwaitingPartialDecision)?;
         self.push_effect(JobEffect::RequestDecision { generation })?;
@@ -1195,14 +1299,19 @@ impl Job {
         tile: u32,
         outcome: dezoomify_protocol::dto::ProbeOutcome,
     ) -> Result<Outcome, JobError> {
-        if self.state != State::Planning || self.probe_tile != Some(tile) {
-            return Err(JobError::invalid_state(
-                "probe outcome valid only for the outstanding probe while Planning",
-            ));
-        }
-        if !self.probe_tiles.contains(&tile) {
-            return Err(JobError::invalid_state("unknown probe tile id"));
-        }
+        // The outstanding flight is the whole gate: no flight means no
+        // probe is answerable, and a tile mismatch names a different (or
+        // already-settled) probe. The state sync below is a debug-only
+        // cross-check; the flight discriminant owns the rejection.
+        let flight_output = match self.probe.as_ref() {
+            Some(flight) if flight.tile == tile => flight.output,
+            _ => {
+                return Err(JobError::invalid_state(
+                    "probe outcome valid only for the outstanding probe while Planning",
+                ));
+            }
+        };
+        debug_assert_eq!(self.state, State::Planning);
         let available = matches!(
             outcome,
             dezoomify_protocol::dto::ProbeOutcome::Available { .. }
@@ -1219,7 +1328,7 @@ impl Job {
             }
             dezoomify_protocol::dto::ProbeOutcome::Missing => ObservationResult::Missing,
         };
-        if available && self.probe_output {
+        if available && flight_output {
             let destination = self
                 .tile_destinations
                 .get(&tile)
@@ -1227,14 +1336,12 @@ impl Job {
                 .unwrap_or_default();
             self.retained_probe = Some((tile, destination));
         }
-        self.probe_tile = None;
-        self.probe_output = false;
-        self.probe_tiles.remove(&tile);
-        self.in_flight.remove(&tile);
-        let Some(continuation) = self.probe.take() else {
+        let Some(flight) = self.probe.take() else {
             return Err(JobError::invalid_state("no probe continuation pending"));
         };
-        let step = continuation
+        self.in_flight.remove(&tile);
+        let step = flight
+            .continuation
             .submit(observation)
             .map_err(|e| JobError::new("job.plan-invalid", e.to_string()))?;
         self.drive_probe(step)?;
@@ -1246,18 +1353,28 @@ impl Job {
         generation: u32,
         choice: RecoveryChoice,
     ) -> Result<Outcome, JobError> {
-        if self.state != State::AwaitingPartialDecision {
+        // The decision discriminant owns the rejection: `None` (no decision
+        // pending, or an already-answered one) is one check, and a
+        // generation mismatch is the stale-answer rejection. The state sync
+        // below is a debug-only cross-check; `Pending` exists only while
+        // `AwaitingPartialDecision` is live.
+        let Decision::Pending {
+            generation: expected,
+        } = self.decision
+        else {
             return Err(JobError::invalid_state(
-                "recovery choice valid only in AwaitingPartialDecision",
+                "recovery choice valid only while a partial decision is pending",
             ));
-        }
-        if self.pending_decision != Some(generation) {
+        };
+        if expected != generation {
             return Err(JobError::invalid_state(
                 "recovery choice generation is stale",
             ));
         }
-        self.recovery_reason = None;
-        self.pending_decision = None;
+        debug_assert_eq!(self.state, State::AwaitingPartialDecision);
+        // Leaving the phase drops the decided payload: decided data cannot
+        // survive the phase exit on any arm below.
+        self.decision = Decision::None;
         match choice {
             RecoveryChoice::Retry => {
                 // Requeue every settled-as-failed tile with a fresh attempt
@@ -1385,7 +1502,7 @@ impl Job {
 
     fn complete_remaining(&mut self, partial: bool) -> Result<(), JobError> {
         self.paused = false;
-        self.finalizing_partial = Some(partial);
+        self.finalization = Finalization::Pending { partial };
         self.set_state(State::Finalizing)?;
         self.push_effect(JobEffect::FinalizeOutput {
             partial,
@@ -1399,15 +1516,17 @@ impl Job {
     }
 
     fn apply_finalization_succeeded(&mut self) -> Result<Outcome, JobError> {
-        if self.state != State::Finalizing {
+        // The finalization discriminant owns the rejection: only `Pending`
+        // answers. The state sync is a debug-only cross-check; `Pending`
+        // exists only while `Finalizing` is live.
+        let Finalization::Pending { partial } = self.finalization else {
             return Err(JobError::invalid_state(
-                "finalization response valid only in Finalizing",
+                "finalization response valid only while finalization is pending",
             ));
-        }
-        let partial = self
-            .finalizing_partial
-            .take()
-            .ok_or_else(|| JobError::invalid_state("no finalization pending"))?;
+        };
+        debug_assert_eq!(self.state, State::Finalizing);
+        // Settling the phase drops the flag: it cannot leak past finalization.
+        self.finalization = Finalization::Idle;
         if partial {
             self.set_state(State::PartiallyCompleted)?;
             self.push_event(JobEvent::State {
@@ -1431,12 +1550,13 @@ impl Job {
         code: String,
         message: String,
     ) -> Result<Outcome, JobError> {
-        if self.state != State::Finalizing {
+        if !matches!(self.finalization, Finalization::Pending { .. }) {
             return Err(JobError::invalid_state(
-                "finalization response valid only in Finalizing",
+                "finalization response valid only while finalization is pending",
             ));
         }
-        self.finalizing_partial = None;
+        debug_assert_eq!(self.state, State::Finalizing);
+        self.finalization = Finalization::Idle;
         self.fail_via_cleanup(&code, message)?;
         Ok(Outcome::Applied)
     }
@@ -1610,7 +1730,7 @@ impl Job {
             .checked_add(1)
             .ok_or_else(|| JobError::overflow("decision generation"))?;
         self.next_decision = next;
-        self.pending_decision = Some(n);
+        self.decision = Decision::Pending { generation: n };
         Ok(n)
     }
 }

@@ -84,14 +84,38 @@ function startRequest(overrides = {}) {
   };
 }
 
+// Authoritative EngineSnapshotDto builder: snapshots are absolute and ride
+// alongside engine messages; the runner forwards the latest one.
+function snap(revision, overrides = {}) {
+  return {
+    revision,
+    lifecycle: "AcquiringTiles",
+    paused: false,
+    progress: { completed: 0, total: undefined },
+    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    decision: undefined,
+    terminal: undefined,
+    output: undefined,
+    ...overrides,
+  };
+}
+
+function received(snapshot, messages = []) {
+  return { type: "engine.messages", messages, snapshot };
+}
+
+function sink(emitted) {
+  return { snapshot: (snapshot, host) => emitted.push([snapshot, host]) };
+}
+
 test("non-browser exec and empty inputs reject typed before any worker exists", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
-  await assert.rejects(() => runner.start(startRequest({ exec: { kind: "native", destination: {} } }), { event: () => {}, snapshot: () => {} }), (error) => {
+  await assert.rejects(() => runner.start(startRequest({ exec: { kind: "native", destination: {} } }), { snapshot: () => {} }), (error) => {
     assert.equal(error.code, "browser.invalid-exec");
     return true;
   });
-  await assert.rejects(() => runner.start(startRequest({ inputs: [] }), { event: () => {}, snapshot: () => {} }), (error) => {
+  await assert.rejects(() => runner.start(startRequest({ inputs: [] }), { snapshot: () => {} }), (error) => {
     assert.equal(error.code, "browser.invalid-source");
     return true;
   });
@@ -100,8 +124,7 @@ test("non-browser exec and empty inputs reject typed before any worker exists", 
 test("start roots the session at the first input with merged quotas", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
-  const emitted = [];
-  await runner.start(startRequest({ engine: { max_concurrent_fetches: 3 } }), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
+  await runner.start(startRequest({ engine: { max_concurrent_fetches: 3 } }), { snapshot: () => {} });
   const start = p.worker.posted.find((message) => message.type === "engine.start");
   assert.ok(start, "expected engine.start on the worker");
   assert.deepEqual(start.inputs, [{ url: "https://meta.test/info.json" }]);
@@ -109,18 +132,18 @@ test("start roots the session at the first input with merged quotas", async () =
   assert.equal(p.seen.assemblies, 1);
 });
 
-test("engine events pass through with live host status", async () => {
+test("snapshots pass through with live host status", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
-  p.worker.receive({ type: "engine.messages", messages: [{ kind: "event", type: "progress", acquired: 1, total: 4 }] });
+  await runner.start(startRequest(), sink(emitted));
+  p.worker.receive(received(snap(1, { progress: { completed: 1, total: 4 } })));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(emitted.length, 1);
-  assert.deepEqual(emitted[0][0], { kind: "event", type: "progress", acquired: 1, total: 4 });
+  assert.equal(emitted[0][0].progress.completed, 1);
   assert.deepEqual(emitted[0][1], { transport: "direct", permission: "granted", output: "pending" });
   p.setTainted(true);
-  p.worker.receive({ type: "engine.messages", messages: [{ kind: "event", type: "progress", acquired: 2, total: 4 }] });
+  p.worker.receive(received(snap(2, { progress: { completed: 2, total: 4 } })));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(emitted[1][1].output, "display-only");
 });
@@ -142,15 +165,15 @@ test("a missing grant suspends as pending host status, not a phase machine", asy
   p.deps.onPermissionRequired = (detail) => { permissionDetail = detail; };
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  const handle = await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
-  p.worker.receive({ type: "engine.messages", messages: [TILE] });
+  const handle = await runner.start(startRequest(), sink(emitted));
+  p.worker.receive(received(snap(1), [TILE]));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(permissionDetail, "expected the product permission action");
   assert.deepEqual(permissionDetail.hosts, []);
   // No engine outcome while suspended: the effect stays pending.
   assert.ok(!p.worker.posted.some((message) => message.type === "engine.failure"));
   p.setPermissionPending(true);
-  p.worker.receive({ type: "engine.messages", messages: [{ kind: "event", type: "progress", acquired: 0, total: 1 }] });
+  p.worker.receive(received(snap(2, { progress: { completed: 0, total: 1 } })));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(emitted.at(-1)[1].permission, "prompt");
   // Denial fails the acquisition typed without re-prompting.
@@ -163,7 +186,7 @@ test("a missing grant suspends as pending host status, not a phase machine", asy
 test("user commands map onto the session; engine-internal commands reject typed", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
-  const handle = await runner.start(startRequest(), { event: () => {}, snapshot: () => {} });
+  const handle = await runner.start(startRequest(), { snapshot: () => {} });
   await handle.command({ type: "select-image", image: 2 });
   await handle.command({ type: "select-level", level: 1 });
   await handle.command({ type: "recovery-choice", generation: 0, choice: "keep" });
@@ -178,28 +201,34 @@ test("user commands map onto the session; engine-internal commands reject typed"
   });
 });
 
-test("a terminal event settles the attempt; late worker messages never emit", async () => {
+test("a terminal snapshot settles the UI; stale live snapshots never emit", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  const handle = await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
-  p.worker.receive({ type: "engine.messages", messages: [{ kind: "event", type: "completed" }] });
+  const handle = await runner.start(startRequest(), sink(emitted));
+  p.worker.receive(received(snap(1, { lifecycle: "Completed", terminal: { type: "completed" } })));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(emitted.length, 1);
-  p.worker.receive({ type: "engine.messages", messages: [{ kind: "event", type: "progress", acquired: 9, total: 9 }] });
+  // A stale live snapshot never moves the UI; terminals always settle it.
+  p.worker.receive(received(snap(0, { progress: { completed: 9, total: 9 } })));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(emitted.length, 1, "retired worker message emitted after terminal");
+  assert.equal(emitted.length, 1, "stale live snapshot emitted after terminal");
+  // Post-terminal commands still forward: the engine owns post-terminal
+  // semantics. Only a disposed attempt rejects, since its worker is gone.
+  await handle.command({ type: "pause" });
+  assert.ok(p.worker.posted.some((message) => message.type === "engine.command"));
+  await handle.dispose();
   await assert.rejects(() => handle.command({ type: "pause" }), (error) => {
     assert.equal(error.code, "browser.job-settled");
     return true;
   });
 });
 
-test("an adapter error projects to a terminal failed event, not a hang", async () => {
+test("an adapter error projects to a terminal failed snapshot, not a hang", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
+  await runner.start(startRequest(), sink(emitted));
   const adapterError = {
     code: "adapter.abi",
     phase: "validation",
@@ -210,8 +239,8 @@ test("an adapter error projects to a terminal failed event, not a hang", async (
   p.worker.receive({ type: "engine.error", error: adapterError });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(emitted.length, 1);
-  assert.equal(emitted[0][0].type, "failed");
-  assert.equal(emitted[0][0].error.code, "adapter.abi");
+  assert.equal(emitted[0][0].terminal.type, "failed");
+  assert.equal(emitted[0][0].terminal.error.code, "adapter.abi");
 });
 
 test("dispose aborts in-flight fetches, terminates the worker, and settles pending work", async () => {
@@ -225,13 +254,14 @@ test("dispose aborts in-flight fetches, terminates the worker, and settles pendi
   });
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  const handle = await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
-  p.worker.receive({ type: "engine.messages", messages: [TILE] });
+  const handle = await runner.start(startRequest(), sink(emitted));
+  p.worker.receive(received(snap(1), [TILE]));
+  const emittedBeforeDispose = emitted.length;
   await handle.dispose();
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(p.worker.terminated, true);
   assert.equal(sawAbortedSignal, true, "in-flight fetch never observed the abort");
-  assert.equal(emitted.length, 0, "disposed attempt emitted after teardown");
+  assert.equal(emitted.length, emittedBeforeDispose, "disposed attempt emitted after teardown");
 });
 
 test("processing calls transfer their buffer and settle on disposal", async () => {
@@ -248,7 +278,7 @@ test("processing calls transfer their buffer and settle on disposal", async () =
     };
   };
   const runner = createBrowserRunner(p.deps);
-  const handle = await runner.start(startRequest(), { event: () => {}, snapshot: () => {} });
+  const handle = await runner.start(startRequest(), { snapshot: () => {} });
   const bytes = new Uint8Array([1, 2, 3]).buffer;
   const pending = assemblyProcess({ recipe: "none" }, bytes);
   await new Promise((resolve) => setTimeout(resolve, 0));

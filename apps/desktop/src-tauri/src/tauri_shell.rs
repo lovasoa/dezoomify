@@ -199,14 +199,14 @@ struct CapabilitySnapshot {
     commands: Vec<&'static str>,
 }
 
-/// Projected IPC payload shape. Every job emit is a `job-snapshot`
-/// `JobSnapshot` carrying `job` + `jobId` aliases plus `revision`/`seq`
-/// so the frontend identity guard keeps working, alongside the typed
-/// snapshot fields: `state`, `acquired`, `total`, `recovery`, `terminal`,
-/// and `output`.
+/// Projected IPC payload shape. Every job emit is the canonical
+/// `EngineSnapshotDto` verbatim (`revision`, `lifecycle`, `paused`,
+/// `progress`, `selection` with catalog, `decision`, `terminal`, `output`)
+/// plus the `job` + `jobId` routing aliases the frontend identity guard
+/// reads. No folded `state`/`acquired`/`recovery`/`origin` fields exist.
 ///
-/// Only counts, hashes, codes, and the redacted origin cross IPC; tile
-/// bytes, paths, full URLs, and secrets never do.
+/// Only the DTO crosses IPC; tile bytes, pixels, paths, full URLs, and
+/// secrets never do.
 fn emit_snapshot(app: &AppHandle, emit: crate::jobs::SnapshotEmit) {
     debug_assert!(!crate::jobs::payload_has_forbidden_keys(&emit.payload));
     let _ = app.emit(emit.channel, emit.payload);
@@ -337,6 +337,52 @@ async fn answer_choice(
     let (dispatched, sync) = {
         let mut table = lock_table(&state)?;
         let (outcome, emits) = commands::dispatch_answer_choice(&mut table, &job, choice)?;
+        (to_dispatched(outcome), emits)
+    };
+    {
+        let mut table = state.lock().map_err(|_| CommandFailure {
+            code: "shell.lock".into(),
+            message: "job table poisoned".into(),
+        })?;
+        poll_and_emit(&app, &mut table, sync);
+    }
+    Ok(dispatched)
+}
+
+#[tauri::command]
+async fn pause_job(
+    state: State<'_, Mutex<JobTable>>,
+    app: AppHandle,
+    job: String,
+) -> Result<Dispatched, CommandFailure> {
+    // Forwards engine `Pause` inside `jobs.rs pause_job` (wrong-phase safe);
+    // the paused flag arrives on the snapshot stream verbatim.
+    let (dispatched, sync) = {
+        let mut table = lock_table(&state)?;
+        let (outcome, emits) = commands::dispatch_pause_job(&mut table, &job)?;
+        (to_dispatched(outcome), emits)
+    };
+    {
+        let mut table = state.lock().map_err(|_| CommandFailure {
+            code: "shell.lock".into(),
+            message: "job table poisoned".into(),
+        })?;
+        poll_and_emit(&app, &mut table, sync);
+    }
+    Ok(dispatched)
+}
+
+#[tauri::command]
+async fn resume_job(
+    state: State<'_, Mutex<JobTable>>,
+    app: AppHandle,
+    job: String,
+) -> Result<Dispatched, CommandFailure> {
+    // Forwards engine `Resume` inside `jobs.rs resume_job`; same routing as
+    // `pause_job` above.
+    let (dispatched, sync) = {
+        let mut table = lock_table(&state)?;
+        let (outcome, emits) = commands::dispatch_resume_job(&mut table, &job)?;
         (to_dispatched(outcome), emits)
     };
     {

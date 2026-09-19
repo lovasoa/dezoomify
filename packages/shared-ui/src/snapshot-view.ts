@@ -5,6 +5,12 @@
 // latest snapshot. Every terminal snapshot yields a complete terminal
 // presentation even when the catalog or progress never arrived.
 //
+// JobSnapshot is the generated EngineSnapshotDto verbatim: lifecycle,
+// progress, selection, decision, terminal, and output are read exactly as
+// the engine projected them. No legacy folded fields are accepted here;
+// unknown job ids and stale revisions are dropped at the subscription
+// boundary (the runner), never in this view.
+//
 // User copy travels as i18n keys plus vars; the view renders them through
 // `t()`. Counts, labels, and gap ledgers stay literal data.
 
@@ -13,7 +19,6 @@ import type {
   ErrorDto,
   JobSnapshot,
   JobState,
-  RecoveryAction,
 } from "@dezoomify/app-model";
 import { categoryFor } from "./failure.ts";
 import { renderTransportLabel, splitGapLedger } from "./components.ts";
@@ -76,7 +81,12 @@ export interface SnapshotLevelOption {
 export type SnapshotSelection =
   | { kind: "image"; options: SnapshotImageOption[] }
   | { kind: "level"; options: SnapshotLevelOption[] }
-  | { kind: "recovery"; generation: number; actions: RecoveryAction[] };
+  // Outstanding keep/retry/discard choice: the closed answers are the
+  // engine's RecoveryChoice values. The DTO carries no action hints at
+  // decision time, so the projection names the generation plus the honest
+  // missing-tile ledger from decision.missing and nothing else; products
+  // offer the three closed answers directly.
+  | { kind: "recovery"; generation: number; missing: number[] };
 
 /** Terminal view model: kind aliases the authoritative outcome; the rest is presentation-only ledger. */
 export type SnapshotTerminal = {
@@ -200,64 +210,21 @@ export function structuredErrorOf(error: ErrorDto): StructuredError {
   return presented;
 }
 
-type SnapshotLike = JobSnapshot & {
-  state?: JobState;
-  jobId?: string | null;
-  catalog?: CatalogDto | null;
-  acquired?: number;
-  total?: number | null;
-  recovery?: { generation: number; actions: RecoveryAction[] } | null;
-  displayOnly?: boolean;
-  output?: {
-    doneTiles?: number;
-    totalTiles?: number | null;
-    failedTiles?: number;
-    partial?: boolean;
-    missingTiles?: string[];
-    missing?: number[];
-    complete?: boolean;
-    disposition?: string;
-  } | null;
-  terminal?: { kind?: SnapshotTerminal["kind"]; type?: string; error?: ErrorDto } | null;
-  lifecycle?: JobState;
-  progress?: { completed?: number; total?: number };
-  selection?: { image?: number | null; level?: number | null; deferred?: Array<{ position: number; uri: string }> } | null;
-  decision?: { generation?: number; missing?: Array<{ tile: number }> } | null;
-};
-
-function terminalKindOf(raw: SnapshotLike["terminal"]): SnapshotTerminal["kind"] | null {
-  if (!raw) return null;
-  if (typeof raw.kind === "string") return raw.kind;
-  if (typeof raw.type === "string") {
-    if (raw.type === "completed") return "completed";
-    if (raw.type === "partial-completed") return "partial-completed";
-    if (raw.type === "failed") return "failed";
-    if (raw.type === "cancelled") return "cancelled";
-  }
-  return null;
-}
-
 function terminalOf(snapshot: JobSnapshot): SnapshotTerminal | null {
-  const raw = (snapshot as SnapshotLike).terminal;
-  const kind = terminalKindOf(raw);
-  if (!kind) return null;
-  const presented: SnapshotTerminal = { kind };
-  const error = (raw as { error?: ErrorDto } | null)?.error;
-  if (error) presented.error = structuredErrorOf(error);
-  const out = (snapshot as SnapshotLike).output;
+  const terminal = snapshot.terminal;
+  if (!terminal) return null;
+  const presented: SnapshotTerminal = { kind: terminal.type };
+  if (terminal.type === "failed") presented.error = structuredErrorOf(terminal.error);
+  const out = snapshot.output;
   if (out) {
-    const missingTiles = Array.isArray(out.missingTiles)
-      ? out.missingTiles.slice()
-      : Array.isArray(out.missing)
-        ? out.missing.map((n) => String(n))
-        : [];
-    const progress = (snapshot as SnapshotLike).progress;
-    const acquired = (snapshot as SnapshotLike).acquired;
+    // Honest tile account off engine facts only: finalized units from
+    // progress, gaps from the output ledger, partial from the terminal tag.
+    const missingTiles = out.missing.map((n) => String(n));
     presented.output = {
-      doneTiles: typeof out.doneTiles === "number" ? out.doneTiles : (typeof progress?.completed === "number" ? progress.completed : (typeof acquired === "number" ? acquired : 0)),
-      totalTiles: (out.totalTiles as number | null | undefined) ?? (progress?.total as number | null | undefined) ?? (snapshot as SnapshotLike).total ?? null,
-      failedTiles: typeof out.failedTiles === "number" ? out.failedTiles : missingTiles.length,
-      partial: typeof out.partial === "boolean" ? out.partial : kind === "partial-completed",
+      doneTiles: snapshot.progress.completed,
+      totalTiles: snapshot.progress.total ?? null,
+      failedTiles: missingTiles.length,
+      partial: terminal.type === "partial-completed",
       missingTiles,
     };
     if (missingTiles.length > 0) {
@@ -299,20 +266,19 @@ export function presentSnapshot(
   transport: string | null,
   options?: { displayOnly?: boolean },
 ): SnapshotPresentation {
-  // Render the authoritative snapshot directly: accept both the generated
-  // EngineSnapshotDto shape (lifecycle/progress/decision/terminal.type) and
-  // the previous folded shape (state/acquired/recovery/terminal.kind) so one
-  // step table covers the migration. Snapshot fields drive the view; the
+  // Render the authoritative snapshot directly: every field below is the
+  // generated EngineSnapshotDto shape (lifecycle/progress/decision with
+  // generation+missing/terminal.type/output with missing+disposition). The
   // transport argument only labels diagnostics.
-  const like = snapshot as SnapshotLike;
   const terminal = terminalOf(snapshot);
-  const terminalKind = terminalKindOf(like.terminal);
-  const partial = terminalKind === "partial-completed";
-  const outputDisposition = (like.output as { disposition?: unknown } | null | undefined)?.disposition;
+  const partial = snapshot.terminal?.type === "partial-completed";
   // Display-only is a host-known output fact (tainted canvas): the assembly
   // reports it explicitly via options until the engine snapshot round-trips
-  // with output.disposition. It is never folded into the DTO itself.
-  const displayOnly = ((options?.displayOnly === true || like.displayOnly === true || outputDisposition === "display-only") && terminal === null);
+  // with output.disposition. It is never folded into the DTO itself, and it
+  // never overrides a terminal.
+  const displayOnly =
+    (options?.displayOnly === true || snapshot.output?.disposition === "display-only") &&
+    terminal === null;
   let phase: SnapshotPhase = "job";
   if (terminal) {
     if (terminal.kind === "completed" || terminal.kind === "partial-completed") phase = "completed";
@@ -322,11 +288,10 @@ export function presentSnapshot(
     phase = "display-only";
   }
 
-  const lifecycle: JobState = like.lifecycle ?? like.state ?? "Discovering";
-  const catalog = (like.catalog ?? null) as CatalogDto | null;
-  const selectedImage = like.selection?.image ?? null;
-  const recoveryGeneration = like.recovery?.generation ?? like.decision?.generation;
-  const recoveryActions = like.recovery?.actions ?? [];
+  const lifecycle: JobState = snapshot.lifecycle ?? "Discovering";
+  const catalog = snapshot.selection.catalog ?? null;
+  const selectedImage = snapshot.selection.image ?? null;
+  const decision = snapshot.decision;
 
   let selection: SnapshotSelection | null = null;
   if (!terminal) {
@@ -337,18 +302,18 @@ export function presentSnapshot(
         kind: "level",
         options: levelOptionsOf(catalog, selectedImage),
       };
-    } else if (lifecycle === "AwaitingPartialDecision" && recoveryGeneration !== undefined && recoveryGeneration !== null) {
+    } else if (lifecycle === "AwaitingPartialDecision" && decision) {
       selection = {
         kind: "recovery",
-        generation: recoveryGeneration,
-        actions: recoveryActions,
+        generation: decision.generation,
+        missing: decision.missing.map((entry) => entry.tile),
       };
     }
   }
 
   const headline = headlineForState(lifecycle);
-  const completed = like.progress?.completed ?? like.acquired ?? 0;
-  const total = (like.progress?.total as number | null | undefined) ?? like.total ?? null;
+  const completed = snapshot.progress.completed;
+  const total = snapshot.progress.total ?? null;
   const progress =
     total !== null || completed > 0
       ? { current: completed, total }
@@ -360,14 +325,15 @@ export function presentSnapshot(
   return {
     ...basePresentation(),
     phase,
-    jobId: (like.jobId ?? null) as string | null,
+    // The engine projection carries no job id; products track ownership.
+    jobId: null,
     stateLabel: lifecycle,
     headlineKey: displayOnly ? "view.display.title" : headline.key,
     ...(headline.vars ? { headlineVars: headline.vars } : {}),
     ...(detailKey ? { detailKey } : {}),
     ...(detailVars ? { detailVars } : {}),
     progress,
-    paused: like.paused ?? false,
+    paused: snapshot.paused ?? false,
     selection,
     terminal,
     transport,

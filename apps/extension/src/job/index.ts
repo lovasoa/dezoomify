@@ -17,7 +17,7 @@ import {
   createCanvasAssembly,
   createProbeSize,
   createTileDecoder,
-  pickEngineSelection,
+  planSelectionDrive,
   saveBlobViaAnchor,
 } from "@dezoomify/browser-runtime";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
@@ -148,7 +148,18 @@ function statusForLifecycle(lifecycle: JobState): PresentationStatus {
 
 function presentFor(status: PresentationStatus, ctx: ViewContext): SnapshotPresentation {
   if (localFailure) return presentFailure(localFailure, "browser-session");
-  if (activeSnapshot) return presentSnapshot(activeSnapshot, "browser-session");
+  if (activeSnapshot) {
+    // Display-only is a host-known output fact (tainted canvas): probe the
+    // assembly like the website does and pass it explicitly to
+    // presentSnapshot. It is never written into the DTO.
+    let displayOnly = false;
+    try {
+      displayOnly = assembly?.isTainted?.() === true;
+    } catch {
+      displayOnly = false;
+    }
+    return presentSnapshot(activeSnapshot, "browser-session", { displayOnly });
+  }
   return presentStatus(status, {
     transport: "browser-session",
     ...(ctx.failure ? { error: ctx.failure } : {}),
@@ -354,55 +365,43 @@ function createAssembly(
 }
 
 /**
- * Drive selection and deferred follows from the authoritative snapshot.
- * Ready images select once (gated by `snapshot.selection.image`, never a
- * product mirror); still-deferred entries follow in the same job through the
- * follow-up command (engine owns budget and cycle guards, never a host
- * recursion with a fresh attempt). Reads only the generated DTO shape:
- * `selection.catalog` and `selection.deferred`.
+ * Drive selection and deferred follows from the authoritative snapshot via
+ * the shared selection driver. Ready images select once; still-deferred
+ * entries follow in the same job through the follow-up command (engine owns
+ * budget and cycle guards, never a host recursion with a fresh attempt).
+ * Reads only the generated DTO shape.
  */
 function driveSnapshot(snapshot: JobSnapshot) {
-  if (snapshot.selection.image !== null && snapshot.selection.image !== undefined) return;
-  const catalog = snapshot.selection.catalog;
-  if (catalog) {
-    jobLog.info("selection-catalog", `entries=${catalog.entries.length}`);
-    const selection = pickEngineSelection(catalog);
-    if (selection) {
+  const drive = planSelectionDrive(snapshot);
+  switch (drive.action) {
+    case "selected":
+    case "waiting":
+      return;
+    case "select": {
+      const catalog = snapshot.selection.catalog;
+      if (catalog) jobLog.info("selection-catalog", `entries=${catalog.entries.length}`);
       render(statusForLifecycle(snapshot.lifecycle), { jobActivity: { startedAt: Date.now() } });
-      void jobHandle?.command({ type: "select-image", image: selection.image }).catch(() => {});
-      void jobHandle?.command({ type: "select-level", level: selection.level }).catch(() => {});
+      void jobHandle?.command({ type: "select-image", image: drive.image }).catch(() => {});
+      void jobHandle?.command({ type: "select-level", level: drive.level }).catch(() => {});
       return;
     }
-    const deferredIndex = catalog.entries.findIndex((entry) => entry?.kind === "image-request");
-    if (deferredIndex >= 0) {
-      followDeferredAt(deferredIndex);
+    case "follow-deferred":
+      followDeferredAt(drive.position);
       return;
-    }
-  } else {
-    const deferred = snapshot.selection.deferred;
-    if (deferred.length > 0) {
-      followDeferredAt(deferred[0].position);
+    case "unselectable":
+      onHostFailure(Object.assign(
+        new Error("No downloadable image was found on this page."),
+        { code: "NO_IMAGE_FOUND", retryable: false },
+      ));
+      void jobHandle?.command({ type: "cancel" }).catch(() => {});
       return;
-    }
-    // No catalog and no deferred entries yet: the engine is still
-    // discovering; never fail or select without snapshot facts.
-    return;
   }
-  onHostFailure(Object.assign(
-    new Error("No downloadable image was found on this page."),
-    { code: "NO_IMAGE_FOUND", retryable: false },
-  ));
-  void jobHandle?.command({ type: "cancel" }).catch(() => {});
 }
 
 function followDeferredAt(image: number) {
   jobLog.info("deferred-follow", `image=${image}`);
   render("discovering", { jobActivity: { startedAt: Date.now() } });
-  // Contract gap (see report): the core engine owns a FollowDeferred command
-  // but the protocol DTO / generated TS JobCommand has no follow-deferred
-  // variant, so this stays a cast until the contract grows one. Same cast
-  // exists on the website path (src/main.ts).
-  void jobHandle?.command({ type: "follow-deferred", image } as unknown as Parameters<NonNullable<typeof jobHandle>["command"]>[0]).catch((error) => {
+  void jobHandle?.command({ type: "follow-deferred", image }).catch((error) => {
     onHostFailure(Object.assign(
       new Error("The image metadata stayed deferred after the resolution limit."),
       { code: "discovery.deferred", retryable: false, detail: error instanceof Error ? error.message : undefined },

@@ -21,10 +21,12 @@
 //! * Cancellation is tracked, not faked: the flag stops new spawns, the
 //!   commit point refuses publication once set, in-flight async tasks are
 //!   aborted (dropping their requests), and the pump awaits every tracked
-//!   handle before cleanup, so cancel reports only after quiescence.
-//!   Aborting a task that is inside a blocking decode detaches that
-//!   sub-100ms tail (cancelling a future cannot stop blocking work); its
-//!   result is dropped and nothing publishes.
+//!   handle plus every tracked blocking decode tail before cleanup, so
+//!   cancel reports only after quiescence. Aborting a task that is inside
+//!   a blocking decode detaches that sub-100ms tail (cancelling a future
+//!   cannot stop blocking work); the tail is tracked by permit, its bytes
+//!   stay counted against the retain cap until it releases, its result is
+//!   dropped, and nothing publishes.
 //! * Output is owned end to end by [`crate::sink::Sink`]: streaming paint,
 //!   bounded retention/spool, one commit point, job-owned-temp-only
 //!   cleanup. This module never writes output itself.
@@ -35,7 +37,10 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{atomic::Ordering, mpsc, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    mpsc, Arc, Mutex,
+};
 use std::time::{Duration, Instant};
 
 use dezoomify_core::core::discovery::{FetchCause, FetchCode, TransportKind};
@@ -90,6 +95,11 @@ pub struct Instrumentation {
     pub peak_inflight: usize,
     /// Peak retained (overlapping, unpainted) tile bytes in the sink.
     pub peak_retained_bytes: u64,
+    /// Peak in-flight decode bytes: encoded bodies held by blocking decode
+    /// tails (including tails detached by cancelling their parent task).
+    /// Bounded by the engine slot budget times the fetch byte limit; counted
+    /// against the retain cap alongside sink retention.
+    pub peak_decode_inflight_bytes: u64,
     /// Canvas bytes (4 bytes per pixel, zero until allocated).
     pub canvas_bytes: u64,
     /// Transient encoded bytes for the committed output.
@@ -221,6 +231,76 @@ struct Attempt<'a> {
     command_rx: Option<Arc<Mutex<mpsc::Receiver<EngineUserCommand>>>>,
     instrumentation: Instrumentation,
     in_flight: usize,
+    /// Tracked blocking decode tails: reserved before every `spawn_blocking`
+    /// decode, released when the blocking closure finishes (even when the
+    /// parent task was aborted and the tail detached). The pump counts these
+    /// bytes against the retain cap and waits them out before reporting the
+    /// terminal.
+    decode_tails: Arc<DecodeTails>,
+}
+
+/// Tracked blocking decode work (permits, not handles): cancelling a future
+/// cannot stop blocking work, so each blocking decode reserves its encoded
+/// body bytes up front and releases them when its closure finishes. The
+/// release runs inside the blocking closure itself, which always runs to
+/// completion even after the parent task is aborted -- so detached tails
+/// stay counted and the terminal wait observes their quiescence.
+#[derive(Debug, Default)]
+pub(crate) struct DecodeTails {
+    active: AtomicUsize,
+    bytes: AtomicU64,
+    peak_bytes: AtomicU64,
+}
+
+impl DecodeTails {
+    fn reserve(&self, bytes: usize) {
+        self.active.fetch_add(1, Ordering::SeqCst);
+        let bytes = bytes as u64;
+        let current = self
+            .bytes
+            .fetch_add(bytes, Ordering::SeqCst)
+            .saturating_add(bytes);
+        self.peak_bytes.fetch_max(current, Ordering::SeqCst);
+    }
+
+    fn release(&self, bytes: usize) {
+        self.bytes.fetch_sub(bytes as u64, Ordering::SeqCst);
+        self.active.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    fn quiescent(&self) -> bool {
+        self.active.load(Ordering::SeqCst) == 0
+    }
+
+    /// Wait for every tracked tail to release, polling so a hung decoder
+    /// can never wedge cleanup forever. Returns whether quiescence was
+    /// observed before the timeout.
+    fn wait_quiescent(&self, timeout: Duration) -> bool {
+        let start = Instant::now();
+        while !self.quiescent() {
+            if start.elapsed() >= timeout {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        true
+    }
+}
+
+/// Whether placing one more decoded tile stays within the retain cap once
+/// in-flight (not yet placed) decode bytes are counted: sink retention plus
+/// tracked tails plus the tile about to be placed. Pure so the bound is
+/// testable without a sink.
+fn decode_budget_exceeded(
+    retained_bytes: u64,
+    inflight_bytes: u64,
+    tile_bytes: u64,
+    cap: u64,
+) -> bool {
+    retained_bytes
+        .saturating_add(inflight_bytes)
+        .saturating_add(tile_bytes)
+        > cap
 }
 
 impl<'a> Attempt<'a> {
@@ -275,6 +355,7 @@ fn execute_attempt(
         command_rx: config.exec_command_rx.clone(),
         instrumentation: Instrumentation::default(),
         in_flight: 0,
+        decode_tails: Arc::new(DecodeTails::default()),
     };
     let mut sink = Sink::new(config, output.format);
     let mut pump = Pump::new(update);
@@ -377,21 +458,31 @@ fn execute_attempt(
                         "completion channel closed with work outstanding",
                     )
                 })?;
-                let update = feed_completion(&mut job, &mut attempt, &mut sink, completion)?;
+                // Pump failures (e.g. the retain cap with tails counted, or
+                // a stale partial answer the engine rejected) still own
+                // quiescence and rollback: nothing publishes on the way out.
+                let update = match feed_completion(&mut job, &mut attempt, &mut sink, completion) {
+                    Ok(update) => update,
+                    Err(error) => {
+                        abort_and_join(&attempt.transport, &mut handles, &attempt.decode_tails);
+                        sink.rollback();
+                        return Err(error);
+                    }
+                };
                 apply_update(&mut pump, update);
                 continue;
             }
             if pump.snapshot.terminal.is_some() {
                 break;
             }
-            abort_and_join(&attempt.transport, &mut handles);
+            abort_and_join(&attempt.transport, &mut handles, &attempt.decode_tails);
             sink.rollback();
             return Err(NativeError::new(
                 "native.internal",
                 "job stalled with no effects",
             ));
         }
-        execute_effects(
+        if let Err(error) = execute_effects(
             &mut job,
             &mut pump,
             &mut attempt,
@@ -399,12 +490,23 @@ fn execute_attempt(
             &completion_tx,
             &mut handles,
             effects,
-        )?;
+        ) {
+            abort_and_join(&attempt.transport, &mut handles, &attempt.decode_tails);
+            sink.rollback();
+            return Err(error);
+        }
         report_snapshot(&mut job, &mut attempt, on_snapshot);
         // Opportunistic completions: feed whatever already landed before
         // the next drain so pipelining never waits a full round trip.
         while let Ok(completion) = completion_rx.try_recv() {
-            let update = feed_completion(&mut job, &mut attempt, &mut sink, completion)?;
+            let update = match feed_completion(&mut job, &mut attempt, &mut sink, completion) {
+                Ok(update) => update,
+                Err(error) => {
+                    abort_and_join(&attempt.transport, &mut handles, &attempt.decode_tails);
+                    sink.rollback();
+                    return Err(error);
+                }
+            };
             apply_update(&mut pump, update);
         }
         // Pause v1 demonstration (`--pause-after N`): same overlay proof as
@@ -444,10 +546,11 @@ fn execute_attempt(
         }
     }
 
-    // Terminal: stop new work, await every tracked handle (aborted async
-    // tasks resolve promptly; detached blocking decode tails drop their
-    // results), then map the terminal honestly.
-    abort_and_join(&attempt.transport, &mut handles);
+    // Terminal: stop new work, await every tracked handle plus every
+    // tracked blocking decode tail (aborted async tasks resolve promptly;
+    // detached tails release their permits when their closures finish and
+    // their results are dropped), then map the terminal honestly.
+    abort_and_join(&attempt.transport, &mut handles, &attempt.decode_tails);
     // Any completion that landed after the terminal is dropped, never fed.
     let terminal = match pump.snapshot.terminal.clone() {
         Some(EngineTerminal::Completed) | Some(EngineTerminal::PartialCompleted { .. }) => {
@@ -516,16 +619,25 @@ enum Terminal {
     Error(NativeError),
 }
 
-/// Abort every tracked task (in-flight requests drop; detached blocking
-/// decode tails finish unseen with dropped results) and await the handles
-/// so cleanup owns quiescence, never a still-running task.
-fn abort_and_join(transport: &NativeTransport, handles: &mut Vec<tokio::task::JoinHandle<()>>) {
+/// Abort every tracked task (in-flight requests drop) and await the handles
+/// so cleanup owns quiescence, never a still-running task. Blocking decode
+/// tails outlive their aborted parents, so the terminal additionally waits
+/// for every tracked tail permit: cancellation is terminal only after
+/// cleanup/quiescence acknowledgment including blocking work. Tails finish
+/// in milliseconds; the generous timeout only guards against a hung decoder
+/// and never publishes anything either way.
+fn abort_and_join(
+    transport: &NativeTransport,
+    handles: &mut Vec<tokio::task::JoinHandle<()>>,
+    tails: &DecodeTails,
+) {
     for handle in handles.iter() {
         handle.abort();
     }
     for handle in handles.drain(..) {
         let _ = transport.block_on(handle);
     }
+    let _ = tails.wait_quiescent(Duration::from_secs(30));
 }
 
 /// Apply host-side external commands (Pause/Resume; Cancel rides the flag).
@@ -607,6 +719,8 @@ fn drain_commands(job: &mut EngineJob, pump: &mut Pump, attempt: &mut Attempt<'_
 fn finish_sink_stats(attempt: &mut Attempt<'_>, sink: &Sink) {
     let stats = sink.stats();
     attempt.instrumentation.peak_retained_bytes = stats.peak_retained_bytes;
+    attempt.instrumentation.peak_decode_inflight_bytes =
+        attempt.decode_tails.peak_bytes.load(Ordering::SeqCst);
     attempt.instrumentation.canvas_bytes = stats.canvas_bytes;
     attempt.instrumentation.encoded_bytes = stats.encoded_bytes;
     attempt.instrumentation.peak_spool_bytes = stats.peak_spool_bytes;
@@ -851,7 +965,9 @@ fn execute_effects(
                 apply_update(pump, update);
             }
             EngineEffect::RequestPartialDecision { generation, .. } => {
-                let Some(decision) = await_partial_choice(attempt, generation) else {
+                let Some((answered_generation, decision)) =
+                    await_partial_choice(attempt, generation)
+                else {
                     if let Some(gate) = attempt.partial_gate.clone() {
                         gate.clear_pending();
                     }
@@ -872,9 +988,13 @@ fn execute_effects(
                 if let Some(gate) = attempt.partial_gate.clone() {
                     gate.clear_pending();
                 }
+                // The answering generation comes from the host through the
+                // gate, never re-applied from this effect: a stale host
+                // answer is engine-rejected at the boundary (invalid-state)
+                // instead of being consumed in order.
                 let update = job
                     .command(EngineUserCommand::AnswerPartial {
-                        generation,
+                        generation: answered_generation,
                         decision: choice,
                     })
                     .map_err(|e| {
@@ -962,6 +1082,7 @@ fn spawn_probe(
     let user = attempt.user.clone();
     let limits = attempt.config.fetch.clone();
     let tx = completion_tx.clone();
+    let tails = Arc::clone(&attempt.decode_tails);
     attempt.note_flight();
     handles.push(transport.spawn(async move {
         let mut request = Request::new(&uri);
@@ -973,11 +1094,19 @@ fn spawn_probe(
         let bytes = fetched.as_ref().map_or(0, |o| o.body.len());
         let read = match fetched {
             Ok(outcome) if outcome.ok() && !outcome.body.is_empty() => {
+                // Tracked tail: reserve before the blocking decode, release
+                // inside the blocking closure so a detached tail (parent
+                // aborted mid-await) stays counted until it really finishes.
+                let body_len = outcome.body.len();
+                tails.reserve(body_len);
+                let tails_release = Arc::clone(&tails);
                 let decoded = tokio::task::spawn_blocking(move || {
-                    processing
+                    let decoded = processing
                         .apply(outcome.body)
                         .ok()
-                        .and_then(|bytes| load_image_with_metadata(&bytes).ok())
+                        .and_then(|bytes| load_image_with_metadata(&bytes).ok());
+                    tails_release.release(body_len);
+                    decoded
                 })
                 .await
                 .ok()
@@ -1042,9 +1171,11 @@ fn spawn_tile(
     let config_fetch = attempt.config.fetch.clone();
     let cache = attempt.cache.clone();
     let tx = completion_tx.clone();
+    let tails = Arc::clone(&attempt.decode_tails);
     attempt.note_flight();
     handles.push(transport.spawn(async move {
-        let result = fetch_and_decode(&need, &task_transport, &user, &config_fetch, &cache).await;
+        let result =
+            fetch_and_decode(&need, &task_transport, &user, &config_fetch, &cache, &tails).await;
         let bytes = result.as_ref().map(|ok| ok.1).unwrap_or(0);
         let _ = tx.send(Completion::Tile {
             effect: need.effect,
@@ -1070,12 +1201,19 @@ async fn fetch_and_decode(
     user: &UserHeaders,
     fetch_limits: &crate::http::FetchLimits,
     cache: &Option<(PathBuf, String)>,
+    tails: &Arc<DecodeTails>,
 ) -> Result<(DecodedTile, usize), TileAttemptFailure> {
     if let Some((dir, namespace)) = cache {
         if let Some(bytes) = crate::cache::load(dir, namespace, &need.uri) {
             let bytes_len = bytes.len();
-            let decoded =
-                tokio::task::spawn_blocking(move || load_image_with_metadata(&bytes)).await;
+            tails.reserve(bytes_len);
+            let tails_release = Arc::clone(tails);
+            let decoded = tokio::task::spawn_blocking(move || {
+                let decoded = load_image_with_metadata(&bytes);
+                tails_release.release(bytes_len);
+                decoded
+            })
+            .await;
             match decoded {
                 Ok(Ok(loaded)) => {
                     return Ok((
@@ -1116,13 +1254,20 @@ async fn fetch_and_decode(
     let processing = need.processing;
     let cache_store = cache.clone();
     let uri = need.uri.clone();
+    tails.reserve(body_len);
+    let tails_release = Arc::clone(tails);
     let decoded = tokio::task::spawn_blocking(move || {
-        let bytes = processing.apply(outcome.body).map_err(NativeError::from)?;
-        if let Some((dir, namespace)) = cache_store.as_ref() {
-            let _ = crate::cache::store(dir, namespace, &uri, &bytes);
-        }
-        load_image_with_metadata(&bytes)
-            .map_err(|e| NativeError::new("tile.decode-failed", format!("tile decode failed: {e}")))
+        let decoded = (|| {
+            let bytes = processing.apply(outcome.body).map_err(NativeError::from)?;
+            if let Some((dir, namespace)) = cache_store.as_ref() {
+                let _ = crate::cache::store(dir, namespace, &uri, &bytes);
+            }
+            load_image_with_metadata(&bytes).map_err(|e| {
+                NativeError::new("tile.decode-failed", format!("tile decode failed: {e}"))
+            })
+        })();
+        tails_release.release(body_len);
+        decoded
     })
     .await
     .map_err(|_| {
@@ -1169,6 +1314,38 @@ fn spawn_timer(
             waited_ms: delay_ms,
         });
     }));
+}
+
+/// Enforce the retain cap with in-flight decode bytes counted: sink
+/// retention plus tracked tails (decode work not yet placed, including
+/// detached tails) plus the tile about to be placed must fit. Fails the job
+/// with the same `output.canvas-limit` the sink itself reports, so the cap
+/// covers decoded bytes from reservation to painting, not just from
+/// placement.
+fn check_decode_budget(
+    attempt: &Attempt<'_>,
+    sink: &Sink,
+    tile_bytes: u64,
+) -> Result<(), NativeError> {
+    let inflight = attempt.decode_tails.bytes.load(Ordering::SeqCst);
+    if decode_budget_exceeded(
+        sink.retained_bytes(),
+        inflight,
+        tile_bytes,
+        sink.retain_cap_bytes(),
+    ) {
+        return Err(NativeError::canvas_memory_unavailable(
+            1,
+            1,
+            &format!(
+                "decoded tiles beyond the retain cap ({} retained, {} in flight)",
+                sink.retained_bytes(),
+                inflight,
+            ),
+            "the configured output retention",
+        ));
+    }
+    Ok(())
 }
 
 fn feed_completion(
@@ -1238,6 +1415,7 @@ fn feed_completion(
                 if !attempt.order.contains(&id) {
                     attempt.order.push(id.clone());
                 }
+                check_decode_budget(attempt, sink, crate::sink::tile_bytes(&decoded.tile.image))?;
                 sink.place(ordinal, decoded.destination, decoded.extent, decoded.tile)?;
                 attempt.settled.insert(id);
                 attempt.acquired += 1;
@@ -1275,6 +1453,11 @@ fn feed_completion(
                     attempt.instrumentation.acquired += 1;
                     attempt.settled.insert(id.clone());
                     sink.note_declared(canvas);
+                    // In-flight decode bytes count against the retain cap:
+                    // tracked tails plus sink retention plus this tile must
+                    // fit, or the job fails closed instead of growing
+                    // without bound.
+                    check_decode_budget(attempt, sink, crate::sink::tile_bytes(&decoded.image))?;
                     sink.place(ordinal, destination, extent, decoded)?;
                     complete_effect(job, effect, EngineEffectResult::TileAcquired)
                 }
@@ -1403,12 +1586,16 @@ fn finalize_output(
 
 /// Interactive partial choice: announce the missing ledger for the host
 /// dialog, wait up to 60s for [`PartialGate::answer`], fail-closed to
-/// [`PartialPolicy`]. Returns `None` only when cancelled while waiting.
-/// Decisions use the canonical [`RecoveryChoice`] vocabulary verbatim.
+/// [`PartialPolicy`]. Returns the answering generation with the decision,
+/// or `None` only when cancelled while waiting. The generation is the
+/// host's answer carried through the gate (falling back to the live effect
+/// generation only for the non-interactive policy path); the engine
+/// rejects a stale one at the boundary. Decisions use the canonical
+/// [`RecoveryChoice`] vocabulary verbatim.
 fn await_partial_choice(
     attempt: &mut Attempt<'_>,
     generation: u32,
-) -> Option<EnginePartialDecision> {
+) -> Option<(u32, EnginePartialDecision)> {
     let mut missing: Vec<String> = attempt.pending_missing.clone();
     if missing.is_empty() {
         for tile in &attempt.order {
@@ -1421,13 +1608,15 @@ fn await_partial_choice(
     missing.dedup();
     let total = attempt.order.len();
     let failed = missing.len().max(1);
-    let _ = generation;
-    let Some(gate) = attempt.partial_gate.clone() else {
-        return Some(if attempt.config.partial_policy == PartialPolicy::Keep {
+    let policy = || {
+        if attempt.config.partial_policy == PartialPolicy::Keep {
             EnginePartialDecision::Keep
         } else {
             EnginePartialDecision::Discard
-        });
+        }
+    };
+    let Some(gate) = attempt.partial_gate.clone() else {
+        return Some((generation, policy()));
     };
     gate.announce(PartialRequest {
         missing,
@@ -1435,17 +1624,15 @@ fn await_partial_choice(
         total,
     });
     const WAIT: Duration = Duration::from_secs(60);
-    if let Some(decision) = gate.wait_for_decision(WAIT, &attempt.config.cancel_flag) {
-        return Some(decision);
+    if let Some((answered_generation, decision)) =
+        gate.wait_for_decision(WAIT, &attempt.config.cancel_flag)
+    {
+        return Some((answered_generation, decision));
     }
     if attempt.config.cancel_flag.load(Ordering::SeqCst) {
         return None;
     }
-    Some(if attempt.config.partial_policy == PartialPolicy::Keep {
-        EnginePartialDecision::Keep
-    } else {
-        EnginePartialDecision::Discard
-    })
+    Some((generation, policy()))
 }
 
 /// Map pipeline bounds onto validated canonical job options. Transport
@@ -1686,4 +1873,89 @@ fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat
         }
     }
     first
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::FetchLimits;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn decode_budget_counts_inflight_tails_against_the_cap() {
+        assert!(!decode_budget_exceeded(0, 0, 100, 512));
+        assert!(!decode_budget_exceeded(400, 100, 12, 512));
+        assert!(decode_budget_exceeded(400, 100, 13, 512));
+        assert!(decode_budget_exceeded(0, 600, 0, 512));
+        assert!(decode_budget_exceeded(512, 0, 1, 512));
+        // Saturating arithmetic fails closed on huge values, never wraps
+        // around to pass; an exact-cap fit still passes.
+        assert!(!decode_budget_exceeded(u64::MAX, 0, 0, u64::MAX));
+        assert!(decode_budget_exceeded(
+            u64::MAX,
+            u64::MAX,
+            u64::MAX,
+            u64::MAX - 1
+        ));
+    }
+
+    #[test]
+    fn quiescent_wait_times_out_on_a_leaked_permit() {
+        let tails = DecodeTails::default();
+        assert!(tails.wait_quiescent(Duration::from_millis(10)));
+        tails.reserve(8);
+        assert!(!tails.wait_quiescent(Duration::from_millis(20)));
+        assert!(!tails.quiescent());
+        assert_eq!(tails.peak_bytes.load(Ordering::SeqCst), 8);
+        tails.release(8);
+        assert!(tails.wait_quiescent(Duration::from_millis(20)));
+        assert!(tails.quiescent());
+    }
+
+    /// Aborting the parent task cannot stop its blocking decode: the tail
+    /// releases its own permit when its closure finishes, and the terminal
+    /// wait observes that quiescence (result dropped, bytes uncounted only
+    /// after the release).
+    #[test]
+    fn detached_blocking_tail_releases_and_quiesces() {
+        let transport = NativeTransport::new(&FetchLimits::default()).expect("transport");
+        let tails = Arc::new(DecodeTails::default());
+        let started = Arc::new(AtomicBool::new(false));
+        let task_tails = Arc::clone(&tails);
+        let task_started = Arc::clone(&started);
+        let parent = transport.spawn(async move {
+            task_tails.reserve(1024);
+            let release = Arc::clone(&task_tails);
+            let _ = tokio::task::spawn_blocking(move || {
+                task_started.store(true, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(200));
+                release.release(1024);
+                42u32
+            })
+            .await;
+        });
+        // Wait until the blocking tail really started, then abort the
+        // parent: the tail detaches and must still release.
+        let start = Instant::now();
+        while !started.load(Ordering::SeqCst) {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "blocking tail starts promptly"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        parent.abort();
+        assert!(
+            tails.wait_quiescent(Duration::from_secs(10)),
+            "terminal wait observes the detached tail"
+        );
+        assert!(
+            start.elapsed() >= Duration::from_millis(150),
+            "cancel waited for the tail instead of reporting early"
+        );
+        assert!(tails.quiescent());
+        assert_eq!(tails.peak_bytes.load(Ordering::SeqCst), 1024);
+        assert_eq!(tails.bytes.load(Ordering::SeqCst), 0);
+        let _ = transport.block_on(parent);
+    }
 }

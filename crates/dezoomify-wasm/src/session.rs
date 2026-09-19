@@ -35,9 +35,9 @@
 //!   the same tile and attempt after the host waited `delay_ms` on its own
 //!   clock. While paused the host parks the completion and answers on
 //!   resume; stale completions are ignored.
-//! * Decisions: `SelectImage`, `SelectLevel`, and `RecoveryChoice` map 1:1
-//!   onto engine commands. `RecoveryChoice` must reference the outstanding
-//!   numeric decision generation.
+//! * Decisions: `SelectImage`, `FollowDeferred`, `SelectLevel`, and
+//!   `RecoveryChoice` map 1:1 onto engine commands. `RecoveryChoice` must
+//!   reference the outstanding numeric decision generation.
 //! * `FinalizationSucceeded` and `FinalizationFailed` complete the one
 //!   awaited finalize effect.
 //! * `CancelWork` instructs the host to close its own retained resources.
@@ -69,9 +69,12 @@ use std::collections::{HashMap, HashSet};
 ///
 /// The engine owns lifecycle, progress, decisions, and terminals. This
 /// session keeps only effect correlation (host request ids to engine effect
-/// ids) plus the retained host failure context that patches the terminal
-/// DTO. It never mirrors lifecycle or re-derives events: answers carry the
+/// ids) plus the request context needed to validate answers. It never
+/// mirrors lifecycle or re-derives events: answers carry the
 /// engine effects verbatim and the absolute snapshot after the answer.
+/// Host failure context for discovery travels through the engine's
+/// `note_metadata_failure` (the engine patches the terminal and clears the
+/// retention on a winning catalog); nothing is retained here.
 pub struct Session {
     job: Option<EngineJob>,
     session_config: SessionConfig,
@@ -89,10 +92,6 @@ pub struct Session {
     live_timers: HashMap<(u32, u32), EngineEffectId>,
     /// Outstanding finalize effect, if the host awaits output.
     live_finalize: Option<EngineEffectId>,
-    /// The complete browser failure that caused discovery to terminate.
-    /// The job engine groups failures by typed cause; the adapter retains
-    /// the host context so the terminal DTO does not discard it.
-    terminal_discovery_error: Option<ErrorDto>,
 }
 
 impl Session {
@@ -112,7 +111,6 @@ impl Session {
             probe_requests: HashSet::new(),
             live_timers: HashMap::new(),
             live_finalize: None,
-            terminal_discovery_error: None,
         })
     }
 
@@ -137,15 +135,16 @@ impl Session {
         Ok(job.project_dto())
     }
 
-    /// Last projected snapshot (or the idle projection before start). The
-    /// retained host failure context patches the terminal error, so the
-    /// absolute snapshot never discards what the engine groups away.
+    /// Last projected snapshot (or the idle projection before start).
+    /// The engine patches the terminal error from the retained host
+    /// failure context, so the absolute snapshot never discards what the
+    /// engine groups away.
     fn last_snapshot(&self) -> dezoomify_protocol::dto::EngineSnapshotDto {
         use dezoomify_protocol::dto::{
             EngineSnapshotDto, JobState as ProtocolJobState, SnapshotProgressDto,
             SnapshotSelectionDto,
         };
-        let mut dto = match &self.job {
+        match &self.job {
             Some(job) => job.project_dto(),
             None => EngineSnapshotDto {
                 revision: 0,
@@ -166,23 +165,7 @@ impl Session {
                 terminal: None,
                 output: None,
             },
-        };
-        self.patch_terminal_error(&mut dto);
-        dto
-    }
-
-    fn patch_terminal_error(&self, dto: &mut dezoomify_protocol::dto::EngineSnapshotDto) {
-        use dezoomify_protocol::dto::SnapshotTerminalDto;
-        let (Some(enriched), Some(SnapshotTerminalDto::Failed { error })) =
-            (&self.terminal_discovery_error, &mut dto.terminal)
-        else {
-            return;
-        };
-        let mut patched = enriched.clone();
-        if patched.detail.is_none() && patched.message != error.message {
-            patched.detail = Some(error.message.clone());
         }
-        *error = patched;
     }
 
     fn require_live(&self) -> Result<(), AdapterError> {
@@ -285,6 +268,9 @@ impl Session {
             JobCommand::RetryTimerElapsed { tile, attempt } => self.on_timer_elapsed(tile, attempt),
             JobCommand::SelectImage { image } => {
                 self.run_user_command(EngineUserCommand::SelectImage { image })
+            }
+            JobCommand::FollowDeferred { image } => {
+                self.run_user_command(EngineUserCommand::FollowDeferred { image })
             }
             JobCommand::SelectLevel { level } => {
                 self.run_user_command(EngineUserCommand::SelectLevel { level })
@@ -641,12 +627,11 @@ impl Session {
                 if !self.is_discovering() {
                     return Ok(Vec::new());
                 }
-                // Forward the typed cause so the engine groups discovery
-                // diagnostics on `(kind, cause)`, never on rendered text.
-                // Host message text stays out of the engine entirely:
-                // nothing free-form crosses, so there is nothing to
-                // redact or bound here. The full request URL is named by
-                // the host itself, outside the engine block.
+                // Forward the host-observed failure context through the
+                // engine's retention: the engine groups discovery
+                // diagnostics on `(kind, cause)` and patches the terminal
+                // from the retained context, clearing it on a winning
+                // catalog. Nothing is retained adapter-side.
                 let transport = match failure.transport {
                     ErrorTransport::Direct => TransportKind::Direct,
                     ErrorTransport::MetadataProxy => TransportKind::MetadataProxy,
@@ -654,20 +639,23 @@ impl Session {
                     ErrorTransport::Native => TransportKind::Native,
                     ErrorTransport::DisplayOnly => TransportKind::DisplayOnly,
                 };
-                self.terminal_discovery_error = Some(ErrorDto {
-                    code: failure.code.clone(),
-                    phase: ErrorPhase::Discovery,
-                    retryable: failure.retryable,
-                    message: failure.message,
-                    recovery: failure.recovery,
-                    request: Some(context.uri),
-                    transport: Some(failure.transport),
-                    blocked_reason: failure.blocked_reason,
-                    resource_kind: Some(ResourceKind::Metadata),
-                    http: failure.http,
-                    preview: failure.preview,
-                    detail: failure.detail,
-                });
+                self.engine_job()?.note_metadata_failure(
+                    EngineEffectId(request),
+                    ErrorDto {
+                        code: failure.code.clone(),
+                        phase: ErrorPhase::Discovery,
+                        retryable: failure.retryable,
+                        message: failure.message.clone(),
+                        recovery: failure.recovery.clone(),
+                        request: Some(context.uri),
+                        transport: Some(failure.transport),
+                        blocked_reason: failure.blocked_reason,
+                        resource_kind: Some(ResourceKind::Metadata),
+                        http: failure.http,
+                        preview: failure.preview.clone(),
+                        detail: failure.detail.clone(),
+                    },
+                );
                 let update = self
                     .engine_job()?
                     .complete(
@@ -706,12 +694,6 @@ impl Session {
     /// snapshot the dispatch returns alongside; hosts render it directly
     /// and never refold a message stream.
     fn drain_update(&mut self, update: EngineUpdate) -> Vec<HostEffect> {
-        // The kept catalog replaces the selection payload on deferred
-        // follows: the retained discovery error belongs to the won race,
-        // so it clears here and can never patch a later terminal.
-        if update.snapshot.selection.catalog.is_some() {
-            self.terminal_discovery_error = None;
-        }
         update
             .effects
             .iter()

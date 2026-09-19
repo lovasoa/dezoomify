@@ -43,7 +43,6 @@ function harness({ fetchResource, loadDisplayImage, assembly = fakeAssembly(), p
     onPermissionRequired: () => {},
     onRecoveryRequested: () => seen.push(["recovery"]),
     onHostFailure: (error) => seen.push(["host-failure", error]),
-    onEvent: (event) => seen.push(["event", event.type]),
     log: (level, code, detail) => logs.push({ level, code, detail }),
   });
   return { controller, sent, seen, assembly, logs };
@@ -141,11 +140,12 @@ test("processed tiles never use the display fallback", async () => {
   assert.ok(failure, "processed acquisition fails instead of dropping the recipe");
 });
 
-test("lifecycle effects and events run in engine order on one chain", async () => {
+test("lifecycle effects run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
+  // Snapshots (terminals included) ride alongside, never as messages: the
+  // only job-state object always forwards, including after cancel.
   controller.handleEngineMessages([
     { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 32, height: 32 } },
-    { kind: "event", type: "completed" },
   ]);
   await flush();
   await flush();
@@ -168,7 +168,6 @@ test("a failed awaited output replies typed instead of faking success", async ()
   const { controller, sent, seen } = harness({ assembly });
   controller.handleEngineMessages([
     { kind: "effect", type: "finalize-output", effect: "fx:10", partial: false, format: "png", canvas: { width: 99999, height: 99999 } },
-    { kind: "event", type: "failed", error: { code: "PLAN_INVALID" } },
   ]);
   await flush();
   await flush();
