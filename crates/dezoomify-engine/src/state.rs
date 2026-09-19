@@ -48,15 +48,6 @@ impl State {
             Self::Cancelled => "Cancelled",
         }
     }
-
-    /// Whether this state is terminal (exactly one terminal event emitted).
-    #[must_use]
-    pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::PartiallyCompleted | Self::Failed | Self::Cancelled
-        )
-    }
 }
 
 impl std::fmt::Display for State {

@@ -43,7 +43,7 @@ use crate::error::NativeError;
 use crate::output::{partial_path_for, validate_destination, write_iiif_dir, OutputFormat};
 use crate::pipeline::{
     blit_onto, encode_jpeg, encode_png, encode_tiff, encode_webp, encode_zif_pyramid,
-    render_iiif_dir, DecodedTile, PipelineConfig, PipelineEvent,
+    render_iiif_dir, DecodedTile, PipelineConfig,
 };
 
 /// First-seen ICC profile plus EXIF metadata bytes per tile ordinal.
@@ -115,7 +115,6 @@ pub struct CommitParams<'a> {
     pub missing: Vec<String>,
     pub tile_count: usize,
     pub image_size: Vec2d,
-    pub on_event: &'a mut dyn FnMut(PipelineEvent),
 }
 
 /// One output sink per job attempt. Single-threaded by construction: the
@@ -523,7 +522,6 @@ impl Sink {
             missing,
             tile_count,
             image_size,
-            on_event,
         } = params;
         if cancelled.load(Ordering::SeqCst) {
             return Err(NativeError::new(
@@ -555,31 +553,26 @@ impl Sink {
                     exif.as_deref(),
                 )?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Jpeg => {
                 let encoded = encode_jpeg(&canvas, self.jpeg_quality, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Tiff => {
                 let encoded = encode_tiff(&canvas, self.compression, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Zif => {
                 let encoded = encode_zif_pyramid(&canvas, self.compression, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::Webp => {
                 let encoded = encode_webp(&canvas, icc.as_deref())?;
                 encoded_len = encoded.len() as u64;
-                Self::emit_encoding(&mut *on_event, encoded.len() as u64, None);
                 commit_bytes(&dest, &encoded)?;
             }
             OutputFormat::IiifDir => {
@@ -590,11 +583,6 @@ impl Sink {
                 let (info_json, tiles) = render_iiif_dir(&canvas, id, self.jpeg_quality)?;
                 encoded_len =
                     info_json.len() as u64 + tiles.iter().map(|(_, b)| b.len() as u64).sum::<u64>();
-                Self::emit_encoding(
-                    &mut *on_event,
-                    info_json.len() as u64,
-                    Some(tiles.len() as u64 + 1),
-                );
                 commit_iiif_dir(&dest, &info_json, &tiles)?;
             }
         }
@@ -647,10 +635,6 @@ impl Sink {
     /// Tiles painted so far (acquired work that reached the canvas).
     pub fn painted_count(&self) -> usize {
         self.painted_count
-    }
-
-    fn emit_encoding(on_event: &mut dyn FnMut(PipelineEvent), bytes: u64, files: Option<u64>) {
-        on_event(PipelineEvent::Encoding { bytes, files });
     }
 }
 

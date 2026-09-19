@@ -947,6 +947,7 @@ fn protocol_state_of(state: EngineLifecycle) -> ProtocolJobState {
         EngineLifecycle::AcquiringTiles => ProtocolJobState::AcquiringTiles,
         EngineLifecycle::AwaitingPartialDecision => ProtocolJobState::AwaitingPartialDecision,
         EngineLifecycle::Finalizing => ProtocolJobState::Finalizing,
+        EngineLifecycle::Cancelling => ProtocolJobState::Cancelling,
         EngineLifecycle::Completed => ProtocolJobState::Completed,
         EngineLifecycle::PartiallyCompleted => ProtocolJobState::PartiallyCompleted,
         EngineLifecycle::Failed => ProtocolJobState::Failed,

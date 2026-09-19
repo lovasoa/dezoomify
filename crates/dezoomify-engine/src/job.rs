@@ -274,46 +274,6 @@ impl Job {
         self.paused
     }
 
-    /// Selectable level count for one catalog image position.
-    #[must_use]
-    pub fn catalog_level_count(&self, image: u32) -> u32 {
-        let index = usize::try_from(image).ok();
-        let count = index
-            .and_then(|index| self.catalog.as_ref()?.entries().get(index))
-            .and_then(|entry| match entry {
-                CatalogEntry::Ready(image) => Some(image.levels.len()),
-                CatalogEntry::Deferred(_) => None,
-            })
-            .unwrap_or(0);
-        u32::try_from(count).unwrap_or(u32::MAX)
-    }
-
-    /// Still-deferred catalog entries as `(position, follow-up URI)`.
-    #[must_use]
-    pub fn deferred_entries(&self) -> Vec<(u32, String)> {
-        let Some(catalog) = self.catalog.as_ref() else {
-            return Vec::new();
-        };
-        catalog
-            .entries()
-            .iter()
-            .enumerate()
-            .filter_map(|(position, entry)| match entry {
-                CatalogEntry::Ready(_) => None,
-                CatalogEntry::Deferred(deferred) => u32::try_from(position)
-                    .ok()
-                    .map(|position| (position, deferred.uri.clone())),
-            })
-            .collect()
-    }
-
-    /// Stable code and message behind a `Failed` terminal, if the job
-    /// failed. Retained past event draining for snapshot projection.
-    #[must_use]
-    pub fn terminal_error(&self) -> Option<(String, String)> {
-        self.terminal_error.clone()
-    }
-
     /// Structured failure facts for tiles settled as failed, in arrival
     /// order per tile. This is the full missing detail behind a partial
     /// decision; empty while acquisition is still settling.
