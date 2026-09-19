@@ -28,7 +28,7 @@ function fakeIpc() {
       invokes.push({ cmd, args });
       if (cmd === "start_job") {
         if (impl.startJobImpl) return impl.startJobImpl(args);
-        return Promise.resolve({ job: impl.startJobId, seq: 1 });
+        return Promise.resolve({ job: impl.startJobId, seq: 0 });
       }
       if (cmd === "query_capabilities") {
         return Promise.resolve({
@@ -38,8 +38,10 @@ function fakeIpc() {
             "answer_choice",
             "cancel_job",
             "open_saved_output",
+            "pause_job",
             "query_capabilities",
             "request_destination",
+            "resume_job",
             "start_job",
           ],
         });
@@ -64,28 +66,32 @@ function observer() {
   return { snapshots: [], hosts: [], snapshot(s) { this.snapshots.push(s); }, hostStatus(h) { this.hosts.push(h); } };
 }
 
+// Canonical EngineSnapshotDto plus the host job/jobId routing aliases.
+// No folded top-level keys (state/acquired/total/seq/kind/recovery/...):
+// those fail the service guard and never reach an observer.
 function snapshotPayload(overrides = {}) {
   return {
     job: "job:native-1",
     jobId: "job:native-1",
     revision: 2,
-    seq: 2,
-    kind: "snapshot",
-    jobSnapshot: true,
-    state: "AcquiringTiles",
     lifecycle: "AcquiringTiles",
-    catalog: null,
-    acquired: 3,
-    total: 10,
     paused: false,
-    selection: { image: null, level: null },
-    warnings: [],
-    recovery: null,
+    progress: { completed: 3, total: 10 },
+    selection: { image: null, level: null, level_count: 0, catalog: null, deferred: [] },
+    decision: null,
     terminal: null,
     output: null,
-    displayOnly: false,
-    updatedAt: 0,
-    origin: "https://museum.example.org",
+    ...overrides,
+  };
+}
+
+function completedOutput(overrides = {}) {
+  return {
+    canvas: { width: 800, height: 600 },
+    format: "png",
+    complete: true,
+    missing: [],
+    disposition: "native-publication",
     ...overrides,
   };
 }
@@ -135,32 +141,46 @@ test("snapshots forward verbatim per job with identity guard only", async () => 
   assert.ok(ipc.handlers.has("dezoomify://job-snapshot"));
   assert.ok(ipc.handlers.has("dezoomify://deep-link-pending"));
 
-  // The initial local snapshot is Created; the first shell snapshot
-  // forwards verbatim (no fold, no seq guard).
-  assert.equal(obs.snapshots[0].state, "Created");
-  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ revision: 2, seq: 2, acquired: 3, total: 10 }));
-  assert.equal(obs.snapshots[obs.snapshots.length - 1].acquired, 3);
-  assert.equal(obs.snapshots[obs.snapshots.length - 1].state, "AcquiringTiles");
+  // Snapshot-absent idle: no local snapshot is minted at start, so nothing
+  // reaches the observer until the backend emits its first verbatim
+  // snapshot. The local revision-0 scale never competes with the engine's.
+  assert.equal(obs.snapshots.length, 0);
+  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({
+    revision: 0,
+    lifecycle: "Created",
+    progress: { completed: 0, total: null },
+  }));
+  assert.equal(obs.snapshots.length, 1);
+  assert.equal(obs.snapshots[0].lifecycle, "Created");
+  assert.equal(obs.snapshots[0].revision, 0);
+
+  // Live snapshots forward verbatim (no fold, no seq guard).
+  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ revision: 2 }));
+  assert.equal(obs.snapshots[obs.snapshots.length - 1].progress.completed, 3);
+  assert.equal(obs.snapshots[obs.snapshots.length - 1].lifecycle, "AcquiringTiles");
   // Same revision forwards again verbatim (no dedupe in the service: the
   // shell owns monotonicity and exactly-once); other jobs stay ignored.
-  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ revision: 2, seq: 2, acquired: 3, total: 10 }));
-  assert.equal(obs.snapshots[obs.snapshots.length - 1].acquired, 3);
-  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ job: "job:other", jobId: "job:other", revision: 3, seq: 3, acquired: 9 }));
-  assert.equal(obs.snapshots[obs.snapshots.length - 1].acquired, 3);
+  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ revision: 2 }));
+  assert.equal(obs.snapshots[obs.snapshots.length - 1].progress.completed, 3);
+  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({
+    job: "job:other",
+    jobId: "job:other",
+    revision: 3,
+    progress: { completed: 9, total: 10 },
+  }));
+  assert.equal(obs.snapshots[obs.snapshots.length - 1].progress.completed, 3);
 
   emit(ipc, "dezoomify://job-snapshot", snapshotPayload({
     revision: 3,
-    seq: 3,
-    state: "Completed",
-    acquired: 10,
-    total: 10,
-    terminal: { kind: "completed" },
-    output: { doneTiles: 10, totalTiles: 10, failedTiles: 0, partial: false, format: "png", width: 800, height: 600, missingTiles: [] },
+    lifecycle: "Completed",
+    progress: { completed: 10, total: 10 },
+    terminal: { type: "completed" },
+    output: completedOutput(),
   }));
   const terminal = obs.snapshots[obs.snapshots.length - 1];
-  assert.equal(terminal.state, "Completed");
-  assert.equal(terminal.terminal.kind, "completed");
-  assert.equal(terminal.output.partial, false);
+  assert.equal(terminal.lifecycle, "Completed");
+  assert.equal(terminal.terminal.type, "completed");
+  assert.equal(terminal.output.complete, true);
   assert.equal(obs.hosts[0].transport, "native");
 
   await handle.dispose();
@@ -174,16 +194,16 @@ test("partial terminal never reads as completed and failures stay typed", async 
   await service.start(nativeRequest(), obs);
   emit(ipc, "dezoomify://job-snapshot", snapshotPayload({
     revision: 4,
-    seq: 4,
-    state: "PartiallyCompleted",
-    terminal: { kind: "partial-completed" },
-    output: { doneTiles: 9, totalTiles: 12, failedTiles: 3, partial: true, format: "png", width: 800, height: 600, missingTiles: ["t-10"], siblingName: "out.partial.png" },
+    lifecycle: "PartiallyCompleted",
+    progress: { completed: 9, total: 12 },
+    terminal: { type: "partial-completed", missing: [10] },
+    output: completedOutput({ complete: false, missing: [10] }),
   }));
   const partial = obs.snapshots[obs.snapshots.length - 1];
-  assert.equal(partial.state, "PartiallyCompleted");
-  assert.equal(partial.terminal.kind, "partial-completed");
-  assert.equal(partial.output.partial, true);
-  assert.deepEqual(partial.output.missingTiles, ["t-10"]);
+  assert.equal(partial.lifecycle, "PartiallyCompleted");
+  assert.equal(partial.terminal.type, "partial-completed");
+  assert.equal(partial.output.complete, false);
+  assert.deepEqual(partial.output.missing, [10]);
 
   const obs2 = observer();
   const ipc2 = fakeIpc();
@@ -191,12 +211,11 @@ test("partial terminal never reads as completed and failures stay typed", async 
   await service2.start(nativeRequest(), obs2);
   emit(ipc2, "dezoomify://job-snapshot", snapshotPayload({
     revision: 5,
-    seq: 5,
-    state: "Failed",
-    terminal: { kind: "failed", error: { code: "tile.download-failed", phase: "acquisition", retryable: true, message: "tile failed", recovery: [], transport: "native" } },
+    lifecycle: "Failed",
+    terminal: { type: "failed", error: { code: "tile.download-failed", phase: "acquisition", retryable: true, message: "tile failed", recovery: [], transport: "native" } },
   }));
   const failed = obs2.snapshots[obs2.snapshots.length - 1];
-  assert.equal(failed.state, "Failed");
+  assert.equal(failed.lifecycle, "Failed");
   assert.equal(failed.terminal.error.code, "tile.download-failed");
   assert.equal(failed.terminal.error.transport, "native");
   await service.dispose();
@@ -210,20 +229,28 @@ test("commands route to typed shell commands; engine-only commands reject", asyn
   await handle.command({ type: "cancel" });
   await handle.command({ type: "select-image", image: 2 });
   await handle.command({ type: "select-level", level: 1 });
-  await handle.command({ type: "recovery-choice", generation: 0, choice: "retry" });
-  await handle.command({ type: "recovery-choice", generation: 0, choice: "keep" });
-  await handle.command({ type: "recovery-choice", generation: 0, choice: "discard" });
+  await handle.command({ type: "recovery-choice", generation: 7, choice: "retry" });
+  await handle.command({ type: "recovery-choice", generation: 7, choice: "keep" });
+  await handle.command({ type: "recovery-choice", generation: 7, choice: "discard" });
+  await handle.command({ type: "pause" });
+  await handle.command({ type: "resume" });
   const routed = ipc.invokes.slice(1).map((call) => call.args.choice ?? call.cmd);
   assert.deepEqual(routed, [
     "cancel_job",
     { kind: "image", index: 2 },
     { kind: "level", index: 1 },
-    { kind: "partial", decision: "retry" },
-    { kind: "partial", decision: "keep" },
-    { kind: "partial", decision: "discard" },
+    { kind: "partial", generation: 7, decision: "retry" },
+    { kind: "partial", generation: 7, decision: "keep" },
+    { kind: "partial", generation: 7, decision: "discard" },
+    "pause_job",
+    "resume_job",
   ]);
-  await assert.rejects(handle.command({ type: "pause" }), (error) => error.code === "desktop.unsupported-command");
-  await assert.rejects(handle.command({ type: "resume" }), (error) => error.code === "desktop.unsupported-command");
+  const pauseCall = ipc.invokes.find((call) => call.cmd === "pause_job");
+  const resumeCall = ipc.invokes.find((call) => call.cmd === "resume_job");
+  assert.deepEqual(pauseCall.args, { job: "job:native-1" });
+  assert.deepEqual(resumeCall.args, { job: "job:native-1" });
+  // Engine-internal commands with no shell command still reject typed.
+  await assert.rejects(handle.command({ type: "tile-acquired", request: 0 }), (error) => error.code === "desktop.unsupported-command");
   await handle.dispose();
   await service.dispose();
 });
@@ -254,7 +281,7 @@ test("capabilities reject unknown shell commands", async () => {
   const service = createDesktopJobService({ ipc });
   const caps = await service.queryCapabilities();
   assert.equal(caps.protocolMin, "2.0");
-  assert.equal(caps.commands.length, 6);
+  assert.equal(caps.commands.length, 8);
   ipc.invoke = (cmd) => Promise.resolve({ protocol_min: "2.0", protocol_max: "2.0", commands: ["start_job", "bogus_cmd"] });
   await assert.rejects(service.queryCapabilities(), (error) => error.code === "desktop.capability-mismatch");
   await service.dispose();
@@ -269,6 +296,33 @@ test("service uses the public Tauri API, never host internals", () => {
   assert.equal(source.includes("__TAURI__"), false);
 });
 
+test("legacy folded payloads never reach an observer", async () => {
+  const ipc = fakeIpc();
+  const service = createDesktopJobService({ ipc });
+  const obs = observer();
+  await service.start(nativeRequest(), obs);
+  assert.equal(obs.snapshots.length, 0);
+  const before = obs.snapshots.length;
+  // Legacy folds: state/acquired/total/seq/kind/jobSnapshot/recovery without
+  // the canonical revision/lifecycle/progress/selection shape.
+  for (const legacy of [
+    { job: "job:native-1", jobId: "job:native-1", seq: 2, kind: "snapshot", state: "AcquiringTiles", acquired: 3, total: 10 },
+    { job: "job:native-1", jobId: "job:native-1", revision: 2, state: "AcquiringTiles", acquired: 3 },
+    { job: "job:native-1", jobId: "job:native-1", lifecycle: "AcquiringTiles", acquired: 3, total: 10 },
+    { job: "job:native-1", jobId: "job:native-1", revision: 2, lifecycle: "AcquiringTiles" },
+    { job: "job:native-1", jobId: "job:native-1", revision: 2, lifecycle: "Nope", progress: { completed: 1, total: 2 }, selection: { level_count: 0, deferred: [] } },
+    { job: "job:native-1", jobId: "job:native-1", revision: 2, lifecycle: "AcquiringTiles", progress: { completed: 1, total: 2 }, selection: { level_count: 0, deferred: [] }, terminal: { kind: "completed" } },
+  ]) {
+    emit(ipc, "dezoomify://job-snapshot", legacy);
+  }
+  assert.equal(obs.snapshots.length, before);
+  // The canonical shape still forwards verbatim after the legacy drops.
+  emit(ipc, "dezoomify://job-snapshot", snapshotPayload({ revision: 2 }));
+  assert.equal(obs.snapshots.length, before + 1);
+  assert.equal(obs.snapshots[obs.snapshots.length - 1].progress.completed, 3);
+  await service.dispose();
+});
+
 test("snapshot channel is the only job transport", () => {
   const source = fs.readFileSync(path.join(HERE, "..", "src", "events.ts"), "utf8");
   assert.ok(source.includes("dezoomify://job-snapshot"));
@@ -281,4 +335,6 @@ test("snapshot channel is the only job transport", () => {
   assert.equal(service.includes("SHELL_STATE_TABLE"), false);
   assert.equal(service.includes("projectDesktopEvent"), false);
   assert.equal(service.includes("seenSeq"), false);
+  assert.equal(service.includes("initialLocalSnapshot"), false);
+  assert.equal(service.includes("unsupported-command until the typed native IPC lands"), false);
 });

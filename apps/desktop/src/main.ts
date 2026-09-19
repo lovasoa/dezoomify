@@ -1109,7 +1109,7 @@ function queryCapabilitiesAtBoot(): void {
   void service.queryCapabilities().then(
     (caps) => {
       const commands = [...caps.commands].sort();
-      const expected = ["answer_choice", "cancel_job", "open_saved_output", "query_capabilities", "request_destination", "start_job"];
+      const expected = ["answer_choice", "cancel_job", "open_saved_output", "pause_job", "query_capabilities", "request_destination", "resume_job", "start_job"];
       const mismatch =
         caps.protocolMin !== PROTOCOL_MIN ||
         caps.protocolMax !== PROTOCOL_MAX ||

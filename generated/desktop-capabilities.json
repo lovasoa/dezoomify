@@ -8,8 +8,10 @@
     "answer_choice",
     "cancel_job",
     "open_saved_output",
+    "pause_job",
     "query_capabilities",
     "request_destination",
+    "resume_job",
     "start_job"
   ],
   "decoders": [
@@ -25,12 +27,8 @@
     "webp"
   ],
   "eventChannels": [
-    "dezoomify://job-state",
-    "dezoomify://job-progress",
-    "dezoomify://job-output",
-    "dezoomify://job-error",
-    "dezoomify://deep-link-pending",
-    "dezoomify://job-snapshot"
+    "dezoomify://job-snapshot",
+    "dezoomify://deep-link-pending"
   ],
   "generator": "phase-11 lean shell (canonical: crates/dezoomify-protocol/src/dto.rs)",
   "nativeHost": {

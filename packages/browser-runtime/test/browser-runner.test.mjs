@@ -188,6 +188,7 @@ test("user commands map onto the session; engine-internal commands reject typed"
   const runner = createBrowserRunner(p.deps);
   const handle = await runner.start(startRequest(), { snapshot: () => {} });
   await handle.command({ type: "select-image", image: 2 });
+  await handle.command({ type: "follow-deferred", image: 1 });
   await handle.command({ type: "select-level", level: 1 });
   await handle.command({ type: "recovery-choice", generation: 0, choice: "keep" });
   await handle.command({ type: "pause" });
@@ -195,6 +196,8 @@ test("user commands map onto the session; engine-internal commands reject typed"
   await handle.command({ type: "cancel" });
   const kinds = p.worker.posted.map((message) => message.type);
   assert.ok(kinds.includes("engine.command"));
+  const follow = p.worker.posted.find((message) => message.command?.type === "follow-deferred");
+  assert.deepEqual(follow?.command, { type: "follow-deferred", image: 1 });
   await assert.rejects(() => handle.command({ type: "start", inputs: [] }), (error) => {
     assert.equal(error.code, "browser.unsupported-command");
     return true;
