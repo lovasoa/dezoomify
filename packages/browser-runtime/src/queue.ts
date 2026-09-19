@@ -21,16 +21,6 @@ export interface WebQueue {
   readonly nextId: number;
 }
 
-export interface WebQueueCapabilities {
-  readonly bulkSupported?: boolean;
-}
-
-/** Whether the negotiated capabilities offer the website single-queue. */
-export function isWebQueueAvailable(caps: WebQueueCapabilities | null | undefined): boolean {
-  if (!caps) return false;
-  return caps.bulkSupported === true;
-}
-
 /** Empty queue. No active job, no entries, counter at zero. */
 export function createWebQueue(): WebQueue {
   return { entries: [], activeId: null, nextId: 0 };
