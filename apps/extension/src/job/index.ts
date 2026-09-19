@@ -28,7 +28,7 @@ import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFa
 import type { JobBinding } from "./transport.ts";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
-const TEST_PERMISSION_MOCK = import.meta.env?.MODE === "testing";
+const TEST_PERMISSION_MOCK = import.meta.env.MODE === "testing";
 
 type ExtensionApi = {
   runtime?: { sendMessage?(message: unknown): Promise<unknown>; onMessage?: { addListener(listener: (message: Record<string, unknown>) => void): void } };
