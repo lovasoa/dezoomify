@@ -9,16 +9,13 @@ import {
   TILE_CONCURRENCY_MAX,
   TILE_CONCURRENCY_MIN,
   TILE_MAX_REQUESTS_PER_SECOND,
-  TILE_MAX_RETRIES,
   TILE_MIN_INTERVAL_MS,
-  TILE_RETRY_BASE_MS,
   createTileThrottle,
   hostOf,
   pickTileConcurrency,
   proxyRateLimitDelayMs,
   shortUrl,
   tileFailedError,
-  tileRetryDelayMs,
   websiteTileConcurrency,
 } from "../src/tile-policy.ts";
 
@@ -27,8 +24,6 @@ test("tile tuning constants match the browser runtime limits", () => {
   assert.equal(DIRECT_METADATA_TIMEOUT_MS, 1500);
   assert.equal(TILE_MAX_REQUESTS_PER_SECOND, 5);
   assert.equal(TILE_MIN_INTERVAL_MS, 200);
-  assert.equal(TILE_MAX_RETRIES, 2);
-  assert.equal(TILE_RETRY_BASE_MS, 250);
   assert.equal(TILE_CONCURRENCY_FLOOR, 4);
   assert.equal(TILE_CONCURRENCY_MIN, 6);
   assert.equal(TILE_CONCURRENCY_MAX, 12);
@@ -55,14 +50,6 @@ test("websiteTileConcurrency negotiates to the browser capability baseline 6", (
   assert.equal(websiteTileConcurrency({ hardwareConcurrency: 16, connection: { rtt: 900 } }), 6);
   assert.equal(websiteTileConcurrency({}), 6);
   assert.equal(websiteTileConcurrency({ hardwareConcurrency: 64 }), 6);
-});
-
-test("tileRetryDelayMs backs off exponentially with jitter", () => {
-  assert.equal(tileRetryDelayMs(0, () => 0), 250);
-  assert.equal(tileRetryDelayMs(1, () => 0), 500);
-  assert.equal(tileRetryDelayMs(2, () => 0), 1000);
-  const jittered = tileRetryDelayMs(0, () => 1);
-  assert.ok(jittered >= 250 && jittered <= 350, `jitter in range: ${jittered}`);
 });
 
 test("proxyRateLimitDelayMs honors Retry-After within the UX budget", () => {
@@ -96,9 +83,13 @@ test("shortUrl and hostOf stay readable", () => {
   assert.equal(shortUrl("bogus"), "bogus");
 });
 
-test("tileFailedError maps exhaustion to TILE_FAILED", () => {
-  const error = tileFailedError("network-error", undefined, "https://a.test/1.png");
+test("tileFailedError carries typed one-attempt facts for the engine", () => {
+  const error = tileFailedError("http-error", 403, "https://a.test/1.png");
   assert.equal(error.code, "TILE_FAILED");
-  assert.equal(error.retryable, true);
-  assert.match(error.technical ?? "", /3 attempts/);
+  assert.equal(error.retryable, false);
+  assert.equal(error.http, 403);
+  assert.equal(error.transportKind, "direct");
+  assert.equal(error.cause?.code, "TRANSPORT_HTTP_ERROR");
+  assert.equal(error.cause?.http, 403);
+  assert.match(error.technical ?? "", /1 attempt/);
 });

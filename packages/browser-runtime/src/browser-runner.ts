@@ -63,8 +63,6 @@ export interface BrowserProduct {
   createWorker(): BrowserWorker;
   /** One-attempt resource fetch feeding the engine retry budget. */
   fetchResource(effect: AcquireEffect, signal: AbortSignal): Promise<{ bytes: Uint8Array; finalUri?: string }>;
-  /** Single-attempt variant classifying tile origins (defaults to fetchResource). */
-  fetchResourceOnce?(effect: AcquireEffect, signal: AbortSignal): Promise<{ bytes: Uint8Array; finalUri?: string }>;
   probeSize(url: string, headers: Record<string, string>, requestId?: number, signal?: AbortSignal): Promise<ProbeSize>;
   /** Absent: no display fallback (failed acquisitions fail the engine). */
   loadDisplayImage?: (url: string) => Promise<TileImageLike>;
@@ -239,9 +237,6 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       worker: { postMessage: (message) => worker.postMessage(message) },
       jobId: () => product.sessionId(),
       fetchResource: (effect) => product.fetchResource(effect, attemptSignal.signal),
-      fetchResourceOnce: product.fetchResourceOnce
-        ? (effect) => (product.fetchResourceOnce as NonNullable<BrowserProduct["fetchResourceOnce"]>)(effect, attemptSignal.signal)
-        : undefined,
       cancelFetch: () => {
         abortAttempt();
       },

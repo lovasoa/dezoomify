@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createBrowserRunner } from "../src/browser-runner.ts";
+import { createWebFetcher } from "../src/web-fetch.ts";
 
 function fakeWorker() {
   const listeners = [];
@@ -25,6 +26,7 @@ function fakeWorker() {
 
 const TILE = {
   type: "acquire-tile",
+  effect: 99,
   tile: 0,
   request: { id: 1, uri: "https://tiles.test/0.png", headers: [], purpose: "tile" },
   placement: { position: { x: 0, y: 0 }, processing: "none", canvas: { width: 256, height: 256 } },
@@ -118,6 +120,52 @@ test("non-browser exec and empty inputs reject typed before any worker exists", 
     assert.equal(error.code, "browser.invalid-source");
     return true;
   });
+});
+
+test("runner sends one-attempt structured tile failures to the engine", async (t) => {
+  for (const fixture of [
+    { name: "HTTP 403", status: 403, expectedCode: "TRANSPORT_HTTP_ERROR", retryable: false,
+      fetchImpl: async () => ({ status: 403, headers: {}, arrayBuffer: async () => new ArrayBuffer(0) }) },
+    { name: "transient network error", expectedCode: "TRANSPORT_NETWORK_ERROR", retryable: true,
+      fetchImpl: async () => { throw new Error("connection reset"); } },
+    { name: "HTTP 429 Retry-After", status: 429, expectedCode: "TRANSPORT_HTTP_ERROR", retryable: true, retryAfterMs: 3000,
+      fetchImpl: async () => ({ status: 429, headers: { get: (name) => name === "retry-after" ? "3" : null }, arrayBuffer: async () => new ArrayBuffer(0) }) },
+  ]) {
+    await t.test(fixture.name, async () => {
+      let calls = 0;
+      const fetcher = createWebFetcher({
+        fetchImpl: async (...args) => { calls += 1; return fixture.fetchImpl(...args); },
+        isProxyEligible: () => ({ eligible: false, reason: "tile" }),
+        hooks: { onRequestStart: () => 1, onRequestEnd() {}, onLog() {}, onUpdate() {} },
+        messages: { rateLimitedBySite: "limited", siteBusy: "busy", discoveryFailed: () => "missing" },
+        throttle: async () => {},
+      });
+      const p = product({
+        fetchResource: (effect, signal) => fetcher.fetchTileFor(effect.request.uri, {}, signal).then((result) => ({ bytes: new Uint8Array(result.bytes) })),
+        classifyFailure: (error) => ({
+          code: error.cause?.code ?? error.code,
+          retryable: error.retryable,
+          message: error.message,
+          transport: error.cause?.transport ?? "direct",
+          ...(typeof error.http === "number" ? { http: error.http } : {}),
+          ...(typeof error.retry_after_ms === "number" ? { retry_after_ms: error.retry_after_ms } : {}),
+        }),
+      });
+      const runner = createBrowserRunner(p.deps);
+      const handle = await runner.start(startRequest(), { snapshot: () => {} });
+      p.worker.receive(received(snap(1), [TILE]));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(calls, 1);
+      const failureMessage = p.worker.posted.find((message) => message.type === "engine.failure" && message.requestId === TILE.request.id);
+      assert.ok(failureMessage);
+      assert.equal(failureMessage.error.code, fixture.expectedCode);
+      assert.equal(failureMessage.error.retryable, fixture.retryable);
+      assert.equal(failureMessage.error.transport, "direct");
+      if (fixture.status) assert.equal(failureMessage.error.http, fixture.status);
+      if (fixture.retryAfterMs) assert.equal(failureMessage.error.retry_after_ms, fixture.retryAfterMs);
+      await handle.dispose();
+    });
+  }
 });
 
 test("start roots the session at the first input with merged quotas", async () => {

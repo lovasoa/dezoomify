@@ -45,15 +45,36 @@ export function transportError(category: TransportCategory, message: string, ext
 
 /** @param {unknown} error */
 export function asFetchFailure(error: unknown): HostFailure {
-  const candidate = error as { category?: unknown; code?: unknown; message?: unknown } | null;
+  const candidate = error as { category?: unknown; code?: unknown; message?: unknown; status?: unknown; retry_after_ms?: unknown } | null;
   const category = blockedReason(candidate?.category) ?? "network";
+  const http = typeof candidate?.status === "number" && Number.isInteger(candidate.status) && candidate.status > 0
+    ? candidate.status
+    : undefined;
   return {
     code: `extension.${category}`,
     retryable: category === "network" || category === "throttled",
     message: typeof candidate?.message === "string" ? candidate.message : "Extension transport failed",
     blocked_reason: category,
     transport: "browser-session",
+    ...(http === undefined ? {} : { http }),
+    ...(typeof candidate?.retry_after_ms === "number" ? { retry_after_ms: candidate.retry_after_ms } : {}),
   };
+}
+
+function retryAfterHeaderMs(headers: unknown, at = Date.now()): number | undefined {
+  try {
+    const value = headers as { get?: (name: string) => string | null; [name: string]: unknown } | null;
+    const raw = typeof value?.get === "function"
+      ? value.get("retry-after")
+      : value?.["retry-after"] ?? value?.["Retry-After"];
+    if (typeof raw !== "string" || raw.trim() === "") return undefined;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.floor(seconds * 1000);
+    const date = Date.parse(raw);
+    return Number.isFinite(date) ? Math.max(0, date - at) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** @param {unknown} value */
@@ -193,14 +214,17 @@ export function createExtensionFetcher(deps: FetchDeps) {
       if (!response || typeof response.status !== "number") throw transportError("malformed", "malformed fetch response");
       if (typeof response.durationMs === "number" && response.durationMs > timeoutMs) throw transportError("network", "fetch timeout");
       if (response.url && response.url !== parsed.href) throw transportError("redirect-unavailable", "redirect permission cannot be validated automatically");
-      if (response.status === 429) throw transportError("throttled", withSignal("site is throttling requests", await errorSignal(response)));
+      if (response.status === 429) throw transportError("throttled", withSignal("site is throttling requests", await errorSignal(response)), {
+        status: response.status,
+        retry_after_ms: retryAfterHeaderMs(response.headers),
+      });
       if (response.status === 401 || response.status === 403) {
         // The host grant is already held (checked above): this is an upstream
         // refusal by the site, not a missing browser permission. It must never
         // pause for another grant, or the job re-prompts in a loop.
         throw transportError("forbidden", withSignal(response.status === 401 ? "unauthorized; the site refused this file" : "forbidden; the site refused this file", await errorSignal(response)), { hosts: [origin], status: response.status });
       }
-      if (response.status < 200 || response.status >= 300) throw transportError("network", withSignal(`request failed with HTTP ${response.status}`, await errorSignal(response)));
+      if (response.status < 200 || response.status >= 300) throw transportError("network", withSignal(`request failed with HTTP ${response.status}`, await errorSignal(response)), { status: response.status });
       const contentType = headerValue(response.headers);
       const accepted = opts.purpose === "metadata" ? ALLOWED_MIME_PREFIXES : ALLOWED_MIME_PREFIXES.filter((mime) => mime !== "text/html");
       if (contentType && !accepted.some((prefix) => contentType.toLowerCase().startsWith(prefix))) throw transportError("malformed", `unsupported response type ${contentType}`);
