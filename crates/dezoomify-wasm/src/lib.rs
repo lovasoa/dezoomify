@@ -69,7 +69,8 @@ pub use session::Session;
 pub mod wasm_api {
     use super::session::Session;
     use dezoomify_protocol::dto::{
-        EngineSnapshotDto, ErrorDto, HostEffect, JobCommand, ProcessingRequest, SessionConfig,
+        EngineSnapshotDto, ErrorDto, HostCompletion, HostEffect, JobCommand, ProcessingRequest,
+        SessionConfig,
     };
     use serde::Serialize;
     use tsify::{Ts, Tsify};
@@ -119,12 +120,28 @@ pub mod wasm_api {
                 .map_err(|error| JsError::new(&error.to_string()))
         }
 
-        /// Run one typed command and return its ordered host messages plus
-        /// the canonical snapshot after the answer.
-        #[wasm_bindgen(js_name = "dispatch")]
-        pub fn dispatch(&mut self, command: Ts<JobCommand>) -> Result<Ts<DispatchResult>, JsError> {
+        /// Run one typed user command and return its ordered host effects
+        /// plus the canonical snapshot after the answer. User commands
+        /// never carry bytes or claim publication.
+        #[wasm_bindgen(js_name = "command")]
+        pub fn command(&mut self, command: Ts<JobCommand>) -> Result<Ts<DispatchResult>, JsError> {
             let command = command.to_rust().map_err(conversion_error)?;
-            result(self.inner.dispatch(command))
+            result(self.inner.command(command))
+                .into_ts()
+                .map_err(conversion_error)
+        }
+
+        /// Answer one outstanding host effect and return its ordered host
+        /// effects plus the canonical snapshot after the answer. Only
+        /// completions carry bytes, failures, observations, and
+        /// publication claims.
+        #[wasm_bindgen(js_name = "complete")]
+        pub fn complete(
+            &mut self,
+            completion: Ts<HostCompletion>,
+        ) -> Result<Ts<DispatchResult>, JsError> {
+            let completion = completion.to_rust().map_err(conversion_error)?;
+            result(self.inner.complete(completion))
                 .into_ts()
                 .map_err(conversion_error)
         }

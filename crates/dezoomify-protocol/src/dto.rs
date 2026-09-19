@@ -217,7 +217,9 @@ impl JobInputDto {
     }
 }
 
-// Job commands (shared UI/CLI -> job)
+// User commands (UI -> job): intent that can never supply bytes, complete
+// an effect, or claim publication. Host completions travel separately as
+// [`HostCompletion`]; the split is structural, not documentary.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,21 +228,6 @@ impl JobInputDto {
 pub enum JobCommand {
     Start {
         inputs: Vec<JobInputDto>,
-    },
-    ProvideResource {
-        request: u32,
-        /// Resource body, carried directly in the command. Nothing is
-        /// retained adapter-side; tile success is body-free
-        /// (`ProvideDisplayOutcome`) and never carries bytes.
-        bytes: Vec<u8>,
-        /// Post-redirect URL observed by the host, when it has one. Relative
-        /// tile URLs resolve against this instead of the request URI.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        final_uri: Option<String>,
-    },
-    ProvideFetchFailure {
-        request: u32,
-        error: FetchFailureDto,
     },
     SelectImage {
         image: u32,
@@ -253,6 +240,41 @@ pub enum JobCommand {
     },
     SelectLevel {
         level: u32,
+    },
+    /// Answer the outstanding partial decision. Same generation + decision
+    /// vocabulary as the engine `AnswerPartial`; stale generations are
+    /// rejected, never consumed in order.
+    AnswerPartial {
+        generation: u32,
+        decision: RecoveryChoice,
+    },
+    Cancel,
+    Pause,
+    Resume,
+}
+
+// Host completions (host -> job): answers to outstanding [`HostEffect`]s.
+// Only these carry bytes, failures, observations, and publication claims.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum HostCompletion {
+    ProvideResource {
+        request: u32,
+        /// Resource body, carried directly in the completion. Nothing is
+        /// retained adapter-side; tile success is body-free
+        /// (`ProvideDisplayOutcome`) and never carries bytes.
+        bytes: Vec<u8>,
+        /// Post-redirect URL observed by the host, when it has one. Relative
+        /// tile URLs resolve against this instead of the request URI.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        final_uri: Option<String>,
+    },
+    ProvideFetchFailure {
+        request: u32,
+        error: FetchFailureDto,
     },
     /// Probe observation for one outstanding `acquire-tile` with
     /// `purpose: probe`. Correlated by the adapter-minted request id (like
@@ -285,10 +307,6 @@ pub enum JobCommand {
         tile: u32,
         attempt: u32,
     },
-    RecoveryChoice {
-        generation: u32,
-        choice: RecoveryChoice,
-    },
     FinalizationSucceeded {
         /// Honest disposition from the host that performed the save:
         /// tainted (display-only) canvases report DisplayOnly so every
@@ -298,9 +316,6 @@ pub enum JobCommand {
     FinalizationFailed {
         error: ErrorDto,
     },
-    Cancel,
-    Pause,
-    Resume,
 }
 
 // ---------------------------------------------------------------------------

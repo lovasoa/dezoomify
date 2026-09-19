@@ -59,7 +59,7 @@ use dezoomify_engine::{
     Update as EngineUpdate, UserCommand as EngineUserCommand,
 };
 use dezoomify_protocol::dto::{
-    ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostEffect, JobCommand,
+    ErrorDto, ErrorPhase, ErrorTransport, FetchFailureDto, HeaderDto, HostCompletion, HostEffect, JobCommand,
     JobState as ProtocolJobState, OutputDispositionDto, PointDto, ProbeOutcome, ProcessingRecipe,
     RequestDto, RequestPurpose, ResourceKind, SessionConfig, SizeDto, TilePlacementDto,
 };
@@ -178,20 +178,41 @@ impl Session {
         Ok(())
     }
 
-    /// Run one typed command synchronously and return every resulting host
-    /// message in engine order plus the canonical snapshot after the
+    /// Run one typed user command synchronously and return every resulting
+    /// host effect in engine order plus the canonical snapshot after the
     /// answer. The snapshot is absolute: hosts render it directly instead
-    /// of refolding the message stream.
+    /// of refolding the message stream. User commands can never supply
+    /// bytes, complete an effect, or claim publication; those cross only as
+    /// [`HostCompletion`] through [`Session::complete`].
     ///
     /// # Errors
     ///
     /// `disposed` after disposal; `wrong-state`/`limit-exceeded` per transition.
-    pub fn dispatch(
+    pub fn command(
         &mut self,
         command: JobCommand,
     ) -> Result<(Vec<HostEffect>, dezoomify_protocol::dto::EngineSnapshotDto), AdapterError> {
         self.require_live()?;
         let messages = self.dispatch_command(command)?;
+        let snapshot = self.last_snapshot();
+        Ok((messages, snapshot))
+    }
+
+    /// Answer one outstanding host effect synchronously and return every
+    /// resulting host effect in engine order plus the canonical snapshot
+    /// after the answer. Only completions carry bytes, failures,
+    /// observations, and publication claims.
+    ///
+    /// # Errors
+    ///
+    /// `disposed` after disposal; `wrong-state` for unknown, stale, or
+    /// already-settled effects.
+    pub fn complete(
+        &mut self,
+        completion: HostCompletion,
+    ) -> Result<(Vec<HostEffect>, dezoomify_protocol::dto::EngineSnapshotDto), AdapterError> {
+        self.require_live()?;
+        let messages = self.dispatch_completion(completion)?;
         let snapshot = self.last_snapshot();
         Ok((messages, snapshot))
     }
@@ -252,20 +273,6 @@ impl Session {
             JobCommand::Cancel => self.run_user_command(EngineUserCommand::Cancel),
             JobCommand::Pause => self.run_user_command(EngineUserCommand::Pause),
             JobCommand::Resume => self.run_user_command(EngineUserCommand::Resume),
-            JobCommand::ProvideResource {
-                request,
-                bytes,
-                final_uri,
-            } => self.on_provide_resource(request, bytes, final_uri),
-            JobCommand::ProvideFetchFailure { request, error } => {
-                self.on_fetch_failure(request, error)
-            }
-            JobCommand::ProvideProbeOutcome { request, outcome } => {
-                self.on_probe_outcome(request, outcome)
-            }
-            JobCommand::ProvideDisplayOutcome { request } => self.on_display_outcome(request),
-            JobCommand::TileAcquired { request } => self.on_tile_acquired(request),
-            JobCommand::RetryTimerElapsed { tile, attempt } => self.on_timer_elapsed(tile, attempt),
             JobCommand::SelectImage { image } => {
                 self.run_user_command(EngineUserCommand::SelectImage { image })
             }
@@ -275,18 +282,42 @@ impl Session {
             JobCommand::SelectLevel { level } => {
                 self.run_user_command(EngineUserCommand::SelectLevel { level })
             }
-            JobCommand::RecoveryChoice { generation, choice } => {
+            JobCommand::AnswerPartial { generation, decision } => {
                 // The engine validates the generation against the
                 // outstanding decision; a stale answer fails typed there.
                 self.run_user_command(EngineUserCommand::AnswerPartial {
                     generation,
-                    decision: choice,
+                    decision,
                 })
             }
-            JobCommand::FinalizationSucceeded { disposition } => {
+        }
+    }
+
+    fn dispatch_completion(
+        &mut self,
+        completion: HostCompletion,
+    ) -> Result<Vec<HostEffect>, AdapterError> {
+        match completion {
+            HostCompletion::ProvideResource {
+                request,
+                bytes,
+                final_uri,
+            } => self.on_provide_resource(request, bytes, final_uri),
+            HostCompletion::ProvideFetchFailure { request, error } => {
+                self.on_fetch_failure(request, error)
+            }
+            HostCompletion::ProvideProbeOutcome { request, outcome } => {
+                self.on_probe_outcome(request, outcome)
+            }
+            HostCompletion::ProvideDisplayOutcome { request } => self.on_display_outcome(request),
+            HostCompletion::TileAcquired { request } => self.on_tile_acquired(request),
+            HostCompletion::RetryTimerElapsed { tile, attempt } => {
+                self.on_timer_elapsed(tile, attempt)
+            }
+            HostCompletion::FinalizationSucceeded { disposition } => {
                 self.on_finalize_succeeded(disposition)
             }
-            JobCommand::FinalizationFailed { error } => self.on_finalize_failed(error),
+            HostCompletion::FinalizationFailed { error } => self.on_finalize_failed(error),
         }
     }
 
