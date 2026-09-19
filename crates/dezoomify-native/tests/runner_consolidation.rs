@@ -71,7 +71,7 @@ fn serve_counted(
                     .and_then(|line| line.split_whitespace().nth(1))
                     .unwrap_or("/")
                     .to_string();
-counts
+                counts
                     .lock()
                     .expect("lock")
                     .entry(path.clone())
@@ -130,7 +130,7 @@ fn serve_counted_with_tile_delay(
                 if path.contains("/pyr_files/") {
                     std::thread::sleep(tile_delay);
                 }
-counts
+                counts
                     .lock()
                     .expect("lock")
                     .entry(path.clone())
