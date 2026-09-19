@@ -899,7 +899,6 @@ mod tests {
             decision: None,
             terminal,
             output: None,
-            notices: Vec::new(),
         }
     }
 

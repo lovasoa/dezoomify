@@ -8,7 +8,7 @@
 //! `provide_metadata`). Each answer returns the newly issued effects plus
 //! the current snapshot; the adapter projects the new effects onto the
 //! generated ABI contract values and derives the ABI event stream from
-//! snapshot diffs (state, catalog, progress, decision, notices, terminal).
+//! snapshot diffs (state, catalog, progress, decision, terminal).
 //!
 //! Host interaction map (every path is explicit and correlated):
 //!

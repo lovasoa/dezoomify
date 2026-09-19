@@ -2,11 +2,12 @@
 //!
 //! The job decides what must happen next and emits host effects; it never
 //! performs I/O, decodes pixels, reads clocks, or writes output. Hosts feed
-//! explicit [`JobCommand`] inputs and drain one ordered typed message queue.
+//! explicit [`JobCommand`] inputs and drain the ordered effect queue.
 //! All counters use checked arithmetic.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
+use dezoomify_core::Vec2d;
 use dezoomify_core::core::adaptive::{DiscoverableStep, ObservationResult, ProbeContinuation};
 use dezoomify_core::core::discovery::{
     DiscoveryError, DiscoveryOperation, FetchCause, ResourceFailure, ResourceResponse,
@@ -14,15 +15,11 @@ use dezoomify_core::core::discovery::{
 use dezoomify_core::core::model::{CatalogEntry, ImageCatalog, ProcessingRecipe, TileRole};
 use dezoomify_core::core::registry::{default_registry, registry_for};
 use dezoomify_core::core::tile_plan::TileSource;
-use dezoomify_core::Vec2d;
-use dezoomify_protocol::dto::CatalogEntryDto;
 
 use crate::config::Config;
-use crate::retry::{retry_delay_ms, TileFailure};
+use crate::retry::{TileFailure, retry_delay_ms};
 use crate::state::State;
-use crate::transition::{
-    JobCommand, JobEffect, JobError, JobEvent, JobMessage, JobMessageBody, Outcome, RecoveryChoice,
-};
+use crate::transition::{JobCommand, JobEffect, JobError, Outcome, RecoveryChoice};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobInput {
@@ -157,16 +154,13 @@ pub struct Job {
     /// typed `job.unknown-format`.
     format: Option<String>,
     state: State,
-    seq: u32,
-    messages: VecDeque<JobMessage>,
+    effects: VecDeque<JobEffect>,
     /// Outstanding discovery resource fetches: request sequence -> core id.
     pending_discovery: HashMap<u32, usize>,
     /// Core discovery operation while discovery is in flight.
     discovery: Option<DiscoveryOperation>,
     /// Finished core catalog.
     catalog: Option<ImageCatalog>,
-    /// Projected wire catalog (same order as `catalog` entries).
-    catalog_images: Vec<CatalogEntryDto>,
     selection: Selection,
     finalization: Finalization,
     cleanup_emitted: bool,
@@ -253,7 +247,6 @@ impl std::fmt::Debug for Job {
         // stays informative without it.
         f.debug_struct("Job")
             .field("state", &self.state)
-            .field("seq", &self.seq)
             .field("terminal", &self.terminal)
             .finish()
     }
@@ -278,12 +271,10 @@ impl Job {
             config,
             format: None,
             state: State::Created,
-            seq: 0,
-            messages: VecDeque::new(),
+            effects: VecDeque::new(),
             pending_discovery: HashMap::new(),
             discovery: None,
             catalog: None,
-            catalog_images: Vec::new(),
             selection: Selection::AwaitingImage,
             finalization: Finalization::Idle,
             cleanup_emitted: false,
@@ -327,12 +318,6 @@ impl Job {
     #[must_use]
     pub fn state(&self) -> State {
         self.state
-    }
-
-    /// Monotonic sequence last assigned (checked arithmetic).
-    #[must_use]
-    pub fn seq(&self) -> u32 {
-        self.seq
     }
 
     /// Terminal event kind once terminal, else `None`.
@@ -397,10 +382,32 @@ impl Job {
         self.canvas_size
     }
 
-    /// Take queued messages exactly once in sequence order.
+    /// Take issued effects exactly once in deterministic order.
     #[must_use]
-    pub fn drain_messages(&mut self) -> Vec<JobMessage> {
-        self.messages.drain(..).collect()
+    pub fn drain_effects(&mut self) -> Vec<JobEffect> {
+        self.effects.drain(..).collect()
+    }
+
+    #[must_use]
+    pub fn catalog(&self) -> Option<&ImageCatalog> {
+        self.catalog.as_ref()
+    }
+
+    #[must_use]
+    pub fn level_count(&self, image: u32) -> u32 {
+        usize::try_from(image)
+            .ok()
+            .and_then(|index| self.catalog.as_ref()?.entries().get(index))
+            .map(|entry| match entry {
+                CatalogEntry::Ready(image) => u32::try_from(image.levels.len()).unwrap_or(u32::MAX),
+                CatalogEntry::Deferred(_) => 0,
+            })
+            .unwrap_or(0)
+    }
+
+    #[must_use]
+    pub fn terminal_error(&self) -> Option<&(String, String)> {
+        self.terminal_error.as_ref()
     }
 
     /// Set the format selector before [`Job::start`]: `None` auto-detects,
@@ -433,9 +440,6 @@ impl Job {
             }
         }
         self.set_state(State::Discovering)?;
-        self.push_event(JobEvent::State {
-            state: State::Discovering,
-        })?;
         self.start_current_input()?;
         Ok(Outcome::Applied)
     }
@@ -505,7 +509,7 @@ impl Job {
     ///
     /// Post-terminal inputs are stably rejected with no new work. Duplicates
     /// are ignored. Valid inputs advance state and queue
-    /// effects/events with monotonic `seq`.
+    /// effects for facade-managed revisions.
     ///
     /// # Errors
     ///
@@ -514,10 +518,6 @@ impl Job {
     pub fn on_command(&mut self, response: JobCommand) -> Result<Outcome, JobError> {
         if self.terminal.is_some() {
             return Err(JobError::post_terminal());
-        }
-        // Cancellation is valid in every non-terminal state.
-        if matches!(response, JobCommand::Cancel) {
-            return self.enter_cancelled();
         }
         match response {
             JobCommand::Cancel => self.enter_cancelled(),
@@ -608,9 +608,7 @@ impl Job {
             return self
                 .fail_via_cleanup("job.no-images", "discovery produced no images".to_string());
         }
-        let images = crate::projection::project_catalog(&catalog).entries;
         self.catalog = Some(catalog);
-        self.catalog_images = images;
         // A followed catalog replaces the superseded one in the same job;
         // the follow flag clears so later failures route normally again.
         self.following_deferred = false;
@@ -618,14 +616,6 @@ impl Job {
         // catalog wins; drop them so late answers are plain duplicates.
         self.pending_discovery.clear();
         self.set_state(State::AwaitingImageSelection)?;
-        self.push_event(JobEvent::Catalog {
-            catalog: dezoomify_protocol::dto::CatalogDto {
-                entries: self.catalog_images.clone(),
-            },
-        })?;
-        self.push_event(JobEvent::State {
-            state: State::AwaitingImageSelection,
-        })?;
         Ok(())
     }
 
@@ -743,10 +733,11 @@ impl Job {
         let index = usize::try_from(image).map_err(|_| JobError::overflow("image position"))?;
         let level_count = {
             let selected = self
-                .catalog_images
-                .get(index)
+                .catalog
+                .as_ref()
+                .and_then(|catalog| catalog.entries().get(index))
                 .ok_or_else(|| JobError::invalid_state("image position is out of range"))?;
-            let CatalogEntryDto::Image(selected) = selected else {
+            let CatalogEntry::Ready(selected) = selected else {
                 return Err(JobError::invalid_state(
                     "image metadata was not fetched; the image cannot be selected",
                 ));
@@ -765,10 +756,7 @@ impl Job {
                 u32::try_from(position).map_err(|_| JobError::overflow("level position"))
             })
             .collect::<Result<_, _>>()?;
-        self.push_event(JobEvent::Levels { image, levels })?;
-        self.push_event(JobEvent::State {
-            state: State::AwaitingLevelSelection,
-        })?;
+        let _ = levels;
         Ok(Outcome::Applied)
     }
 
@@ -826,9 +814,6 @@ impl Job {
         };
         self.discovery = Some(registry.start(uri));
         self.set_state(State::Discovering)?;
-        self.push_event(JobEvent::State {
-            state: State::Discovering,
-        })?;
         self.drive_discovery()?;
         Ok(Outcome::Applied)
     }
@@ -849,9 +834,13 @@ impl Job {
         let image_index = image.index;
         let level_index =
             usize::try_from(level).map_err(|_| JobError::overflow("level position"))?;
-        let in_range = match &self.catalog_images[image_index] {
-            CatalogEntryDto::Image(image) => image.levels.get(level_index).is_some(),
-            CatalogEntryDto::ImageRequest(_) => false,
+        let in_range = match self
+            .catalog
+            .as_ref()
+            .and_then(|catalog| catalog.entries().get(image_index))
+        {
+            Some(CatalogEntry::Ready(image)) => image.levels.get(level_index).is_some(),
+            Some(CatalogEntry::Deferred(_)) | None => false,
         };
         if !in_range {
             return Err(JobError::invalid_state("level position is out of range"));
@@ -864,9 +853,6 @@ impl Job {
             },
         };
         self.set_state(State::Planning)?;
-        self.push_event(JobEvent::State {
-            state: State::Planning,
-        })?;
         self.plan_selected_level()?;
         Ok(Outcome::Applied)
     }
@@ -1062,10 +1048,7 @@ impl Job {
             .saturating_sub(self.acquired_tiles.len());
         let acquired = self.acquired_tiles.len() as u64;
         self.set_state(State::AcquiringTiles)?;
-        self.push_event(JobEvent::Progress { acquired, total })?;
-        self.push_event(JobEvent::State {
-            state: State::AcquiringTiles,
-        })?;
+        let _ = (acquired, total);
         if self.acquired_tiles.len() == self.planned_tiles.len() {
             self.complete_remaining(false)?;
         } else {
@@ -1116,7 +1099,7 @@ impl Job {
         let acquired = u64::try_from(self.acquired_tiles.len())
             .map_err(|_| JobError::overflow("acquired count"))?;
         let total = self.planned_tiles.len() as u64;
-        self.push_event(JobEvent::Progress { acquired, total })?;
+        let _ = (acquired, total);
         // A success can settle the round when failures are stashed:
         // with every planned tile acquired or settled-as-failed the
         // partial decision carries the complete missing list.
@@ -1194,7 +1177,6 @@ impl Job {
             .or_default()
             .push(failure.clone());
         if failure.is_retryable() && attempt <= self.config.max_retries {
-            self.push_event(JobEvent::Warning { tile, attempt })?;
             // Attempts count the initial try: the first failure schedules
             // retry-timer 1, whose completion re-issues the second try.
             let delay_ms = retry_delay_ms(
@@ -1288,13 +1270,6 @@ impl Job {
         let generation = self.alloc_decision_generation()?;
         self.set_state(State::AwaitingPartialDecision)?;
         self.push_effect(JobEffect::RequestDecision { generation })?;
-        self.push_event(JobEvent::MissingWork {
-            failed: self.failed_tiles.clone(),
-        })?;
-        self.push_event(JobEvent::RecoveryRequested { generation })?;
-        self.push_event(JobEvent::State {
-            state: State::AwaitingPartialDecision,
-        })?;
         Ok(())
     }
 
@@ -1399,9 +1374,6 @@ impl Job {
                 }
                 self.unsettled = self.unsettled.saturating_add(restored);
                 self.set_state(State::AcquiringTiles)?;
-                self.push_event(JobEvent::State {
-                    state: State::AcquiringTiles,
-                })?;
                 if !self.paused {
                     self.emit_pending_tiles()?;
                 }
@@ -1427,15 +1399,8 @@ impl Job {
         // Exactly one idempotent `cancel-work`: the cleanup gate below
         // owns the emission, so cancellation and failure paths converge.
         self.emit_cleanup_once()?;
-        self.push_event(JobEvent::State {
-            state: State::Cancelling,
-        })?;
         self.emit_cleanup_once()?;
         self.set_state(State::Cancelled)?;
-        self.push_event(JobEvent::State {
-            state: State::Cancelled,
-        })?;
-        self.push_event(JobEvent::Cancelled)?;
         self.terminal = Some("cancelled".to_string());
         Ok(Outcome::Applied)
     }
@@ -1450,7 +1415,6 @@ impl Job {
             return Ok(Outcome::Ignored);
         }
         self.paused = true;
-        self.push_event(JobEvent::Paused)?;
         Ok(Outcome::Applied)
     }
 
@@ -1463,7 +1427,6 @@ impl Job {
             return Err(JobError::invalid_state("resume valid only while paused"));
         }
         self.paused = false;
-        self.push_event(JobEvent::Resumed)?;
         // Retry timers created while paused start now: issue one
         // `WaitForRetry` per pending retry the host does not hold yet.
         let unissued: Vec<(u32, u32, u64)> = self
@@ -1513,9 +1476,6 @@ impl Job {
             format: dezoomify_protocol::dto::OutputFormat::Png,
             canvas: self.canvas_size,
         })?;
-        self.push_event(JobEvent::State {
-            state: State::Finalizing,
-        })?;
         Ok(())
     }
 
@@ -1533,17 +1493,9 @@ impl Job {
         self.finalization = Finalization::Idle;
         if partial {
             self.set_state(State::PartiallyCompleted)?;
-            self.push_event(JobEvent::State {
-                state: State::PartiallyCompleted,
-            })?;
-            self.push_event(JobEvent::PartialCompleted)?;
             self.terminal = Some("partial-completed".to_string());
         } else {
             self.set_state(State::Completed)?;
-            self.push_event(JobEvent::State {
-                state: State::Completed,
-            })?;
-            self.push_event(JobEvent::Completed)?;
             self.terminal = Some("completed".to_string());
         }
         Ok(Outcome::Applied)
@@ -1570,13 +1522,6 @@ impl Job {
         self.terminal_error = Some((code.to_string(), message.clone()));
         self.emit_cleanup_once()?;
         self.set_state(State::Failed)?;
-        self.push_event(JobEvent::State {
-            state: State::Failed,
-        })?;
-        self.push_event(JobEvent::Failed {
-            code: code.to_string(),
-            message,
-        })?;
         self.terminal = Some("failed".to_string());
         Ok(())
     }
@@ -1692,30 +1637,8 @@ impl Job {
         Ok(())
     }
 
-    fn bump_seq(&mut self) -> Result<u32, JobError> {
-        let next = self
-            .seq
-            .checked_add(1)
-            .ok_or_else(|| JobError::overflow("seq"))?;
-        self.seq = next;
-        Ok(next)
-    }
-
     fn push_effect(&mut self, effect: JobEffect) -> Result<(), JobError> {
-        let sequence = self.bump_seq()?;
-        self.messages.push_back(JobMessage {
-            sequence,
-            body: JobMessageBody::Effect(effect),
-        });
-        Ok(())
-    }
-
-    fn push_event(&mut self, event: JobEvent) -> Result<(), JobError> {
-        let sequence = self.bump_seq()?;
-        self.messages.push_back(JobMessage {
-            sequence,
-            body: JobMessageBody::Event(event),
-        });
+        self.effects.push_back(effect);
         Ok(())
     }
 
