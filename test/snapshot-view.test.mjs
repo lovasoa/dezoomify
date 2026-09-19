@@ -111,20 +111,21 @@ test("pause keeps progress while the partial decision names its gaps", () => {
   assert.deepEqual(view.selection.missing, [7]);
 });
 
-test("display-only renders without byte access", () => {
+test("tainted canvas keeps the progress bar while dezooming", () => {
   const snap = dto({
     revision: 5,
     lifecycle: "AcquiringTiles",
     progress: { completed: 2, total: 8 },
   });
   const view = presentSnapshot(snap, "display-only", { displayOnly: true });
-  assert.equal(view.phase, "display-only");
+  assert.equal(view.phase, "job");
   assert.equal(view.displayOnly, true);
-  assert.equal(view.headlineKey, "view.display.title");
+  assert.equal(view.headlineKey, "view.step.downloading");
+  assert.deepEqual(view.progress, { current: 2, total: 8 });
   assert.equal(view.transportLabel, "Display only");
 });
 
-test("display-only round-trips through output disposition", () => {
+test("display-only round-trips through output disposition only when finished", () => {
   const snap = dto({
     revision: 6,
     lifecycle: "AcquiringTiles",
@@ -132,7 +133,7 @@ test("display-only round-trips through output disposition", () => {
     output: { canvas: undefined, format: "png", complete: false, missing: [], disposition: "display-only" },
   });
   const view = presentSnapshot(snap, "display-only");
-  assert.equal(view.phase, "display-only");
+  assert.equal(view.phase, "job");
   assert.equal(view.displayOnly, true);
 });
 
