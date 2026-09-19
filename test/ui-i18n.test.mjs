@@ -191,8 +191,8 @@ test("i18n: pickLocale follows Accept-Language headers and language lists", () =
 });
 
 // Todo 2.2: desktop copy moved from main.tsx into errorCopy.ts,
-// jobController.ts, settingsPanel.ts, and diagnostics.ts. The key set stays
-// identical; only the scanned files widen to the whole desktop src dir.
+// settingsPanel.ts, and diagnostics.ts. The key set stays identical; only
+// the scanned files widen to the whole desktop src dir.
 function readDesktop() {
   const dir = path.join(rootDir, "apps/desktop/src");
   return fs

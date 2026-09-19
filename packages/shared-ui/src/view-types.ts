@@ -1,4 +1,5 @@
-import type { AppCapabilities, ControllerState } from "./controller.ts";
+import type { AppCapabilities } from "./components.ts";
+import type { SnapshotPresentation } from "./snapshot-view.ts";
 import type { HistoryEntry } from "@dezoomify/app-model";
 import type { ReactElement, ReactNode } from "react";
 
@@ -29,15 +30,20 @@ export interface JobActivity {
   pausedDurationMs?: number;
 }
 
+/**
+ * Host presentation context. Counts, selection geometry, and terminal data
+ * ride the SnapshotPresentation; hosts set these fields from their snapshot
+ * stream plus product-local surfaces (canvas blobs, saved files, history).
+ */
 export interface ViewContext {
   capabilities?: AppCapabilities;
-  currentProgress?: { current: number; total: number; active?: number; retrying?: number; estimatedTotalMs?: number; message?: string };
+  currentProgress?: { active?: number; retrying?: number; estimatedTotalMs?: number; message?: string };
   completedInfo?: { width: number; height: number; mime: string; blobUrl?: string };
   nativeSaved?: { partial: boolean };
   savedOutput?: { name: string; width: number; height: number; doneTiles: number; totalTiles: number; failedTiles: number };
   originClean?: boolean; jobActivity?: JobActivity; initialUrl?: string;
   imageChoice?: { width?: number; height?: number; tiles?: number };
-  sourceUrl?: string; desktopHandoffUrl?: string; history?: HistoryEntry[]; paused?: boolean;
+  sourceUrl?: string; desktopHandoffUrl?: string; history?: HistoryEntry[];
 }
 
 /** Host-owned React content rendered inside or instead of the generic card. */
@@ -48,18 +54,11 @@ export interface ViewRenderOptions {
   replace?: ReactElement;
 }
 
-export type ViewPhase = "idle" | "job" | "display-only" | "completed" | "failed" | "cancelled" | "generic";
-
-export function getPhaseForStatus(status: ControllerState["status"]): ViewPhase {
-  if (status === "idle") return "idle";
-  if (["discovering", "choosing-image", "choosing-level", "preflighting", "downloading", "saving"].includes(status)) return "job";
-  if (status === "display-only" || status === "completed" || status === "failed" || status === "cancelled") return status;
-  return "generic";
-}
+export type ViewPhase = SnapshotPresentation["phase"];
 
 export interface ImagePickerOption { index: number; title?: string; width?: number; height?: number; tiles?: number; }
 export interface ImagePickerArgs { options: ImagePickerOption[]; onPick(index: number): void; }
 export interface LevelPickerOption { index: number; width: number; height: number; tiles: number; fits: boolean; }
 export interface LevelPickerArgs { options: LevelPickerOption[]; onPick(index: number): void; }
-export interface ConfirmModalArgs { id?: string; title: string; subtitle: string; bodyLines: string[]; confirmLabel: string; declineLabel: string; }
+export interface ConfirmModalArgs { id?: string; title: string; subtitle?: string; bodyLines: string[]; confirmLabel: string; declineLabel: string; }
 export interface PlatformHints { userAgent?: string; platform?: string; }

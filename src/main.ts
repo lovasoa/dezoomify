@@ -3,21 +3,39 @@
 // Real pipeline: worker-hosted wasm core discovery -> direct-first transport
 // with automatic eligible metadata-proxy fallback -> tile acquisition -> canvas
 // assembly -> real PNG save. Nothing here fabricates progress or completion.
-import { createController } from "../packages/shared-ui/src/controller.ts";
+//
+// The browser job service (packages/app-model service over the shared
+// browser runner) folds engine events into authoritative JobSnapshots; the
+// view renders presentSnapshot of the latest snapshot. Host-local failures
+// (invalid input, host rejections) render through presentFailure. No
+// synthetic controller walk exists.
 import {
+  createJobService,
   HISTORY_KEY_WEBSITE,
   clearHistory as clearHistoryStore,
   loadHistory as loadHistoryStore,
   pushHistory,
   saveHistory as saveHistoryStore,
   toHistoryEntry,
-} from "../packages/app-model/src/history.ts";
-import type { HistoryEntry } from "../packages/app-model/src/history.ts";
-import { renderView, showDesktopAppGuidance, showExtensionGuidance } from "../packages/shared-ui/src/view.tsx";
-import type { ViewContext } from "../packages/shared-ui/src/view.tsx";
-import type { ErrorDto, HeaderDto, JobEvent, ProcessingRecipe } from "@dezoomify/wasm-bindings";
+} from "../packages/app-model/src/index.ts";
+import type {
+  HistoryEntry,
+  JobEvent,
+  JobHandle,
+  JobSnapshot,
+} from "../packages/app-model/src/index.ts";
+import {
+  describeFailure,
+  presentFailure,
+  presentIdle,
+  presentSnapshot,
+  renderView,
+  showDesktopAppGuidance,
+  showExtensionGuidance,
+  t,
+} from "../packages/shared-ui/src/index.ts";
+import type { SnapshotPresentation, StructuredError, ViewContext } from "../packages/shared-ui/src/index.ts";
 import { DEFAULT_PAGE_TITLE, isActiveJobStatus, jobPageTitle } from "../packages/shared-ui/src/view-helpers.ts";
-import { describeFailure } from "../packages/shared-ui/src/failure.ts";
 import {
   RATE_LIMITED_BY_SITE_MESSAGE,
   SITE_BUSY_MESSAGE,
@@ -32,9 +50,7 @@ import {
   createBrowserRunner,
   createCanvasAssembly,
   createProbeSize,
-  dispatchTyped,
   type BrowserJobHandle,
-  type DispatchTable,
 } from "../packages/browser-runtime/src/index.ts";
 import {
   blockedReason,
@@ -80,11 +96,11 @@ import { createLogger } from "../packages/browser-runtime/src/logging.ts";
 import { createWebFetcher, type WebFetcher } from "../packages/browser-runtime/src/web-fetch.ts";
 import { PROXY_TRANSPORT_LABEL } from "../packages/browser-runtime/src/transport-labels.ts";
 import {
-  BROWSER_SAVE_COLOR_WARNING,
   canvasToPngBlob,
   isCanvasTaintError,
   saveBlobViaAnchor,
 } from "../packages/browser-runtime/src/canvas-save.ts";
+import type { ErrorDto, HeaderDto, ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
 // Re-export the shared browser limits for existing website test imports.
 export {
@@ -97,21 +113,26 @@ export {
 
 const preview = createPreviewControls();
 
-let sessionId = `sess:web-${Date.now()}`;
-const controller = createController(sessionId);
-let currentSeq = 0;
 // One browser runner attempt (worker, session, abort scope, disposal). The
 // runner owns the engine host; product code here keeps URL input, transport
 // product actions, history, queue, and view wiring only.
-let jobHandle: BrowserJobHandle | null = null;
+let jobHandle: JobHandle | null = null;
 let jobToken = 0;
 let resultBlobUrl: string | null = null;
 let resultTitle: string | undefined;
-// Pause (suspend-acquisition): the website stops scheduling new
-// tiles while paused, finishes in-flight work, retains the canvas, and
-// re-drives on resume. Integration-layer only; the engine pause lives in
-// `dezoomify-engine` for native hosts.
-let jobPaused = false;
+// Authoritative snapshot of the active job, folded by the job service.
+let latestSnapshot: JobSnapshot | null = null;
+// Host-local failure that never reached an engine snapshot (invalid input,
+// host rejections). Renders through presentFailure.
+let webFailure: StructuredError | null = null;
+// Tainted-canvas display-only override: the picture finished as ordinary
+// image display with no readable bytes, so the view must stay display-only.
+let displayOnlyFlag = false;
+// One auto-selection per attempt: the catalog handler issues the engine
+// selection commands exactly once.
+let selectionDone = false;
+// Message riding the progress line ("Saving 12 tiles…").
+let progressMessage: string | undefined;
 
 // Recent-jobs history: local-only ledger, newest first, at most
 // 20 entries. Each entry keeps its full source address.
@@ -234,11 +255,6 @@ function recordMetadataAttempt(
   refreshDiagnostics();
 }
 
-function nextEvent(kind: string, extra: Record<string, unknown> = {}) {
-  currentSeq++;
-  return { seq: currentSeq, sessionId, kind, ...extra };
-}
-
 const tileThrottle = createTileThrottle();
 const tileDecoder = createTileDecoder();
 
@@ -275,7 +291,7 @@ const webFetcher: WebFetcher = createWebFetcher({
   messages: {
     rateLimitedBySite: RATE_LIMITED_BY_SITE_MESSAGE,
     siteBusy: SITE_BUSY_MESSAGE,
-    discoveryFailed: (via) => discoveryFailedError(via).message,
+    discoveryFailed: (via) => noImageFoundError(via).message,
   },
   throttle: (url) => tileThrottle.throttle(url),
 });
@@ -358,7 +374,7 @@ function createAssembly(
       viewCtx.originClean = false;
       viewCtx.sourceUrl = sourceUrl;
       viewCtx.desktopHandoffUrl = desktopHandoffLink(sourceUrl);
-      controller.dispatch(nextEvent("preflight-display-only", { transport: "display" }) as never);
+      displayOnlyFlag = true;
       const dims = activeAssembly?.dimensions();
       recordWebHistory(sourceUrl, dims?.width ?? 0, dims?.height ?? 0, "display");
       update();
@@ -369,8 +385,7 @@ function createAssembly(
 }
 
 /** Shared presenter for engine failures: headline plus stable classification. */
-function presentEngineFailure(error: ErrorDto, url: string, token: number): void {
-  if (token !== jobToken) return;
+function presentEngineFailure(error: ErrorDto, url: string): void {
   const code = error.code;
   const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
   const lower = code.toLowerCase();
@@ -390,29 +405,25 @@ function presentEngineFailure(error: ErrorDto, url: string, token: number): void
     : discoveryFailed
       ? discoveryFailedError(via)
       : null;
-  controller.dispatch(
-    nextEvent("fail", {
-      error: describeFailure({
-        code,
-        engineDetail: error.detail ?? error.message,
-        ...(discoveryCopy
-          ? { message: discoveryCopy.message, category: discoveryCopy.category }
-          : {}),
-        phase: error.phase,
-        retryable: discoveryCopy ? discoveryCopy.retryable : error.retryable,
-        transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
-        host: hostOf(url),
-        url: error.request,
-        http: error.http,
-        preview: error.preview,
-      }),
-    }) as never,
-  );
+  webFailure = describeFailure({
+    code,
+    engineDetail: error.detail ?? error.message,
+    ...(discoveryCopy
+      ? { message: discoveryCopy.message, category: discoveryCopy.category }
+      : {}),
+    phase: error.phase,
+    retryable: discoveryCopy ? discoveryCopy.retryable : error.retryable,
+    transport: error.transport ?? errorTransportFor(code, webFetcher.getActiveTransport()),
+    host: hostOf(url),
+    url: error.request,
+    http: error.http,
+    preview: error.preview,
+  });
   update();
 }
 
 function reportProgress(current: number, total: number, message: string): void {
-  viewCtx.currentProgress = { current, total, message };
+  progressMessage = message;
   jobActivity.touchProgress();
   jobActivity.scheduleUpdate();
 }
@@ -441,6 +452,40 @@ function clearHash(): void {
   }
 }
 
+/** Snapshot-failure presentation with the website's discovery copy. */
+function failurePresentationOf(snapshot: JobSnapshot): SnapshotPresentation | null {
+  const terminal = snapshot.terminal;
+  if (!terminal || terminal.kind !== "failed" || !terminal.error) return null;
+  presentEngineFailure(terminal.error, viewCtx.jobActivity?.url ?? latestSnapshot?.jobId ?? "");
+  return webFailure ? presentFailure(webFailure, webFetcher.getActiveTransport()) : null;
+}
+
+function activeTransport(): string | null {
+  return webFetcher.getActiveTransport();
+}
+
+function currentPresentation(): SnapshotPresentation {
+  if (webFailure) return presentFailure(webFailure, activeTransport());
+  if (!latestSnapshot) return presentIdle();
+  const snapshot = displayOnlyFlag ? { ...latestSnapshot, displayOnly: true } : latestSnapshot;
+  const presentation = failurePresentationOf(latestSnapshot) ?? presentSnapshot(snapshot, activeTransport());
+  if (displayOnlyFlag && presentation.phase !== "failed") {
+    return {
+      ...presentation,
+      phase: "display-only",
+      displayOnly: true,
+      headlineKey: "view.display.title",
+      canCancel: false,
+      canReset: true,
+    };
+  }
+  return presentation;
+}
+
+function isTerminalNow(): boolean {
+  return webFailure !== null || displayOnlyFlag || (latestSnapshot?.terminal ?? null) !== null;
+}
+
 async function runJob(url: string, followDepth = 0, origin = url): Promise<void> {
   const token = ++jobToken;
   webFetcher.resetActiveTransport();
@@ -448,8 +493,11 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
   resetActivity(origin);
   setCanvasVisible(document, false);
   preview.resetTransform(document);
-  jobPaused = false;
-  viewCtx.paused = false;
+  latestSnapshot = null;
+  webFailure = null;
+  displayOnlyFlag = false;
+  selectionDone = false;
+  progressMessage = undefined;
   viewCtx.imageChoice = undefined;
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
@@ -463,10 +511,8 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
   if (followDepth === 0) writeHash(origin);
   jobActivity.startHeartbeat();
   jobActivity.setStep("Finding the zoomable image…", `Contacting ${hostOf(origin)}…`);
-  controller.dispatch(nextEvent("start-discovery", { transport: "direct" }) as never);
   update();
 
-  let selected = false;
   let terminal: "done" | "failed" | "cancelled" | "display" | "deferred" = "done";
   let deferredNext: string | null = null;
   let settle: () => void = () => {};
@@ -478,119 +524,25 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
     const structured = error as { code?: unknown; message?: unknown; detail?: unknown; retryable?: unknown };
     const code = typeof structured?.code === "string" ? structured.code : "OUTPUT_FAILED";
     webLog.error("host-failure", `code=${code} message=${String(structured?.message ?? code)}`);
-    controller.dispatch(
-      nextEvent("fail", {
-        error: describeFailure({
-          code,
-          engineDetail: typeof structured?.detail === "string" ? structured.detail : undefined,
-          message: typeof structured?.message === "string" ? structured.message : undefined,
-          retryable: typeof structured?.retryable === "boolean" ? structured.retryable : undefined,
-          transport: "browser-session",
-          host: hostOf(origin),
-        }),
-      }) as never,
-    );
+    webFailure = describeFailure({
+      code,
+      engineDetail: typeof structured?.detail === "string" ? structured.detail : undefined,
+      message: typeof structured?.message === "string" ? structured.message : undefined,
+      retryable: typeof structured?.retryable === "boolean" ? structured.retryable : undefined,
+      transport: "browser-session",
+      host: hostOf(origin),
+    });
     terminal = "failed";
     update();
     settle();
-  };
-
-  const complete = (): void => {
-    if (activeAssembly?.isTainted() === true) {
-      terminal = "display";
-      settle();
-      return;
-    }
-    controller.dispatch(nextEvent("save-start") as never);
-    recordWebHistory(origin, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
-    controller.dispatch(nextEvent("save-done") as never);
-    terminal = "done";
-    update();
-    settle();
-  };
-
-  const eventHandlers = {
-    catalog: (event) => {
-      if (selected) return;
-      selected = true;
-      const catalog = event.catalog;
-      const entries = catalog.entries;
-      const via = webFetcher.getActiveTransport() === PROXY_TRANSPORT_LABEL ? "proxy" : "direct";
-      if (entries.length === 0) {
-        controller.dispatch(nextEvent("images-found", { imageCount: 0, transport: via }) as never);
-        onHostFailure(failure("NO_IMAGE_FOUND", noImageFoundError(via).message, false, "discovery returned an empty image catalog"));
-        return;
-      }
-      const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
-      if (!selection) {
-        // No resolved image is selectable. A still-deferred catalog (IIIF
-        // manifest, bulk list) resolves through its first request with a
-        // fresh, bounded attempt; the engine never follows it silently.
-        const deferredUri = pickDeferredUri(catalog);
-        if (deferredUri) {
-          if (followDepth >= MAX_DEFERRED_FOLLOWS) {
-            controller.dispatch(nextEvent("images-found", { imageCount: entries.length, transport: via }) as never);
-            onHostFailure(failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false));
-            return;
-          }
-          deferredNext = deferredUri;
-          terminal = "deferred";
-          settle();
-          return;
-        }
-        onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
-        return;
-      }
-      controller.dispatch(nextEvent("images-found", { imageCount: entries.length, transport: via }) as never);
-      const entry = entries[selection.image];
-      const image = entry && entry.kind === "image" ? entry : null;
-      resultTitle = image?.title;
-      const level = image?.levels?.[selection.level];
-      if (level) viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
-      controller.dispatch(nextEvent("image-chosen") as never);
-      jobActivity.setStep("Choosing the highest resolution…");
-      controller.dispatch(nextEvent("level-chosen") as never);
-      controller.dispatch(nextEvent("preflight-ok", { transport: via }) as never);
-      update();
-      const handle = jobHandle;
-      if (handle) {
-        void handle.command({ type: "select-image", image: selection.image });
-        void handle.command({ type: "select-level", level: selection.level });
-      }
-    },
-    progress: (event) => {
-      reportProgress(event.acquired, event.total, `Saving ${event.total} tiles…`);
-      update();
-    },
-    warning: (event) => webLog.warn("engine-warning", JSON.stringify(event.error)),
-    "recovery-request": () => {},
-    "job-state": () => {},
-    paused: () => {},
-    resumed: () => {},
-    completed: complete,
-    "partial-completed": complete,
-    failed: (event) => {
-      presentEngineFailure(event.error, origin, token);
-      terminal = "failed";
-      settle();
-    },
-    cancelled: () => {
-      controller.dispatch(nextEvent("cancel") as never);
-      terminal = "cancelled";
-      update();
-      settle();
-    },
-  } satisfies DispatchTable<JobEvent, void>;
-
-  const onEngineEvent = (event: JobEvent): void => {
-    if (token !== jobToken) return;
-    dispatchTyped(eventHandlers, event);
   };
 
   // One shared browser runner: the website injects its transport (direct
   // first with automatic eligible metadata-proxy fallback) and its output
   // assembly (visible page canvas, anchor save). Retries, partials, and
   // ordering stay in the engine; the abort scope and disposal live here.
+  // The app-model job service folds the runner's events into authoritative
+  // snapshots; the observer below renders and drives product side effects.
   const runner = createBrowserRunner({
     createWorker: () => new Worker(new URL("./worker.js", import.meta.url), { type: "module" }),
     fetchResource: async (effect, signal) => {
@@ -652,7 +604,7 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
       return assembly;
     },
     quotas: { max_concurrent_fetches: websiteTileConcurrency() },
-    sessionId: () => sessionId,
+    sessionId: () => `job:web-${token}`,
     getTransport: () => webFetcher.getActiveTransport(),
     // The website has no host grants: nothing ever suspends for permission.
     isPermissionPending: () => false,
@@ -669,10 +621,85 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
     },
   });
 
+  const service = createJobService(runner);
+
+  const onSnapshot = (snapshot: JobSnapshot): void => {
+    if (token !== jobToken) return;
+    latestSnapshot = snapshot;
+
+    // Auto-selection: exactly one attempt per catalog. A deferred catalog
+    // (IIIF manifest, bulk list) resolves through its first request with a
+    // fresh, bounded attempt; the engine never follows it silently.
+    if (!selectionDone && snapshot.catalog) {
+      selectionDone = true;
+      const catalog = snapshot.catalog;
+      const entries = catalog.entries;
+      const selection = pickEngineSelection(catalog, BROWSER_LIMITS);
+      if (!selection) {
+        const deferredUri = pickDeferredUri(catalog);
+        if (deferredUri) {
+          if (followDepth >= MAX_DEFERRED_FOLLOWS) {
+            onHostFailure(failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false));
+            return;
+          }
+          deferredNext = deferredUri;
+          terminal = "deferred";
+          settle();
+          return;
+        }
+        onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
+        return;
+      }
+      const entry = entries[selection.image];
+      const image = entry && entry.kind === "image" ? entry : null;
+      resultTitle = image?.title;
+      const level = image?.levels?.[selection.level];
+      if (level) viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
+      jobActivity.setStep("Choosing the highest resolution…");
+      update();
+      const handle = jobHandle;
+      if (handle) {
+        void handle.command({ type: "select-image", image: selection.image });
+        void handle.command({ type: "select-level", level: selection.level });
+      }
+      return;
+    }
+
+    if (snapshot.acquired > 0 || snapshot.total !== null) {
+      reportProgress(snapshot.acquired, snapshot.total ?? 0, `Saving ${snapshot.total ?? "?"} tiles…`);
+      update();
+    }
+
+    const terminalOutcome = snapshot.terminal;
+    if (terminalOutcome) {
+      if (displayOnlyFlag || activeAssembly?.isTainted() === true) {
+        terminal = "display";
+        settle();
+        return;
+      }
+      if (terminalOutcome.kind === "completed" || terminalOutcome.kind === "partial-completed") {
+        recordWebHistory(origin, viewCtx.completedInfo?.width ?? 0, viewCtx.completedInfo?.height ?? 0, "png");
+        terminal = "done";
+        update();
+        settle();
+        return;
+      }
+      if (terminalOutcome.kind === "failed") {
+        terminal = "failed";
+        update();
+        settle();
+        return;
+      }
+      terminal = "cancelled";
+      update();
+      settle();
+    }
+  };
+
   try {
-    const handle = await runner.start(
+    const handle = await service.start(
       { inputs: [{ url }], engine: {}, exec: { kind: "browser", sourceUrl: origin } },
-      (event) => onEngineEvent(event),
+      { snapshot: onSnapshot, hostStatus: () => {} },
     );
     if (token !== jobToken) {
       await handle.dispose();
@@ -694,9 +721,6 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
     // The catalog asked for another resource: restart the whole attempt
     // against it under the same logical job and original address. The bound
     // is checked in the catalog handler; the engine never follows silently.
-    sessionId = `sess:web-${Date.now()}`;
-    controller.reset(sessionId);
-    currentSeq = 0;
     webLog.info("deferred-follow", `depth=${followDepth + 1} host=${hostOf(deferredNext)}`);
     void runJob(deferredNext, followDepth + 1, origin);
     return;
@@ -711,10 +735,12 @@ async function runJob(url: string, followDepth = 0, origin = url): Promise<void>
     webQueue = settled.queue;
     const next = settled.next;
     if (next) {
-      const status = controller.getState().status;
-      if (status === "completed" || status === "cancelled" || status === "failed" || status === "display-only") {
-        controller.reset(sessionId);
-        currentSeq = 0;
+      if (isTerminalNow()) {
+        latestSnapshot = null;
+        webFailure = null;
+        displayOnlyFlag = false;
+        selectionDone = false;
+        progressMessage = undefined;
       }
       const summary = summarizeWebQueue(webQueue);
       webLog.info("queue", `succeeded=${summary.succeeded} failed=${summary.failed} pending=${summary.pending}`);
@@ -731,16 +757,12 @@ function submitQueuedUrl(url: string): void {
   const res = enqueueWebQueue(webQueue, url);
   webQueue = res.queue;
   if (res.code !== "ok" || !res.entry) {
-    controller.dispatch(
-      nextEvent("fail", {
-        error: {
-          code: "INVALID_URL",
-          category: "validation",
-          retryable: false,
-          message: "Please enter a valid web address starting with http:// or https://",
-        },
-      }) as never,
-    );
+    webFailure = {
+      code: "INVALID_URL",
+      category: "validation",
+      retryable: false,
+      message: "Please enter a valid web address starting with http:// or https://",
+    };
     update();
     return;
   }
@@ -789,56 +811,51 @@ function syncPageTitle(status: string): void {
 
 function update(): void {
   if (!appContainer) return;
-  const state = controller.getState();
-  if (state.status === "downloading" && viewCtx.currentProgress) {
-    const progress = viewCtx.currentProgress;
-    progress.active = Math.min(
-      jobActivity.state.pendingRequests ?? 0,
-      Math.max(0, progress.total - progress.current),
-    );
-  }
-  const activeTransport = webFetcher.getActiveTransport();
-  if (activeTransport && !state.transport) {
-    state.transport = activeTransport;
+  const presentation = currentPresentation();
+  // In-flight tile count rides the context; counts come from the snapshot.
+  if (presentation.phase === "job" && latestSnapshot?.total) {
+    viewCtx.currentProgress = {
+      active: Math.min(
+        jobActivity.state.pendingRequests ?? 0,
+        Math.max(0, latestSnapshot.total - latestSnapshot.acquired),
+      ),
+      ...(progressMessage ? { message: progressMessage } : {}),
+    };
+  } else if (progressMessage) {
+    viewCtx.currentProgress = { message: progressMessage };
+  } else {
+    viewCtx.currentProgress = undefined;
   }
   if (viewCtx.jobActivity) jobActivity.refreshLongestPending();
-  syncPageTitle(state.status);
+  syncPageTitle(presentation.phase === "job" ? "downloading" : presentation.phase);
   renderView(
     appContainer,
-    state,
+    presentation,
     {
       onSubmitUrl(url: string) {
         if (isLocalFileUrl(url)) {
           viewCtx.initialUrl = url;
           viewCtx.sourceUrl = url;
           viewCtx.desktopHandoffUrl = undefined;
-          controller.dispatch(
-            nextEvent("fail", {
-              error: {
-                code: "INVALID_URL",
-                category: "validation",
-                retryable: false,
-                message: "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
-                transport: "direct",
-                phase: "discovery",
-                detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
-              },
-            }) as never,
-          );
+          webFailure = {
+            code: "INVALID_URL",
+            category: "validation",
+            retryable: false,
+            message: "Local files cannot be opened on this website. Use the desktop app for files on your computer.",
+            transport: "direct",
+            phase: "discovery",
+            detail: "Local file: open the desktop app and choose the file there; nothing is sent.",
+          };
           update();
           return;
         }
         if (!isAllowedSourceUrl(url)) {
-          controller.dispatch(
-            nextEvent("fail", {
-              error: {
-                code: "INVALID_URL",
-                category: "validation",
-                retryable: false,
-                message: "Please enter a valid web address starting with http:// or https://",
-              },
-            }) as never,
-          );
+          webFailure = {
+            code: "INVALID_URL",
+            category: "validation",
+            retryable: false,
+            message: "Please enter a valid web address starting with http:// or https://",
+          };
           update();
           return;
         }
@@ -847,27 +864,19 @@ function update(): void {
       onPause() {
         // Pause v1: stop scheduling new tiles; in-flight finishes, the
         // canvas is retained, resume re-drives the FIFO queue.
-        if (jobPaused) return;
-        jobPaused = true;
-        viewCtx.paused = true;
-        jobActivity.pause();
         void jobHandle?.command({ type: "pause" });
+        jobActivity.pause();
         webLog.info("paused", "no new pieces are being fetched");
         update();
       },
       onResume() {
-        if (!jobPaused) return;
-        jobPaused = false;
-        viewCtx.paused = false;
-        jobActivity.resume();
         void jobHandle?.command({ type: "resume" });
+        jobActivity.resume();
         webLog.info("resumed", "fetching queued pieces again");
         update();
       },
       onCancel() {
         jobToken += 1;
-        jobPaused = false;
-        viewCtx.paused = false;
         jobActivity.stopHeartbeat();
         disposeAttempt();
         // Stop returns directly to the initial view. Effects from the retired
@@ -876,16 +885,7 @@ function update(): void {
           webQueue = cancelAllWeb(webQueue);
           webQueue = createWebQueue();
         }
-        sessionId = `sess:web-${Date.now()}`;
-        controller.reset(sessionId);
-        currentSeq = 0;
-        viewCtx.currentProgress = undefined;
-        viewCtx.completedInfo = undefined;
-        viewCtx.jobActivity = undefined;
-        viewCtx.initialUrl = undefined;
-        viewCtx.imageChoice = undefined;
-        viewCtx.sourceUrl = undefined;
-        viewCtx.desktopHandoffUrl = undefined;
+        resetJobViewState();
         webFetcher.resetActiveTransport();
         tileThrottle.reset();
         setCanvasVisible(document, false);
@@ -899,29 +899,18 @@ function update(): void {
       },
       onReset() {
         jobToken += 1;
-        jobPaused = false;
-        viewCtx.paused = false;
         jobActivity.stopHeartbeat();
         disposeAttempt();
         webFetcher.resetActiveTransport();
         tileThrottle.reset();
         setCanvasVisible(document, false);
         preview.resetTransform(document);
-        sessionId = `sess:web-${Date.now()}`;
-        controller.reset(sessionId);
-        currentSeq = 0;
         // Reset clears the whole queue: no new work is issued afterwards.
         if (webQueueEnabled()) {
           webQueue = cancelAllWeb(webQueue);
           webQueue = createWebQueue();
         }
-        viewCtx.currentProgress = undefined;
-        viewCtx.completedInfo = undefined;
-        viewCtx.jobActivity = undefined;
-        viewCtx.initialUrl = undefined;
-        viewCtx.imageChoice = undefined;
-        viewCtx.sourceUrl = undefined;
-        viewCtx.desktopHandoffUrl = undefined;
+        resetJobViewState();
         clearHash();
         if (resultBlobUrl) {
           URL.revokeObjectURL(resultBlobUrl);
@@ -1005,6 +994,21 @@ function update(): void {
   );
 }
 
+function resetJobViewState(): void {
+  latestSnapshot = null;
+  webFailure = null;
+  displayOnlyFlag = false;
+  selectionDone = false;
+  progressMessage = undefined;
+  viewCtx.currentProgress = undefined;
+  viewCtx.completedInfo = undefined;
+  viewCtx.jobActivity = undefined;
+  viewCtx.initialUrl = undefined;
+  viewCtx.imageChoice = undefined;
+  viewCtx.sourceUrl = undefined;
+  viewCtx.desktopHandoffUrl = undefined;
+}
+
 function startFromHash(): void {
   if (typeof window === "undefined") return;
   const raw = parseHash(window.location.hash);
@@ -1047,4 +1051,4 @@ if (appContainer) {
   update();
 }
 
-export { controller, update };
+export { update, currentPresentation };

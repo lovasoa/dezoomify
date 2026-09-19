@@ -164,7 +164,7 @@ pub fn build_web(_args: &[String]) -> Result<(), String> {
         "functions/api/proxy.ts",
         "src/server/security.ts",
         "scripts/dev-server.mjs",
-        "packages/shared-ui/src/controller.ts",
+        "packages/shared-ui/src/snapshot-view.ts",
     ] {
         if !super::repo_root().join(rel).is_file() {
             return Err(format!("missing web source {rel}"));

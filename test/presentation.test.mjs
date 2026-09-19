@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createController, renderAppChoice } from "../packages/shared-ui/src/controller.ts";
+import { applyJobEvent, initialSnapshot } from "../packages/app-model/src/index.ts";
+import { presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
+import { renderAppChoice } from "../packages/shared-ui/src/components.ts";
 import {
   categoryFor,
   describeFailure,
@@ -13,79 +15,85 @@ import {
   renderProgress,
 } from "../packages/shared-ui/src/components.ts";
 import fs from "node:fs";
-import path from "node:path";
 
-test("controller walks full happy path", () => {
-  const c = createController("s1");
-  assert.equal(c.getState().status, "idle");
-  let seq = 0;
-  const next = (kind, extra = {}) => ({ seq: ++seq, sessionId: "s1", kind, ...extra });
-  assert.ok(c.dispatch(next("start-discovery")));
-  assert.ok(c.dispatch(next("images-found", { imageCount: 3 })));
-  assert.equal(c.getState().status, "choosing-image");
-  assert.ok(c.dispatch(next("image-chosen")));
-  assert.ok(c.dispatch(next("level-chosen")));
-  assert.ok(c.dispatch(next("preflight-ok", { transport: "direct" })));
-  assert.equal(c.getState().status, "downloading");
-  assert.ok(c.dispatch(next("save-start")));
-  assert.ok(c.dispatch(next("save-done")));
-  assert.equal(c.getState().status, "completed");
+function run(jobId, events) {
+  let now = 0;
+  let snap = initialSnapshot(jobId, ++now);
+  for (const event of events) snap = applyJobEvent(snap, event, ++now);
+  return snap;
+}
+
+test("snapshot fold walks the full happy path", () => {
+  const snap = run("job:1", [
+    { type: "job-state", state: "Discovering" },
+    { type: "catalog", catalog: { entries: [{ kind: "image", format: "IIIF", width: 8, height: 6, sourceKind: "iiif", levels: [{ label: "full", width: 8, height: 6, tileWidth: 4, tileHeight: 4 }] }] } },
+    { type: "job-state", state: "AwaitingImageSelection" },
+    { type: "job-state", state: "AwaitingLevelSelection" },
+    { type: "job-state", state: "Planning" },
+    { type: "job-state", state: "AcquiringTiles" },
+    { type: "progress", acquired: 1, total: 4 },
+    { type: "job-state", state: "Finalizing" },
+    { type: "completed" },
+  ]);
+  const view = presentSnapshot(snap, "direct");
+  assert.equal(view.phase, "completed");
+  assert.equal(view.terminal.kind, "completed");
+  assert.equal(view.canReset, true);
+  assert.equal(view.canCancel, false);
+  assert.deepEqual(view.progress, { current: 1, total: 4 });
 });
 
-test("controller display-only branch + failed stores structured error", () => {
-  const c = createController("s9");
-  let seq = 0;
-  const next = (kind, extra = {}) => ({ seq: ++seq, sessionId: "s9", kind, ...extra });
-  c.dispatch(next("start-discovery"));
-  c.dispatch(next("images-found"));
-  c.dispatch(next("image-chosen"));
-  c.dispatch(next("level-chosen"));
-  c.dispatch(next("preflight-display-only"));
-  assert.equal(c.getState().status, "display-only");
+test("display-only branch + failed terminal stores the typed error", () => {
+  const displaySnap = run("job:9", [
+    { type: "job-state", state: "AcquiringTiles" },
+  ]);
+  const displayView = presentSnapshot({ ...displaySnap, displayOnly: true }, "display-only");
+  assert.equal(displayView.phase, "display-only");
+  assert.equal(displayView.displayOnly, true);
+  assert.equal(displayView.headlineKey, "view.display.title");
 
-  // A failure from a mid-job session (downloading) stores the structured error.
-  const d = createController("s10");
-  let dseq = 0;
-  const dnext = (kind, extra = {}) => ({ seq: ++dseq, sessionId: "s10", kind, ...extra });
-  d.dispatch(dnext("start-discovery"));
-  d.dispatch(dnext("images-found"));
-  d.dispatch(dnext("image-chosen"));
-  d.dispatch(dnext("level-chosen"));
-  d.dispatch(dnext("preflight-ok", { transport: "direct" }));
-  assert.equal(d.getState().status, "downloading");
-  const err = { code: "TRANSPORT_NETWORK_ERROR", category: "transport", retryable: true, message: "Could not open the picture." };
-  assert.ok(d.dispatch(dnext("fail", { error: err })));
-  assert.equal(d.getState().status, "failed");
-  assert.deepEqual(d.getState().error, err);
+  // A failed terminal keeps the typed error for the error view.
+  const error = { code: "TRANSPORT_NETWORK_ERROR", phase: "acquisition", retryable: true, message: "Could not open the picture.", recovery: [] };
+  const failedSnap = run("job:10", [
+    { type: "job-state", state: "AcquiringTiles" },
+    { type: "failed", error },
+  ]);
+  const failedView = presentSnapshot(failedSnap, "direct");
+  assert.equal(failedView.phase, "failed");
+  assert.equal(failedView.terminal.error.code, "TRANSPORT_NETWORK_ERROR");
+  assert.equal(failedView.terminal.error.retryable, true);
 });
 
-test("controller can fall back from saving to display-only", () => {
-  const c = createController("s11");
-  let seq = 0;
-  const next = (kind, extra = {}) => ({ seq: ++seq, sessionId: "s11", kind, ...extra });
-  c.dispatch(next("start-discovery"));
-  c.dispatch(next("images-found"));
-  c.dispatch(next("image-chosen"));
-  c.dispatch(next("level-chosen"));
-  c.dispatch(next("preflight-ok"));
-  c.dispatch(next("save-start"));
-  assert.ok(c.dispatch(next("preflight-display-only")));
-  assert.equal(c.getState().status, "display-only");
+test("a finished job can still present display-only from the host override", () => {
+  const snap = run("job:11", [
+    { type: "job-state", state: "AcquiringTiles" },
+    { type: "progress", acquired: 2, total: 4 },
+  ]);
+  const view = presentSnapshot({ ...snap, displayOnly: true }, "browser-session");
+  assert.equal(view.phase, "display-only");
+  assert.equal(view.progress.current, 2);
+  const taintedTerminal = presentSnapshot({ ...snap, displayOnly: true, terminal: { kind: "completed" } }, "browser-session");
+  assert.equal(taintedTerminal.phase, "completed");
+  assert.equal(taintedTerminal.displayOnly, false, "terminals render their own phase");
 });
 
-test("stale seq and foreign session ignored; illegal transition rejected", () => {
-  const c = createController("s1");
-  assert.ok(c.dispatch({ seq: 1, sessionId: "s1", kind: "start-discovery" }));
-  assert.equal(c.dispatch({ seq: 1, sessionId: "s1", kind: "images-found" }), false);
-  assert.equal(c.dispatch({ seq: 0, sessionId: "s1", kind: "images-found" }), false);
-  assert.equal(c.dispatch({ seq: 2, sessionId: "other", kind: "images-found" }), false);
-  // Illegal: save-done from discovering.
-  assert.equal(c.dispatch({ seq: 2, sessionId: "s1", kind: "save-done" }), false);
-  // Cancel then reset.
-  assert.ok(c.dispatch({ seq: 2, sessionId: "s1", kind: "cancel" }));
-  assert.equal(c.getState().status, "cancelled");
-  c.reset();
-  assert.equal(c.getState().status, "idle");
+test("fold is exactly-once terminal and ignores late events by reference", () => {
+  let snap = run("job:12", [
+    { type: "job-state", state: "AcquiringTiles" },
+    { type: "progress", acquired: 2, total: 4 },
+    { type: "cancelled" },
+  ]);
+  assert.equal(snap.terminal.kind, "cancelled");
+  assert.equal(snap.state, "Cancelled");
+  // Late events after a terminal outcome return the identical snapshot.
+  const late = applyJobEvent(snap, { type: "progress", acquired: 4, total: 4 }, 99);
+  assert.equal(late, snap, "late event must not move a terminal snapshot");
+  const secondTerminal = applyJobEvent(snap, { type: "completed" }, 100);
+  assert.equal(secondTerminal, snap, "a second terminal must not overwrite the first");
+  // Cancel then reset is a fresh snapshot.
+  const fresh = initialSnapshot("job:12", 1);
+  assert.equal(fresh.state, "Created");
+  assert.equal(fresh.terminal, null);
 });
 
 test("app-choice guidance is plain language with no jargon", () => {
@@ -164,5 +172,4 @@ test("website scenario transcripts have fixed shape", () => {
   assert.deepEqual(fallback.attempts, ["direct", "proxy"]);
   assert.equal(fallback.transport, "Metadata proxy");
   assert.ok(fallback.proxyScope === "metadata-only");
-  void path;
 });

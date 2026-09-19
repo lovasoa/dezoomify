@@ -10,7 +10,7 @@ sites; `cargo xtask test live --public` stays opt-in and advisory.
 | Behavior | Corpus | Lane |
 |---|---|---|
 | Full job renders from snapshots, no synthetic events | `test/snapshot-view.test.mjs` | `cargo xtask test ui` |
-| Controller happy path and display-only branch | `test/controller.test.mjs` | `cargo xtask test ui` |
+| Snapshot fold happy path and display-only branch | `test/presentation.test.mjs` | `cargo xtask test ui` |
 | Terminal renders without catalog or progress | `test/snapshot-view.test.mjs` (completed/failed/cancelled) | `cargo xtask test ui` |
 | Kept partials name their gaps | `test/snapshot-view.test.mjs`, `testdata/scenarios/desktop/tile-failure-keep` | `cargo xtask test ui`, `cargo xtask test desktop` |
 | Display-only vs readable-bytes distinction | `test/snapshot-view.test.mjs`, `testdata/scenarios/post-cutover/taint` | `cargo xtask test ui`, `cargo xtask test scenario` |

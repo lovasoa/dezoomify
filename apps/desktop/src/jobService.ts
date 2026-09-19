@@ -7,14 +7,18 @@
 //
 // Command routing against the shipped shell (DESKTOP_COMMANDS):
 // cancel -> cancel_job; image/level/recovery choices -> answer_choice with
-// the shell's typed choice shapes (single source in jobController.ts);
-// pause/resume and engine-internal commands have no shell command yet and
-// reject with desktop.unsupported-command until the typed native IPC lands.
+// the shell's typed choice shapes (single source here); pause/resume and
+// engine-internal commands have no shell command yet and reject with
+// desktop.unsupported-command until the typed native IPC lands.
 //
 // Event projection is explicit and total: each payload maps by its channel
 // plus kind/state fields to one generated JobEvent, or is ignored. No
 // substring matching on display text. Payload shapes are imported from
 // events.ts (canonical); destination formats from desktopIntegration.ts.
+// Native payloads carry data the shared fold cannot know (output geometry,
+// partial ledgers, sibling basenames); the service enriches the folded
+// snapshot with it before publishing, so the snapshot stays the single
+// source of truth the UI renders.
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -42,9 +46,17 @@ import {
   type DesktopEventChannel,
 } from "./events.ts";
 import { DESKTOP_COMMANDS, NATIVE_FORMATS } from "./desktopIntegration.ts";
-import type { AnswerChoice } from "./jobController.ts";
 
 // Keep erasable syntax only so node type-stripping can read this file.
+
+// Typed desktop choice shapes sent to the shell `answer_choice` command.
+// Structured end to end: these objects decode to the shell `Choice` enum
+// directly; no string parsing is involved.
+export type AnswerChoice =
+  | { kind: "image"; index: number }
+  | { kind: "level"; index: number }
+  | { kind: "partial"; keep: boolean }
+  | { kind: "retry" };
 
 export interface DesktopIpc {
   invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -110,6 +122,16 @@ function numField(record: Record<string, unknown>, keys: string[]): number | und
   return undefined;
 }
 
+function stringList(record: Record<string, unknown>, keys: string[]): string[] {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === "string" && item !== "");
+    }
+  }
+  return [];
+}
+
 const VALID_PHASES = new Set([
   "handshake",
   "validation",
@@ -145,8 +167,38 @@ function flatKind(payload: Record<string, unknown>): string {
 }
 
 function stateOf(payload: Record<string, unknown>): string {
-  return (strField(payload, ["state"]) ?? "").toLowerCase();
+  return (strField(payload, ["state"]) ?? "").toLowerCase().replace(/[-_]/g, "");
 }
+
+/** Typed recovery actions for each native recovery family. */
+const PARTIAL_ACTIONS = [
+  { id: "keep-partial", kind: "keep-partial", scope: "job", rationale: "kept-partial" },
+  { id: "discard-partial", kind: "discard-partial", scope: "job", rationale: "fail-closed" },
+  { id: "retry", kind: "retry", scope: "tile", rationale: "transient" },
+] as const;
+
+const DESTINATION_ACTIONS = [
+  { id: "choose-output", kind: "choose-output", scope: "job", rationale: "output-denied" },
+  { id: "retry", kind: "retry", scope: "job", rationale: "transient" },
+] as const;
+
+/** Shell state names that map onto one engine job state. */
+const SHELL_STATE_TABLE: Record<string, JobEvent> = {
+  created: { type: "job-state", state: "Created" },
+  discovering: { type: "job-state", state: "Discovering" },
+  awaitingimageselection: { type: "job-state", state: "AwaitingImageSelection" },
+  awaitinglevelselection: { type: "job-state", state: "AwaitingLevelSelection" },
+  planning: { type: "job-state", state: "Planning" },
+  running: { type: "job-state", state: "AcquiringTiles" },
+  acquiring: { type: "job-state", state: "AcquiringTiles" },
+  acquiringtiles: { type: "job-state", state: "AcquiringTiles" },
+  processing: { type: "job-state", state: "AcquiringTiles" },
+  encoding: { type: "job-state", state: "Finalizing" },
+  finalizing: { type: "job-state", state: "Finalizing" },
+  cancelling: { type: "job-state", state: "Cancelling" },
+  cleaningup: { type: "job-state", state: "Cancelling" },
+  awaitingpartialdecision: { type: "job-state", state: "AwaitingPartialDecision" },
+};
 
 /**
  * Project one shell payload to one generated JobEvent. Returns null for
@@ -219,45 +271,103 @@ export function projectDesktopEvent(
   if (kind === "paused") return { type: "paused" };
   if (kind === "resumed") return { type: "resumed" };
 
+  // Recovery requests: partial decisions offer keep/discard/retry; the
+  // destination cue (any event reporting the AwaitingDestination shell
+  // state) offers choose-output. The reason field is typed, never display
+  // text.
   if (
     kind === "recoveryrequested" ||
     kind === "requestdecision" ||
     kind === "awaitingrecovery" ||
     kind === "awaitingpartialdecision" ||
-    kind === "awaitingpartial" ||
-    kind === "awaitingdestination" ||
-    kind === "destination"
+    kind === "awaitingpartial"
   ) {
     const generation = eventSeq(payload) ?? 0;
-    return { type: "recovery-request", generation, actions: [] };
-  }
-
-  if (
-    state === "awaitingimageselection" ||
-    state === "awaitinglevelselection" ||
-    state === "discovering" ||
-    state === "planning" ||
-    state === "acquiringtiles" ||
-    state === "awaitingpartialdecision" ||
-    state === "finalizing" ||
-    state === "cancelling" ||
-    state === "created"
-  ) {
-    const table: Record<string, JobEvent> = {
-      awaitingimageselection: { type: "job-state", state: "AwaitingImageSelection" },
-      awaitinglevelselection: { type: "job-state", state: "AwaitingLevelSelection" },
-      discovering: { type: "job-state", state: "Discovering" },
-      planning: { type: "job-state", state: "Planning" },
-      acquiringtiles: { type: "job-state", state: "AcquiringTiles" },
-      awaitingpartialdecision: { type: "job-state", state: "AwaitingPartialDecision" },
-      finalizing: { type: "job-state", state: "Finalizing" },
-      cancelling: { type: "job-state", state: "Cancelling" },
-      created: { type: "job-state", state: "Created" },
+    const reason = strField(payload, ["reason"]);
+    const actions = reason === "destination" ? DESTINATION_ACTIONS : PARTIAL_ACTIONS;
+    return {
+      type: "recovery-request",
+      generation,
+      actions: actions.map((action) => ({ ...action })),
     };
-    return table[state] ?? null;
+  }
+  if (state === "awaitingdestination") {
+    const generation = eventSeq(payload) ?? 0;
+    return {
+      type: "recovery-request",
+      generation,
+      actions: DESTINATION_ACTIONS.map((action) => ({ ...action })),
+    };
+  }
+  // A destination grant moves the job into active work: the driver plans
+  // before the first tile flows.
+  if (kind === "destination") {
+    return { type: "job-state", state: "Planning" };
   }
 
-  return null;
+  const stateEvent = SHELL_STATE_TABLE[state];
+  return stateEvent ?? null;
+}
+
+/**
+ * Fold the shell state riding a progress payload before the progress event:
+ * the snapshot state must track Acquiring/Finalizing during downloads.
+ */
+function progressStateEvent(payload: Record<string, unknown>): JobEvent | null {
+  const stateEvent = SHELL_STATE_TABLE[stateOf(payload)];
+  return stateEvent ?? null;
+}
+
+/** Typed output details a native terminal payload carries beyond the fold. */
+function enrichOutput(
+  snapshot: JobSnapshot,
+  payload: Record<string, unknown>,
+): JobSnapshot {
+  if (!snapshot.output) return snapshot;
+  const width = numField(payload, ["width"]);
+  const height = numField(payload, ["height"]);
+  const format = strField(payload, ["format"]);
+  const missing = stringList(payload, ["missingTiles", "missing"]);
+  const siblingRaw = strField(payload, ["sibling"]);
+  const sibling =
+    typeof siblingRaw === "string" &&
+    siblingRaw.length > 0 &&
+    siblingRaw.length <= 256 &&
+    siblingRaw.indexOf("/") < 0 &&
+    siblingRaw.indexOf("\\") < 0
+      ? siblingRaw
+      : undefined;
+  return {
+    ...snapshot,
+    output: {
+      ...snapshot.output,
+      ...(typeof width === "number" && width > 0 ? { width } : {}),
+      ...(typeof height === "number" && height > 0 ? { height } : {}),
+      ...(format ? { format } : {}),
+      ...(missing.length > 0 ? { missingTiles: missing } : {}),
+      ...(sibling ? { siblingName: sibling } : {}),
+    },
+  };
+}
+
+/** Typed partial-ledger details a native recovery payload carries. */
+function enrichRecovery(
+  snapshot: JobSnapshot,
+  payload: Record<string, unknown>,
+): JobSnapshot {
+  if (!snapshot.recovery) return snapshot;
+  const missing = stringList(payload, ["missingTiles", "missing"]);
+  const failed = numField(payload, ["failed", "failedRequests", "failures"]);
+  const total = numField(payload, ["total", "tiles", "tileCount"]);
+  return {
+    ...snapshot,
+    recovery: {
+      ...snapshot.recovery,
+      ...(missing.length > 0 ? { missing } : {}),
+      ...(typeof failed === "number" ? { failed } : {}),
+      ...(typeof total === "number" ? { total } : {}),
+    },
+  };
 }
 
 function extensionFor(format: string): string | null {
@@ -325,7 +435,21 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     }
     const event = projectDesktopEvent(channel, payload);
     if (!event) return;
-    const folded = applyJobEvent(tracked.current, event, now());
+    let folded = tracked.current;
+    // Progress payloads carry the live shell state alongside the counts;
+    // fold it first so the snapshot state tracks the download.
+    if (event.type === "progress") {
+      const stateEvent = progressStateEvent(payload);
+      if (stateEvent && stateEvent.type === "job-state" && stateEvent.state !== folded.state) {
+        folded = applyJobEvent(folded, stateEvent, now());
+      }
+    }
+    folded = applyJobEvent(folded, event, now());
+    if (event.type === "completed" || event.type === "partial-completed") {
+      folded = enrichOutput(folded, payload);
+    } else if (event.type === "recovery-request") {
+      folded = enrichRecovery(folded, payload);
+    }
     if (folded === tracked.current) return;
     tracked.current = folded;
     if (store.publish(folded)) tracked.observer.snapshot(folded);

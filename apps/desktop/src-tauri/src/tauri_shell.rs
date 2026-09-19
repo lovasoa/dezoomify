@@ -223,9 +223,9 @@ fn drain_and_emit(app: &AppHandle, table: &mut crate::jobs::JobTable) {
 }
 
 /// Run one typed commands-layer dispatch under the table lock.
-fn lock_table(
-    state: &State<'_, Mutex<JobTable>>,
-) -> Result<std::sync::MutexGuard<'_, JobTable>, CommandFailure> {
+fn lock_table<'a>(
+    state: &'a State<'_, Mutex<JobTable>>,
+) -> Result<std::sync::MutexGuard<'a, JobTable>, CommandFailure> {
     state.lock().map_err(|_| CommandFailure {
         code: "shell.lock".into(),
         message: "job table poisoned".into(),
@@ -300,10 +300,10 @@ async fn cancel_job(
     // Signals `cancel_flag` + the engine `Cancel` transition inside
     // `jobs.rs cancel_job`; the `Cancelling`/`CleaningUp`/`Cancelled` chain
     // was enqueued as projected `job-state` emits.
-    let dispatched = to_dispatched(commands::dispatch_cancel_job(
-        &mut lock_table(&state)?,
-        &job,
-    )?);
+    let dispatched = {
+        let mut table = lock_table(&state)?;
+        to_dispatched(commands::dispatch_cancel_job(&mut table, &job)?)
+    };
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
@@ -325,11 +325,10 @@ async fn answer_choice(
     // inside `jobs.rs answer_choice`; the precise `Awaiting*`/`Running`
     // state was enqueued as a projected `job-state` emit with the redacted
     // origin.
-    let dispatched = to_dispatched(commands::dispatch_answer_choice(
-        &mut lock_table(&state)?,
-        &job,
-        choice,
-    )?);
+    let dispatched = {
+        let mut table = lock_table(&state)?;
+        to_dispatched(commands::dispatch_answer_choice(&mut table, &job, choice)?)
+    };
     {
         let mut table = state.lock().map_err(|_| CommandFailure {
             code: "shell.lock".into(),
@@ -344,7 +343,10 @@ async fn answer_choice(
 async fn query_capabilities(
     state: State<'_, Mutex<JobTable>>,
 ) -> Result<CapabilitySnapshot, CommandFailure> {
-    commands::dispatch_query_capabilities(&mut lock_table(&state)?)?;
+    {
+        let mut table = lock_table(&state)?;
+        commands::dispatch_query_capabilities(&mut table)?;
+    }
     Ok(CapabilitySnapshot {
         native_available: true,
         encoders: commands::SUPPORTED_FORMATS
