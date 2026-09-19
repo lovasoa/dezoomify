@@ -3,7 +3,7 @@
 
 use dezoomify_protocol::dto::{
     BlockedReason, ErrorPhase, ErrorTransport, FetchFailureDto, HostEffect, JobCommand,
-    JobInputDto, SessionConfig,
+    JobInputDto, JobState, SessionConfig,
 };
 use dezoomify_wasm::Session;
 
@@ -70,7 +70,11 @@ fn typed_fetch_error_requires_and_preserves_context() {
     let (messages, snapshot) = session
         .dispatch(JobCommand::ProvideFetchFailure { request, error })
         .expect("typed failure accepted");
-    assert!(messages.is_empty(), "terminal answers carry no new effects");
+    // The terminal answer carries only the release effect so the host can
+    // close its retained resources; no new acquisition work is issued.
+    assert!(messages
+        .iter()
+        .all(|message| matches!(message, HostEffect::CancelWork)));
     let failed = match snapshot.terminal {
         Some(dezoomify_protocol::dto::SnapshotTerminalDto::Failed { error }) => error,
         ref terminal => panic!("expected failed terminal, got {terminal:?}"),
@@ -208,6 +212,97 @@ fn reacquired_request(messages: &[HostEffect], tile: u32) -> Option<u32> {
         } if *id == tile => Some(request.id),
         _ => None,
     })
+}
+
+/// A bulk list resolving to two still-deferred entries (same fixture the
+/// engine checklist uses: following entry 0 fetches `a.dzi` in the same job).
+const BULK_LIST: &[u8] = b"https://example.test/a.dzi\nhttps://example.test/b.dzi\n";
+
+#[test]
+fn follow_deferred_continues_same_job_with_replaced_catalog() {
+    let mut session = session();
+    let (messages, _snapshot) = session
+        .dispatch(JobCommand::Start {
+            inputs: vec![JobInputDto::new("https://example.test/list.txt")],
+        })
+        .expect("typed start");
+    let request = messages
+        .iter()
+        .find_map(|message| match message {
+            HostEffect::AcquireResource { request } => Some(request.id),
+            _ => None,
+        })
+        .expect("discovery request");
+    let (_messages, snapshot) = session
+        .dispatch(JobCommand::ProvideResource {
+            request,
+            bytes: BULK_LIST.to_vec(),
+            final_uri: None,
+        })
+        .expect("bulk catalog");
+    assert_eq!(snapshot.lifecycle, JobState::AwaitingImageSelection);
+    assert_eq!(snapshot.selection.deferred.len(), 2);
+    assert_eq!(
+        snapshot.selection.deferred[0].uri,
+        "https://example.test/a.dzi"
+    );
+    // The bulk catalog itself is kept with two image-request entries; the
+    // deferred positions index into it.
+    let catalog = snapshot.selection.catalog.as_ref().expect("bulk catalog");
+    assert_eq!(catalog.entries.len(), 2);
+    assert!(matches!(
+        catalog.entries[0],
+        dezoomify_protocol::dto::CatalogEntryDto::ImageRequest(_)
+    ));
+
+    // Ready images cannot be selected while entries stay deferred.
+    let error = session
+        .dispatch(JobCommand::SelectImage { image: 0 })
+        .unwrap_err();
+    assert_eq!(error.code(), dezoomify_wasm::AdapterErrorCode::WrongState);
+
+    // Same job follows: exactly one new metadata effect for the follow URI.
+    let (messages, snapshot) = session
+        .dispatch(JobCommand::FollowDeferred { image: 0 })
+        .expect("follow");
+    assert_eq!(snapshot.lifecycle, JobState::Discovering);
+    let follow = messages
+        .iter()
+        .find_map(|message| match message {
+            HostEffect::AcquireResource { request } => Some(request.clone()),
+            _ => None,
+        })
+        .expect("follow-up metadata effect");
+    assert_eq!(follow.uri, "https://example.test/a.dzi");
+
+    // The follow-up bytes replace the catalog in place: no new job.
+    let (_messages, snapshot) = session
+        .dispatch(JobCommand::ProvideResource {
+            request: follow.id,
+            bytes: DZI.to_vec(),
+            final_uri: None,
+        })
+        .expect("replaced catalog");
+    assert_eq!(snapshot.lifecycle, JobState::AwaitingImageSelection);
+    assert!(snapshot.selection.catalog.is_some());
+    assert!(snapshot.selection.deferred.is_empty());
+
+    // The replaced catalog drives the same job to tiles.
+    let (_messages, snapshot) = session
+        .dispatch(JobCommand::SelectImage { image: 0 })
+        .expect("image");
+    let level = snapshot.selection.level_count - 1;
+    let (messages, _snapshot) = session
+        .dispatch(JobCommand::SelectLevel { level })
+        .expect("level");
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| matches!(message, HostEffect::AcquireTile { .. }))
+            .count(),
+        4,
+        "largest DZI level is a 2x2 grid"
+    );
 }
 
 #[test]

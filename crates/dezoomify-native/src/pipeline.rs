@@ -133,15 +133,26 @@ pub struct PartialRequest {
 #[derive(Debug, Default)]
 struct PartialGateInner {
     pending: Option<PartialRequest>,
-    decision: Option<dezoomify_protocol::dto::RecoveryChoice>,
+    decision: Option<AnsweredDecision>,
+}
+
+/// One answered partial decision carrying the engine generation it answers.
+/// The generation travels with the decision (never re-applied from the
+/// current engine effect), so a stale host answer is engine-rejected at the
+/// boundary instead of being consumed in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AnsweredDecision {
+    generation: u32,
+    decision: dezoomify_protocol::dto::RecoveryChoice,
 }
 
 /// Interactive partial gate shared between the background driver and the
 /// host shell. The driver announces the missing ledger and waits up to 60s
-/// for the host answer; the host answers via [`PartialGate::answer`].
-/// Fail-closed: timeout, cancellation, or no gate falls back to
-/// [`PartialPolicy`]. Early answers survive (stored before the wait starts)
-/// and each wait consumes exactly one decision so a retry can ask again.
+/// for the host answer; the host answers via [`PartialGate::answer`] with
+/// the generation from its snapshot. Fail-closed: timeout, cancellation,
+/// or no gate falls back to [`PartialPolicy`]. Early answers survive
+/// (stored before the wait starts) and each wait consumes exactly one
+/// decision so a retry can ask again.
 #[derive(Debug, Default)]
 pub struct PartialGate {
     inner: Mutex<PartialGateInner>,
@@ -166,25 +177,32 @@ impl PartialGate {
         }
     }
 
-    /// Answer the pending request. Wakes a waiting driver; an early answer
-    /// is stored for the next wait.
-    pub fn answer(&self, decision: dezoomify_protocol::dto::RecoveryChoice) {
+    /// Answer the pending request with the generation from the host's
+    /// snapshot. Wakes a waiting driver; an early answer is stored for the
+    /// next wait. The generation is carried through to the engine answer,
+    /// so a stale answer is engine-rejected instead of consumed in order.
+    pub fn answer(&self, generation: u32, decision: dezoomify_protocol::dto::RecoveryChoice) {
+        let answered = AnsweredDecision {
+            generation,
+            decision,
+        };
         match self.inner.lock() {
             Ok(mut guard) => {
-                guard.decision = Some(decision);
+                guard.decision = Some(answered);
             }
             Err(poisoned) => {
-                poisoned.into_inner().decision = Some(decision);
+                poisoned.into_inner().decision = Some(answered);
             }
         }
     }
 
     /// Non-blocking take of a stored decision, if any.
-    pub fn take_decision(&self) -> Option<dezoomify_protocol::dto::RecoveryChoice> {
-        match self.inner.lock() {
+    pub(crate) fn take_decision(&self) -> Option<(u32, dezoomify_protocol::dto::RecoveryChoice)> {
+        let answered = match self.inner.lock() {
             Ok(mut guard) => guard.decision.take(),
             Err(poisoned) => poisoned.into_inner().decision.take(),
-        }
+        };
+        answered.map(|answered| (answered.generation, answered.decision))
     }
 
     /// Snapshot of the pending request, if any.
@@ -197,13 +215,14 @@ impl PartialGate {
     }
 
     /// Wait up to `timeout` for an interactive answer, polling so
-    /// cancellation stays prompt. Returns `None` on timeout or when
-    /// `cancel_flag` is set (fail-closed to policy at the caller).
+    /// cancellation stays prompt. Returns the answering generation with
+    /// the decision, or `None` on timeout or when `cancel_flag` is set
+    /// (fail-closed to policy at the caller).
     pub fn wait_for_decision(
         &self,
         timeout: Duration,
         cancel_flag: &AtomicBool,
-    ) -> Option<dezoomify_protocol::dto::RecoveryChoice> {
+    ) -> Option<(u32, dezoomify_protocol::dto::RecoveryChoice)> {
         if let Some(decision) = self.take_decision() {
             return Some(decision);
         }
@@ -1167,13 +1186,34 @@ mod tests {
             gate.pending_request().expect("pending").missing,
             vec!["tile:1".to_string()]
         );
-        gate.answer(RecoveryChoice::Keep);
+        gate.answer(7, RecoveryChoice::Keep);
         let flag = AtomicBool::new(false);
         assert_eq!(
             gate.wait_for_decision(Duration::from_secs(5), &flag),
-            Some(RecoveryChoice::Keep)
+            Some((7, RecoveryChoice::Keep))
         );
         // Each wait consumes exactly one decision so a retry can ask again.
+        assert_eq!(gate.take_decision(), None);
+    }
+
+    #[test]
+    fn partial_gate_carries_generations_in_order() {
+        use dezoomify_protocol::dto::RecoveryChoice;
+        let gate = PartialGate::new();
+        // Each wait consumes exactly one answered generation, so a stale
+        // host answer reaches the engine with its own generation and is
+        // rejected there instead of consumed in order.
+        let flag = AtomicBool::new(false);
+        gate.answer(3, RecoveryChoice::Keep);
+        assert_eq!(
+            gate.wait_for_decision(Duration::from_secs(5), &flag),
+            Some((3, RecoveryChoice::Keep))
+        );
+        gate.answer(4, RecoveryChoice::Discard);
+        assert_eq!(
+            gate.wait_for_decision(Duration::from_secs(5), &flag),
+            Some((4, RecoveryChoice::Discard))
+        );
         assert_eq!(gate.take_decision(), None);
     }
 

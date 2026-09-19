@@ -181,6 +181,19 @@ impl Sink {
         }
     }
 
+    /// Retained (overlapping, unpainted) tile bytes currently held.
+    /// The pump adds in-flight decode bytes (tracked tails not yet placed)
+    /// to this before enforcing the retain cap, so the cap covers decoded
+    /// bytes from reservation to painting, not just from placement.
+    pub fn retained_bytes(&self) -> u64 {
+        self.retained_bytes
+    }
+
+    /// Bound on retained tile bytes (`output_retain_cap`).
+    pub fn retain_cap_bytes(&self) -> u64 {
+        self.retain_cap_bytes
+    }
+
     /// Current canvas dimensions, once allocated or declared.
     pub fn dimensions(&self) -> Option<Vec2d> {
         if self.width > 0 && self.height > 0 {
@@ -710,7 +723,7 @@ fn unique_suffix() -> u64 {
     (now ^ (count.wrapping_mul(0x9E37_79B9_7F4A_7C15) as u128)) as u64
 }
 
-fn tile_bytes(image: &RgbaImage) -> u64 {
+pub(crate) fn tile_bytes(image: &RgbaImage) -> u64 {
     u64::from(image.width())
         .saturating_mul(u64::from(image.height()))
         .saturating_mul(4)

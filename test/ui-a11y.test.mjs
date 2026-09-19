@@ -11,7 +11,6 @@ import {
   showExtensionGuidance,
 } from "../packages/shared-ui/src/view.tsx";
 import { presentFailure, presentIdle, presentSnapshot, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
-import { applyJobEvent, initialSnapshot } from "../packages/app-model/src/index.ts";
 
 const callbacks = {
   onSubmitUrl: () => {},
@@ -25,10 +24,16 @@ function render(el, presentation, cb, ctx, options) {
 }
 
 function progressPresentation(current, total) {
-  let snap = initialSnapshot("job:a11y", 1);
-  snap = applyJobEvent(snap, { type: "job-state", state: "AcquiringTiles" }, 2);
-  snap = applyJobEvent(snap, { type: "progress", acquired: current, total }, 3);
-  return presentSnapshot(snap, "direct");
+  return presentSnapshot({
+    revision: 3,
+    lifecycle: "AcquiringTiles",
+    paused: false,
+    progress: { completed: current, total },
+    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    decision: undefined,
+    terminal: undefined,
+    output: undefined,
+  }, "direct");
 }
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */

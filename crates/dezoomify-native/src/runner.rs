@@ -21,7 +21,8 @@
 //! and the commit point refuses to publish once cancellation was requested, so
 //! cancel can never delete or replace a pre-existing destination. The terminal
 //! reports only after quiescence (every tracked task aborted and joined,
-//! including blocking decode tails whose results are dropped).
+//! plus every tracked blocking decode tail released; detached tails drop
+//! their results).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -323,8 +324,15 @@ impl RunningJob {
             EngineUserCommand::Cancel => {
                 self.cancel_flag.store(true, Ordering::SeqCst);
             }
-            EngineUserCommand::AnswerPartial { decision, .. } => {
-                self.partial_gate.answer(decision);
+            EngineUserCommand::AnswerPartial {
+                generation,
+                decision,
+            } => {
+                // The host generation travels with the decision: the driver
+                // answers with exactly this generation, so a stale answer is
+                // engine-rejected at the boundary instead of consumed in
+                // order.
+                self.partial_gate.answer(generation, decision);
             }
             EngineUserCommand::Pause
             | EngineUserCommand::Resume

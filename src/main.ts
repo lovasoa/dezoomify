@@ -706,7 +706,7 @@ async function runJob(url: string, origin = url): Promise<void> {
     webLog.info("deferred-follow", `image=${image} host=${hostOf(origin)}`);
     const handle = jobHandle;
     if (handle) {
-      void handle.command({ type: "follow-deferred", image } as unknown as Parameters<typeof handle.command>[0]).catch((error) =>
+      void handle.command({ type: "follow-deferred", image }).catch((error) =>
         onHostFailure(error instanceof Error ? error : failure("discovery.deferred", "The image metadata stayed deferred after the resolution limit.", false)),
       );
     }

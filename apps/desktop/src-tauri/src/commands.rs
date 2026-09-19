@@ -1,10 +1,11 @@
 // Desktop Tauri command registry (lean shell, standard library only).
 //
-// Allowed commands: start_job, cancel_job, answer_choice,
-// request_destination, query_capabilities. Every job-scoped command carries a
-// typed job id; unknown or stale job ids are rejected before any effect.
-// Events are ordered per job with a monotonic seq; terminal events appear
-// exactly once. No tile bytes cross IPC, only protocol progress and events.
+// Allowed commands: start_job, cancel_job, pause_job, resume_job,
+// answer_choice, request_destination, query_capabilities. Every job-scoped
+// command carries a typed job id; unknown or stale job ids are rejected
+// before any effect. Events are ordered per job with a monotonic seq;
+// terminal events appear exactly once. No tile bytes cross IPC, only
+// protocol progress and events.
 
 use crate::jobs::{Choice, JobTable};
 use crate::settings::parse_settings;
@@ -204,6 +205,60 @@ pub fn dispatch_cancel_job(
     }
 }
 
+/// Typed `pause_job` dispatch: forwards engine `Pause` for a live job;
+/// unknown or stale job ids are rejected before any effect. Pre-runner jobs
+/// resolve silently (nothing to pause yet); the paused flag arrives on the
+/// next verbatim runner snapshot.
+pub fn dispatch_pause_job(
+    table: &mut JobTable,
+    job: &str,
+) -> Result<(DispatchOutcome, Vec<crate::jobs::SnapshotEmit>), CommandError> {
+    if !is_valid_job_id(job) {
+        return Err(CommandError::invalid_input(
+            "job id must look like job:<suffix>",
+        ));
+    }
+    match table.pause_job(job) {
+        Ok((seq, emits)) => Ok((
+            DispatchOutcome {
+                job: job.to_string(),
+                seq,
+                event: "job-snapshot".to_string(),
+            },
+            emits,
+        )),
+        Err(kind) if kind == "unknown" => Err(CommandError::unknown_job(job)),
+        Err(kind) if kind == "stale" => Err(CommandError::stale_job(job)),
+        Err(other) => Err(CommandError::invalid_input(&other)),
+    }
+}
+
+/// Typed `resume_job` dispatch: forwards engine `Resume` for a live job.
+/// Same routing and staleness rules as [`dispatch_pause_job`].
+pub fn dispatch_resume_job(
+    table: &mut JobTable,
+    job: &str,
+) -> Result<(DispatchOutcome, Vec<crate::jobs::SnapshotEmit>), CommandError> {
+    if !is_valid_job_id(job) {
+        return Err(CommandError::invalid_input(
+            "job id must look like job:<suffix>",
+        ));
+    }
+    match table.resume_job(job) {
+        Ok((seq, emits)) => Ok((
+            DispatchOutcome {
+                job: job.to_string(),
+                seq,
+                event: "job-snapshot".to_string(),
+            },
+            emits,
+        )),
+        Err(kind) if kind == "unknown" => Err(CommandError::unknown_job(job)),
+        Err(kind) if kind == "stale" => Err(CommandError::stale_job(job)),
+        Err(other) => Err(CommandError::invalid_input(&other)),
+    }
+}
+
 /// Typed `answer_choice` dispatch: the choice arrives as structured JSON,
 /// decodes to a [`Choice`] before any effect, and unknown or stale job ids
 /// are rejected first.
@@ -219,8 +274,9 @@ pub fn dispatch_answer_choice(
     }
     let choice: Choice = serde_json::from_value(choice).map_err(|_| {
         CommandError::invalid_input(
-            "choice must be {\"kind\":\"image\"|\"level\",\"index\":n} or \
-             {\"kind\":\"partial\",\"decision\":\"keep\"|\"retry\"|\"discard\"}",
+            "choice must be {\"kind\":\"image\"|\"level\",\"index\":n}, \
+             {\"kind\":\"partial\",\"decision\":\"keep\"|\"retry\"|\"discard\"}, or \
+             {\"kind\":\"pause\"|\"resume\"}",
         )
     })?;
     match table.answer_choice(job, &choice) {
@@ -441,12 +497,15 @@ mod tests {
 
     #[test]
     fn registry_lists_exact_commands() {
-        assert_eq!(COMMANDS.len(), 6);
+        assert_eq!(COMMANDS.len(), 8);
         for name in [
             "start_job",
             "cancel_job",
+            "pause_job",
+            "resume_job",
             "answer_choice",
             "request_destination",
+            "open_saved_output",
             "query_capabilities",
         ] {
             assert!(is_known_command(name), "missing {name}");
@@ -491,6 +550,54 @@ mod tests {
         assert_eq!(err, "stale");
         assert!(table.poll_drivers().is_empty());
         assert!(first_seq >= 1);
+    }
+
+    #[test]
+    fn pause_and_resume_route_to_engine_commands() {
+        let mut table = JobTable::new();
+        // Unknown jobs reject before any effect.
+        assert_eq!(
+            dispatch_pause_job(&mut table, "job:nope").unwrap_err().code,
+            "job.unknown"
+        );
+        assert_eq!(
+            dispatch_resume_job(&mut table, "job:nope")
+                .unwrap_err()
+                .code,
+            "job.unknown"
+        );
+        // Malformed ids are invalid-input before lookup.
+        assert_eq!(
+            dispatch_pause_job(&mut table, "bad-id").unwrap_err().code,
+            "job.invalid-input"
+        );
+        assert_eq!(
+            dispatch_resume_job(&mut table, "").unwrap_err().code,
+            "job.invalid-input"
+        );
+        // A live pre-runner job resolves silently: nothing to pause yet, no
+        // synchronous emit; the paused flag arrives on runner snapshots.
+        let (id, _) = table.start_job("https://example.com/item").unwrap();
+        let (paused, emits) = dispatch_pause_job(&mut table, &id).unwrap();
+        assert_eq!(paused.job, id);
+        assert_eq!(paused.seq, 0);
+        assert_eq!(paused.event, "job-snapshot");
+        assert!(emits.is_empty());
+        let (resumed, emits) = dispatch_resume_job(&mut table, &id).unwrap();
+        assert_eq!(resumed.job, id);
+        assert_eq!(resumed.seq, 0);
+        assert!(emits.is_empty());
+        // Post-terminal jobs are stale with no new effect.
+        table.cancel_job(&id).unwrap();
+        assert_eq!(
+            dispatch_pause_job(&mut table, &id).unwrap_err().code,
+            "job.stale"
+        );
+        assert_eq!(
+            dispatch_resume_job(&mut table, &id).unwrap_err().code,
+            "job.stale"
+        );
+        assert!(table.poll_drivers().is_empty());
     }
 
     #[test]

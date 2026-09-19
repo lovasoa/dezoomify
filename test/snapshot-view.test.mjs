@@ -1,13 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyJobEvent, initialSnapshot } from "../packages/app-model/src/index.ts";
 import { presentIdle, presentSnapshot } from "../packages/shared-ui/src/snapshot-view.ts";
 
-function run(jobId, events) {
-  let now = 0;
-  let snap = initialSnapshot(jobId, ++now);
-  for (const event of events) snap = applyJobEvent(snap, event, ++now);
-  return snap;
+// Authoritative EngineSnapshotDto builder: tests render the latest snapshot
+// directly, never a folded event walk.
+function dto(overrides = {}) {
+  return {
+    revision: 0,
+    lifecycle: "Discovering",
+    paused: false,
+    progress: { completed: 0, total: undefined },
+    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    decision: undefined,
+    terminal: undefined,
+    output: undefined,
+    ...overrides,
+  };
 }
 
 const catalog = {
@@ -45,7 +53,7 @@ test("idle presentation has no job state", () => {
 });
 
 test("discovery renders a cancellable job step", () => {
-  const snap = run("job:1", [{ type: "job-state", state: "Discovering" }]);
+  const snap = dto({ revision: 1, lifecycle: "Discovering" });
   const view = presentSnapshot(snap, "direct");
   assert.equal(view.phase, "job");
   assert.equal(view.headlineKey, "view.step.discovering");
@@ -56,10 +64,11 @@ test("discovery renders a cancellable job step", () => {
 });
 
 test("image selection offers every ready catalog entry", () => {
-  const snap = run("job:2", [
-    { type: "job-state", state: "AwaitingImageSelection" },
-    { type: "catalog", catalog },
-  ]);
+  const snap = dto({
+    revision: 2,
+    lifecycle: "AwaitingImageSelection",
+    selection: { image: undefined, level: undefined, level_count: 2, catalog, deferred: [] },
+  });
   const view = presentSnapshot(snap, "metadata-proxy");
   assert.equal(view.phase, "job");
   assert.equal(view.headlineKey, "view.step.choosingImage");
@@ -70,12 +79,11 @@ test("image selection offers every ready catalog entry", () => {
 });
 
 test("level selection follows the chosen image", () => {
-  let snap = run("job:3", [
-    { type: "job-state", state: "AwaitingImageSelection" },
-    { type: "catalog", catalog },
-  ]);
-  snap = { ...snap, selection: { image: 0, level: null } };
-  snap = applyJobEvent(snap, { type: "job-state", state: "AwaitingLevelSelection" }, 99);
+  const snap = dto({
+    revision: 3,
+    lifecycle: "AwaitingLevelSelection",
+    selection: { image: 0, level: undefined, level_count: 2, catalog, deferred: [] },
+  });
   const view = presentSnapshot(snap, null);
   assert.equal(view.selection.kind, "level");
   assert.equal(view.selection.options.length, 2);
@@ -83,40 +91,53 @@ test("level selection follows the chosen image", () => {
   assert.equal(view.transportLabel, null);
 });
 
-test("pause keeps progress while recovery surfaces actions", () => {
-  const snap = run("job:4", [
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "progress", acquired: 5, total: 20 },
-    { type: "paused" },
-    {
-      type: "recovery-request",
+test("pause keeps progress while the partial decision names its gaps", () => {
+  const snap = dto({
+    revision: 4,
+    lifecycle: "AwaitingPartialDecision",
+    paused: true,
+    progress: { completed: 5, total: 20 },
+    decision: {
       generation: 2,
-      actions: [{ id: "retry", kind: "retry", scope: "tile", rationale: "transient" }],
+      missing: [{ tile: 7, failures: [{ code: "TILE_FAILED", category: "transient" }] }],
     },
-  ]);
+  });
   const view = presentSnapshot(snap, "native");
   assert.equal(view.paused, true);
   assert.deepEqual(view.progress, { current: 5, total: 20 });
   assert.equal(view.phase, "job");
   assert.equal(view.selection.kind, "recovery");
   assert.equal(view.selection.generation, 2);
+  assert.deepEqual(view.selection.missing, [7]);
 });
 
 test("display-only renders without byte access", () => {
-  let snap = run("job:5", [
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "progress", acquired: 2, total: 8 },
-  ]);
-  snap = { ...snap, displayOnly: true };
-  const view = presentSnapshot(snap, "display-only");
+  const snap = dto({
+    revision: 5,
+    lifecycle: "AcquiringTiles",
+    progress: { completed: 2, total: 8 },
+  });
+  const view = presentSnapshot(snap, "display-only", { displayOnly: true });
   assert.equal(view.phase, "display-only");
   assert.equal(view.displayOnly, true);
   assert.equal(view.headlineKey, "view.display.title");
   assert.equal(view.transportLabel, "Display only");
 });
 
+test("display-only round-trips through output disposition", () => {
+  const snap = dto({
+    revision: 6,
+    lifecycle: "AcquiringTiles",
+    progress: { completed: 2, total: 8 },
+    output: { canvas: undefined, format: "png", complete: false, missing: [], disposition: "display-only" },
+  });
+  const view = presentSnapshot(snap, "display-only");
+  assert.equal(view.phase, "display-only");
+  assert.equal(view.displayOnly, true);
+});
+
 test("completed terminal renders honestly even without catalog or progress", () => {
-  const snap = run("job:6", [{ type: "completed" }]);
+  const snap = dto({ revision: 7, lifecycle: "Completed", terminal: { type: "completed" } });
   const view = presentSnapshot(snap, "native");
   assert.equal(view.phase, "completed");
   assert.equal(view.partial, false);
@@ -127,30 +148,19 @@ test("completed terminal renders honestly even without catalog or progress", () 
 });
 
 test("kept partials name their gaps", () => {
-  let snap = run("job:7", [
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "progress", acquired: 9, total: 12 },
-    { type: "partial-completed" },
-  ]);
-  snap = {
-    ...snap,
-    output: {
-      doneTiles: 9,
-      totalTiles: 12,
-      failedTiles: 3,
-      partial: true,
-      format: "png",
-      width: 8000,
-      height: 6000,
-      missingTiles: ["t-10", "t-11", "t-12"],
-    },
-  };
+  const snap = dto({
+    revision: 8,
+    lifecycle: "PartiallyCompleted",
+    progress: { completed: 9, total: 12 },
+    terminal: { type: "partial-completed", missing: [10, 11, 12] },
+    output: { canvas: undefined, format: "png", complete: false, missing: [10, 11, 12], disposition: undefined },
+  });
   const view = presentSnapshot(snap, "native");
   assert.equal(view.phase, "completed");
   assert.equal(view.partial, true);
   assert.equal(view.terminal.output.failedTiles, 3);
   assert.equal(view.terminal.gapCount, 3);
-  assert.match(view.terminal.gapShown, /t-10/);
+  assert.match(view.terminal.gapShown, /10/);
 });
 
 test("failed terminal carries the typed error without catalog", () => {
@@ -162,7 +172,7 @@ test("failed terminal carries the typed error without catalog", () => {
     recovery: [],
     transport: "native",
   };
-  const snap = run("job:8", [{ type: "failed", error }]);
+  const snap = dto({ revision: 9, lifecycle: "Failed", terminal: { type: "failed", error } });
   const view = presentSnapshot(snap, "native");
   assert.equal(view.phase, "failed");
   assert.equal(view.headlineKey, "view.fail.title");
@@ -171,10 +181,7 @@ test("failed terminal carries the typed error without catalog", () => {
 });
 
 test("cancelled renders the cancel copy", () => {
-  const snap = run("job:9", [
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "cancelled" },
-  ]);
+  const snap = dto({ revision: 10, lifecycle: "Cancelled", terminal: { type: "cancelled" } });
   const view = presentSnapshot(snap, null);
   assert.equal(view.phase, "cancelled");
   assert.equal(view.headlineKey, "view.cancel.title");

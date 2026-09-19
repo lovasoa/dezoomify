@@ -3,7 +3,22 @@ import assert from "node:assert/strict";
 import { act, click } from "./react-dom.mjs";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { presentFailure, presentIdle, presentSnapshot, presentStatus } from "../packages/shared-ui/src/snapshot-view.ts";
-import { applyJobEvent, initialSnapshot } from "../packages/app-model/src/index.ts";
+
+// Authoritative EngineSnapshotDto builder: each presentation renders one
+// latest snapshot, never a folded event walk.
+function dto(overrides = {}) {
+  return {
+    revision: 0,
+    lifecycle: "Discovering",
+    paused: false,
+    progress: { completed: 0, total: undefined },
+    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
+    decision: undefined,
+    terminal: undefined,
+    output: undefined,
+    ...overrides,
+  };
+}
 
 function container() {
   const el = globalThis.document.createElement("div");
@@ -15,11 +30,8 @@ function render(el, presentation, callbacks, ctx) {
   act(() => renderView(el, presentation, callbacks, ctx));
 }
 
-function jobPresentation(events = [], transport = "direct") {
-  let now = 0;
-  let snap = initialSnapshot("job:t", ++now);
-  for (const event of events) snap = applyJobEvent(snap, event, ++now);
-  return presentSnapshot(snap, transport);
+function jobPresentation(snapshot, transport = "direct") {
+  return presentSnapshot(snapshot, transport);
 }
 
 function failurePresentation(error, transport = "direct") {
@@ -66,7 +78,7 @@ test("renderView mounts card and updates job section in place without DOM destru
     },
   };
 
-  render(el, jobPresentation([{ type: "job-state", state: "Discovering" }]), callbacks, ctx);
+  render(el, jobPresentation(dto({ revision: 1, lifecycle: "Discovering" })), callbacks, ctx);
   assert.equal(card.dataset.viewPhase, "job");
   const jobSec = card.querySelector(".dz-job-section");
   assert.ok(jobSec, "job section mounted");
@@ -82,11 +94,11 @@ test("renderView mounts card and updates job section in place without DOM destru
   // 3. Heartbeat update / progress ticks during job
   render(
     el,
-    jobPresentation([
-      { type: "job-state", state: "Discovering" },
-      { type: "job-state", state: "AcquiringTiles" },
-      { type: "progress", acquired: 15, total: 60 },
-    ]),
+    jobPresentation(dto({
+      revision: 3,
+      lifecycle: "AcquiringTiles",
+      progress: { completed: 15, total: 60 },
+    })),
     callbacks,
     {
       ...ctx,
@@ -113,10 +125,11 @@ test("renderView mounts card and updates job section in place without DOM destru
   assert.equal(details.open, true, "open details preserved across in-place updates");
 
   // 4. Rapid heartbeat / progress ticks
-  const tickPresentation = jobPresentation([
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "progress", acquired: 15, total: 60 },
-  ]);
+  const tickPresentation = jobPresentation(dto({
+    revision: 3,
+    lifecycle: "AcquiringTiles",
+    progress: { completed: 15, total: 60 },
+  }));
   for (let tick = 1; tick <= 10; tick++) {
     render(el, tickPresentation, callbacks, {
       ...ctx,
@@ -133,7 +146,7 @@ test("renderView mounts card and updates job section in place without DOM destru
   // 5. Transition to completed
   render(
     el,
-    jobPresentation([{ type: "completed" }]),
+    jobPresentation(dto({ revision: 4, lifecycle: "Completed", terminal: { type: "completed" } })),
     callbacks,
     { completedInfo: { width: 4000, height: 3000, mime: "image/png" } },
   );
@@ -158,7 +171,7 @@ test("slow discovery replaces the phase with one waiting status", () => {
       lastProgressAt: now - 11000,
     },
   };
-  render(el, jobPresentation([{ type: "job-state", state: "Discovering" }]), callbacks, ctx);
+  render(el, jobPresentation(dto({ revision: 1, lifecycle: "Discovering" })), callbacks, ctx);
   const card = el.querySelector(".dz-card");
   const step = card.querySelector("#dz-job-step-text");
   assert.ok(step, "job status shown while stalled");
@@ -288,10 +301,11 @@ test("job rail keeps integrated stop and diagnostics-copy controls, and header v
 
   render(
     el,
-    jobPresentation([
-      { type: "job-state", state: "AcquiringTiles" },
-      { type: "progress", acquired: 10, total: 50 },
-    ]),
+    jobPresentation(dto({
+      revision: 2,
+      lifecycle: "AcquiringTiles",
+      progress: { completed: 10, total: 50 },
+    })),
     callbacks,
   );
   assert.equal(header.style.display, "none", "header hidden in job phase");
@@ -316,11 +330,12 @@ test("paused job activity freezes the displayed elapsed time", () => {
   const el = container();
   render(
     el,
-    jobPresentation([
-      { type: "job-state", state: "AcquiringTiles" },
-      { type: "progress", acquired: 3, total: 10 },
-      { type: "paused" },
-    ]),
+    jobPresentation(dto({
+      revision: 2,
+      lifecycle: "AcquiringTiles",
+      paused: true,
+      progress: { completed: 3, total: 10 },
+    })),
     { onSubmitUrl: () => {}, onCancel: () => {}, onReset: () => {} },
     {
       jobActivity: { startedAt: 1_000, pausedAt: 4_000, now: 12_000, paused: true },

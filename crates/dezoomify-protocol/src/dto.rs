@@ -245,6 +245,12 @@ pub enum JobCommand {
     SelectImage {
         image: u32,
     },
+    /// Follow one still-deferred catalog entry within the same job
+    /// (zero-based position). Bounded and cycle-guarded; the catalog is
+    /// replaced on success with no new job ID.
+    FollowDeferred {
+        image: u32,
+    },
     SelectLevel {
         level: u32,
     },

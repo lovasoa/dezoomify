@@ -38,13 +38,16 @@ test("a disposed worker drops late bytes and commands; the retired job cannot mu
   const dispatches = calls.length;
   await host.onMessage({ type: "engine.dispose" });
   assert.ok(calls.includes("dispose"));
+  // Disposal itself publishes the session's final snapshot once (asserted
+  // below); only messages after that point must stay silent.
+  const sentAfterDispose = sent.length;
   await host.onMessage({ type: "engine.bytes", requestId: 3, bytes: new Uint8Array([1, 2]) });
   await host.onMessage({ type: "engine.command", command: { type: "cancel" } });
   await host.onMessage({ type: "engine.probe", requestId: 4, outcome: { status: "missing" } });
   await host.onMessage({ type: "engine.display", requestId: 5 });
   await host.onMessage({ type: "engine.acquired", requestId: 6 });
   assert.equal(calls.length, dispatches + 1, `retired worker dispatched late input: ${JSON.stringify(calls)}`);
-  assert.ok(!sent.some((message) => message.type === "engine.messages"), "retired worker published messages");
+  assert.ok(!sent.slice(sentAfterDispose).some((message) => message.type === "engine.messages"), "retired worker published messages");
 });
 
 test("worker disposal is repeat-safe and publishes the session dispose result once", async () => {
