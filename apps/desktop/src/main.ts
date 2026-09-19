@@ -61,7 +61,6 @@ import {
   getEffectiveSettings,
   resetDesktopSettings,
 } from "./settingsPanel.ts";
-import type { SettingsPanelEnv } from "./settingsPanel.ts";
 import { DesktopSettingsView } from "./settingsView.tsx";
 import { createElement } from "react";
 import {
@@ -516,19 +515,6 @@ function invokeErrorMessage(error: unknown, fallback: string): string {
         : fallback;
 }
 
-const settingsEnv: SettingsPanelEnv = {
-  getSettings: () => desktopSettings,
-  setSettings: (settings: DesktopSettings) => {
-    desktopSettings = settings;
-    grantedFormat = normalizeNativeFormat(settings.outputFormat);
-  },
-  setError: (error: string | null) => {
-    settingsError = error;
-  },
-  pushLog: (line: string) => pushLog(line),
-  update: () => update(),
-};
-
 function runPersistSettingsFromPanel(): void {
   const errors = saveSettings(desktopSettings);
   settingsError = errors.length ? errors.join("; ") : null;
@@ -537,7 +523,11 @@ function runPersistSettingsFromPanel(): void {
 }
 
 function runResetDesktopSettings(): void {
-  resetDesktopSettings(settingsEnv);
+  desktopSettings = resetDesktopSettings();
+  grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
+  settingsError = null;
+  pushLog("Settings reset to defaults");
+  update();
   void applyPlatformOutputDefault();
 }
 
@@ -665,7 +655,7 @@ function launchNativeJob(trimmed: string, token: number): void {
   // Minimal settings are validated fail-closed here: invalid settings fail
   // the submit before any start_job effect. The redacted summary never
   // includes header values.
-  const effective = getEffectiveSettings(null, desktopSettings);
+  const effective = getEffectiveSettings(desktopSettings);
   if (!effective.ok || !effective.settings) {
     const detail = effective.errors.join("; ") || "Invalid settings.";
     settingsError = detail;

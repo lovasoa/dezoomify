@@ -7,9 +7,9 @@ stateDiagram-v2
     [*] --> Created
     Created --> Discovering: start()
     Discovering --> AwaitingImageSelection: catalog ready
-    Discovering --> Discovering: acquire-resource cycle
+    Discovering --> Discovering: acquire-metadata cycle
     Discovering --> Failed: discovery failed
-    AwaitingImageSelection --> AwaitingLevelSelection: SelectedImage
+    AwaitingImageSelection --> AwaitingLevelSelection: SelectImage
     AwaitingLevelSelection --> Planning: SelectedLevel
     Planning --> Planning: ProbeOutcome next probe
     Planning --> AcquiringTiles: plan resolved
@@ -19,8 +19,8 @@ stateDiagram-v2
     AwaitingPartialDecision --> AcquiringTiles: RecoveryChoice Retry
     AwaitingPartialDecision --> Finalizing: RecoveryChoice Keep
     AwaitingPartialDecision --> Failed: RecoveryChoice Discard
-    Finalizing --> Completed: FinalizationSucceeded
-    Finalizing --> PartiallyCompleted: FinalizationSucceeded partial
+    Finalizing --> Completed: OutputCommitted
+    Finalizing --> PartiallyCompleted: OutputCommitted partial
     Finalizing --> Failed: FinalizationFailed
     Created --> Cancelled: Cancel
     Discovering --> Cancelled: Cancel
@@ -60,7 +60,7 @@ Progress counts work units per phase (completed, active, queued, failed, total w
 
 ## Cancel and partial output
 
-Cancel is a command. The engine stops new work and emits one idempotent `cancel-work` instruction before reaching `cancelled`.
+Cancel is a command. The engine stops new work and emits one idempotent `cancel-release` instruction before reaching `cancelled`.
 
 Partial policy, picked up front:
 
@@ -91,11 +91,11 @@ Effects carry everything a host needs; hosts never re-derive job policy or tile 
 - `request-partial-decision{id, generation, missing}`: answer with `command(AnswerPartial{decision})`.
 - `cancel-release{id}`: idempotent; cancel work and release kept resources after cancellation or failure.
 
-Discovery walks ordered roots in registry order. A root with bytes is evaluated directly; a URL-only root starts with an `acquire-resource` effect. The first root yielding a catalog wins; failures advance to the next root. One `acquire-resource` effect per outstanding core request; the same request stays outstanding until answered, so the engine never spins on silence.
+Discovery walks ordered roots in registry order. A root with bytes is evaluated directly; a URL-only root starts with an `acquire-metadata` effect. The first root yielding a catalog wins; failures advance to the next root. One `acquire-metadata` effect per outstanding core request; the same effect stays outstanding until answered, so the engine never spins on silence.
 
-A probe marked `ProbeAndOutput` counts as already fetched when the resolved plan lists its position in `previously_output`; the host keeps the decoded probe. Other probes stay advisory and never enter retry or partial handling.
+A probe tile answered as available whose position the resolved plan reuses (`probe_output`) counts as already fetched; the host keeps the decoded probe. Other probes stay advisory and never enter retry or partial handling.
 
-| Input | Valid source state(s) | Validation | Transition | Effects | Events |
+| Input | Valid source state(s) | Validation | Transition | Effects | Snapshot |
 |---|---|---|---|---|---|
 | `start(options)` | (no job yet) | Options valid (`max_retries` 0..=1024, 0 is first attempt only), non-empty ordered inputs with `http(s)`/`file://`/local-path URLs (≤2048B, `file://` only local absolute), known format (`None`/`auto` or registered name, else `Err(job.unknown-dezoomer)` with no transition) | `Created` -> `Discovering` | supplied root bytes are evaluated directly; otherwise `acquire-metadata` per outstanding discovery request | snapshot `Discovering` |
 | `provide_metadata(id, response, bytes)` | `Discovering` | outstanding metadata effect, `bytes.len() <= max_bytes`, non-empty (empty bodies are rejected with `job.empty-resource` and change nothing) | Stay (core asks for more resources) or -> `AwaitingImageSelection` | further `acquire-metadata` or none | snapshot `Discovering`, then `AwaitingImageSelection` with the catalog |
@@ -108,7 +108,6 @@ A probe marked `ProbeAndOutput` counts as already fetched when the resolved plan
 | `complete(id, ProbeAvailable{width,height})` / `complete(id, ProbeMissing)` | `Planning` | outstanding probe effect; available observations need positive width/height | One core probe step: next probe (stay `Planning`) or resolved plan -> `AcquiringTiles` | `acquire-tile` (next probe or first plan tiles) | snapshot `Planning` or `AcquiringTiles`, `progress:0/total` |
 | `complete(id, TileAcquired)` on a probe effect | `AcquiringTiles` | probe effects are answered with probe results only | No transition, no work | none | none (`Err(job.invalid-state)`) |
 | `complete(id, TileAcquired)` / `complete(id, TileDisplayed)` | `AcquiringTiles` | outstanding tile effect | Stay or last tile -> `Finalizing` | next `acquire-tile` or one `finalize-output` | `progress`, snapshot `Finalizing` |
-| `complete(id, TileFailed)` | `AcquiringTiles` | outstanding tile effect | permanent (e.g. HTTP 403): settle after exactly one attempt; transient: one `wait-retry-timer` per remaining attempt; exhausted: stash as settled-as-failed; the partial decision waits until every planned tile is acquired or settled-as-failed with nothing in flight, queued, or timer-pending | `acquire-tile` (retry) or, once settled, `request-partial-decision` | `warning` + `progress`, or snapshot `AwaitingPartialDecision` |
 | `complete(id, TileFailed{failure})` | `AcquiringTiles` | outstanding tile effect | permanent (e.g. HTTP 403): settle after exactly one attempt; transient: one `wait-retry-timer` per remaining attempt; exhausted: stash as settled-as-failed; the partial decision waits until every planned tile is acquired or settled-as-failed with nothing in flight, queued, or timer-pending | `wait-retry-timer{id, tile, attempt, delay_ms}` or, once settled, `request-partial-decision` | `warning` (transient only) + `progress`, or snapshot `AwaitingPartialDecision` |
 | `complete(id, TimerElapsed)` | `AcquiringTiles` | outstanding timer effect | requeue the tile and emit `acquire-tile`; while paused the retry parks and re-drives on resume; unknown timers change nothing | `acquire-tile` or none (paused) | `progress` chain on resume |
 | `command(AnswerPartial{Retry})` | `AwaitingPartialDecision` | decision outstanding | -> `AcquiringTiles`, requeueing exactly the settled-as-failed tiles in plan order with a fresh attempt budget; acquired tiles are preserved | `acquire-tile` | snapshot `AcquiringTiles` |
