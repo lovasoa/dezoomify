@@ -39,6 +39,7 @@ import type {
   HostEffect,
   JobInputDto,
   OutputFormat,
+  RecoveryChoice,
   RequestDto,
   SessionConfig,
   SizeDto,
@@ -108,7 +109,7 @@ export interface EngineHostDeps {
   log?(level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown): void;
 }
 
-export type RecoveryChoice = "keep" | "retry" | "discard";
+export type { RecoveryChoice };
 
 export function createEngineHost(deps: EngineHostDeps) {
   const log: NonNullable<EngineHostDeps["log"]> = deps.log ?? (() => {});
@@ -600,6 +601,9 @@ export function createEngineHost(deps: EngineHostDeps) {
     },
     selectImage(image: number) {
       sendToEngine({ type: "engine.command", command: { type: "select-image", image } });
+    },
+    followDeferred(image: number) {
+      sendToEngine({ type: "engine.command", command: { type: "follow-deferred", image } });
     },
     selectLevel(level: number) {
       sendToEngine({ type: "engine.command", command: { type: "select-level", level } });

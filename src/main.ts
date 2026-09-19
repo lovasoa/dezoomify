@@ -67,7 +67,7 @@ import {
   isAllowedSourceUrl,
   isLocalFileUrl,
 } from "../packages/browser-runtime/src/plan-gates.ts";
-import { pickEngineSelection } from "../packages/browser-runtime/src/engine-selection.ts";
+import { planSelectionDrive } from "../packages/browser-runtime/src/engine-selection.ts";
 import {
   cancelAllWeb,
   createWebQueue,
@@ -628,44 +628,33 @@ async function runJob(url: string, origin = url): Promise<void> {
       lifecycle?: string;
     };
 
-    // Auto-selection reads the authoritative selection: while no image is
-    // chosen, pick the engine default once from the catalog shape when it
-    // is present; the generated DTO shape carries deferred follows in
-    // `selection.deferred` instead. `follow-deferred` stays in the same job
-    // (engine owns budget and cycle guards).
-    const selectedImage = like.selection?.image;
-    if ((selectedImage === null || selectedImage === undefined)) {
-      const catalog = like.catalog;
-      if (catalog && Array.isArray(catalog.entries)) {
-        const entries = catalog.entries;
-        const selection = pickEngineSelection(catalog as unknown as Parameters<typeof pickEngineSelection>[0], BROWSER_LIMITS);
-        if (!selection) {
-          const deferredIndex = entries.findIndex((entry) => entry?.kind === "image-request");
-          if (deferredIndex >= 0) {
-            followDeferredAt(deferredIndex);
-            return;
-          }
-          onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
-          return;
-        }
-        const entry = entries[selection.image];
-        const image = entry && entry.kind === "image" ? entry : null;
-        resultTitle = typeof image?.title === "string" ? image.title : undefined;
-        const level = image?.levels?.[selection.level];
-        if (level && typeof level.width === "number" && typeof level.height === "number") viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
-        update();
-        const handle = jobHandle;
-        if (handle) {
-          void handle.command({ type: "select-image", image: selection.image });
-          void handle.command({ type: "select-level", level: selection.level });
-        }
-        return;
+    // Auto-selection drives from the authoritative snapshot through the
+    // shared pure selection driver: ready images select once, still-deferred
+    // entries follow in the same job (the engine owns budget and cycle
+    // guards). Engine commands plus the product side effects (title,
+    // image choice) stay here.
+    const drive = planSelectionDrive(snapshot, BROWSER_LIMITS);
+    if (drive.action === "select") {
+      const entry = snapshot.selection.catalog?.entries[drive.image];
+      const image = entry && entry.kind === "image" ? entry : null;
+      resultTitle = drive.title ?? (typeof image?.title === "string" ? image.title : undefined);
+      const level = image?.levels?.[drive.level];
+      if (level && typeof level.width === "number" && typeof level.height === "number") viewCtx.imageChoice = { width: level.width, height: level.height, tiles: 0 };
+      update();
+      const handle = jobHandle;
+      if (handle) {
+        void handle.command({ type: "select-image", image: drive.image });
+        void handle.command({ type: "select-level", level: drive.level });
       }
-      const deferred = Array.isArray(like.selection?.deferred) ? like.selection.deferred : [];
-      if (deferred.length > 0 && typeof deferred[0]?.position === "number") {
-        followDeferredAt(deferred[0].position);
-        return;
-      }
+      return;
+    }
+    if (drive.action === "follow-deferred") {
+      followDeferredAt(drive.position);
+      return;
+    }
+    if (drive.action === "unselectable") {
+      onHostFailure(failure("CATALOG_UNSELECTABLE", "The image catalog has no level this browser can select.", false));
+      return;
     }
 
     const completed = like.progress?.completed ?? like.acquired ?? 0;

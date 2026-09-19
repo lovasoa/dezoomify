@@ -140,6 +140,20 @@ test("processed tiles never use the display fallback", async () => {
   assert.ok(failure, "processed acquisition fails instead of dropping the recipe");
 });
 
+test("selection and deferred-follow commands forward typed to the engine", async () => {
+  const { controller, sent } = harness();
+  controller.selectImage(2);
+  controller.followDeferred(1);
+  controller.selectLevel(3);
+  controller.chooseRecovery(0, "keep");
+  assert.deepEqual(sent.map((message) => message.command), [
+    { type: "select-image", image: 2 },
+    { type: "follow-deferred", image: 1 },
+    { type: "select-level", level: 3 },
+    { type: "recovery-choice", generation: 0, choice: "keep" },
+  ]);
+});
+
 test("lifecycle effects run in engine order on one chain", async () => {
   const { controller, assembly, sent } = harness();
   // Snapshots (terminals included) ride alongside, never as messages: the

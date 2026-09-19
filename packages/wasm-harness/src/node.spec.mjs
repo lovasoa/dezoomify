@@ -30,7 +30,7 @@ function start(session, url = "https://example.com/image.dzi") {
 function discoveryRequest(result) {
   assert.equal(result.status, "ok");
   return result.messages.find((message) =>
-    message.kind === "effect" && message.type === "acquire-resource"
+    message.type === "acquire-resource"
   )?.request;
 }
 
@@ -65,34 +65,32 @@ function acquireTiles(session) {
     bytes,
   });
   assert.equal(provided.status, "ok");
-  const catalog = provided.messages.find((message) =>
-    message.kind === "event" && message.type === "catalog"
-  );
-  assert.ok(catalog, "metadata yields a catalog");
+  const catalog = provided.snapshot.selection.catalog;
+  assert.ok(catalog, "metadata yields a catalog in the snapshot");
   const selected = session.dispatch({ type: "select-image", image: 0 });
   assert.equal(selected.status, "ok");
-  const levels = catalog.catalog.entries[0].levels.length;
+  const levels = catalog.entries[0].levels.length;
   const leveled = session.dispatch({ type: "select-level", level: levels - 1 });
   assert.equal(leveled.status, "ok");
   const tiles = leveled.messages
-    .filter((message) => message.kind === "effect" && message.type === "acquire-tile")
+    .filter((message) => message.type === "acquire-tile")
     .map((message) => ({ tile: message.tile, request: message.request.id }));
   assert.equal(tiles.length, 4, "largest DZI level is a 2x2 grid");
   return { tiles };
 }
 
 describe("generated typed WASM surface", () => {
-  it("returns effects and events directly from dispatch", () => {
+  it("returns effects directly from dispatch plus the absolute snapshot", () => {
     assert.equal(typeof wasm.Session, "function");
     const session = new wasm.Session({});
     const result = start(session);
     assert.equal(result.status, "ok");
-    assert.equal(result.messages[0].kind, "event");
-    assert.equal(result.messages[0].type, "job-state");
+    assert.equal(result.messages[0].type, "acquire-resource");
+    assert.equal(result.snapshot.lifecycle, "Discovering");
     assert.ok(discoveryRequest(result));
     const disposed = session.dispose();
     assert.equal(disposed.status, "ok");
-    assert.ok(disposed.messages.some((message) => message.type === "cancelled"));
+    assert.ok(disposed.messages.some((message) => message.type === "cancel-work"));
     assert.equal(disposed.snapshot.terminal.type, "cancelled");
     const again = session.dispose();
     assert.equal(again.status, "ok");
@@ -111,8 +109,8 @@ describe("generated typed WASM surface", () => {
     });
     assert.equal(provided.status, "ok");
     assert.ok(
-      provided.messages.some((message) => message.kind === "event" && message.type === "catalog"),
-      "direct bytes yield a catalog",
+      provided.snapshot.selection.catalog,
+      "direct bytes yield a catalog in the snapshot",
     );
     session.dispose();
   });
@@ -147,9 +145,8 @@ describe("generated typed WASM surface", () => {
       },
     });
     assert.equal(result.status, "ok");
-    const failed = result.messages.find((message) =>
-      message.kind === "event" && message.type === "failed"
-    );
+    const failed = result.snapshot.terminal;
+    assert.equal(failed.type, "failed");
     assert.equal(failed.error.code, "PROXY_ERROR");
     assert.equal(failed.error.phase, "discovery", "Rust derives phase from the answered effect");
     assert.equal(failed.error.transport, "metadata-proxy");
@@ -173,7 +170,7 @@ describe("generated typed WASM surface", () => {
       assert.equal(result.status, "ok");
       messageCount += result.messages.length;
       finalized ||= result.messages.some((message) =>
-        message.kind === "effect" && message.type === "finalize-output"
+        message.type === "finalize-output"
       );
     }
     assert.ok(finalized, "display-only acquisition still finalizes");
@@ -192,7 +189,7 @@ describe("generated typed WASM surface", () => {
     });
     assert.equal(failed.status, "ok");
     const wait = failed.messages.find((message) =>
-      message.kind === "effect" && message.type === "wait-retry-timer"
+      message.type === "wait-retry-timer"
     );
     assert.equal(wait.tile, tiles[0].tile);
     assert.equal(wait.attempt, 1);
@@ -204,7 +201,7 @@ describe("generated typed WASM surface", () => {
     });
     assert.equal(elapsed.status, "ok");
     const reacquired = elapsed.messages.filter((message) =>
-      message.kind === "effect" && message.type === "acquire-tile" && message.tile === wait.tile
+      message.type === "acquire-tile" && message.tile === wait.tile
     );
     assert.equal(reacquired.length, 1, "the timer completion issues exactly one re-acquisition");
     session.dispose();

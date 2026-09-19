@@ -18,8 +18,8 @@
 // cancel -> cancel_job; pause/resume -> pause_job/resume_job;
 // image/level/partial choices -> answer_choice with the shell's typed
 // choice shapes (single source here, partial carrying generation+choice).
-// Engine-internal commands have no shell command and reject with
-// desktop.unsupported-command until the typed native IPC lands.
+// Remaining engine-internal commands have no shell command and reject
+// with desktop.unsupported-command.
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -190,21 +190,6 @@ function isSnapshotPayload(value: unknown): value is JobSnapshot {
   return true;
 }
 
-/** Local initial snapshot: canonical `Created` with nothing selected. The
- * shell's first verbatim snapshot replaces it; no fold lives here. */
-function initialLocalSnapshot(): JobSnapshot {
-  return {
-    revision: 0,
-    lifecycle: "Created",
-    paused: false,
-    progress: { completed: 0, total: undefined },
-    selection: { image: undefined, level: undefined, level_count: 0, catalog: undefined, deferred: [] },
-    decision: undefined,
-    terminal: undefined,
-    output: undefined,
-  };
-}
-
 export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJobService {
   const ipc = deps?.ipc ?? publicIpc();
   const now = deps?.now ?? Date.now;
@@ -327,8 +312,10 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
     const existing = observers.get(id);
     if (existing) observers.delete(id);
     observers.set(id, { nativeId: id, observer });
-    const current = initialLocalSnapshot();
-    observer.snapshot(current);
+    // No local initial snapshot: the view stays snapshot-absent idle until
+    // the backend emits the first verbatim `Created` snapshot (revision 0).
+    // Minting a local revision 0 here would compete with the engine's own
+    // revision scale on the single snapshot channel.
     observer.hostStatus(hostStatus() as never);
 
     async function command(command: UserCommand): Promise<void> {

@@ -171,8 +171,6 @@ importers:
         specifier: workspace:*
         version: link:../wasm-bindings
 
-  packages/bindings: {}
-
   packages/browser-runtime:
     dependencies:
       '@dezoomify/app-model':

@@ -306,6 +306,9 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
         case "select-image":
           activeHost.selectImage(command.image);
           return;
+        case "follow-deferred":
+          activeHost.followDeferred(command.image);
+          return;
         case "select-level":
           activeHost.selectLevel(command.level);
           return;
