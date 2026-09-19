@@ -29,7 +29,8 @@
     "dezoomify://job-progress",
     "dezoomify://job-output",
     "dezoomify://job-error",
-    "dezoomify://deep-link-pending"
+    "dezoomify://deep-link-pending",
+    "dezoomify://job-snapshot"
   ],
   "generator": "phase-11 lean shell (canonical: crates/dezoomify-protocol/src/dto.rs)",
   "nativeHost": {

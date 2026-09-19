@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createDesktopJobService,
+  foldSnapshotPayload,
   projectDesktopEvent,
 } from "../src/jobService.ts";
 
@@ -151,9 +152,9 @@ test("snapshots flow per job with seq and identity guards", async () => {
     cmd: "start_job",
     args: { inputUrl: "https://museum.example.org/iiif/1/manifest.json" },
   });
-  // All five shell channels are subscribed exactly once.
-  assert.equal(ipc.handlers.size, 5);
-  assert.ok(ipc.handlers.has("dezoomify://job-progress"));
+  // All six shell channels are subscribed exactly once.
+  assert.equal(ipc.handlers.size, 6);
+  assert.ok(ipc.handlers.has("dezoomify://job-snapshot"));
 
   emit(ipc, "dezoomify://job-progress", { job: "job:native-1", jobId: "job:native-1", seq: 2, kind: "progress", acquired: 3, total: 10 });
   assert.equal(obs.snapshots[obs.snapshots.length - 1].acquired, 3);
@@ -239,4 +240,56 @@ test("service uses the public Tauri API, never host internals", () => {
   assert.equal(source.includes("__TAURI_INTERNALS__"), false);
   assert.equal(source.includes("__TAURI_EVENT__"), false);
   assert.equal(source.includes("__TAURI__"), false);
+});
+
+test("snapshot channel folds lifecycle, counts, ledger, and terminal", () => {
+  const events = foldSnapshotPayload({
+    job: "job:native-1",
+    jobId: "job:native-1",
+    seq: 4,
+    kind: "snapshot",
+    state: "AcquiringTiles",
+    lifecycle: "AcquiringTiles",
+    acquired: 3,
+    total: 10,
+    origin: "https://museum.example.org",
+  });
+  assert.deepEqual(events, [
+    { type: "job-state", state: "AcquiringTiles" },
+    { type: "progress", acquired: 3, total: 10 },
+  ]);
+  const recovery = foldSnapshotPayload({
+    job: "job:native-1",
+    jobId: "job:native-1",
+    seq: 5,
+    kind: "snapshot",
+    state: "AwaitingPartialDecision",
+    lifecycle: "AwaitingPartialDecision",
+    acquired: 9,
+    total: 12,
+    origin: "https://museum.example.org",
+    recovery: { missing: ["t-10"], failed: 3, total: 12 },
+  });
+  assert.equal(recovery[2].type, "recovery-request");
+  assert.deepEqual(
+    recovery[2].actions.map((action) => action.id),
+    ["keep-partial", "discard-partial", "retry"],
+  );
+  const terminal = foldSnapshotPayload({
+    job: "job:native-1",
+    jobId: "job:native-1",
+    seq: 6,
+    kind: "snapshot",
+    state: "Completed",
+    lifecycle: "AcquiringTiles",
+    acquired: 12,
+    total: 12,
+    origin: "https://museum.example.org",
+    terminal: "completed",
+    format: "png",
+    width: 800,
+    height: 600,
+    tileCount: 12,
+  });
+  assert.equal(terminal[terminal.length - 1].type, "completed");
 });
