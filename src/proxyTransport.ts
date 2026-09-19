@@ -311,15 +311,6 @@ export function parseRelayError(bytes: ArrayBuffer): { code?: string; reason?: s
   }
 }
 
-/** Test seam: drop global proxy rate state between isolated checks. */
-export function resetProxyRateLimit(): void {
-  try {
-    globalProxyRateLimiter?.reset();
-  } catch {
-    // Reset must never throw.
-  }
-}
-
 export function createProxyTransport(
   fetchImpl: ProxyFetchImpl,
   opts: {
