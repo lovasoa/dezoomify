@@ -339,6 +339,51 @@ mod tests {
         serde_json::json!({"kind": "level", "index": index})
     }
 
+    /// Fold one synthetic runner terminal through the real
+    /// `apply_runner_snapshot` path (no I/O): the terminal itself is
+    /// hand-built, everything after it is production behavior.
+    fn fold_test_terminal(table: &mut JobTable, id: &str, terminal: TestTerminal) {
+        use dezoomify_native::runner::{Lifecycle, OutputSummary, Terminal};
+        fn summary(partial: bool) -> OutputSummary {
+            OutputSummary {
+                path: std::path::PathBuf::from("/tmp/dz-published.png"),
+                tile_count: 1,
+                width: 2,
+                height: 2,
+                format: "png".to_string(),
+                partial,
+                missing: Vec::new(),
+            }
+        }
+        let terminal = match terminal {
+            TestTerminal::Completed => Terminal::Completed(summary(false)),
+            TestTerminal::Partial => Terminal::Completed(summary(true)),
+            TestTerminal::Failed => Terminal::Failed(dezoomify_native::error::NativeError::new(
+                "tile.download-failed",
+                "boom",
+            )),
+        };
+        table.apply_runner_snapshot(
+            id,
+            &dezoomify_native::runner::JobSnapshot {
+                job: id.to_string(),
+                seq: 0,
+                lifecycle: Lifecycle::Finalizing,
+                acquired: 0,
+                total: 0,
+                recovery: None,
+                terminal: Some(terminal),
+            },
+        );
+    }
+
+    #[derive(Clone, Copy)]
+    enum TestTerminal {
+        Completed,
+        Partial,
+        Failed,
+    }
+
     #[test]
     fn registry_lists_exact_commands() {
         assert_eq!(COMMANDS.len(), 6);
@@ -561,9 +606,7 @@ mod tests {
         // Failed terminal stays single-terminal through dispatch.
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table
-            .fail_test_job(&id, "tile.download-failed", "boom")
-            .unwrap();
+        fold_test_terminal(&mut table, &id, TestTerminal::Failed);
         let failed_count = table
             .events_for(&id)
             .iter()
@@ -585,7 +628,7 @@ mod tests {
         // Completed terminal: choice after completion is stale.
         let mut table = JobTable::new();
         let id = table.start_job("https://example.com/item").unwrap();
-        table.complete_job(&id).unwrap();
+        fold_test_terminal(&mut table, &id, TestTerminal::Completed);
         assert_eq!(
             dispatch_answer_choice(&mut table, &id, level_choice(0))
                 .unwrap_err()
@@ -641,17 +684,13 @@ mod tests {
                     assert_eq!(outcome.event, "cancelled");
                 }
                 "completed" => {
-                    table.complete_job(&id).unwrap();
+                    fold_test_terminal(&mut table, &id, TestTerminal::Completed);
                 }
                 "failed" => {
-                    table
-                        .fail_test_job(&id, "tile.download-failed", "boom")
-                        .unwrap();
+                    fold_test_terminal(&mut table, &id, TestTerminal::Failed);
                 }
                 _ => {
-                    table
-                        .complete_partial_test_output(&id, "png", 2, 2, 1)
-                        .unwrap();
+                    fold_test_terminal(&mut table, &id, TestTerminal::Partial);
                 }
             }
             let events = table.events_for(&id);

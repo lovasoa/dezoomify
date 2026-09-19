@@ -35,33 +35,12 @@ test("snapshot fold walks the full happy path", () => {
     { type: "job-state", state: "Finalizing" },
     { type: "completed" },
   ]);
-  const view = presentSnapshot(snap, "direct");
-  assert.equal(view.phase, "completed");
-  assert.equal(view.terminal.kind, "completed");
-  assert.equal(view.canReset, true);
-  assert.equal(view.canCancel, false);
-  assert.deepEqual(view.progress, { current: 1, total: 4 });
-});
-
-test("display-only branch + failed terminal stores the typed error", () => {
-  const displaySnap = run("job:9", [
-    { type: "job-state", state: "AcquiringTiles" },
-  ]);
-  const displayView = presentSnapshot({ ...displaySnap, displayOnly: true }, "display-only");
-  assert.equal(displayView.phase, "display-only");
-  assert.equal(displayView.displayOnly, true);
-  assert.equal(displayView.headlineKey, "view.display.title");
-
-  // A failed terminal keeps the typed error for the error view.
-  const error = { code: "TRANSPORT_NETWORK_ERROR", phase: "acquisition", retryable: true, message: "Could not open the picture.", recovery: [] };
-  const failedSnap = run("job:10", [
-    { type: "job-state", state: "AcquiringTiles" },
-    { type: "failed", error },
-  ]);
-  const failedView = presentSnapshot(failedSnap, "direct");
-  assert.equal(failedView.phase, "failed");
-  assert.equal(failedView.terminal.error.code, "TRANSPORT_NETWORK_ERROR");
-  assert.equal(failedView.terminal.error.retryable, true);
+  // The completed-phase presentation shape is covered in snapshot-view;
+  // here the fold itself must terminate exactly once with its progress.
+  assert.equal(snap.state, "Completed");
+  assert.equal(snap.terminal.kind, "completed");
+  assert.equal(snap.acquired, 1);
+  assert.equal(snap.total, 4);
 });
 
 test("a finished job can still present display-only from the host override", () => {

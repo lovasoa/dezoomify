@@ -200,13 +200,13 @@ fn stale_timer_completions_are_ignored_without_new_work() {
     let planned = discover_and_acquire(&mut host);
 
     // Unknown timer completion is a safe no-op.
-    let len = host.transcript().len();
+    let len = host.activity_len();
     host.apply(JobCommand::RetryTimerElapsed {
         tile: planned[0],
         attempt: 7,
     })
     .unwrap();
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
 
     // Real timer, then a duplicate completion for the same attempt.
     host.apply(JobCommand::TileFailed {
@@ -219,13 +219,13 @@ fn stale_timer_completions_are_ignored_without_new_work() {
         attempt: 1,
     })
     .unwrap();
-    let len = host.transcript().len();
+    let len = host.activity_len();
     host.apply(JobCommand::RetryTimerElapsed {
         tile: planned[0],
         attempt: 1,
     })
     .unwrap();
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
     assert_eq!(acquire_count(&host, planned[0]), 2);
 
     // A second failure report with no re-acquisition in between is a
@@ -236,14 +236,14 @@ fn stale_timer_completions_are_ignored_without_new_work() {
     })
     .unwrap();
     let attempts = acquire_count(&host, planned[1]);
-    let len = host.transcript().len();
+    let len = host.activity_len();
     host.apply(JobCommand::TileFailed {
         tile: planned[1],
         failure: transient_failure(),
     })
     .unwrap();
     assert_eq!(acquire_count(&host, planned[1]), attempts);
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
 }
 
 #[test]
@@ -430,11 +430,11 @@ fn cancel_before_commit_releases_once_and_rejects_late_work() {
     );
     assert_eq!(host.terminal_count(), 1);
 
-    let len = host.transcript().len();
+    let len = host.activity_len();
     let late = host.apply(JobCommand::TileAcquired { tile: planned[1] });
     assert!(late.is_err());
     assert_eq!(late.unwrap_err().code, "job.post-terminal");
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
     assert_eq!(host.terminal_count(), 1);
 }
 
@@ -609,12 +609,12 @@ fn deferred_follow_cycle_is_rejected() {
     })
     .unwrap();
     assert_eq!(host.state(), "AwaitingImageSelection");
-    let len = host.transcript().len();
+    let len = host.activity_len();
     let err = host
         .apply(JobCommand::FollowDeferred { image: 0 })
         .unwrap_err();
     assert_eq!(err.code, "job.invalid-state");
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
 }
 
 #[test]
@@ -659,12 +659,12 @@ fn deferred_follow_budget_is_bounded() {
     assert_eq!(host.state(), "AwaitingImageSelection");
     // The budget is spent: a second follow dies with no new work, and the
     // job still honestly awaits selection of whatever is ready.
-    let len = host.transcript().len();
+    let len = host.activity_len();
     let err = host
         .apply(JobCommand::FollowDeferred { image: 0 })
         .unwrap_err();
     assert_eq!(err.code, "job.invalid-state");
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
     assert_eq!(host.state(), "AwaitingImageSelection");
 
     // Zero follows allowed: following is rejected up front.
