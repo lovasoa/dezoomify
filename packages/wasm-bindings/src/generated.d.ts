@@ -284,7 +284,7 @@ export interface SessionConfig {
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "redirect-unavailable" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
 
-export type DispatchResult = { status: "ok"; messages: HostMessage[] } | { status: "error"; error: ErrorDto };
+export type DispatchResult = { status: "ok"; messages: HostMessage[]; snapshot: EngineSnapshotDto } | { status: "error"; error: ErrorDto };
 
 export type ErrorPhase = "handshake" | "validation" | "discovery" | "acquisition" | "decode" | "processing" | "output" | "publication" | "cleanup";
 
@@ -321,7 +321,8 @@ export class Session {
      */
     applyProcessing(request: ProcessingRequest, bytes: Uint8Array): Uint8Array;
     /**
-     * Run one typed command and return its ordered host messages.
+     * Run one typed command and return its ordered host messages plus
+     * the canonical snapshot after the answer.
      */
     dispatch(command: JobCommand): DispatchResult;
     /**

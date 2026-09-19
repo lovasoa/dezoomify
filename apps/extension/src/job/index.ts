@@ -573,7 +573,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   try {
     const handle = await runner.start(
       { inputs, engine: {}, exec: { kind: "browser", sourceUrl: inputs[0]?.url ?? "" } },
-      (event) => handleEvent(event),
+      { event: (event) => handleEvent(event), snapshot: () => {} },
     );
     jobHandle = handle;
   } catch (error) {

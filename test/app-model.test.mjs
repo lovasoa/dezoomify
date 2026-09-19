@@ -172,9 +172,9 @@ function fakeRunner(log) {
   return {
     runners,
     runner: {
-      start(request, emit) {
+      start(request, sink) {
         const index = runners.length;
-        const record = { request, emit, commands: [], disposed: false };
+        const record = { request, sink, commands: [], disposed: false };
         runners.push(record);
         log.push(`start:${index}`);
         return Promise.resolve({
@@ -210,8 +210,8 @@ test("service routes interleaved emissions to the owning observer only", async (
   assert.notEqual(handleA.id, handleB.id);
   assert.equal(log.join(","), "start:0,start:1");
 
-  runners[0].emit({ type: "progress", acquired: 1, total: 4 }, initialHostStatus());
-  runners[1].emit({ type: "progress", acquired: 2, total: 8 }, initialHostStatus());
+  runners[0].sink.event({ type: "progress", acquired: 1, total: 4 }, initialHostStatus());
+  runners[1].sink.event({ type: "progress", acquired: 2, total: 8 }, initialHostStatus());
   assert.equal(seenA[seenA.length - 1].acquired, 1);
   assert.equal(seenB[seenB.length - 1].acquired, 2);
   assert.equal(seenA[seenA.length - 1].jobId, handleA.id);
@@ -220,9 +220,40 @@ test("service routes interleaved emissions to the owning observer only", async (
   assert.deepEqual(runners[0].commands, [{ type: "cancel" }]);
 
   await handleA.dispose();
-  runners[0].emit({ type: "progress", acquired: 4, total: 4 }, initialHostStatus());
+  runners[0].sink.event({ type: "progress", acquired: 4, total: 4 }, initialHostStatus());
   assert.equal(seenA[seenA.length - 1].acquired, 1);
   assert.ok(runners[0].disposed);
+});
+
+test("service folds absolute snapshots with revision guards", async () => {
+  const log = [];
+  const { runner, runners } = fakeRunner(log);
+  let now = 100;
+  const service = createJobService(runner, { now: () => ++now });
+  const seen = [];
+  const handle = await service.start(browserRequest("https://c.example.org/3"), {
+    snapshot: (s) => seen.push(s),
+    hostStatus: () => {},
+  });
+  const dto = (revision, acquired, total, lifecycle) => ({
+    revision,
+    lifecycle,
+    paused: false,
+    progress: { completed: acquired, total },
+    selection: { image: null, level: null, level_count: 0, deferred: [] },
+    decision: null,
+    terminal: null,
+    output: null,
+  });
+  runners[0].sink.snapshot(dto(1, 2, 4, "AcquiringTiles"));
+  assert.equal(seen[seen.length - 1].acquired, 2);
+  assert.equal(seen[seen.length - 1].state, "AcquiringTiles");
+  // Stale revisions never move the UI.
+  runners[0].sink.snapshot(dto(1, 9, 9, "AcquiringTiles"));
+  assert.equal(seen[seen.length - 1].acquired, 2);
+  runners[0].sink.snapshot(dto(2, 9, 9, "AcquiringTiles"));
+  assert.equal(seen[seen.length - 1].acquired, 9);
+  await handle.dispose();
 });
 
 test("service rejects invalid requests with stable validation codes", async () => {

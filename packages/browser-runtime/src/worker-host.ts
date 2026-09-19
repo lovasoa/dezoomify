@@ -3,6 +3,7 @@
 // generated typed WASM ABI.
 import type {
   DispatchResult,
+  EngineSnapshotDto,
   ErrorDto,
   FetchFailureDto,
   HostMessage,
@@ -53,7 +54,7 @@ export type WorkerHostMessage =
   | { type: "engine.dispose" };
 
 export type WorkerHostOutput =
-  | { type: "engine.messages"; messages: HostMessage[] }
+  | { type: "engine.messages"; messages: HostMessage[]; snapshot: EngineSnapshotDto }
   | { type: "engine.processed"; requestId: number; bytes: ArrayBuffer }
   | { type: "engine.process-failed"; requestId: number; error: ErrorDto }
   | { type: "engine.ranked"; requestId: number; urls: string[] }
@@ -76,10 +77,11 @@ export function createJobWorkerHost(deps: {
       return;
     }
     const messages: HostMessage[] = result.messages;
+    const snapshot: EngineSnapshotDto = result.snapshot;
     if (messages.length === 0) return;
     const effects = messages.filter((message) => message.kind === "effect").length;
-    log("debug", "messages-returned", `effects=${effects} events=${messages.length - effects} total=${messages.length}`);
-    deps.postMessage({ type: "engine.messages", messages });
+    log("debug", "messages-returned", `effects=${effects} events=${messages.length - effects} total=${messages.length} revision=${snapshot.revision}`);
+    deps.postMessage({ type: "engine.messages", messages, snapshot });
   }
 
   function dispatch(command: JobCommand): void {

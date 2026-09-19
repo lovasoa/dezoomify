@@ -87,11 +87,11 @@ function startRequest(overrides = {}) {
 test("non-browser exec and empty inputs reject typed before any worker exists", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
-  await assert.rejects(() => runner.start(startRequest({ exec: { kind: "native", destination: {} } }), () => {}), (error) => {
+  await assert.rejects(() => runner.start(startRequest({ exec: { kind: "native", destination: {} } }), { event: () => {}, snapshot: () => {} }), (error) => {
     assert.equal(error.code, "browser.invalid-exec");
     return true;
   });
-  await assert.rejects(() => runner.start(startRequest({ inputs: [] }), () => {}), (error) => {
+  await assert.rejects(() => runner.start(startRequest({ inputs: [] }), { event: () => {}, snapshot: () => {} }), (error) => {
     assert.equal(error.code, "browser.invalid-source");
     return true;
   });
@@ -101,7 +101,7 @@ test("start roots the session at the first input with merged quotas", async () =
   const p = product();
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  await runner.start(startRequest({ engine: { max_concurrent_fetches: 3 } }), (event, host) => emitted.push([event, host]));
+  await runner.start(startRequest({ engine: { max_concurrent_fetches: 3 } }), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
   const start = p.worker.posted.find((message) => message.type === "engine.start");
   assert.ok(start, "expected engine.start on the worker");
   assert.deepEqual(start.inputs, [{ url: "https://meta.test/info.json" }]);
@@ -113,7 +113,7 @@ test("engine events pass through with live host status", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  await runner.start(startRequest(), (event, host) => emitted.push([event, host]));
+  await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
   p.worker.receive({ type: "engine.messages", messages: [{ kind: "event", type: "progress", acquired: 1, total: 4 }] });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(emitted.length, 1);
@@ -142,7 +142,7 @@ test("a missing grant suspends as pending host status, not a phase machine", asy
   p.deps.onPermissionRequired = (detail) => { permissionDetail = detail; };
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  const handle = await runner.start(startRequest(), (event, host) => emitted.push([event, host]));
+  const handle = await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
   p.worker.receive({ type: "engine.messages", messages: [TILE] });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(permissionDetail, "expected the product permission action");
@@ -163,7 +163,7 @@ test("a missing grant suspends as pending host status, not a phase machine", asy
 test("user commands map onto the session; engine-internal commands reject typed", async () => {
   const p = product();
   const runner = createBrowserRunner(p.deps);
-  const handle = await runner.start(startRequest(), () => {});
+  const handle = await runner.start(startRequest(), { event: () => {}, snapshot: () => {} });
   await handle.command({ type: "select-image", image: 2 });
   await handle.command({ type: "select-level", level: 1 });
   await handle.command({ type: "recovery-choice", generation: 0, choice: "keep" });
@@ -182,7 +182,7 @@ test("a terminal event settles the attempt; late worker messages never emit", as
   const p = product();
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  const handle = await runner.start(startRequest(), (event, host) => emitted.push([event, host]));
+  const handle = await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
   p.worker.receive({ type: "engine.messages", messages: [{ kind: "event", type: "completed" }] });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(emitted.length, 1);
@@ -199,7 +199,7 @@ test("an adapter error projects to a terminal failed event, not a hang", async (
   const p = product();
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  await runner.start(startRequest(), (event, host) => emitted.push([event, host]));
+  await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
   const adapterError = {
     code: "adapter.abi",
     phase: "validation",
@@ -225,7 +225,7 @@ test("dispose aborts in-flight fetches, terminates the worker, and settles pendi
   });
   const runner = createBrowserRunner(p.deps);
   const emitted = [];
-  const handle = await runner.start(startRequest(), (event, host) => emitted.push([event, host]));
+  const handle = await runner.start(startRequest(), { event: (event, host) => emitted.push([event, host]), snapshot: { event: () => {}, snapshot: () => {} } });
   p.worker.receive({ type: "engine.messages", messages: [TILE] });
   await handle.dispose();
   await new Promise((resolve) => setTimeout(resolve, 30));
@@ -248,7 +248,7 @@ test("processing calls transfer their buffer and settle on disposal", async () =
     };
   };
   const runner = createBrowserRunner(p.deps);
-  const handle = await runner.start(startRequest(), () => {});
+  const handle = await runner.start(startRequest(), { event: () => {}, snapshot: () => {} });
   const bytes = new Uint8Array([1, 2, 3]).buffer;
   const pending = assemblyProcess({ recipe: "none" }, bytes);
   await new Promise((resolve) => setTimeout(resolve, 0));

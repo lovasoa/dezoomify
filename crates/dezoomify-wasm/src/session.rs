@@ -165,6 +165,35 @@ impl Session {
         Ok(job.project_dto())
     }
 
+    /// Last projected snapshot (or the idle projection before start).
+    fn last_snapshot(&self) -> dezoomify_protocol::dto::EngineSnapshotDto {
+        use dezoomify_protocol::dto::{
+            EngineSnapshotDto, JobState as ProtocolJobState, SnapshotProgressDto,
+            SnapshotSelectionDto,
+        };
+        match &self.job {
+            Some(job) => job.project_dto(),
+            None => EngineSnapshotDto {
+                revision: 0,
+                lifecycle: ProtocolJobState::Created,
+                paused: false,
+                progress: SnapshotProgressDto {
+                    completed: 0,
+                    total: Some(0),
+                },
+                selection: SnapshotSelectionDto {
+                    image: None,
+                    level: None,
+                    level_count: 0,
+                    deferred: Vec::new(),
+                },
+                decision: None,
+                terminal: None,
+                output: None,
+            },
+        }
+    }
+
     fn require_live(&self) -> Result<(), AdapterError> {
         if self.disposed {
             return Err(AdapterError::new(
@@ -176,23 +205,32 @@ impl Session {
     }
 
     /// Run one typed command synchronously and return every resulting host
-    /// message in engine order.
+    /// message in engine order plus the canonical snapshot after the
+    /// answer. The snapshot is absolute: hosts render it directly instead
+    /// of refolding the message stream.
     ///
     /// # Errors
     ///
     /// `disposed` after disposal; `wrong-state`/`limit-exceeded` per transition.
-    pub fn dispatch(&mut self, command: JobCommand) -> Result<Vec<HostMessage>, AdapterError> {
+    pub fn dispatch(
+        &mut self,
+        command: JobCommand,
+    ) -> Result<(Vec<HostMessage>, dezoomify_protocol::dto::EngineSnapshotDto), AdapterError> {
         self.require_live()?;
-        self.dispatch_command(command)
+        let messages = self.dispatch_command(command)?;
+        let snapshot = self.last_snapshot();
+        Ok((messages, snapshot))
     }
 
     /// Cancel the active job through the engine and release adapter
     /// resources. Repeat-safe: later calls succeed without enqueueing
-    /// duplicates. Afterwards every operation except repeated disposal fails
-    /// with `disposed`.
-    pub fn dispose(&mut self) -> Result<Vec<HostMessage>, AdapterError> {
+    /// duplicates, returning the last snapshot. Afterwards every operation
+    /// except repeated disposal fails with `disposed`.
+    pub fn dispose(
+        &mut self,
+    ) -> Result<(Vec<HostMessage>, dezoomify_protocol::dto::EngineSnapshotDto), AdapterError> {
         if self.disposed {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), self.last_snapshot()));
         }
         self.disposed = true;
         let mut messages = if let Some(job) = self.job.as_mut() {
@@ -215,8 +253,9 @@ impl Session {
         }) {
             messages.push(self.force_cancelled_event());
         }
+        let snapshot = self.last_snapshot();
         self.job = None;
-        Ok(messages)
+        Ok((messages, snapshot))
     }
 
     fn force_cancelled_event(&mut self) -> HostMessage {

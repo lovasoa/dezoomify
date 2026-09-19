@@ -78,13 +78,20 @@ pub mod wasm_api {
     #[derive(Serialize, Tsify)]
     #[serde(tag = "status", rename_all = "kebab-case")]
     pub enum DispatchResult {
-        Ok { messages: Vec<HostMessage> },
-        Error { error: ErrorDto },
+        Ok {
+            messages: Vec<HostMessage>,
+            snapshot: EngineSnapshotDto,
+        },
+        Error {
+            error: ErrorDto,
+        },
     }
 
-    fn result(value: Result<Vec<HostMessage>, super::AdapterError>) -> DispatchResult {
+    fn result(
+        value: Result<(Vec<HostMessage>, EngineSnapshotDto), super::AdapterError>,
+    ) -> DispatchResult {
         match value {
-            Ok(messages) => DispatchResult::Ok { messages },
+            Ok((messages, snapshot)) => DispatchResult::Ok { messages, snapshot },
             Err(error) => DispatchResult::Error {
                 error: error.to_error_dto(),
             },
@@ -112,7 +119,8 @@ pub mod wasm_api {
                 .map_err(|error| JsError::new(&error.to_string()))
         }
 
-        /// Run one typed command and return its ordered host messages.
+        /// Run one typed command and return its ordered host messages plus
+        /// the canonical snapshot after the answer.
         #[wasm_bindgen(js_name = "dispatch")]
         pub fn dispatch(&mut self, command: Ts<JobCommand>) -> Result<Ts<DispatchResult>, JsError> {
             let command = command.to_rust().map_err(conversion_error)?;

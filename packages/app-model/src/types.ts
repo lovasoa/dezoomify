@@ -11,6 +11,7 @@
 
 import type {
   CatalogDto,
+  EngineSnapshotDto,
   ErrorDto,
   JobCommand,
   JobEvent,
@@ -22,6 +23,7 @@ import type {
 
 export type {
   CatalogDto,
+  EngineSnapshotDto,
   ErrorDto,
   JobCommand,
   JobEvent,
@@ -200,8 +202,16 @@ export interface RunnerHandle {
 }
 
 export interface HostRunner {
-  start(
-    request: JobStartRequest,
-    emit: (event: JobEvent, host: HostStatus) => void,
-  ): Promise<RunnerHandle>;
+  start(request: JobStartRequest, sink: RunnerSink): Promise<RunnerHandle>;
+}
+
+/**
+ * Event sink behind a HostRunner: the legacy per-event channel plus the
+ * absolute snapshot channel. Hosts consume both through the service fold;
+ * the snapshot carries lifecycle, progress, decisions, and terminals, so
+ * products render it instead of refolding the event stream.
+ */
+export interface RunnerSink {
+  event(event: JobEvent, host: HostStatus): void;
+  snapshot(snapshot: EngineSnapshotDto): void;
 }
