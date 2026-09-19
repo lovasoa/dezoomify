@@ -28,7 +28,7 @@ import { createCoordinatorSourceTransport, createEngineResourceFetcher, engineFa
 import type { JobBinding } from "./transport.ts";
 import type { ProcessingRecipe } from "@dezoomify/wasm-bindings";
 
-declare const __DEZOOMIFY_TEST_PERMISSION_MOCK__: boolean;
+const TEST_PERMISSION_MOCK = import.meta.env?.MODE === "testing";
 
 type ExtensionApi = {
   runtime?: { sendMessage?(message: unknown): Promise<unknown>; onMessage?: { addListener(listener: (message: Record<string, unknown>) => void): void } };
@@ -202,12 +202,12 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       // the headless extension driver. Its test package mocks only that
       // browser boundary; the click, coordinator validation, retry, and
       // completed output still run end to end.
-      const request = __DEZOOMIFY_TEST_PERMISSION_MOCK__ ? Promise.resolve(true) : Promise.resolve(api?.permissions?.request?.({ origins }));
+      const request = TEST_PERMISSION_MOCK ? Promise.resolve(true) : Promise.resolve(api?.permissions?.request?.({ origins }));
       void request.then((granted) => {
         if (!granted) throw new Error("permission denied");
         return send(boundEnvelope("dz.job.permission-required", {
           origins: hosts,
-          ...(__DEZOOMIFY_TEST_PERMISSION_MOCK__ ? { testGrant: true } : {}),
+          ...(TEST_PERMISSION_MOCK ? { testGrant: true } : {}),
         }));
       }).catch(() => {
         if (!pendingPermission) return;
@@ -257,7 +257,7 @@ function resolvePermission(message: Record<string, unknown>) {
   if (!binding || message.jobId !== binding.jobId || typeof message.granted !== "boolean") return;
   jobLog.info("permission-resolved", `jobId=${binding.jobId} granted=${message.granted}`);
   pendingPermission = null;
-  if (__DEZOOMIFY_TEST_PERMISSION_MOCK__ && message.granted && Array.isArray(message.origins)) {
+  if (TEST_PERMISSION_MOCK && message.granted && Array.isArray(message.origins)) {
     for (const origin of message.origins) if (typeof origin === "string") testGrantedOrigins.add(origin);
   }
   if (message.granted) {
@@ -475,7 +475,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
   const activeBinding = binding;
   const fetcher = createExtensionFetcher({
     hasPermission: async (origin) => testGrantedOrigins.has(origin) ||
-      (!__DEZOOMIFY_TEST_PERMISSION_MOCK__ && !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] }))),
+      (!TEST_PERMISSION_MOCK && !!(api?.permissions?.contains && await api.permissions.contains({ origins: [`${origin}/*`] }))),
   });
   const extensionTransport = {
     async fetchResource(url: string, opts?: unknown) {

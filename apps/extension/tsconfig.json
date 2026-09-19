@@ -1,4 +1,5 @@
 {
+  "extends": "./.wxt/tsconfig.json",
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
     "target": "ES2022",
@@ -14,6 +15,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": false,
     "exactOptionalPropertyTypes": false
-  },
-  "include": ["src/**/*.ts", "entrypoints/**/*.ts", "wxt.config.ts"]
+  }
 }
