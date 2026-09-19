@@ -32,7 +32,7 @@ function fakeBrowser(session = {}, results = []) {
       async get(key) { return { [key]: session[key] }; },
       async set(value) { Object.assign(session, value); calls.storage.push(value); },
     } },
-    permissions: { onRemoved: { addListener(fn) { listeners.permissionsRemoved.push(fn); } }, request: async () => true },
+    permissions: { contains: async () => false, onRemoved: { addListener(fn) { listeners.permissionsRemoved.push(fn); } } },
     runtime: { getURL(path) { return `chrome-extension://test/${path}`; }, onMessage: { addListener(fn) { listeners.message.push(fn); } } },
   };
   return { api, calls, listeners, session };
@@ -172,4 +172,3 @@ test("retry is rejected once the source binding is invalidated", async () => {
   await tick();
   assert.equal(fake.calls.execute.length, before, "an invalidated source is never rearmed");
 });
-

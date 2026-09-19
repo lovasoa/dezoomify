@@ -27,13 +27,20 @@ type CandidateSnapshot = { ok: true; documentUrl: string; inputs: CandidateInput
 type CandidateBatch = { requestId: string; inputs: CandidateInput[]; overflow: number; documentUrl: string };
 type SourceFetchResult = { ok: boolean; code?: string; status?: number; url?: string; bytes?: number; data?: string };
 type Entry = { jobId: string; tabId: number; frameId: number; documentGeneration: number; attemptGeneration: number; jobTabId: number; sourceUrl: string; sourceValid: boolean; jobActive: boolean; jobReady: boolean; jobRunning: boolean; heldCandidates: Array<{ entry: Entry; candidate: CandidateBatch }>; seenCandidates: Set<string>; snapshotCount: number; grantedOrigins: Set<string>; primary: boolean };
+/**
+ * The coordinator's required slice of WXT's cross-browser API.
+ *
+ * This is a dependency-injection seam, not a second browser abstraction:
+ * production supplies WXT's `browser` object unchanged, while unit tests
+ * supply a deterministic implementation of only these APIs.
+ */
 export type BrowserApi = {
-  action?: { setIcon?: WxtBrowser["action"]["setIcon"]; setBadgeText?: WxtBrowser["action"]["setBadgeText"]; onClicked?: { addListener?: WxtBrowser["action"]["onClicked"]["addListener"] } };
-  tabs?: { sendMessage?: WxtBrowser["tabs"]["sendMessage"]; update?: WxtBrowser["tabs"]["update"]; create?: WxtBrowser["tabs"]["create"]; onRemoved?: { addListener?: WxtBrowser["tabs"]["onRemoved"]["addListener"] }; onUpdated?: { addListener?: WxtBrowser["tabs"]["onUpdated"]["addListener"] } };
-  storage?: { session?: { set?: WxtBrowser["storage"]["session"]["set"]; get?: WxtBrowser["storage"]["session"]["get"] } };
-  permissions?: { contains?: WxtBrowser["permissions"]["contains"]; onRemoved?: { addListener?: WxtBrowser["permissions"]["onRemoved"]["addListener"] } };
-  scripting?: { executeScript?: WxtBrowser["scripting"]["executeScript"] };
-  runtime?: { getURL?: WxtBrowser["runtime"]["getURL"]; onMessage?: { addListener?: WxtBrowser["runtime"]["onMessage"]["addListener"] } };
+  action: Pick<WxtBrowser["action"], "setIcon" | "setBadgeText" | "onClicked">;
+  tabs: Pick<WxtBrowser["tabs"], "sendMessage" | "update" | "create" | "onRemoved" | "onUpdated">;
+  storage: { session: Pick<WxtBrowser["storage"]["session"], "set" | "get"> };
+  permissions: Pick<WxtBrowser["permissions"], "contains" | "onRemoved">;
+  scripting: Pick<WxtBrowser["scripting"], "executeScript">;
+  runtime: Pick<WxtBrowser["runtime"], "getURL" | "onMessage">;
 };
 export type BrowserTab = { id?: number; url?: string };
 type BrowserSender = { tab?: BrowserTab; frameId?: number };
@@ -59,7 +66,7 @@ function sameDocumentUrl(a: string, b: string): boolean {
   } catch { return a === b; }
 }
 
-export function createBackgroundCoordinator({ browserApi, testing = false }: { browserApi?: BrowserApi; testing?: boolean }) {
+export function createBackgroundCoordinator({ browserApi, testing = false }: { browserApi: BrowserApi; testing?: boolean }) {
   const backgroundLogger = createLogger("background");
 
   function setBackgroundLogLevel(level: string | number) { backgroundLogger.setLevel(level); }
@@ -93,18 +100,18 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
 
   function setBadge(tabId: number, active: boolean, failed = false) {
     try {
-      const icon = browserApi?.action?.setIcon?.({ tabId, path: active ? ACTIVE_ICON : IDLE_ICON });
-      if (icon?.catch) icon.catch(() => {});
-      const badge = browserApi?.action?.setBadgeText?.({ tabId, text: active ? (failed ? "!" : "•") : "" });
-      if (badge?.catch) badge.catch(() => {});
+      const icon = browserApi.action.setIcon({ tabId, path: active ? ACTIVE_ICON : IDLE_ICON });
+      icon.catch(() => {});
+      const badge = browserApi.action.setBadgeText({ tabId, text: active ? (failed ? "!" : "•") : "" });
+      badge.catch(() => {});
     } catch {}
   }
 
   function sendToTab(tabId: number, message: unknown, frameId?: number) {
     try {
       const options = typeof frameId === "number" ? { frameId } : undefined;
-      const pending = options === undefined ? browserApi?.tabs?.sendMessage?.(tabId, message) : browserApi?.tabs?.sendMessage?.(tabId, message, options);
-      if (pending?.catch) pending.catch(() => {});
+      const pending = options === undefined ? browserApi.tabs.sendMessage(tabId, message) : browserApi.tabs.sendMessage(tabId, message, options);
+      pending.catch(() => {});
       return pending;
     } catch { return null; }
   }
@@ -124,14 +131,14 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
   async function persistBindings() {
     try {
       const entries = [...sourceBindings.values()].map(serializableEntry);
-      await browserApi?.storage?.session?.set?.({ [STORAGE_KEY]: entries });
+      await browserApi.storage.session.set({ [STORAGE_KEY]: entries });
     } catch (error) { backgroundLog("debug", "storage-write-failed", error instanceof Error ? error.message : error); }
   }
   async function restoreBindings() {
     if (restoreStarted) return;
     restoreStarted = true;
     try {
-      const stored = await browserApi?.storage?.session?.get?.(STORAGE_KEY);
+      const stored = await browserApi.storage.session.get(STORAGE_KEY);
       const entries = Array.isArray(stored?.[STORAGE_KEY]) ? stored[STORAGE_KEY] : [];
       for (const raw of entries) {
         if (!raw || typeof raw.jobId !== "string" || typeof raw.tabId !== "number" || typeof raw.frameId !== "number" ||
@@ -186,7 +193,7 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     for (const entry of jobs.values()) {
       if (entry.tabId === tabId && entry.jobRunning && typeof entry.jobTabId === "number") {
         backgroundLog("info", "job-focus", `tab=${tabId} jobTab=${entry.jobTabId} reason=running`);
-        try { await browserApi?.tabs?.update?.(entry.jobTabId, { active: true }); } catch {}
+        try { await browserApi.tabs.update(entry.jobTabId, { active: true }); } catch {}
         return;
       }
       if (entry.tabId === tabId && entry.jobActive) {
@@ -200,14 +207,14 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
       }
       if (entry.tabId === tabId && entry.jobReady && typeof entry.jobTabId === "number") {
         backgroundLog("info", "job-focus", `tab=${tabId} jobTab=${entry.jobTabId} reason=ready`);
-        try { await browserApi?.tabs?.update?.(entry.jobTabId, { active: true }); } catch {}
+        try { await browserApi.tabs.update(entry.jobTabId, { active: true }); } catch {}
         return;
       }
     }
     const jobId = makeJobId();
     let jobTab;
     try {
-      jobTab = await browserApi?.tabs?.create?.({ url: browserApi?.runtime?.getURL?.(`/job.html#jobId=${encodeURIComponent(jobId)}`), active: true });
+      jobTab = await browserApi.tabs.create({ url: browserApi.runtime.getURL(`/job.html#jobId=${encodeURIComponent(jobId)}`), active: true });
     } catch (error) {
       backgroundLog("error", "job-tab-create-failed", error instanceof Error ? error.message : error);
       return;
@@ -240,7 +247,7 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     }
     const generation = entry.documentGeneration;
     backgroundLog("info", "active-tab-op-start", `op=${op} tab=${entry.tabId} frame=${entry.frameId} gen=${generation}`);
-    const results = await browserApi?.scripting?.executeScript?.({
+    const results = await browserApi.scripting.executeScript({
       target: { tabId: entry.tabId, frameIds: [entry.frameId] },
       func,
       args,
@@ -285,7 +292,7 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
     // activation from its Allow button. The coordinator verifies that grant
     // before resuming a paused acquisition.
     if (testing && message.testGrant === true) granted = true;
-    else try { granted = Boolean(await browserApi?.permissions?.contains?.({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
+    else try { granted = Boolean(await browserApi.permissions.contains({ origins: origins.map((origin) => `${origin}/*`) })); } catch {}
     if (granted) for (const origin of origins) entry.grantedOrigins.add(origin);
     await persistBindings();
     backgroundLog("info", "permission-check", `req=${message.requestId} jobId=${entry.jobId} origins=${origins.length} granted=${granted}`);
@@ -401,20 +408,20 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
   }
 
   function wire() {
-    if (wired || !browserApi) return;
+    if (wired) return;
     wired = true;
     void restoreBindings();
-    browserApi.action?.onClicked?.addListener?.((tab) => { void createJob(tab); });
-    browserApi.tabs?.onRemoved?.addListener?.((tabId) => {
+    browserApi.action.onClicked.addListener((tab) => { void createJob(tab); });
+    browserApi.tabs.onRemoved.addListener((tabId) => {
       for (const entry of [...jobs.values()]) {
         if (entry.tabId === tabId || entry.jobTabId === tabId) void removeJob(entry, entry.tabId === tabId ? "source-tab-closed" : "job-tab-closed");
       }
     });
-    browserApi.tabs?.onUpdated?.addListener?.((tabId, changeInfo) => {
+    browserApi.tabs.onUpdated.addListener((tabId, changeInfo) => {
       if (typeof changeInfo?.url !== "string") return;
       for (const entry of sourceBindings.values()) if (entry.tabId === tabId && entry.sourceValid && !sameDocumentUrl(changeInfo.url, entry.sourceUrl)) invalidateSourceDocument(entry, "navigation");
     });
-    browserApi.permissions?.onRemoved?.addListener?.((removed) => {
+    browserApi.permissions.onRemoved.addListener((removed) => {
       const removedOrigins = new Set((removed?.origins ?? []).map((origin) => origin.replace(/\/\*$/, "")));
       for (const entry of jobs.values()) {
         const revoked = [...entry.grantedOrigins].filter((origin) => removedOrigins.has(origin));
@@ -425,7 +432,7 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
       }
       void persistBindings();
     });
-    browserApi.runtime?.onMessage?.addListener?.((message, sender, sendResponse) => {
+    browserApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!message || typeof message.type !== "string") return;
       if (!requestId(message)) return;
       // Test-only toolbar equivalent: headless browsers cannot click browser
@@ -484,7 +491,7 @@ export function createBackgroundCoordinator({ browserApi, testing = false }: { b
   }
 
   function startBackground() {
-    try { if (browserApi?.action?.onClicked) wire(); } catch (error) { backgroundLog("error", "wire-failed", error instanceof Error ? error.message : error); }
+    try { wire(); } catch (error) { backgroundLog("error", "wire-failed", error instanceof Error ? error.message : error); }
   }
 
   return {
