@@ -5,6 +5,7 @@
 // job from the store so late emissions after teardown stay invisible.
 
 import type {
+  EngineSnapshotDto,
   HostRunner,
   HostStatus,
   JobEvent,
@@ -14,10 +15,11 @@ import type {
   JobSnapshot,
   JobStartRequest,
   RunnerHandle,
+  RunnerSink,
   UserCommand,
 } from "./types.ts";
 import { initialHostStatus } from "./types.ts";
-import { applyJobEvent, initialSnapshot } from "./snapshot.ts";
+import { applyJobEvent, applySnapshotDto, initialSnapshot } from "./snapshot.ts";
 import { createSnapshotStore, type SnapshotStore } from "./store.ts";
 
 export interface ServiceOptions {
@@ -83,17 +85,24 @@ export function createJobService(runner: HostRunner, opts?: ServiceOptions): Job
     observer.hostStatus(initialHostStatus());
 
     let settled = false;
-    const emit = (event: JobEvent, host: HostStatus): void => {
-      if (settled) return;
-      const at = now();
-      const folded = applyJobEvent(current, event, at);
+    function publish(folded: JobSnapshot, host: HostStatus | null): void {
       if (folded === current) return;
       current = folded;
       if (store.publish(current)) observer.snapshot(current);
-      observer.hostStatus(host);
+      if (host) observer.hostStatus(host);
+    }
+    const sink: RunnerSink = {
+      event(event: JobEvent, host: HostStatus): void {
+        if (settled) return;
+        publish(applyJobEvent(current, event, now()), host);
+      },
+      snapshot(dto: EngineSnapshotDto): void {
+        if (settled) return;
+        publish(applySnapshotDto(current, dto, now()), null);
+      },
     };
 
-    const handle: RunnerHandle = await runner.start(request, emit);
+    const handle: RunnerHandle = await runner.start(request, sink);
     const jobHandle: JobHandle = {
       id,
       async command(command: UserCommand): Promise<void> {

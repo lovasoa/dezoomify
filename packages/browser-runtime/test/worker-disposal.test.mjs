@@ -2,15 +2,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createJobWorkerHost } from "../src/worker-host.ts";
 
+const IDLE = {
+  revision: 0,
+  lifecycle: "Created",
+  paused: false,
+  progress: { completed: 0, total: 0 },
+  selection: { image: null, level: null, level_count: 0, deferred: [] },
+  decision: null,
+  terminal: null,
+  output: null,
+};
+
 function fakeWasm(calls) {
   class Session {
     constructor() { calls.push("new-session"); }
     dispatch(command) {
       calls.push(`dispatch:${command.type}`);
-      return { status: "ok", messages: [] };
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
     }
     applyProcessing() { return new Uint8Array([9]).buffer; }
-    dispose() { calls.push("dispose"); return { status: "ok", messages: [] }; }
+    dispose() { calls.push("dispose"); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
   }
   return { Session };
 }
@@ -53,8 +64,8 @@ test("byte provide dispatches direct bytes with no arena reservation", async () 
   const dispatched = [];
   const sent = [];
   class Session {
-    dispatch(command) { dispatched.push(command); return { status: "ok", messages: [] }; }
-    dispose() { return { status: "ok", messages: [] }; }
+    dispatch(command) { dispatched.push(command); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    dispose() { return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
   }
   const host = createJobWorkerHost({
     postMessage: (message) => sent.push(message),
@@ -92,8 +103,8 @@ test("processed tile bytes transfer ownership to the host instead of copying", a
 test("acquired tiles acknowledge body-free with a typed outcome", async () => {
   const dispatched = [];
   class Session {
-    dispatch(command) { dispatched.push(command); return { status: "ok", messages: [] }; }
-    dispose() { return { status: "ok", messages: [] }; }
+    dispatch(command) { dispatched.push(command); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    dispose() { return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
   }
   const host = createJobWorkerHost({
     postMessage() {},

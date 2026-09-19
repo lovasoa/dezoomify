@@ -20,6 +20,7 @@
 // Display fallback (website): when readable bytes are unavailable but an
 // ordinary image loads, the tile is held as display-only. The canvas taints
 // on draw, so the job completes as display-only with no programmatic save.
+import type { EngineSnapshotDto } from "@dezoomify/wasm-bindings";
 import type { TileImageLike } from "./tile-draw.ts";
 import type { ProbeSize } from "./probe.ts";
 import type { WorkerHostMessage } from "./worker-host.ts";
@@ -99,6 +100,7 @@ export interface EngineHostDeps {
   onRecoveryRequested(generation: number): void;
   onHostFailure(error: unknown): void;
   onEvent(event: JobEvent): void;
+  onSnapshot?(snapshot: EngineSnapshotDto): void;
   log?(level: "debug" | "info" | "warn" | "error", code: string, detail?: unknown): void;
 }
 
@@ -520,7 +522,8 @@ export function createEngineHost(deps: EngineHostDeps) {
     }),
   } satisfies DispatchTable<EffectMessage, void>;
 
-  function handleEngineMessages(messages: HostMessage[]) {
+  function handleEngineMessages(messages: HostMessage[], snapshot?: EngineSnapshotDto) {
+    if (snapshot) deps.onSnapshot?.(snapshot);
     for (const message of messages) {
       if (message.kind === "effect") {
         log("debug", "effect-received", `type=${message.type}${"tile" in message ? ` tile=${message.tile}` : ""}`);

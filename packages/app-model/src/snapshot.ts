@@ -4,7 +4,7 @@
 // outcome are dropped (late safe). Pause stops progress accounting but never
 // rewrites history: acquired/total keep their last values while paused.
 
-import type { JobEvent, JobState } from "@dezoomify/wasm-bindings";
+import type { EngineSnapshotDto, JobEvent, JobState } from "@dezoomify/wasm-bindings";
 import type {
   JobSelection,
   JobSnapshot,
@@ -131,6 +131,53 @@ export function applyJobEvent(snapshot: JobSnapshot, event: JobEvent, now: numbe
   }
   next.output = withOutput(next);
   return next;
+}
+
+/**
+ * Apply one absolute engine snapshot. The DTO carries lifecycle, progress,
+ * decisions, and terminals; the catalog, warnings, and display-only flag
+ * ride the event stream and are preserved. Terminals apply exactly once;
+ * snapshots at or below the current revision are dropped.
+ */
+export function applySnapshotDto(
+  snapshot: JobSnapshot,
+  dto: EngineSnapshotDto,
+  now: number,
+): JobSnapshot {
+  if (snapshot.terminal !== null) return snapshot;
+  if (dto.revision <= snapshot.revision && snapshot.revision > 0) return snapshot;
+  const next: JobSnapshot = {
+    ...snapshot,
+    revision: dto.revision,
+    state: dto.lifecycle as JobState,
+    acquired: dto.progress.completed,
+    total: dto.progress.total ?? null,
+    paused: dto.paused,
+    selection: {
+      image: dto.selection.image ?? null,
+      level: dto.selection.level ?? null,
+    },
+    warnings: snapshot.warnings,
+    recovery: dto.decision
+      ? { generation: dto.decision.generation, actions: [] }
+      : null,
+    terminal: terminalForDto(dto),
+    updatedAt: now,
+  };
+  next.output = withOutput(next);
+  return next;
+}
+
+function terminalForDto(dto: EngineSnapshotDto): TerminalOutcome | null {
+  const terminal = dto.terminal;
+  if (!terminal) return null;
+  if (terminal.type === "completed") return { kind: "completed" };
+  if (terminal.type === "partial-completed") {
+    return { kind: "partial-completed" };
+  }
+  if (terminal.type === "failed") return { kind: "failed", error: terminal.error };
+  if (terminal.type === "cancelled") return { kind: "cancelled" };
+  return null;
 }
 
 /** True for snapshots the UI must render as finished (one terminal render). */

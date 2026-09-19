@@ -13,11 +13,13 @@
 // Deferred metadata is a product concern (a fresh start), never followed
 // silently here.
 import type {
+  EngineSnapshotDto,
   HostRunner,
   HostStatus,
   JobEvent,
   JobStartRequest,
   RunnerHandle,
+  RunnerSink,
   UserCommand,
 } from "@dezoomify/app-model";
 import type {
@@ -105,10 +107,7 @@ function firstSourceUrl(inputs: JobInputDto[]): string | null {
 
 /** Browser runner: the app-model HostRunner whose jobs carry the grant-resolution channel. */
 export interface BrowserRunner extends HostRunner {
-  start(
-    request: JobStartRequest,
-    emit: (event: JobEvent, host: HostStatus) => void,
-  ): Promise<BrowserJobHandle>;
+  start(request: JobStartRequest, sink: RunnerSink): Promise<BrowserJobHandle>;
 }
 
 export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
@@ -116,7 +115,7 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
 
   async function start(
     request: JobStartRequest,
-    emit: (event: JobEvent, host: HostStatus) => void,
+    sink: RunnerSink,
   ): Promise<BrowserJobHandle> {
     if (!request || typeof request !== "object" || request.exec?.kind !== "browser") {
       throw runnerError("browser.invalid-exec", "The browser runner runs browser jobs only.");
@@ -183,7 +182,13 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       ) {
         settled = true;
       }
-      emit(event, status());
+      sink.event(event, status());
+    }
+
+    function onSnapshot(snapshot: EngineSnapshotDto): void {
+      if (settled) return;
+      if (snapshot.terminal) settled = true;
+      sink.snapshot(snapshot);
     }
 
     assembly = product.createAssembly({ sourceUrl, processTile });
@@ -210,6 +215,7 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       onRecoveryRequested: (generation) => {
         product.onRecoveryRequested?.(generation);
       },
+      onSnapshot,
       onHostFailure: (error) => {
         if (settled) return;
         settled = true;
@@ -235,7 +241,7 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
           ...(candidate?.preview ? { preview: candidate.preview } : {}),
           ...(candidate?.detail ? { detail: candidate.detail } : {}),
         };
-        emit({ type: "failed", error: failure }, status());
+        sink.event({ type: "failed", error: failure }, status());
       },
       onEvent,
       log,
@@ -246,7 +252,7 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       const data = event.data;
       if (!data || typeof data !== "object" || settled) return;
       if (data.type === "engine.messages") {
-        activeHost.handleEngineMessages(data.messages);
+        activeHost.handleEngineMessages(data.messages, data.snapshot);
         return;
       }
       if (data.type === "engine.processed" || data.type === "engine.process-failed") {
@@ -264,7 +270,7 @@ export function createBrowserRunner(product: BrowserProduct): BrowserRunner {
       if (data.type === "engine.error") {
         if (settled) return;
         settled = true;
-        emit({ type: "failed", error: data.error }, status());
+        sink.event({ type: "failed", error: data.error }, status());
       }
     });
 

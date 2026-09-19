@@ -11,7 +11,7 @@ fn session() -> Session {
     Session::new(SessionConfig::default()).expect("typed session")
 }
 
-fn start(session: &mut Session) -> Vec<HostMessage> {
+fn start(session: &mut Session) -> (Vec<HostMessage>, dezoomify_protocol::dto::EngineSnapshotDto) {
     session
         .dispatch(JobCommand::Start {
             inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
@@ -19,9 +19,14 @@ fn start(session: &mut Session) -> Vec<HostMessage> {
         .expect("typed start")
 }
 
+/// Start and keep the messages only; the snapshot travels separately.
+fn start_messages(session: &mut Session) -> Vec<HostMessage> {
+    start(session).0
+}
+
 #[test]
 fn start_returns_typed_events_and_effects_directly() {
-    let messages = start(&mut session());
+    let messages = start_messages(&mut session());
     assert!(matches!(
         messages.first(),
         Some(HostMessage::Event(JobEvent::JobState { .. }))
@@ -34,7 +39,7 @@ fn start_returns_typed_events_and_effects_directly() {
 #[test]
 fn typed_fetch_error_requires_and_preserves_context() {
     let mut session = session();
-    let messages = start(&mut session);
+    let messages = start_messages(&mut session);
     let request = messages
         .iter()
         .find_map(|message| match message {
@@ -56,7 +61,7 @@ fn typed_fetch_error_requires_and_preserves_context() {
         preview: None,
         detail: None,
     };
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::ProvideFetchFailure { request, error })
         .expect("typed failure accepted");
     let failed = messages.iter().find_map(|message| match message {
@@ -91,12 +96,17 @@ fn typed_config_budgets_are_validated_by_the_engine() {
 #[test]
 fn dispose_returns_typed_cancellation_once() {
     let mut session = session();
-    start(&mut session);
-    let messages = session.dispose().expect("dispose");
+    start_messages(&mut session);
+    let (messages, snapshot) = session.dispose().expect("dispose");
     assert!(messages
         .iter()
         .any(|message| matches!(message, HostMessage::Event(JobEvent::Cancelled))));
-    assert!(session.dispose().expect("repeat dispose").is_empty());
+    assert_eq!(
+        snapshot.terminal,
+        Some(dezoomify_protocol::dto::SnapshotTerminalDto::Cancelled)
+    );
+    let (repeat_messages, _repeat_snapshot) = session.dispose().expect("repeat dispose");
+    assert!(repeat_messages.is_empty());
 }
 
 /// A real Deep Zoom metadata document: 512x512, 256px tiles, no overlap.
@@ -127,7 +137,7 @@ fn tile_failure(code: &str, http: Option<u16>) -> FetchFailureDto {
 fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
     use dezoomify_protocol::dto::HostEffect;
     let mut session = session();
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::Start {
             inputs: vec![JobInputDto::new("https://example.com/image.dzi")],
         })
@@ -140,7 +150,7 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
         })
         .expect("discovery request");
     // Discovery bodies cross directly in the command; nothing is retained.
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::ProvideResource {
             request,
             bytes: DZI.to_vec(),
@@ -155,7 +165,7 @@ fn session_acquiring_tiles() -> (Session, Vec<(u32, u32)>) {
         .expect("image");
     // Levels ascend by size; the last position is the largest (2x2 grid).
     let levels = 10u32;
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::SelectLevel { level: levels - 1 })
         .expect("level");
     let mut tiles = Vec::new();
@@ -175,7 +185,7 @@ fn tile_403_failure_forwards_http_and_settles_after_single_attempt() {
     // A 403 refusal on the first tile: the bridge forwards the observed
     // HTTP status into a typed engine failure, so the tile settles after
     // exactly one attempt with no re-acquisition.
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::ProvideFetchFailure {
             request: tiles[0].1,
             error: tile_failure("TRANSPORT_HTTP_ERROR", Some(403)),
@@ -190,7 +200,7 @@ fn tile_403_failure_forwards_http_and_settles_after_single_attempt() {
     // and only then does the partial decision arrive carrying the refusal.
     let mut decided = false;
     for (_, request) in tiles.iter().skip(1) {
-        let messages = session
+        let (messages, _snapshot) = session
             .dispatch(JobCommand::ProvideDisplayOutcome { request: *request })
             .expect("display outcome");
         decided |= messages.iter().any(|message| {
@@ -260,7 +270,7 @@ fn transient_failure_waits_then_retries_with_backoff() {
     let (tile, mut request) = tiles[0];
 
     // Attempt 1 fails transiently: one explicit wait, no re-acquisition yet.
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::ProvideFetchFailure {
             request,
             error: transient_timeout(),
@@ -270,13 +280,13 @@ fn transient_failure_waits_then_retries_with_backoff() {
     assert_eq!(reacquired_request(&messages, tile), None);
 
     // The host waits, then answers the timer: exactly one re-acquisition.
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::RetryTimerElapsed { tile, attempt: 1 })
         .expect("timer elapsed");
     request = reacquired_request(&messages, tile).expect("second attempt issued");
 
     // Attempt 2 fails: backoff doubles to 2s.
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::ProvideFetchFailure {
             request,
             error: transient_timeout(),
@@ -285,7 +295,7 @@ fn transient_failure_waits_then_retries_with_backoff() {
     assert_eq!(timer_of(&messages), Some((tile, 2, 2_000)));
 
     // A stale timer completion (unknown attempt) settles nothing.
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::RetryTimerElapsed { tile, attempt: 9 })
         .expect("stale timer tolerated");
     assert!(messages.is_empty());
@@ -299,7 +309,7 @@ fn retry_after_hint_sets_the_explicit_wait() {
     error.code = "TRANSPORT_HTTP_ERROR".into();
     error.http = Some(503);
     error.retry_after_ms = Some(5_000);
-    let messages = session
+    let (messages, _snapshot) = session
         .dispatch(JobCommand::ProvideFetchFailure { request, error })
         .expect("503 with retry-after accepted");
     assert_eq!(timer_of(&messages), Some((tile, 1, 5_000)));
@@ -314,7 +324,7 @@ fn ordinary_tile_ack_carries_no_body_bytes() {
     let mut message_count = 0;
     let mut finalized = false;
     for (_, request) in &tiles {
-        let messages = session
+        let (messages, _snapshot) = session
             .dispatch(JobCommand::ProvideDisplayOutcome { request: *request })
             .expect("display outcome");
         message_count += messages.len();
@@ -337,7 +347,7 @@ fn display_only_tiles_complete_without_body_bytes() {
     // readable bytes, so tile acknowledgements are body-free.
     let mut finalized = false;
     for (_, request) in &tiles {
-        let messages = session
+        let (messages, _snapshot) = session
             .dispatch(JobCommand::ProvideDisplayOutcome { request: *request })
             .expect("display outcome");
         finalized |= messages.iter().any(|message| {
@@ -358,7 +368,7 @@ fn acquired_tiles_complete_without_body_bytes() {
     // tile, so the acknowledgment carries no body, only the typed outcome.
     let mut finalized = false;
     for (_, request) in &tiles {
-        let messages = session
+        let (messages, _snapshot) = session
             .dispatch(JobCommand::TileAcquired { request: *request })
             .expect("acquired outcome");
         finalized |= messages.iter().any(|message| {
