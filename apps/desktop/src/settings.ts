@@ -21,14 +21,14 @@ import { downloadDir } from "@tauri-apps/api/path";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface DesktopSettings {
-  readonly outputDir: string | null;
-  readonly outputFormat: DesktopOutputFormat;
+  readonly output_dir: string | null;
+  readonly output_format: DesktopOutputFormat;
   readonly compression: number;
-  readonly maxWidth: number | null;
-  readonly maxHeight: number | null;
+  readonly max_width: number | null;
+  readonly max_height: number | null;
   readonly retries: number;
-  readonly networkProfile: NetworkProfile;
-  readonly cacheDir: string | null;
+  readonly network_profile: NetworkProfile;
+  readonly cache_dir: string | null;
   readonly headers: Readonly<Record<string, string>>;
 }
 
@@ -58,14 +58,14 @@ export const MAX_HEADERS = 32 as const;
 
 export function defaultSettings(): DesktopSettings {
   return {
-    outputDir: null,
-    outputFormat: DEFAULT_OUTPUT_FORMAT,
+    output_dir: null,
+    output_format: DEFAULT_OUTPUT_FORMAT,
     compression: DEFAULT_COMPRESSION,
-    maxWidth: null,
-    maxHeight: null,
+    max_width: null,
+    max_height: null,
     retries: DEFAULT_RETRIES,
-    networkProfile: DEFAULT_NETWORK_PROFILE,
-    cacheDir: null,
+    network_profile: DEFAULT_NETWORK_PROFILE,
+    cache_dir: null,
     headers: {},
   };
 }
@@ -313,28 +313,28 @@ export function validateSettings(raw: unknown): SettingsValidation {
     return { ok: false, settings: null, errors: ["settings must be an object"] };
   }
   const obj = raw as Record<string, unknown>;
-  const outputFormat = parseOutputFormat(obj["output_format"], errors);
+  const output_format = parseOutputFormat(obj["output_format"], errors);
   const compression = parseCompression(obj["compression"], errors);
   const retries = parseRetries(obj["retries"], errors);
-  const networkProfile = parseNetworkProfile(obj["network_profile"], errors);
-  const maxWidth = parseOptionalDimension(obj["max_width"], "max-width", errors);
-  const maxHeight = parseOptionalDimension(obj["max_height"], "max-height", errors);
-  const outputDir = parseOptionalDir(obj["output_dir"], "output dir", errors);
-  const cacheDir = parseOptionalDir(
+  const network_profile = parseNetworkProfile(obj["network_profile"], errors);
+  const max_width = parseOptionalDimension(obj["max_width"], "max-width", errors);
+  const max_height = parseOptionalDimension(obj["max_height"], "max-height", errors);
+  const output_dir = parseOptionalDir(obj["output_dir"], "output dir", errors);
+  const cache_dir = parseOptionalDir(
     obj["cache_dir"],
     "cache dir",
     errors,
   );
   const headers = parseHeadersValue(obj["headers"], errors);
   if (
-    outputFormat === undefined ||
+    output_format === undefined ||
     compression === undefined ||
     retries === undefined ||
-    networkProfile === undefined ||
-    maxWidth === undefined ||
-    maxHeight === undefined ||
-    outputDir === undefined ||
-    cacheDir === undefined ||
+    network_profile === undefined ||
+    max_width === undefined ||
+    max_height === undefined ||
+    output_dir === undefined ||
+    cache_dir === undefined ||
     headers === undefined
   ) {
     return { ok: false, settings: null, errors };
@@ -345,14 +345,14 @@ export function validateSettings(raw: unknown): SettingsValidation {
   return {
     ok: true,
     settings: {
-      outputDir,
-      outputFormat,
+      output_dir,
+      output_format,
       compression,
-      maxWidth,
-      maxHeight,
+      max_width,
+      max_height,
       retries,
-      networkProfile,
-      cacheDir,
+      network_profile,
+      cache_dir,
       headers,
     },
     errors: [],
@@ -413,14 +413,14 @@ export function loadSettings(): DesktopSettings {
 // persisting when invalid (fail closed, keeps the last good payload).
 export function saveSettings(settings: DesktopSettings): Array<string> {
   const validated = validateSettings({
-    outputDir: settings.outputDir,
-    outputFormat: settings.outputFormat,
+    output_dir: settings.output_dir,
+    output_format: settings.output_format,
     compression: settings.compression,
-    maxWidth: settings.maxWidth,
-    maxHeight: settings.maxHeight,
+    max_width: settings.max_width,
+    max_height: settings.max_height,
     retries: settings.retries,
-    networkProfile: settings.networkProfile,
-    cacheDir: settings.cacheDir,
+    network_profile: settings.network_profile,
+    cache_dir: settings.cache_dir,
     headers: { ...settings.headers },
   });
   if (!validated.ok || !validated.settings) return validated.errors;
@@ -436,14 +436,14 @@ export function saveSettings(settings: DesktopSettings): Array<string> {
 // Header values travel here; never pass this object to logs.
 export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, unknown> {
   return {
-    output_format: settings.outputFormat,
+    output_format: settings.output_format,
     compression: settings.compression,
     retries: settings.retries,
-    network_profile: settings.networkProfile,
-    max_width: settings.maxWidth,
-    max_height: settings.maxHeight,
-    output_dir: settings.outputDir,
-    cache_dir: settings.cacheDir,
+    network_profile: settings.network_profile,
+    max_width: settings.max_width,
+    max_height: settings.max_height,
+    output_dir: settings.output_dir,
+    cache_dir: settings.cache_dir,
     headers: { ...settings.headers },
   };
 }
@@ -452,14 +452,14 @@ export function settingsToInvokeArgs(settings: DesktopSettings): Record<string, 
 // presence flags and header names only. Never header values.
 export function describeSettingsForLog(settings: DesktopSettings): string {
   const names = Object.keys(settings.headers).sort();
-  const maxWidth = settings.maxWidth === null ? "none" : String(settings.maxWidth);
-  const maxHeight = settings.maxHeight === null ? "none" : String(settings.maxHeight);
-  const outputDir = settings.outputDir === null ? "unset" : "set";
-  const cacheDir = settings.cacheDir === null ? "unset" : "set";
+  const max_width = settings.max_width === null ? "none" : String(settings.max_width);
+  const max_height = settings.max_height === null ? "none" : String(settings.max_height);
+  const output_dir = settings.output_dir === null ? "unset" : "set";
+  const cache_dir = settings.cache_dir === null ? "unset" : "set";
   return (
-    `output_format=${settings.outputFormat} compression=${settings.compression} retries=${settings.retries} network=${settings.networkProfile} ` +
-    `max_width=${maxWidth} max_height=${maxHeight} output_dir=${outputDir} ` +
-    `cache_dir=${cacheDir} headers=${names.length} [${names.join(",")}]`
+    `output_format=${settings.output_format} compression=${settings.compression} retries=${settings.retries} network=${settings.network_profile} ` +
+    `max_width=${max_width} max_height=${max_height} output_dir=${output_dir} ` +
+    `cache_dir=${cache_dir} headers=${names.length} [${names.join(",")}]`
   );
 }
 

@@ -222,7 +222,7 @@ function recordDesktopHistory(url: string, width?: number, height?: number, form
 // NATIVE_FORMATS in desktopIntegration.ts matches the formats accepted by
 // SUPPORTED_FORMATS in commands.rs and the tauri_shell.rs dialog filters.
 // grantedFormat seeds the submit suggestedName and the completed-view mime;
-// the persisted settings outputFormat owns the choice across reloads.
+// the persisted settings output_format owns the choice across reloads.
 function normalizeNativeFormat(value: unknown): NativeFormat {
   if (typeof value === "string") {
     const lower = value.toLowerCase();
@@ -236,12 +236,12 @@ function normalizeNativeFormat(value: unknown): NativeFormat {
 
 // Minimal settings (task 3.5): persisted locally, validated with fail-closed
 // bounds, and sent on the next start_job. Header values never enter logs;
-// use describeSettingsForLog for any diagnostics. The persisted outputFormat
+// use describeSettingsForLog for any diagnostics. The persisted output_format
 // (todo 5.1, first-class in settings.ts) seeds grantedFormat at boot so
 // the chosen encoder survives reloads; download settings still travel via
 // settingsToInvokeArgs only.
 let desktopSettings: DesktopSettings = loadSettings();
-grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
+grantedFormat = normalizeNativeFormat(desktopSettings.output_format);
 
 let settingsError: string | null = null;
 
@@ -498,7 +498,7 @@ function runPersistSettingsFromPanel(): void {
 
 function runResetDesktopSettings(): void {
   desktopSettings = resetDesktopSettings();
-  grantedFormat = normalizeNativeFormat(desktopSettings.outputFormat);
+  grantedFormat = normalizeNativeFormat(desktopSettings.output_format);
   settingsError = null;
   pushLog("Settings reset to defaults");
   update();
@@ -509,10 +509,10 @@ function runResetDesktopSettings(): void {
 // to the platform Downloads directory as soon as the native bridge is ready,
 // so the compact Folder control always starts somewhere useful.
 async function applyPlatformOutputDefault(): Promise<void> {
-  if (desktopSettings.outputDir !== null) return;
-  const outputDir = await defaultOutputDirectory();
-  if (!outputDir || desktopSettings.outputDir !== null) return;
-  desktopSettings = { ...desktopSettings, outputDir };
+  if (desktopSettings.output_dir !== null) return;
+  const output_dir = await defaultOutputDirectory();
+  if (!output_dir || desktopSettings.output_dir !== null) return;
+  desktopSettings = { ...desktopSettings, output_dir };
   saveSettings(desktopSettings);
   update();
 }
@@ -568,7 +568,7 @@ function clearJobViewState(): void {
   viewCtx.currentProgress = undefined;
   viewCtx.completedInfo = undefined;
   viewCtx.jobActivity = undefined;
-  // The encoder choice is a persisted preference (settings.ts outputFormat,
+  // The encoder choice is a persisted preference (settings.ts output_format,
   // seeded into grantedFormat at boot): a new submit must not reset it to
   // png, or the reloaded choice would never reach the picker.
   stopHeartbeat();
@@ -1001,7 +1001,7 @@ function handleRecoveryRetry(): void {
   const handle = activeHandle;
   if (!decision || !handle || isTerminalNow()) return;
   pushLog("Retry requested (partial)");
-  void handle.command({ type: "recovery-choice", generation: decision.generation, choice: "retry" }).then(
+  void handle.command({ type: "answer-partial", generation: decision.generation, decision: "retry" }).then(
     () => {
       touchProgress();
       update();
@@ -1022,7 +1022,7 @@ function handlePartialChoice(keep: boolean): void {
   if (!decision || !handle) return;
   if (isTerminalNow()) return;
   pushLog(keep ? "Keeping partial image…" : "Discarding partial image…");
-  void handle.command({ type: "recovery-choice", generation: decision.generation, choice: keep ? "keep" : "discard" }).then(
+  void handle.command({ type: "answer-partial", generation: decision.generation, decision: keep ? "keep" : "discard" }).then(
     () => {
       touchProgress();
       update();
@@ -1559,7 +1559,7 @@ function update() {
         error: settingsError,
         onChange: (settings: DesktopSettings) => {
           desktopSettings = settings;
-          grantedFormat = normalizeNativeFormat(settings.outputFormat);
+          grantedFormat = normalizeNativeFormat(settings.output_format);
           runPersistSettingsFromPanel();
         },
         onReset: runResetDesktopSettings,

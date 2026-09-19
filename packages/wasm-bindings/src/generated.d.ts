@@ -295,9 +295,11 @@ export type ErrorPhase = "handshake" | "validation" | "discovery" | "acquisition
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
+export type HostCompletion = { type: "provide-resource"; request: number; bytes: number[]; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "tile-acquired"; request: number } | { type: "retry-timer-elapsed"; tile: number; attempt: number } | { type: "finalization-succeeded"; disposition: OutputDispositionDto } | { type: "finalization-failed"; error: ErrorDto };
+
 export type HostEffect = { type: "acquire-resource"; request: RequestDto } | { type: "acquire-tile"; request: RequestDto; tile: number; placement: TilePlacementDto } | { type: "finalize-output"; partial: boolean; format: OutputFormat; canvas: SizeDto | undefined } | { type: "wait-retry-timer"; tile: number; attempt: number; delay_ms: number } | { type: "cancel-work" } | { type: "request-decision"; generation: number };
 
-export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "provide-resource"; request: number; bytes: number[]; final_uri?: string } | { type: "provide-fetch-failure"; request: number; error: FetchFailureDto } | { type: "select-image"; image: number } | { type: "follow-deferred"; image: number } | { type: "select-level"; level: number } | { type: "provide-probe-outcome"; request: number; outcome: ProbeOutcome } | { type: "provide-display-outcome"; request: number } | { type: "tile-acquired"; request: number } | { type: "retry-timer-elapsed"; tile: number; attempt: number } | { type: "recovery-choice"; generation: number; choice: RecoveryChoice } | { type: "finalization-succeeded"; disposition: OutputDispositionDto } | { type: "finalization-failed"; error: ErrorDto } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
+export type JobCommand = { type: "start"; inputs: JobInputDto[] } | { type: "select-image"; image: number } | { type: "follow-deferred"; image: number } | { type: "select-level"; level: number } | { type: "answer-partial"; generation: number; decision: RecoveryChoice } | { type: "cancel" } | { type: "pause" } | { type: "resume" };
 
 export type JobState = "Created" | "Discovering" | "AwaitingImageSelection" | "AwaitingLevelSelection" | "Planning" | "AcquiringTiles" | "AwaitingPartialDecision" | "Finalizing" | "Cancelling" | "Completed" | "PartiallyCompleted" | "Failed" | "Cancelled";
 
@@ -322,10 +324,18 @@ export class Session {
      */
     applyProcessing(request: ProcessingRequest, bytes: Uint8Array): Uint8Array;
     /**
-     * Run one typed command and return its ordered host messages plus
-     * the canonical snapshot after the answer.
+     * Run one typed user command and return its ordered host effects
+     * plus the canonical snapshot after the answer. User commands
+     * never carry bytes or claim publication.
      */
-    dispatch(command: JobCommand): DispatchResult;
+    command(command: JobCommand): DispatchResult;
+    /**
+     * Answer one outstanding host effect and return its ordered host
+     * effects plus the canonical snapshot after the answer. Only
+     * completions carry bytes, failures, observations, and
+     * publication claims.
+     */
+    complete(completion: HostCompletion): DispatchResult;
     /**
      * Cancel/release session resources; repeat-safe (`dispose`).
      */
@@ -347,7 +357,8 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_session_free: (a: number, b: number) => void;
     readonly session_applyProcessing: (a: number, b: any, c: number, d: number) => [number, number, number, number];
-    readonly session_dispatch: (a: number, b: any) => [number, number, number];
+    readonly session_command: (a: number, b: any) => [number, number, number];
+    readonly session_complete: (a: number, b: any) => [number, number, number];
     readonly session_dispose: (a: number) => [number, number, number];
     readonly session_new: (a: any) => [number, number, number];
     readonly session_snapshot: (a: number) => [number, number, number];

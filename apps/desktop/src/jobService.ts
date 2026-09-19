@@ -337,11 +337,11 @@ export function createDesktopJobService(deps?: DesktopJobServiceDeps): DesktopJo
         await ipc.invoke("answer_choice", { job: id, choice });
         return;
       }
-      if (command.type === "recovery-choice") {
+      if (command.type === "answer-partial") {
         const choice: AnswerChoice = {
           kind: "partial",
           generation: command.generation,
-          decision: command.choice,
+          decision: command.decision,
         };
         await ipc.invoke("answer_choice", { job: id, choice });
         return;

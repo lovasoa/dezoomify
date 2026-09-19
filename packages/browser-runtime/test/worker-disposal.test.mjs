@@ -16,8 +16,12 @@ const IDLE = {
 function fakeWasm(calls) {
   class Session {
     constructor() { calls.push("new-session"); }
-    dispatch(command) {
-      calls.push(`dispatch:${command.type}`);
+    command(command) {
+      calls.push(`command:${command.type}`);
+      return { status: "ok", messages: [], snapshot: { ...IDLE } };
+    }
+    complete(completion) {
+      calls.push(`complete:${completion.type}`);
       return { status: "ok", messages: [], snapshot: { ...IDLE } };
     }
     applyProcessing() { return new Uint8Array([9]).buffer; }
@@ -34,7 +38,7 @@ test("a disposed worker drops late bytes and commands; the retired job cannot mu
     wasm: async () => fakeWasm(calls),
   });
   await host.onMessage({ type: "engine.start", jobId: "job:one", inputs: [{ url: "https://a.test/x.dzi" }] });
-  assert.ok(calls.includes("dispatch:start"));
+  assert.ok(calls.includes("command:start"));
   const dispatches = calls.length;
   await host.onMessage({ type: "engine.dispose" });
   assert.ok(calls.includes("dispose"));
@@ -67,7 +71,8 @@ test("byte provide dispatches direct bytes with no arena reservation", async () 
   const dispatched = [];
   const sent = [];
   class Session {
-    dispatch(command) { dispatched.push(command); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    command(command) { dispatched.push(command); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    complete(completion) { dispatched.push(completion); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
     dispose() { return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
   }
   const host = createJobWorkerHost({
@@ -106,7 +111,8 @@ test("processed tile bytes transfer ownership to the host instead of copying", a
 test("acquired tiles acknowledge body-free with a typed outcome", async () => {
   const dispatched = [];
   class Session {
-    dispatch(command) { dispatched.push(command); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    command(command) { dispatched.push(command); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
+    complete(completion) { dispatched.push(completion); return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
     dispose() { return { status: "ok", messages: [], snapshot: { ...IDLE } }; }
   }
   const host = createJobWorkerHost({

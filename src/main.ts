@@ -608,7 +608,7 @@ async function runJob(url: string, origin = url): Promise<void> {
     onRecoveryRequested: (generation) => {
       // Website policy answers partial decisions immediately as discard;
       // the engine owns the consequence.
-      void jobHandle?.command({ type: "recovery-choice", generation, choice: "discard" });
+      void jobHandle?.command({ type: "answer-partial", generation, decision: "discard" });
     },
     log: (level, code, detail) => {
       if (level === "error") webLog.error(code, detail);

@@ -6,6 +6,7 @@ import type {
   EngineSnapshotDto,
   ErrorDto,
   FetchFailureDto,
+  HostCompletion,
   HostEffect,
   JobCommand,
   JobInputDto,
@@ -50,7 +51,9 @@ export type WorkerHostMessage =
   | { type: "engine.process"; requestId: number; recipe: ProcessingRecipe; bytes: Uint8Array | ArrayBuffer }
   | { type: "engine.rank"; requestId: number; urls: string[] }
   | { type: "engine.failure"; requestId: number; error: FetchFailureDto }
+  | { type: "engine.timer-elapsed"; tile: number; attempt: number }
   | { type: "engine.command"; command: JobCommand }
+  | { type: "engine.finalize"; outcome: Extract<HostCompletion, { type: "finalization-succeeded" } | { type: "finalization-failed" }> }
   | { type: "engine.dispose" };
 
 export type WorkerHostOutput =
@@ -88,9 +91,15 @@ export function createJobWorkerHost(deps: {
 
   function dispatch(command: JobCommand): void {
     if (!session || disposed) return;
-    const request = "request" in command ? command.request : undefined;
-    log("debug", "command-dispatched", `command=${command.type}${request === undefined ? "" : ` request=${request}`}`);
-    publish(session.dispatch(command));
+    log("debug", "command-dispatched", `command=${command.type}`);
+    publish(session.command(command));
+  }
+
+  function complete(completion: HostCompletion): void {
+    if (!session || disposed) return;
+    const request = "request" in completion ? completion.request : undefined;
+    log("debug", "completion-dispatched", `completion=${completion.type}${request === undefined ? "" : ` request=${request}`}`);
+    publish(session.complete(completion));
   }
 
   async function start(message: Extract<WorkerHostMessage, { type: "engine.start" }>): Promise<void> {
@@ -104,32 +113,32 @@ export function createJobWorkerHost(deps: {
 
   function provideBytes(message: Extract<WorkerHostMessage, { type: "engine.bytes" }>): void {
     if (!session || disposed) return;
-    // Direct-bytes provide: browser-owned bytes ride inline on the command;
+    // Direct-bytes provide: browser-owned bytes ride inline on the completion;
     // the WASM byte arena is gone (no allocate/write/commit/take/free).
     // The generated contract declares `bytes: number[]`, so the host sends
     // a plain array (only small discovery metadata travels here; tile
     // success is body-free and never carries bytes).
     const finalUri = message.finalUri !== "" ? message.finalUri : undefined;
-    dispatch({
+    complete({
       type: "provide-resource",
       request: message.requestId,
       bytes: Array.from(message.bytes),
       ...(finalUri ? { final_uri: finalUri } : {}),
-    } as unknown as JobCommand);
+    });
   }
 
   function provideProbe(message: Extract<WorkerHostMessage, { type: "engine.probe" }>): void {
-    dispatch({ type: "provide-probe-outcome", request: message.requestId, outcome: message.outcome });
+    complete({ type: "provide-probe-outcome", request: message.requestId, outcome: message.outcome });
   }
 
   function provideDisplay(message: Extract<WorkerHostMessage, { type: "engine.display" }>): void {
-    dispatch({ type: "provide-display-outcome", request: message.requestId });
+    complete({ type: "provide-display-outcome", request: message.requestId });
   }
 
   function reportAcquired(message: Extract<WorkerHostMessage, { type: "engine.acquired" }>): void {
     // Body-free tile acknowledgment: the tile was fetched, decoded, and
     // placed host-side, so only the typed outcome crosses into the engine.
-    dispatch({ type: "tile-acquired", request: message.requestId });
+    complete({ type: "tile-acquired", request: message.requestId });
   }
 
   function processTile(message: Extract<WorkerHostMessage, { type: "engine.process" }>): void {
@@ -156,9 +165,13 @@ export function createJobWorkerHost(deps: {
       deps.postMessage({ type: "engine.ranked", requestId: input.requestId, urls: input.urls });
     },
     "engine.failure": (input) => {
-      dispatch({ type: "provide-fetch-failure", request: input.requestId, error: input.error });
+      complete({ type: "provide-fetch-failure", request: input.requestId, error: input.error });
+    },
+    "engine.timer-elapsed": (input) => {
+      complete({ type: "retry-timer-elapsed", tile: input.tile, attempt: input.attempt });
     },
     "engine.command": (input) => dispatch(input.command),
+    "engine.finalize": (input) => complete(input.outcome),
     "engine.dispose": () => {
       log("info", "session-disposed", "");
       disposed = true;

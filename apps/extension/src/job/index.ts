@@ -217,10 +217,10 @@ function render(status: PresentationStatus, ctx: ViewContext = {}) {
       },
     }) } : {}),
     ...(decisionGeneration !== undefined && !pendingPermission ? { after: createElement(PartialOutputActions, { onChoose: (keep) => {
-      void jobHandle?.command({ type: "recovery-choice", generation: decisionGeneration, choice: keep ? "keep" : "discard" });
+      void jobHandle?.command({ type: "answer-partial", generation: decisionGeneration, decision: keep ? "keep" : "discard" });
       render("downloading", { jobActivity: { startedAt: Date.now() } });
     }, onRetry: () => {
-      void jobHandle?.command({ type: "recovery-choice", generation: decisionGeneration, choice: "retry" });
+      void jobHandle?.command({ type: "answer-partial", generation: decisionGeneration, decision: "retry" });
       render("downloading", { jobActivity: { startedAt: Date.now() } });
     } }) } : {}),
   });
