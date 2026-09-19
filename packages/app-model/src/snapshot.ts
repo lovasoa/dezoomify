@@ -136,8 +136,9 @@ export function applyJobEvent(snapshot: JobSnapshot, event: JobEvent, now: numbe
 /**
  * Apply one absolute engine snapshot. The DTO carries lifecycle, progress,
  * decisions, and terminals; the catalog, warnings, and display-only flag
- * ride the event stream and are preserved. Terminals apply exactly once;
- * snapshots at or below the current revision are dropped.
+ * ride the event stream and are preserved. Terminals apply exactly once.
+ * Revisions stay on the single fold-side scale (previous revision plus
+ * one); DTO revisions gate staleness in the service, never here.
  */
 export function applySnapshotDto(
   snapshot: JobSnapshot,
@@ -145,10 +146,9 @@ export function applySnapshotDto(
   now: number,
 ): JobSnapshot {
   if (snapshot.terminal !== null) return snapshot;
-  if (dto.revision <= snapshot.revision && snapshot.revision > 0) return snapshot;
   const next: JobSnapshot = {
     ...snapshot,
-    revision: dto.revision,
+    revision: snapshot.revision + 1,
     state: dto.lifecycle as JobState,
     acquired: dto.progress.completed,
     total: dto.progress.total ?? null,

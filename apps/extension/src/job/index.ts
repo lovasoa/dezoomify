@@ -67,7 +67,6 @@ let attemptSignal: AbortSignal | null = null;
 /** @type {ReturnType<typeof createCanvasAssembly> | null} */
 let assembly: ReturnType<typeof createCanvasAssembly> | null = null;
 let saveCompleted = false;
-let jobServiceHandle: { dispose(): Promise<void> } | null = null;
 let latestSnapshot: JobSnapshot | null = null;
 let localFailure: StructuredError | null = null;
 let started = false;
@@ -409,13 +408,6 @@ function setup(bound: unknown) {
 function stopAttempt() {
   const handle = jobHandle;
   jobHandle = null;
-  const serviceHandle = jobServiceHandle;
-  jobServiceHandle = null;
-  if (serviceHandle) {
-    try {
-      void serviceHandle.dispose().catch(() => {});
-    } catch { /* teardown is best effort */ }
-  }
   attemptSignal = null;
   if (handle) {
     try {
@@ -571,7 +563,7 @@ async function beginAttempt(inputs: Array<{ url: string; contents?: string }>) {
         hostStatus: () => {},
       },
     );
-    jobServiceHandle = handle;
+    jobHandle = handle;
   } catch (error) {
     onHostFailure(error);
   }
