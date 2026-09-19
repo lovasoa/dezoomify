@@ -44,11 +44,6 @@ pub const IIIF_TILE_WIDTH: u32 = 512;
 /// and perf smoke uses 16 workers on scoped std threads with backpressure.
 pub const MAX_CONCURRENT: usize = 16;
 
-/// Spill decision threshold: canvases beyond 512 MiB spill decoded
-/// tiles to a temp dir one at a time and stream the encode, so peak memory
-/// stays near one canvas plus one tile.
-pub const SPILL_THRESHOLD_BYTES: u64 = 512 << 20;
-
 /// Composed canvas bytes (RGBA, 4 bytes/pixel) for a `width` by `height`
 /// image. `None` on overflow (callers fail closed with
 /// `output.canvas-limit`).
@@ -57,23 +52,6 @@ pub fn canvas_bytes(width: u32, height: u32) -> Option<u64> {
     u64::from(width)
         .checked_mul(u64::from(height))?
         .checked_mul(4)
-}
-
-/// Legacy peak estimate: decoded tile set plus canvas plus transient encode
-/// buffer (three canvases). The 20k by 20k fixture peaks at 4.8 GiB here.
-#[must_use]
-pub fn estimated_peak_legacy_bytes(width: u32, height: u32) -> Option<u64> {
-    canvas_bytes(width, height)?.checked_mul(3)
-}
-
-/// Streaming peak estimate: one canvas plus one 512px tile plus a 64 KiB file
-/// buffer. The 20k by 20k fixture peaks near 1.6 GiB, under half the legacy
-/// peak (see `tests/perf-baseline.json`).
-#[must_use]
-pub fn estimated_peak_streaming_bytes(width: u32, height: u32) -> Option<u64> {
-    canvas_bytes(width, height)?
-        .checked_add(u64::from(IIIF_TILE_WIDTH) * u64::from(IIIF_TILE_WIDTH) * 4)?
-        .checked_add(64 << 10)
 }
 
 /// Peak model used by performance tests: canvas bytes plus one transient
@@ -101,12 +79,6 @@ pub fn exceeds_available_memory(required: u64, available: u64) -> bool {
     required > available
 }
 
-/// Spill decision: true when the canvas exceeds [`SPILL_THRESHOLD_BYTES`].
-/// Overflow (`None`) spills fail-closed rather than allocating.
-#[must_use]
-pub fn should_spill(width: u32, height: u32) -> bool {
-    canvas_bytes(width, height).is_some_and(|bytes| bytes > SPILL_THRESHOLD_BYTES)
-}
 /// What to do when required tiles still fail after retries.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PartialPolicy {

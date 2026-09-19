@@ -1,24 +1,13 @@
 //! Native pipeline benchmarks: end-to-end tile throughput on the shipped
-//! exec path, encode time per format, and the peak-RSS model for the 20k by
-//! 20k fixture.
+//! exec path and encode time per format.
 //!
 //! The throughput bench runs the real `pipeline::run` over four generated
 //! local tiles (no network, no separate pool): it tracks the shipped
 //! fetch/decode/assemble/encode path the driver uses, including the engine
 //! concurrency budget.
 //!
-//! The 20k fixture itself (about 1.5 GiB of RGBA) is modeled, not allocated:
-//! allocating it in a bench would OOM CI runners. The model compares the
-//! legacy peak (decoded set plus canvas plus transient buffer) against the
-//! streaming peak (canvas plus one tile plus file buffers) using the same
-//! helpers the driver uses (`estimated_peak_*`, `should_spill`,
-//! `required_memory_bytes`), so the bench tracks the shipped decision.
-
 use criterion::{criterion_group, criterion_main, Criterion};
-use dezoomify_native::pipeline::{
-    self, canvas_bytes, encode_jpeg, encode_png, encode_tiff, estimated_peak_legacy_bytes,
-    estimated_peak_streaming_bytes, required_memory_bytes, should_spill, PipelineConfig,
-};
+use dezoomify_native::pipeline::{self, encode_jpeg, encode_png, encode_tiff, PipelineConfig};
 use std::hint::black_box;
 
 fn sweep_image(width: u32, height: u32) -> image::RgbaImage {
@@ -132,44 +121,5 @@ fn bench_encode_time(criterion: &mut Criterion) {
     group.finish();
 }
 
-/// Peak-RSS model for the 20k by 20k fixture plus the 40k canvas-limit gate.
-/// No gigapixel allocation: the same pure helpers the driver calls decide
-/// spill and budget, so a regression in the model is a regression in the
-/// shipped gate.
-fn bench_peak_rss_model(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("peak-rss-20k");
-    group.bench_function("streaming-halves-legacy", |bencher| {
-        bencher.iter(|| {
-            let legacy = estimated_peak_legacy_bytes(black_box(20_000), black_box(20_000))
-                .expect("legacy model");
-            let streaming = estimated_peak_streaming_bytes(black_box(20_000), black_box(20_000))
-                .expect("streaming model");
-            assert!(
-                streaming * 2 <= legacy,
-                "streaming peak must be at most half the legacy peak"
-            );
-            assert!(should_spill(20_000, 20_000), "20k canvas spills");
-            black_box((legacy, streaming))
-        });
-    });
-    group.bench_function("large-canvas-memory-model", |bencher| {
-        bencher.iter(|| {
-            let required =
-                required_memory_bytes(black_box(200_000), black_box(200_000)).expect("200k model");
-            assert!(
-                required > canvas_bytes(200_000, 200_000).expect("200k canvas"),
-                "the model includes the transient encode buffer"
-            );
-            black_box(required)
-        });
-    });
-    group.finish();
-}
-
-criterion_group!(
-    benches,
-    bench_tile_throughput,
-    bench_encode_time,
-    bench_peak_rss_model
-);
+criterion_group!(benches, bench_tile_throughput, bench_encode_time);
 criterion_main!(benches);
