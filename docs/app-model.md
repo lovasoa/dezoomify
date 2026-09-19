@@ -19,8 +19,8 @@ renders authoritative snapshots.
   the `sourceUrl` data field, `native` carries the validated destination.
 - `JobSnapshot` is absolute and authoritative. The shared UI renders the
   latest snapshot and never reconstructs phases from event walks. `revision`
-  increases on every applied event; observers drop stale revisions and
-  unknown job ids at the async subscription boundary.
+  increases on every engine transition; runtimes drop stale revisions at
+  the transport edge before they reach any product.
 - `isTerminalSnapshot`/`isActiveSnapshot` are pure predicates over absolute
   snapshots: terminals are set exactly once by the engine, observers settle
   on them, and nothing here folds events or assigns revisions.
@@ -28,16 +28,8 @@ renders authoritative snapshots.
   never a phase machine; phases come from snapshots. The initial status is
   neutral (no transport, no permission implied, output pending) until the
   first host emission replaces it.
-- `OutputSummary` anchors to tile accounting, never to display state:
-  `doneTiles` counts finalized tiles, `totalTiles` the planned total (null
-  until the plan publishes one), `failedTiles` the tiles the engine gave
-  up on, and `missingTiles` names the gaps behind a kept partial. `format`,
-  `width`, and `height` are filled by host publication; the summary is
-  null until a terminal success or kept partial. `partial` is true only
-  for kept partials, so a partial save never reads as complete.
-- The sequential queue runs one job at a time over the single-job engine.
-  Failures are isolated and retained; cancel-one, cancel-all, and retry
-  never disturb other entries.
+- Queues live in the products' integration layers (website single-queue,
+  desktop multi-job queue), never here and never in the engine.
 - Shared history keeps the last 20 jobs with full addresses over an
   injected store. History never leaves the device; only http(s) addresses
   are kept and bad payloads parse to an empty list.
@@ -48,9 +40,8 @@ renders authoritative snapshots.
 
 ## Ownership
 
-`packages/app-model` owns the service interface, the snapshot fold, the
-latest-snapshot store, the sequential queue, shared history, and the
-canonical labels. Products own their `HostRunner` (browser assembly,
+`packages/app-model` owns the service interface, the snapshot predicates,
+shared history, and the canonical labels. Products own their `HostRunner` (browser assembly,
 native runner, desktop IPC) and mount the shared UI. The architecture
 gate forbids host globals, React, and runtime imports in this package.
 See [Architecture](architecture.md) and the
