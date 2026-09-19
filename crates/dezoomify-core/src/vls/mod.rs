@@ -7,8 +7,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request,
+    CatalogEntry, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
+    LevelDescriptor, Request,
 };
 use crate::web_page::page_title;
 
@@ -30,7 +30,7 @@ static ATTRIBUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("constant VLS attribute pattern")
 });
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new(
+pub const SPEC: FormatSpec = FormatSpec::new(
     "vls",
     &[
         DiscoveryMatch::UrlPredicate(is_view_url).map_url(normalize_url),

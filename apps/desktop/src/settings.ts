@@ -313,15 +313,15 @@ export function validateSettings(raw: unknown): SettingsValidation {
     return { ok: false, settings: null, errors: ["settings must be an object"] };
   }
   const obj = raw as Record<string, unknown>;
-  const outputFormat = parseOutputFormat(obj["outputFormat"] ?? obj["output_format"], errors);
+  const outputFormat = parseOutputFormat(obj["output_format"], errors);
   const compression = parseCompression(obj["compression"], errors);
   const retries = parseRetries(obj["retries"], errors);
-  const networkProfile = parseNetworkProfile(obj["networkProfile"] ?? obj["network_profile"], errors);
-  const maxWidth = parseOptionalDimension(obj["maxWidth"] ?? obj["max_width"], "max-width", errors);
-  const maxHeight = parseOptionalDimension(obj["maxHeight"] ?? obj["max_height"], "max-height", errors);
-  const outputDir = parseOptionalDir(obj["outputDir"] ?? obj["output_dir"], "output dir", errors);
+  const networkProfile = parseNetworkProfile(obj["network_profile"], errors);
+  const maxWidth = parseOptionalDimension(obj["max_width"], "max-width", errors);
+  const maxHeight = parseOptionalDimension(obj["max_height"], "max-height", errors);
+  const outputDir = parseOptionalDir(obj["output_dir"], "output dir", errors);
   const cacheDir = parseOptionalDir(
-    obj["cacheDir"] ?? obj["cache_dir"] ?? obj["cache-dir"],
+    obj["cache_dir"],
     "cache dir",
     errors,
   );

@@ -69,6 +69,9 @@ pub struct JobOptions {
     pub max_width: Option<u32>,
     pub max_height: Option<u32>,
     pub max_retries: u32,
+    /// Base retry wait (attempt `n` waits this doubled `n-1` times);
+    /// engine-owned backoff, default 2 s to match the CLI default.
+    pub retry_base_delay: Duration,
     pub keep_partial: bool,
     pub compression: u8,
     pub headers: BTreeMap<String, String>,
@@ -85,9 +88,6 @@ pub struct JobOptions {
     /// `ZERO` disables staggering (the CLI default); bulk image pacing stays
     /// in the caller.
     pub min_interval: Duration,
-    /// Pause v1 demonstration: pause the engine after this many tiles are
-    /// acquired, then resume and complete. `None` disables.
-    pub pause_after: Option<usize>,
 }
 
 impl Default for JobOptions {
@@ -103,6 +103,7 @@ impl Default for JobOptions {
             max_width: None,
             max_height: None,
             max_retries: 3,
+            retry_base_delay: Duration::from_secs(2),
             keep_partial: true,
             compression: 5,
             headers: BTreeMap::new(),
@@ -113,7 +114,6 @@ impl Default for JobOptions {
             accept_invalid_certs: false,
             max_concurrent: crate::pipeline::MAX_CONCURRENT,
             min_interval: Duration::ZERO,
-            pause_after: None,
         }
     }
 }
@@ -177,6 +177,8 @@ impl JobOptions {
             },
             max_concurrent: self.max_concurrent.clamp(1, 64),
             max_retries: self.max_retries.min(1024),
+            retry_base_delay_ms: u64::try_from(self.retry_base_delay.as_millis())
+                .unwrap_or(u64::MAX),
             min_interval: self.min_interval,
             compression: self.compression.min(100),
             cache_dir: Some(
@@ -197,7 +199,6 @@ impl JobOptions {
             },
             partial_gate: Some(partial_gate),
             cancel_flag,
-            pause_after: self.pause_after,
             exec_command_rx: Some(exec_commands),
             ..PipelineConfig::default()
         }

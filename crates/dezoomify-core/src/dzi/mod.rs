@@ -8,8 +8,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
+    CatalogEntry, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
     LevelDescriptor, Request, resolve_relative,
 };
 use crate::json_utils::all_json;
@@ -41,7 +41,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::Any.extract(load_catalog),
 ];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("deepzoom", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("deepzoom", ROUTES)
     .with_display_name("Seadragon (Deep Zoom Image)")
     .preferring(|uri| uri.contains(".dzi") || uri.contains("_files/") || paris::prefers(uri));
 

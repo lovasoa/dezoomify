@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, ImageCatalog, ImageDescriptor,
+    CatalogEntry, DiscoveryError, DiscoveryMatch, FormatSpec, ImageCatalog, ImageDescriptor,
     LevelDescriptor, Positioned, ProcessingRecipe, Request, TileSourceError,
 };
 use crate::default_headers;
@@ -14,7 +14,7 @@ use crate::default_headers;
 mod tile_set;
 mod variable;
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("custom", &[DiscoveryMatch::Any.extract(catalog)])
+pub const SPEC: FormatSpec = FormatSpec::new("custom", &[DiscoveryMatch::Any.extract(catalog)])
     .with_display_name("Custom tiles")
     .recognizing(is_tiles_yaml, "not a tiles.yaml file")
     .preferring(is_tiles_yaml);

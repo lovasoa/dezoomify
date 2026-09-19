@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, DiscoveryRoute, Grid, ImageCatalog,
+    CatalogEntry, DiscoveryError, DiscoveryMatch, DiscoveryRoute, FormatSpec, Grid, ImageCatalog,
     ImageDescriptor, LevelDescriptor, Request,
 };
 
@@ -14,7 +14,7 @@ const INFO_QUERY: &str = "cmd=info";
 
 const ROUTES: &[DiscoveryRoute] = &[DiscoveryMatch::Any.extract(catalog)];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("xlimage", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("xlimage", ROUTES)
     .with_display_name("XLimage")
     .recognizing(is_xlimage_url, "not an XLimage URL")
     .preferring(is_info_url);

@@ -119,7 +119,7 @@ fn ported_flags_are_known() {
     let help_flags: &[&[&str]] = &[
         &["--largest"],
         &["-l"],
-        &["--dezoomer", "auto"],
+        &["--format", "auto"],
         &["-d", "auto"],
         &["--max-height", "800"],
         &["-h", "800"],

@@ -303,25 +303,17 @@ export function parseRawDeepLinkUrl(raw: string): ValidatedDeepLink | null {
   return { sourceUrl: sourceUrl.trim(), hint, version: Number(versionRaw) };
 }
 
-export function extractDeepLinkUrl(payload: Record<string, unknown>): string | null {
-  for (const key of ["url", "sourceUrl", "source_url", "input_url", "inputUrl", "href", "detail"]) {
-    const v = payload[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
-}
-
 // Validate a `dezoomify://deep-link-pending` payload again in the frontend
-// before showing the confirm UI. Accepts the redacted
+// before showing the confirm UI. Accepts exactly the redacted
 // `{source_url, hint, version}` triple emitted by the Rust shell, or a raw
-// `dezoomify://open` URL in legacy shapes. Null means reject (no-op).
+// `dezoomify://open` URL value re-validated strictly below.
+// Null means reject (no-op).
 export function validateDeepLinkPayload(payload: Record<string, unknown>): ValidatedDeepLink | null {
-  const sourceRaw =
-    payload["source_url"] ?? payload["sourceUrl"] ?? extractDeepLinkUrl(payload);
+  const sourceRaw = payload["source_url"];
   if (typeof sourceRaw === "string" && sourceRaw.trim().startsWith("dezoomify://")) {
     return parseRawDeepLinkUrl(sourceRaw);
   }
-  const version = normalizeDeepLinkVersion(payload["version"] ?? payload["v"]);
+  const version = normalizeDeepLinkVersion(payload["version"]);
   if (version === null) return null;
   if (!isValidDeepLinkSource(sourceRaw)) return null;
   const hint = normalizeDeepLinkHint(payload["hint"] ?? null);

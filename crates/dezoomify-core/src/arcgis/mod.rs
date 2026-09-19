@@ -7,11 +7,11 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, floor_index,
+    CatalogEntry, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
+    LevelDescriptor, Request, floor_index,
 };
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new(
+pub const SPEC: FormatSpec = FormatSpec::new(
     "arcgis",
     &[
         DiscoveryMatch::UrlPredicate(is_arcgis_url).map_url(metadata_url),

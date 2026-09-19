@@ -521,5 +521,6 @@ fn job_options_for(inputs: Vec<DiscoveryInput>, config: &dezoomify_engine::Confi
         max_retries: config.max_retries,
         max_bytes: config.max_bytes,
         max_deferred_follows: config.max_deferred_follows,
+        retry_base_delay_ms: config.retry_base_delay_ms,
     }
 }

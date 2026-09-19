@@ -20,7 +20,7 @@ pub struct Args {
     /// CLI-side against the known format list; unknown names fail.
     /// Wired to native `format` (`None`/`auto` auto-detects, named selects
     /// the single program, unknown fails typed).
-    pub dezoomer: String,
+    pub format: String,
     /// Select the largest level. Maps to uncapped width plus the native
     /// largest flag (bulk-implied when no level cap was given).
     pub largest: bool,
@@ -39,11 +39,9 @@ pub struct Args {
     /// Tile retry budget, wired to native `max_retries`. Zero means no
     /// retries and is passed through unchanged.
     pub retries: u32,
-    /// Delay before the first retry, then doubling. Parsed and stored but
-    /// never consulted: retry timing is engine-owned (explicit `WaitForRetry`
-    /// timer effects with exponential backoff plus observed `retry-after`).
-    /// Kept parsing so existing invocations keep working; removal rides with
-    /// the user-doc update.
+    /// Base retry wait, wired to native `retry_base_delay`: attempt `n`
+    /// waits this value doubled `n-1` times (engine backoff ceiling and
+    /// observed `retry-after` still apply).
     pub retry_delay: Duration,
     /// Output compression, 0 is less, 100 is more. Wired to native
     /// `compression`: JPEG quality is `100 - compression`, PNG tiers map
@@ -76,11 +74,6 @@ pub struct Args {
     /// `tile.download-failed` and no output. `--keep-partial` is the
     /// explicit opt-in spelling of the default; last flag wins.
     pub keep_partial: bool,
-    /// Pause v1 demonstration: pause the engine after this many tiles are
-    /// acquired (suspend new scheduling, finish in-flight, retain decoded),
-    /// then resume and complete. Wired to native `pause_after`. `None`
-    /// disables the demonstration.
-    pub pause_after: Option<usize>,
 }
 
 impl Args {
@@ -131,7 +124,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut outfile_option: Option<PathBuf> = None;
     let mut overwrite = false;
     let mut json = false;
-    let mut dezoomer = "auto".to_string();
+    let mut format = "auto".to_string();
     let mut largest = false;
     let mut max_width = None;
     let mut max_height = None;
@@ -151,7 +144,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut tile_cache: Option<PathBuf> = None;
     let mut bulk: Option<String> = None;
     let mut keep_partial = true;
-    let mut pause_after: Option<usize> = None;
     let mut i = 0;
     while i < args.len() {
         let (flag, inline_value) = split_flag_value(&args[i]);
@@ -176,12 +168,12 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 reject_inline_value(flag, inline_value)?;
                 keep_partial = false;
             }
-            "--dezoomer" | "-d" => {
-                let raw = take_value(args, &mut i, inline_value, "--dezoomer")?;
+            "--format" | "-d" => {
+                let raw = take_value(args, &mut i, inline_value, "--format")?;
                 if raw.is_empty() {
-                    return Err("missing value for --dezoomer".to_string());
+                    return Err("missing value for --format".to_string());
                 }
-                dezoomer = raw;
+                format = raw;
             }
             "--largest" | "-l" => {
                 reject_inline_value(flag, inline_value)?;
@@ -305,16 +297,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
                 bulk = Some(raw);
             }
-            "--pause-after" => {
-                let raw = take_value(args, &mut i, inline_value, "--pause-after")?;
-                let count: usize = raw
-                    .parse()
-                    .map_err(|_| format!("invalid --pause-after value: {raw}"))?;
-                if pause_after.is_some() {
-                    return Err("duplicate --pause-after".to_string());
-                }
-                pause_after = Some(count);
-            }
             "--help" | "-?" => return Err(help()),
             "--version" | "-V" => {
                 return Err(format!("dezoomify-cli {APP_VERSION}"));
@@ -350,7 +332,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         return Err("--outfile conflicts with positional <output>".to_string());
     }
     let output = outfile_option.or(positional_output);
-    validate_dezoomer(&dezoomer)?;
+    validate_format(&format)?;
     // Single mode allows a missing output for title-based auto-naming;
     // a missing input prompts when a terminal is present, else prints help.
     // Bulk mode already allows missing positionals.
@@ -359,7 +341,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         output,
         overwrite,
         json,
-        dezoomer,
+        format,
         largest,
         max_width,
         max_height,
@@ -379,7 +361,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         tile_cache,
         bulk,
         keep_partial,
-        pause_after,
     })
 }
 
@@ -430,11 +411,11 @@ fn take_value(
         .ok_or_else(|| format!("missing value for {flag}"))
 }
 
-/// Known `--dezoomer` format names, mirroring the core registry order
+/// Known `--format` names, mirroring the core registry order
 /// (`dezoomify-core/src/core/registry.rs` snapshot). `auto` is the
 /// pseudo-name for automatic detection and is always accepted.
 #[must_use]
-pub fn known_dezoomers() -> &'static [&'static str] {
+pub fn known_formats() -> &'static [&'static str] {
     &[
         "custom",
         "google_arts_and_culture",
@@ -457,23 +438,23 @@ pub fn known_dezoomers() -> &'static [&'static str] {
     ]
 }
 
-/// Validate a `--dezoomer` value: `auto` or a known format (case-insensitive,
+/// Validate a `--format` value: `auto` or a known format (case-insensitive,
 /// matching the core `registry_for`). Unknown names fail with a typed error
 /// listing the expected values; they are rejected outright rather than
 /// silently using auto-detection.
-fn validate_dezoomer(name: &str) -> Result<(), String> {
+fn validate_format(name: &str) -> Result<(), String> {
     if name == "auto" {
         return Ok(());
     }
-    if known_dezoomers()
+    if known_formats()
         .iter()
         .any(|known| known.eq_ignore_ascii_case(name))
     {
         return Ok(());
     }
     Err(format!(
-        "unknown dezoomer '{name}' (expected one of: auto, {})",
-        known_dezoomers().join(", ")
+        "unknown format '{name}' (expected one of: auto, {})",
+        known_formats().join(", ")
     ))
 }
 
@@ -548,16 +529,15 @@ fn help() -> String {
         "options:",
         "  --overwrite                 overwrite an existing output file",
         "  --json                      print machine-readable JSON events on stdout",
-        "  -d, --dezoomer <name>       format to use, or auto to detect (default auto)",
+        "  -d, --format <name>         format to use, or auto to detect (default auto)",
         "  -l, --largest               select the largest level (highest resolution)",
         "  -w, --max-width <px>        largest level whose width fits (positive integer)",
         "  -h, --max-height <px>       largest level whose height fits (positive integer)",
         "  --zoom-level <n>            select level by index, 0 is smallest, too large uses last",
         "  --image-index <n>           select image by index, 0 is first, too large uses last",
-        "  --pause-after <n>           pause after n tiles, then resume (Pause v1 demo)",
         "  -n, --parallelism <n>       max concurrent tile downloads (default 16)",
         "  -r, --retries <n>           tile retry budget, 0 means no retries (default 3)",
-        "  --retry-delay <duration>    accepted but unused (default 2s; retry timing is engine-driven)",
+        "  --retry-delay <duration>    base retry wait, doubling per attempt (default 2s)",
         "  --compression <0-100>       output compression, 0 is less, 100 is more (default 5)",
         "  -H, --header \"Name: value\"  HTTP header for tile requests (repeatable, last wins)",
         "  --max-idle-per-host <n>     max idle connections per host (default 32)",
@@ -759,9 +739,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_dezoomer_largest_height_zoom_parallelism() {
+    fn parses_format_largest_height_zoom_parallelism() {
         let args = parse(&[
-            "-d".to_string(),
+            "--format".to_string(),
             "iiif".to_string(),
             "-l".to_string(),
             "--max-height".to_string(),
@@ -774,7 +754,7 @@ mod tests {
             "out.png".to_string(),
         ])
         .expect("parse new selection flags");
-        assert_eq!(args.dezoomer, "iiif");
+        assert_eq!(args.format, "iiif");
         assert!(args.largest);
         assert_eq!(args.max_height, Some(800));
         assert_eq!(args.zoom_level, Some(2));
@@ -784,27 +764,24 @@ mod tests {
     }
 
     #[test]
-    fn unknown_dezoomer_fails_with_typed_error() {
+    fn unknown_format_fails_with_typed_error() {
         let err = parse(&[
-            "--dezoomer".to_string(),
+            "--format".to_string(),
             "nope".to_string(),
             "https://example.com/x.dzi".to_string(),
             "out.png".to_string(),
         ])
-        .expect_err("unknown dezoomer must fail");
-        assert!(
-            err.contains("unknown dezoomer 'nope'"),
-            "typed error: {err}"
-        );
+        .expect_err("unknown format must fail");
+        assert!(err.contains("unknown format 'nope'"), "typed error: {err}");
         assert!(err.contains("auto"), "lists auto: {err}");
         let ok = parse(&[
-            "--dezoomer".to_string(),
+            "--format".to_string(),
             "IIIF".to_string(),
             "https://example.com/x.dzi".to_string(),
             "out.png".to_string(),
         ])
         .expect("known names validate case-insensitively");
-        assert_eq!(ok.dezoomer, "IIIF");
+        assert_eq!(ok.format, "IIIF");
     }
 
     #[test]
@@ -922,7 +899,7 @@ mod tests {
         assert_eq!(args.connect_timeout, Duration::from_secs(6));
         assert_eq!(args.logging, "info");
         assert_eq!(args.parallelism, 16);
-        assert_eq!(args.dezoomer, "auto");
+        assert_eq!(args.format, "auto");
         assert!(!args.largest);
         assert_eq!(args.max_height, None);
         assert_eq!(args.zoom_level, None);
@@ -1008,49 +985,6 @@ mod tests {
         assert_eq!(args.input.as_deref(), Some("https://example.com/x.dzi"));
         assert_eq!(args.output, None);
         assert_eq!(args.bulk_output_file(), None);
-    }
-
-    #[test]
-    fn pause_after_parses_and_rejects_bad_values() {
-        let args = parse(&[
-            "--pause-after".to_string(),
-            "2".to_string(),
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect("pause-after parses");
-        assert_eq!(args.pause_after, Some(2));
-        let inline = parse(&[
-            "--pause-after=0".to_string(),
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect("inline pause-after parses");
-        assert_eq!(inline.pause_after, Some(0));
-        let err = parse(&[
-            "--pause-after".to_string(),
-            "nope".to_string(),
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect_err("bad pause-after must fail");
-        assert!(err.contains("invalid --pause-after"), "typed error: {err}");
-        let dup = parse(&[
-            "--pause-after".to_string(),
-            "1".to_string(),
-            "--pause-after".to_string(),
-            "2".to_string(),
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect_err("duplicate pause-after must fail");
-        assert!(dup.contains("duplicate --pause-after"), "duplicate: {dup}");
-        let defaults = parse(&[
-            "https://example.com/x.dzi".to_string(),
-            "out.png".to_string(),
-        ])
-        .expect("defaults");
-        assert_eq!(defaults.pause_after, None);
     }
 
     #[test]

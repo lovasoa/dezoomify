@@ -7,15 +7,15 @@ use quick_xml::reader::Reader;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, floor_index, resolve_url_template,
+    CatalogEntry, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
+    LevelDescriptor, Request, floor_index, resolve_url_template,
 };
 
 const RADIUS: f64 = 6_378_137.0;
 const HALF_SIZE: f64 = std::f64::consts::PI * RADIUS;
 const METRES_PER_PIXEL: f64 = 0.28e-3;
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("wmts", &[DiscoveryMatch::Any.extract(catalog)])
+pub const SPEC: FormatSpec = FormatSpec::new("wmts", &[DiscoveryMatch::Any.extract(catalog)])
     .with_display_name("WMTS")
     .recognizing(is_wmts_url, "not a WMTS capabilities URL")
     .preferring(|uri| uri.to_ascii_lowercase().contains("wmts"));

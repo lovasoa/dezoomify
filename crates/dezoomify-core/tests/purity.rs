@@ -15,7 +15,7 @@ use std::process::Command;
 
 /// Runtime crates that must never appear in this crate's dependency graph.
 /// `log` is a zero-dependency facade (no runtime, no I/O) and is explicitly allowed
-/// so dezoomers can emit debug diagnostics when the host initializes a logger.
+/// so formats can emit debug diagnostics when the host initializes a logger.
 const BANNED: &[&str] = &[
     "reqwest",
     "tokio",

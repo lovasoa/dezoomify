@@ -59,6 +59,10 @@ pub struct Config {
     pub max_bytes: u64,
     /// Maximum same-job deferred catalog follows (0 disables following).
     pub max_deferred_follows: u32,
+    /// Base retry wait in milliseconds: attempt `n` waits this value doubled
+    /// `n-1` times (capped by the backoff ceiling); an observed `retry-after`
+    /// still overrides upward. Zero retries immediately.
+    pub retry_base_delay_ms: u64,
 }
 
 impl Default for Config {
@@ -71,6 +75,7 @@ impl Default for Config {
             max_buffers: 16,
             max_bytes: 67_108_864,
             max_deferred_follows: 8,
+            retry_base_delay_ms: crate::retry::RETRY_BASE_DELAY_MS,
         }
     }
 }
@@ -151,6 +156,16 @@ impl Config {
             return Err(ConfigError::new(
                 "job.resource-limit",
                 format!("max_bytes {} out of range", self.max_bytes),
+            ));
+        }
+        if self.retry_base_delay_ms > crate::retry::MAX_RETRY_AFTER_MS {
+            return Err(ConfigError::new(
+                "job.resource-limit",
+                format!(
+                    "retry_base_delay_ms {} exceeds {}",
+                    self.retry_base_delay_ms,
+                    crate::retry::MAX_RETRY_AFTER_MS
+                ),
             ));
         }
         if self.max_concurrent_fetches > self.max_tiles {

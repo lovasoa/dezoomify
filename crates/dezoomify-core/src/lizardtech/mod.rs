@@ -7,8 +7,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request, image_title,
+    CatalogEntry, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
+    LevelDescriptor, Request, image_title,
 };
 
 static SERVER_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -29,11 +29,10 @@ static ATTRIBUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("constant XML attribute pattern")
 });
 
-pub const SPEC: DezoomerSpec =
-    DezoomerSpec::new("lizardtech", &[DiscoveryMatch::Any.extract(catalog)])
-        .with_display_name("LizardTech ImageServer")
-        .recognizing(is_lizardtech_url, "not a LizardTech ImageServer URL")
-        .preferring(|uri| uri.to_ascii_lowercase().contains("/lizardtech/iserv/"));
+pub const SPEC: FormatSpec = FormatSpec::new("lizardtech", &[DiscoveryMatch::Any.extract(catalog)])
+    .with_display_name("LizardTech ImageServer")
+    .recognizing(is_lizardtech_url, "not a LizardTech ImageServer URL")
+    .preferring(|uri| uri.to_ascii_lowercase().contains("/lizardtech/iserv/"));
 
 fn is_lizardtech_url(uri: &str) -> bool {
     uri.to_ascii_lowercase().contains("/lizardtech/iserv/")

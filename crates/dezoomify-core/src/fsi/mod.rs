@@ -6,8 +6,8 @@ use regex::Regex;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryContext, DiscoveryError, DiscoveryMatch,
-    DiscoveryResource, DiscoveryRoute, DiscoveryStep, Grid, ImageCatalog, ImageDescriptor,
+    CatalogEntry, DiscoveryContext, DiscoveryError, DiscoveryMatch, DiscoveryResource,
+    DiscoveryRoute, DiscoveryStep, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
     LevelDescriptor, Request, image_title, resolve_relative,
 };
 
@@ -30,7 +30,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     DiscoveryMatch::Any.extract(catalog),
 ];
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new("fsi", ROUTES)
+pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES)
     .with_display_name("FSI")
     .preferring(is_server_url);
 

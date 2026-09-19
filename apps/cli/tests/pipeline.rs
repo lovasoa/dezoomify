@@ -325,7 +325,7 @@ fn cli_full_flags_produce_golden_output() {
         .arg("3s")
         .arg("--logging")
         .arg("info")
-        .arg("--dezoomer")
+        .arg("--format")
         .arg("auto")
         .arg("--parallelism")
         .arg("8")
@@ -378,7 +378,7 @@ fn cli_full_flags_produce_golden_output() {
 
 #[test]
 fn cli_selection_gaps_are_real_no_warnings() {
-    // `--dezoomer <named>`, `--logging <non-info>`, and `--retries 0` are
+    // `--format <named>`, `--logging <non-info>`, and `--retries 0` are
     // real: validated/passed through with zero warnings. The fetch still
     // succeeds and hashes to the cli-dzi golden (`deepzoom` is the named
     // program that parses the pyramid DZI; `iiif` would fail typed).
@@ -387,7 +387,7 @@ fn cli_selection_gaps_are_real_no_warnings() {
     let out_dir = temp_dir("e2e-no-fallback-warnings");
     let output = out_dir.join("real.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
-        .arg("--dezoomer")
+        .arg("--format")
         .arg("deepzoom")
         .arg("--logging")
         .arg("debug")
@@ -410,7 +410,7 @@ fn cli_selection_gaps_are_real_no_warnings() {
     );
     assert!(
         !stderr.contains("auto-detecting instead"),
-        "dezoomer no longer falls back with a warning: {stderr}"
+        "format no longer falls back with a warning: {stderr}"
     );
     assert!(
         !stderr.contains("no refetch"),
@@ -550,20 +550,20 @@ fn cli_invalid_logging_fails_with_typed_error() {
 }
 
 #[test]
-fn cli_unknown_dezoomer_fails_with_typed_error() {
-    let out_dir = temp_dir("e2e-unknown-dezoomer");
+fn cli_unknown_format_fails_with_typed_error() {
+    let out_dir = temp_dir("e2e-unknown-format");
     let output = out_dir.join("out.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
-        .arg("--dezoomer")
+        .arg("--format")
         .arg("nope")
         .arg("https://fixtures.test/cli/pyramid.dzi")
         .arg(&output)
         .output()
         .expect("run cli");
-    assert_eq!(run.status.code(), Some(2), "unknown dezoomer must exit 2");
+    assert_eq!(run.status.code(), Some(2), "unknown format must exit 2");
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("unknown dezoomer 'nope'"),
+        stderr.contains("unknown format 'nope'"),
         "typed error: {stderr}"
     );
     assert!(
@@ -684,15 +684,15 @@ fn cli_no_partial_discards_output() {
 }
 
 #[test]
-fn cli_named_dezoomer_mismatch_fails_instead_of_detecting() {
-    // A known but wrong `--dezoomer` selects the single program and fails
+fn cli_named_format_mismatch_fails_instead_of_detecting() {
+    // A known but wrong `--format` selects the single program and fails
     // typed instead of falling back to auto-detection.
     let origin = start_fixture_server();
     let input = format!("{origin}/fetch?url=https://fixtures.test/cli/pyramid.dzi");
-    let out_dir = temp_dir("e2e-dezoomer-mismatch");
+    let out_dir = temp_dir("e2e-format-mismatch");
     let output = out_dir.join("mismatch.png");
     let run = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
-        .arg("--dezoomer")
+        .arg("--format")
         .arg("iiif")
         .arg(&input)
         .arg(&output)
@@ -700,7 +700,7 @@ fn cli_named_dezoomer_mismatch_fails_instead_of_detecting() {
         .expect("run cli");
     assert!(
         !run.status.success(),
-        "mismatched dezoomer must fail: stderr={:?}",
+        "mismatched format must fail: stderr={:?}",
         String::from_utf8_lossy(&run.stderr),
     );
     assert!(!output.exists(), "failed jobs write no output");

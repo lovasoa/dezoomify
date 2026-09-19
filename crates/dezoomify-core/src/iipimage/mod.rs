@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use crate::Vec2d;
 use crate::core::{
-    CatalogEntry, DezoomerSpec, DiscoveryError, DiscoveryMatch, Grid, ImageCatalog,
-    ImageDescriptor, LevelDescriptor, Request,
+    CatalogEntry, DiscoveryError, DiscoveryMatch, FormatSpec, Grid, ImageCatalog, ImageDescriptor,
+    LevelDescriptor, Request,
 };
 
 const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
 
-pub const SPEC: DezoomerSpec = DezoomerSpec::new(
+pub const SPEC: FormatSpec = FormatSpec::new(
     "iipimage",
     &[
         DiscoveryMatch::UrlPredicate(needs_metadata).map_url(metadata_url),
