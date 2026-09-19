@@ -71,7 +71,7 @@ fn serve_counted(
                     .and_then(|line| line.split_whitespace().nth(1))
                     .unwrap_or("/")
                     .to_string();
-                counts
+counts
                     .lock()
                     .expect("lock")
                     .entry(path.clone())
@@ -130,7 +130,7 @@ fn serve_counted_with_tile_delay(
                 if path.contains("/pyr_files/") {
                     std::thread::sleep(tile_delay);
                 }
-                counts
+counts
                     .lock()
                     .expect("lock")
                     .entry(path.clone())
@@ -186,6 +186,10 @@ fn engine_snapshots_forward_verbatim_with_monotonic_revisions() {
     let job = NativeRunner::start(JobOptions {
         input_url: format!("{base}/pyr.dzi"),
         output: OutputTarget::File(output.clone()),
+        // Hermetic tile cache: the shared default on-disk cache plus
+        // ephemeral-port reuse lets stale entries from earlier runs leak
+        // into exact-count assertions. Each test owns a wiped cache dir.
+        cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     })
     .expect("runner starts");
@@ -289,6 +293,9 @@ fn bounded_concurrency_and_memory_accounting() {
     let config = PipelineConfig {
         max_concurrent: 2,
         partial_policy: PartialPolicy::Fail,
+        // Hermetic tile cache: never share the default on-disk cache
+        // between loopback tests (see verbatim test).
+        cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     };
     let outcome = dezoomify_native::pipeline::run(
@@ -362,6 +369,9 @@ fn partial_retry_preserves_good_tiles() {
         // Generous transient budget so the tile is still retrying when the
         // partial decision arrives; the Retry requeues with a fresh budget.
         max_retries: 1,
+        // Hermetic tile cache: see above (ephemeral-port reuse + shared
+        // default cache leaks stale entries into exact-count assertions).
+        cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     })
     .expect("runner starts");
@@ -445,6 +455,9 @@ fn decode_inflight_bytes_are_bounded_and_accounted() {
     let config = PipelineConfig {
         max_concurrent: 2,
         partial_policy: PartialPolicy::Fail,
+        // Hermetic tile cache: never share the default on-disk cache
+        // between loopback tests (see verbatim test).
+        cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     };
     let outcome = dezoomify_native::pipeline::run(
@@ -505,6 +518,8 @@ fn cancel_during_acquisition_quiesces_without_publication() {
         output: OutputTarget::File(output.clone()),
         overwrite: true,
         max_concurrent: 4,
+        // Hermetic tile cache: see verbatim test.
+        cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     })
     .expect("runner starts");
@@ -520,7 +535,8 @@ fn cancel_during_acquisition_quiesces_without_publication() {
         }
         assert!(
             snapshot.snapshot.terminal.is_none(),
-            "no terminal before acquisition"
+            "no terminal before the decision, got {:?}",
+            snapshot.snapshot.terminal
         );
     }
     let _ = job.send(dezoomify_native::UserCommand::Cancel);
@@ -575,6 +591,10 @@ fn stale_partial_answer_is_engine_rejected_not_consumed() {
     let job = NativeRunner::start(JobOptions {
         input_url: format!("{base}/pyr.dzi"),
         output: OutputTarget::File(output.clone()),
+        // Hermetic tile cache: the shared default on-disk cache plus
+        // ephemeral-port reuse lets stale entries from earlier runs leak
+        // into exact-count assertions. Each test owns a wiped cache dir.
+        cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     })
     .expect("runner starts");
@@ -590,7 +610,8 @@ fn stale_partial_answer_is_engine_rejected_not_consumed() {
         }
         assert!(
             snapshot.snapshot.terminal.is_none(),
-            "no terminal before the decision"
+            "no terminal before the decision, got {:?}",
+            snapshot.snapshot.terminal
         );
     };
     let _ = job.send(dezoomify_native::UserCommand::AnswerPartial {
@@ -649,6 +670,8 @@ fn cancel_publication_race_orders_commit_or_nothing() {
         input_url: format!("{base}/pyr.dzi"),
         output: OutputTarget::File(output.clone()),
         overwrite: true,
+        // Hermetic tile cache: see verbatim test.
+        cache_dir: Some(work.join("tile-cache")),
         ..Default::default()
     })
     .expect("runner starts");
@@ -663,7 +686,8 @@ fn cancel_publication_race_orders_commit_or_nothing() {
         }
         assert!(
             snapshot.snapshot.terminal.is_none(),
-            "no terminal before the decision"
+            "no terminal before the decision, got {:?}",
+            snapshot.snapshot.terminal
         );
     }
     let _ = job.send(dezoomify_native::UserCommand::Cancel);
