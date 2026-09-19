@@ -171,7 +171,7 @@ test("401/403 classified without automatic handoff", async () => {
         assert.equal(error.status, status);
         assert.deepEqual(error.hosts, ["https://a.example"]);
         const failure = asFetchFailure(error);
-        assert.equal(failure.code, "extension.forbidden");
+        assert.equal(failure.code, "TRANSPORT_HTTP_ERROR");
         assert.equal(failure.blocked_reason, "forbidden");
         assert.equal(failure.retryable, false);
         assert.equal(failure.http, status);
@@ -196,7 +196,7 @@ test("429 preserves HTTP status and Retry-After for engine retry scheduling", as
     () => f.fetchResource("https://a.example/tile.jpg", { userIntent: true, purpose: "tile" }),
     (error) => {
       const failure = asFetchFailure(error);
-      assert.equal(failure.code, "extension.throttled");
+      assert.equal(failure.code, "TRANSPORT_HTTP_ERROR");
       assert.equal(failure.retryable, true);
       assert.equal(failure.http, 429);
       assert.equal(failure.retry_after_ms, 3000);
