@@ -86,6 +86,37 @@ fn typed_fetch_error_requires_and_preserves_context() {
 }
 
 #[test]
+fn rejected_empty_metadata_body_keeps_the_effect_answerable() {
+    let mut session = session();
+    let messages = start_messages(&mut session);
+    let request = messages
+        .iter()
+        .find_map(|message| match message {
+            HostEffect::AcquireResource { request } => Some(request.id),
+            _ => None,
+        })
+        .expect("discovery request");
+
+    let error = session
+        .complete(HostCompletion::ProvideResource {
+            request,
+            bytes: Vec::new(),
+            final_uri: None,
+        })
+        .unwrap_err();
+    assert_eq!(error.code(), dezoomify_wasm::AdapterErrorCode::WrongState);
+
+    let (_messages, snapshot) = session
+        .complete(HostCompletion::ProvideResource {
+            request,
+            bytes: DZI.to_vec(),
+            final_uri: None,
+        })
+        .expect("the same outstanding effect accepts the retry body");
+    assert_eq!(snapshot.lifecycle, JobState::AwaitingImageSelection);
+}
+
+#[test]
 fn typed_config_budgets_are_validated_by_the_engine() {
     let mut session = Session::new(SessionConfig {
         max_tiles: std::num::NonZeroU32::new(u32::MAX),
