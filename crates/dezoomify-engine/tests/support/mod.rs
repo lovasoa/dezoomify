@@ -1,8 +1,8 @@
 //! Scripted deterministic host for job workflow tests.
 //!
-//! The host drives [`EngineJob`] through the canonical API and collects a
-//! transcript of `state:` / `effect:` / `event:` strings in deterministic
-//! order. It performs no I/O, clock reads, or randomness during execution.
+//! The host drives [`EngineJob`] through the canonical API and records the
+//! issued effects plus the derived events in deterministic order. It
+//! performs no I/O, clock reads, or randomness during execution.
 //!
 //! Scripted inputs mirror the historical engine command shapes
 //! ([`JobCommand`]) so workflow tests read as engine scenarios; effect
@@ -13,8 +13,8 @@
 
 use dezoomify_engine::{
     DiscoveryInput, Effect, EffectId, EffectResult, EngineError, EngineJob, Failure, JobOptions,
-    Lifecycle, OutputDisposition, PartialDecision, ResponseMetadata, SelectionPolicy, Terminal,
-    Update, UserCommand,
+    OutputDisposition, PartialDecision, ResponseMetadata, SelectionPolicy, Terminal, Update,
+    UserCommand,
 };
 use dezoomify_protocol::dto::ProbeOutcome;
 use std::collections::{HashMap, HashSet};
@@ -94,14 +94,14 @@ pub use dezoomify_engine::PartialDecision as RecoveryChoice;
 pub struct ScriptedHost {
     job: Option<EngineJob>,
     pending_options: Option<JobOptions>,
-    transcript: Vec<String>,
-    /// Raw effect objects in arrival order (for id extraction in tests).
+    /// Effect objects in arrival order (for id extraction in tests).
     pub effects: Vec<serde_json::Value>,
-    /// Raw event objects in arrival order (for id extraction in tests).
+    /// Event objects in arrival order (for id extraction in tests).
     pub events: Vec<serde_json::Value>,
-    /// Support-side transcript seq (record order; deterministic and sorted).
+    /// Record seq (arrival order; deterministic and sorted).
     next_seq: u64,
-    last_state: String,
+    /// Last recorded lifecycle name.
+    emitted_lifecycle: Option<String>,
     /// Live tile effect per tile ordinal (latest attempt wins).
     tile_effects_live: HashMap<u32, EffectId>,
     /// Live probe effect per tile ordinal.
@@ -112,8 +112,6 @@ pub struct ScriptedHost {
     metadata_effects_live: HashMap<u32, EffectId>,
     /// Every tile ordinal ever issued (for never-seen rejection).
     seen_tiles: HashSet<u32>,
-    /// Every metadata request id ever issued.
-    seen_metadata: HashSet<u32>,
     /// Live finalize effect id.
     finalize_effect_live: Option<EffectId>,
     /// Live decision generations.
@@ -164,17 +162,15 @@ impl ScriptedHost {
         let mut host = Self {
             job: None,
             pending_options: None,
-            transcript: Vec::new(),
             effects: Vec::new(),
             events: Vec::new(),
             next_seq: 0,
-            last_state: "Created".to_string(),
+            emitted_lifecycle: None,
             tile_effects_live: HashMap::new(),
             probe_effects_live: HashMap::new(),
             timer_effects_live: HashMap::new(),
             metadata_effects_live: HashMap::new(),
             seen_tiles: HashSet::new(),
-            seen_metadata: HashSet::new(),
             finalize_effect_live: None,
             decision_live: None,
             outstanding: HashMap::new(),
@@ -185,12 +181,11 @@ impl ScriptedHost {
             emitted_notice_keys: Vec::new(),
             emitted_terminal: false,
         };
-        host.transcript.push("state:Created".to_string());
         host.pending_options = Some(options);
         Ok(host)
     }
 
-    /// Start the job and record resulting effects/events/state.
+    /// Start the job and record resulting effects/events.
     ///
     /// # Errors
     ///
@@ -213,14 +208,12 @@ impl ScriptedHost {
         let revision_before = self.snapshot_revision();
         let effects_before = self.effects.len();
         let events_before = self.events.len();
-        let transcript_before = self.transcript.len();
         let result = self.apply_inner(response);
         if result.is_err() {
-            // Rejections must not add work: no new effects, events, or
-            // transcript lines, and the snapshot revision is unchanged.
+            // Rejections must not add work: no new effects or events, and
+            // the snapshot revision is unchanged.
             debug_assert_eq!(self.effects.len(), effects_before);
             debug_assert_eq!(self.events.len(), events_before);
-            debug_assert_eq!(self.transcript.len(), transcript_before);
             debug_assert_eq!(self.snapshot_revision(), revision_before);
         }
         result
@@ -432,18 +425,19 @@ impl ScriptedHost {
         }
     }
 
-    /// Ordered transcript of `state:` / `effect:` / `event:` entries.
+    /// Recorded activity count (effects plus events): the change detector
+    /// for tolerated no-ops.
     #[must_use]
-    pub fn transcript(&self) -> &[String] {
-        &self.transcript
+    pub fn activity_len(&self) -> usize {
+        self.effects.len() + self.events.len()
     }
 
-    /// Current job state name.
+    /// Current job lifecycle name.
     #[must_use]
     pub fn state(&self) -> String {
         self.job
             .as_ref()
-            .map(|job| lifecycle_name(job.snapshot().lifecycle))
+            .map(|job| format!("{:?}", job.snapshot().lifecycle))
             .unwrap_or_else(|| "Created".to_string())
     }
 
@@ -541,24 +535,44 @@ impl ScriptedHost {
         self.outstanding.len()
     }
 
-    /// Count terminal events in the transcript (must be 0 or 1).
+    /// Whether a `job-state` event for one lifecycle phase was recorded.
     #[must_use]
-    pub fn terminal_count(&self) -> usize {
-        self.transcript
-            .iter()
-            .filter(|line| {
-                line.starts_with("event:completed:")
-                    || line.starts_with("event:partial-completed:")
-                    || line.starts_with("event:failed:")
-                    || line.starts_with("event:cancelled:")
-            })
-            .count()
+    pub fn has_state_event(&self, phase: &str) -> bool {
+        self.events.iter().any(|event| {
+            event.get("kind").and_then(serde_json::Value::as_str) == Some("job-state")
+                && event.get("state").and_then(serde_json::Value::as_str) == Some(phase)
+        })
     }
 
-    /// Canonical JSON array of the transcript (pretty, LF ending).
+    /// Whether an event of one kind was recorded.
     #[must_use]
-    pub fn canonical_json(&self) -> String {
-        serde_json::to_string_pretty(&self.transcript).unwrap_or_else(|_| "[]".to_string()) + "\n"
+    pub fn has_event(&self, kind: &str) -> bool {
+        self.events
+            .iter()
+            .any(|event| event.get("kind").and_then(serde_json::Value::as_str) == Some(kind))
+    }
+
+    /// Failed events in arrival order.
+    #[must_use]
+    pub fn failed_events(&self) -> Vec<&serde_json::Value> {
+        self.events
+            .iter()
+            .filter(|event| event.get("kind").and_then(serde_json::Value::as_str) == Some("failed"))
+            .collect()
+    }
+
+    /// Count terminal events (must be 0 or 1).
+    #[must_use]
+    pub fn terminal_count(&self) -> usize {
+        self.events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.get("kind").and_then(serde_json::Value::as_str),
+                    Some("completed" | "partial-completed" | "failed" | "cancelled")
+                )
+            })
+            .count()
     }
 
     /// Positions of the first catalog image and its levels.
@@ -670,10 +684,9 @@ impl ScriptedHost {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            self.outstanding.insert(id, kind.clone());
+            self.outstanding.insert(id, kind);
             match effect {
                 Effect::AcquireMetadata { .. } => {
-                    self.seen_metadata.insert(id.get());
                     self.metadata_effects_live.insert(id.get(), id);
                 }
                 Effect::AcquireTile { tile, probe, .. } => {
@@ -695,18 +708,15 @@ impl ScriptedHost {
                 }
                 Effect::CancelRelease { .. } => {}
             }
-            self.transcript.push(format_effect(&value).1);
             self.effects.push(value);
         }
         let snapshot = &update.snapshot;
         // Lifecycle moves.
-        let state = lifecycle_name(snapshot.lifecycle);
-        if state != self.last_state {
-            self.last_state = state.clone();
-            self.transcript.push(format!("state:{state}"));
+        let state = format!("{:?}", snapshot.lifecycle);
+        if Some(state.clone()) != self.emitted_lifecycle {
+            self.emitted_lifecycle = Some(state.clone());
             let value =
                 serde_json::json!({"kind":"job-state","seq":self.claim_seq(),"state":state});
-            self.transcript.push(format_event(&value).1);
             self.events.push(value);
         }
         // The kept catalog (re-emitted when a deferred follow replaces it).
@@ -716,7 +726,6 @@ impl ScriptedHost {
                 self.emitted_catalog = Some(entries.clone());
                 let value =
                     serde_json::json!({"kind":"catalog","seq":self.claim_seq(),"entries":entries});
-                self.transcript.push(format_event(&value).1);
                 self.events.push(value);
             }
         }
@@ -728,7 +737,6 @@ impl ScriptedHost {
                 "kind":"progress","seq":self.claim_seq(),
                 "acquired":progress.0,"total":progress.1.unwrap_or(0),
             });
-            self.transcript.push(format_event(&value).1);
             self.events.push(value);
         }
         // Pause overlay transitions.
@@ -736,7 +744,6 @@ impl ScriptedHost {
             self.emitted_paused = snapshot.paused;
             let kind = if snapshot.paused { "paused" } else { "resumed" };
             let value = serde_json::json!({"kind":kind,"seq":self.claim_seq()});
-            self.transcript.push(format_event(&value).1);
             self.events.push(value);
         }
         // Outstanding partial decision: one cue per generation.
@@ -747,7 +754,6 @@ impl ScriptedHost {
                     "kind":"recovery-requested","seq":self.claim_seq(),
                     "generation":decision.generation,
                 });
-                self.transcript.push(format_event(&value).1);
                 self.events.push(value);
             }
         }
@@ -772,7 +778,6 @@ impl ScriptedHost {
                     "kind":"missing-work","seq":self.claim_seq(),"failed":notice.missing,
                 })
             };
-            self.transcript.push(format_event(&value).1);
             self.events.push(value);
         }
         // Terminal outcome last: exactly one terminal render.
@@ -793,7 +798,6 @@ impl ScriptedHost {
                         serde_json::json!({"kind":"cancelled","seq":self.claim_seq()})
                     }
                 };
-                self.transcript.push(format_event(&value).1);
                 self.events.push(value);
             }
         }
@@ -821,24 +825,6 @@ fn job_options_for(inputs: Vec<DiscoveryInput>, config: &dezoomify_engine::Confi
         max_bytes: config.max_bytes,
         max_deferred_follows: config.max_deferred_follows,
     }
-}
-
-fn lifecycle_name(lifecycle: Lifecycle) -> String {
-    match lifecycle {
-        Lifecycle::Created => "Created",
-        Lifecycle::Discovering => "Discovering",
-        Lifecycle::AwaitingImageSelection => "AwaitingImageSelection",
-        Lifecycle::AwaitingLevelSelection => "AwaitingLevelSelection",
-        Lifecycle::Planning => "Planning",
-        Lifecycle::AcquiringTiles => "AcquiringTiles",
-        Lifecycle::AwaitingPartialDecision => "AwaitingPartialDecision",
-        Lifecycle::Finalizing => "Finalizing",
-        Lifecycle::Completed => "Completed",
-        Lifecycle::PartiallyCompleted => "PartiallyCompleted",
-        Lifecycle::Failed => "Failed",
-        Lifecycle::Cancelled => "Cancelled",
-    }
-    .to_string()
 }
 
 fn effect_json(seq: u64, effect: &Effect) -> serde_json::Value {
@@ -904,77 +890,4 @@ fn effect_json(seq: u64, effect: &Effect) -> serde_json::Value {
             "kind":"request-decision","seq":seq,"generation":generation,
         }),
     }
-}
-
-fn seq_of(value: &serde_json::Value) -> u64 {
-    value
-        .get("seq")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(u64::MAX)
-}
-
-fn str_field(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
-}
-
-fn format_effect(value: &serde_json::Value) -> (u64, String) {
-    let seq = seq_of(value);
-    let kind = str_field(value, "kind").unwrap_or_else(|| "-".to_string());
-    let corr = match kind.as_str() {
-        "acquire-resource" => str_field(value, "request"),
-        "acquire-tile" | "wait-retry" => str_field(value, "tile"),
-        "request-decision" => str_field(value, "generation"),
-        _ => None,
-    }
-    .unwrap_or_else(|| "-".to_string());
-    (seq, format!("effect:{kind}:{corr}:seq:{seq}"))
-}
-
-fn format_event(value: &serde_json::Value) -> (u64, String) {
-    let seq = seq_of(value);
-    let kind = str_field(value, "kind").unwrap_or_else(|| "-".to_string());
-    let detail = match kind.as_str() {
-        "job-state" => str_field(value, "state"),
-        "catalog" => value
-            .get("entries")
-            .and_then(|entries| entries.as_array())
-            .and_then(|entries| entries.first())
-            .and_then(|first| first.get("id"))
-            .and_then(|id| id.as_str())
-            .map(ToString::to_string),
-        "progress" => {
-            let acquired = value
-                .get("acquired")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let total = value
-                .get("total")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            Some(format!("{acquired}/{total}"))
-        }
-        "warning" => match (str_field(value, "tile"), value.get("attempt")) {
-            (Some(tile), Some(attempt)) => Some(format!("{tile}#{attempt}")),
-            (Some(tile), None) => Some(tile),
-            _ => None,
-        },
-        "recovery-requested" => str_field(value, "reason"),
-        "missing-work" => value.get("failed").and_then(|failed| {
-            failed.as_array().map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            })
-        }),
-        "completed" | "partial-completed" => str_field(value, "output"),
-        "failed" => str_field(value, "code"),
-        _ => None,
-    }
-    .unwrap_or_else(|| "-".to_string());
-    (seq, format!("event:{kind}:{detail}:seq:{seq}"))
 }

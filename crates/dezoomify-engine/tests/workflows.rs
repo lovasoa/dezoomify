@@ -102,15 +102,12 @@ fn discover_success_minimal() {
             && effect.get("purpose").and_then(serde_json::Value::as_str) == Some("metadata")
     }));
 
-    let transcript = host.transcript();
     for phase in ["Discovering", "AwaitingImageSelection"] {
-        let prefix = format!("event:job-state:{phase}:seq:");
         assert!(
-            transcript.iter().any(|line| line.starts_with(&prefix)),
-            "missing job-state event for {phase}: {transcript:?}"
+            host.has_state_event(phase),
+            "missing job-state event for {phase}"
         );
     }
-    assert!(seqs_are_sorted(transcript));
 }
 
 #[test]
@@ -200,28 +197,18 @@ fn successful_finalization_completes() {
     assert_eq!(host.terminal_count(), 1);
     assert_eq!(host.terminal_kind().as_deref(), Some("completed"));
 
-    let transcript = host.transcript();
     // Planning never settles in a snapshot on the direct path (level
     // selection resolves the plan within one answer); the settled phases
     // plus the issued tile effects prove the plan ran.
     for phase in ["AcquiringTiles", "Finalizing", "Completed"] {
-        let prefix = format!("event:job-state:{phase}:seq:");
         assert!(
-            transcript.iter().any(|line| line.starts_with(&prefix)),
-            "missing job-state event for {phase}: {transcript:?}"
+            host.has_state_event(phase),
+            "missing job-state event for {phase}"
         );
     }
-    assert!(transcript.contains(&"state:AcquiringTiles".to_string()));
-    assert!(transcript.contains(&"state:Completed".to_string()));
-    assert_eq!(
-        transcript
-            .iter()
-            .filter(|line| line.starts_with("event:completed:"))
-            .count(),
-        1
-    );
-    assert!(seqs_are_sorted(transcript));
-    assert!(transcript.len() >= 20);
+    assert_eq!(host.state(), "Completed");
+    assert_eq!(host.terminal_count(), 1);
+    assert!(host.activity_len() >= 20);
     // Progress reported the real plan size.
     assert!(host.events.iter().any(|event| {
         event.get("kind").and_then(serde_json::Value::as_str) == Some("progress")
@@ -319,23 +306,20 @@ fn cancel_in_acquiring_tiles_ignores_late_response() {
     assert_eq!(host.state(), "Cancelled");
     assert_eq!(host.terminal_count(), 1);
 
-    let len_after_cancel = host.transcript().len();
+    let len_after_cancel = host.activity_len();
     // Late tile outcome after cancellation is stably rejected with no work.
     let late = host.apply(JobCommand::TileAcquired { tile: tiles[1] });
     assert!(late.is_err());
     assert_eq!(late.unwrap_err().code, "job.post-terminal");
     assert_eq!(host.state(), "Cancelled");
-    assert_eq!(host.transcript().len(), len_after_cancel);
+    assert_eq!(host.activity_len(), len_after_cancel);
     assert_eq!(host.terminal_count(), 1);
     // The facade settles cancellation synchronously: no transient
     // Cancelling snapshot exists, only the Cancelled terminal.
     assert!(
-        host.transcript()
-            .iter()
-            .any(|line| line.starts_with("event:job-state:Cancelled:seq:")),
+        host.has_state_event("Cancelled"),
         "missing job-state event for Cancelled"
     );
-    assert!(host.transcript().contains(&"state:Cancelled".to_string()));
 }
 
 #[test]
@@ -479,18 +463,6 @@ fn discovery_poll_emits_one_effect_per_outstanding_request() {
     assert_eq!(host.state(), "Discovering");
 }
 
-fn seqs_are_sorted(transcript: &[String]) -> bool {
-    let seqs: Vec<u64> = transcript
-        .iter()
-        .filter_map(|line| line.rsplit(":seq:").next())
-        .filter_map(|suffix| suffix.split(':').next())
-        .filter_map(|num| num.parse::<u64>().ok())
-        .collect();
-    let mut sorted = seqs.clone();
-    sorted.sort_unstable();
-    seqs == sorted
-}
-
 #[test]
 fn pause_suspends_new_tiles_and_resume_redrives() {
     // Pause (suspend-acquisition): pause stops scheduling new tiles,
@@ -511,14 +483,11 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     host.apply(JobCommand::Pause).unwrap();
     assert!(host.is_paused());
     assert_eq!(host.effects.len(), effects_before);
-    assert!(host
-        .transcript()
-        .iter()
-        .any(|line| line.starts_with("event:paused:")));
+    assert!(host.has_event("paused"));
     // Duplicate pause issues no new work.
-    let len = host.transcript().len();
+    let len = host.activity_len();
     host.apply(JobCommand::Pause).unwrap();
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
     // In-flight tile finishes while paused: progress is recorded, but no new
     // tile is scheduled and completion is deferred.
     host.apply(JobCommand::TileAcquired { tile: planned[0] })
@@ -530,10 +499,7 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     // Resume re-drives the pending queue in FIFO order.
     host.apply(JobCommand::Resume).unwrap();
     assert!(!host.is_paused());
-    assert!(host
-        .transcript()
-        .iter()
-        .any(|line| line.starts_with("event:resumed:")));
+    assert!(host.has_event("resumed"));
     // Finish the rest: the job completes with exactly one terminal.
     for tile in planned.iter().skip(1) {
         host.apply(JobCommand::TileAcquired { tile: *tile })
@@ -542,7 +508,6 @@ fn pause_suspends_new_tiles_and_resume_redrives() {
     host.apply(JobCommand::FinalizationSucceeded).unwrap();
     assert_eq!(host.state(), "Completed");
     assert_eq!(host.terminal_count(), 1);
-    assert!(seqs_are_sorted(host.transcript()));
 }
 
 #[test]

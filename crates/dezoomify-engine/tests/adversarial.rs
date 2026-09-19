@@ -23,7 +23,7 @@ fn duplicate_response_is_ignored() {
         final_uri: None,
     })
     .unwrap();
-    let len = host.transcript().len();
+    let len = host.activity_len();
     // Replaying the consumed discovery request is a safe no-op.
     host.apply(JobCommand::ResourceBytes {
         request: 0,
@@ -31,7 +31,7 @@ fn duplicate_response_is_ignored() {
         final_uri: None,
     })
     .unwrap();
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
     assert_eq!(host.state(), "AwaitingImageSelection");
 
     // Duplicate tile completion never double-completes work. The largest
@@ -39,24 +39,24 @@ fn duplicate_response_is_ignored() {
     host.apply(JobCommand::SelectImage { image: 0 }).unwrap();
     host.apply(JobCommand::SelectLevel { level: 9 }).unwrap();
     host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
-    let len = host.transcript().len();
+    let len = host.activity_len();
     // Duplicate tile completion never double-completes work.
     host.apply(JobCommand::TileAcquired { tile: 0 }).unwrap();
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
 }
 
 #[test]
 fn unknown_request_is_ignored_without_corruption() {
     let mut host = host_with_id("job:mine");
     host.start().unwrap();
-    let len = host.transcript().len();
+    let len = host.activity_len();
     host.apply(JobCommand::ResourceBytes {
         request: 99,
         bytes: dzi_bytes(),
         final_uri: None,
     })
     .unwrap();
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
     assert_eq!(host.state(), "Discovering");
     // The outstanding request still proceeds normally afterwards.
     host.apply(JobCommand::ResourceBytes {
@@ -91,13 +91,12 @@ fn over_limit_tiles_become_typed_terminal_failure() {
     // resource-limit failure, never a panic or silent truncation.
     assert_eq!(host.state(), "Failed");
     assert_eq!(host.terminal_count(), 1);
-    let failed: Vec<&String> = host
-        .transcript()
-        .iter()
-        .filter(|line| line.starts_with("event:failed:"))
-        .collect();
+    let failed = host.failed_events();
     assert_eq!(failed.len(), 1);
-    assert!(failed[0].contains("job.resource-limit"));
+    assert_eq!(
+        failed[0].get("code").and_then(serde_json::Value::as_str),
+        Some("job.resource-limit")
+    );
     // Post-terminal inputs stay stably rejected with no second terminal.
     let err = host.apply(JobCommand::Cancel).unwrap_err();
     assert_eq!(err.code, "job.post-terminal");
@@ -111,10 +110,10 @@ fn double_cancel_is_idempotent() {
     host.apply(JobCommand::Cancel).unwrap();
     assert_eq!(host.state(), "Cancelled");
     assert_eq!(host.terminal_count(), 1);
-    let len = host.transcript().len();
+    let len = host.activity_len();
     let err = host.apply(JobCommand::Cancel).unwrap_err();
     assert_eq!(err.code, "job.post-terminal");
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
     assert_eq!(host.terminal_count(), 1);
 }
 
@@ -136,10 +135,7 @@ fn empty_resource_bytes_fail_without_catalog() {
     assert_eq!(host.state(), "Discovering");
     assert_eq!(host.terminal_count(), 0);
     assert!(
-        !host
-            .transcript()
-            .iter()
-            .any(|line| line.starts_with("event:catalog:")),
+        !host.has_event("catalog"),
         "empty bytes must not emit a catalog"
     );
 }
@@ -179,7 +175,7 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
     })
     .unwrap();
     assert_eq!(host.state(), "AwaitingImageSelection");
-    let len = host.transcript().len();
+    let len = host.activity_len();
     // A live-but-late sibling answer is accepted with no new work: the
     // winning catalog survives and the transcript does not move.
     host.apply(JobCommand::ResourceBytes {
@@ -193,6 +189,6 @@ fn batch_sibling_answer_after_a_winner_is_ignored() {
         cause: FetchCause::new(FetchCode::DiscoveryFailed, TransportKind::Direct),
     })
     .unwrap();
-    assert_eq!(host.transcript().len(), len);
+    assert_eq!(host.activity_len(), len);
     assert_eq!(host.state(), "AwaitingImageSelection");
 }
