@@ -524,66 +524,33 @@ impl JobTable {
         // Automatic settings starts save without a dialog: the runner
         // derives the file name from the selected catalog title inside the
         // native driver.
-        if let Some(record) = self.jobs.get_mut(&id) {
-            let format = settings.output_format.clone();
-            record.options.output = OutputTarget::AutoDir {
+        let options = {
+            let record = self
+                .jobs
+                .get(&id)
+                .ok_or_else(|| "job disappeared before runner start".to_string())?;
+            let mut options = record.options.clone();
+            options.output = OutputTarget::AutoDir {
                 dir: record.output_dir.clone().unwrap_or_else(std::env::temp_dir),
-                format: output_format_for_id(&format).unwrap_or(OutputFormat::Png),
+                format: output_format_for_id(&settings.output_format).unwrap_or(OutputFormat::Png),
             };
-        }
-        self.start_runner(&id);
-        // A runner that fails to start settles synchronously with a typed
-        // `Failed` snapshot; otherwise the initial `Created` emit stands
-        // and live snapshots arrive via `poll_drivers`.
-        if self.jobs.get(&id).is_some_and(|r| r.settled) {
-            let settled_emit = self.settled_emit_for(&id);
-            if let Some(emit) = settled_emit {
-                return Ok((id, emit));
+            options
+        };
+        // A startup failure is a command failure, before a runner exists or
+        // an engine snapshot can be authoritative. Remove the unannounced
+        // registry entry so a later command cannot observe a stale phantom.
+        let runner = match NativeRunner::start(options.clone()) {
+            Ok(runner) => runner,
+            Err(error) => {
+                self.jobs.remove(&id);
+                return Err(error.to_string());
             }
+        };
+        if let Some(record) = self.jobs.get_mut(&id) {
+            record.options = options;
+            record.runner = Some(runner);
         }
         Ok((id, initial))
-    }
-
-    /// Start the runner for a job whose options already carry a destination.
-    /// Idempotent: a live runner is never replaced. Atyped start failure
-    /// settles the job closed with no runner.
-    fn start_runner(&mut self, job: &str) {
-        if self.jobs.get(job).is_some_and(|r| r.runner.is_some()) {
-            return;
-        }
-        let options = match self.jobs.get(job) {
-            Some(record) => record.options.clone(),
-            None => return,
-        };
-        match NativeRunner::start(options) {
-            Ok(runner) => {
-                if let Some(record) = self.jobs.get_mut(job) {
-                    record.runner = Some(runner);
-                }
-            }
-            Err(error) => {
-                // Typed failure before any effect: the job fails closed.
-                let origin = self
-                    .jobs
-                    .get(job)
-                    .map(|r| r.origin.clone())
-                    .unwrap_or_default();
-                if let Some(record) = self.jobs.get_mut(job) {
-                    record.settled = true;
-                }
-                let _ = (origin, error);
-            }
-        }
-    }
-
-    fn settled_emit_for(&self, job: &str) -> Option<SnapshotEmit> {
-        // Currently only used for synchronous start failures, which settle
-        // without a runner snapshot. Reconstruct the typed `Failed`
-        // snapshot from the settled flag is not possible verbatim, so this
-        // stays `None`: the failure surfaces through the next `poll_drivers`
-        // or the command error. Kept as a hook for future typed emits.
-        let _ = job;
-        None
     }
 
     /// Cancel a live job. Forwards one `Cancel` to the runner (the shared
@@ -759,15 +726,28 @@ impl JobTable {
         // Extension/format match plus overwrite policy, also before any work.
         validate_destination(path, &requested, overwrite).map_err(|e| e.to_string())?;
         let has_runner = self.jobs.get(job).is_some_and(|r| r.runner.is_some());
+        if has_runner {
+            if let Some(record) = self.jobs.get_mut(job) {
+                record.destination = Some(path.to_path_buf());
+            }
+            return Ok((0, Vec::new()));
+        }
+        let mut options = self
+            .jobs
+            .get(job)
+            .ok_or_else(|| "unknown".to_string())?
+            .options
+            .clone();
+        options.output = OutputTarget::File(path.to_path_buf());
+        options.overwrite = overwrite;
+        // Do not update the registry until the runner accepted the options:
+        // a startup validation failure stays a command error and the job can
+        // still receive a corrected destination grant.
+        let runner = NativeRunner::start(options.clone()).map_err(|error| error.to_string())?;
         if let Some(record) = self.jobs.get_mut(job) {
             record.destination = Some(path.to_path_buf());
-            if !has_runner {
-                record.options.output = OutputTarget::File(path.to_path_buf());
-                record.options.overwrite = overwrite;
-            }
-        }
-        if !has_runner {
-            self.start_runner(job);
+            record.options = options;
+            record.runner = Some(runner);
         }
         Ok((0, Vec::new()))
     }
@@ -1213,6 +1193,31 @@ mod tests {
                 .unwrap_err(),
             "stale"
         );
+    }
+
+    #[test]
+    fn runner_start_failure_is_a_retriable_destination_command_error() {
+        let mut table = JobTable::new();
+        let (id, _) = table.start_job("https://example.com/item").unwrap();
+        // Simulate an invalid option reaching the otherwise validated
+        // boundary. NativeRunner rejects it before spawning any work.
+        table.jobs.get_mut(&id).unwrap().options.input_url.clear();
+        let path = scratch_path("runner-start-failure", "out.png");
+        let error = table
+            .request_destination(&id, &path, "png", false)
+            .unwrap_err();
+        assert!(error.starts_with("job.invalid-input:"), "{error}");
+        assert!(table.destination_for(&id).is_none());
+        assert!(!table.has_runner(&id));
+        assert!(!table.is_settled(&id));
+
+        // No terminal or phantom state was created, so a corrected grant
+        // starts the one real runner normally.
+        table.jobs.get_mut(&id).unwrap().options.input_url =
+            "file:///nonexistent/dezoomify-test".into();
+        table.request_destination(&id, &path, "png", false).unwrap();
+        assert!(table.has_runner(&id));
+        let _ = table.cancel_job(&id);
     }
 
     #[test]
